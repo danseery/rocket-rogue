@@ -307,6 +307,7 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     emscripten_get_element_css_size("#canvas", &cssWidth, &cssHeight);
     emscripten_set_canvas_element_size("#canvas", static_cast<int>(cssWidth), static_cast<int>(cssHeight));
     glViewport(0, 0, static_cast<int>(cssWidth), static_cast<int>(cssHeight));
+    viewportAspect_ = static_cast<float>(std::max(1.0, cssWidth) / std::max(1.0, cssHeight));
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
     glClearColor(0.02F + heat * 0.05F, 0.03F, 0.05F + heat * 0.02F, 1.0F);
@@ -316,30 +317,30 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
 #endif
 }
 
-void WebGLRenderer::drawRect(float cx, float cy, float w, float h, Color color)
+void WebGLRenderer::drawRect(float cx, float cy, float w, float h, Color color, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(48);
     appendRect(vertices, cx, cy, w, h, color);
-    submit(vertices, 0x0004);
+    submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawLine(float ax, float ay, float bx, float by, Color color, float width)
+void WebGLRenderer::drawLine(float ax, float ay, float bx, float by, Color color, float width, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(16);
     appendLine(vertices, ax, ay, bx, by, color);
-    submitLines(vertices, width);
+    submitLines(vertices, width, worldSpace);
 }
 
-void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color)
+void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(24);
     pushVertex(vertices, ax, ay, color);
     pushVertex(vertices, bx, by, color);
     pushVertex(vertices, cx, cy, color);
-    submit(vertices, 0x0004);
+    submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, int segments)
+void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, int segments, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(static_cast<std::size_t>(segments) * 24);
     for (int i = 0; i < segments; ++i) {
@@ -349,7 +350,7 @@ void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, in
         pushVertex(vertices, cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, color);
         pushVertex(vertices, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
     }
-    submit(vertices, 0x0004);
+    submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
 std::vector<float>& WebGLRenderer::scratchVertices(std::size_t reserveCount)
@@ -415,7 +416,7 @@ void WebGLRenderer::warmTextures()
     }
 }
 
-void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex, int frameCount)
+void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
 {
     if (!textureReady(assetIndex)) {
         return;
@@ -440,7 +441,7 @@ void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint,
     pushVertex(vertices, left, bottom, tint, u0, v1);
     pushVertex(vertices, right, top, tint, u1, v0);
     pushVertex(vertices, left, top, tint, u0, v0);
-    submit(vertices, 0x0004, true, asset.texture);
+    submit(vertices, 0x0004, true, asset.texture, worldSpace);
 }
 
 void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
@@ -450,9 +451,9 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     const float bottom = -0.86F;
     const float top = -0.60F;
 
-    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, right - left, top - bottom, {0.02F, 0.05F, 0.07F, 0.72F});
-    drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F);
-    drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F);
+    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, right - left, top - bottom, {0.02F, 0.05F, 0.07F, 0.72F}, false);
+    drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F, false);
+    drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F, false);
 
     if (snapshot.telemetryCount <= 1) {
         return;
@@ -462,7 +463,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     Color warningHot {1.0F, 0.38F, 0.28F, 1.0F};
     Color heatColor {1.0F, 0.78F, 0.25F, 0.90F};
 
-    drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F}, 1.0F);
+    drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F}, 1.0F, false);
 
     std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
@@ -474,7 +475,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x1 = left + t1 * (right - left);
         appendLine(heatVertices, x0, h0, x1, h1, heatColor);
     }
-    submitLines(heatVertices, 1.5F);
+    submitLines(heatVertices, 1.5F, false);
 
     std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
@@ -487,7 +488,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x1 = left + t1 * (right - left);
         appendLine(warningVertices, x0, y0, x1, y1, warningColor);
     }
-    submitLines(warningVertices, 2.2F);
+    submitLines(warningVertices, 2.2F, false);
 }
 
 void WebGLRenderer::drawStars()
@@ -640,7 +641,7 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
 
 void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
 {
-    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F});
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawStars();
 
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
@@ -731,11 +732,24 @@ void WebGLRenderer::drawEllipseLine(float cx, float cy, float rx, float ry, Colo
     submitLines(vertices, 1.0F);
 }
 
-void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bool textured, unsigned int texture)
+void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bool textured, unsigned int texture, bool worldSpace)
 {
 #ifdef __EMSCRIPTEN__
     if (vertices.empty()) {
         return;
+    }
+
+    const std::vector<float>* uploadVertices = &vertices;
+    if (worldSpace) {
+        projectedVertices_ = vertices;
+        const float aspect = std::max(0.10F, viewportAspect_);
+        const float xScale = aspect >= 1.0F ? 1.0F / aspect : 1.0F;
+        const float yScale = aspect >= 1.0F ? 1.0F : aspect;
+        for (std::size_t i = 0; i + 1 < projectedVertices_.size(); i += 8) {
+            projectedVertices_[i] *= xScale;
+            projectedVertices_[i + 1] *= yScale;
+        }
+        uploadVertices = &projectedVertices_;
     }
 
     glUseProgram(program_);
@@ -747,24 +761,25 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bo
     }
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)), vertices.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(vertices.size() / 8));
+    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(uploadVertices->size() * sizeof(float)), uploadVertices->data(), GL_DYNAMIC_DRAW);
+    glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(uploadVertices->size() / 8));
 #else
     (void)vertices;
     (void)primitive;
     (void)textured;
     (void)texture;
+    (void)worldSpace;
 #endif
 }
 
-void WebGLRenderer::submitLines(const std::vector<float>& vertices, float width)
+void WebGLRenderer::submitLines(const std::vector<float>& vertices, float width, bool worldSpace)
 {
 #ifdef __EMSCRIPTEN__
     glLineWidth(width);
 #else
     (void)width;
 #endif
-    submit(vertices, 0x0001);
+    submit(vertices, 0x0001, false, 0, worldSpace);
 }
 
 } // namespace rocket

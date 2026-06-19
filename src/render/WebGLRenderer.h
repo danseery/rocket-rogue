@@ -42,11 +42,11 @@ public:
 
 private:
     void beginFrame(const RenderSnapshot& snapshot);
-    void drawRect(float cx, float cy, float w, float h, Color color);
-    void drawLine(float ax, float ay, float bx, float by, Color color, float width = 1.0F);
-    void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color);
-    void drawCircle(float cx, float cy, float radius, Color color, int segments = 36);
-    void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1);
+    void drawRect(float cx, float cy, float w, float h, Color color, bool worldSpace = true);
+    void drawLine(float ax, float ay, float bx, float by, Color color, float width = 1.0F, bool worldSpace = true);
+    void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace = true);
+    void drawCircle(float cx, float cy, float radius, Color color, int segments = 36, bool worldSpace = true);
+    void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<float>& scratchVertices(std::size_t reserveCount);
     void appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color);
     void appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color);
@@ -58,8 +58,8 @@ private:
     void drawStars();
     void drawRoute(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
-    void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0);
-    void submitLines(const std::vector<float>& vertices, float width);
+    void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0, bool worldSpace = true);
+    void submitLines(const std::vector<float>& vertices, float width, bool worldSpace = true);
 
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
@@ -77,6 +77,8 @@ private:
     };
     std::array<TextureAsset, 6> assets_ {};
     std::vector<float> vertices_;
+    std::vector<float> projectedVertices_;
+    float viewportAspect_ = 16.0F / 9.0F;
     bool initialized_ = false;
 };
 
