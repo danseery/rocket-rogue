@@ -1,0 +1,3 @@
+# Python development requirements for Rocket Rogue.
+# Keep this file committed and pinned when Python tooling is added.
+

@@ -1,0 +1,19 @@
+{
+  "name": "rocket-rogue-poc",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "C++20/WebGL2 proof of concept for a rocket-launch roguelite.",
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "sanity": "node tools/sanity-check.mjs",
+    "serve:web": "node tools/serve.mjs build/web-release 8080",
+    "configure:native": "cmake --preset native-debug",
+    "build:native": "cmake --build --preset native-debug",
+    "test:native": "ctest --preset native-debug",
+    "configure:web": "cmake --preset web-release",
+    "build:web": "cmake --build --preset web-release"
+  }
+}

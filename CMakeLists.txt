@@ -1,0 +1,51 @@
+cmake_minimum_required(VERSION 3.22)
+
+project(RocketRoguePoc
+    VERSION 0.1.0
+    DESCRIPTION "A C++20/WebGL2 proof of concept for a rocket-launch roguelite"
+    LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(rocket_core
+    src/core/Content.cpp
+    src/core/GameState.cpp
+    src/core/LaunchSimulation.cpp
+    src/core/Random.cpp
+    src/core/SaveData.cpp)
+
+target_include_directories(rocket_core PUBLIC src)
+
+if(MSVC)
+    target_compile_options(rocket_core PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(rocket_core PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(rocket_core_tests
+    tests/core_tests.cpp)
+target_link_libraries(rocket_core_tests PRIVATE rocket_core)
+
+enable_testing()
+add_test(NAME rocket_core_tests COMMAND rocket_core_tests)
+
+if(EMSCRIPTEN)
+    add_executable(rocket_rogue
+        src/main.cpp
+        src/game/RocketGameApp.cpp
+        src/platform/WebSaveStore.cpp
+        src/render/WebGLRenderer.cpp)
+
+    target_link_libraries(rocket_rogue PRIVATE rocket_core)
+    target_include_directories(rocket_rogue PRIVATE src)
+
+    set(ROCKET_EXPORTED_FUNCTIONS
+        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_next','_rr_adjust_target','_rr_attempt_frontier','_rr_buy_offer','_rr_repair_ship','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
+
+    set_target_properties(rocket_rogue PROPERTIES
+        OUTPUT_NAME "rocket_rogue"
+        SUFFIX ".html"
+        LINK_FLAGS "--shell-file ${CMAKE_SOURCE_DIR}/web/shell.html -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
+endif()
