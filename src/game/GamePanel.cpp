@@ -169,7 +169,7 @@ std::string moduleThreat(const ShipModule& module)
     case SlotType::Hull:
         return "Absorbs structural damage";
     case SlotType::Cooling:
-        return "Mitigates TEMP runaway";
+        return "Lowers TEMP buildup";
     case SlotType::Sensors:
         return module.stats.pressure > 0.0 ? "Reduces pressure uncertainty" : "Improves warning luck";
     case SlotType::Escape:
@@ -190,7 +190,7 @@ std::string primaryImpact(const ShipModule& module)
         {std::abs(stats.thrust), "Speed", stats.thrust},
         {std::abs(stats.fuel), "Fuel", stats.fuel},
         {std::abs(stats.hull), "Hull", stats.hull},
-        {std::abs(stats.cooling), "Cooling", stats.cooling},
+        {std::abs(stats.cooling), "TEMP control", stats.cooling},
         {std::abs(stats.sensors), "Sensors", stats.sensors},
         {std::abs(stats.escape), "Escape", stats.escape},
         {std::abs(stats.pressure), "Pressure control", stats.pressure},
@@ -374,6 +374,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     const bool transferLaunch = state.screen == Screen::Launch && context.activeLaunch.config.frontierTransfer;
     const int requiredReadiness = frontierReadinessRequired(state, catalog);
     const Destination* next = nextDestination(state, catalog);
+    const bool hullLaunchBlocked = state.run.shipDamage >= 100;
+    const bool crewLaunchBlocked = astronaut == nullptr;
 
     std::ostringstream out;
     out << "<div class=\"panel-head\"><div><h1>Rocket Rogue</h1></div>"
@@ -516,7 +518,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 out << crewUpgradeCard(*upgrade, static_cast<int>(i), state.run.credits);
             }
         }
+        const double rerollCost = offerRerollCost(state);
         out << "</div><div class=\"actions\">";
+        out << (state.run.credits >= rerollCost
+            ? button("Reroll offers (" + money(rerollCost) + " credits)", "rr.rerollOffers()", "warn")
+            : disabledButton("Need " + money(rerollCost) + " credits"));
         out << button("Skip refit", "rr.next()");
         out << "</div>";
         out << modalTemplate("settings", "Settings", settingsBody.str());
@@ -528,7 +534,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     shipBody << detailRow("Thrust", money(stats.thrust));
     shipBody << detailRow("Fuel", money(stats.fuel));
     shipBody << detailRow("Hull", money(stats.hull));
-    shipBody << detailRow("Cooling", money(stats.cooling));
+    shipBody << detailRow("TEMP control", money(stats.cooling));
     shipBody << detailRow("Sensors", money(stats.sensors));
     shipBody << detailRow("Escape", money(stats.escape));
     shipBody << detailRow("Pressure control", money(stats.pressure));
@@ -600,6 +606,29 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     frontierBody << "</div>";
 
+    std::ostringstream launchBlockedBody;
+    launchBlockedBody << "<div class=\"detail-stack\">";
+    if (hullLaunchBlocked) {
+        launchBlockedBody << "<p class=\"status\">Mission control will not clear a vehicle at total hull damage.</p>";
+    }
+    if (crewLaunchBlocked) {
+        launchBlockedBody << "<p class=\"status\">No living astronaut is currently cleared for launch.</p>";
+    }
+    launchBlockedBody << detailRow("Hull damage", std::to_string(state.run.shipDamage) + "%");
+    launchBlockedBody << detailRow("Crew", astronaut == nullptr ? "None cleared" : astronaut->name);
+    launchBlockedBody << detailRow("Required action", hullLaunchBlocked ? "Repair vehicle" : "Recruit crew");
+    launchBlockedBody << "</div><div class=\"modal-actions actions\">";
+    if (hullLaunchBlocked) {
+        const double blockedRepairCost = repairShipCost(state);
+        launchBlockedBody << (state.run.credits >= blockedRepairCost
+            ? button("Assign repair bay", "rr.repairShip()", "ok")
+            : disabledButton("Need " + money(blockedRepairCost) + " credits"));
+    }
+    if (crewLaunchBlocked) {
+        launchBlockedBody << button("Recruit crew", "rr.recruitCrew()", "ok");
+    }
+    launchBlockedBody << "</div>";
+
     out << "<h2>Hangar Bay</h2>";
     out << "<div class=\"summary-grid\">";
     out << "<article class=\"summary-card\"><span>Ship</span><strong>" << state.run.shipDamage << "% damage</strong>"
@@ -613,11 +642,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     out << "<h2>Hangar ops</h2>";
     out << "<div class=\"ops-grid\">";
-    const int repairAmount = std::min(35, state.run.shipDamage);
-    const double repairCost = std::max(8.0, static_cast<double>(repairAmount) * 1.15);
+    const int repairAmount = repairShipAmount(state);
+    const double repairCost = repairShipCost(state);
     out << operationCard(
         "Repair bay",
-        repairAmount > 0 ? "Restore up to " + std::to_string(repairAmount) + " hull damage before the next burn." : "No structural work is needed right now.",
+        repairAmount > 0 ? "Restore up to " + std::to_string(repairAmount) + " hull damage. Repeated assignments cost more this expedition." : "No structural work is needed right now.",
         repairAmount > 0 ? money(repairCost) + " credits" : "Ship stable",
         "rr.repairShip()",
         repairAmount > 0 && state.run.credits >= repairCost,
@@ -628,26 +657,30 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     } else {
         out << operationCard(
             "Simulator burn",
-            "+" + std::to_string(std::max(1, 1 + crewUpgrades.trainingGain)) + " training, +" + std::to_string(std::max(0, 6 - crewUpgrades.trainingStressRelief)) + " stress. Facilities can improve this.",
-            "18 credits",
+            "+" + std::to_string(std::max(1, 1 + crewUpgrades.trainingGain)) + " training, +" + std::to_string(crewTrainingStressGain(state, catalog)) + " stress. Repeated assignments cost more this expedition.",
+            money(crewTrainingCost(state, catalog)) + " credits",
             "rr.trainCrew()",
-            state.run.credits >= 18.0,
+            state.run.credits >= crewTrainingCost(state, catalog) && astronaut->stress + crewTrainingStressGain(state, catalog) <= 100,
             "crew");
         out << operationCard(
             "Medical rest",
-            "-" + std::to_string(crewRestStressRecovery(state, catalog)) + " stress at current difficulty. Clears injury when possible.",
-            "10 credits",
+            "-" + std::to_string(crewRestStressRecovery(state, catalog)) + " stress at current difficulty. Repeated assignments cost more this expedition.",
+            money(crewRestCost(state, catalog)) + " credits",
             "rr.restCrew()",
-            state.run.credits >= 10.0,
+            state.run.credits >= crewRestCost(state, catalog),
             "crew");
     }
     out << "</div>";
 
     out << "<div class=\"actions\">";
-    out << button("Launch proving flight", "rr.startLaunch()", "ok");
+    out << (hullLaunchBlocked || crewLaunchBlocked
+        ? modalButton("Launch proving flight", "launch_blocked", "ok")
+        : button("Launch proving flight", "rr.startLaunch()", "ok"));
     if (next != nullptr) {
         if (canCommitToNextFrontier(state, catalog)) {
-            out << button("Attempt: " + next->name, "rr.attemptFrontier()", "danger");
+            out << (hullLaunchBlocked || crewLaunchBlocked
+                ? modalButton("Attempt: " + next->name, "launch_blocked", "danger")
+                : button("Attempt: " + next->name, "rr.attemptFrontier()", "danger"));
         } else {
             out << "<button disabled>Need flight data</button>";
         }
@@ -668,6 +701,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << modalTemplate("ship", "Ship Details", shipBody.str());
     out << modalTemplate("crew", "Crew Details", crewBody.str());
     out << modalTemplate("frontier", "Frontier Details", frontierBody.str());
+    out << modalTemplate("launch_blocked", "Launch Hold", launchBlockedBody.str());
     out << modalTemplate("legacy", "Legacy", legacyBody.str());
     out << modalTemplate("settings", "Settings", settingsBody.str());
 

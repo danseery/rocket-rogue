@@ -14,6 +14,10 @@ struct SaveData {
     int frontierReadiness = 0;
     int shipDamage = 0;
     std::string frameId = "pathfinder";
+    int offerRerollsThisExpedition = 0;
+    int repairOpsThisExpedition = 0;
+    int trainingOpsThisExpedition = 0;
+    int restOpsThisExpedition = 0;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
     std::vector<std::string> crewUpgradeIds;

@@ -109,6 +109,17 @@ std::string warningMessage(const TelemetryEvent& event)
     return "Tracking system margins below limits";
 }
 
+double overburnJackpotMultiplier(const Destination& destination, double burnMultiplier)
+{
+    const double overGoal = std::max(0.0, burnMultiplier - destination.targetMultiplier);
+    if (overGoal <= 0.0) {
+        return 1.0;
+    }
+
+    const double normalizedOverburn = overGoal / std::max(0.20, destination.targetMultiplier - 1.0);
+    return std::clamp(std::exp(normalizedOverburn * 2.65), 1.0, 8.0);
+}
+
 void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const ContentCatalog& catalog, const Destination& destination, const GameState& state, Random& rng)
 {
     outcome.type = LaunchResultType::Destroyed;
@@ -217,7 +228,19 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     const int historyIndex = destinationHistoryIndex(catalog, destination.id);
     const int attempts = destinationHistoryValue(state.meta.destinationAttempts, historyIndex);
     const int successes = destinationHistoryValue(state.meta.destinationSuccesses, historyIndex);
-    const double transferHazard = launch.config.frontierTransfer ? 1.08 + static_cast<double>(destination.tier) * 0.12 : 0.0;
+    const int requiredReadiness = frontierReadinessRequired(state, catalog);
+    const int currentReadiness = std::max(0, state.run.frontierReadiness);
+    const double readinessRatio = requiredReadiness <= 0
+        ? 1.0
+        : std::clamp(static_cast<double>(currentReadiness) / static_cast<double>(requiredReadiness), 0.0, 1.0);
+    launch.overpreparedData = requiredReadiness <= 0 ? 0 : std::max(0, currentReadiness - requiredReadiness);
+    launch.provingPayoutBonus = launch.config.frontierTransfer ? 0.0 : std::clamp(static_cast<double>(launch.overpreparedData) * 0.20, 0.0, 0.60);
+    const double transferPrep = launch.config.frontierTransfer
+        ? readinessRatio * 0.18 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.050
+        : 0.0;
+    const double transferHazard = launch.config.frontierTransfer
+        ? std::max(0.50, 1.00 + static_cast<double>(destination.tier) * 0.10 - transferPrep)
+        : 0.0;
     const double unprovenHazard = successes == 0 ? std::max(0.0, 0.20 - static_cast<double>(attempts) * 0.035) : 0.0;
     const double hazard = destination.hazard * 0.26 + transferHazard + unprovenHazard + std::max(0.0, launch.stats.volatility) * 0.11 + static_cast<double>(state.run.shipDamage) * 0.008;
     const double safety = std::clamp(1.0 + performance - hazard, 0.55, 1.75);
@@ -225,14 +248,28 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     const double tail = std::pow(rng.next01(), 1.0 / safety);
 
     const double minCrash = destination.minCrashMultiplier;
-    const double transferCeilingPenalty = launch.config.frontierTransfer ? std::max(0.35, 1.08 + static_cast<double>(destination.tier) * 0.12 - performance * 0.25) : 0.0;
-    const double unprovenCeilingPenalty = successes == 0 ? std::max(0.78, 0.96 - static_cast<double>(std::min(attempts, 8)) * 0.015) : 0.0;
+    const double transferCeilingPenalty = launch.config.frontierTransfer
+        ? std::max(0.28, 0.90 + static_cast<double>(destination.tier) * 0.10 - performance * 0.32 - readinessRatio * 0.22 - static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.080)
+        : 0.0;
+    const double unprovenPrepRelief = launch.config.frontierTransfer
+        ? readinessRatio * 0.20 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.075
+        : 0.0;
+    const double unprovenCeilingPenalty = successes == 0
+        ? std::max(0.42, 0.86 - static_cast<double>(std::min(attempts, 8)) * 0.025 - unprovenPrepRelief)
+        : 0.0;
     const double pressureCeilingPenalty = successes == 0 ? missionPressure * 0.38 : missionPressure * 0.12;
     const double longShotBonus = longShotBreak ? rng.range(0.24, 0.52) : 0.0;
-    const double maxCrash = std::max(minCrash + 0.18, destination.maxCrashMultiplier - transferCeilingPenalty - unprovenCeilingPenalty - pressureCeilingPenalty + longShotBonus + safety * 0.14);
+    const double transferReadinessCeilingBonus = launch.config.frontierTransfer
+        ? readinessRatio * 0.20 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.12
+        : 0.0;
+    const double overpreparedCeilingBonus = launch.config.frontierTransfer
+        ? 0.0
+        : static_cast<double>(launch.overpreparedData) * 0.18;
+    const double maxCrash = std::max(minCrash + 0.18, destination.maxCrashMultiplier - transferCeilingPenalty - unprovenCeilingPenalty - pressureCeilingPenalty + longShotBonus + transferReadinessCeilingBonus + overpreparedCeilingBonus + safety * 0.14);
     launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
     launch.sensorQuality = std::clamp(0.22 + launch.stats.sensors * 0.065, 0.15, 0.92);
-    launch.heatRate = std::clamp(destination.hazard * 0.62 + (launch.config.frontierTransfer ? 0.18 : 0.0) + std::max(0.0, launch.stats.volatility) * 0.18 - launch.stats.cooling * 0.040, 0.34, 2.45);
+    const double transferHeatLoad = launch.config.frontierTransfer ? 0.04 + static_cast<double>(destination.tier) * 0.035 : 0.0;
+    launch.heatRate = std::clamp(destination.hazard * 0.56 + transferHeatLoad + std::max(0.0, launch.stats.volatility) * 0.16 - launch.stats.cooling * 0.046, 0.34, 2.45);
     launch.pressureModifier = std::clamp(missionPressure - std::max(0.0, launch.stats.pressure) * 0.040, 0.03, 0.60);
     launch.throttleFactor = 1.0;
     launch.cutHeatRelief = 0.0;
@@ -332,12 +369,13 @@ PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch)
 
 double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
 {
+    constexpr double travelSpeedMultiplier = 1.10;
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
     const double thrust = std::max(0.4, launch.stats.thrust);
     const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
     const double acceleration = (0.00026 + destination.hazard * 0.00008) * launch.throttleFactor;
     const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration);
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * travelSpeedMultiplier;
 }
 
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
@@ -407,7 +445,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
         return outcome;
     }
 
-    const double payoutMultiplier = 1.0 + std::max(0.0, launch.stats.payout) * 0.045;
+    const double payoutMultiplier = 1.0 + std::max(0.0, launch.stats.payout) * 0.045 + launch.provingPayoutBonus;
     const bool reachedDestination = outcome.ejectMultiplier >= destination->targetMultiplier;
     const TelemetryEvent event = telemetryAt(launch, outcome.ejectMultiplier);
 
@@ -438,7 +476,8 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     }
 
     outcome.type = reachedDestination ? LaunchResultType::MissionComplete : LaunchResultType::SafeEject;
-    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * (reachedDestination ? 1.18 : 0.74);
+    const double jackpotMultiplier = reachedDestination ? overburnJackpotMultiplier(*destination, outcome.ejectMultiplier) : 1.0;
+    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * (reachedDestination ? 1.18 * jackpotMultiplier : 0.74);
     outcome.recoveryCost = std::clamp(3.0 + static_cast<double>(destination->tier) * 2.0 + outcome.ejectMultiplier * 1.5, 2.0, 28.0);
     const double netRewardFloor = returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
     if (netRewardFloor > 0.0) {

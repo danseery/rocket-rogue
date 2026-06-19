@@ -64,6 +64,14 @@ Serve the generated build directory:
 node tools/serve.mjs build/web-release 8080
 ```
 
+Prepare the clean static package used by Azure Static Web Apps:
+
+```powershell
+npm run prepare:azure
+```
+
+This writes only deployable game files to `dist/azure-static-web-app`.
+
 Then open `http://localhost:8080/rocket_rogue.html`.
 
 The equivalent manual command is:
@@ -148,6 +156,17 @@ Use the on-screen mission-control buttons:
 - After each mission summary, choose one of three refit cards or skip the refit window.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
 - Push deeper through the frontier ladder only after enough proving data is banked.
+
+## Deploy to Azure Static Web Apps
+
+This repo includes a GitHub Actions workflow for Azure Static Web Apps Free:
+
+- Workflow: `.github/workflows/azure-static-web-app.yml`
+- Static app config: `staticwebapp.config.json`
+- Deploy package script: `npm run prepare:azure`
+- Full setup notes: `docs/AZURE_STATIC_WEB_APPS.md`
+
+The workflow expects a GitHub Actions secret named `AZURE_STATIC_WEB_APPS_API_TOKEN`.
 
 ## Portability notes
 

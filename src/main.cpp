@@ -129,6 +129,16 @@ void rr_buy_offer(int index)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_reroll_offers()
+{
+    if (g_app) {
+        g_app->rerollOffers();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_repair_ship()
 {
     if (g_app) {

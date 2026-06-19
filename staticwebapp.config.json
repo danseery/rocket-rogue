@@ -1,0 +1,19 @@
+{
+  "navigationFallback": {
+    "rewrite": "/rocket_rogue.html",
+    "exclude": [
+      "/assets/*",
+      "/*.js",
+      "/*.wasm",
+      "/*.png",
+      "/*.json"
+    ]
+  },
+  "mimeTypes": {
+    ".wasm": "application/wasm"
+  },
+  "globalHeaders": {
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Cross-Origin-Embedder-Policy": "require-corp"
+  }
+}

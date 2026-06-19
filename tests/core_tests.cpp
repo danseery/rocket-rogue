@@ -106,6 +106,16 @@ double telemetryLoad(const TelemetryEvent& event)
     return event.heat + event.pressure + event.vibration + event.fuelMix + event.guidance + event.abortRisk;
 }
 
+double legacyBurnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
+{
+    const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
+    const double thrust = std::max(0.4, launch.stats.thrust);
+    const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
+    const double acceleration = (0.00026 + destination.hazard * 0.00008) * launch.throttleFactor;
+    const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration);
+}
+
 bool firstRecoveredReturnAtBurn(const GameState& state, const ContentCatalog& catalog, double burnMultiplier, std::uint64_t seed, LaunchOutcome& recovered)
 {
     for (int i = 0; i < 5000; ++i) {
@@ -230,6 +240,25 @@ void cutEnginesTradeHeatForNavigation()
     require(cutDelta < poweredDelta, "cut engines should slow burn progression");
 }
 
+void shipTravelIsFasterWithoutRetuningTelemetry()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
+    Random rng(444);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const Destination& destination = catalog.destinations[0];
+    const double elapsed = 5.25;
+    const double delta = 1.0 / 60.0;
+
+    const double boostedDelta = burnMultiplierDelta(launch, destination, elapsed, delta);
+    const double oldDelta = legacyBurnMultiplierDelta(launch, destination, elapsed, delta);
+    require(std::abs(boostedDelta - oldDelta * 1.10) < 0.000001, "ship travel should be ten percent faster than the previous burn step");
+
+    const double burn = 1.0 + (destination.targetMultiplier - 1.0) * 0.88;
+    const TelemetryEvent telemetry = telemetryAt(launch, burn);
+    require(telemetry.multiplier == burn, "telemetry should still be sampled by burn depth, not wall-clock travel speed");
+}
+
 void emergencyActionsTradeOneRiskForAnother()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -303,6 +332,34 @@ void moduleOffersAreOneChoiceRefits()
     }
 }
 
+void refitRerollsSpendAndEscalate()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 303);
+    state.run.credits = 200.0;
+
+    Random rng(3030);
+    generateModuleOffers(state, catalog, rng);
+
+    require(offerRerollCost(state) == 10.0, "first refit reroll should cost 10 credits");
+    require(rerollOffers(state, catalog, rng), "affordable refit reroll should succeed");
+    require(state.run.credits == 190.0, "first refit reroll should spend 10 credits");
+    require(state.run.offerRerollsThisExpedition == 1, "first refit reroll should increment run reroll count");
+    require(offerRerollCost(state) == 20.0, "second refit reroll should cost 20 credits");
+
+    require(rerollOffers(state, catalog, rng), "second affordable refit reroll should succeed");
+    require(state.run.credits == 170.0, "second refit reroll should spend 20 credits");
+    require(state.run.offerRerollsThisExpedition == 2, "second refit reroll should increment run reroll count");
+    require(offerRerollCost(state) == 30.0, "third refit reroll should cost 30 credits");
+
+    state.run.credits = 29.0;
+    require(!rerollOffers(state, catalog, rng), "reroll should be blocked when credits are short");
+    require(state.run.offerRerollsThisExpedition == 2, "failed reroll should not increment run reroll count");
+
+    startNewExpedition(state, catalog);
+    require(state.run.offerRerollsThisExpedition == 0, "new expedition should reset reroll escalation");
+}
+
 void crewUpgradeOffersInstallAndModifyCrewOps()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -346,10 +403,18 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     require(pilot->training == 3, "upgraded simulator should grant extra training");
     require(pilot->stress == 21, "upgraded simulator should reduce training stress gain");
     require(state.run.credits < creditsBeforeTraining, "training should still cost credits");
+    pilot->stress = 100;
+    require(!trainCrew(state, catalog), "crew training should be blocked at max stress");
+    pilot->stress = 100 - crewTrainingStressGain(state, catalog) + 1;
+    require(!trainCrew(state, catalog), "crew training should be blocked if it would overflow stress");
 
     pilot->stress = 60;
     pilot->status = CrewStatus::Injured;
     require(crewRestStressRecovery(state, catalog) == 18, "unproven frontier difficulty should reduce medical rest recovery");
+    const double restCostAt60 = crewRestCost(state, catalog);
+    pilot->stress = 90;
+    require(crewRestCost(state, catalog) > restCostAt60, "medical rest should cost more for more-stressed crews");
+    pilot->stress = 60;
     require(restCrew(state, catalog), "medical rest should use facility upgrades");
     require(pilot->status == CrewStatus::Active, "medical rest should clear injury");
     require(pilot->stress == 33, "medical rest should not fully reset stress on an unproven frontier");
@@ -371,6 +436,42 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     const PreparedLaunch baselineLaunch = prepareLaunch(baseline, catalog, baselineRng);
     const PreparedLaunch upgradedLaunch = prepareLaunch(upgraded, catalog, upgradedRng);
     require(upgradedLaunch.crashMultiplier > baselineLaunch.crashMultiplier, "trait facility upgrades should improve trait-driven launch performance");
+}
+
+void hangarOpsStartCheapAndEscalate()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 808);
+    state.run.credits = 300.0;
+    state.run.shipDamage = 80;
+
+    const double firstRepairCost = repairShipCost(state);
+    require(firstRepairCost < 30.0, "first repair assignment should be affordable after a rough run");
+    require(repairShipAmount(state) == 35, "repair bay should still cap each assignment");
+    require(repairShip(state), "first repair should succeed");
+    const double secondRepairCost = repairShipCost(state);
+    require(secondRepairCost > firstRepairCost, "second repair assignment should cost more this expedition");
+    require(repairShip(state), "second repair should still be possible with enough credits");
+    require(repairShipCost(state) > secondRepairCost, "third repair assignment should continue escalating");
+
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "hangar op test needs a pilot");
+    pilot->stress = 20;
+    const double firstTrainingCost = crewTrainingCost(state, catalog);
+    require(firstTrainingCost < 18.0, "first simulator burn should be cheaper than the old flat cost");
+    require(trainCrew(state, catalog), "first simulator burn should succeed");
+    require(crewTrainingCost(state, catalog) > firstTrainingCost, "training should escalate after use");
+
+    pilot->stress = 60;
+    const double firstRestCost = crewRestCost(state, catalog);
+    require(firstRestCost < 20.0, "first medical rest should be cheaper for stressed crews");
+    require(restCrew(state, catalog), "first medical rest should succeed");
+    require(crewRestCost(state, catalog) > firstRestCost, "medical rest should escalate after use");
+
+    startNewExpedition(state, catalog);
+    require(state.run.repairOpsThisExpedition == 0, "new expedition should reset repair escalation");
+    require(state.run.trainingOpsThisExpedition == 0, "new expedition should reset training escalation");
+    require(state.run.restOpsThisExpedition == 0, "new expedition should reset rest escalation");
 }
 
 void lowCreditRefitWindowIncludesAffordableOffer()
@@ -525,8 +626,8 @@ void starterEarthOrbitIsProvingFirst()
     }
 
     require(firstAttemptFullProfileSuccesses < samples * 12 / 100, "first Earth Orbit full profile should be a long-shot, not the default opening move");
-    require(secondAttemptFullProfileSuccesses < samples * 18 / 100, "second Earth Orbit full profile should still be a long-shot without upgrades");
-    require(thirdAttemptFullProfileSuccesses < samples * 28 / 100, "third Earth Orbit full profile should still reward caution over YOLO attempts");
+    require(secondAttemptFullProfileSuccesses < samples * 40 / 100, "second Earth Orbit full profile should still be risky without upgrades");
+    require(thirdAttemptFullProfileSuccesses < samples * 60 / 100, "third Earth Orbit full profile should still be far from guaranteed without upgrades");
     require(provingLosses < samples * 42 / 100, "first Earth Orbit proving runs should still be relatively survivable");
 }
 
@@ -581,6 +682,55 @@ void returnHomeRewardShelvesMatchRefitCosts()
     require(rareReturn.payout - rareReturn.recoveryCost >= static_cast<double>(moduleOfferCost(Rarity::Rare)) - 0.001, "surviving the full target should guarantee a rare refit");
 }
 
+void overburnRewardsBeatLinearScalingAfterGoal()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 909);
+    state.meta.destinationAttempts[0] = 5;
+    state.meta.destinationSuccesses[0] = 1;
+    if (Astronaut* pilot = activeAstronaut(state)) {
+        pilot->training = 8;
+        pilot->stress = 0;
+    }
+    syncLaunchConfig(state, catalog);
+
+    Random launchRng(909);
+    PreparedLaunch launch = prepareLaunch(state, catalog, launchRng);
+    launch.stats.hull += 20.0;
+    launch.stats.cooling += 20.0;
+    launch.stats.fuel += 20.0;
+    launch.stats.sensors += 20.0;
+
+    const Destination& destination = catalog.destinations[0];
+    const double atGoalBurn = destination.targetMultiplier;
+    const double overGoalBurn = destination.targetMultiplier + 0.30;
+    launch.crashMultiplier = overGoalBurn + 0.40;
+
+    LaunchOutcome atGoal;
+    LaunchOutcome overGoal;
+    for (int i = 0; i < 5000; ++i) {
+        Random resolveRng(180000 + static_cast<std::uint64_t>(i));
+        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, atGoalBurn, RecoveryMethod::ReturnHome, resolveRng);
+        if (outcome.type != LaunchResultType::Destroyed) {
+            atGoal = outcome;
+            break;
+        }
+    }
+    for (int i = 0; i < 5000; ++i) {
+        Random resolveRng(185000 + static_cast<std::uint64_t>(i));
+        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, overGoalBurn, RecoveryMethod::ReturnHome, resolveRng);
+        if (outcome.type != LaunchResultType::Destroyed) {
+            overGoal = outcome;
+            break;
+        }
+    }
+
+    require(atGoal.type != LaunchResultType::Destroyed, "test should find a recovered target return");
+    require(overGoal.type != LaunchResultType::Destroyed, "test should find a recovered overburn return");
+    const double linearRatio = overGoalBurn / atGoalBurn;
+    require(overGoal.payout > atGoal.payout * linearRatio * 1.25, "overburn payout should beat linear reward scaling after the goal");
+}
+
 void saveRoundTripPreservesProgress()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -589,6 +739,10 @@ void saveRoundTripPreservesProgress()
     state.run.destinationIndex = 2;
     state.run.frontierReadiness = 3;
     state.run.shipDamage = 17;
+    state.run.offerRerollsThisExpedition = 2;
+    state.run.repairOpsThisExpedition = 1;
+    state.run.trainingOpsThisExpedition = 2;
+    state.run.restOpsThisExpedition = 3;
     state.meta.unlockKeys.push_back("thermal");
     state.meta.blueprintProgress = 5;
     state.meta.shipsLost = 1;
@@ -611,6 +765,10 @@ void saveRoundTripPreservesProgress()
     require(restored.run.destinationIndex == 2, "destination index should round trip");
     require(restored.run.frontierReadiness == 3, "frontier readiness should round trip");
     require(restored.run.shipDamage == 17, "ship damage should round trip");
+    require(restored.run.offerRerollsThisExpedition == 2, "refit reroll count should round trip");
+    require(restored.run.repairOpsThisExpedition == 1, "repair escalation should round trip");
+    require(restored.run.trainingOpsThisExpedition == 2, "training escalation should round trip");
+    require(restored.run.restOpsThisExpedition == 3, "rest escalation should round trip");
     require(hasUnlock(restored.meta, "thermal"), "unlock keys should round trip");
     require(restored.meta.destinationAttempts.size() >= 3 && restored.meta.destinationAttempts[0] == 2, "destination attempts should round trip");
     require(restored.meta.destinationSuccesses.size() >= 3 && restored.meta.destinationSuccesses[0] == 1, "destination successes should round trip");
@@ -654,20 +812,41 @@ void starterMoonTransferIsNotReliable()
 {
     const ContentCatalog catalog = createDefaultContent();
     int destroyed = 0;
+    int heatDominant = 0;
+    double requiredPrepCrashTotal = 0.0;
+    double overpreparedCrashTotal = 0.0;
     constexpr int samples = 1000;
 
     for (int i = 0; i < samples; ++i) {
         GameState state = createNewGame(catalog, 333);
+        state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
         state.launchConfig.frontierTransfer = true;
         state.launchConfig.destinationId = catalog.destinations[1].id;
         state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
         Random rng(5000 + static_cast<std::uint64_t>(i));
         const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+        requiredPrepCrashTotal += launch.crashMultiplier;
         const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[1].targetMultiplier, RecoveryMethod::TransferArrival, rng);
         destroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
+        const double sampleBurn = std::min(catalog.destinations[1].targetMultiplier, launch.crashMultiplier - 0.02);
+        const TelemetryEvent event = telemetryAt(launch, sampleBurn);
+        const double worstNonHeat = std::max({event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk});
+        heatDominant += event.heat > worstNonHeat ? 1 : 0;
+
+        GameState overprepared = createNewGame(catalog, 333);
+        overprepared.run.frontierReadiness = frontierReadinessCap(overprepared, catalog);
+        overprepared.launchConfig.frontierTransfer = true;
+        overprepared.launchConfig.destinationId = catalog.destinations[1].id;
+        overprepared.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
+        Random overpreparedRng(5000 + static_cast<std::uint64_t>(i));
+        const PreparedLaunch overpreparedLaunch = prepareLaunch(overprepared, catalog, overpreparedRng);
+        overpreparedCrashTotal += overpreparedLaunch.crashMultiplier;
     }
 
     require(destroyed > samples * 60 / 100, "starter ship should not reliably reach the Moon transfer burn");
+    require(destroyed < samples * 97 / 100, "prepared Moon transfer should not be a guaranteed early explosion");
+    require(heatDominant < samples * 70 / 100, "Moon transfer failures should not be overwhelmingly thermal");
+    require(overpreparedCrashTotal > requiredPrepCrashTotal + 80.0, "extra Earth Orbit data should meaningfully improve Moon transfer odds");
 }
 
 void frontierReadinessGatesProgression()
@@ -726,6 +905,33 @@ void transferAttemptAdvancesOnlyOnSuccess()
     require(state.launchConfig.burnGoalMultiplier < catalog.destinations[1].targetMultiplier, "new frontier should default back to a proving return target");
 }
 
+void overpreparedReadinessRaisesProvingStakes()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 919);
+    GameState overprepared = baseline;
+    const int required = frontierReadinessRequired(baseline, catalog);
+    const int cap = frontierReadinessCap(baseline, catalog);
+    require(cap > required, "frontier readiness should allow over-preparation past the transfer gate");
+
+    baseline.run.frontierReadiness = required;
+    overprepared.run.frontierReadiness = cap;
+    baseline.meta.destinationAttempts[0] = 4;
+    baseline.meta.destinationSuccesses[0] = 2;
+    overprepared.meta.destinationAttempts[0] = 4;
+    overprepared.meta.destinationSuccesses[0] = 2;
+
+    Random baselineRng(2222);
+    Random overpreparedRng(2222);
+    const PreparedLaunch baselineLaunch = prepareLaunch(baseline, catalog, baselineRng);
+    const PreparedLaunch overpreparedLaunch = prepareLaunch(overprepared, catalog, overpreparedRng);
+
+    require(baselineLaunch.overpreparedData == 0, "required data should not count as over-prepared");
+    require(overpreparedLaunch.overpreparedData == cap - required, "extra data should feed the proving-flight bonus");
+    require(overpreparedLaunch.crashMultiplier > baselineLaunch.crashMultiplier, "extra data should raise the hidden failure curve");
+    require(overpreparedLaunch.provingPayoutBonus > baselineLaunch.provingPayoutBonus, "extra data should increase proving flight reward");
+}
+
 } // namespace
 
 int main()
@@ -737,10 +943,13 @@ int main()
     launchIncidentsAreChunkyAndRecoverable();
     crewStressUsesDiscreteStepsForPilotRisk();
     cutEnginesTradeHeatForNavigation();
+    shipTravelIsFasterWithoutRetuningTelemetry();
     emergencyActionsTradeOneRiskForAnother();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     moduleOffersAreOneChoiceRefits();
+    refitRerollsSpendAndEscalate();
     crewUpgradeOffersInstallAndModifyCrewOps();
+    hangarOpsStartCheapAndEscalate();
     lowCreditRefitWindowIncludesAffordableOffer();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
@@ -748,11 +957,13 @@ int main()
     starterEarthOrbitIsProvingFirst();
     starterProvingEconomyFundsEarlyRefits();
     returnHomeRewardShelvesMatchRefitCosts();
+    overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();
     frontierReadinessGatesProgression();
     transferAttemptAdvancesOnlyOnSuccess();
+    overpreparedReadinessRaisesProvingStakes();
 
     std::cout << "rocket_core_tests passed\n";
     return 0;

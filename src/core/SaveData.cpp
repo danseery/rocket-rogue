@@ -155,6 +155,10 @@ SaveData captureSaveData(const GameState& state)
     save.frontierReadiness = state.run.frontierReadiness;
     save.shipDamage = state.run.shipDamage;
     save.frameId = state.run.frameId;
+    save.offerRerollsThisExpedition = state.run.offerRerollsThisExpedition;
+    save.repairOpsThisExpedition = state.run.repairOpsThisExpedition;
+    save.trainingOpsThisExpedition = state.run.trainingOpsThisExpedition;
+    save.restOpsThisExpedition = state.run.restOpsThisExpedition;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
@@ -179,6 +183,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.frontierReadiness = std::max(0, save.frontierReadiness);
     state.run.shipDamage = std::clamp(save.shipDamage, 0, 100);
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
+    state.run.offerRerollsThisExpedition = std::max(0, save.offerRerollsThisExpedition);
+    state.run.repairOpsThisExpedition = std::max(0, save.repairOpsThisExpedition);
+    state.run.trainingOpsThisExpedition = std::max(0, save.trainingOpsThisExpedition);
+    state.run.restOpsThisExpedition = std::max(0, save.restOpsThisExpedition);
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
@@ -230,6 +238,10 @@ std::string serializeSaveData(const SaveData& save)
     out << "frontierReadiness=" << save.frontierReadiness << "\n";
     out << "shipDamage=" << save.shipDamage << "\n";
     out << "frameId=" << save.frameId << "\n";
+    out << "offerRerolls=" << save.offerRerollsThisExpedition << "\n";
+    out << "repairOps=" << save.repairOpsThisExpedition << "\n";
+    out << "trainingOps=" << save.trainingOpsThisExpedition << "\n";
+    out << "restOps=" << save.restOpsThisExpedition << "\n";
     out << "inventory=" << join(save.inventoryModuleIds, ',') << "\n";
     out << "equipped=" << join(save.equippedModuleIds, ',') << "\n";
     out << "crewUpgrades=" << join(save.crewUpgradeIds, ',') << "\n";
@@ -276,6 +288,14 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.shipDamage = parseInt(value, save.shipDamage);
         } else if (key == "frameId") {
             save.frameId = std::string(value);
+        } else if (key == "offerRerolls") {
+            save.offerRerollsThisExpedition = parseInt(value, save.offerRerollsThisExpedition);
+        } else if (key == "repairOps") {
+            save.repairOpsThisExpedition = parseInt(value, save.repairOpsThisExpedition);
+        } else if (key == "trainingOps") {
+            save.trainingOpsThisExpedition = parseInt(value, save.trainingOpsThisExpedition);
+        } else if (key == "restOps") {
+            save.restOpsThisExpedition = parseInt(value, save.restOpsThisExpedition);
         } else if (key == "inventory") {
             save.inventoryModuleIds = split(value, ',');
         } else if (key == "equipped") {

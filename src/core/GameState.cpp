@@ -48,6 +48,12 @@ int destinationIndexForId(const ContentCatalog& catalog, const std::string& dest
     return -1;
 }
 
+double escalatedHangarOpCost(double baseCost, int uses)
+{
+    const int safeUses = std::max(0, uses);
+    return std::ceil(baseCost * std::pow(1.35, static_cast<double>(safeUses)) + static_cast<double>(safeUses) * 12.0);
+}
+
 } // namespace
 
 int moduleOfferCost(Rarity rarity)
@@ -133,7 +139,7 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.screen = Screen::Hangar;
     state.run.active = true;
     state.run.destinationIndex = std::clamp(state.meta.furthestTier, 0, static_cast<int>(catalog.destinations.size()) - 1);
-    state.run.frontierReadiness = std::clamp(state.run.frontierReadiness, 0, frontierReadinessRequired(state, catalog));
+    state.run.frontierReadiness = std::clamp(state.run.frontierReadiness, 0, frontierReadinessCap(state, catalog));
     state.run.shipDamage = 0;
     state.run.frameId = catalog.frames.empty() ? "" : catalog.frames.front().id;
     state.run.inventoryModuleIds = starterInventory();
@@ -141,6 +147,10 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.offerModuleIds = {};
     state.run.offerCrewUpgradeIds = {};
     state.run.launchesThisExpedition = 0;
+    state.run.offerRerollsThisExpedition = 0;
+    state.run.repairOpsThisExpedition = 0;
+    state.run.trainingOpsThisExpedition = 0;
+    state.run.restOpsThisExpedition = 0;
     if (state.run.credits < 45.0) {
         state.run.credits = 45.0;
     }
@@ -315,6 +325,26 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     }
 }
 
+double offerRerollCost(const GameState& state)
+{
+    return 10.0 * static_cast<double>(state.run.offerRerollsThisExpedition + 1);
+}
+
+bool rerollOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
+{
+    const double cost = offerRerollCost(state);
+    if (state.run.credits < cost) {
+        state.statusLine = "Not enough mission credits to reroll the refit board.";
+        return false;
+    }
+
+    state.run.credits -= cost;
+    state.run.offerRerollsThisExpedition += 1;
+    generateModuleOffers(state, catalog, rng);
+    state.statusLine = "Refit offers rerolled. The next reroll will cost " + std::to_string(static_cast<int>(offerRerollCost(state))) + " credits.";
+    return true;
+}
+
 bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
 {
     if (index < 0 || index >= static_cast<int>(state.run.offerModuleIds.size())) {
@@ -357,6 +387,22 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
     return true;
 }
 
+int repairShipAmount(const GameState& state)
+{
+    return std::min(35, state.run.shipDamage);
+}
+
+double repairShipCost(const GameState& state)
+{
+    const int repaired = repairShipAmount(state);
+    if (repaired <= 0) {
+        return 0.0;
+    }
+
+    const double baseCost = 6.0 + static_cast<double>(repaired) * 0.42;
+    return escalatedHangarOpCost(baseCost, state.run.repairOpsThisExpedition);
+}
+
 bool repairShip(GameState& state)
 {
     if (state.run.shipDamage <= 0) {
@@ -364,8 +410,8 @@ bool repairShip(GameState& state)
         return false;
     }
 
-    const int repaired = std::min(35, state.run.shipDamage);
-    const double cost = std::max(8.0, static_cast<double>(repaired) * 1.15);
+    const int repaired = repairShipAmount(state);
+    const double cost = repairShipCost(state);
     if (state.run.credits < cost) {
         state.statusLine = "Not enough mission credits for repairs.";
         return false;
@@ -373,8 +419,30 @@ bool repairShip(GameState& state)
 
     state.run.credits -= cost;
     state.run.shipDamage -= repaired;
+    state.run.repairOpsThisExpedition += 1;
     state.statusLine = "Repaired " + std::to_string(repaired) + " hull damage.";
     return true;
+}
+
+int crewTrainingStressGain(const GameState& state, const ContentCatalog& catalog)
+{
+    const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
+    return std::max(0, 6 - upgrades.trainingStressRelief);
+}
+
+double crewTrainingCost(const GameState& state, const ContentCatalog&)
+{
+    return escalatedHangarOpCost(10.0, state.run.trainingOpsThisExpedition);
+}
+
+double crewRestCost(const GameState& state, const ContentCatalog&)
+{
+    const Astronaut* astronaut = activeAstronaut(state);
+    if (astronaut == nullptr) {
+        return escalatedHangarOpCost(8.0, state.run.restOpsThisExpedition);
+    }
+    const double baseCost = 6.0 + static_cast<double>(astronaut->stress) * 0.06;
+    return escalatedHangarOpCost(baseCost, state.run.restOpsThisExpedition);
 }
 
 bool trainCrew(GameState& state, const ContentCatalog& catalog)
@@ -385,7 +453,13 @@ bool trainCrew(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    constexpr double cost = 18.0;
+    const int stressGain = crewTrainingStressGain(state, catalog);
+    if (astronaut->stress >= 100 || astronaut->stress + stressGain > 100) {
+        state.statusLine = astronaut->name + " is too stressed for simulator work. Rest the crew first.";
+        return false;
+    }
+
+    const double cost = crewTrainingCost(state, catalog);
     if (state.run.credits < cost) {
         state.statusLine = "Training budget denied.";
         return false;
@@ -393,11 +467,10 @@ bool trainCrew(GameState& state, const ContentCatalog& catalog)
 
     const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
     const int trainingGain = std::max(1, 1 + upgrades.trainingGain);
-    const int stressGain = std::max(0, 6 - upgrades.trainingStressRelief);
-
     state.run.credits -= cost;
     astronaut->training = std::min(10, astronaut->training + trainingGain);
-    astronaut->stress = std::min(100, astronaut->stress + stressGain);
+    astronaut->stress += stressGain;
+    state.run.trainingOpsThisExpedition += 1;
     state.statusLine = astronaut->name + " completed simulator burns.";
     return true;
 }
@@ -418,7 +491,7 @@ bool restCrew(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    constexpr double cost = 10.0;
+    const double cost = crewRestCost(state, catalog);
     if (state.run.credits < cost) {
         state.statusLine = "No room in the budget for shore leave.";
         return false;
@@ -431,6 +504,7 @@ bool restCrew(GameState& state, const ContentCatalog& catalog)
         astronaut->status = CrewStatus::Active;
         astronaut->stress = std::max(0, astronaut->stress - std::max(4, stressRecovery / 2));
     }
+    state.run.restOpsThisExpedition += 1;
     state.statusLine = astronaut->name + " recovered " + std::to_string(stressRecovery) + " stress under current mission conditions.";
     return true;
 }
@@ -479,6 +553,15 @@ int frontierReadinessRequired(const GameState& state, const ContentCatalog& cata
         return 0;
     }
     return 3 + destination.tier;
+}
+
+int frontierReadinessCap(const GameState& state, const ContentCatalog& catalog)
+{
+    const int required = frontierReadinessRequired(state, catalog);
+    if (required <= 0) {
+        return 0;
+    }
+    return required + 3;
 }
 
 const Destination* nextDestination(const GameState& state, const ContentCatalog& catalog)
@@ -641,7 +724,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                 }
             } else {
                 if (destination != nullptr && outcome.ejectMultiplier >= destination->targetMultiplier * 0.55) {
-                    state.run.frontierReadiness = std::min(frontierReadinessRequired(state, catalog), state.run.frontierReadiness + 1);
+                    state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
                     state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
                         ? "Transfer aborted by ejection. Rescue was expensive, but the data record survived."
                         : "Transfer aborted. Vehicle returned with valuable long-burn data.";
@@ -652,11 +735,13 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                 }
             }
         } else if (outcome.type == LaunchResultType::MissionComplete) {
-            const int required = frontierReadinessRequired(state, catalog);
-            state.run.frontierReadiness = std::min(required, state.run.frontierReadiness + 1);
+            state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
             if (canCommitToNextFrontier(state, catalog)) {
                 const Destination* next = nextDestination(state, catalog);
-                state.statusLine = "Full proving profile returned. Attempt the transfer to " + (next == nullptr ? std::string("the next route") : next->name) + " when ready.";
+                const int required = frontierReadinessRequired(state, catalog);
+                state.statusLine = state.run.frontierReadiness > required
+                    ? "Extra proving data banked. The curve is opening up, and so is the temptation."
+                    : "Full proving profile returned. Attempt the transfer to " + (next == nullptr ? std::string("the next route") : next->name) + " when ready.";
             } else {
                 state.statusLine = "Mission data banked. Keep testing, upgrading, and deciding how bold the next burn should be.";
             }
@@ -664,7 +749,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             const Destination& current = currentDestination(state, catalog);
             const double usefulDataThreshold = outcome.recoveryMethod == RecoveryMethod::ManualEject ? current.targetMultiplier * 0.90 : current.targetMultiplier * 0.70;
             if (outcome.ejectMultiplier >= usefulDataThreshold && frontierReadinessRequired(state, catalog) > 0) {
-                state.run.frontierReadiness = std::min(frontierReadinessRequired(state, catalog), state.run.frontierReadiness + 1);
+                state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
                 state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
                     ? "Emergency eject confirmed. Rescue recovered enough telemetry to matter."
                     : "Early return confirmed. Useful flight data recovered from the proving route.";

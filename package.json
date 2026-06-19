@@ -9,6 +9,7 @@
   },
   "scripts": {
     "sanity": "node tools/sanity-check.mjs",
+    "prepare:azure": "node tools/prepare-azure-static-web-app.mjs",
     "serve:web": "node tools/serve.mjs build/web-release 8080",
     "configure:native": "cmake --preset native-debug",
     "build:native": "cmake --build --preset native-debug",

@@ -192,6 +192,10 @@ struct RunState {
     std::array<std::string, 3> offerModuleIds {};
     std::array<std::string, 3> offerCrewUpgradeIds {};
     int launchesThisExpedition = 0;
+    int offerRerollsThisExpedition = 0;
+    int repairOpsThisExpedition = 0;
+    int trainingOpsThisExpedition = 0;
+    int restOpsThisExpedition = 0;
 };
 
 struct GameState {

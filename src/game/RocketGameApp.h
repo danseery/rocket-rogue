@@ -26,6 +26,7 @@ public:
     void next();
     void attemptFrontierTransfer();
     void buyOffer(int index);
+    void rerollOffers();
     void repairShip();
     void recruitCrew();
     void trainCrew();

@@ -319,6 +319,18 @@ void RocketGameApp::attemptFrontierTransfer()
         return;
     }
 
+    if (state_.run.shipDamage >= 100) {
+        state_.statusLine = "That vehicle is less rocket than cautionary sculpture.";
+        panelDirty_ = true;
+        return;
+    }
+
+    if (activeAstronaut(state_) == nullptr) {
+        state_.statusLine = "No living astronaut is cleared for launch.";
+        panelDirty_ = true;
+        return;
+    }
+
     if (!canCommitToNextFrontier(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next == nullptr ? "No farther frontier is charted in this proof of concept." : "More proving data is needed before the transfer attempt.";
@@ -363,6 +375,18 @@ void RocketGameApp::buyOffer(int index)
     }
     if (rocket::buyOffer(state_, catalog_, index)) {
         state_.screen = Screen::Hangar;
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::rerollOffers()
+{
+    if (state_.screen != Screen::Upgrade) {
+        return;
+    }
+
+    if (rocket::rerollOffers(state_, catalog_, rng_)) {
         save();
     }
     panelDirty_ = true;
