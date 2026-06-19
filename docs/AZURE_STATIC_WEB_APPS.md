@@ -54,6 +54,7 @@ On pushes to `main`, GitHub Actions will:
 
 The deploy package contains:
 
+- `index.html`
 - `rocket_rogue.html`
 - `rocket_rogue.js`
 - `rocket_rogue.wasm`

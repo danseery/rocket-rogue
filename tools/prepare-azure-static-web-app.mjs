@@ -57,6 +57,7 @@ mkdirSync(outputDir, { recursive: true });
 for (const file of requiredFiles) {
   copyFileBytes(join(buildDir, file), join(outputDir, file));
 }
+copyFileBytes(join(buildDir, "rocket_rogue.html"), join(outputDir, "index.html"));
 
 copyDirectory(join(buildDir, "assets"), join(outputDir, "assets"));
 copyFileBytes("staticwebapp.config.json", join(outputDir, "staticwebapp.config.json"));
