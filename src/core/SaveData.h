@@ -16,11 +16,14 @@ struct SaveData {
     std::string frameId = "pathfinder";
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
+    std::vector<std::string> crewUpgradeIds;
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
+    std::vector<int> destinationAttempts;
+    std::vector<int> destinationSuccesses;
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
     std::vector<Astronaut> crew;

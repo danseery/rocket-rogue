@@ -63,7 +63,13 @@
       "output": {
         "outputOnFailure": true
       }
+    },
+    {
+      "name": "web-release",
+      "configurePreset": "web-release",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
-

@@ -39,6 +39,18 @@ std::string join(const std::vector<std::string>& values, char delimiter)
     return out.str();
 }
 
+std::string joinInts(const std::vector<int>& values, char delimiter)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            out << delimiter;
+        }
+        out << values[i];
+    }
+    return out.str();
+}
+
 int statusToInt(CrewStatus status)
 {
     switch (status) {
@@ -123,6 +135,15 @@ std::vector<Astronaut> parseCrew(std::string_view text)
     return crew;
 }
 
+std::vector<int> parseInts(std::string_view text)
+{
+    std::vector<int> values;
+    for (const std::string& item : split(text, ',')) {
+        values.push_back(parseInt(item, 0));
+    }
+    return values;
+}
+
 } // namespace
 
 SaveData captureSaveData(const GameState& state)
@@ -136,11 +157,14 @@ SaveData captureSaveData(const GameState& state)
     save.frameId = state.run.frameId;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
+    save.crewUpgradeIds = state.run.crewUpgradeIds;
     save.unlockKeys = state.meta.unlockKeys;
     save.blueprintProgress = state.meta.blueprintProgress;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
     save.astronautsLost = state.meta.astronautsLost;
+    save.destinationAttempts = state.meta.destinationAttempts;
+    save.destinationSuccesses = state.meta.destinationSuccesses;
     save.memorials = state.meta.memorials;
     save.famousLaunches = state.meta.famousLaunches;
     save.crew = state.run.crew;
@@ -157,11 +181,14 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
+    state.run.crewUpgradeIds = save.crewUpgradeIds;
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{"starter"} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.furthestTier = save.furthestTier;
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
+    state.meta.destinationAttempts = save.destinationAttempts;
+    state.meta.destinationSuccesses = save.destinationSuccesses;
     state.meta.memorials = save.memorials;
     state.meta.famousLaunches = save.famousLaunches;
     if (!save.crew.empty()) {
@@ -205,11 +232,14 @@ std::string serializeSaveData(const SaveData& save)
     out << "frameId=" << save.frameId << "\n";
     out << "inventory=" << join(save.inventoryModuleIds, ',') << "\n";
     out << "equipped=" << join(save.equippedModuleIds, ',') << "\n";
+    out << "crewUpgrades=" << join(save.crewUpgradeIds, ',') << "\n";
     out << "unlocks=" << join(save.unlockKeys, ',') << "\n";
     out << "blueprints=" << save.blueprintProgress << "\n";
     out << "furthestTier=" << save.furthestTier << "\n";
     out << "shipsLost=" << save.shipsLost << "\n";
     out << "astronautsLost=" << save.astronautsLost << "\n";
+    out << "destinationAttempts=" << joinInts(save.destinationAttempts, ',') << "\n";
+    out << "destinationSuccesses=" << joinInts(save.destinationSuccesses, ',') << "\n";
     out << "memorials=" << join(save.memorials, '|') << "\n";
     out << "famousLaunches=" << join(save.famousLaunches, '|') << "\n";
     out << "crew=" << serializeCrew(save.crew) << "\n";
@@ -250,6 +280,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.inventoryModuleIds = split(value, ',');
         } else if (key == "equipped") {
             save.equippedModuleIds = split(value, ',');
+        } else if (key == "crewUpgrades") {
+            save.crewUpgradeIds = split(value, ',');
         } else if (key == "unlocks") {
             save.unlockKeys = split(value, ',');
         } else if (key == "blueprints") {
@@ -260,6 +292,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.shipsLost = parseInt(value, save.shipsLost);
         } else if (key == "astronautsLost") {
             save.astronautsLost = parseInt(value, save.astronautsLost);
+        } else if (key == "destinationAttempts") {
+            save.destinationAttempts = parseInts(value);
+        } else if (key == "destinationSuccesses") {
+            save.destinationSuccesses = parseInts(value);
         } else if (key == "memorials") {
             save.memorials = split(value, '|');
         } else if (key == "famousLaunches") {

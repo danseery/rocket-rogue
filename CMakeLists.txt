@@ -27,13 +27,25 @@ endif()
 add_executable(rocket_core_tests
     tests/core_tests.cpp)
 target_link_libraries(rocket_core_tests PRIVATE rocket_core)
+set_target_properties(rocket_core_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
 enable_testing()
-add_test(NAME rocket_core_tests COMMAND rocket_core_tests)
+if(EMSCRIPTEN)
+    if(DEFINED ENV{EMSDK_NODE})
+        set(ROCKET_TEST_NODE "$ENV{EMSDK_NODE}")
+    else()
+        find_program(ROCKET_TEST_NODE NAMES node node.exe REQUIRED)
+    endif()
+    add_test(NAME rocket_core_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_core_tests>")
+else()
+    add_test(NAME rocket_core_tests COMMAND rocket_core_tests)
+endif()
 
 if(EMSCRIPTEN)
     add_executable(rocket_rogue
         src/main.cpp
+        src/game/GamePanel.cpp
         src/game/RocketGameApp.cpp
         src/platform/WebSaveStore.cpp
         src/render/WebGLRenderer.cpp)
@@ -49,7 +61,7 @@ if(EMSCRIPTEN)
     target_include_directories(rocket_rogue PRIVATE src)
 
     set(ROCKET_EXPORTED_FUNCTIONS
-        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_next','_rr_adjust_target','_rr_attempt_frontier','_rr_buy_offer','_rr_repair_ship','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
+        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_cut_engines','_rr_pressure_relief','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_buy_offer','_rr_repair_ship','_rr_recruit_crew','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
 
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"

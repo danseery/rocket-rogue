@@ -72,6 +72,36 @@ void rr_cut_engines()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_pressure_relief()
+{
+    if (g_app) {
+        g_app->pressureReliefValve();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_close_relief_valve()
+{
+    if (g_app) {
+        g_app->closePressureReliefValve();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_jettison_cargo()
+{
+    if (g_app) {
+        g_app->jettisonCargo();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_next()
 {
     if (g_app) {
@@ -79,19 +109,6 @@ void rr_next()
     }
 }
 
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_adjust_target(int deltaSteps)
-{
-    if (g_app) {
-        g_app->adjustTarget(deltaSteps);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_attempt_frontier()
 {
     if (g_app) {

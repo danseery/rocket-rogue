@@ -8,28 +8,28 @@ namespace rocket {
 
 namespace {
 
-double crewTrainingBonus(const GameState& state)
+double crewTrainingBonus(const GameState& state, const ContentCatalog& catalog)
 {
     const Astronaut* astronaut = activeAstronaut(state);
     if (astronaut == nullptr) {
         return 0.0;
     }
 
-    double bonus = static_cast<double>(astronaut->training) * 0.055;
-    bonus -= static_cast<double>(astronaut->stress) * 0.004;
+    double bonus = static_cast<double>(effectiveTrainingLevel(*astronaut)) * 0.055;
+    const double traitMultiplier = 1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier);
 
     if (astronaut->trait == "Calm under heat") {
-        bonus += 0.12;
+        bonus += 0.12 * traitMultiplier;
     } else if (astronaut->trait == "Reads telemetry early") {
-        bonus += 0.06;
+        bonus += 0.06 * traitMultiplier;
     } else if (astronaut->trait == "Improves ejection odds") {
-        bonus += 0.04;
+        bonus += 0.04 * traitMultiplier;
     }
 
     return bonus;
 }
 
-double crewEscapeBonus(const GameState& state)
+double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
 {
     const Astronaut* astronaut = activeAstronaut(state);
     if (astronaut == nullptr) {
@@ -38,7 +38,7 @@ double crewEscapeBonus(const GameState& state)
 
     double bonus = static_cast<double>(astronaut->training) * 0.025;
     if (astronaut->trait == "Improves ejection odds") {
-        bonus += 0.16;
+        bonus += 0.16 * (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
     }
     return bonus;
 }
@@ -48,7 +48,7 @@ std::vector<TelemetryEvent> buildTelemetry(const PreparedLaunch& launch)
     std::vector<TelemetryEvent> events;
     events.reserve(12);
 
-    const double maxSample = std::max(launch.config.targetEjectMultiplier, launch.crashMultiplier);
+    const double maxSample = std::max(launch.config.burnGoalMultiplier, launch.crashMultiplier);
     for (int i = 0; i < 12; ++i) {
         const double t = static_cast<double>(i) / 11.0;
         const double multiplier = 1.0 + (maxSample - 1.0) * t;
@@ -56,6 +56,23 @@ std::vector<TelemetryEvent> buildTelemetry(const PreparedLaunch& launch)
     }
 
     return events;
+}
+
+TelemetryEvent peakTelemetryThrough(const PreparedLaunch& launch, double endMultiplier)
+{
+    TelemetryEvent peak;
+    const double maxSample = std::max(1.0, endMultiplier);
+    for (int i = 0; i < 18; ++i) {
+        const double t = static_cast<double>(i) / 17.0;
+        const double multiplier = 1.0 + (maxSample - 1.0) * t;
+        const TelemetryEvent sample = telemetryAt(launch, multiplier);
+        if (sample.warning >= peak.warning) {
+            peak = sample;
+        }
+        peak.abortRisk = std::max(peak.abortRisk, sample.abortRisk);
+        peak.stress = std::max(peak.stress, sample.stress);
+    }
+    return peak;
 }
 
 std::string warningMessage(const TelemetryEvent& event)
@@ -92,14 +109,14 @@ std::string warningMessage(const TelemetryEvent& event)
     return "Tracking system margins below limits";
 }
 
-void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const Destination& destination, const GameState& state, Random& rng)
+void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const ContentCatalog& catalog, const Destination& destination, const GameState& state, Random& rng)
 {
     outcome.type = LaunchResultType::Destroyed;
     outcome.shipDamage = 100;
     outcome.blueprintGain = std::max(0, destination.tier / 2);
 
     const double baseSurvival = outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.48 : 0.22;
-    const double survivalChance = std::clamp(baseSurvival + launch.stats.escape * 0.07 + crewEscapeBonus(state) - destination.hazard * 0.035, 0.05, 0.90);
+    const double survivalChance = std::clamp(baseSurvival + launch.stats.escape * 0.07 + crewEscapeBonus(state, catalog) - destination.hazard * 0.035, 0.05, 0.90);
     const bool survived = rng.chance(survivalChance);
     outcome.crewKilled = !survived;
     outcome.crewInjured = survived && rng.chance(outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.42 : 0.58);
@@ -113,6 +130,65 @@ void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const D
 double telemetryWave(double multiplier, double crashMultiplier, double frequency, double phase)
 {
     return 0.5 + std::sin(multiplier * frequency + crashMultiplier * phase) * 0.5;
+}
+
+double smoothStep(double value)
+{
+    const double t = std::clamp(value, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+int destinationHistoryIndex(const ContentCatalog& catalog, std::string_view destinationId)
+{
+    for (std::size_t i = 0; i < catalog.destinations.size(); ++i) {
+        if (catalog.destinations[i].id == destinationId) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+int destinationHistoryValue(const std::vector<int>& values, int index)
+{
+    if (index < 0 || static_cast<std::size_t>(index) >= values.size()) {
+        return 0;
+    }
+    return values[static_cast<std::size_t>(index)];
+}
+
+double incidentPulse(const TelemetryIncident& incident, double multiplier)
+{
+    const double distance = std::abs(multiplier - incident.centerMultiplier);
+    const double pulse = std::clamp(1.0 - distance / std::max(0.01, incident.width), 0.0, 1.0);
+    return pulse * pulse * (3.0 - 2.0 * pulse);
+}
+
+double dampened(double amount, double mitigation)
+{
+    return std::clamp(amount - std::max(0.0, mitigation), 0.03, 0.52);
+}
+
+double returnHomeNetRewardFloor(const PreparedLaunch& launch, const Destination& destination, double burnMultiplier)
+{
+    if (launch.config.frontierTransfer) {
+        return 0.0;
+    }
+
+    const double dataGoal = std::min(launch.config.burnGoalMultiplier, destination.targetMultiplier);
+    if (burnMultiplier + 0.000001 < dataGoal) {
+        return 0.0;
+    }
+
+    if (burnMultiplier + 0.000001 >= destination.targetMultiplier) {
+        return static_cast<double>(moduleOfferCost(Rarity::Rare));
+    }
+
+    const double uncommonThreshold = dataGoal + (destination.targetMultiplier - dataGoal) * 0.45;
+    if (burnMultiplier + 0.000001 >= uncommonThreshold) {
+        return static_cast<double>(moduleOfferCost(Rarity::Uncommon));
+    }
+
+    return static_cast<double>(moduleOfferCost(Rarity::Common));
 }
 
 } // namespace
@@ -135,25 +211,144 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         launch.stats.hull * 0.055 +
         launch.stats.cooling * 0.050 +
         launch.stats.sensors * 0.035 +
-        crewTrainingBonus(state));
+        crewTrainingBonus(state, catalog));
 
+    const double missionPressure = missionPressureModifier(state, catalog, destination);
+    const int historyIndex = destinationHistoryIndex(catalog, destination.id);
+    const int attempts = destinationHistoryValue(state.meta.destinationAttempts, historyIndex);
+    const int successes = destinationHistoryValue(state.meta.destinationSuccesses, historyIndex);
     const double transferHazard = launch.config.frontierTransfer ? 1.08 + static_cast<double>(destination.tier) * 0.12 : 0.0;
-    const double hazard = destination.hazard * 0.26 + transferHazard + std::max(0.0, launch.stats.volatility) * 0.11 + static_cast<double>(state.run.shipDamage) * 0.008;
+    const double unprovenHazard = successes == 0 ? std::max(0.0, 0.20 - static_cast<double>(attempts) * 0.035) : 0.0;
+    const double hazard = destination.hazard * 0.26 + transferHazard + unprovenHazard + std::max(0.0, launch.stats.volatility) * 0.11 + static_cast<double>(state.run.shipDamage) * 0.008;
     const double safety = std::clamp(1.0 + performance - hazard, 0.55, 1.75);
+    const bool longShotBreak = successes == 0 && rng.chance(std::clamp(0.012 + static_cast<double>(attempts) * 0.006 + launch.stats.sensors * 0.0015, 0.012, 0.055));
     const double tail = std::pow(rng.next01(), 1.0 / safety);
 
     const double minCrash = destination.minCrashMultiplier;
     const double transferCeilingPenalty = launch.config.frontierTransfer ? std::max(0.35, 1.08 + static_cast<double>(destination.tier) * 0.12 - performance * 0.25) : 0.0;
-    const double maxCrash = std::max(minCrash + 0.18, destination.maxCrashMultiplier - transferCeilingPenalty + safety * 0.14);
+    const double unprovenCeilingPenalty = successes == 0 ? std::max(0.78, 0.96 - static_cast<double>(std::min(attempts, 8)) * 0.015) : 0.0;
+    const double pressureCeilingPenalty = successes == 0 ? missionPressure * 0.38 : missionPressure * 0.12;
+    const double longShotBonus = longShotBreak ? rng.range(0.24, 0.52) : 0.0;
+    const double maxCrash = std::max(minCrash + 0.18, destination.maxCrashMultiplier - transferCeilingPenalty - unprovenCeilingPenalty - pressureCeilingPenalty + longShotBonus + safety * 0.14);
     launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
     launch.sensorQuality = std::clamp(0.22 + launch.stats.sensors * 0.065, 0.15, 0.92);
     launch.heatRate = std::clamp(destination.hazard * 0.62 + (launch.config.frontierTransfer ? 0.18 : 0.0) + std::max(0.0, launch.stats.volatility) * 0.18 - launch.stats.cooling * 0.040, 0.34, 2.45);
+    launch.pressureModifier = std::clamp(missionPressure - std::max(0.0, launch.stats.pressure) * 0.040, 0.03, 0.60);
     launch.throttleFactor = 1.0;
     launch.cutHeatRelief = 0.0;
     launch.cutVibrationRelief = 0.0;
     launch.cutGuidancePenalty = 0.0;
+    launch.pressureRelief = 0.0;
+    launch.pressureReliefFailure = 0.0;
+    launch.reliefGuidancePenalty = 0.0;
+    launch.cargoFuelRelief = 0.0;
+    launch.cargoGuidancePenalty = 0.0;
+    launch.cargoVibrationPenalty = 0.0;
+    launch.cargoReturnPenalty = 0.0;
+    if (const Astronaut* astronaut = activeAstronaut(state)) {
+        launch.crewStressSteps = crewStressStepCount(astronaut->stress);
+        launch.crewGuidancePenalty = crewNavigationPenaltyFromStress(astronaut->stress);
+        launch.crewAbortMultiplier = crewAbortRiskMultiplierFromStress(astronaut->stress);
+    }
+    launch.incidentCount = std::clamp(2 + destination.tier / 2 + (launch.config.frontierTransfer ? 1 : 0), 2, static_cast<int>(launch.incidents.size()));
+
+    const double profileEnd = std::max(launch.config.burnGoalMultiplier, destination.targetMultiplier);
+    const double profileSpan = std::max(0.16, profileEnd - 1.0);
+    const double incidentSeverity =
+        0.12 +
+        destination.hazard * 0.032 +
+        missionPressure * 0.10 +
+        std::max(0.0, launch.stats.volatility) * 0.035 +
+        static_cast<double>(state.run.shipDamage) * 0.0012;
+
+    for (int i = 0; i < launch.incidentCount; ++i) {
+        TelemetryIncident incident;
+        const double lane = (static_cast<double>(i) + rng.range(0.22, 0.82)) / static_cast<double>(launch.incidentCount + 1);
+        incident.centerMultiplier = std::clamp(1.0 + profileSpan * lane, 1.04, std::max(1.05, launch.crashMultiplier - 0.035));
+        incident.width = rng.range(0.045, 0.105) + destination.hazard * 0.006;
+
+        const double amount = incidentSeverity * rng.range(0.78, 1.42);
+        switch (rng.rangeInt(0, 5)) {
+        case 0:
+            incident.heat = dampened(amount + 0.08, launch.stats.cooling * 0.026);
+            incident.pressure = dampened(amount * 0.34, launch.stats.pressure * 0.020);
+            break;
+        case 1:
+            incident.pressure = dampened(amount + 0.07, launch.stats.pressure * 0.034 + launch.stats.fuel * 0.010);
+            incident.fuelMix = dampened(amount * 0.42, launch.stats.fuel * 0.019);
+            break;
+        case 2:
+            incident.vibration = dampened(amount + 0.06, launch.stats.hull * 0.030);
+            incident.guidance = dampened(amount * 0.36, launch.stats.sensors * 0.024);
+            break;
+        case 3:
+            incident.fuelMix = dampened(amount + 0.05, launch.stats.fuel * 0.034);
+            incident.pressure = dampened(amount * 0.30, launch.stats.pressure * 0.024);
+            break;
+        case 4:
+            incident.guidance = dampened(amount + 0.06, launch.stats.sensors * 0.036);
+            incident.vibration = dampened(amount * 0.28, launch.stats.hull * 0.022);
+            break;
+        default:
+            incident.abortRisk = dampened(amount + 0.05, launch.stats.escape * 0.040 + launch.stats.sensors * 0.018);
+            incident.guidance = dampened(amount * 0.32, launch.stats.sensors * 0.026);
+            break;
+        }
+
+        launch.incidents[static_cast<std::size_t>(i)] = incident;
+    }
 
     return launch;
+}
+
+PreparedLaunch withCutEngines(const PreparedLaunch& launch)
+{
+    PreparedLaunch throttled = launch;
+    throttled.throttleFactor = 0.58;
+    throttled.cutHeatRelief = 0.18;
+    throttled.cutVibrationRelief = 0.14;
+    throttled.cutGuidancePenalty = 0.22;
+    return throttled;
+}
+
+PreparedLaunch withPressureRelief(const PreparedLaunch& launch, bool failed)
+{
+    PreparedLaunch relieved = launch;
+    relieved.pressureRelief = failed ? 0.05 : 0.24;
+    relieved.pressureReliefFailure = failed ? 0.16 : 0.0;
+    relieved.reliefGuidancePenalty = failed ? 0.08 : 0.14;
+    return relieved;
+}
+
+PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch)
+{
+    PreparedLaunch lightened = launch;
+    lightened.cargoFuelRelief = 0.22;
+    lightened.cargoGuidancePenalty = 0.16;
+    lightened.cargoVibrationPenalty = 0.12;
+    lightened.cargoReturnPenalty = 0.075;
+    return lightened;
+}
+
+double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
+{
+    const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
+    const double thrust = std::max(0.4, launch.stats.thrust);
+    const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
+    const double acceleration = (0.00026 + destination.hazard * 0.00008) * launch.throttleFactor;
+    const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration);
+}
+
+double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
+{
+    const double progress = std::clamp(returnElapsed / std::max(0.1, returnDuration), 0.0, 1.0);
+    const double shaped = smoothStep(progress);
+    const double headroom = std::max(0.04, crashMultiplier - commitMultiplier);
+    const double overshoot = std::min(headroom * 0.22, 0.18 + headroom * 0.10);
+    const double bump = std::sin(shaped * 3.1415926535) * overshoot;
+    const double settle = shaped * std::min(headroom * 0.08, 0.06);
+    return std::min(crashMultiplier - 0.02, commitMultiplier + bump - settle);
 }
 
 double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier)
@@ -180,7 +375,8 @@ double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalo
         event.heat * 0.050 +
         static_cast<double>(state.run.shipDamage) * 0.0014 +
         transferPenalty -
-        systemsRelief;
+        systemsRelief +
+        launch.cargoReturnPenalty;
 
     return std::clamp(risk, 0.01, 0.42);
 }
@@ -195,6 +391,9 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     outcome.crashMultiplier = launch.crashMultiplier;
     outcome.ejectMultiplier = std::max(1.0, burnMultiplier);
     outcome.telemetry = buildTelemetry(launch);
+    const TelemetryEvent peak = peakTelemetryThrough(launch, outcome.ejectMultiplier);
+    outcome.peakWarning = peak.warning;
+    outcome.peakAbortRisk = peak.abortRisk;
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {
@@ -204,7 +403,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     }
 
     if (method == RecoveryMethod::None || outcome.ejectMultiplier >= launch.crashMultiplier) {
-        markDestroyed(outcome, launch, *destination, state, rng);
+        markDestroyed(outcome, launch, catalog, *destination, state, rng);
         return outcome;
     }
 
@@ -213,7 +412,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     const TelemetryEvent event = telemetryAt(launch, outcome.ejectMultiplier);
 
     if (method == RecoveryMethod::ReturnHome && rng.chance(returnHomeRisk(launch, catalog, state, outcome.ejectMultiplier))) {
-        markDestroyed(outcome, launch, *destination, state, rng);
+        markDestroyed(outcome, launch, catalog, *destination, state, rng);
         return outcome;
     }
 
@@ -239,8 +438,12 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     }
 
     outcome.type = reachedDestination ? LaunchResultType::MissionComplete : LaunchResultType::SafeEject;
-    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * (reachedDestination ? 1.12 : 0.68);
+    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * (reachedDestination ? 1.18 : 0.74);
     outcome.recoveryCost = std::clamp(3.0 + static_cast<double>(destination->tier) * 2.0 + outcome.ejectMultiplier * 1.5, 2.0, 28.0);
+    const double netRewardFloor = returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
+    if (netRewardFloor > 0.0) {
+        outcome.payout = std::max(outcome.payout, outcome.recoveryCost + netRewardFloor);
+    }
 
     const double stressDamage = destination->hazard * 4.5 + outcome.ejectMultiplier * 1.7 + event.stress * 8.0 - launch.stats.hull * 0.70 - launch.stats.cooling * 0.58;
     outcome.shipDamage = std::clamp(static_cast<int>(std::round(stressDamage)), 0, reachedDestination ? 26 : 16);
@@ -252,7 +455,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
 LaunchOutcome simulateLaunchToTarget(const GameState& state, const ContentCatalog& catalog, Random& rng)
 {
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    return resolveLaunch(launch, catalog, state, state.launchConfig.targetEjectMultiplier, RecoveryMethod::ReturnHome, rng);
+    return resolveLaunch(launch, catalog, state, state.launchConfig.burnGoalMultiplier, RecoveryMethod::ReturnHome, rng);
 }
 
 TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
@@ -261,7 +464,7 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
     event.multiplier = multiplier;
 
     const double progressToCrash = std::clamp((multiplier - 1.0) / std::max(0.01, launch.crashMultiplier - 1.0), 0.0, 1.4);
-    const double burnLoad = std::clamp((multiplier - 1.0) / std::max(0.10, launch.config.targetEjectMultiplier - 1.0), 0.0, 1.45);
+    const double burnLoad = std::clamp((multiplier - 1.0) / std::max(0.10, launch.config.burnGoalMultiplier - 1.0), 0.0, 1.45);
     const double lateFlight = std::clamp((progressToCrash - 0.45) / 0.65, 0.0, 1.0);
     const double shipDamage = std::max(0.0, -std::min(0.0, launch.stats.hull)) * 0.16;
     const double volatility = std::max(0.0, launch.stats.volatility);
@@ -275,27 +478,42 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
     const double vibrationPulse = 0.70 + telemetryWave(multiplier, launch.crashMultiplier, 15.9, 4.4) * 0.65;
     const double mixPulse = 0.78 + telemetryWave(multiplier, launch.crashMultiplier, 8.3, 5.6) * 0.48;
     const double guidancePulse = 0.72 + telemetryWave(multiplier, launch.crashMultiplier, 6.6, 3.2) * 0.52;
+    const double pressureLoad = 1.0 + launch.pressureModifier;
     const double earlyPressure = burnLoad * (0.090 + thrustLoad * 0.014 + volatility * 0.035) * pressurePulse - fuelRelief * 0.22 - coolingRelief * 0.16;
     const double earlyVibration = burnLoad * (0.080 + std::max(0.0, launch.stats.thrust) * 0.012 + volatility * 0.050) * vibrationPulse + shipDamage * 0.35 - hullRelief * 0.22 - sensorRelief * 0.14;
     const double earlyFuelMix = burnLoad * (0.060 + std::max(0.0, std::abs(launch.stats.thrust - launch.stats.fuel)) * 0.014 + volatility * 0.030) * mixPulse - fuelRelief * 0.18 - sensorRelief * 0.08;
 
     event.heat = std::clamp(progressToCrash * launch.heatRate - launch.cutHeatRelief, 0.0, 1.25);
-    event.pressure = std::clamp(earlyPressure + lateFlight * (0.31 + thrustLoad * 0.052 + volatility * 0.075) + event.heat * 0.15 - fuelRelief * 0.18 - coolingRelief * 0.08, 0.0, 1.0);
-    event.vibration = std::clamp(earlyVibration + lateFlight * (0.24 + volatility * 0.15 + std::max(0.0, launch.stats.thrust) * 0.017) + shipDamage * 0.65 - hullRelief * 0.20 - sensorRelief * 0.08 - launch.cutVibrationRelief, 0.0, 1.0);
-    event.fuelMix = std::clamp(earlyFuelMix + lateFlight * (0.23 + std::max(0.0, launch.stats.thrust - launch.stats.fuel) * 0.052 + volatility * 0.042) + event.pressure * 0.15 - fuelRelief * 0.22, 0.0, 1.0);
-    event.guidance = std::clamp(burnLoad * (0.045 + event.vibration * 0.070 + event.pressure * 0.050) * guidancePulse + lateFlight * (0.28 + volatility * 0.055) + event.vibration * 0.20 + event.pressure * 0.10 - sensorRelief * 0.48 + launch.cutGuidancePenalty, 0.0, 1.0);
+    event.pressure = std::clamp((earlyPressure + lateFlight * (0.31 + thrustLoad * 0.052 + volatility * 0.075) + event.heat * 0.15 - fuelRelief * 0.18 - coolingRelief * 0.08) * pressureLoad - launch.pressureRelief + launch.pressureReliefFailure, 0.0, 1.0);
+    event.vibration = std::clamp(earlyVibration + lateFlight * (0.24 + volatility * 0.15 + std::max(0.0, launch.stats.thrust) * 0.017) + shipDamage * 0.65 - hullRelief * 0.20 - sensorRelief * 0.08 - launch.cutVibrationRelief + launch.cargoVibrationPenalty, 0.0, 1.0);
+    event.fuelMix = std::clamp(earlyFuelMix + lateFlight * (0.23 + std::max(0.0, launch.stats.thrust - launch.stats.fuel) * 0.052 + volatility * 0.042) + event.pressure * 0.15 - fuelRelief * 0.22 - launch.cargoFuelRelief, 0.0, 1.0);
+    const double crewNavLoad = launch.crewGuidancePenalty * (0.35 + burnLoad * 0.65);
+    event.guidance = std::clamp(burnLoad * (0.045 + event.vibration * 0.070 + event.pressure * 0.050) * guidancePulse + lateFlight * (0.28 + volatility * 0.055) + event.vibration * 0.20 + event.pressure * 0.10 - sensorRelief * 0.48 + launch.cutGuidancePenalty + launch.reliefGuidancePenalty + launch.cargoGuidancePenalty + crewNavLoad, 0.0, 1.0);
 
     const double readableLoad = burnLoad * (0.040 + volatility * 0.014);
-    event.pressure = std::max(event.pressure, std::clamp(readableLoad * (0.75 + pressurePulse * 0.38) - fuelRelief * 0.04 - coolingRelief * 0.03, 0.0, 0.28));
-    event.vibration = std::max(event.vibration, std::clamp(readableLoad * (0.85 + vibrationPulse * 0.42) - hullRelief * 0.04 - sensorRelief * 0.03, 0.0, 0.28));
-    event.fuelMix = std::max(event.fuelMix, std::clamp(readableLoad * (0.70 + mixPulse * 0.34) - fuelRelief * 0.04 - sensorRelief * 0.02, 0.0, 0.24));
-    event.guidance = std::max(event.guidance, std::clamp(readableLoad * (0.62 + guidancePulse * 0.30) + event.vibration * 0.05 - sensorRelief * 0.04 + launch.cutGuidancePenalty * 0.48, 0.0, 0.42));
+    event.pressure = std::max(event.pressure, std::clamp((readableLoad * (0.75 + pressurePulse * 0.38) - fuelRelief * 0.04 - coolingRelief * 0.03) * pressureLoad - launch.pressureRelief + launch.pressureReliefFailure, 0.0, 0.32));
+    event.vibration = std::max(event.vibration, std::clamp(readableLoad * (0.85 + vibrationPulse * 0.42) - hullRelief * 0.04 - sensorRelief * 0.03 + launch.cargoVibrationPenalty * 0.48, 0.0, 0.36));
+    event.fuelMix = std::max(event.fuelMix, std::clamp(readableLoad * (0.70 + mixPulse * 0.34) - fuelRelief * 0.04 - sensorRelief * 0.02 - launch.cargoFuelRelief * 0.35, 0.0, 0.24));
+    event.guidance = std::max(event.guidance, std::clamp(readableLoad * (0.62 + guidancePulse * 0.30) + event.vibration * 0.05 - sensorRelief * 0.04 + launch.cutGuidancePenalty * 0.48 + launch.reliefGuidancePenalty * 0.52 + launch.cargoGuidancePenalty * 0.58 + crewNavLoad * 0.74, 0.0, 0.58));
+
+    double incidentAbortRisk = 0.0;
+    for (int i = 0; i < launch.incidentCount; ++i) {
+        const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(i)];
+        const double pulse = incidentPulse(incident, multiplier);
+        event.heat = std::clamp(event.heat + incident.heat * pulse, 0.0, 1.25);
+        event.pressure = std::clamp(event.pressure + incident.pressure * pulse, 0.0, 1.0);
+        event.vibration = std::clamp(event.vibration + incident.vibration * pulse, 0.0, 1.0);
+        event.fuelMix = std::clamp(event.fuelMix + incident.fuelMix * pulse, 0.0, 1.0);
+        event.guidance = std::clamp(event.guidance + incident.guidance * pulse, 0.0, 1.0);
+        incidentAbortRisk = std::max(incidentAbortRisk, incident.abortRisk * pulse);
+    }
 
     const double earlyThermal = std::clamp((event.heat - 0.60) / 0.55, 0.0, 1.0) * 0.38;
     const double warningStart = 0.84 - launch.sensorQuality * 0.22;
     const double certaintyWindow = std::clamp((progressToCrash - warningStart) / std::max(0.05, 1.0 - warningStart), 0.0, 1.0);
     const double earlyAbortLoad = burnLoad * (0.040 + event.guidance * 0.080 + event.vibration * 0.050) + progressToCrash * 0.030 - escapeRelief * 0.10;
-    event.abortRisk = std::clamp(earlyAbortLoad + certaintyWindow * (0.54 + event.guidance * 0.25 + event.vibration * 0.22) + event.heat * 0.10 - escapeRelief * 0.76, 0.0, 1.0);
+    const double rawAbortRisk = earlyAbortLoad + certaintyWindow * (0.54 + event.guidance * 0.25 + event.vibration * 0.22) + event.heat * 0.10 + incidentAbortRisk - escapeRelief * 0.76;
+    event.abortRisk = std::clamp(rawAbortRisk * launch.crewAbortMultiplier, 0.0, 1.0);
     event.warning = std::clamp(std::max({earlyThermal, event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk}), 0.0, 1.0);
     event.stress = std::clamp(event.heat * 0.28 + event.pressure * 0.20 + event.vibration * 0.22 + event.guidance * 0.18 + event.abortRisk * 0.32 + progressToCrash * 0.08, 0.0, 1.0);
     event.message = warningMessage(event);

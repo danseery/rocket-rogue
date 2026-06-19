@@ -8,20 +8,16 @@ namespace rocket {
 
 namespace {
 
-int moduleCost(const ShipModule& module)
-{
-    switch (module.rarity) {
-    case Rarity::Common:
-        return 28;
-    case Rarity::Uncommon:
-        return 48;
-    case Rarity::Rare:
-        return 74;
-    case Rarity::Prototype:
-        return 105;
-    }
-    return 35;
-}
+enum class RefitOfferKind {
+    ShipModule,
+    CrewUpgrade
+};
+
+struct RefitCandidate {
+    RefitOfferKind kind = RefitOfferKind::ShipModule;
+    std::string id;
+    int cost = 0;
+};
 
 std::vector<std::string> starterInventory()
 {
@@ -35,11 +31,83 @@ std::vector<std::string> starterInventory()
     };
 }
 
+void ensureDestinationHistory(GameState& state, const ContentCatalog& catalog)
+{
+    const std::size_t count = catalog.destinations.size();
+    state.meta.destinationAttempts.resize(count, 0);
+    state.meta.destinationSuccesses.resize(count, 0);
+}
+
+int destinationIndexForId(const ContentCatalog& catalog, const std::string& destinationId)
+{
+    for (std::size_t i = 0; i < catalog.destinations.size(); ++i) {
+        if (catalog.destinations[i].id == destinationId) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 } // namespace
+
+int moduleOfferCost(Rarity rarity)
+{
+    switch (rarity) {
+    case Rarity::Common:
+        return 22;
+    case Rarity::Uncommon:
+        return 34;
+    case Rarity::Rare:
+        return 62;
+    case Rarity::Prototype:
+        return 92;
+    }
+    return 34;
+}
+
+int moduleOfferCost(const ShipModule& module)
+{
+    return moduleOfferCost(module.rarity);
+}
+
+int crewUpgradeCost(const CrewUpgrade& upgrade)
+{
+    return moduleOfferCost(upgrade.rarity);
+}
+
+CrewUpgradeStats& operator+=(CrewUpgradeStats& lhs, const CrewUpgradeStats& rhs)
+{
+    lhs.trainingGain += rhs.trainingGain;
+    lhs.trainingStressRelief += rhs.trainingStressRelief;
+    lhs.restStressBonus += rhs.restStressBonus;
+    lhs.launchStressRelief += rhs.launchStressRelief;
+    lhs.traitModifier += rhs.traitModifier;
+    return lhs;
+}
+
+int crewStressStepCount(int stress)
+{
+    return std::clamp(stress, 0, 100) / 14;
+}
+
+int effectiveTrainingLevel(const Astronaut& astronaut)
+{
+    return astronaut.training - crewStressStepCount(astronaut.stress);
+}
+
+double crewNavigationPenaltyFromStress(int stress)
+{
+    return static_cast<double>(crewStressStepCount(stress)) * 0.022;
+}
+
+double crewAbortRiskMultiplierFromStress(int stress)
+{
+    return 1.0 + static_cast<double>(crewStressStepCount(stress)) / 7.0;
+}
 
 double defaultProvingTarget(const Destination& destination)
 {
-    return std::clamp(1.0 + (destination.targetMultiplier - 1.0) * 0.55, 1.15, destination.targetMultiplier);
+    return std::clamp(1.0 + (destination.targetMultiplier - 1.0) * 0.47, 1.15, destination.targetMultiplier);
 }
 
 GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
@@ -49,6 +117,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
     state.meta.unlockKeys = {"starter"};
     state.run.credits = 100.0;
     state.run.crew = catalog.astronauts;
+    ensureDestinationHistory(state, catalog);
     startNewExpedition(state, catalog);
 
     Random rng(seed);
@@ -60,6 +129,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
 
 void startNewExpedition(GameState& state, const ContentCatalog& catalog)
 {
+    ensureDestinationHistory(state, catalog);
     state.screen = Screen::Hangar;
     state.run.active = true;
     state.run.destinationIndex = std::clamp(state.meta.furthestTier, 0, static_cast<int>(catalog.destinations.size()) - 1);
@@ -68,6 +138,8 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.frameId = catalog.frames.empty() ? "" : catalog.frames.front().id;
     state.run.inventoryModuleIds = starterInventory();
     state.run.equippedModuleIds = starterInventory();
+    state.run.offerModuleIds = {};
+    state.run.offerCrewUpgradeIds = {};
     state.run.launchesThisExpedition = 0;
     if (state.run.credits < 45.0) {
         state.run.credits = 45.0;
@@ -96,11 +168,12 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     }
 
     syncLaunchConfig(state, catalog);
-    state.launchConfig.targetEjectMultiplier = defaultProvingTarget(currentDestination(state, catalog));
+    state.launchConfig.burnGoalMultiplier = defaultProvingTarget(currentDestination(state, catalog));
 }
 
 void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
 {
+    ensureDestinationHistory(state, catalog);
     const Destination* destination = catalog.findDestination(state.launchConfig.destinationId);
     if (destination == nullptr || !state.launchConfig.frontierTransfer) {
         destination = &currentDestination(state, catalog);
@@ -109,8 +182,8 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
     state.launchConfig.frameId = state.run.frameId;
     state.launchConfig.equippedModuleIds = state.run.equippedModuleIds;
 
-    if (state.launchConfig.targetEjectMultiplier < 1.05 || state.launchConfig.targetEjectMultiplier > destination->targetMultiplier + 1.5) {
-        state.launchConfig.targetEjectMultiplier = state.launchConfig.frontierTransfer ? destination->targetMultiplier : defaultProvingTarget(*destination);
+    if (state.launchConfig.burnGoalMultiplier < 1.05 || state.launchConfig.burnGoalMultiplier > destination->targetMultiplier + 1.5) {
+        state.launchConfig.burnGoalMultiplier = state.launchConfig.frontierTransfer ? destination->targetMultiplier : defaultProvingTarget(*destination);
     }
 
     if (state.launchConfig.astronautId.empty()) {
@@ -133,15 +206,112 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
 
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
 {
-    const auto pool = unlockedModules(catalog, state.meta);
-    if (pool.empty()) {
+    state.run.offerModuleIds = {};
+    state.run.offerCrewUpgradeIds = {};
+
+    const auto modulePool = unlockedModules(catalog, state.meta);
+    const auto crewPool = unlockedCrewUpgrades(catalog, state.meta);
+    if (modulePool.empty() && crewPool.empty()) {
         state.run.offerModuleIds = {};
+        state.run.offerCrewUpgradeIds = {};
         return;
     }
 
-    for (auto& offerId : state.run.offerModuleIds) {
-        const ShipModule* picked = pool[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(pool.size()) - 1))];
-        offerId = picked->id;
+    std::vector<RefitCandidate> candidates;
+    const auto addCandidates = [&](bool onlyUnowned) {
+        for (const ShipModule* module : modulePool) {
+            const bool alreadyOwned = std::find(
+                state.run.inventoryModuleIds.begin(),
+                state.run.inventoryModuleIds.end(),
+                module->id) != state.run.inventoryModuleIds.end();
+            if (!onlyUnowned || !alreadyOwned) {
+                candidates.push_back({RefitOfferKind::ShipModule, module->id, moduleOfferCost(*module)});
+            }
+        }
+
+        for (const CrewUpgrade* upgrade : crewPool) {
+            const bool alreadyOwned = std::find(
+                state.run.crewUpgradeIds.begin(),
+                state.run.crewUpgradeIds.end(),
+                upgrade->id) != state.run.crewUpgradeIds.end();
+            if (!onlyUnowned || !alreadyOwned) {
+                candidates.push_back({RefitOfferKind::CrewUpgrade, upgrade->id, crewUpgradeCost(*upgrade)});
+            }
+        }
+    };
+
+    addCandidates(true);
+    if (candidates.size() < state.run.offerModuleIds.size()) {
+        candidates.clear();
+        addCandidates(false);
+    }
+
+    if (candidates.empty()) {
+        return;
+    }
+
+    const auto sameCandidate = [](const RefitCandidate& lhs, const RefitCandidate& rhs) {
+        return lhs.kind == rhs.kind && lhs.id == rhs.id;
+    };
+
+    std::vector<RefitCandidate> pickedIds;
+    pickedIds.reserve(state.run.offerModuleIds.size());
+    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
+        const RefitCandidate* picked = nullptr;
+        for (int attempts = 0; attempts < 12 && picked == nullptr; ++attempts) {
+            const RefitCandidate& candidate = candidates[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(candidates.size()) - 1))];
+            if (std::find_if(pickedIds.begin(), pickedIds.end(), [&](const RefitCandidate& existing) { return sameCandidate(existing, candidate); }) == pickedIds.end()) {
+                picked = &candidate;
+            }
+        }
+        if (picked == nullptr) {
+            picked = &candidates[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(candidates.size()) - 1))];
+        }
+        if (picked->kind == RefitOfferKind::ShipModule) {
+            state.run.offerModuleIds[i] = picked->id;
+        } else {
+            state.run.offerCrewUpgradeIds[i] = picked->id;
+        }
+        pickedIds.push_back(*picked);
+    }
+
+    const auto isAffordable = [&](std::size_t index) {
+        const std::string& moduleId = state.run.offerModuleIds[index];
+        if (!moduleId.empty()) {
+            const ShipModule* module = catalog.findModule(moduleId);
+            return module != nullptr && state.run.credits >= static_cast<double>(moduleOfferCost(*module));
+        }
+
+        const std::string& upgradeId = state.run.offerCrewUpgradeIds[index];
+        const CrewUpgrade* upgrade = catalog.findCrewUpgrade(upgradeId);
+        return upgrade != nullptr && state.run.credits >= static_cast<double>(crewUpgradeCost(*upgrade));
+    };
+
+    bool hasAffordableOffer = false;
+    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
+        hasAffordableOffer = hasAffordableOffer || isAffordable(i);
+    }
+
+    if (!hasAffordableOffer && state.run.credits > 0.0) {
+        const RefitCandidate* cheapestAffordable = nullptr;
+        for (const RefitCandidate& candidate : candidates) {
+            if (std::find_if(pickedIds.begin(), pickedIds.end(), [&](const RefitCandidate& existing) { return sameCandidate(existing, candidate); }) != pickedIds.end()) {
+                continue;
+            }
+            if (state.run.credits >= static_cast<double>(candidate.cost) && (cheapestAffordable == nullptr || candidate.cost < cheapestAffordable->cost)) {
+                cheapestAffordable = &candidate;
+            }
+        }
+
+        if (cheapestAffordable != nullptr) {
+            state.run.offerModuleIds.back().clear();
+            state.run.offerCrewUpgradeIds.back().clear();
+            if (cheapestAffordable->kind == RefitOfferKind::ShipModule) {
+                state.run.offerModuleIds.back() = cheapestAffordable->id;
+            } else {
+                state.run.offerCrewUpgradeIds.back() = cheapestAffordable->id;
+            }
+        }
     }
 }
 
@@ -151,30 +321,38 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
         return false;
     }
 
-    const ShipModule* module = catalog.findModule(state.run.offerModuleIds[static_cast<std::size_t>(index)]);
-    if (module == nullptr) {
+    const auto offerIndex = static_cast<std::size_t>(index);
+    const ShipModule* module = catalog.findModule(state.run.offerModuleIds[offerIndex]);
+    const CrewUpgrade* crewUpgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[offerIndex]);
+    if (module == nullptr && crewUpgrade == nullptr) {
         return false;
     }
 
-    const int cost = moduleCost(*module);
+    const int cost = module != nullptr ? moduleOfferCost(*module) : crewUpgradeCost(*crewUpgrade);
     if (state.run.credits < static_cast<double>(cost)) {
-        state.statusLine = "Insufficient mission credits for " + module->name + ".";
+        state.statusLine = "Insufficient mission credits for " + (module != nullptr ? module->name : crewUpgrade->name) + ".";
         return false;
     }
 
     state.run.credits -= static_cast<double>(cost);
-    state.run.inventoryModuleIds.push_back(module->id);
+    if (module != nullptr) {
+        state.run.inventoryModuleIds.push_back(module->id);
 
-    auto slotIt = std::find_if(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), [&](const std::string& equippedId) {
-        const ShipModule* equipped = catalog.findModule(equippedId);
-        return equipped != nullptr && equipped->slot == module->slot;
-    });
+        auto slotIt = std::find_if(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), [&](const std::string& equippedId) {
+            const ShipModule* equipped = catalog.findModule(equippedId);
+            return equipped != nullptr && equipped->slot == module->slot;
+        });
 
-    if (slotIt != state.run.equippedModuleIds.end()) {
-        *slotIt = module->id;
+        if (slotIt != state.run.equippedModuleIds.end()) {
+            *slotIt = module->id;
+        }
+    } else {
+        state.run.crewUpgradeIds.push_back(crewUpgrade->id);
     }
 
-    state.statusLine = "Installed " + module->name + ". The hangar crew looks nervous, which is usually good.";
+    state.run.offerModuleIds = {};
+    state.run.offerCrewUpgradeIds = {};
+    state.statusLine = "Installed " + (module != nullptr ? module->name : crewUpgrade->name) + ". The refit took the available hangar window.";
     syncLaunchConfig(state, catalog);
     return true;
 }
@@ -199,7 +377,7 @@ bool repairShip(GameState& state)
     return true;
 }
 
-bool trainCrew(GameState& state)
+bool trainCrew(GameState& state, const ContentCatalog& catalog)
 {
     Astronaut* astronaut = activeAstronaut(state);
     if (astronaut == nullptr) {
@@ -213,14 +391,26 @@ bool trainCrew(GameState& state)
         return false;
     }
 
+    const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
+    const int trainingGain = std::max(1, 1 + upgrades.trainingGain);
+    const int stressGain = std::max(0, 6 - upgrades.trainingStressRelief);
+
     state.run.credits -= cost;
-    astronaut->training = std::min(10, astronaut->training + 1);
-    astronaut->stress = std::min(100, astronaut->stress + 6);
+    astronaut->training = std::min(10, astronaut->training + trainingGain);
+    astronaut->stress = std::min(100, astronaut->stress + stressGain);
     state.statusLine = astronaut->name + " completed simulator burns.";
     return true;
 }
 
-bool restCrew(GameState& state)
+int crewRestStressRecovery(const GameState& state, const ContentCatalog& catalog)
+{
+    const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
+    const double difficulty = missionPressureModifier(state, catalog, currentDestination(state, catalog));
+    const double recoveryFactor = std::clamp(1.0 - difficulty, 0.45, 0.95);
+    return std::max(8, static_cast<int>(std::round(static_cast<double>(24 + upgrades.restStressBonus) * recoveryFactor)));
+}
+
+bool restCrew(GameState& state, const ContentCatalog& catalog)
 {
     Astronaut* astronaut = activeAstronaut(state);
     if (astronaut == nullptr) {
@@ -234,13 +424,14 @@ bool restCrew(GameState& state)
         return false;
     }
 
+    const int stressRecovery = crewRestStressRecovery(state, catalog);
     state.run.credits -= cost;
-    astronaut->stress = std::max(0, astronaut->stress - 24);
+    astronaut->stress = std::max(0, astronaut->stress - stressRecovery);
     if (astronaut->status == CrewStatus::Injured) {
         astronaut->status = CrewStatus::Active;
-        astronaut->stress = std::max(0, astronaut->stress - 12);
+        astronaut->stress = std::max(0, astronaut->stress - std::max(4, stressRecovery / 2));
     }
-    state.statusLine = astronaut->name + " is cleared for another reckless miracle.";
+    state.statusLine = astronaut->name + " recovered " + std::to_string(stressRecovery) + " stress under current mission conditions.";
     return true;
 }
 
@@ -305,6 +496,26 @@ bool canCommitToNextFrontier(const GameState& state, const ContentCatalog& catal
     return nextDestination(state, catalog) != nullptr && required > 0 && state.run.frontierReadiness >= required;
 }
 
+double missionPressureModifier(const GameState& state, const ContentCatalog& catalog, const Destination& destination)
+{
+    const int index = destinationIndexForId(catalog, destination.id);
+    if (index < 0) {
+        return 0.25;
+    }
+
+    const auto attemptsIndex = static_cast<std::size_t>(index);
+    const int attempts = attemptsIndex < state.meta.destinationAttempts.size() ? state.meta.destinationAttempts[attemptsIndex] : 0;
+    const int successes = attemptsIndex < state.meta.destinationSuccesses.size() ? state.meta.destinationSuccesses[attemptsIndex] : 0;
+
+    if (attempts <= 0) {
+        return 0.50;
+    }
+    if (successes <= 0) {
+        return std::max(0.08, 0.25 / static_cast<double>(attempts));
+    }
+    return std::max(0.05, 0.14 / static_cast<double>(successes + 1));
+}
+
 bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog)
 {
     const Destination* next = nextDestination(state, catalog);
@@ -324,7 +535,7 @@ bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog)
     state.meta.furthestTier = std::max(state.meta.furthestTier, next->tier);
     state.launchConfig.frontierTransfer = false;
     state.launchConfig.destinationId = next->id;
-    state.launchConfig.targetEjectMultiplier = defaultProvingTarget(*next);
+    state.launchConfig.burnGoalMultiplier = defaultProvingTarget(*next);
     syncLaunchConfig(state, catalog);
     state.statusLine = "Transfer achieved: " + next->name + ". The proving route has moved outward.";
     return true;
@@ -354,16 +565,30 @@ void unlockFromBlueprints(GameState& state)
 
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& outcome)
 {
+    ensureDestinationHistory(state, catalog);
     state.lastOutcome = outcome;
     state.launchConfig.frontierTransfer = false;
     state.run.launchesThisExpedition += 1;
     state.run.shipDamage = std::clamp(state.run.shipDamage + outcome.shipDamage, 0, 100);
     state.meta.blueprintProgress += outcome.blueprintGain;
     unlockFromBlueprints(state);
+    const int outcomeDestinationIndex = destinationIndexForId(catalog, outcome.destinationId);
+    if (outcomeDestinationIndex >= 0) {
+        const auto index = static_cast<std::size_t>(outcomeDestinationIndex);
+        state.meta.destinationAttempts[index] += 1;
+        if (outcome.type == LaunchResultType::MissionComplete) {
+            state.meta.destinationSuccesses[index] += 1;
+        }
+    }
 
     Astronaut* astronaut = activeAstronaut(state);
     if (astronaut != nullptr) {
-        astronaut->stress = std::min(100, astronaut->stress + (outcome.type == LaunchResultType::Destroyed ? 34 : 12));
+        const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
+        const double warningLoad = std::clamp((outcome.peakWarning - 0.55) / 0.45, 0.0, 1.0);
+        const double abortLoad = std::clamp((outcome.peakAbortRisk - 0.35) / 0.65, 0.0, 1.0);
+        const int dangerStress = static_cast<int>(std::round(warningLoad * 8.0 + abortLoad * 8.0));
+        const int stressGain = std::max(0, (outcome.type == LaunchResultType::Destroyed ? 34 : 12) + dangerStress - upgrades.launchStressRelief);
+        astronaut->stress = std::min(100, astronaut->stress + stressGain);
         if (outcome.crewKilled) {
             astronaut->status = CrewStatus::Dead;
             state.meta.astronautsLost += 1;
@@ -409,7 +634,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                     state.run.frontierReadiness = 0;
                     state.meta.furthestTier = std::max(state.meta.furthestTier, destination->tier);
                     state.launchConfig.destinationId = destination->id;
-                    state.launchConfig.targetEjectMultiplier = defaultProvingTarget(*destination);
+                    state.launchConfig.burnGoalMultiplier = defaultProvingTarget(*destination);
                     state.statusLine = "Transfer achieved: " + destination->name + ". New proving flights begin here.";
                 } else {
                     state.statusLine = "Transfer data accepted, but the route ledger rejected the destination.";
@@ -472,6 +697,17 @@ ModuleStats aggregateShipStats(const GameState& state, const ContentCatalog& cat
     stats.cooling -= damagePenalty * 1.2;
     stats.escape -= damagePenalty * 0.8;
 
+    return stats;
+}
+
+CrewUpgradeStats aggregateCrewUpgradeStats(const GameState& state, const ContentCatalog& catalog)
+{
+    CrewUpgradeStats stats;
+    for (const std::string& upgradeId : state.run.crewUpgradeIds) {
+        if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(upgradeId)) {
+            stats += upgrade->stats;
+        }
+    }
     return stats;
 }
 

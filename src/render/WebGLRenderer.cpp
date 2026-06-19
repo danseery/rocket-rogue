@@ -318,40 +318,21 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
 
 void WebGLRenderer::drawRect(float cx, float cy, float w, float h, Color color)
 {
-    const float left = cx - w * 0.5F;
-    const float right = cx + w * 0.5F;
-    const float top = cy + h * 0.5F;
-    const float bottom = cy - h * 0.5F;
-
-    std::vector<float> vertices;
-    vertices.reserve(36);
-    pushVertex(vertices, left, bottom, color);
-    pushVertex(vertices, right, bottom, color);
-    pushVertex(vertices, right, top, color);
-    pushVertex(vertices, left, bottom, color);
-    pushVertex(vertices, right, top, color);
-    pushVertex(vertices, left, top, color);
+    std::vector<float>& vertices = scratchVertices(48);
+    appendRect(vertices, cx, cy, w, h, color);
     submit(vertices, 0x0004);
 }
 
 void WebGLRenderer::drawLine(float ax, float ay, float bx, float by, Color color, float width)
 {
-#ifdef __EMSCRIPTEN__
-    glLineWidth(width);
-#else
-    (void)width;
-#endif
-    std::vector<float> vertices;
-    vertices.reserve(12);
-    pushVertex(vertices, ax, ay, color);
-    pushVertex(vertices, bx, by, color);
-    submit(vertices, 0x0001);
+    std::vector<float>& vertices = scratchVertices(16);
+    appendLine(vertices, ax, ay, bx, by, color);
+    submitLines(vertices, width);
 }
 
 void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color)
 {
-    std::vector<float> vertices;
-    vertices.reserve(18);
+    std::vector<float>& vertices = scratchVertices(24);
     pushVertex(vertices, ax, ay, color);
     pushVertex(vertices, bx, by, color);
     pushVertex(vertices, cx, cy, color);
@@ -360,8 +341,7 @@ void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float c
 
 void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, int segments)
 {
-    std::vector<float> vertices;
-    vertices.reserve(static_cast<std::size_t>(segments) * 18);
+    std::vector<float>& vertices = scratchVertices(static_cast<std::size_t>(segments) * 24);
     for (int i = 0; i < segments; ++i) {
         const float a0 = (static_cast<float>(i) / static_cast<float>(segments)) * kPi * 2.0F;
         const float a1 = (static_cast<float>(i + 1) / static_cast<float>(segments)) * kPi * 2.0F;
@@ -370,6 +350,35 @@ void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, in
         pushVertex(vertices, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
     }
     submit(vertices, 0x0004);
+}
+
+std::vector<float>& WebGLRenderer::scratchVertices(std::size_t reserveCount)
+{
+    vertices_.clear();
+    if (vertices_.capacity() < reserveCount) {
+        vertices_.reserve(reserveCount);
+    }
+    return vertices_;
+}
+
+void WebGLRenderer::appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color)
+{
+    const float left = cx - w * 0.5F;
+    const float right = cx + w * 0.5F;
+    const float top = cy + h * 0.5F;
+    const float bottom = cy - h * 0.5F;
+    pushVertex(vertices, left, bottom, color);
+    pushVertex(vertices, right, bottom, color);
+    pushVertex(vertices, right, top, color);
+    pushVertex(vertices, left, bottom, color);
+    pushVertex(vertices, right, top, color);
+    pushVertex(vertices, left, top, color);
+}
+
+void WebGLRenderer::appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color)
+{
+    pushVertex(vertices, ax, ay, color);
+    pushVertex(vertices, bx, by, color);
 }
 
 bool WebGLRenderer::textureReady(int assetIndex)
@@ -424,8 +433,7 @@ void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint,
     const float top = cy + h * 0.5F;
     const float bottom = cy - h * 0.5F;
 
-    std::vector<float> vertices;
-    vertices.reserve(48);
+    std::vector<float>& vertices = scratchVertices(48);
     pushVertex(vertices, left, bottom, tint, u0, v1);
     pushVertex(vertices, right, bottom, tint, u1, v1);
     pushVertex(vertices, right, top, tint, u1, v0);
@@ -456,18 +464,70 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 
     drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F}, 1.0F);
 
+    std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    for (int i = 1; i < snapshot.telemetryCount; ++i) {
+        const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
+        const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
+        const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * (top - bottom);
+        const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * (top - bottom);
+        const float x0 = left + t0 * (right - left);
+        const float x1 = left + t1 * (right - left);
+        appendLine(heatVertices, x0, h0, x1, h1, heatColor);
+    }
+    submitLines(heatVertices, 1.5F);
+
+    std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
         const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
         const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
         const float y0 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i - 1)]) * (top - bottom);
         const float y1 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i)]) * (top - bottom);
-        const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * (top - bottom);
-        const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * (top - bottom);
         const float x0 = left + t0 * (right - left);
         const float x1 = left + t1 * (right - left);
-        drawLine(x0, h0, x1, h1, heatColor, 1.5F);
-        drawLine(x0, y0, x1, y1, mix(warningSafe, warningHot, static_cast<float>(snapshot.warning)), 2.2F);
+        appendLine(warningVertices, x0, y0, x1, y1, warningColor);
     }
+    submitLines(warningVertices, 2.2F);
+}
+
+void WebGLRenderer::drawStars()
+{
+    std::vector<float>& vertices = scratchVertices(52 * 48);
+    for (int i = 0; i < 52; ++i) {
+        const float x = -0.95F + static_cast<float>((i * 37) % 190) / 95.0F;
+        const float y = -0.92F + static_cast<float>((i * 71) % 184) / 92.0F;
+        const float alpha = 0.18F + static_cast<float>((i * 19) % 60) / 100.0F;
+        appendRect(vertices, x, y, 0.004F, 0.004F, {0.75F, 0.88F, 1.0F, alpha});
+    }
+    submit(vertices, 0x0004);
+}
+
+void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
+{
+    std::vector<float>& routeVertices = scratchVertices(28 * 16);
+    Vec2 previous = routePoint(snapshot, 0.0F);
+    for (int i = 1; i <= 28; ++i) {
+        const float t = static_cast<float>(i) / 28.0F;
+        const Vec2 next = routePoint(snapshot, t);
+        const Color routeColor = t <= snapshot.travelProgress ? Color{0.42F, 0.88F, 1.0F, 0.42F} : Color{0.25F, 0.42F, 0.52F, 0.22F};
+        appendLine(routeVertices, previous.x, previous.y, next.x, next.y, routeColor);
+        previous = next;
+    }
+    submitLines(routeVertices, 1.0F);
+
+    if (snapshot.travelProgress <= 1.0) {
+        return;
+    }
+
+    std::vector<float>& overburnVertices = scratchVertices(8 * 16);
+    Vec2 overburnPrevious = routePoint(snapshot, 1.0F);
+    for (int i = 1; i <= 8; ++i) {
+        const float t = 1.0F + (static_cast<float>(snapshot.travelProgress) - 1.0F) * (static_cast<float>(i) / 8.0F);
+        const Vec2 overburnNext = routePoint(snapshot, t);
+        appendLine(overburnVertices, overburnPrevious.x, overburnPrevious.y, overburnNext.x, overburnNext.y, {0.90F, 0.50F, 0.28F, 0.44F});
+        overburnPrevious = overburnNext;
+    }
+    submitLines(overburnVertices, 1.0F);
 }
 
 void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
@@ -533,8 +593,7 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
         const Vec2 tr {centerX + right.x * halfW + forward.x * halfH, centerY + right.y * halfW + forward.y * halfH};
         const Vec2 tl {centerX - right.x * halfW + forward.x * halfH, centerY - right.y * halfW + forward.y * halfH};
 
-        std::vector<float> vertices;
-        vertices.reserve(48);
+        std::vector<float>& vertices = scratchVertices(48);
         pushVertex(vertices, bl.x, bl.y, tint, u0, 1.0F);
         pushVertex(vertices, br.x, br.y, tint, u1, 1.0F);
         pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
@@ -582,29 +641,13 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
 void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F});
-
-    for (int i = 0; i < 52; ++i) {
-        const float x = -0.95F + static_cast<float>((i * 37) % 190) / 95.0F;
-        const float y = -0.92F + static_cast<float>((i * 71) % 184) / 92.0F;
-        const float alpha = 0.18F + static_cast<float>((i * 19) % 60) / 100.0F;
-        drawRect(x, y, 0.004F, 0.004F, {0.75F, 0.88F, 1.0F, alpha});
-    }
-
-    auto drawEllipseLine = [&](float cx, float cy, float rx, float ry, Color color, int segments, float start, float end) {
-        Vec2 previous {cx + std::cos(start) * rx, cy + std::sin(start) * ry};
-        for (int i = 1; i <= segments; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(segments);
-            const float angle = start + (end - start) * t;
-            const Vec2 next {cx + std::cos(angle) * rx, cy + std::sin(angle) * ry};
-            drawLine(previous.x, previous.y, next.x, next.y, color, 1.0F);
-            previous = next;
-        }
-    };
+    drawStars();
 
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;
         const float earthY = -1.10F;
         const float earthR = 0.58F;
+        const Vec2 distantMoon {0.72F, 0.50F};
         if (textureReady(EarthAsset)) {
             drawSprite(earthX, earthY, earthR * 2.25F, earthR * 2.25F, {1.0F, 1.0F, 1.0F, 0.95F}, EarthAsset);
         } else {
@@ -614,6 +657,12 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             drawCircle(earthX + 0.14F, earthY + 0.28F, earthR * 0.12F, {0.28F, 0.58F, 0.36F, 0.64F}, 20);
         }
         drawEllipseLine(earthX, earthY, earthR * 1.08F, earthR * 0.56F, {0.45F, 0.88F, 1.0F, 0.22F}, 42, 0.13F * kPi, 0.92F * kPi);
+        if (textureReady(MoonAsset)) {
+            drawSprite(distantMoon.x, distantMoon.y, 0.13F, 0.13F, {1.0F, 1.0F, 1.0F, 0.72F}, MoonAsset);
+        } else {
+            drawCircle(distantMoon.x, distantMoon.y, 0.036F, {0.72F, 0.74F, 0.72F, 0.58F}, 32);
+            drawCircle(distantMoon.x + 0.010F, distantMoon.y + 0.008F, 0.010F, {0.48F, 0.50F, 0.50F, 0.30F}, 12);
+        }
     } else if (snapshot.destinationTier == 1) {
         const Vec2 moon = routePoint(snapshot, 1.0F);
         const float earthX = -0.26F;
@@ -639,6 +688,19 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        if (snapshot.destinationTier == 2) {
+            const float earthX = -0.34F;
+            const float earthY = -0.89F;
+            const float earthR = 0.16F;
+            if (textureReady(EarthAsset)) {
+                drawSprite(earthX, earthY, earthR * 2.30F, earthR * 2.30F, {1.0F, 1.0F, 1.0F, 0.80F}, EarthAsset);
+            } else {
+                drawCircle(earthX, earthY, earthR * 1.18F, {0.24F, 0.62F, 0.96F, 0.07F}, 48);
+                drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.62F}, 48);
+                drawCircle(earthX - 0.04F, earthY + 0.04F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.58F}, 14);
+                drawCircle(earthX + 0.05F, earthY + 0.07F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.48F}, 14);
+            }
+        }
         if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
             drawSprite(endpoint.x, endpoint.y, radius * 2.55F, radius * 2.55F, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
         } else {
@@ -647,29 +709,26 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     }
 
-    Vec2 previous = routePoint(snapshot, 0.0F);
-    for (int i = 1; i <= 28; ++i) {
-        const float t = static_cast<float>(i) / 28.0F;
-        const Vec2 next = routePoint(snapshot, t);
-        const Color routeColor = t <= snapshot.travelProgress ? Color{0.42F, 0.88F, 1.0F, 0.42F} : Color{0.25F, 0.42F, 0.52F, 0.22F};
-        drawLine(previous.x, previous.y, next.x, next.y, routeColor, 1.0F);
-        previous = next;
-    }
-
-    if (snapshot.travelProgress > 1.0) {
-        Vec2 overburnPrevious = routePoint(snapshot, 1.0F);
-        for (int i = 1; i <= 8; ++i) {
-            const float t = 1.0F + (static_cast<float>(snapshot.travelProgress) - 1.0F) * (static_cast<float>(i) / 8.0F);
-            const Vec2 overburnNext = routePoint(snapshot, t);
-            drawLine(overburnPrevious.x, overburnPrevious.y, overburnNext.x, overburnNext.y, {0.90F, 0.50F, 0.28F, 0.44F}, 1.0F);
-            overburnPrevious = overburnNext;
-        }
-    }
+    drawRoute(snapshot);
 
     if ((snapshot.destinationTier == 0 && !snapshot.frontierTransfer) || snapshot.destinationTier > 2) {
         const Vec2 targetMarker = routePoint(snapshot, 1.0F);
         drawLine(targetMarker.x, targetMarker.y - 0.055F, targetMarker.x, targetMarker.y + 0.055F, {0.98F, 0.82F, 0.36F, 0.70F}, 2.0F);
     }
+}
+
+void WebGLRenderer::drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end)
+{
+    auto& vertices = scratchVertices(static_cast<std::size_t>(segments) * 16U);
+    Vec2 previous {cx + std::cos(start) * rx, cy + std::sin(start) * ry};
+    for (int i = 1; i <= segments; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(segments);
+        const float angle = start + (end - start) * t;
+        const Vec2 next {cx + std::cos(angle) * rx, cy + std::sin(angle) * ry};
+        appendLine(vertices, previous.x, previous.y, next.x, next.y, color);
+        previous = next;
+    }
+    submitLines(vertices, 1.0F);
 }
 
 void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bool textured, unsigned int texture)
@@ -696,6 +755,16 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bo
     (void)textured;
     (void)texture;
 #endif
+}
+
+void WebGLRenderer::submitLines(const std::vector<float>& vertices, float width)
+{
+#ifdef __EMSCRIPTEN__
+    glLineWidth(width);
+#else
+    (void)width;
+#endif
+    submit(vertices, 0x0001);
 }
 
 } // namespace rocket

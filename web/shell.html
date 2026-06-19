@@ -40,7 +40,7 @@
     #panel {
       position: fixed;
       inset: 16px auto 16px 16px;
-      width: min(420px, calc(100vw - 32px));
+      width: min(440px, calc(100vw - 32px));
       overflow: auto;
       padding: 16px;
       border: 1px solid var(--panel-border);
@@ -48,6 +48,13 @@
       background: var(--panel);
       backdrop-filter: blur(14px);
       box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
 
     h1, h2, h3, p {
@@ -118,6 +125,15 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    .actions.primary-actions {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .actions.system-actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 8px;
+    }
+
     button {
       min-height: 38px;
       border: 1px solid rgba(137, 178, 211, 0.25);
@@ -152,6 +168,18 @@
     button.warn {
       background: rgba(255, 209, 102, 0.18);
       border-color: rgba(255, 209, 102, 0.48);
+    }
+
+    button.ghost {
+      min-height: 32px;
+      background: rgba(255, 255, 255, 0.045);
+      border-color: rgba(137, 178, 211, 0.18);
+      color: var(--muted);
+    }
+
+    button.ghost:hover {
+      color: var(--text);
+      background: rgba(103, 210, 255, 0.12);
     }
 
     .warning-grid {
@@ -230,6 +258,303 @@
       white-space: nowrap;
     }
 
+    .summary-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .summary-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .summary-card span {
+      grid-column: 1 / -1;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .summary-card strong {
+      min-width: 0;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .summary-card button {
+      min-height: 30px;
+    }
+
+    .upgrade-grid {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .upgrade-card {
+      position: relative;
+      overflow: hidden;
+      padding: 12px;
+      border: 1px solid rgba(137, 178, 211, 0.22);
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(17, 25, 34, 0.96), rgba(9, 13, 18, 0.96));
+    }
+
+    .upgrade-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-left: 4px solid var(--accent);
+      pointer-events: none;
+    }
+
+    .slot-engine::before { border-left-color: #ff9f43; }
+    .slot-fuel::before { border-left-color: #70d6ff; }
+    .slot-hull::before { border-left-color: #b8c4d8; }
+    .slot-cooling::before { border-left-color: #62e6c7; }
+    .slot-sensors::before { border-left-color: #ffd166; }
+    .slot-escape::before { border-left-color: #ff6c5c; }
+
+    .card-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .module-art {
+      position: absolute;
+      top: 34px;
+      right: 12px;
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(237, 244, 248, 0.16);
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.02)),
+        rgba(103, 210, 255, 0.10);
+      color: var(--text);
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    .upgrade-card h3 {
+      max-width: calc(100% - 56px);
+      margin-top: 10px;
+      font-size: 16px;
+      line-height: 1.2;
+    }
+
+    .module-threat {
+      max-width: calc(100% - 56px);
+      margin-top: 4px;
+    }
+
+    .module-impact {
+      display: block;
+      margin-top: 8px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .stat-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+    }
+
+    .stat-chip {
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 5px;
+      padding: 3px 6px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 11px;
+    }
+
+    .stat-chip.up {
+      color: #b7ffd4;
+      border-color: rgba(114, 224, 168, 0.26);
+    }
+
+    .stat-chip.down {
+      color: #ffb7ad;
+      border-color: rgba(255, 108, 92, 0.30);
+    }
+
+    .card-footer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .card-footer span {
+      color: var(--warn);
+      font-size: 13px;
+    }
+
+    .card-footer button {
+      min-height: 34px;
+    }
+
+    .ops-grid {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .ops-card {
+      padding: 10px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .ops-card h3 {
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .ops-card p {
+      margin-top: 4px;
+    }
+
+    .ops-card.repair {
+      border-color: rgba(184, 196, 216, 0.26);
+    }
+
+    .ops-card.crew {
+      border-color: rgba(255, 209, 102, 0.24);
+    }
+
+    .settings-footer {
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
+    .settings-footer button {
+      width: 100%;
+      min-height: 32px;
+      opacity: 0.82;
+    }
+
+    .utility-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .utility-row button {
+      flex: 1;
+    }
+
+    .bottom-tools {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
+    .detail-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(137, 178, 211, 0.12);
+    }
+
+    .detail-row span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .detail-row strong {
+      color: var(--text);
+      font-size: 13px;
+      text-align: right;
+    }
+
+    .detail-section {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0;
+      margin-top: 14px;
+      padding: 12px 0 6px;
+      border-top: 1px solid rgba(137, 178, 211, 0.18);
+    }
+
+    .modal-root[hidden] {
+      display: none;
+    }
+
+    .modal-root {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(0, 0, 0, 0.52);
+      backdrop-filter: blur(10px);
+    }
+
+    .modal-panel {
+      width: min(520px, calc(100vw - 36px));
+      max-height: min(72vh, 720px);
+      overflow: auto;
+      padding: 16px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: rgba(13, 18, 25, 0.98);
+      box-shadow: 0 26px 80px rgba(0, 0, 0, 0.48);
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .modal-head h2 {
+      margin: 0;
+      color: var(--text);
+      text-transform: none;
+      font-size: 18px;
+    }
+
+    .modal-close {
+      min-width: 34px;
+      min-height: 34px;
+      padding: 0;
+    }
+
+    .modal-actions {
+      margin-top: 14px;
+    }
+
     @media (max-width: 720px) {
       #panel {
         inset: auto 10px 10px 10px;
@@ -245,10 +570,23 @@
     <h1>Rocket Rogue</h1>
     <p class="status">Loading WebAssembly...</p>
   </aside>
+  <div id="modal-root" class="modal-root" hidden>
+    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <h2 id="modal-title"></h2>
+        <button class="modal-close ghost" type="button" aria-label="Close">Close</button>
+      </div>
+      <div id="modal-content"></div>
+    </section>
+  </div>
 
   <script>
     const panel = document.getElementById("panel");
     const canvas = document.getElementById("canvas");
+    const modalRoot = document.getElementById("modal-root");
+    const modalTitle = document.getElementById("modal-title");
+    const modalContent = document.getElementById("modal-content");
+    const modalClose = modalRoot.querySelector(".modal-close");
 
     window.RocketBridge = {
       setPanel(html) {
@@ -277,8 +615,10 @@
       ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
       cutEngines: () => rrCall("rr_cut_engines"),
+      pressureRelief: () => rrCall("rr_pressure_relief"),
+      closeReliefValve: () => rrCall("rr_close_relief_valve"),
+      jettisonCargo: () => rrCall("rr_jettison_cargo"),
       next: () => rrCall("rr_next"),
-      adjustTarget: (delta) => rrCall("rr_adjust_target", [delta], ["number"]),
       attemptFrontier: () => rrCall("rr_attempt_frontier"),
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
       repairShip: () => rrCall("rr_repair_ship"),
@@ -297,9 +637,10 @@
       "rr.ejectNow()": () => rr.ejectNow(),
       "rr.returnHome()": () => rr.returnHome(),
       "rr.cutEngines()": () => rr.cutEngines(),
+      "rr.pressureRelief()": () => rr.pressureRelief(),
+      "rr.closeReliefValve()": () => rr.closeReliefValve(),
+      "rr.jettisonCargo()": () => rr.jettisonCargo(),
       "rr.next()": () => rr.next(),
-      "rr.adjustTarget(-1)": () => rr.adjustTarget(-1),
-      "rr.adjustTarget(1)": () => rr.adjustTarget(1),
       "rr.attemptFrontier()": () => rr.attemptFrontier(),
       "rr.buyOffer(0)": () => rr.buyOffer(0),
       "rr.buyOffer(1)": () => rr.buyOffer(1),
@@ -314,6 +655,26 @@
     let lastPanelActionAt = 0;
     let lastPanelAction = "";
 
+    function openPanelModal(id) {
+      const template = Array.from(panel.querySelectorAll("template[data-modal]"))
+        .find((candidate) => candidate.dataset.modal === id);
+      if (!template) {
+        return false;
+      }
+
+      modalTitle.textContent = template.dataset.title || "Details";
+      modalContent.innerHTML = template.innerHTML;
+      modalRoot.hidden = false;
+      modalClose.focus();
+      return true;
+    }
+
+    function closePanelModal() {
+      modalRoot.hidden = true;
+      modalTitle.textContent = "";
+      modalContent.innerHTML = "";
+    }
+
     function runPanelAction(action) {
       const handler = rrActions[action];
       if (!handler) {
@@ -327,7 +688,8 @@
 
     function handlePanelAction(event) {
       const button = event.target.closest("button[data-rr-action]");
-      if (!button || !panel.contains(button) || button.disabled) {
+      const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
+      if (!button || !validContainer || button.disabled) {
         return;
       }
 
@@ -340,18 +702,46 @@
       }
 
       runPanelAction(action);
+      if (modalRoot.contains(button) && action === "rr.resetSave()") {
+        closePanelModal();
+      }
     }
 
+    function handleModalTrigger(event) {
+      const button = event.target.closest("button[data-ui-modal]");
+      if (!button || !panel.contains(button) || button.disabled) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      openPanelModal(button.dataset.uiModal || "");
+    }
+
+    panel.addEventListener("click", handleModalTrigger, true);
     panel.addEventListener("pointerdown", handlePanelAction, true);
     panel.addEventListener("click", handlePanelAction, true);
     panel.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
       }
+      handleModalTrigger(event);
+      handlePanelAction(event);
+    }, true);
+    modalRoot.addEventListener("pointerdown", handlePanelAction, true);
+    modalRoot.addEventListener("click", (event) => {
+      if (event.target === modalRoot || event.target === modalClose) {
+        event.preventDefault();
+        closePanelModal();
+        return;
+      }
       handlePanelAction(event);
     }, true);
 
     window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !modalRoot.hidden) {
+        closePanelModal();
+        return;
+      }
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }

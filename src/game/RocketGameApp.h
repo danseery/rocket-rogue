@@ -19,9 +19,11 @@ public:
     void startLaunch();
     void returnHome();
     void cutEngines();
+    void pressureReliefValve();
+    void closePressureReliefValve();
+    void jettisonCargo();
     void ejectNow();
     void next();
-    void adjustTarget(int deltaSteps);
     void attemptFrontierTransfer();
     void buyOffer(int index);
     void repairShip();
@@ -34,9 +36,9 @@ private:
     void completeLaunch(double burnMultiplier, RecoveryMethod method);
     void save();
     void refreshPanel();
-    std::string buildPanelHtml() const;
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
+    void recordTelemetryPeak(const TelemetryEvent& event);
 
     ContentCatalog catalog_;
     GameState state_;
@@ -45,8 +47,15 @@ private:
     PreparedLaunch activeLaunch_;
     double launchElapsed_ = 0.0;
     double currentMultiplier_ = 1.0;
+    double peakWarning_ = 0.0;
+    double peakAbortRisk_ = 0.0;
     bool returningHome_ = false;
+    bool returnDriftHome_ = false;
     bool cutEnginesActive_ = false;
+    bool pressureReliefUsed_ = false;
+    bool pressureReliefOpen_ = false;
+    bool pressureReliefFailed_ = false;
+    bool cargoJettisoned_ = false;
     double returnElapsed_ = 0.0;
     double returnDuration_ = 2.4;
     double returnBurnMultiplier_ = 1.0;

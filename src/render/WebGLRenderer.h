@@ -47,12 +47,19 @@ private:
     void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color);
     void drawCircle(float cx, float cy, float radius, Color color, int segments = 36);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1);
+    std::vector<float>& scratchVertices(std::size_t reserveCount);
+    void appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color);
+    void appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color);
     bool textureReady(int assetIndex);
     void warmTextures();
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
+    void drawStars();
+    void drawRoute(const RenderSnapshot& snapshot);
+    void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
     void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0);
+    void submitLines(const std::vector<float>& vertices, float width);
 
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
@@ -69,6 +76,7 @@ private:
         bool ready = false;
     };
     std::array<TextureAsset, 6> assets_ {};
+    std::vector<float> vertices_;
     bool initialized_ = false;
 };
 

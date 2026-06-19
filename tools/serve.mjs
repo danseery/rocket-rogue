@@ -38,6 +38,11 @@ createServer((req, res) => {
     pathname = "/rocket_rogue.html";
   }
 
+  if (pathname.startsWith("/rocket_core_tests") || pathname.startsWith("/tests/")) {
+    send(res, 404, "Test artifacts are not served by the game dev server.");
+    return;
+  }
+
   let filePath = resolve(join(root, pathname));
   if (!insideRoot(filePath)) {
     send(res, 403, "Forbidden");

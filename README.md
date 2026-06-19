@@ -5,8 +5,8 @@ Rocket Rogue is a C++20/WebGL2 proof of concept for a fictional-stakes rocket la
 ## What is implemented
 
 - Portable C++ core for content, deterministic RNG, launch resolution, run state, save serialization, and balance tests.
-- Web-first Emscripten app shell with WebGL2 procedural rendering and browser localStorage persistence.
-- Asset-free NASA-arcade presentation: primitive rocket silhouette, launch plume, telemetry line, destination backdrop, and HTML mission-control controls.
+- Web-first Emscripten app shell with WebGL2 rendering and browser localStorage persistence.
+- NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
 - Frontier ladder: prove Earth Orbit repeatedly, commit to Moon, then continue outward through Mars, Outer Planets, Nearby Star, and Nearby Galaxy.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
 
@@ -138,11 +138,25 @@ node tools/serve.mjs build/web-release 8080
 
 Use the on-screen mission-control buttons:
 
-- Adjust destination and eject target in the hangar.
-- Launch, then eject manually before the hidden failure point.
-- Spend fictional mission credits on repair, training, rest, or module offers.
-- Push deeper through the destination ladder, or accept that going too far can end the expedition brutally.
+- Launch proving flights from the current frontier to bank flight data.
+- During flight, choose `Return home`, `Cut engines`, or `Eject`.
+- `Cut engines` lowers heat and vibration, slows the burn, and increases navigation drift.
+- `Relief valve` vents physical pressure at the cost of navigation drift, with a small failure/decompression risk.
+- `Jettison cargo` stabilizes fuel mix, but worsens navigation, vibration, and return-home risk.
+- Seeded telemetry incidents create temporary one-or-two-system spikes, so a bad PRESS, VIB, MIX, NAV, or ABORT read can become a short decision window rather than a guaranteed cascade.
+- New frontiers carry high mission pressure; repeated attempts and successful profiles reduce it, while pressure-control modules dampen the `PRESS` telemetry channel.
+- After each mission summary, choose one of three refit cards or skip the refit window.
+- In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
+- Push deeper through the frontier ladder only after enough proving data is banked.
 
 ## Portability notes
 
 The web app is Emscripten-first, but game logic is isolated in `rocket_core`. A future desktop or Steam build should add a second platform layer for windowing, save storage, input, audio, achievements, and cloud save without rewriting launch rules or progression.
+
+Current boundaries:
+
+- `src/core`: deterministic content, progression, save data, flight tuning, launch resolution, and tests.
+- `src/game`: browser game-state orchestration, live launch controls, panel HTML generation, and render snapshots. `RocketGameApp` owns session flow; `GamePanel` owns mission-control HTML.
+- `src/render`: WebGL2 renderer and texture upload for procedural shapes plus sprite assets.
+- `src/platform`: tiny browser bridge for localStorage and panel updates.
+- `web`: HTML/CSS/JS shell that forwards UI actions into exported C++ functions.

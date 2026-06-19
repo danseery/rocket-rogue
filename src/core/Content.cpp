@@ -20,6 +20,19 @@ ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity
     return result;
 }
 
+CrewUpgrade crewUpgrade(std::string id, std::string name, std::string description, Rarity rarity, CrewUpgradeStats stats, std::string unlockKey, std::vector<std::string> tags)
+{
+    CrewUpgrade result;
+    result.id = std::move(id);
+    result.name = std::move(name);
+    result.description = std::move(description);
+    result.rarity = rarity;
+    result.stats = stats;
+    result.unlockKey = std::move(unlockKey);
+    result.tags = std::move(tags);
+    return result;
+}
+
 } // namespace
 
 const ShipModule* ContentCatalog::findModule(std::string_view id) const
@@ -28,6 +41,14 @@ const ShipModule* ContentCatalog::findModule(std::string_view id) const
         return module.id == id;
     });
     return found == modules.end() ? nullptr : &*found;
+}
+
+const CrewUpgrade* ContentCatalog::findCrewUpgrade(std::string_view id) const
+{
+    const auto found = std::find_if(crewUpgrades.begin(), crewUpgrades.end(), [id](const CrewUpgrade& upgrade) {
+        return upgrade.id == id;
+    });
+    return found == crewUpgrades.end() ? nullptr : &*found;
 }
 
 const ShipFrame* ContentCatalog::findFrame(std::string_view id) const
@@ -63,8 +84,8 @@ ContentCatalog createDefaultContent()
         module("kestrel_engine", "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 3.6, .fuel = -0.4, .volatility = 0.45, .payout = 0.4}, "deep_space", {"fast", "hungry"}),
         module("nova_drive", "Nova Drive", SlotType::Engine, Rarity::Rare, {.thrust = 5.2, .cooling = -0.8, .volatility = 1.1, .payout = 1.1}, "exotic", {"prototype", "dangerous"}),
 
-        module("stable_tank", "Stable Tank", SlotType::Fuel, Rarity::Common, {.fuel = 2.5, .hull = 0.2}, "starter", {"safe"}),
-        module("slush_tank", "Slush Tank", SlotType::Fuel, Rarity::Uncommon, {.fuel = 4.0, .cooling = 0.4, .volatility = 0.35}, "thermal", {"cold"}),
+        module("stable_tank", "Stable Tank", SlotType::Fuel, Rarity::Common, {.fuel = 2.5, .hull = 0.2, .pressure = 0.4}, "starter", {"safe", "pressure"}),
+        module("slush_tank", "Slush Tank", SlotType::Fuel, Rarity::Uncommon, {.fuel = 4.0, .cooling = 0.4, .pressure = 0.8, .volatility = 0.35}, "thermal", {"cold", "pressure"}),
         module("deep_reservoir", "Deep Reservoir", SlotType::Fuel, Rarity::Rare, {.thrust = 0.5, .fuel = 5.4, .volatility = 0.75}, "deep_space", {"long-haul"}),
 
         module("patchwork_hull", "Patchwork Hull", SlotType::Hull, Rarity::Common, {.hull = 2.6, .repair = 0.6}, "starter", {"cheap"}),
@@ -75,13 +96,21 @@ ContentCatalog createDefaultContent()
         module("cryo_loop", "Cryo Loop", SlotType::Cooling, Rarity::Uncommon, {.fuel = -0.4, .cooling = 4.4}, "thermal", {"precision"}),
         module("sacrificial_sink", "Sacrificial Heat Sink", SlotType::Cooling, Rarity::Rare, {.hull = -0.8, .cooling = 6.0, .repair = -0.4}, "recovery", {"one-more-burn"}),
 
-        module("analog_telemetry", "Analog Telemetry", SlotType::Sensors, Rarity::Common, {.sensors = 2.0}, "starter", {"honest"}),
-        module("hazard_radar", "Hazard Radar", SlotType::Sensors, Rarity::Uncommon, {.sensors = 3.8, .escape = 0.2}, "deep_space", {"warning"}),
-        module("predictive_guidance", "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 5.2, .volatility = 0.25}, "ai", {"forecast"}),
+        module("analog_telemetry", "Analog Telemetry", SlotType::Sensors, Rarity::Common, {.sensors = 2.0, .pressure = 0.3}, "starter", {"honest", "pressure"}),
+        module("hazard_radar", "Hazard Radar", SlotType::Sensors, Rarity::Uncommon, {.sensors = 3.8, .escape = 0.2, .pressure = 0.7}, "deep_space", {"warning", "pressure"}),
+        module("predictive_guidance", "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 5.2, .pressure = 1.0, .volatility = 0.25}, "ai", {"forecast", "pressure"}),
 
         module("spring_capsule", "Spring Capsule", SlotType::Escape, Rarity::Common, {.thrust = -0.2, .escape = 2.8}, "starter", {"eject"}),
         module("abort_tower", "Abort Tower", SlotType::Escape, Rarity::Uncommon, {.hull = 0.5, .escape = 4.6, .payout = -0.2}, "recovery", {"crew-first"}),
         module("phoenix_pod", "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, "exotic", {"legendary"})
+    };
+
+    catalog.crewUpgrades = {
+        crewUpgrade("analog_sim_bay", "Analog Simulator Bay", "Lower-stress rehearsal gear for routine burns.", Rarity::Common, {.trainingStressRelief = 2}, "starter", {"simulator", "training"}),
+        crewUpgrade("high_g_simulator", "High-G Simulator", "A better simulator that teaches more per session.", Rarity::Uncommon, {.trainingGain = 1, .trainingStressRelief = 1}, "recovery", {"simulator", "training"}),
+        crewUpgrade("medical_recovery_ward", "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, "recovery", {"medical", "stress"}),
+        crewUpgrade("mission_psych_office", "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, "thermal", {"psych", "stress"}),
+        crewUpgrade("trait_coaching_lab", "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, "ai", {"coaching", "traits"})
     };
 
     catalog.frames = {
@@ -125,12 +154,28 @@ bool isModuleUnlocked(const MetaProgress& meta, const ShipModule& module)
     return hasUnlock(meta, module.unlockKey);
 }
 
+bool isCrewUpgradeUnlocked(const MetaProgress& meta, const CrewUpgrade& upgrade)
+{
+    return hasUnlock(meta, upgrade.unlockKey);
+}
+
 std::vector<const ShipModule*> unlockedModules(const ContentCatalog& catalog, const MetaProgress& meta)
 {
     std::vector<const ShipModule*> result;
     for (const auto& module : catalog.modules) {
         if (isModuleUnlocked(meta, module)) {
             result.push_back(&module);
+        }
+    }
+    return result;
+}
+
+std::vector<const CrewUpgrade*> unlockedCrewUpgrades(const ContentCatalog& catalog, const MetaProgress& meta)
+{
+    std::vector<const CrewUpgrade*> result;
+    for (const auto& upgrade : catalog.crewUpgrades) {
+        if (isCrewUpgradeUnlocked(meta, upgrade)) {
+            result.push_back(&upgrade);
         }
     }
     return result;
@@ -221,6 +266,7 @@ ModuleStats& operator+=(ModuleStats& lhs, const ModuleStats& rhs)
     lhs.cooling += rhs.cooling;
     lhs.sensors += rhs.sensors;
     lhs.escape += rhs.escape;
+    lhs.pressure += rhs.pressure;
     lhs.volatility += rhs.volatility;
     lhs.payout += rhs.payout;
     lhs.repair += rhs.repair;

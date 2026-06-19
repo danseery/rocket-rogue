@@ -12,6 +12,7 @@ enum class Screen {
     Hangar,
     Launch,
     Results,
+    Upgrade,
     Legacy
 };
 
@@ -58,9 +59,18 @@ struct ModuleStats {
     double cooling = 0.0;
     double sensors = 0.0;
     double escape = 0.0;
+    double pressure = 0.0;
     double volatility = 0.0;
     double payout = 0.0;
     double repair = 0.0;
+};
+
+struct CrewUpgradeStats {
+    int trainingGain = 0;
+    int trainingStressRelief = 0;
+    int restStressBonus = 0;
+    int launchStressRelief = 0;
+    double traitModifier = 0.0;
 };
 
 struct ShipModule {
@@ -70,6 +80,16 @@ struct ShipModule {
     Rarity rarity = Rarity::Common;
     ModuleStats stats;
     int durability = 100;
+    std::string unlockKey = "starter";
+    std::vector<std::string> tags;
+};
+
+struct CrewUpgrade {
+    std::string id;
+    std::string name;
+    std::string description;
+    Rarity rarity = Rarity::Common;
+    CrewUpgradeStats stats;
     std::string unlockKey = "starter";
     std::vector<std::string> tags;
 };
@@ -106,8 +126,7 @@ struct Destination {
 
 struct LaunchConfig {
     std::string destinationId;
-    double targetEjectMultiplier = 1.5;
-    bool autoEject = false;
+    double burnGoalMultiplier = 1.5;
     bool frontierTransfer = false;
     std::string astronautId;
     std::string frameId;
@@ -142,6 +161,8 @@ struct LaunchOutcome {
     bool crewInjured = false;
     std::string moduleDestroyedId;
     int blueprintGain = 0;
+    double peakWarning = 0.0;
+    double peakAbortRisk = 0.0;
     std::vector<TelemetryEvent> telemetry;
 };
 
@@ -151,6 +172,8 @@ struct MetaProgress {
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
+    std::vector<int> destinationAttempts;
+    std::vector<int> destinationSuccesses;
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
 };
@@ -164,8 +187,10 @@ struct RunState {
     std::string frameId;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
+    std::vector<std::string> crewUpgradeIds;
     std::vector<Astronaut> crew;
     std::array<std::string, 3> offerModuleIds {};
+    std::array<std::string, 3> offerCrewUpgradeIds {};
     int launchesThisExpedition = 0;
 };
 

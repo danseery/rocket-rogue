@@ -14,6 +14,7 @@
     "build:native": "cmake --build --preset native-debug",
     "test:native": "ctest --preset native-debug",
     "configure:web": "cmake --preset web-release",
-    "build:web": "cmake --build --preset web-release"
+    "build:web": "cmake --build --preset web-release",
+    "test:web": "ctest --preset web-release"
   }
 }
