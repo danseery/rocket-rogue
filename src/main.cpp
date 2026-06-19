@@ -62,6 +62,16 @@ void rr_return_home()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_cut_engines()
+{
+    if (g_app) {
+        g_app->cutEngines();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_next()
 {
     if (g_app) {
@@ -106,6 +116,16 @@ void rr_repair_ship()
 {
     if (g_app) {
         g_app->repairShip();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_recruit_crew()
+{
+    if (g_app) {
+        g_app->recruitCrew();
     }
 }
 

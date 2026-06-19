@@ -18,12 +18,14 @@ public:
 
     void startLaunch();
     void returnHome();
+    void cutEngines();
     void ejectNow();
     void next();
     void adjustTarget(int deltaSteps);
     void attemptFrontierTransfer();
     void buyOffer(int index);
     void repairShip();
+    void recruitCrew();
     void trainCrew();
     void restCrew();
     void resetSave();
@@ -34,6 +36,7 @@ private:
     void refreshPanel();
     std::string buildPanelHtml() const;
     RenderSnapshot snapshot() const;
+    PreparedLaunch currentFlightModel() const;
 
     ContentCatalog catalog_;
     GameState state_;
@@ -43,12 +46,14 @@ private:
     double launchElapsed_ = 0.0;
     double currentMultiplier_ = 1.0;
     bool returningHome_ = false;
+    bool cutEnginesActive_ = false;
     double returnElapsed_ = 0.0;
     double returnDuration_ = 2.4;
     double returnBurnMultiplier_ = 1.0;
     double returnStartTravelProgress_ = 0.0;
     bool resultUsesTravelProgress_ = false;
     double resultTravelProgress_ = 0.0;
+    double resultElapsed_ = 0.0;
     bool panelDirty_ = true;
 };
 

@@ -10,6 +10,10 @@ struct PreparedLaunch {
     double crashMultiplier = 1.0;
     double sensorQuality = 0.0;
     double heatRate = 1.0;
+    double throttleFactor = 1.0;
+    double cutHeatRelief = 0.0;
+    double cutVibrationRelief = 0.0;
+    double cutGuidancePenalty = 0.0;
 };
 
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng);

@@ -116,6 +116,17 @@ std::string outcomeLabel(const LaunchOutcome& outcome)
     return outcome.type == LaunchResultType::MissionComplete ? "Data Profile Complete" : "Proving Return";
 }
 
+double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
+{
+    const double progress = std::clamp(returnElapsed / std::max(0.1, returnDuration), 0.0, 1.0);
+    const double shaped = progress * progress * (3.0 - 2.0 * progress);
+    const double headroom = std::max(0.04, crashMultiplier - commitMultiplier);
+    const double overshoot = std::min(headroom * 0.22, 0.18 + headroom * 0.10);
+    const double bump = std::sin(shaped * 3.1415926535) * overshoot;
+    const double settle = shaped * std::min(headroom * 0.08, 0.06);
+    return std::min(crashMultiplier - 0.02, commitMultiplier + bump - settle);
+}
+
 int offerCost(const ShipModule& module)
 {
     switch (module.rarity) {
@@ -138,6 +149,20 @@ double smoothStep(double value)
 }
 
 } // namespace
+
+PreparedLaunch RocketGameApp::currentFlightModel() const
+{
+    PreparedLaunch launch = activeLaunch_;
+    if (!cutEnginesActive_ || returningHome_) {
+        return launch;
+    }
+
+    launch.throttleFactor = 0.58;
+    launch.cutHeatRelief = 0.18;
+    launch.cutVibrationRelief = 0.14;
+    launch.cutGuidancePenalty = 0.22;
+    return launch;
+}
 
 bool RocketGameApp::initialize()
 {
@@ -165,46 +190,65 @@ bool RocketGameApp::initialize()
 void RocketGameApp::tick(double deltaSeconds)
 {
     if (state_.screen == Screen::Launch) {
+        const PreparedLaunch flightModel = currentFlightModel();
         const Destination* activeDestination = catalog_.findDestination(activeLaunch_.config.destinationId);
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
 
         if (returningHome_) {
             returnElapsed_ += std::clamp(deltaSeconds, 0.0, 0.08);
             const double returnProgress = smoothStep(returnElapsed_ / std::max(0.1, returnDuration_));
+            const double returnTelemetry = returnTelemetryMultiplier(
+                returnBurnMultiplier_,
+                flightModel.crashMultiplier,
+                returnElapsed_,
+                returnDuration_);
             if (returnProgress >= 1.0) {
-                completeLaunch(returnBurnMultiplier_, RecoveryMethod::ReturnHome);
+                completeLaunch(returnTelemetry, RecoveryMethod::ReturnHome);
             } else {
-                state_.statusLine = returnProgress < 0.32
-                    ? "Return burn committed. Rotating ship for retrograde flight."
-                    : "Return burn underway. Recovery teams are tracking the approach.";
+                const TelemetryEvent event = telemetryAt(flightModel, returnTelemetry);
+                if (event.warning > 0.78 || event.heat > 0.88) {
+                    state_.statusLine = event.message + ". The return burn is still biting.";
+                } else if (returnProgress < 0.28) {
+                    state_.statusLine = "Return burn committed. Rotating ship for retrograde flight.";
+                } else {
+                    state_.statusLine = "Return burn underway. Systems are easing, but this is not free.";
+                }
             }
         } else {
             launchElapsed_ += std::clamp(deltaSeconds, 0.0, 0.08);
-            const double thrust = std::max(0.4, activeLaunch_.stats.thrust);
+            const double thrust = std::max(0.4, flightModel.stats.thrust);
             const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
-            const double acceleration = 0.00026 + destination.hazard * 0.00008;
-            currentMultiplier_ = 1.0 + launchElapsed_ * cruiseRate + launchElapsed_ * launchElapsed_ * acceleration;
+            const double acceleration = (0.00026 + destination.hazard * 0.00008) * flightModel.throttleFactor;
+            currentMultiplier_ += std::clamp(deltaSeconds, 0.0, 0.08) * cruiseRate * flightModel.throttleFactor + acceleration;
 
-            if (currentMultiplier_ >= activeLaunch_.crashMultiplier) {
-                completeLaunch(activeLaunch_.crashMultiplier, RecoveryMethod::None);
+            if (currentMultiplier_ >= flightModel.crashMultiplier) {
+                completeLaunch(flightModel.crashMultiplier, RecoveryMethod::None);
             } else if (activeLaunch_.config.frontierTransfer && currentMultiplier_ >= destination.targetMultiplier) {
                 completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
             } else {
-                const TelemetryEvent event = telemetryAt(activeLaunch_, currentMultiplier_);
+                const TelemetryEvent event = telemetryAt(flightModel, currentMultiplier_);
                 if (event.warning > 0.88) {
                     state_.statusLine = event.message + ". Decide now: return or eject.";
                 } else if (event.warning > 0.62 || event.heat > 0.82) {
                     state_.statusLine = event.message + ".";
                 } else {
                     const bool pastDataGoal = !activeLaunch_.config.frontierTransfer && currentMultiplier_ >= destination.targetMultiplier;
-                    state_.statusLine = activeLaunch_.config.frontierTransfer
-                        ? "Transfer burn stable. Survive to the required burn or abort."
-                        : (pastDataGoal ? "Data goal reached. Return home now, or overburn for extra telemetry." : "Proving burn stable. Push for more data or return home.");
+                    if (cutEnginesActive_) {
+                        state_.statusLine = pastDataGoal
+                            ? "Engines cut. Thermal load is dropping, but nav drift is growing."
+                            : "Engines cut. Cooler burn, less vibration, slower climb, shakier tracking.";
+                    } else {
+                        state_.statusLine = activeLaunch_.config.frontierTransfer
+                            ? "Transfer burn stable. Survive to the required burn or abort."
+                            : (pastDataGoal ? "Data goal reached. Return home now, or overburn for extra telemetry." : "Proving burn stable. Push for more data or return home.");
+                    }
                 }
             }
         }
 
         panelDirty_ = true;
+    } else if (state_.screen == Screen::Results) {
+        resultElapsed_ += std::clamp(deltaSeconds, 0.0, 0.08);
     }
 
     if (panelDirty_) {
@@ -242,8 +286,10 @@ void RocketGameApp::startLaunch()
     currentMultiplier_ = 1.0;
     launchElapsed_ = 0.0;
     returningHome_ = false;
+    cutEnginesActive_ = false;
     returnElapsed_ = 0.0;
     resultUsesTravelProgress_ = false;
+    resultElapsed_ = 0.0;
     state_.screen = Screen::Launch;
     state_.statusLine = "Proving burn underway. Return home to bank data; eject only when the vehicle leaves you no choice.";
     panelDirty_ = true;
@@ -254,7 +300,10 @@ void RocketGameApp::ejectNow()
     if (state_.screen != Screen::Launch) {
         return;
     }
-    completeLaunch(returningHome_ ? returnBurnMultiplier_ : currentMultiplier_, RecoveryMethod::ManualEject);
+    const double liveMultiplier = returningHome_
+        ? returnTelemetryMultiplier(returnBurnMultiplier_, currentFlightModel().crashMultiplier, returnElapsed_, returnDuration_)
+        : currentMultiplier_;
+    completeLaunch(liveMultiplier, RecoveryMethod::ManualEject);
 }
 
 void RocketGameApp::returnHome()
@@ -273,7 +322,21 @@ void RocketGameApp::returnHome()
     returnElapsed_ = 0.0;
     returnDuration_ = 2.1 + returnStartTravelProgress_ * 1.4;
     returningHome_ = true;
+    cutEnginesActive_ = false;
     state_.statusLine = "Return burn committed. Rotating ship for retrograde flight.";
+    panelDirty_ = true;
+}
+
+void RocketGameApp::cutEngines()
+{
+    if (state_.screen != Screen::Launch || returningHome_) {
+        return;
+    }
+
+    cutEnginesActive_ = !cutEnginesActive_;
+    state_.statusLine = cutEnginesActive_
+        ? "Engine cut confirmed. Ship is running cooler, but guidance drift is widening."
+        : "Thrust restored. Burn is climbing again, and so are the hot systems.";
     panelDirty_ = true;
 }
 
@@ -329,8 +392,10 @@ void RocketGameApp::attemptFrontierTransfer()
     currentMultiplier_ = 1.0;
     launchElapsed_ = 0.0;
     returningHome_ = false;
+    cutEnginesActive_ = false;
     returnElapsed_ = 0.0;
     resultUsesTravelProgress_ = false;
+    resultElapsed_ = 0.0;
     state_.screen = Screen::Launch;
     state_.statusLine = "Transfer attempt committed. Survive to the required burn, or abort before the ship decides for you.";
     panelDirty_ = true;
@@ -350,6 +415,14 @@ void RocketGameApp::buyOffer(int index)
 void RocketGameApp::repairShip()
 {
     if (rocket::repairShip(state_)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::recruitCrew()
+{
+    if (rocket::recruitCrew(state_, catalog_)) {
         save();
     }
     panelDirty_ = true;
@@ -378,21 +451,41 @@ void RocketGameApp::resetSave()
     rng_ = Random(state_.seed);
     generateModuleOffers(state_, catalog_, rng_);
     returningHome_ = false;
+    cutEnginesActive_ = false;
     returnElapsed_ = 0.0;
     resultUsesTravelProgress_ = false;
+    resultElapsed_ = 0.0;
     panelDirty_ = true;
 }
 
 void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
 {
-    LaunchOutcome outcome = resolveLaunch(activeLaunch_, catalog_, state_, burnMultiplier, method, rng_);
+    const PreparedLaunch flightModel = currentFlightModel();
+    const bool wasReturningHome = returningHome_;
+    double frozenTravelProgress = std::clamp(
+        (burnMultiplier - 1.0) / std::max(0.1, currentDestination(state_, catalog_).targetMultiplier - 1.0),
+        0.0,
+        1.42);
+    if (wasReturningHome) {
+        const double returnProgress = smoothStep(returnElapsed_ / std::max(0.1, returnDuration_));
+        frozenTravelProgress = std::clamp(returnStartTravelProgress_ * (1.0 - returnProgress), 0.0, 1.42);
+    } else if (const Destination* activeDestination = catalog_.findDestination(activeLaunch_.config.destinationId)) {
+        frozenTravelProgress = std::clamp(
+            (burnMultiplier - 1.0) / std::max(0.1, activeDestination->targetMultiplier - 1.0),
+            0.0,
+            1.42);
+    }
+
+    LaunchOutcome outcome = resolveLaunch(flightModel, catalog_, state_, burnMultiplier, method, rng_);
     applyLaunchOutcome(state_, catalog_, outcome);
     state_.screen = Screen::Results;
     currentMultiplier_ = outcome.ejectMultiplier;
-    resultUsesTravelProgress_ = returningHome_ && method == RecoveryMethod::ReturnHome;
-    resultTravelProgress_ = resultUsesTravelProgress_ ? 0.0 : 0.0;
+    resultUsesTravelProgress_ = wasReturningHome;
+    resultTravelProgress_ = frozenTravelProgress;
     returningHome_ = false;
+    cutEnginesActive_ = false;
     returnElapsed_ = 0.0;
+    resultElapsed_ = 0.0;
     save();
     panelDirty_ = true;
 }
@@ -436,12 +529,16 @@ std::string RocketGameApp::buildPanelHtml() const
     out << "</div>";
 
     if (state_.screen == Screen::Launch) {
-        const TelemetryEvent event = telemetryAt(activeLaunch_, currentMultiplier_);
-        const double recoveryRisk = returnHomeRisk(activeLaunch_, catalog_, state_, currentMultiplier_);
+        const PreparedLaunch flightModel = currentFlightModel();
+        const double displayedMultiplier = returnLaunch
+            ? returnTelemetryMultiplier(returnBurnMultiplier_, flightModel.crashMultiplier, returnElapsed_, returnDuration_)
+            : currentMultiplier_;
+        const TelemetryEvent event = telemetryAt(flightModel, displayedMultiplier);
+        const double recoveryRisk = returnHomeRisk(flightModel, catalog_, state_, displayedMultiplier);
         const double returnProgress = smoothStep(returnElapsed_ / std::max(0.1, returnDuration_));
         out << "<h2>" << (returnLaunch ? "Return burn" : (transferLaunch ? "Transfer attempt" : "Proving flight")) << "</h2>";
         out << "<div class=\"metric-grid\">";
-        out << metric("Burn depth", multiplier(currentMultiplier_));
+        out << metric("Burn depth", multiplier(displayedMultiplier));
         out << metric(returnLaunch ? "Return progress" : (transferLaunch ? "Required burn" : "Data goal"), returnLaunch ? percent(returnProgress) : multiplier(displayDestination->targetMultiplier));
         out << metric("Return risk", percent(recoveryRisk));
         out << metric("Heat", std::to_string(static_cast<int>(event.heat * 100.0)) + "%");
@@ -456,11 +553,16 @@ std::string RocketGameApp::buildPanelHtml() const
         out << warningButton("ABORT", event.abortRisk);
         out << "</div>";
         out << "<p class=\"status\">" << htmlEscape(event.message) << "</p>";
-        out << "<div class=\"actions\">";
+        out << "<div class=\"actions launch-actions\">";
         if (returnLaunch) {
             out << "<button disabled>Returning home</button>";
         } else {
             out << button("Return home", "rr.returnHome()", "ok");
+        }
+        if (returnLaunch) {
+            out << "<button disabled>Cut engines</button>";
+        } else {
+            out << button(cutEnginesActive_ ? "Restore thrust" : "Cut engines", "rr.cutEngines()", "warn");
         }
         out << button("Eject", "rr.ejectNow()", "danger");
         out << "</div>";
@@ -527,8 +629,8 @@ std::string RocketGameApp::buildPanelHtml() const
 
     out << "<div class=\"actions\">";
     out << button("Repair", "rr.repairShip()");
-    out << button("Train crew", "rr.trainCrew()");
-    out << button("Rest crew", "rr.restCrew()");
+    out << button(activeAstronaut(state_) == nullptr ? "Recruit crew" : "Train crew", activeAstronaut(state_) == nullptr ? "rr.recruitCrew()" : "rr.trainCrew()");
+    out << button(activeAstronaut(state_) == nullptr ? "Recruit reserve" : "Rest crew", activeAstronaut(state_) == nullptr ? "rr.recruitCrew()" : "rr.restCrew()");
     out << button("Launch proving flight", "rr.startLaunch()", "ok");
     if (next != nullptr) {
         if (canCommitToNextFrontier(state_, catalog_)) {
@@ -568,9 +670,11 @@ std::string RocketGameApp::buildPanelHtml() const
 RenderSnapshot RocketGameApp::snapshot() const
 {
     RenderSnapshot result;
+    const PreparedLaunch flightModel = currentFlightModel();
     result.screen = state_.screen;
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
     result.currentMultiplier = currentMultiplier_;
+    result.animationTime = state_.screen == Screen::Launch ? launchElapsed_ : resultElapsed_;
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
     if (state_.screen == Screen::Launch) {
@@ -603,17 +707,24 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.currentFrontierTier = currentFrontier.tier;
 
     if (state_.screen == Screen::Launch) {
-        const TelemetryEvent event = telemetryAt(activeLaunch_, currentMultiplier_);
+        const double displayedMultiplier = returningHome_
+            ? returnTelemetryMultiplier(returnBurnMultiplier_, flightModel.crashMultiplier, returnElapsed_, returnDuration_)
+            : currentMultiplier_;
+        const TelemetryEvent event = telemetryAt(flightModel, displayedMultiplier);
         result.heat = event.heat;
         result.warning = event.warning;
         for (int i = 0; i < static_cast<int>(result.telemetry.size()); ++i) {
             const double t = static_cast<double>(i) / static_cast<double>(result.telemetry.size() - 1);
-            const double sampleMultiplier = 1.0 + (std::max(currentMultiplier_, result.targetMultiplier) - 1.0) * t;
-            const TelemetryEvent sample = telemetryAt(activeLaunch_, sampleMultiplier);
+            const double sampleCeiling = returningHome_
+                ? displayedMultiplier
+                : std::max(currentMultiplier_, result.targetMultiplier);
+            const double sampleMultiplier = 1.0 + (sampleCeiling - 1.0) * t;
+            const TelemetryEvent sample = telemetryAt(flightModel, sampleMultiplier);
             result.telemetry[static_cast<std::size_t>(i)] = sample.warning;
             result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sample.heat, 0.0, 1.0);
         }
         result.telemetryCount = static_cast<int>(result.telemetry.size());
+        result.poweredFlight = !returningHome_ && !cutEnginesActive_;
     } else if (!state_.lastOutcome.telemetry.empty()) {
         const int count = std::min(static_cast<int>(result.telemetry.size()), static_cast<int>(state_.lastOutcome.telemetry.size()));
         for (int i = 0; i < count; ++i) {

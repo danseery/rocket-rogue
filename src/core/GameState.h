@@ -14,6 +14,7 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index);
 bool repairShip(GameState& state);
 bool trainCrew(GameState& state);
 bool restCrew(GameState& state);
+bool recruitCrew(GameState& state, const ContentCatalog& catalog);
 bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog);
 double defaultProvingTarget(const Destination& destination);
 void unlockFromBlueprints(GameState& state);

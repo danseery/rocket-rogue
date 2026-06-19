@@ -27,10 +27,12 @@ struct RenderSnapshot {
     int currentFrontierTier = 0;
     bool frontierTransfer = false;
     bool returningHome = false;
+    bool poweredFlight = false;
     double returnTurnProgress = 1.0;
     std::array<double, 12> telemetry {};
     std::array<double, 12> heatTelemetry {};
     int telemetryCount = 0;
+    double animationTime = 0.0;
 };
 
 class WebGLRenderer {
@@ -44,14 +46,29 @@ private:
     void drawLine(float ax, float ay, float bx, float by, Color color, float width = 1.0F);
     void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color);
     void drawCircle(float cx, float cy, float radius, Color color, int segments = 36);
+    void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1);
+    bool textureReady(int assetIndex);
+    void warmTextures();
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
-    void submit(const std::vector<float>& vertices, int primitive);
+    void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0);
 
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
     unsigned int vbo_ = 0;
+    int useTextureUniform_ = -1;
+    int samplerUniform_ = -1;
+    struct TextureAsset {
+        const char* key = nullptr;
+        const char* path = nullptr;
+        unsigned int texture = 0;
+        int width = 0;
+        int height = 0;
+        bool requested = false;
+        bool ready = false;
+    };
+    std::array<TextureAsset, 6> assets_ {};
     bool initialized_ = false;
 };
 

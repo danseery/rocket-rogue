@@ -244,6 +244,43 @@ bool restCrew(GameState& state)
     return true;
 }
 
+bool recruitCrew(GameState& state, const ContentCatalog& catalog)
+{
+    const bool emergencyRecruitment = activeAstronaut(state) == nullptr;
+    const double cost = emergencyRecruitment ? 0.0 : 24.0;
+
+    if (catalog.astronauts.empty()) {
+        state.statusLine = "Mission control has no recruit profiles on file.";
+        return false;
+    }
+
+    if (state.run.credits < cost) {
+        state.statusLine = "Not enough mission credits to recruit new crew.";
+        return false;
+    }
+
+    const Astronaut& templateAstronaut = catalog.astronauts[static_cast<std::size_t>(
+        (state.meta.astronautsLost + state.meta.shipsLost + state.run.launchesThisExpedition + state.run.crew.size()) %
+        static_cast<int>(catalog.astronauts.size()))];
+
+    Astronaut recruit = templateAstronaut;
+    const int recruitNumber = state.meta.astronautsLost + state.meta.shipsLost + static_cast<int>(state.run.crew.size()) + 1;
+    recruit.id = "recruit_" + std::to_string(recruitNumber);
+    recruit.name = emergencyRecruitment ? "Emergency Cadet " + std::to_string(recruitNumber) : templateAstronaut.name + " II";
+    recruit.background = emergencyRecruitment ? "Emergency recruitment pool" : "New agency intake";
+    recruit.training = emergencyRecruitment ? 0 : std::max(0, templateAstronaut.training - 1);
+    recruit.stress = emergencyRecruitment ? 18 : 8;
+    recruit.status = CrewStatus::Active;
+
+    state.run.credits -= cost;
+    state.run.crew.push_back(recruit);
+    syncLaunchConfig(state, catalog);
+    state.statusLine = emergencyRecruitment
+        ? recruit.name + " was rushed in from the emergency recruitment pool."
+        : recruit.name + " joined the roster.";
+    return true;
+}
+
 int frontierReadinessRequired(const GameState& state, const ContentCatalog& catalog)
 {
     const Destination& destination = currentDestination(state, catalog);

@@ -148,6 +148,10 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
     launch.sensorQuality = std::clamp(0.22 + launch.stats.sensors * 0.065, 0.15, 0.92);
     launch.heatRate = std::clamp(destination.hazard * 0.62 + (launch.config.frontierTransfer ? 0.18 : 0.0) + std::max(0.0, launch.stats.volatility) * 0.18 - launch.stats.cooling * 0.040, 0.34, 2.45);
+    launch.throttleFactor = 1.0;
+    launch.cutHeatRelief = 0.0;
+    launch.cutVibrationRelief = 0.0;
+    launch.cutGuidancePenalty = 0.0;
 
     return launch;
 }
@@ -169,16 +173,16 @@ double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalo
     const double transferPenalty = launch.config.frontierTransfer ? 0.08 + static_cast<double>(destination->tier) * 0.015 : 0.0;
 
     const double risk =
-        0.055 +
-        destination->hazard * 0.040 +
-        profileDepth * 0.115 +
-        event.warning * 0.180 +
-        event.heat * 0.095 +
-        static_cast<double>(state.run.shipDamage) * 0.0025 +
+        0.022 +
+        destination->hazard * 0.022 +
+        profileDepth * 0.060 +
+        event.warning * 0.105 +
+        event.heat * 0.050 +
+        static_cast<double>(state.run.shipDamage) * 0.0014 +
         transferPenalty -
         systemsRelief;
 
-    return std::clamp(risk, 0.02, 0.76);
+    return std::clamp(risk, 0.01, 0.42);
 }
 
 LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier, RecoveryMethod method, Random& rng)
@@ -275,17 +279,17 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
     const double earlyVibration = burnLoad * (0.080 + std::max(0.0, launch.stats.thrust) * 0.012 + volatility * 0.050) * vibrationPulse + shipDamage * 0.35 - hullRelief * 0.22 - sensorRelief * 0.14;
     const double earlyFuelMix = burnLoad * (0.060 + std::max(0.0, std::abs(launch.stats.thrust - launch.stats.fuel)) * 0.014 + volatility * 0.030) * mixPulse - fuelRelief * 0.18 - sensorRelief * 0.08;
 
-    event.heat = std::clamp(progressToCrash * launch.heatRate, 0.0, 1.25);
+    event.heat = std::clamp(progressToCrash * launch.heatRate - launch.cutHeatRelief, 0.0, 1.25);
     event.pressure = std::clamp(earlyPressure + lateFlight * (0.31 + thrustLoad * 0.052 + volatility * 0.075) + event.heat * 0.15 - fuelRelief * 0.18 - coolingRelief * 0.08, 0.0, 1.0);
-    event.vibration = std::clamp(earlyVibration + lateFlight * (0.24 + volatility * 0.15 + std::max(0.0, launch.stats.thrust) * 0.017) + shipDamage * 0.65 - hullRelief * 0.20 - sensorRelief * 0.08, 0.0, 1.0);
+    event.vibration = std::clamp(earlyVibration + lateFlight * (0.24 + volatility * 0.15 + std::max(0.0, launch.stats.thrust) * 0.017) + shipDamage * 0.65 - hullRelief * 0.20 - sensorRelief * 0.08 - launch.cutVibrationRelief, 0.0, 1.0);
     event.fuelMix = std::clamp(earlyFuelMix + lateFlight * (0.23 + std::max(0.0, launch.stats.thrust - launch.stats.fuel) * 0.052 + volatility * 0.042) + event.pressure * 0.15 - fuelRelief * 0.22, 0.0, 1.0);
-    event.guidance = std::clamp(burnLoad * (0.045 + event.vibration * 0.070 + event.pressure * 0.050) * guidancePulse + lateFlight * (0.28 + volatility * 0.055) + event.vibration * 0.20 + event.pressure * 0.10 - sensorRelief * 0.48, 0.0, 1.0);
+    event.guidance = std::clamp(burnLoad * (0.045 + event.vibration * 0.070 + event.pressure * 0.050) * guidancePulse + lateFlight * (0.28 + volatility * 0.055) + event.vibration * 0.20 + event.pressure * 0.10 - sensorRelief * 0.48 + launch.cutGuidancePenalty, 0.0, 1.0);
 
     const double readableLoad = burnLoad * (0.040 + volatility * 0.014);
     event.pressure = std::max(event.pressure, std::clamp(readableLoad * (0.75 + pressurePulse * 0.38) - fuelRelief * 0.04 - coolingRelief * 0.03, 0.0, 0.28));
     event.vibration = std::max(event.vibration, std::clamp(readableLoad * (0.85 + vibrationPulse * 0.42) - hullRelief * 0.04 - sensorRelief * 0.03, 0.0, 0.28));
     event.fuelMix = std::max(event.fuelMix, std::clamp(readableLoad * (0.70 + mixPulse * 0.34) - fuelRelief * 0.04 - sensorRelief * 0.02, 0.0, 0.24));
-    event.guidance = std::max(event.guidance, std::clamp(readableLoad * (0.62 + guidancePulse * 0.30) + event.vibration * 0.05 - sensorRelief * 0.04, 0.0, 0.22));
+    event.guidance = std::max(event.guidance, std::clamp(readableLoad * (0.62 + guidancePulse * 0.30) + event.vibration * 0.05 - sensorRelief * 0.04 + launch.cutGuidancePenalty * 0.48, 0.0, 0.42));
 
     const double earlyThermal = std::clamp((event.heat - 0.60) / 0.55, 0.0, 1.0) * 0.38;
     const double warningStart = 0.84 - launch.sensorQuality * 0.22;

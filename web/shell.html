@@ -114,6 +114,10 @@
       margin-top: 14px;
     }
 
+    .actions.launch-actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
     button {
       min-height: 38px;
       border: 1px solid rgba(137, 178, 211, 0.25);
@@ -143,6 +147,11 @@
     button.ok {
       background: rgba(114, 224, 168, 0.16);
       border-color: rgba(114, 224, 168, 0.36);
+    }
+
+    button.warn {
+      background: rgba(255, 209, 102, 0.18);
+      border-color: rgba(255, 209, 102, 0.48);
     }
 
     .warning-grid {
@@ -267,11 +276,13 @@
       startLaunch: () => rrCall("rr_start_launch"),
       ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
+      cutEngines: () => rrCall("rr_cut_engines"),
       next: () => rrCall("rr_next"),
       adjustTarget: (delta) => rrCall("rr_adjust_target", [delta], ["number"]),
       attemptFrontier: () => rrCall("rr_attempt_frontier"),
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
       repairShip: () => rrCall("rr_repair_ship"),
+      recruitCrew: () => rrCall("rr_recruit_crew"),
       trainCrew: () => rrCall("rr_train_crew"),
       restCrew: () => rrCall("rr_rest_crew"),
       resetSave: () => {
@@ -285,6 +296,7 @@
       "rr.startLaunch()": () => rr.startLaunch(),
       "rr.ejectNow()": () => rr.ejectNow(),
       "rr.returnHome()": () => rr.returnHome(),
+      "rr.cutEngines()": () => rr.cutEngines(),
       "rr.next()": () => rr.next(),
       "rr.adjustTarget(-1)": () => rr.adjustTarget(-1),
       "rr.adjustTarget(1)": () => rr.adjustTarget(1),
@@ -293,6 +305,7 @@
       "rr.buyOffer(1)": () => rr.buyOffer(1),
       "rr.buyOffer(2)": () => rr.buyOffer(2),
       "rr.repairShip()": () => rr.repairShip(),
+      "rr.recruitCrew()": () => rr.recruitCrew(),
       "rr.trainCrew()": () => rr.trainCrew(),
       "rr.restCrew()": () => rr.restCrew(),
       "rr.resetSave()": () => rr.resetSave()

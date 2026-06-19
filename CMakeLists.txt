@@ -38,6 +38,13 @@ if(EMSCRIPTEN)
         src/platform/WebSaveStore.cpp
         src/render/WebGLRenderer.cpp)
 
+    add_custom_target(copy_rocket_assets
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/assets
+            ${CMAKE_CURRENT_BINARY_DIR}/assets
+        COMMENT "Copying Rocket Rogue web assets")
+    add_dependencies(rocket_rogue copy_rocket_assets)
+
     target_link_libraries(rocket_rogue PRIVATE rocket_core)
     target_include_directories(rocket_rogue PRIVATE src)
 

@@ -2,6 +2,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <GLES3/gl3.h>
+#include <emscripten.h>
 #include <emscripten/html5.h>
 #endif
 
@@ -13,6 +14,15 @@ namespace rocket {
 namespace {
 
 constexpr float kPi = 3.1415926535F;
+
+enum ArtAsset {
+    EarthAsset = 0,
+    MoonAsset = 1,
+    MarsAsset = 2,
+    RocketAsset = 3,
+    ExplosionAsset = 4,
+    ThrustAsset = 5
+};
 
 struct Vec2 {
     float x = 0.0F;
@@ -82,6 +92,64 @@ Vec2 routeTangent(const RenderSnapshot& snapshot, float progress)
 }
 
 #ifdef __EMSCRIPTEN__
+EM_JS(void, rr_request_image, (const char* keyPtr, const char* pathPtr), {
+    const key = UTF8ToString(keyPtr);
+    const path = UTF8ToString(pathPtr);
+    Module.RocketArt = Module.RocketArt || {};
+    if (Module.RocketArt[key]) {
+        return;
+    }
+
+    const image = new Image();
+    const record = { image, ready: false, failed: false, width: 0, height: 0 };
+    image.onload = () => {
+        record.ready = true;
+        record.width = image.naturalWidth || image.width;
+        record.height = image.naturalHeight || image.height;
+    };
+    image.onerror = () => {
+        record.failed = true;
+    };
+    image.src = path;
+    Module.RocketArt[key] = record;
+});
+
+EM_JS(int, rr_image_ready, (const char* keyPtr), {
+    const key = UTF8ToString(keyPtr);
+    const record = Module.RocketArt && Module.RocketArt[key];
+    return record && record.ready ? 1 : 0;
+});
+
+EM_JS(int, rr_upload_image_texture, (const char* keyPtr, int textureId), {
+    const key = UTF8ToString(keyPtr);
+    const record = Module.RocketArt && Module.RocketArt[key];
+    if (!record || !record.ready || !GLctx || !GL || !GL.textures[textureId]) {
+        return 0;
+    }
+
+    const gl = GLctx;
+    gl.bindTexture(gl.TEXTURE_2D, GL.textures[textureId]);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, record.image);
+    return 1;
+});
+
+EM_JS(int, rr_image_width, (const char* keyPtr), {
+    const key = UTF8ToString(keyPtr);
+    const record = Module.RocketArt && Module.RocketArt[key];
+    return record && record.ready ? record.width : 0;
+});
+
+EM_JS(int, rr_image_height, (const char* keyPtr), {
+    const key = UTF8ToString(keyPtr);
+    const record = Module.RocketArt && Module.RocketArt[key];
+    return record && record.ready ? record.height : 0;
+});
+
 GLuint compileShader(GLenum type, const char* source)
 {
     const GLuint shader = glCreateShader(type);
@@ -95,21 +163,28 @@ GLuint createProgram()
     constexpr const char* vertexSource = R"(#version 300 es
 layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec4 a_color;
+layout(location = 2) in vec2 a_uv;
 out vec4 v_color;
+out vec2 v_uv;
 void main()
 {
     gl_Position = vec4(a_pos, 0.0, 1.0);
     v_color = a_color;
+    v_uv = a_uv;
 }
 )";
 
     constexpr const char* fragmentSource = R"(#version 300 es
 precision mediump float;
 in vec4 v_color;
+in vec2 v_uv;
+uniform sampler2D u_texture;
+uniform float u_useTexture;
 out vec4 out_color;
 void main()
 {
-    out_color = v_color;
+    vec4 sprite = texture(u_texture, v_uv) * v_color;
+    out_color = mix(v_color, sprite, u_useTexture);
 }
 )";
 
@@ -125,7 +200,7 @@ void main()
 }
 #endif
 
-void pushVertex(std::vector<float>& vertices, float x, float y, Color color)
+void pushVertex(std::vector<float>& vertices, float x, float y, Color color, float u = 0.0F, float v = 0.0F)
 {
     vertices.push_back(x);
     vertices.push_back(y);
@@ -133,6 +208,8 @@ void pushVertex(std::vector<float>& vertices, float x, float y, Color color)
     vertices.push_back(color.g);
     vertices.push_back(color.b);
     vertices.push_back(color.a);
+    vertices.push_back(u);
+    vertices.push_back(v);
 }
 
 Color mix(Color a, Color b, float t)
@@ -150,6 +227,13 @@ Color mix(Color a, Color b, float t)
 
 bool WebGLRenderer::initialize()
 {
+    assets_[EarthAsset] = {"earth", "assets/art/earth.png"};
+    assets_[MoonAsset] = {"moon", "assets/art/moon.png"};
+    assets_[MarsAsset] = {"mars", "assets/art/mars.png"};
+    assets_[RocketAsset] = {"rocket", "assets/art/rocket.png"};
+    assets_[ExplosionAsset] = {"explosion", "assets/art/explosion-sheet.png"};
+    assets_[ThrustAsset] = {"thrust", "assets/art/thrust-sheet.png"};
+
 #ifdef __EMSCRIPTEN__
     EmscriptenWebGLContextAttributes attributes;
     emscripten_webgl_init_context_attributes(&attributes);
@@ -173,9 +257,26 @@ bool WebGLRenderer::initialize()
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 6, reinterpret_cast<void*>(0));
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(float) * 6, reinterpret_cast<void*>(sizeof(float) * 2));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 8, reinterpret_cast<void*>(0));
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(float) * 8, reinterpret_cast<void*>(sizeof(float) * 2));
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 8, reinterpret_cast<void*>(sizeof(float) * 6));
     glUseProgram(program_);
+    useTextureUniform_ = glGetUniformLocation(program_, "u_useTexture");
+    samplerUniform_ = glGetUniformLocation(program_, "u_texture");
+    glUniform1i(samplerUniform_, 0);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    std::array<GLuint, 6> textureIds {};
+    glGenTextures(static_cast<GLsizei>(textureIds.size()), textureIds.data());
+    for (std::size_t i = 0; i < assets_.size(); ++i) {
+        assets_[i].texture = textureIds[i];
+    }
+
+    for (auto& asset : assets_) {
+        rr_request_image(asset.key, asset.path);
+        asset.requested = true;
+    }
 
     initialized_ = true;
     return true;
@@ -192,6 +293,7 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
     }
 
     beginFrame(snapshot);
+    warmTextures();
     drawBackdrop(snapshot);
     drawRocket(snapshot);
     drawTelemetry(snapshot);
@@ -268,6 +370,69 @@ void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, in
         pushVertex(vertices, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
     }
     submit(vertices, 0x0004);
+}
+
+bool WebGLRenderer::textureReady(int assetIndex)
+{
+    if (assetIndex < 0 || assetIndex >= static_cast<int>(assets_.size())) {
+        return false;
+    }
+
+    TextureAsset& asset = assets_[static_cast<std::size_t>(assetIndex)];
+    if (asset.ready) {
+        return true;
+    }
+
+#ifdef __EMSCRIPTEN__
+    if (!asset.requested) {
+        rr_request_image(asset.key, asset.path);
+        asset.requested = true;
+    }
+
+    if (rr_image_ready(asset.key) != 0 && rr_upload_image_texture(asset.key, static_cast<int>(asset.texture)) != 0) {
+        asset.width = rr_image_width(asset.key);
+        asset.height = rr_image_height(asset.key);
+        asset.ready = asset.width > 0 && asset.height > 0;
+    }
+#endif
+
+    return asset.ready;
+}
+
+void WebGLRenderer::warmTextures()
+{
+    for (int i = 0; i < static_cast<int>(assets_.size()); ++i) {
+        (void)textureReady(i);
+    }
+}
+
+void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex, int frameCount)
+{
+    if (!textureReady(assetIndex)) {
+        return;
+    }
+
+    TextureAsset& asset = assets_[static_cast<std::size_t>(assetIndex)];
+    const int frames = std::max(1, frameCount);
+    const int frame = std::clamp(frameIndex, 0, frames - 1);
+    const float u0 = static_cast<float>(frame) / static_cast<float>(frames);
+    const float u1 = static_cast<float>(frame + 1) / static_cast<float>(frames);
+    const float v0 = 0.0F;
+    const float v1 = 1.0F;
+    const float left = cx - w * 0.5F;
+    const float right = cx + w * 0.5F;
+    const float top = cy + h * 0.5F;
+    const float bottom = cy - h * 0.5F;
+
+    std::vector<float> vertices;
+    vertices.reserve(48);
+    pushVertex(vertices, left, bottom, tint, u0, v1);
+    pushVertex(vertices, right, bottom, tint, u1, v1);
+    pushVertex(vertices, right, top, tint, u1, v0);
+    pushVertex(vertices, left, bottom, tint, u0, v1);
+    pushVertex(vertices, right, top, tint, u1, v0);
+    pushVertex(vertices, left, top, tint, u0, v0);
+    submit(vertices, 0x0004, true, asset.texture);
 }
 
 void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
@@ -349,6 +514,53 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
         drawTriangle(bl.x, bl.y, tr.x, tr.y, tl.x, tl.y, color);
     };
 
+    auto texturedQuad = [&](int assetIndex, float width, float height, Color tint, int frameIndex = 0, int frameCount = 1, float offsetRight = 0.0F, float offsetForward = 0.0F) {
+        if (!textureReady(assetIndex)) {
+            return false;
+        }
+
+        TextureAsset& asset = assets_[static_cast<std::size_t>(assetIndex)];
+        const int frames = std::max(1, frameCount);
+        const int frame = std::clamp(frameIndex, 0, frames - 1);
+        const float u0 = static_cast<float>(frame) / static_cast<float>(frames);
+        const float u1 = static_cast<float>(frame + 1) / static_cast<float>(frames);
+        const float halfW = width * 0.5F;
+        const float halfH = height * 0.5F;
+        const float centerX = cx + right.x * offsetRight + forward.x * offsetForward;
+        const float centerY = cy + right.y * offsetRight + forward.y * offsetForward;
+        const Vec2 bl {centerX - right.x * halfW - forward.x * halfH, centerY - right.y * halfW - forward.y * halfH};
+        const Vec2 br {centerX + right.x * halfW - forward.x * halfH, centerY + right.y * halfW - forward.y * halfH};
+        const Vec2 tr {centerX + right.x * halfW + forward.x * halfH, centerY + right.y * halfW + forward.y * halfH};
+        const Vec2 tl {centerX - right.x * halfW + forward.x * halfH, centerY - right.y * halfW + forward.y * halfH};
+
+        std::vector<float> vertices;
+        vertices.reserve(48);
+        pushVertex(vertices, bl.x, bl.y, tint, u0, 1.0F);
+        pushVertex(vertices, br.x, br.y, tint, u1, 1.0F);
+        pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
+        pushVertex(vertices, bl.x, bl.y, tint, u0, 1.0F);
+        pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
+        pushVertex(vertices, tl.x, tl.y, tint, u0, 0.0F);
+        submit(vertices, 0x0004, true, asset.texture);
+        return true;
+    };
+
+    if (snapshot.lastResult == LaunchResultType::Destroyed && textureReady(ExplosionAsset)) {
+        const int frame = std::clamp(static_cast<int>(snapshot.animationTime * 9.5), 0, 7);
+        const float blastSize = std::max(0.22F, 1.55F * scale);
+        drawSprite(cx, cy, blastSize, blastSize, {1.0F, 1.0F, 1.0F, 1.0F}, ExplosionAsset, frame, 8);
+        return;
+    }
+
+    if (textureReady(RocketAsset)) {
+        if (snapshot.poweredFlight && textureReady(ThrustAsset)) {
+            const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+            texturedQuad(ThrustAsset, 0.28F * scale, 0.38F * scale, {1.0F, 1.0F, 1.0F, 1.0F}, thrustFrame, 6, 0.01F * scale, -0.22F * scale);
+        }
+        texturedQuad(RocketAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+        return;
+    }
+
     triangle(0.0F, 0.34F, -0.075F, 0.19F, 0.075F, 0.19F, body);
     quad(0.0F, 0.0F, 0.15F, 0.38F, body);
     quad(0.0F, 0.08F, 0.16F, 0.045F, accent);
@@ -393,30 +605,46 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         const float earthX = -0.16F;
         const float earthY = -1.10F;
         const float earthR = 0.58F;
-        drawCircle(earthX, earthY, earthR * 1.10F, {0.24F, 0.62F, 0.96F, 0.08F}, 72);
-        drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.82F}, 72);
-        drawCircle(earthX - 0.16F, earthY + 0.18F, earthR * 0.16F, {0.28F, 0.58F, 0.36F, 0.72F}, 24);
-        drawCircle(earthX + 0.14F, earthY + 0.28F, earthR * 0.12F, {0.28F, 0.58F, 0.36F, 0.64F}, 20);
+        if (textureReady(EarthAsset)) {
+            drawSprite(earthX, earthY, earthR * 2.25F, earthR * 2.25F, {1.0F, 1.0F, 1.0F, 0.95F}, EarthAsset);
+        } else {
+            drawCircle(earthX, earthY, earthR * 1.10F, {0.24F, 0.62F, 0.96F, 0.08F}, 72);
+            drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.82F}, 72);
+            drawCircle(earthX - 0.16F, earthY + 0.18F, earthR * 0.16F, {0.28F, 0.58F, 0.36F, 0.72F}, 24);
+            drawCircle(earthX + 0.14F, earthY + 0.28F, earthR * 0.12F, {0.28F, 0.58F, 0.36F, 0.64F}, 20);
+        }
         drawEllipseLine(earthX, earthY, earthR * 1.08F, earthR * 0.56F, {0.45F, 0.88F, 1.0F, 0.22F}, 42, 0.13F * kPi, 0.92F * kPi);
     } else if (snapshot.destinationTier == 1) {
         const Vec2 moon = routePoint(snapshot, 1.0F);
         const float earthX = -0.26F;
         const float earthY = -0.88F;
         const float earthR = 0.30F;
-        drawCircle(earthX, earthY, earthR * 1.20F, {0.24F, 0.62F, 0.96F, 0.08F}, 64);
-        drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.72F}, 64);
-        drawCircle(earthX - 0.08F, earthY + 0.08F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.70F}, 20);
-        drawCircle(earthX + 0.10F, earthY + 0.14F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.58F}, 20);
+        if (textureReady(EarthAsset)) {
+            drawSprite(earthX, earthY, earthR * 2.32F, earthR * 2.32F, {1.0F, 1.0F, 1.0F, 0.86F}, EarthAsset);
+        } else {
+            drawCircle(earthX, earthY, earthR * 1.20F, {0.24F, 0.62F, 0.96F, 0.08F}, 64);
+            drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.72F}, 64);
+            drawCircle(earthX - 0.08F, earthY + 0.08F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.70F}, 20);
+            drawCircle(earthX + 0.10F, earthY + 0.14F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.58F}, 20);
+        }
         drawEllipseLine(earthX, earthY, 1.08F, 0.76F, {0.40F, 0.62F, 0.78F, 0.20F}, 96, -0.04F * kPi, 0.82F * kPi);
-        drawCircle(moon.x, moon.y, 0.060F, {0.72F, 0.74F, 0.72F, 0.78F}, 48);
-        drawCircle(moon.x + 0.018F, moon.y + 0.015F, 0.018F, {0.48F, 0.50F, 0.50F, 0.36F}, 16);
+        if (textureReady(MoonAsset)) {
+            drawSprite(moon.x, moon.y, 0.22F, 0.22F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
+        } else {
+            drawCircle(moon.x, moon.y, 0.060F, {0.72F, 0.74F, 0.72F, 0.78F}, 48);
+            drawCircle(moon.x + 0.018F, moon.y + 0.015F, 0.018F, {0.48F, 0.50F, 0.50F, 0.36F}, 16);
+        }
     } else {
         const float tier = static_cast<float>(snapshot.destinationTier);
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
-        drawCircle(endpoint.x, endpoint.y, radius, destination, 56);
-        drawCircle(endpoint.x, endpoint.y, radius * 1.65F, {destination.r, destination.g, destination.b, 0.09F}, 64);
+        if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
+            drawSprite(endpoint.x, endpoint.y, radius * 2.55F, radius * 2.55F, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
+        } else {
+            drawCircle(endpoint.x, endpoint.y, radius, destination, 56);
+            drawCircle(endpoint.x, endpoint.y, radius * 1.65F, {destination.r, destination.g, destination.b, 0.09F}, 64);
+        }
     }
 
     Vec2 previous = routePoint(snapshot, 0.0F);
@@ -438,11 +666,13 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     }
 
-    const Vec2 targetMarker = routePoint(snapshot, 1.0F);
-    drawLine(targetMarker.x, targetMarker.y - 0.055F, targetMarker.x, targetMarker.y + 0.055F, {0.98F, 0.82F, 0.36F, 0.85F}, 2.0F);
+    if ((snapshot.destinationTier == 0 && !snapshot.frontierTransfer) || snapshot.destinationTier > 2) {
+        const Vec2 targetMarker = routePoint(snapshot, 1.0F);
+        drawLine(targetMarker.x, targetMarker.y - 0.055F, targetMarker.x, targetMarker.y + 0.055F, {0.98F, 0.82F, 0.36F, 0.70F}, 2.0F);
+    }
 }
 
-void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive)
+void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bool textured, unsigned int texture)
 {
 #ifdef __EMSCRIPTEN__
     if (vertices.empty()) {
@@ -450,13 +680,21 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive)
     }
 
     glUseProgram(program_);
+    glUniform1f(useTextureUniform_, textured ? 1.0F : 0.0F);
+    if (textured) {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform1i(samplerUniform_, 0);
+    }
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices.size() * sizeof(float)), vertices.data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(vertices.size() / 6));
+    glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(vertices.size() / 8));
 #else
     (void)vertices;
     (void)primitive;
+    (void)textured;
+    (void)texture;
 #endif
 }
 
