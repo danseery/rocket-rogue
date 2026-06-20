@@ -78,10 +78,13 @@ private:
     std::array<TextureAsset, 6> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
-    float sceneLeft_ = -1.0F;
-    float sceneRight_ = 1.0F;
-    float sceneBottom_ = -1.0F;
-    float sceneTop_ = 1.0F;
+    float sceneCssWidth_ = 1280.0F;
+    float sceneCssHeight_ = 720.0F;
+    float scenePixelLeft_ = 0.0F;
+    float scenePixelRight_ = 1280.0F;
+    float scenePixelCenterX_ = 640.0F;
+    float scenePixelCenterY_ = 360.0F;
+    float sceneWorldUnit_ = 360.0F;
     float sceneAspect_ = 16.0F / 9.0F;
     bool initialized_ = false;
 };

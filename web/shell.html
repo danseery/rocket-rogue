@@ -32,8 +32,10 @@
 
     #canvas {
       display: block;
+      position: fixed;
+      inset: 0;
       width: 100vw;
-      height: 100vh;
+      height: 100dvh;
       background: #05070a;
     }
 
@@ -41,6 +43,7 @@
       position: fixed;
       inset: 16px auto 16px 16px;
       width: min(440px, calc(100vw - 32px));
+      max-height: calc(100dvh - 32px);
       overflow: auto;
       padding: 16px;
       border: 1px solid var(--panel-border);

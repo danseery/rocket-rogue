@@ -109,11 +109,21 @@ void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const C
     outcome.shipDamage = tuning::damage::destroyedShipDamage;
     outcome.blueprintGain = std::max(0, destination.tier / 2);
 
-    const double baseSurvival = outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.48 : 0.22;
-    const double survivalChance = std::clamp(baseSurvival + launch.stats.escape * 0.07 + crewEscapeBonus(state, catalog) - destination.hazard * 0.035, 0.05, 0.90);
+    const double baseSurvival = outcome.recoveryMethod == RecoveryMethod::ManualEject
+        ? tuning::outcomes::manualEjectSurvivalBase
+        : tuning::outcomes::vehicleLossSurvivalBase;
+    const double survivalChance = std::clamp(
+        baseSurvival +
+            launch.stats.escape * tuning::outcomes::survivalEscapeScale +
+            crewEscapeBonus(state, catalog) -
+            destination.hazard * tuning::outcomes::survivalHazardScale,
+        tuning::outcomes::survivalMinimum,
+        tuning::outcomes::survivalMaximum);
     const bool survived = rng.chance(survivalChance);
     outcome.crewKilled = !survived;
-    outcome.crewInjured = survived && rng.chance(outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.42 : 0.58);
+    outcome.crewInjured = survived && rng.chance(outcome.recoveryMethod == RecoveryMethod::ManualEject
+        ? tuning::outcomes::manualEjectInjuryChance
+        : tuning::outcomes::vehicleLossInjuryChance);
 
     if (!state.run.equippedModuleIds.empty() && rng.chance(tuning::damage::moduleLossChance)) {
         const int index = rng.rangeInt(0, static_cast<int>(state.run.equippedModuleIds.size()) - 1);
@@ -124,6 +134,11 @@ void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const C
 double telemetryWave(double multiplier, double crashMultiplier, double frequency, double phase)
 {
     return 0.5 + std::sin(multiplier * frequency + crashMultiplier * phase) * 0.5;
+}
+
+double telemetryPulse(const tuning::telemetry::PulseProfile& profile, double multiplier, double crashMultiplier)
+{
+    return profile.base + telemetryWave(multiplier, crashMultiplier, profile.frequency, profile.phase) * profile.waveScale;
 }
 
 double smoothStep(double value)
@@ -387,26 +402,31 @@ double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalo
     }
 
     const TelemetryEvent event = telemetryAt(launch, burnMultiplier);
-    const double profileDepth = std::clamp((burnMultiplier - 1.0) / std::max(0.10, destination->targetMultiplier - 1.0), 0.0, 1.8);
+    const double profileDepth = std::clamp(
+        (burnMultiplier - 1.0) / std::max(tuning::session::minTravelDenominator, destination->targetMultiplier - 1.0),
+        0.0,
+        tuning::outcomes::returnProfileDepthMaximum);
     const double systemsRelief =
-        std::max(0.0, launch.stats.hull) * 0.018 +
-        std::max(0.0, launch.stats.cooling) * 0.018 +
-        std::max(0.0, launch.stats.fuel) * 0.012 +
-        std::max(0.0, launch.stats.sensors) * 0.010;
-    const double transferPenalty = launch.config.frontierTransfer ? 0.08 + static_cast<double>(destination->tier) * 0.015 : 0.0;
+        std::max(0.0, launch.stats.hull) * tuning::outcomes::returnSystemsHullRelief +
+        std::max(0.0, launch.stats.cooling) * tuning::outcomes::returnSystemsCoolingRelief +
+        std::max(0.0, launch.stats.fuel) * tuning::outcomes::returnSystemsFuelRelief +
+        std::max(0.0, launch.stats.sensors) * tuning::outcomes::returnSystemsSensorsRelief;
+    const double transferPenalty = launch.config.frontierTransfer
+        ? tuning::outcomes::returnTransferBasePenalty + static_cast<double>(destination->tier) * tuning::outcomes::returnTransferTierPenalty
+        : 0.0;
 
     const double risk =
-        0.022 +
-        destination->hazard * 0.022 +
-        profileDepth * 0.060 +
-        event.warning * 0.105 +
-        event.heat * 0.050 +
-        static_cast<double>(state.run.shipDamage) * 0.0014 +
+        tuning::outcomes::returnRiskBase +
+        destination->hazard * tuning::outcomes::returnRiskHazardScale +
+        profileDepth * tuning::outcomes::returnRiskProfileDepthScale +
+        event.warning * tuning::outcomes::returnRiskWarningScale +
+        event.heat * tuning::outcomes::returnRiskHeatScale +
+        static_cast<double>(state.run.shipDamage) * tuning::outcomes::returnRiskDamageScale +
         transferPenalty -
         systemsRelief +
         launch.cargoReturnPenalty;
 
-    return std::clamp(risk, 0.01, 0.42);
+    return std::clamp(risk, tuning::outcomes::returnRiskMinimum, tuning::outcomes::returnRiskMaximum);
 }
 
 LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier, RecoveryMethod method, Random& rng)
@@ -435,7 +455,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
         return outcome;
     }
 
-    const double payoutMultiplier = 1.0 + std::max(0.0, launch.stats.payout) * 0.045 + launch.provingPayoutBonus;
+    const double payoutMultiplier = 1.0 + std::max(0.0, launch.stats.payout) * tuning::outcomes::payoutStatScale + launch.provingPayoutBonus;
     const bool reachedDestination = outcome.ejectMultiplier >= destination->targetMultiplier;
     const TelemetryEvent event = telemetryAt(launch, outcome.ejectMultiplier);
 
@@ -447,20 +467,47 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     if (method == RecoveryMethod::ManualEject) {
         outcome.type = LaunchResultType::SafeEject;
         outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::manualEjectPayoutFactor;
-        outcome.recoveryCost = std::clamp(14.0 + static_cast<double>(destination->tier) * 7.0 + outcome.ejectMultiplier * 3.0 - launch.stats.escape * 1.2, 8.0, 64.0);
-        const double ejectDamage = destination->hazard * 3.8 + outcome.ejectMultiplier * 2.2 + event.abortRisk * 10.0 - launch.stats.escape * 0.75;
-        outcome.shipDamage = std::clamp(static_cast<int>(std::round(ejectDamage)), 4, 34);
-        const double injuryChance = std::clamp(0.14 + event.abortRisk * 0.32 + static_cast<double>(state.run.shipDamage) * 0.002 - launch.stats.escape * 0.030, 0.02, 0.48);
+        outcome.recoveryCost = std::clamp(
+            tuning::outcomes::manualEjectRecoveryBase +
+                static_cast<double>(destination->tier) * tuning::outcomes::manualEjectRecoveryTierScale +
+                outcome.ejectMultiplier * tuning::outcomes::manualEjectRecoveryBurnScale -
+                launch.stats.escape * tuning::outcomes::manualEjectRecoveryEscapeRelief,
+            tuning::outcomes::manualEjectRecoveryMinimum,
+            tuning::outcomes::manualEjectRecoveryMaximum);
+        const double ejectDamage =
+            destination->hazard * tuning::outcomes::manualEjectDamageHazardScale +
+            outcome.ejectMultiplier * tuning::outcomes::manualEjectDamageBurnScale +
+            event.abortRisk * tuning::outcomes::manualEjectDamageAbortScale -
+            launch.stats.escape * tuning::outcomes::manualEjectDamageEscapeRelief;
+        outcome.shipDamage = std::clamp(
+            static_cast<int>(std::round(ejectDamage)),
+            tuning::outcomes::manualEjectDamageMinimum,
+            tuning::outcomes::manualEjectDamageMaximum);
+        const double injuryChance = std::clamp(
+            tuning::outcomes::manualEjectCrewInjuryBase +
+                event.abortRisk * tuning::outcomes::manualEjectCrewInjuryAbortScale +
+                static_cast<double>(state.run.shipDamage) * tuning::outcomes::manualEjectCrewInjuryDamageScale -
+                launch.stats.escape * tuning::outcomes::manualEjectCrewInjuryEscapeRelief,
+            tuning::outcomes::manualEjectCrewInjuryMinimum,
+            tuning::outcomes::manualEjectCrewInjuryMaximum);
         outcome.crewInjured = rng.chance(injuryChance);
-        outcome.blueprintGain = outcome.ejectMultiplier >= destination->targetMultiplier * 0.82 ? 1 : 0;
+        outcome.blueprintGain = outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::manualEjectBlueprintTargetShare ? 1 : 0;
         return outcome;
     }
 
     if (method == RecoveryMethod::TransferArrival) {
         outcome.type = LaunchResultType::MissionComplete;
         outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::transferArrivalPayoutFactor;
-        const double arrivalDamage = destination->hazard * 5.8 + outcome.ejectMultiplier * 1.9 + event.stress * 8.0 - launch.stats.hull * 0.72 - launch.stats.cooling * 0.54;
-        outcome.shipDamage = std::clamp(static_cast<int>(std::round(arrivalDamage)), 4, 32);
+        const double arrivalDamage =
+            destination->hazard * tuning::outcomes::transferArrivalDamageHazardScale +
+            outcome.ejectMultiplier * tuning::outcomes::transferArrivalDamageBurnScale +
+            event.stress * tuning::outcomes::transferArrivalDamageStressScale -
+            launch.stats.hull * tuning::outcomes::transferArrivalDamageHullRelief -
+            launch.stats.cooling * tuning::outcomes::transferArrivalDamageCoolingRelief;
+        outcome.shipDamage = std::clamp(
+            static_cast<int>(std::round(arrivalDamage)),
+            tuning::outcomes::transferArrivalDamageMinimum,
+            tuning::outcomes::transferArrivalDamageMaximum);
         outcome.blueprintGain = 1 + destination->tier / 2;
         return outcome;
     }
@@ -469,15 +516,30 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     const double jackpotMultiplier = reachedDestination ? overburnJackpotMultiplier(*destination, outcome.ejectMultiplier) : 1.0;
     outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier *
         (reachedDestination ? tuning::rewards::returnHomeReachedGoalFactor * jackpotMultiplier : tuning::rewards::returnHomeBasePayoutFactor);
-    outcome.recoveryCost = std::clamp(3.0 + static_cast<double>(destination->tier) * 2.0 + outcome.ejectMultiplier * 1.5, 2.0, 28.0);
+    outcome.recoveryCost = std::clamp(
+        tuning::outcomes::returnHomeRecoveryBase +
+            static_cast<double>(destination->tier) * tuning::outcomes::returnHomeRecoveryTierScale +
+            outcome.ejectMultiplier * tuning::outcomes::returnHomeRecoveryBurnScale,
+        tuning::outcomes::returnHomeRecoveryMinimum,
+        tuning::outcomes::returnHomeRecoveryMaximum);
     const double netRewardFloor = returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
     if (netRewardFloor > 0.0) {
         outcome.payout = std::max(outcome.payout, outcome.recoveryCost + netRewardFloor);
     }
 
-    const double stressDamage = destination->hazard * 4.5 + outcome.ejectMultiplier * 1.7 + event.stress * 8.0 - launch.stats.hull * 0.70 - launch.stats.cooling * 0.58;
-    outcome.shipDamage = std::clamp(static_cast<int>(std::round(stressDamage)), 0, reachedDestination ? 26 : 16);
-    outcome.blueprintGain = reachedDestination ? 1 + destination->tier / 2 : (outcome.ejectMultiplier >= destination->targetMultiplier * 0.75 ? 1 : 0);
+    const double stressDamage =
+        destination->hazard * tuning::outcomes::returnHomeDamageHazardScale +
+        outcome.ejectMultiplier * tuning::outcomes::returnHomeDamageBurnScale +
+        event.stress * tuning::outcomes::returnHomeDamageStressScale -
+        launch.stats.hull * tuning::outcomes::returnHomeDamageHullRelief -
+        launch.stats.cooling * tuning::outcomes::returnHomeDamageCoolingRelief;
+    outcome.shipDamage = std::clamp(
+        static_cast<int>(std::round(stressDamage)),
+        tuning::outcomes::returnHomeDamageMinimum,
+        reachedDestination ? tuning::outcomes::returnHomeDamageCompleteMaximum : tuning::outcomes::returnHomeDamageEarlyMaximum);
+    outcome.blueprintGain = reachedDestination
+        ? 1 + destination->tier / 2
+        : (outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::returnHomeBlueprintTargetShare ? 1 : 0);
 
     return outcome;
 }
@@ -493,44 +555,154 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
     TelemetryEvent event;
     event.multiplier = multiplier;
 
-    const double progressToCrash = std::clamp((multiplier - 1.0) / std::max(0.01, launch.crashMultiplier - 1.0), 0.0, 1.4);
-    const double burnLoad = std::clamp((multiplier - 1.0) / std::max(0.10, launch.config.burnGoalMultiplier - 1.0), 0.0, 1.45);
-    const double lateFlight = std::clamp((progressToCrash - 0.45) / 0.65, 0.0, 1.0);
-    const double shipDamage = std::max(0.0, -std::min(0.0, launch.stats.hull)) * 0.16;
+    const double progressToCrash = std::clamp(
+        (multiplier - 1.0) / std::max(tuning::telemetry::progressDenominator, launch.crashMultiplier - 1.0),
+        0.0,
+        tuning::telemetry::progressMaximum);
+    const double burnLoad = std::clamp(
+        (multiplier - 1.0) / std::max(tuning::telemetry::burnLoadDenominator, launch.config.burnGoalMultiplier - 1.0),
+        0.0,
+        tuning::telemetry::burnLoadMaximum);
+    const double lateFlight = std::clamp(
+        (progressToCrash - tuning::telemetry::lateFlightStart) / tuning::telemetry::lateFlightRange,
+        0.0,
+        1.0);
+    const double shipDamage = std::max(0.0, -std::min(0.0, launch.stats.hull)) * tuning::telemetry::damagedHullScale;
     const double volatility = std::max(0.0, launch.stats.volatility);
-    const double thrustLoad = std::max(0.0, launch.stats.thrust - launch.stats.fuel * 0.48);
-    const double coolingRelief = std::max(0.0, launch.stats.cooling) * 0.030;
-    const double hullRelief = std::max(0.0, launch.stats.hull) * 0.035;
-    const double fuelRelief = std::max(0.0, launch.stats.fuel) * 0.032;
-    const double sensorRelief = std::max(0.0, launch.stats.sensors) * 0.040;
-    const double escapeRelief = std::max(0.0, launch.stats.escape) * 0.052;
-    const double pressurePulse = 0.75 + telemetryWave(multiplier, launch.crashMultiplier, 10.7, 2.1) * 0.55;
-    const double vibrationPulse = 0.70 + telemetryWave(multiplier, launch.crashMultiplier, 15.9, 4.4) * 0.65;
-    const double mixPulse = 0.78 + telemetryWave(multiplier, launch.crashMultiplier, 8.3, 5.6) * 0.48;
-    const double guidancePulse = 0.72 + telemetryWave(multiplier, launch.crashMultiplier, 6.6, 3.2) * 0.52;
+    const double thrustLoad = std::max(0.0, launch.stats.thrust - launch.stats.fuel * tuning::telemetry::thrustFuelOffset);
+    const double coolingRelief = std::max(0.0, launch.stats.cooling) * tuning::telemetry::coolingReliefScale;
+    const double hullRelief = std::max(0.0, launch.stats.hull) * tuning::telemetry::hullReliefScale;
+    const double fuelRelief = std::max(0.0, launch.stats.fuel) * tuning::telemetry::fuelReliefScale;
+    const double sensorRelief = std::max(0.0, launch.stats.sensors) * tuning::telemetry::sensorReliefScale;
+    const double escapeRelief = std::max(0.0, launch.stats.escape) * tuning::telemetry::escapeReliefScale;
+    const double pressurePulse = telemetryPulse(tuning::telemetry::pressurePulse, multiplier, launch.crashMultiplier);
+    const double vibrationPulse = telemetryPulse(tuning::telemetry::vibrationPulse, multiplier, launch.crashMultiplier);
+    const double mixPulse = telemetryPulse(tuning::telemetry::fuelMixPulse, multiplier, launch.crashMultiplier);
+    const double guidancePulse = telemetryPulse(tuning::telemetry::guidancePulse, multiplier, launch.crashMultiplier);
     const double pressureLoad = 1.0 + launch.pressureModifier;
-    const double earlyPressure = burnLoad * (0.090 + thrustLoad * 0.014 + volatility * 0.035) * pressurePulse - fuelRelief * 0.22 - coolingRelief * 0.16;
-    const double earlyVibration = burnLoad * (0.080 + std::max(0.0, launch.stats.thrust) * 0.012 + volatility * 0.050) * vibrationPulse + shipDamage * 0.35 - hullRelief * 0.22 - sensorRelief * 0.14;
-    const double earlyFuelMix = burnLoad * (0.060 + std::max(0.0, std::abs(launch.stats.thrust - launch.stats.fuel)) * 0.014 + volatility * 0.030) * mixPulse - fuelRelief * 0.18 - sensorRelief * 0.08;
+    const double earlyPressure =
+        burnLoad *
+            (tuning::telemetry::earlyPressureBase +
+                thrustLoad * tuning::telemetry::earlyPressureThrustScale +
+                volatility * tuning::telemetry::earlyPressureVolatilityScale) *
+            pressurePulse -
+        fuelRelief * tuning::telemetry::earlyPressureFuelRelief -
+        coolingRelief * tuning::telemetry::earlyPressureCoolingRelief;
+    const double earlyVibration =
+        burnLoad *
+            (tuning::telemetry::earlyVibrationBase +
+                std::max(0.0, launch.stats.thrust) * tuning::telemetry::earlyVibrationThrustScale +
+                volatility * tuning::telemetry::earlyVibrationVolatilityScale) *
+            vibrationPulse +
+        shipDamage * tuning::telemetry::earlyVibrationDamageScale -
+        hullRelief * tuning::telemetry::earlyVibrationHullRelief -
+        sensorRelief * tuning::telemetry::earlyVibrationSensorRelief;
+    const double earlyFuelMix =
+        burnLoad *
+            (tuning::telemetry::earlyFuelMixBase +
+                std::max(0.0, std::abs(launch.stats.thrust - launch.stats.fuel)) * tuning::telemetry::earlyFuelMixImbalanceScale +
+                volatility * tuning::telemetry::earlyFuelMixVolatilityScale) *
+            mixPulse -
+        fuelRelief * tuning::telemetry::earlyFuelMixFuelRelief -
+        sensorRelief * tuning::telemetry::earlyFuelMixSensorRelief;
 
-    event.heat = std::clamp(progressToCrash * launch.heatRate - launch.cutHeatRelief, 0.0, 1.25);
-    event.pressure = std::clamp((earlyPressure + lateFlight * (0.31 + thrustLoad * 0.052 + volatility * 0.075) + event.heat * 0.15 - fuelRelief * 0.18 - coolingRelief * 0.08) * pressureLoad - launch.pressureRelief + launch.pressureReliefFailure, 0.0, 1.0);
-    event.vibration = std::clamp(earlyVibration + lateFlight * (0.24 + volatility * 0.15 + std::max(0.0, launch.stats.thrust) * 0.017) + shipDamage * 0.65 - hullRelief * 0.20 - sensorRelief * 0.08 - launch.cutVibrationRelief + launch.cargoVibrationPenalty, 0.0, 1.0);
-    event.fuelMix = std::clamp(earlyFuelMix + lateFlight * (0.23 + std::max(0.0, launch.stats.thrust - launch.stats.fuel) * 0.052 + volatility * 0.042) + event.pressure * 0.15 - fuelRelief * 0.22 - launch.cargoFuelRelief, 0.0, 1.0);
-    const double crewNavLoad = launch.crewGuidancePenalty * (0.35 + burnLoad * 0.65);
-    event.guidance = std::clamp(burnLoad * (0.045 + event.vibration * 0.070 + event.pressure * 0.050) * guidancePulse + lateFlight * (0.28 + volatility * 0.055) + event.vibration * 0.20 + event.pressure * 0.10 - sensorRelief * 0.48 + launch.cutGuidancePenalty + launch.reliefGuidancePenalty + launch.cargoGuidancePenalty + crewNavLoad, 0.0, 1.0);
+    event.heat = std::clamp(progressToCrash * launch.heatRate - launch.cutHeatRelief, 0.0, tuning::telemetry::heatMaximum);
+    event.pressure = std::clamp(
+        (earlyPressure +
+            lateFlight *
+                (tuning::telemetry::pressureLateBase +
+                    thrustLoad * tuning::telemetry::pressureLateThrustScale +
+                    volatility * tuning::telemetry::pressureLateVolatilityScale) +
+            event.heat * tuning::telemetry::pressureHeatScale -
+            fuelRelief * tuning::telemetry::pressureFuelRelief -
+            coolingRelief * tuning::telemetry::pressureCoolingRelief) *
+                pressureLoad -
+            launch.pressureRelief +
+            launch.pressureReliefFailure,
+        0.0,
+        1.0);
+    event.vibration = std::clamp(
+        earlyVibration +
+            lateFlight *
+                (tuning::telemetry::vibrationLateBase +
+                    volatility * tuning::telemetry::vibrationLateVolatilityScale +
+                    std::max(0.0, launch.stats.thrust) * tuning::telemetry::vibrationLateThrustScale) +
+            shipDamage * tuning::telemetry::vibrationDamageScale -
+            hullRelief * tuning::telemetry::vibrationHullRelief -
+            sensorRelief * tuning::telemetry::vibrationSensorRelief -
+            launch.cutVibrationRelief +
+            launch.cargoVibrationPenalty,
+        0.0,
+        1.0);
+    event.fuelMix = std::clamp(
+        earlyFuelMix +
+            lateFlight *
+                (tuning::telemetry::fuelMixLateBase +
+                    std::max(0.0, launch.stats.thrust - launch.stats.fuel) * tuning::telemetry::fuelMixLateThrustOverFuelScale +
+                    volatility * tuning::telemetry::fuelMixLateVolatilityScale) +
+            event.pressure * tuning::telemetry::fuelMixPressureScale -
+            fuelRelief * tuning::telemetry::fuelMixFuelRelief -
+            launch.cargoFuelRelief,
+        0.0,
+        1.0);
+    const double crewNavLoad = launch.crewGuidancePenalty * (tuning::telemetry::crewNavBase + burnLoad * tuning::telemetry::crewNavBurnScale);
+    event.guidance = std::clamp(
+        burnLoad *
+            (tuning::telemetry::guidanceBase +
+                event.vibration * tuning::telemetry::guidanceVibrationLoadScale +
+                event.pressure * tuning::telemetry::guidancePressureLoadScale) *
+            guidancePulse +
+            lateFlight * (tuning::telemetry::guidanceLateBase + volatility * tuning::telemetry::guidanceLateVolatilityScale) +
+            event.vibration * tuning::telemetry::guidanceVibrationScale +
+            event.pressure * tuning::telemetry::guidancePressureScale -
+            sensorRelief * tuning::telemetry::guidanceSensorRelief +
+            launch.cutGuidancePenalty +
+            launch.reliefGuidancePenalty +
+            launch.cargoGuidancePenalty +
+            crewNavLoad,
+        0.0,
+        1.0);
 
-    const double readableLoad = burnLoad * (0.040 + volatility * 0.014);
-    event.pressure = std::max(event.pressure, std::clamp((readableLoad * (0.75 + pressurePulse * 0.38) - fuelRelief * 0.04 - coolingRelief * 0.03) * pressureLoad - launch.pressureRelief + launch.pressureReliefFailure, 0.0, 0.32));
-    event.vibration = std::max(event.vibration, std::clamp(readableLoad * (0.85 + vibrationPulse * 0.42) - hullRelief * 0.04 - sensorRelief * 0.03 + launch.cargoVibrationPenalty * 0.48, 0.0, 0.36));
-    event.fuelMix = std::max(event.fuelMix, std::clamp(readableLoad * (0.70 + mixPulse * 0.34) - fuelRelief * 0.04 - sensorRelief * 0.02 - launch.cargoFuelRelief * 0.35, 0.0, 0.24));
-    event.guidance = std::max(event.guidance, std::clamp(readableLoad * (0.62 + guidancePulse * 0.30) + event.vibration * 0.05 - sensorRelief * 0.04 + launch.cutGuidancePenalty * 0.48 + launch.reliefGuidancePenalty * 0.52 + launch.cargoGuidancePenalty * 0.58 + crewNavLoad * 0.74, 0.0, 0.58));
+    const double readableLoad = burnLoad * (tuning::telemetry::readableLoadBase + volatility * tuning::telemetry::readableLoadVolatilityScale);
+    event.pressure = std::max(event.pressure, std::clamp(
+        (readableLoad * (tuning::telemetry::readablePressureBase + pressurePulse * tuning::telemetry::readablePressurePulseScale) -
+            fuelRelief * tuning::telemetry::readablePressureFuelRelief -
+            coolingRelief * tuning::telemetry::readablePressureCoolingRelief) *
+                pressureLoad -
+            launch.pressureRelief +
+            launch.pressureReliefFailure,
+        0.0,
+        tuning::telemetry::readablePressureMaximum));
+    event.vibration = std::max(event.vibration, std::clamp(
+        readableLoad * (tuning::telemetry::readableVibrationBase + vibrationPulse * tuning::telemetry::readableVibrationPulseScale) -
+            hullRelief * tuning::telemetry::readableVibrationHullRelief -
+            sensorRelief * tuning::telemetry::readableVibrationSensorRelief +
+            launch.cargoVibrationPenalty * tuning::telemetry::readableVibrationCargoScale,
+        0.0,
+        tuning::telemetry::readableVibrationMaximum));
+    event.fuelMix = std::max(event.fuelMix, std::clamp(
+        readableLoad * (tuning::telemetry::readableFuelMixBase + mixPulse * tuning::telemetry::readableFuelMixPulseScale) -
+            fuelRelief * tuning::telemetry::readableFuelMixFuelRelief -
+            sensorRelief * tuning::telemetry::readableFuelMixSensorRelief -
+            launch.cargoFuelRelief * tuning::telemetry::readableFuelMixCargoRelief,
+        0.0,
+        tuning::telemetry::readableFuelMixMaximum));
+    event.guidance = std::max(event.guidance, std::clamp(
+        readableLoad * (tuning::telemetry::readableGuidanceBase + guidancePulse * tuning::telemetry::readableGuidancePulseScale) +
+            event.vibration * tuning::telemetry::readableGuidanceVibrationScale -
+            sensorRelief * tuning::telemetry::readableGuidanceSensorRelief +
+            launch.cutGuidancePenalty * tuning::telemetry::readableGuidanceCutPenaltyScale +
+            launch.reliefGuidancePenalty * tuning::telemetry::readableGuidanceReliefPenaltyScale +
+            launch.cargoGuidancePenalty * tuning::telemetry::readableGuidanceCargoPenaltyScale +
+            crewNavLoad * tuning::telemetry::readableGuidanceCrewNavScale,
+        0.0,
+        tuning::telemetry::readableGuidanceMaximum));
 
     double incidentAbortRisk = 0.0;
     for (int i = 0; i < launch.incidentCount; ++i) {
         const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(i)];
         const double pulse = incidentPulse(incident, multiplier);
-        event.heat = std::clamp(event.heat + incident.heat * pulse, 0.0, 1.25);
+        event.heat = std::clamp(event.heat + incident.heat * pulse, 0.0, tuning::telemetry::heatMaximum);
         event.pressure = std::clamp(event.pressure + incident.pressure * pulse, 0.0, 1.0);
         event.vibration = std::clamp(event.vibration + incident.vibration * pulse, 0.0, 1.0);
         event.fuelMix = std::clamp(event.fuelMix + incident.fuelMix * pulse, 0.0, 1.0);
@@ -538,14 +710,42 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
         incidentAbortRisk = std::max(incidentAbortRisk, incident.abortRisk * pulse);
     }
 
-    const double earlyThermal = std::clamp((event.heat - 0.60) / 0.55, 0.0, 1.0) * 0.38;
-    const double warningStart = 0.84 - launch.sensorQuality * 0.22;
-    const double certaintyWindow = std::clamp((progressToCrash - warningStart) / std::max(0.05, 1.0 - warningStart), 0.0, 1.0);
-    const double earlyAbortLoad = burnLoad * (0.040 + event.guidance * 0.080 + event.vibration * 0.050) + progressToCrash * 0.030 - escapeRelief * 0.10;
-    const double rawAbortRisk = earlyAbortLoad + certaintyWindow * (0.54 + event.guidance * 0.25 + event.vibration * 0.22) + event.heat * 0.10 + incidentAbortRisk - escapeRelief * 0.76;
+    const double earlyThermal = std::clamp(
+        (event.heat - tuning::telemetry::earlyThermalStart) / tuning::telemetry::earlyThermalRange,
+        0.0,
+        1.0) * tuning::telemetry::earlyThermalScale;
+    const double warningStart = tuning::telemetry::warningStartBase - launch.sensorQuality * tuning::telemetry::warningStartSensorScale;
+    const double certaintyWindow = std::clamp(
+        (progressToCrash - warningStart) / std::max(tuning::telemetry::certaintyWindowMinimumRange, 1.0 - warningStart),
+        0.0,
+        1.0);
+    const double earlyAbortLoad =
+        burnLoad *
+            (tuning::telemetry::earlyAbortBase +
+                event.guidance * tuning::telemetry::earlyAbortGuidanceScale +
+                event.vibration * tuning::telemetry::earlyAbortVibrationScale) +
+        progressToCrash * tuning::telemetry::earlyAbortProgressScale -
+        escapeRelief * tuning::telemetry::earlyAbortEscapeRelief;
+    const double rawAbortRisk =
+        earlyAbortLoad +
+        certaintyWindow *
+            (tuning::telemetry::certaintyAbortBase +
+                event.guidance * tuning::telemetry::certaintyAbortGuidanceScale +
+                event.vibration * tuning::telemetry::certaintyAbortVibrationScale) +
+        event.heat * tuning::telemetry::abortHeatScale +
+        incidentAbortRisk -
+        escapeRelief * tuning::telemetry::abortEscapeRelief;
     event.abortRisk = std::clamp(rawAbortRisk * launch.crewAbortMultiplier, 0.0, 1.0);
     event.warning = std::clamp(std::max({earlyThermal, event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk}), 0.0, 1.0);
-    event.stress = std::clamp(event.heat * 0.28 + event.pressure * 0.20 + event.vibration * 0.22 + event.guidance * 0.18 + event.abortRisk * 0.32 + progressToCrash * 0.08, 0.0, 1.0);
+    event.stress = std::clamp(
+        event.heat * tuning::telemetry::stressHeatScale +
+            event.pressure * tuning::telemetry::stressPressureScale +
+            event.vibration * tuning::telemetry::stressVibrationScale +
+            event.guidance * tuning::telemetry::stressGuidanceScale +
+            event.abortRisk * tuning::telemetry::stressAbortScale +
+            progressToCrash * tuning::telemetry::stressProgressScale,
+        0.0,
+        1.0);
     event.message = warningMessage(event);
 
     return event;

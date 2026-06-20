@@ -98,6 +98,10 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/GameText.h` owns reusable display text: status lines, telemetry warning copy, core labels, button labels, module stat labels, and module threat wording.
 - `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
 
+Telemetry equation constants live under `tuning::telemetry`: pulse profiles, early/late channel buildup, readable minimums, abort certainty, and telemetry-driven stress. Balance the feel of warning dials there before changing formula structure.
+
+Outcome math should also stay tuned from one place. Survival odds, return-home risk, rescue costs, ship damage curves, useful-data thresholds, blueprint share thresholds, and post-flight crew stress all live under `tuning::outcomes` or `tuning::stress` so balance changes do not require spelunking through launch resolution branches.
+
 When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visible wording to `GameText.h`, and any reusable channel/event metadata to a small core helper before wiring the behavior into `GameState`, `LaunchSimulation`, `RocketGameApp`, or `GamePanel`.
 
 ## Persistence

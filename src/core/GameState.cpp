@@ -645,10 +645,21 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     Astronaut* astronaut = activeAstronaut(state);
     if (astronaut != nullptr) {
         const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
-        const double warningLoad = std::clamp((outcome.peakWarning - 0.55) / 0.45, 0.0, 1.0);
-        const double abortLoad = std::clamp((outcome.peakAbortRisk - 0.35) / 0.65, 0.0, 1.0);
-        const int dangerStress = static_cast<int>(std::round(warningLoad * 8.0 + abortLoad * 8.0));
-        const int stressGain = std::max(0, (outcome.type == LaunchResultType::Destroyed ? 34 : 12) + dangerStress - upgrades.launchStressRelief);
+        const double warningLoad = std::clamp(
+            (outcome.peakWarning - tuning::stress::warningStressStart) / tuning::stress::warningStressRange,
+            0.0,
+            1.0);
+        const double abortLoad = std::clamp(
+            (outcome.peakAbortRisk - tuning::stress::abortStressStart) / tuning::stress::abortStressRange,
+            0.0,
+            1.0);
+        const int dangerStress = static_cast<int>(std::round(
+            warningLoad * tuning::stress::warningStressScale +
+            abortLoad * tuning::stress::abortStressScale));
+        const int baseStress = outcome.type == LaunchResultType::Destroyed
+            ? tuning::stress::destroyedLaunchStress
+            : tuning::stress::survivedLaunchStress;
+        const int stressGain = std::max(0, baseStress + dangerStress - upgrades.launchStressRelief);
         astronaut->stress = std::min(tuning::crew::maxStress, astronaut->stress + stressGain);
         if (outcome.crewKilled) {
             astronaut->status = CrewStatus::Dead;
@@ -701,7 +712,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                     state.statusLine = std::string(text::status::transferLedgerRejected);
                 }
             } else {
-                if (destination != nullptr && outcome.ejectMultiplier >= destination->targetMultiplier * 0.55) {
+                if (destination != nullptr && outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::transferUsefulDataTargetShare) {
                     state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
                     state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
                         ? std::string(text::status::transferAbortedEject)
@@ -725,7 +736,10 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             }
         } else {
             const Destination& current = currentDestination(state, catalog);
-            const double usefulDataThreshold = outcome.recoveryMethod == RecoveryMethod::ManualEject ? current.targetMultiplier * 0.90 : current.targetMultiplier * 0.70;
+            const double usefulDataTargetShare = outcome.recoveryMethod == RecoveryMethod::ManualEject
+                ? tuning::outcomes::manualEjectUsefulDataTargetShare
+                : tuning::outcomes::returnUsefulDataTargetShare;
+            const double usefulDataThreshold = current.targetMultiplier * usefulDataTargetShare;
             if (outcome.ejectMultiplier >= usefulDataThreshold && frontierReadinessRequired(state, catalog) > 0) {
                 state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
                 state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject

@@ -14,6 +14,7 @@ namespace rocket {
 namespace {
 
 constexpr float kPi = 3.1415926535F;
+constexpr float kSceneViewportPadding = 0.92F;
 
 enum ArtAsset {
     EarthAsset = 0,
@@ -153,6 +154,19 @@ EM_JS(int, rr_image_height, (const char* keyPtr), {
 EM_JS(double, rr_device_pixel_ratio, (), {
     const ratio = globalThis.devicePixelRatio || 1;
     return Math.max(1, Math.min(2, ratio));
+});
+
+EM_JS(void, rr_sync_canvas_to_visual_viewport, (), {
+    const canvas = document.getElementById("canvas");
+    if (!canvas) {
+        return;
+    }
+
+    const viewport = globalThis.visualViewport;
+    const width = Math.max(1, Math.round((viewport && viewport.width) || globalThis.innerWidth || canvas.clientWidth || 1));
+    const height = Math.max(1, Math.round((viewport && viewport.height) || globalThis.innerHeight || canvas.clientHeight || 1));
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
 });
 
 EM_JS(double, rr_scene_left_ndc, (), {
@@ -325,6 +339,8 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
 void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
 {
 #ifdef __EMSCRIPTEN__
+    rr_sync_canvas_to_visual_viewport();
+
     double cssWidth = 1280.0;
     double cssHeight = 720.0;
     emscripten_get_element_css_size("#canvas", &cssWidth, &cssHeight);
@@ -334,13 +350,16 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     emscripten_set_canvas_element_size("#canvas", drawingWidth, drawingHeight);
     glViewport(0, 0, drawingWidth, drawingHeight);
 
-    sceneLeft_ = static_cast<float>(rr_scene_left_ndc());
-    sceneRight_ = 1.0F;
-    sceneBottom_ = -1.0F;
-    sceneTop_ = 1.0F;
-
-    const float sceneWidthPixels = std::max(1.0F, (sceneRight_ - sceneLeft_) * static_cast<float>(cssWidth) * 0.5F);
-    const float sceneHeightPixels = std::max(1.0F, (sceneTop_ - sceneBottom_) * static_cast<float>(cssHeight) * 0.5F);
+    sceneCssWidth_ = std::max(1.0F, static_cast<float>(cssWidth));
+    sceneCssHeight_ = std::max(1.0F, static_cast<float>(cssHeight));
+    const float sceneLeftNdc = static_cast<float>(rr_scene_left_ndc());
+    scenePixelLeft_ = (sceneLeftNdc + 1.0F) * 0.5F * sceneCssWidth_;
+    scenePixelRight_ = sceneCssWidth_;
+    const float sceneWidthPixels = std::max(1.0F, scenePixelRight_ - scenePixelLeft_);
+    const float sceneHeightPixels = sceneCssHeight_;
+    scenePixelCenterX_ = scenePixelLeft_ + sceneWidthPixels * 0.5F;
+    scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
+    sceneWorldUnit_ = std::max(1.0F, std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * kSceneViewportPadding);
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
@@ -776,16 +795,13 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bo
     const std::vector<float>* uploadVertices = &vertices;
     if (worldSpace) {
         projectedVertices_ = vertices;
-        const float aspect = std::max(0.10F, sceneAspect_);
-        const float xScale = aspect >= 1.0F ? 1.0F / aspect : 1.0F;
-        const float yScale = aspect >= 1.0F ? 1.0F : aspect;
-        const float sceneCenterX = (sceneLeft_ + sceneRight_) * 0.5F;
-        const float sceneCenterY = (sceneBottom_ + sceneTop_) * 0.5F;
-        const float sceneHalfWidth = (sceneRight_ - sceneLeft_) * 0.5F;
-        const float sceneHalfHeight = (sceneTop_ - sceneBottom_) * 0.5F;
+        const float invCssWidth = 2.0F / std::max(1.0F, sceneCssWidth_);
+        const float invCssHeight = 2.0F / std::max(1.0F, sceneCssHeight_);
         for (std::size_t i = 0; i + 1 < projectedVertices_.size(); i += 8) {
-            projectedVertices_[i] = sceneCenterX + projectedVertices_[i] * xScale * sceneHalfWidth;
-            projectedVertices_[i + 1] = sceneCenterY + projectedVertices_[i + 1] * yScale * sceneHalfHeight;
+            const float pixelX = scenePixelCenterX_ + projectedVertices_[i] * sceneWorldUnit_;
+            const float pixelY = scenePixelCenterY_ + projectedVertices_[i + 1] * sceneWorldUnit_;
+            projectedVertices_[i] = pixelX * invCssWidth - 1.0F;
+            projectedVertices_[i + 1] = pixelY * invCssHeight - 1.0F;
         }
         uploadVertices = &projectedVertices_;
     }

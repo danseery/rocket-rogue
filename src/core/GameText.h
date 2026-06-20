@@ -81,6 +81,7 @@ inline constexpr std::string_view missionCredits = "Mission credits";
 inline constexpr std::string_view hullDamage = "Hull damage";
 inline constexpr std::string_view transferTarget = "Transfer target";
 inline constexpr std::string_view currentFrontier = "Current frontier";
+inline constexpr std::string_view flightData = "Flight data";
 inline constexpr std::string_view missionDifficulty = "Mission difficulty";
 inline constexpr std::string_view crewStress = "Crew stress";
 inline constexpr std::string_view burnDepth = "Burn depth";
@@ -88,6 +89,9 @@ inline constexpr std::string_view returnProgress = "Return progress";
 inline constexpr std::string_view requiredBurn = "Required burn";
 inline constexpr std::string_view dataGoal = "Data goal";
 inline constexpr std::string_view returnRisk = "Return risk";
+inline constexpr std::string_view outcome = "Outcome";
+inline constexpr std::string_view recovery = "Recovery";
+inline constexpr std::string_view failurePoint = "Failure point";
 inline constexpr std::string_view peakWarning = "Peak warning";
 inline constexpr std::string_view peakAbort = "Peak abort";
 inline constexpr std::string_view creditDelta = "Credit delta";
@@ -122,6 +126,11 @@ inline constexpr std::string_view pressureChip = "PCTRL";
 inline constexpr std::string_view volatilityChip = "VOL";
 inline constexpr std::string_view payoutChip = "PAY";
 inline constexpr std::string_view repairChip = "FIX";
+inline constexpr std::string_view trainingChip = "TRAIN";
+inline constexpr std::string_view simStressChip = "SIM STRESS";
+inline constexpr std::string_view restChip = "REST";
+inline constexpr std::string_view launchStressChip = "LAUNCH STRESS";
+inline constexpr std::string_view traitChip = "TRAIT";
 } // namespace moduleStats
 
 namespace moduleThreats {
@@ -155,7 +164,182 @@ inline constexpr std::string_view unavailable = "Unavailable";
 inline constexpr std::string_view skipRefit = "Skip refit";
 inline constexpr std::string_view launchProvingFlight = "Launch proving flight";
 inline constexpr std::string_view needFlightData = "Need flight data";
+inline constexpr std::string_view settings = "Settings";
+inline constexpr std::string_view details = "Details";
+inline constexpr std::string_view resetSave = "Reset save";
+inline constexpr std::string_view startReplacementRefit = "Start replacement refit";
+inline constexpr std::string_view reviewRefitOptions = "Review refit options";
+inline constexpr std::string_view assignRepairBay = "Assign repair bay";
+inline constexpr std::string_view recruitCrew = "Recruit crew";
+inline constexpr std::string_view legacy = "Legacy";
 } // namespace buttons
+
+namespace panel {
+inline constexpr std::string_view title = "Rocket Rogue";
+inline constexpr std::string_view complete = "Complete";
+inline constexpr std::string_view noActiveCrew = "No active crew";
+inline constexpr std::string_view noneCleared = "None cleared";
+inline constexpr std::string_view noPilot = "No pilot";
+inline constexpr std::string_view noSpareModules = "No spare modules";
+inline constexpr std::string_view baselineTrainingRoom = "Baseline training room";
+inline constexpr std::string_view noneCharted = "None charted";
+inline constexpr std::string_view shipStable = "Ship stable";
+inline constexpr std::string_view zeroCredits = "0 credits";
+
+namespace sections {
+inline constexpr std::string_view returnBurn = "Return burn";
+inline constexpr std::string_view transferAttempt = "Transfer attempt";
+inline constexpr std::string_view provingFlight = "Proving flight";
+inline constexpr std::string_view telemetry = "Telemetry";
+inline constexpr std::string_view flightControls = "Flight controls";
+inline constexpr std::string_view result = "Result";
+inline constexpr std::string_view refitWindow = "Refit window";
+inline constexpr std::string_view hangarBay = "Hangar Bay";
+inline constexpr std::string_view hangarOps = "Hangar ops";
+} // namespace sections
+
+namespace modals {
+inline constexpr std::string_view telemetryDetails = "Telemetry Details";
+inline constexpr std::string_view settings = "Settings";
+inline constexpr std::string_view shipDetails = "Ship Details";
+inline constexpr std::string_view crewDetails = "Crew Details";
+inline constexpr std::string_view frontierDetails = "Frontier Details";
+inline constexpr std::string_view launchHold = "Launch Hold";
+inline constexpr std::string_view legacy = "Legacy";
+} // namespace modals
+
+namespace details {
+inline constexpr std::string_view keyboard = "Keyboard";
+inline constexpr std::string_view keyboardValue = "R return home, E eject";
+inline constexpr std::string_view save = "Save";
+inline constexpr std::string_view saveValue = "Browser localStorage";
+inline constexpr std::string_view build = "Build";
+inline constexpr std::string_view buildValue = "WebGL2 / Emscripten POC";
+inline constexpr std::string_view equippedShipUpgrades = "Equipped Ship Upgrades";
+inline constexpr std::string_view storedShipUpgrades = "Stored Ship Upgrades";
+inline constexpr std::string_view inventory = "Inventory";
+inline constexpr std::string_view active = "Active";
+inline constexpr std::string_view trait = "Trait";
+inline constexpr std::string_view training = "Training";
+inline constexpr std::string_view stress = "Stress";
+inline constexpr std::string_view stressEffects = "Stress effects";
+inline constexpr std::string_view status = "Status";
+inline constexpr std::string_view crewFacilities = "Crew Facilities";
+inline constexpr std::string_view facilities = "Facilities";
+inline constexpr std::string_view facilityEffects = "Facility Effects";
+inline constexpr std::string_view simulatorGain = "Simulator gain";
+inline constexpr std::string_view simulatorStress = "Simulator stress";
+inline constexpr std::string_view medicalRest = "Medical rest";
+inline constexpr std::string_view launchStress = "Launch stress";
+inline constexpr std::string_view traitModifiers = "Trait modifiers";
+inline constexpr std::string_view current = "Current";
+inline constexpr std::string_view next = "Next";
+inline constexpr std::string_view transferBurn = "Transfer burn";
+inline constexpr std::string_view crew = "Crew";
+inline constexpr std::string_view requiredAction = "Required action";
+inline constexpr std::string_view ship = "Ship";
+inline constexpr std::string_view frontier = "Frontier";
+inline constexpr std::string_view blueprints = "Blueprints";
+inline constexpr std::string_view shipsLost = "Ships lost";
+inline constexpr std::string_view astronautsLost = "Astronauts lost";
+inline constexpr std::string_view furthestTier = "Furthest tier";
+inline constexpr std::string_view repairVehicle = "Repair vehicle";
+inline constexpr std::string_view recruitCrew = "Recruit crew";
+} // namespace details
+
+namespace outcomes {
+inline constexpr std::string_view returnFailure = "Return Failure";
+inline constexpr std::string_view transferLost = "Transfer Lost";
+inline constexpr std::string_view vehicleLost = "Vehicle Lost";
+inline constexpr std::string_view emergencyEject = "Emergency Eject";
+inline constexpr std::string_view profileReturned = "Profile Returned";
+inline constexpr std::string_view earlyReturn = "Early Return";
+inline constexpr std::string_view transferComplete = "Transfer Complete";
+inline constexpr std::string_view transferAborted = "Transfer Aborted";
+inline constexpr std::string_view dataProfileComplete = "Data Profile Complete";
+inline constexpr std::string_view provingReturn = "Proving Return";
+} // namespace outcomes
+
+namespace messages {
+inline constexpr std::string_view crewLossRecorded = "Crew loss recorded in the memorial ledger.";
+inline constexpr std::string_view crewInjured = "Crew injured. Rest before you ask for another miracle.";
+inline constexpr std::string_view chooseOneRefit = "Choose one ship or crew upgrade. The install crew can only complete one refit before the next launch cycle.";
+inline constexpr std::string_view totalHullBlocked = "Mission control will not clear a vehicle at total hull damage.";
+inline constexpr std::string_view noLivingCrewBlocked = "No living astronaut is currently cleared for launch.";
+inline constexpr std::string_view noStructuralWork = "No structural work is needed right now.";
+inline constexpr std::string_view emergencyReplacement = "Emergency replacement clears the launch soft lock.";
+inline constexpr std::string_view reserveRoster = "Add another qualified astronaut before the next proving run.";
+inline constexpr std::string_view crewOpsFallback = "Improves crew operations";
+} // namespace messages
+
+namespace ops {
+inline constexpr std::string_view repairBay = "Repair bay";
+inline constexpr std::string_view crewIntake = "Crew intake";
+inline constexpr std::string_view reserveRoster = "Reserve roster";
+inline constexpr std::string_view simulatorBurn = "Simulator burn";
+inline constexpr std::string_view medicalRest = "Medical rest";
+} // namespace ops
+
+inline std::string credits(std::string value)
+{
+    return value + " credits";
+}
+
+inline std::string needCredits(std::string value)
+{
+    return "Need " + value + " credits";
+}
+
+inline std::string lostModule(std::string_view moduleId)
+{
+    return "Lost module: " + std::string(moduleId);
+}
+
+inline std::string attemptFrontier(std::string_view destinationName)
+{
+    return "Attempt: " + std::string(destinationName);
+}
+
+inline std::string rerollOffers(std::string cost)
+{
+    return "Reroll offers (" + cost + " credits)";
+}
+
+inline std::string repairDetail(int repairAmount)
+{
+    return "Restore up to " + std::to_string(repairAmount) + " hull damage. Repeated assignments cost more this expedition.";
+}
+
+inline std::string simulatorDetail(int trainingGain, int stressGain)
+{
+    return "+" + std::to_string(trainingGain) + " training, +" + std::to_string(stressGain) + " stress. Repeated assignments cost more this expedition.";
+}
+
+inline std::string restDetail(int stressRecovery)
+{
+    return "-" + std::to_string(stressRecovery) + " stress at current difficulty. Repeated assignments cost more this expedition.";
+}
+
+inline std::string trainingImpact(int trainingGain)
+{
+    return "+" + std::to_string(trainingGain) + " training per simulator burn";
+}
+
+inline std::string restImpact(int restStressBonus)
+{
+    return "+" + std::to_string(restStressBonus) + " rest recovery";
+}
+
+inline std::string launchStressImpact(int launchStressRelief)
+{
+    return "-" + std::to_string(launchStressRelief) + " stress after launches";
+}
+
+inline std::string simulatorStressImpact(int trainingStressRelief)
+{
+    return "-" + std::to_string(trainingStressRelief) + " simulator stress";
+}
+} // namespace panel
 
 inline std::string insufficientCreditsFor(std::string_view name)
 {
