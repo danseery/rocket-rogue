@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ContentIds.h"
 #include "core/GameTypes.h"
 
 #include <algorithm>
@@ -16,6 +17,10 @@ struct RarityOfferCosts {
 };
 
 inline constexpr RarityOfferCosts refitCosts {};
+
+namespace presentation {
+inline constexpr double statChipMinimumMagnitude = 0.05;
+} // namespace presentation
 
 inline int moduleOfferCost(Rarity rarity)
 {
@@ -117,11 +122,11 @@ struct BlueprintUnlock {
 };
 
 inline constexpr BlueprintUnlock blueprintUnlocks[] = {
-    {4, "thermal", "Thermal systems unlocked."},
-    {8, "recovery", "Recovery hardware unlocked."},
-    {12, "deep_space", "Deep-space module family unlocked."},
-    {18, "ai", "Predictive guidance unlocked."},
-    {24, "exotic", "Exotic prototype modules unlocked."}
+    {4, content::unlock::thermal, "Thermal systems unlocked."},
+    {8, content::unlock::recovery, "Recovery hardware unlocked."},
+    {12, content::unlock::deepSpace, "Deep-space module family unlocked."},
+    {18, content::unlock::ai, "Predictive guidance unlocked."},
+    {24, content::unlock::exotic, "Exotic prototype modules unlocked."}
 };
 } // namespace unlocks
 
@@ -294,6 +299,7 @@ inline constexpr double returnBaseDuration = 2.10;
 inline constexpr double returnDurationPerProgress = 1.40;
 inline constexpr double returnDriftDurationMultiplier = 1.25;
 inline constexpr double returnTurnSeconds = 1.15;
+inline constexpr double returnEarlyProgressThreshold = 0.28;
 inline constexpr double returnWarningThreshold = 0.78;
 inline constexpr double heatCautionThreshold = 0.82;
 inline constexpr double driftFuelMixThreshold = 0.86;

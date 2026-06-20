@@ -103,6 +103,53 @@ inline constexpr std::string_view mix = "MIX";
 inline constexpr std::string_view abort = "ABORT";
 } // namespace labels
 
+namespace units {
+inline constexpr std::string_view damage = "damage";
+inline constexpr std::string_view effective = "effective";
+inline constexpr std::string_view steps = "steps";
+inline constexpr std::string_view traitModifiers = "trait modifiers";
+} // namespace units
+
+namespace enums {
+inline constexpr std::string_view unknown = "Unknown";
+
+namespace slot {
+inline constexpr std::string_view engine = "Engine";
+inline constexpr std::string_view fuel = "Fuel";
+inline constexpr std::string_view hull = "Hull";
+inline constexpr std::string_view cooling = "Cooling";
+inline constexpr std::string_view sensors = "Sensors";
+inline constexpr std::string_view escape = "Escape";
+} // namespace slot
+
+namespace rarity {
+inline constexpr std::string_view common = "Common";
+inline constexpr std::string_view uncommon = "Uncommon";
+inline constexpr std::string_view rare = "Rare";
+inline constexpr std::string_view prototype = "Prototype";
+} // namespace rarity
+
+namespace crewStatus {
+inline constexpr std::string_view active = "Active";
+inline constexpr std::string_view injured = "Injured";
+inline constexpr std::string_view dead = "Dead";
+} // namespace crewStatus
+
+namespace launchResult {
+inline constexpr std::string_view none = "None";
+inline constexpr std::string_view safeEject = "Safe Eject";
+inline constexpr std::string_view missionComplete = "Mission Complete";
+inline constexpr std::string_view destroyed = "Destroyed";
+} // namespace launchResult
+
+namespace recovery {
+inline constexpr std::string_view none = "None";
+inline constexpr std::string_view returnHome = "Return Home";
+inline constexpr std::string_view manualEject = "Manual Eject";
+inline constexpr std::string_view transferArrival = "Transfer Arrival";
+} // namespace recovery
+} // namespace enums
+
 namespace moduleStats {
 inline constexpr std::string_view thrustDetail = "Thrust";
 inline constexpr std::string_view speed = "Speed";
@@ -270,6 +317,11 @@ inline constexpr std::string_view noStructuralWork = "No structural work is need
 inline constexpr std::string_view emergencyReplacement = "Emergency replacement clears the launch soft lock.";
 inline constexpr std::string_view reserveRoster = "Add another qualified astronaut before the next proving run.";
 inline constexpr std::string_view crewOpsFallback = "Improves crew operations";
+inline constexpr std::string_view emergencyRecruitBackground = "Emergency recruitment pool";
+inline constexpr std::string_view agencyIntakeBackground = "New agency intake";
+inline constexpr std::string_view replacementCadet = "Replacement Cadet";
+inline constexpr std::string_view restoredCrewBackground = "Restored crew record";
+inline constexpr std::string_view generatedRecruitTrait = "Learns quickly";
 } // namespace messages
 
 namespace ops {
@@ -339,6 +391,11 @@ inline std::string simulatorStressImpact(int trainingStressRelief)
 {
     return "-" + std::to_string(trainingStressRelief) + " simulator stress";
 }
+
+inline std::string traitModifierImpact(std::string percentValue)
+{
+    return percentValue + " " + std::string(units::traitModifiers);
+}
 } // namespace panel
 
 inline std::string insufficientCreditsFor(std::string_view name)
@@ -386,6 +443,31 @@ inline std::string recruitJoined(std::string_view recruitName, bool emergency)
     return emergency
         ? std::string(recruitName) + " was rushed in from the emergency recruitment pool."
         : std::string(recruitName) + " joined the roster.";
+}
+
+inline std::string recruitId(int recruitNumber)
+{
+    return "recruit_" + std::to_string(recruitNumber);
+}
+
+inline std::string replacementId(int replacementNumber)
+{
+    return "replacement_" + std::to_string(replacementNumber);
+}
+
+inline bool isReplacementId(std::string_view astronautId)
+{
+    return astronautId.rfind("replacement_", 0) == 0;
+}
+
+inline std::string emergencyCadetName(int recruitNumber)
+{
+    return "Emergency Cadet " + std::to_string(recruitNumber);
+}
+
+inline std::string nextGenerationName(std::string_view templateName)
+{
+    return std::string(templateName) + " II";
 }
 
 inline std::string moreFlightDataNeeded(std::string_view destinationName)

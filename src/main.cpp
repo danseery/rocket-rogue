@@ -109,6 +109,9 @@ void rr_next()
     }
 }
 
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_attempt_frontier()
 {
     if (g_app) {

@@ -636,25 +636,41 @@
       }
     };
 
+    const rrActionIds = Object.freeze({
+      startLaunch: "start_launch",
+      ejectNow: "eject_now",
+      returnHome: "return_home",
+      cutEngines: "cut_engines",
+      pressureRelief: "pressure_relief",
+      closeReliefValve: "close_relief_valve",
+      jettisonCargo: "jettison_cargo",
+      next: "next",
+      attemptFrontier: "attempt_frontier",
+      buyOfferPrefix: "buy_offer:",
+      rerollOffers: "reroll_offers",
+      repairShip: "repair_ship",
+      recruitCrew: "recruit_crew",
+      trainCrew: "train_crew",
+      restCrew: "rest_crew",
+      resetSave: "reset_save"
+    });
+
     const rrActions = {
-      "rr.startLaunch()": () => rr.startLaunch(),
-      "rr.ejectNow()": () => rr.ejectNow(),
-      "rr.returnHome()": () => rr.returnHome(),
-      "rr.cutEngines()": () => rr.cutEngines(),
-      "rr.pressureRelief()": () => rr.pressureRelief(),
-      "rr.closeReliefValve()": () => rr.closeReliefValve(),
-      "rr.jettisonCargo()": () => rr.jettisonCargo(),
-      "rr.next()": () => rr.next(),
-      "rr.attemptFrontier()": () => rr.attemptFrontier(),
-      "rr.buyOffer(0)": () => rr.buyOffer(0),
-      "rr.buyOffer(1)": () => rr.buyOffer(1),
-      "rr.buyOffer(2)": () => rr.buyOffer(2),
-      "rr.rerollOffers()": () => rr.rerollOffers(),
-      "rr.repairShip()": () => rr.repairShip(),
-      "rr.recruitCrew()": () => rr.recruitCrew(),
-      "rr.trainCrew()": () => rr.trainCrew(),
-      "rr.restCrew()": () => rr.restCrew(),
-      "rr.resetSave()": () => rr.resetSave()
+      [rrActionIds.startLaunch]: () => rr.startLaunch(),
+      [rrActionIds.ejectNow]: () => rr.ejectNow(),
+      [rrActionIds.returnHome]: () => rr.returnHome(),
+      [rrActionIds.cutEngines]: () => rr.cutEngines(),
+      [rrActionIds.pressureRelief]: () => rr.pressureRelief(),
+      [rrActionIds.closeReliefValve]: () => rr.closeReliefValve(),
+      [rrActionIds.jettisonCargo]: () => rr.jettisonCargo(),
+      [rrActionIds.next]: () => rr.next(),
+      [rrActionIds.attemptFrontier]: () => rr.attemptFrontier(),
+      [rrActionIds.rerollOffers]: () => rr.rerollOffers(),
+      [rrActionIds.repairShip]: () => rr.repairShip(),
+      [rrActionIds.recruitCrew]: () => rr.recruitCrew(),
+      [rrActionIds.trainCrew]: () => rr.trainCrew(),
+      [rrActionIds.restCrew]: () => rr.restCrew(),
+      [rrActionIds.resetSave]: () => rr.resetSave()
     };
 
     let lastPanelActionAt = 0;
@@ -681,6 +697,21 @@
     }
 
     function runPanelAction(action) {
+      if (action.startsWith(rrActionIds.buyOfferPrefix)) {
+        const rawIndex = action.slice(rrActionIds.buyOfferPrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.buyOffer(index);
+          return true;
+        }
+        return false;
+      }
+
       const handler = rrActions[action];
       if (!handler) {
         return false;
@@ -707,7 +738,7 @@
       }
 
       runPanelAction(action);
-      if (modalRoot.contains(button) && action === "rr.resetSave()") {
+      if (modalRoot.contains(button) && action === rrActionIds.resetSave) {
         closePanelModal();
       }
     }

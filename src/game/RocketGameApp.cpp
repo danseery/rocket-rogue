@@ -1,6 +1,8 @@
 #include "game/RocketGameApp.h"
 
+#include "core/GameMath.h"
 #include "core/GameText.h"
+#include "core/LaunchStatus.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
 #include "game/GamePanel.h"
@@ -10,29 +12,9 @@
 
 namespace rocket {
 
-namespace {
-
-double smoothStep(double value)
-{
-    const double t = std::clamp(value, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
-}
-
-} // namespace
-
 PreparedLaunch RocketGameApp::currentFlightModel() const
 {
-    PreparedLaunch launch = session_.preparedLaunch;
-    if (session_.controls.pressureReliefOpen || session_.controls.pressureReliefFailed) {
-        launch = withPressureRelief(launch, session_.controls.pressureReliefFailed);
-    }
-    if (session_.controls.cargoJettisoned) {
-        launch = withJettisonedCargo(launch);
-    }
-    if (session_.controls.cutEnginesActive && !session_.controls.returningHome) {
-        launch = withCutEngines(launch);
-    }
-    return launch;
+    return applyFlightActions(session_.preparedLaunch, session_.controls.actions);
 }
 
 void RocketGameApp::recordTelemetryPeak(const TelemetryEvent& event)
@@ -74,7 +56,7 @@ double RocketGameApp::travelProgressFor(double burnMultiplier, const Destination
 
 double RocketGameApp::liveBurnMultiplier() const
 {
-    if (!session_.controls.returningHome) {
+    if (!session_.controls.actions.returningHome) {
         return session_.currentMultiplier;
     }
     return returnTelemetryMultiplier(
@@ -113,9 +95,9 @@ void RocketGameApp::tick(double deltaSeconds)
         const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
 
-        if (session_.controls.returningHome) {
+        if (session_.controls.actions.returningHome) {
             session_.returnTrip.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-            const double returnProgress = smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
+            const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
             const double returnTelemetry = returnTelemetryMultiplier(
                 session_.returnTrip.burnMultiplier,
                 flightModel.crashMultiplier,
@@ -127,19 +109,14 @@ void RocketGameApp::tick(double deltaSeconds)
             } else {
                 const TelemetryEvent event = telemetryAt(flightModel, returnTelemetry);
                 recordTelemetryPeak(event);
-                if (event.warning > tuning::session::returnWarningThreshold || event.heat > tuning::launch::warningCriticalThreshold) {
-                    state_.statusLine = session_.controls.returnDriftHome
-                        ? text::returnDriftWarning(event.message)
-                        : text::returnBurnWarning(event.message);
-                } else if (returnProgress < 0.28) {
-                    state_.statusLine = session_.controls.returnDriftHome
-                        ? std::string(text::status::fuelReserveGone)
-                        : std::string(text::status::returnBurnRotating);
-                } else {
-                    state_.statusLine = session_.controls.returnDriftHome
-                        ? std::string(text::status::coastingHome)
-                        : std::string(text::status::returnBurnUnderway);
-                }
+                state_.statusLine = launchStatusLine({
+                    event,
+                    session_.controls.actions,
+                    session_.preparedLaunch.config.frontierTransfer,
+                    session_.controls.returnDriftHome,
+                    false,
+                    returnProgress
+                });
             }
         } else {
             const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
@@ -155,22 +132,15 @@ void RocketGameApp::tick(double deltaSeconds)
             } else {
                 const TelemetryEvent event = telemetryAt(flightModel, session_.currentMultiplier);
                 recordTelemetryPeak(event);
-                if (event.warning > tuning::launch::warningCriticalThreshold) {
-                    state_.statusLine = text::telemetryDecision(event.message);
-                } else if (event.warning > tuning::launch::warningCautionThreshold || event.heat > tuning::session::heatCautionThreshold) {
-                    state_.statusLine = text::telemetryStatement(event.message);
-                } else {
-                    const bool pastDataGoal = !session_.preparedLaunch.config.frontierTransfer && session_.currentMultiplier >= destination.targetMultiplier;
-                    if (session_.controls.cutEnginesActive) {
-                        state_.statusLine = pastDataGoal
-                            ? std::string(text::status::enginesCutAfterGoal)
-                            : std::string(text::status::enginesCut);
-                    } else {
-                        state_.statusLine = session_.preparedLaunch.config.frontierTransfer
-                            ? std::string(text::status::transferBurnStable)
-                            : (pastDataGoal ? std::string(text::status::dataGoalReached) : std::string(text::status::provingBurnStable));
-                    }
-                }
+                const bool pastDataGoal = !session_.preparedLaunch.config.frontierTransfer && session_.currentMultiplier >= destination.targetMultiplier;
+                state_.statusLine = launchStatusLine({
+                    event,
+                    session_.controls.actions,
+                    session_.preparedLaunch.config.frontierTransfer,
+                    session_.controls.returnDriftHome,
+                    pastDataGoal,
+                    0.0
+                });
             }
         }
 
@@ -228,7 +198,7 @@ void RocketGameApp::ejectNow()
 
 void RocketGameApp::returnHome()
 {
-    if (state_.screen != Screen::Launch || session_.controls.returningHome) {
+    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome) {
         return;
     }
 
@@ -249,8 +219,8 @@ void RocketGameApp::returnHome()
     if (session_.controls.returnDriftHome) {
         session_.returnTrip.duration *= tuning::session::returnDriftDurationMultiplier;
     }
-    session_.controls.returningHome = true;
-    session_.controls.cutEnginesActive = false;
+    session_.controls.actions.returningHome = true;
+    session_.controls.actions.cutEnginesActive = false;
     state_.statusLine = session_.controls.returnDriftHome
         ? std::string(text::status::fuelReserveGone)
         : std::string(text::status::returnBurnRotating);
@@ -259,12 +229,12 @@ void RocketGameApp::returnHome()
 
 void RocketGameApp::cutEngines()
 {
-    if (state_.screen != Screen::Launch || session_.controls.returningHome) {
+    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome) {
         return;
     }
 
-    session_.controls.cutEnginesActive = !session_.controls.cutEnginesActive;
-    state_.statusLine = session_.controls.cutEnginesActive
+    session_.controls.actions.cutEnginesActive = !session_.controls.actions.cutEnginesActive;
+    state_.statusLine = session_.controls.actions.cutEnginesActive
         ? std::string(text::status::engineCutConfirmed)
         : std::string(text::status::thrustRestored);
     panelDirty_ = true;
@@ -272,7 +242,7 @@ void RocketGameApp::cutEngines()
 
 void RocketGameApp::pressureReliefValve()
 {
-    if (state_.screen != Screen::Launch || session_.controls.returningHome || session_.controls.pressureReliefUsed) {
+    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.controls.pressureReliefUsed) {
         return;
     }
 
@@ -295,7 +265,7 @@ void RocketGameApp::pressureReliefValve()
         tuning::session::decompressionMaximum);
 
     session_.controls.pressureReliefUsed = true;
-    session_.controls.pressureReliefOpen = true;
+    session_.controls.actions.pressureReliefOpen = true;
     if (rng_.chance(decompressionChance)) {
         completeLaunch(session_.currentMultiplier, RecoveryMethod::None);
         state_.statusLine = std::string(text::status::rapidDecompression);
@@ -303,8 +273,8 @@ void RocketGameApp::pressureReliefValve()
         return;
     }
 
-    session_.controls.pressureReliefFailed = rng_.chance(failureChance);
-    state_.statusLine = session_.controls.pressureReliefFailed
+    session_.controls.actions.pressureReliefFailed = rng_.chance(failureChance);
+    state_.statusLine = session_.controls.actions.pressureReliefFailed
         ? std::string(text::status::pressureReliefStuck)
         : std::string(text::status::pressureReliefOpened);
     panelDirty_ = true;
@@ -313,24 +283,24 @@ void RocketGameApp::pressureReliefValve()
 void RocketGameApp::closePressureReliefValve()
 {
     if (state_.screen != Screen::Launch ||
-        session_.controls.returningHome ||
-        !session_.controls.pressureReliefOpen ||
-        session_.controls.pressureReliefFailed) {
+        session_.controls.actions.returningHome ||
+        !session_.controls.actions.pressureReliefOpen ||
+        session_.controls.actions.pressureReliefFailed) {
         return;
     }
 
-    session_.controls.pressureReliefOpen = false;
+    session_.controls.actions.pressureReliefOpen = false;
     state_.statusLine = std::string(text::status::pressureReliefClosed);
     panelDirty_ = true;
 }
 
 void RocketGameApp::jettisonCargo()
 {
-    if (state_.screen != Screen::Launch || session_.controls.returningHome || session_.controls.cargoJettisoned) {
+    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.controls.actions.cargoJettisoned) {
         return;
     }
 
-    session_.controls.cargoJettisoned = true;
+    session_.controls.actions.cargoJettisoned = true;
     state_.statusLine = std::string(text::status::cargoJettisoned);
     panelDirty_ = true;
 }
@@ -467,10 +437,10 @@ void RocketGameApp::resetSave()
 void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
 {
     const PreparedLaunch flightModel = currentFlightModel();
-    const bool wasReturningHome = session_.controls.returningHome;
+    const bool wasReturningHome = session_.controls.actions.returningHome;
     double frozenTravelProgress = travelProgressFor(burnMultiplier, currentDestination(state_, catalog_));
     if (wasReturningHome) {
-        const double returnProgress = smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
+        const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
         frozenTravelProgress = std::clamp(
             session_.returnTrip.startTravelProgress * (1.0 - returnProgress),
             0.0,
@@ -512,12 +482,8 @@ void RocketGameApp::refreshPanel()
         session_.returnTrip.burnMultiplier,
         session_.returnTrip.elapsed,
         session_.returnTrip.duration,
-        session_.controls.returningHome,
-        session_.controls.cutEnginesActive,
+        session_.controls.actions,
         session_.controls.pressureReliefUsed,
-        session_.controls.pressureReliefOpen,
-        session_.controls.pressureReliefFailed,
-        session_.controls.cargoJettisoned
     }));
     panelDirty_ = false;
 }
@@ -544,8 +510,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
-    if (session_.controls.returningHome) {
-        const double returnProgress = smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
+    if (session_.controls.actions.returningHome) {
+        const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
         result.travelProgress = std::clamp(
             session_.returnTrip.startTravelProgress * (1.0 - returnProgress),
             0.0,
@@ -568,7 +534,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.warning = event.warning;
         for (int i = 0; i < static_cast<int>(result.telemetry.size()); ++i) {
             const double t = static_cast<double>(i) / static_cast<double>(result.telemetry.size() - 1);
-            const double sampleCeiling = session_.controls.returningHome
+            const double sampleCeiling = session_.controls.actions.returningHome
                 ? displayedMultiplier
                 : std::max(session_.currentMultiplier, result.targetMultiplier);
             const double sampleMultiplier = 1.0 + (sampleCeiling - 1.0) * t;
@@ -577,9 +543,9 @@ RenderSnapshot RocketGameApp::snapshot() const
             result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sample.heat, 0.0, 1.0);
         }
         result.telemetryCount = static_cast<int>(result.telemetry.size());
-        result.poweredFlight = session_.controls.returningHome
+        result.poweredFlight = session_.controls.actions.returningHome
             ? !session_.controls.returnDriftHome
-            : !session_.controls.cutEnginesActive;
+            : !session_.controls.actions.cutEnginesActive;
     } else if (!state_.lastOutcome.telemetry.empty()) {
         const int count = std::min(static_cast<int>(result.telemetry.size()), static_cast<int>(state_.lastOutcome.telemetry.size()));
         for (int i = 0; i < count; ++i) {

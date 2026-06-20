@@ -1,4 +1,5 @@
 #include "core/GameState.h"
+#include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/Tuning.h"
 
@@ -24,12 +25,12 @@ struct RefitCandidate {
 std::vector<std::string> starterInventory()
 {
     return {
-        "sparrow_engine",
-        "stable_tank",
-        "patchwork_hull",
-        "radiator_vanes",
-        "analog_telemetry",
-        "spring_capsule"
+        content::module::sparrowEngine,
+        content::module::stableTank,
+        content::module::patchworkHull,
+        content::module::radiatorVanes,
+        content::module::analogTelemetry,
+        content::module::springCapsule
     };
 }
 
@@ -97,6 +98,33 @@ double crewAbortRiskMultiplierFromStress(int stress)
     return 1.0 + static_cast<double>(crewStressStepCount(stress)) * tuning::crew::abortRiskPerStressStep;
 }
 
+PostLaunchCrewStress postLaunchCrewStress(const LaunchOutcome& outcome, const CrewUpgradeStats& upgrades)
+{
+    const double warningLoad = std::clamp(
+        (outcome.peakWarning - tuning::stress::warningStressStart) / tuning::stress::warningStressRange,
+        0.0,
+        1.0);
+    const double abortLoad = std::clamp(
+        (outcome.peakAbortRisk - tuning::stress::abortStressStart) / tuning::stress::abortStressRange,
+        0.0,
+        1.0);
+
+    PostLaunchCrewStress stress;
+    stress.baseStress = outcome.type == LaunchResultType::Destroyed
+        ? tuning::stress::destroyedLaunchStress
+        : tuning::stress::survivedLaunchStress;
+    stress.warningStress = static_cast<int>(std::round(warningLoad * tuning::stress::warningStressScale));
+    stress.abortStress = static_cast<int>(std::round(abortLoad * tuning::stress::abortStressScale));
+    stress.relief = std::max(0, upgrades.launchStressRelief);
+    stress.total = std::max(0, stress.baseStress + stress.warningStress + stress.abortStress - stress.relief);
+    return stress;
+}
+
+int postLaunchCrewStressGain(const LaunchOutcome& outcome, const CrewUpgradeStats& upgrades)
+{
+    return postLaunchCrewStress(outcome, upgrades).total;
+}
+
 double defaultProvingTarget(const Destination& destination)
 {
     return std::clamp(
@@ -109,7 +137,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
 {
     GameState state;
     state.seed = seed;
-    state.meta.unlockKeys = {"starter"};
+    state.meta.unlockKeys = {content::unlock::starter};
     state.run.credits = tuning::hangar::startingCredits;
     state.run.crew = catalog.astronauts;
     ensureDestinationHistory(state, catalog);
@@ -150,10 +178,10 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
 
     if (activeAstronaut(state) == nullptr && !catalog.astronauts.empty()) {
         Astronaut recruit = catalog.astronauts.front();
-        recruit.id = "replacement_" + std::to_string(state.meta.astronautsLost + state.meta.shipsLost + 1);
-        recruit.name = "Replacement Cadet";
-        recruit.background = "Emergency recruitment pool";
-        recruit.trait = "Learns quickly";
+        recruit.id = text::replacementId(state.meta.astronautsLost + state.meta.shipsLost + 1);
+        recruit.name = std::string(text::panel::messages::replacementCadet);
+        recruit.background = std::string(text::panel::messages::emergencyRecruitBackground);
+        recruit.trait = std::string(text::panel::messages::generatedRecruitTrait);
         recruit.training = 0;
         recruit.stress = tuning::hangar::emergencyReplacementStress;
         recruit.status = CrewStatus::Active;
@@ -414,6 +442,12 @@ bool repairShip(GameState& state)
     return true;
 }
 
+int crewTrainingGain(const GameState& state, const ContentCatalog& catalog)
+{
+    const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
+    return std::max(1, 1 + upgrades.trainingGain);
+}
+
 int crewTrainingStressGain(const GameState& state, const ContentCatalog& catalog)
 {
     const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
@@ -443,23 +477,20 @@ bool trainCrew(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    const int stressGain = crewTrainingStressGain(state, catalog);
-    if (astronaut->stress >= tuning::crew::maxStress || astronaut->stress + stressGain > tuning::crew::maxStress) {
+    const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    if (astronaut->stress >= tuning::crew::maxStress || astronaut->stress + preview.trainingStressGain > tuning::crew::maxStress) {
         state.statusLine = text::tooStressedForTraining(astronaut->name);
         return false;
     }
 
-    const double cost = crewTrainingCost(state, catalog);
-    if (state.run.credits < cost) {
+    if (!preview.trainingAvailable) {
         state.statusLine = std::string(text::status::trainingBudgetDenied);
         return false;
     }
 
-    const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
-    const int trainingGain = std::max(1, 1 + upgrades.trainingGain);
-    state.run.credits -= cost;
-    astronaut->training = std::min(tuning::crew::maxTraining, astronaut->training + trainingGain);
-    astronaut->stress += stressGain;
+    state.run.credits -= preview.trainingCost;
+    astronaut->training = std::min(tuning::crew::maxTraining, astronaut->training + preview.trainingGain);
+    astronaut->stress += preview.trainingStressGain;
     state.run.trainingOpsThisExpedition += 1;
     state.statusLine = text::simulatorComplete(astronaut->name);
     return true;
@@ -483,35 +514,65 @@ bool restCrew(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    const double cost = crewRestCost(state, catalog);
-    if (state.run.credits < cost) {
+    const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    if (!preview.restAvailable) {
         state.statusLine = std::string(text::status::restBudgetDenied);
         return false;
     }
 
-    const int stressRecovery = crewRestStressRecovery(state, catalog);
-    state.run.credits -= cost;
-    astronaut->stress = std::max(0, astronaut->stress - stressRecovery);
+    state.run.credits -= preview.restCost;
+    astronaut->stress = std::max(0, astronaut->stress - preview.restStressRecovery);
     if (astronaut->status == CrewStatus::Injured) {
         astronaut->status = CrewStatus::Active;
-        astronaut->stress = std::max(0, astronaut->stress - std::max(4, stressRecovery / 2));
+        astronaut->stress = std::max(0, astronaut->stress - std::max(4, preview.restStressRecovery / 2));
     }
     state.run.restOpsThisExpedition += 1;
-    state.statusLine = text::crewRecovered(astronaut->name, stressRecovery);
+    state.statusLine = text::crewRecovered(astronaut->name, preview.restStressRecovery);
     return true;
+}
+
+double recruitCrewCost(const GameState& state)
+{
+    return activeAstronaut(state) == nullptr ? tuning::hangar::emergencyRecruitCost : tuning::hangar::recruitCost;
+}
+
+HangarOperationPreview hangarOperationPreview(const GameState& state, const ContentCatalog& catalog)
+{
+    HangarOperationPreview preview;
+    const Astronaut* astronaut = activeAstronaut(state);
+
+    preview.repairAmount = repairShipAmount(state);
+    preview.repairCost = repairShipCost(state);
+    preview.repairAvailable = preview.repairAmount > 0 && state.run.credits >= preview.repairCost;
+
+    preview.trainingGain = crewTrainingGain(state, catalog);
+    preview.trainingStressGain = crewTrainingStressGain(state, catalog);
+    preview.trainingCost = crewTrainingCost(state, catalog);
+    preview.trainingAvailable = astronaut != nullptr &&
+        state.run.credits >= preview.trainingCost &&
+        astronaut->stress < tuning::crew::maxStress &&
+        astronaut->stress + preview.trainingStressGain <= tuning::crew::maxStress;
+
+    preview.restStressRecovery = crewRestStressRecovery(state, catalog);
+    preview.restCost = crewRestCost(state, catalog);
+    preview.restAvailable = astronaut != nullptr && state.run.credits >= preview.restCost;
+
+    preview.emergencyRecruitment = astronaut == nullptr;
+    preview.recruitCost = recruitCrewCost(state);
+    preview.recruitAvailable = state.run.credits >= preview.recruitCost;
+
+    return preview;
 }
 
 bool recruitCrew(GameState& state, const ContentCatalog& catalog)
 {
-    const bool emergencyRecruitment = activeAstronaut(state) == nullptr;
-    const double cost = emergencyRecruitment ? tuning::hangar::emergencyRecruitCost : tuning::hangar::recruitCost;
-
     if (catalog.astronauts.empty()) {
         state.statusLine = std::string(text::status::noRecruitProfiles);
         return false;
     }
 
-    if (state.run.credits < cost) {
+    const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    if (!preview.recruitAvailable) {
         state.statusLine = std::string(text::status::recruitUnaffordable);
         return false;
     }
@@ -522,17 +583,17 @@ bool recruitCrew(GameState& state, const ContentCatalog& catalog)
 
     Astronaut recruit = templateAstronaut;
     const int recruitNumber = state.meta.astronautsLost + state.meta.shipsLost + static_cast<int>(state.run.crew.size()) + 1;
-    recruit.id = "recruit_" + std::to_string(recruitNumber);
-    recruit.name = emergencyRecruitment ? "Emergency Cadet " + std::to_string(recruitNumber) : templateAstronaut.name + " II";
-    recruit.background = emergencyRecruitment ? "Emergency recruitment pool" : "New agency intake";
-    recruit.training = emergencyRecruitment ? 0 : std::max(0, templateAstronaut.training - tuning::hangar::recruitTrainingPenalty);
-    recruit.stress = emergencyRecruitment ? tuning::hangar::emergencyRecruitStress : tuning::hangar::recruitStress;
+    recruit.id = text::recruitId(recruitNumber);
+    recruit.name = preview.emergencyRecruitment ? text::emergencyCadetName(recruitNumber) : text::nextGenerationName(templateAstronaut.name);
+    recruit.background = preview.emergencyRecruitment ? std::string(text::panel::messages::emergencyRecruitBackground) : std::string(text::panel::messages::agencyIntakeBackground);
+    recruit.training = preview.emergencyRecruitment ? 0 : std::max(0, templateAstronaut.training - tuning::hangar::recruitTrainingPenalty);
+    recruit.stress = preview.emergencyRecruitment ? tuning::hangar::emergencyRecruitStress : tuning::hangar::recruitStress;
     recruit.status = CrewStatus::Active;
 
-    state.run.credits -= cost;
+    state.run.credits -= preview.recruitCost;
     state.run.crew.push_back(recruit);
     syncLaunchConfig(state, catalog);
-    state.statusLine = text::recruitJoined(recruit.name, emergencyRecruitment);
+    state.statusLine = text::recruitJoined(recruit.name, preview.emergencyRecruitment);
     return true;
 }
 
@@ -645,22 +706,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     Astronaut* astronaut = activeAstronaut(state);
     if (astronaut != nullptr) {
         const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
-        const double warningLoad = std::clamp(
-            (outcome.peakWarning - tuning::stress::warningStressStart) / tuning::stress::warningStressRange,
-            0.0,
-            1.0);
-        const double abortLoad = std::clamp(
-            (outcome.peakAbortRisk - tuning::stress::abortStressStart) / tuning::stress::abortStressRange,
-            0.0,
-            1.0);
-        const int dangerStress = static_cast<int>(std::round(
-            warningLoad * tuning::stress::warningStressScale +
-            abortLoad * tuning::stress::abortStressScale));
-        const int baseStress = outcome.type == LaunchResultType::Destroyed
-            ? tuning::stress::destroyedLaunchStress
-            : tuning::stress::survivedLaunchStress;
-        const int stressGain = std::max(0, baseStress + dangerStress - upgrades.launchStressRelief);
-        astronaut->stress = std::min(tuning::crew::maxStress, astronaut->stress + stressGain);
+        astronaut->stress = std::min(tuning::crew::maxStress, astronaut->stress + postLaunchCrewStressGain(outcome, upgrades));
         if (outcome.crewKilled) {
             astronaut->status = CrewStatus::Dead;
             state.meta.astronautsLost += 1;

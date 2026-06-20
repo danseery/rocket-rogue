@@ -44,10 +44,19 @@ struct PreparedLaunch {
     int incidentCount = 0;
 };
 
+struct FlightActionState {
+    bool returningHome = false;
+    bool cutEnginesActive = false;
+    bool pressureReliefOpen = false;
+    bool pressureReliefFailed = false;
+    bool cargoJettisoned = false;
+};
+
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng);
 PreparedLaunch withCutEngines(const PreparedLaunch& launch);
 PreparedLaunch withPressureRelief(const PreparedLaunch& launch, bool failed);
 PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch);
+PreparedLaunch applyFlightActions(const PreparedLaunch& launch, const FlightActionState& actions);
 double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds);
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration);
 double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier);

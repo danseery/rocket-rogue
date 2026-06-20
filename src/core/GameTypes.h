@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ContentIds.h"
 #include "core/GameText.h"
 
 #include <array>
@@ -82,7 +83,7 @@ struct ShipModule {
     Rarity rarity = Rarity::Common;
     ModuleStats stats;
     int durability = 100;
-    std::string unlockKey = "starter";
+    std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
 };
 
@@ -92,7 +93,7 @@ struct CrewUpgrade {
     std::string description;
     Rarity rarity = Rarity::Common;
     CrewUpgradeStats stats;
-    std::string unlockKey = "starter";
+    std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
 };
 
@@ -123,7 +124,7 @@ struct Destination {
     double maxCrashMultiplier = 2.0;
     double baseReward = 10.0;
     double hazard = 1.0;
-    std::string unlockKey = "starter";
+    std::string unlockKey = content::unlock::starter;
 };
 
 struct LaunchConfig {

@@ -1,13 +1,16 @@
 #include "game/GamePanel.h"
+#include "core/GameFormat.h"
+#include "core/GameMath.h"
 #include "core/GameText.h"
+#include "core/OutcomePresentation.h"
+#include "core/RefitPresentation.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
+#include "core/GameUi.h"
 
 #include <algorithm>
-#include <array>
-#include <cmath>
-#include <iomanip>
 #include <sstream>
+#include <vector>
 
 namespace rocket {
 
@@ -39,65 +42,24 @@ std::string htmlEscape(std::string_view text)
     return out;
 }
 
-std::string money(double value)
-{
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(0) << value;
-    return out.str();
-}
-
-std::string signedMoney(double value)
-{
-    std::ostringstream out;
-    if (value > 0.0) {
-        out << "+";
-    }
-    out << std::fixed << std::setprecision(0) << value;
-    return out.str();
-}
-
-std::string multiplier(double value)
-{
-    std::ostringstream out;
-    out << "x" << std::fixed << std::setprecision(2) << value;
-    return out.str();
-}
-
-std::string percent(double value)
-{
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(0) << std::clamp(value, 0.0, 1.0) * 100.0 << "%";
-    return out.str();
-}
-
-std::string signedPercent(double value)
-{
-    std::ostringstream out;
-    if (value > 0.0) {
-        out << "+";
-    }
-    out << std::fixed << std::setprecision(0) << value * 100.0 << "%";
-    return out.str();
-}
-
 std::string metric(std::string_view label, std::string value)
 {
     return "<div class=\"metric\"><strong>" + htmlEscape(value) + "</strong><span>" + htmlEscape(label) + "</span></div>";
 }
 
-std::string button(std::string_view label, std::string action, std::string cssClass = "")
+std::string button(std::string_view label, std::string_view action, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\">" + htmlEscape(label) + "</button>";
 }
 
-std::string modalButton(std::string_view label, std::string modalId, std::string cssClass = "")
+std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
     return "<button" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
 }
 
-std::string modalTemplate(std::string modalId, std::string title, std::string body)
+std::string modalTemplate(std::string_view modalId, std::string_view title, std::string body)
 {
     return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
 }
@@ -121,138 +83,21 @@ std::string warningClass(double value)
 std::string warningButton(std::string_view label, double value)
 {
     return "<button type=\"button\" class=\"warning-button " + warningClass(value) + "\"><strong>" +
-        htmlEscape(label) + "</strong><span>" + htmlEscape(percent(value)) + "</span></button>";
+        htmlEscape(label) + "</strong><span>" + htmlEscape(display::percent(value)) + "</span></button>";
 }
 
-std::string outcomeLabel(const LaunchOutcome& outcome)
+std::string statChip(const RefitStatChip& chip)
 {
-    if (outcome.type == LaunchResultType::Destroyed) {
-        if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
-            return std::string(text::panel::outcomes::returnFailure);
-        }
-        return std::string(outcome.frontierTransfer ? text::panel::outcomes::transferLost : text::panel::outcomes::vehicleLost);
-    }
-    if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
-        return std::string(text::panel::outcomes::emergencyEject);
-    }
-    if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
-        return std::string(outcome.type == LaunchResultType::MissionComplete ? text::panel::outcomes::profileReturned : text::panel::outcomes::earlyReturn);
-    }
-    if (outcome.frontierTransfer) {
-        return std::string(outcome.type == LaunchResultType::MissionComplete ? text::panel::outcomes::transferComplete : text::panel::outcomes::transferAborted);
-    }
-    return std::string(outcome.type == LaunchResultType::MissionComplete ? text::panel::outcomes::dataProfileComplete : text::panel::outcomes::provingReturn);
+    return "<span class=\"stat-chip " + std::string(chip.positive ? "up" : "down") + "\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
 }
 
-std::string slotClass(SlotType slot)
+std::string statChipGrid(const std::vector<RefitStatChip>& chips)
 {
-    switch (slot) {
-    case SlotType::Engine:
-        return "engine";
-    case SlotType::Fuel:
-        return "fuel";
-    case SlotType::Hull:
-        return "hull";
-    case SlotType::Cooling:
-        return "cooling";
-    case SlotType::Sensors:
-        return "sensors";
-    case SlotType::Escape:
-        return "escape";
-    }
-    return "module";
-}
-
-std::string moduleThreat(const ShipModule& module)
-{
-    switch (module.slot) {
-    case SlotType::Engine:
-        return std::string(module.stats.thrust >= 0.0 ? text::moduleThreats::shortensExposure : text::moduleThreats::reducesEngineLoad);
-    case SlotType::Fuel:
-        return std::string(module.stats.pressure > 0.0 ? text::moduleThreats::stabilizesPressure : text::moduleThreats::extendsReturnMargin);
-    case SlotType::Hull:
-        return std::string(text::moduleThreats::absorbsDamage);
-    case SlotType::Cooling:
-        return std::string(text::moduleThreats::lowersTemperature);
-    case SlotType::Sensors:
-        return std::string(module.stats.pressure > 0.0 ? text::moduleThreats::reducesPressureUncertainty : text::moduleThreats::improvesWarningLuck);
-    case SlotType::Escape:
-        return std::string(text::moduleThreats::improvesCrewSurvival);
-    }
-    return std::string(text::moduleThreats::improvesMissionOdds);
-}
-
-struct ModuleStatDisplay {
-    double value;
-    std::string_view primaryLabel;
-    std::string_view chipLabel;
-    std::string_view detailLabel;
-    bool showInShipDetails = true;
-};
-
-std::array<ModuleStatDisplay, 10> moduleStatDisplays(const ModuleStats& stats)
-{
-    return {{
-        {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail},
-        {stats.fuel, text::moduleStats::fuel, text::moduleStats::fuelChip, text::moduleStats::fuel},
-        {stats.hull, text::moduleStats::hull, text::moduleStats::hullChip, text::moduleStats::hull},
-        {stats.cooling, text::moduleStats::tempControl, text::moduleStats::tempChip, text::moduleStats::tempControl},
-        {stats.sensors, text::moduleStats::sensors, text::moduleStats::sensorsChip, text::moduleStats::sensors},
-        {stats.escape, text::moduleStats::escape, text::moduleStats::escapeChip, text::moduleStats::escape},
-        {stats.pressure, text::moduleStats::pressureControl, text::moduleStats::pressureChip, text::moduleStats::pressureControl},
-        {stats.volatility, text::moduleStats::volatility, text::moduleStats::volatilityChip, text::moduleStats::volatility, false},
-        {stats.payout, text::moduleStats::dataPayout, text::moduleStats::payoutChip, text::moduleStats::dataPayout, false},
-        {stats.repair, text::moduleStats::repairCost, text::moduleStats::repairChip, text::moduleStats::repairCost, false}
-    }};
-}
-
-std::string primaryImpact(const ShipModule& module)
-{
-    const auto displays = moduleStatDisplays(module.stats);
-    const ModuleStatDisplay* best = &displays.front();
-    for (const ModuleStatDisplay& display : displays) {
-        if (std::abs(display.value) > std::abs(best->value)) {
-            best = &display;
-        }
-    }
-
-    std::ostringstream out;
-    out << (best->value >= 0.0 ? "+" : "") << std::fixed << std::setprecision(1) << best->value << " " << best->primaryLabel;
-    return out.str();
-}
-
-std::string statTag(std::string_view label, double value)
-{
-    if (std::abs(value) < 0.05) {
-        return "";
-    }
-
-    std::ostringstream out;
-    out << "<span class=\"stat-chip " << (value >= 0.0 ? "up" : "down") << "\">"
-        << htmlEscape(label) << " " << (value >= 0.0 ? "+" : "")
-        << std::fixed << std::setprecision(1) << value << "</span>";
-    return out.str();
-}
-
-std::string moduleStatTags(const ShipModule& module)
-{
-    const ModuleStats& stats = module.stats;
     std::string tags;
-    for (const ModuleStatDisplay& display : moduleStatDisplays(stats)) {
-        tags += statTag(display.chipLabel, display.value);
+    for (const RefitStatChip& chip : chips) {
+        tags += statChip(chip);
     }
-    return tags;
-}
-
-std::string crewUpgradeStatTags(const CrewUpgrade& upgrade)
-{
-    const CrewUpgradeStats& stats = upgrade.stats;
-    std::string tags;
-    tags += statTag(text::moduleStats::trainingChip, static_cast<double>(stats.trainingGain));
-    tags += statTag(text::moduleStats::simStressChip, static_cast<double>(stats.trainingStressRelief));
-    tags += statTag(text::moduleStats::restChip, static_cast<double>(stats.restStressBonus));
-    tags += statTag(text::moduleStats::launchStressChip, static_cast<double>(stats.launchStressRelief));
-    tags += statTag(text::moduleStats::traitChip, stats.traitModifier * 100.0);
     return tags;
 }
 
@@ -260,61 +105,42 @@ std::string moduleCard(const ShipModule& module, int index, double credits)
 {
     const int cost = moduleOfferCost(module);
     const bool affordable = credits >= static_cast<double>(cost);
+    const RefitPresentation presentation = moduleRefitPresentation(module);
     std::ostringstream out;
-    out << "<article class=\"upgrade-card slot-" << slotClass(module.slot) << "\">";
-    out << "<div class=\"card-topline\"><span>" << htmlEscape(toString(module.slot)) << "</span><span>"
-        << htmlEscape(toString(module.rarity)) << "</span></div>";
-    out << "<div class=\"module-art\"><span>" << htmlEscape(std::string(toString(module.slot)).substr(0, 1)) << "</span></div>";
-    out << "<h3>" << htmlEscape(module.name) << "</h3>";
-    out << "<p class=\"module-threat\">" << htmlEscape(moduleThreat(module)) << "</p>";
-    out << "<strong class=\"module-impact\">" << htmlEscape(primaryImpact(module)) << "</strong>";
-    out << "<div class=\"stat-grid\">" << moduleStatTags(module) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << cost << " credits</span>";
+    out << "<article class=\"upgrade-card slot-" << htmlEscape(presentation.slotClass) << "\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(presentation.category) << "</span><span>"
+        << htmlEscape(presentation.rarity) << "</span></div>";
+    out << "<div class=\"module-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
+    out << "<h3>" << htmlEscape(presentation.title) << "</h3>";
+    out << "<p class=\"module-threat\">" << htmlEscape(presentation.detail) << "</p>";
+    out << "<strong class=\"module-impact\">" << htmlEscape(presentation.primaryImpact) << "</strong>";
+    out << "<div class=\"stat-grid\">" << statChipGrid(presentation.statChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(display::credits(cost)) << "</span>";
     if (affordable) {
-        out << button(text::buttons::install, "rr.buyOffer(" + std::to_string(index) + ")", "ok");
+        out << button(text::buttons::install, ui::actions::buyOffer(index), "ok");
     } else {
         out << disabledButton(text::needCredits(cost));
     }
     out << "</div></article>";
     return out.str();
-}
-
-std::string crewUpgradeImpact(const CrewUpgrade& upgrade)
-{
-    const CrewUpgradeStats& stats = upgrade.stats;
-    if (stats.trainingGain > 0) {
-        return text::panel::trainingImpact(stats.trainingGain);
-    }
-    if (stats.restStressBonus > 0) {
-        return text::panel::restImpact(stats.restStressBonus);
-    }
-    if (stats.launchStressRelief > 0) {
-        return text::panel::launchStressImpact(stats.launchStressRelief);
-    }
-    if (stats.trainingStressRelief > 0) {
-        return text::panel::simulatorStressImpact(stats.trainingStressRelief);
-    }
-    if (stats.traitModifier > 0.0) {
-        return "+" + percent(stats.traitModifier) + " trait modifiers";
-    }
-    return std::string(text::panel::messages::crewOpsFallback);
 }
 
 std::string crewUpgradeCard(const CrewUpgrade& upgrade, int index, double credits)
 {
     const int cost = crewUpgradeCost(upgrade);
     const bool affordable = credits >= static_cast<double>(cost);
+    const RefitPresentation presentation = crewUpgradeRefitPresentation(upgrade);
     std::ostringstream out;
-    out << "<article class=\"upgrade-card slot-sensors\">";
-    out << "<div class=\"card-topline\"><span>" << htmlEscape(text::panel::details::crew) << "</span><span>" << htmlEscape(toString(upgrade.rarity)) << "</span></div>";
-    out << "<div class=\"module-art\"><span>C</span></div>";
-    out << "<h3>" << htmlEscape(upgrade.name) << "</h3>";
-    out << "<p class=\"module-threat\">" << htmlEscape(upgrade.description) << "</p>";
-    out << "<strong class=\"module-impact\">" << htmlEscape(crewUpgradeImpact(upgrade)) << "</strong>";
-    out << "<div class=\"stat-grid\">" << crewUpgradeStatTags(upgrade) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << cost << " credits</span>";
+    out << "<article class=\"upgrade-card slot-" << htmlEscape(presentation.slotClass) << "\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(presentation.category) << "</span><span>" << htmlEscape(presentation.rarity) << "</span></div>";
+    out << "<div class=\"module-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
+    out << "<h3>" << htmlEscape(presentation.title) << "</h3>";
+    out << "<p class=\"module-threat\">" << htmlEscape(presentation.detail) << "</p>";
+    out << "<strong class=\"module-impact\">" << htmlEscape(presentation.primaryImpact) << "</strong>";
+    out << "<div class=\"stat-grid\">" << statChipGrid(presentation.statChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(display::credits(cost)) << "</span>";
     if (affordable) {
-        out << button(text::buttons::install, "rr.buyOffer(" + std::to_string(index) + ")", "ok");
+        out << button(text::buttons::install, ui::actions::buyOffer(index), "ok");
     } else {
         out << disabledButton(text::needCredits(cost));
     }
@@ -322,7 +148,7 @@ std::string crewUpgradeCard(const CrewUpgrade& upgrade, int index, double credit
     return out.str();
 }
 
-std::string operationCard(std::string title, std::string detail, std::string cost, std::string action, bool available, std::string cssClass = "")
+std::string operationCard(std::string title, std::string detail, std::string cost, std::string_view action, bool available, std::string cssClass = "")
 {
     std::ostringstream out;
     out << "<article class=\"ops-card " << htmlEscape(cssClass) << "\">";
@@ -349,13 +175,7 @@ std::string crewStressSummary(const Astronaut* astronaut)
     if (astronaut == nullptr) {
         return std::string(text::panel::noActiveCrew);
     }
-    return std::to_string(astronaut->stress) + "%";
-}
-
-double smoothStep(double value)
-{
-    const double t = std::clamp(value, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
+    return display::wholePercent(astronaut->stress);
 }
 
 } // namespace
@@ -382,7 +202,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     std::ostringstream out;
     out << "<div class=\"panel-head\"><div><h1>" << htmlEscape(text::panel::title) << "</h1></div>"
-        << modalButton(text::buttons::settings, "settings", "ghost") << "</div>";
+        << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div>";
     out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
 
     std::ostringstream settingsBody;
@@ -391,35 +211,35 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     settingsBody << detailRow(text::panel::details::save, text::panel::details::saveValue);
     settingsBody << detailRow(text::panel::details::build, text::panel::details::buildValue);
     settingsBody << "</div><div class=\"modal-actions\">";
-    settingsBody << button(text::buttons::resetSave, "rr.resetSave()", "danger");
+    settingsBody << button(text::buttons::resetSave, ui::actions::resetSave, "danger");
     settingsBody << "</div>";
 
     out << "<div class=\"metric-grid\">";
-    out << metric(text::labels::missionCredits, money(state.run.credits));
-    out << metric(text::labels::hullDamage, std::to_string(state.run.shipDamage) + "%");
+    out << metric(text::labels::missionCredits, display::money(state.run.credits));
+    out << metric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage));
     out << metric(transferLaunch ? text::labels::transferTarget : text::labels::currentFrontier, displayDestination->name);
     out << metric(
         transferLaunch ? std::string_view(text::labels::requiredBurn) : std::string_view(text::labels::flightData),
-        transferLaunch ? multiplier(displayDestination->targetMultiplier) :
-                         (requiredReadiness == 0 ? std::string(text::panel::complete) : std::to_string(state.run.frontierReadiness) + "/" + std::to_string(requiredReadiness)));
-    out << metric(text::labels::missionDifficulty, signedPercent(state.screen == Screen::Launch ? context.flightModel.pressureModifier : missionPressureModifier(state, catalog, *displayDestination)));
+        transferLaunch ? display::multiplier(displayDestination->targetMultiplier) :
+                         (requiredReadiness == 0 ? std::string(text::panel::complete) : display::fraction(state.run.frontierReadiness, requiredReadiness)));
+    out << metric(text::labels::missionDifficulty, display::signedPercent(state.screen == Screen::Launch ? context.flightModel.pressureModifier : missionPressureModifier(state, catalog, *displayDestination)));
     out << metric(text::labels::crewStress, crewStressSummary(astronaut));
     out << "</div>";
 
     if (state.screen == Screen::Launch) {
-        const double displayedMultiplier = context.returningHome
+        const double displayedMultiplier = context.flightActions.returningHome
             ? returnTelemetryMultiplier(context.returnBurnMultiplier, context.flightModel.crashMultiplier, context.returnElapsed, context.returnDuration)
             : context.currentMultiplier;
         const TelemetryEvent event = telemetryAt(context.flightModel, displayedMultiplier);
         const double recoveryRisk = returnHomeRisk(context.flightModel, catalog, state, displayedMultiplier);
-        const double returnProgress = smoothStep(context.returnElapsed / std::max(0.1, context.returnDuration));
+        const double returnProgress = math::smoothStep(context.returnElapsed / std::max(0.1, context.returnDuration));
 
-        out << "<h2>" << htmlEscape(context.returningHome ? text::panel::sections::returnBurn : (transferLaunch ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight)) << "</h2>";
+        out << "<h2>" << htmlEscape(context.flightActions.returningHome ? text::panel::sections::returnBurn : (transferLaunch ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight)) << "</h2>";
         out << "<div class=\"metric-grid\">";
-        out << metric(text::labels::burnDepth, multiplier(displayedMultiplier));
-        out << metric(context.returningHome ? text::labels::returnProgress : (transferLaunch ? text::labels::requiredBurn : text::labels::dataGoal),
-            context.returningHome ? percent(returnProgress) : multiplier(displayDestination->targetMultiplier));
-        out << metric(text::labels::returnRisk, percent(recoveryRisk));
+        out << metric(text::labels::burnDepth, display::multiplier(displayedMultiplier));
+        out << metric(context.flightActions.returningHome ? text::labels::returnProgress : (transferLaunch ? text::labels::requiredBurn : text::labels::dataGoal),
+            context.flightActions.returningHome ? display::percent(returnProgress) : display::multiplier(displayDestination->targetMultiplier));
+        out << metric(text::labels::returnRisk, display::percent(recoveryRisk));
         out << "</div>";
 
         out << "<h2>" << htmlEscape(text::panel::sections::telemetry) << "</h2>";
@@ -428,74 +248,70 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << warningButton(sample.label, sample.value);
         }
         out << "</div>";
-        out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, "telemetry", "ghost") << "</div>";
+        out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
         out << "<p class=\"status\">" << htmlEscape(event.message) << "</p>";
 
         out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
         out << "<div class=\"actions primary-actions\">";
-        if (context.returningHome) {
+        if (context.flightActions.returningHome) {
             out << disabledButton(text::buttons::returningHome);
         } else {
-            out << button(text::buttons::returnHome, "rr.returnHome()", "ok");
+            out << button(text::buttons::returnHome, ui::actions::returnHome, "ok");
         }
-        out << button(text::buttons::eject, "rr.ejectNow()", "danger");
+        out << button(text::buttons::eject, ui::actions::ejectNow, "danger");
         out << "</div>";
 
         out << "<div class=\"actions system-actions\">";
-        if (context.returningHome) {
+        if (context.flightActions.returningHome) {
             out << disabledButton(text::buttons::cutEngines);
             out << disabledButton(text::buttons::reliefValve);
             out << disabledButton(text::buttons::jettisonCargo);
         } else {
-            out << button(context.cutEnginesActive ? text::buttons::restoreThrust : text::buttons::cutEngines, "rr.cutEngines()", "warn");
+            out << button(context.flightActions.cutEnginesActive ? text::buttons::restoreThrust : text::buttons::cutEngines, ui::actions::cutEngines, "warn");
             out << (context.pressureReliefUsed
-                ? (context.pressureReliefFailed
+                ? (context.flightActions.pressureReliefFailed
                     ? disabledButton(text::buttons::reliefValveFailed)
-                    : (context.pressureReliefOpen
-                        ? button(text::buttons::closeValve, "rr.closeReliefValve()", "warn")
+                    : (context.flightActions.pressureReliefOpen
+                        ? button(text::buttons::closeValve, ui::actions::closeReliefValve, "warn")
                         : disabledButton(text::buttons::valveClosed)))
-                : button(text::buttons::reliefValve, "rr.pressureRelief()", "warn"));
-            out << (context.cargoJettisoned
+                : button(text::buttons::reliefValve, ui::actions::pressureRelief, "warn"));
+            out << (context.flightActions.cargoJettisoned
                 ? disabledButton(text::buttons::cargoGone)
-                : button(text::buttons::jettisonCargo, "rr.jettisonCargo()", "warn"));
+                : button(text::buttons::jettisonCargo, ui::actions::jettisonCargo, "warn"));
         }
         out << "</div>";
         std::ostringstream telemetryBody;
         telemetryBody << "<div class=\"detail-stack\">";
         for (const TelemetryChannelSample& sample : telemetrySamples(event)) {
-            telemetryBody << detailRow(std::string(sample.label), percent(sample.value));
+            telemetryBody << detailRow(std::string(sample.label), display::percent(sample.value));
         }
-        telemetryBody << detailRow(std::string(text::labels::returnRisk), percent(recoveryRisk));
-        telemetryBody << detailRow(std::string(text::labels::missionDifficulty), signedPercent(context.flightModel.pressureModifier));
+        telemetryBody << detailRow(std::string(text::labels::returnRisk), display::percent(recoveryRisk));
+        telemetryBody << detailRow(std::string(text::labels::missionDifficulty), display::signedPercent(context.flightModel.pressureModifier));
         telemetryBody << "</div>";
-        out << modalTemplate("telemetry", std::string(text::panel::modals::telemetryDetails), telemetryBody.str());
-        out << modalTemplate("settings", std::string(text::panel::modals::settings), settingsBody.str());
+        out << modalTemplate(ui::modals::telemetry, text::panel::modals::telemetryDetails, telemetryBody.str());
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
 
     if (state.screen == Screen::Results) {
+        const LaunchOutcomePresentation presentation = launchOutcomePresentation(state.lastOutcome);
         out << "<h2>" << htmlEscape(text::panel::sections::result) << "</h2>";
         out << "<div class=\"metric-grid\">";
-        out << metric(text::labels::outcome, outcomeLabel(state.lastOutcome));
+        out << metric(text::labels::outcome, std::string(presentation.label));
         out << metric(text::labels::recovery, std::string(toString(state.lastOutcome.recoveryMethod)));
-        out << metric(text::labels::burnDepth, multiplier(state.lastOutcome.ejectMultiplier));
-        out << metric(text::labels::failurePoint, multiplier(state.lastOutcome.crashMultiplier));
-        out << metric(text::labels::peakWarning, percent(state.lastOutcome.peakWarning));
-        out << metric(text::labels::peakAbort, percent(state.lastOutcome.peakAbortRisk));
-        out << metric(text::labels::creditDelta, signedMoney(state.lastOutcome.payout - state.lastOutcome.recoveryCost));
+        out << metric(text::labels::burnDepth, display::multiplier(state.lastOutcome.ejectMultiplier));
+        out << metric(text::labels::failurePoint, display::multiplier(state.lastOutcome.crashMultiplier));
+        out << metric(text::labels::peakWarning, display::percent(state.lastOutcome.peakWarning));
+        out << metric(text::labels::peakAbort, display::percent(state.lastOutcome.peakAbortRisk));
+        out << metric(text::labels::creditDelta, display::signedMoney(state.lastOutcome.payout - state.lastOutcome.recoveryCost));
         out << "</div>";
-        if (!state.lastOutcome.moduleDestroyedId.empty()) {
-            out << "<p class=\"status\">" << htmlEscape(text::panel::lostModule(state.lastOutcome.moduleDestroyedId)) << "</p>";
-        }
-        if (state.lastOutcome.crewKilled) {
-            out << "<p class=\"status\">" << htmlEscape(text::panel::messages::crewLossRecorded) << "</p>";
-        } else if (state.lastOutcome.crewInjured) {
-            out << "<p class=\"status\">" << htmlEscape(text::panel::messages::crewInjured) << "</p>";
+        for (const std::string& note : presentation.notes) {
+            out << "<p class=\"status\">" << htmlEscape(note) << "</p>";
         }
         out << "<div class=\"actions\">";
-        out << button(state.lastOutcome.type == LaunchResultType::Destroyed ? text::buttons::startReplacementRefit : text::buttons::reviewRefitOptions, "rr.next()", "ok");
+        out << button(presentation.nextActionLabel, ui::actions::next, "ok");
         out << "</div>";
-        out << modalTemplate("settings", std::string(text::panel::modals::settings), settingsBody.str());
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
 
@@ -518,11 +334,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const double rerollCost = offerRerollCost(state);
         out << "</div><div class=\"actions\">";
         out << (state.run.credits >= rerollCost
-            ? button(text::panel::rerollOffers(money(rerollCost)), "rr.rerollOffers()", "warn")
-            : disabledButton(text::panel::needCredits(money(rerollCost))));
-        out << button(text::buttons::skipRefit, "rr.next()");
+            ? button(text::panel::rerollOffers(display::money(rerollCost)), ui::actions::rerollOffers, "warn")
+            : disabledButton(display::needCredits(rerollCost)));
+        out << button(text::buttons::skipRefit, ui::actions::next);
         out << "</div>";
-        out << modalTemplate("settings", std::string(text::panel::modals::settings), settingsBody.str());
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
 
@@ -530,10 +346,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     shipBody << "<div class=\"detail-stack\">";
     for (const ModuleStatDisplay& display : moduleStatDisplays(stats)) {
         if (display.showInShipDetails) {
-            shipBody << detailRow(std::string(display.detailLabel), money(display.value));
+            shipBody << detailRow(std::string(display.detailLabel), display::money(display.value));
         }
     }
-    shipBody << detailRow(std::string(text::moduleStats::damage), std::to_string(state.run.shipDamage) + "%");
+    shipBody << detailRow(std::string(text::moduleStats::damage), display::wholePercent(state.run.shipDamage));
     shipBody << detailHeader(text::panel::details::equippedShipUpgrades);
     for (const std::string& moduleId : state.run.equippedModuleIds) {
         if (const ShipModule* module = catalog.findModule(moduleId)) {
@@ -559,13 +375,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     std::ostringstream crewBody;
     crewBody << "<div class=\"detail-stack\">";
     const CrewUpgradeStats crewUpgrades = aggregateCrewUpgradeStats(state, catalog);
+    const HangarOperationPreview hangarOps = hangarOperationPreview(state, catalog);
     if (astronaut != nullptr) {
         const int stressSteps = crewStressStepCount(astronaut->stress);
         crewBody << detailRow(text::panel::details::active, astronaut->name);
         crewBody << detailRow(text::panel::details::trait, astronaut->trait);
-        crewBody << detailRow(text::panel::details::training, std::to_string(astronaut->training) + " (" + std::to_string(effectiveTrainingLevel(*astronaut)) + " effective)");
-        crewBody << detailRow(text::panel::details::stress, std::to_string(astronaut->stress) + "% / " + std::to_string(stressSteps) + " steps");
-        crewBody << detailRow(text::panel::details::stressEffects, "NAV +" + percent(crewNavigationPenaltyFromStress(astronaut->stress)) + ", ABORT " + multiplier(crewAbortRiskMultiplierFromStress(astronaut->stress)));
+        crewBody << detailRow(text::panel::details::training, display::trainingWithEffective(astronaut->training, effectiveTrainingLevel(*astronaut)));
+        crewBody << detailRow(text::panel::details::stress, display::stressWithSteps(astronaut->stress, stressSteps));
+        crewBody << detailRow(text::panel::details::stressEffects, display::crewStressEffects(crewNavigationPenaltyFromStress(astronaut->stress), crewAbortRiskMultiplierFromStress(astronaut->stress)));
         crewBody << detailRow(text::panel::details::status, std::string(toString(astronaut->status)));
     } else {
         crewBody << detailRow(text::panel::details::active, text::panel::noneCleared);
@@ -581,21 +398,21 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
     }
     crewBody << detailHeader(text::panel::details::facilityEffects);
-    crewBody << detailRow(text::panel::details::simulatorGain, "+" + std::to_string(std::max(1, 1 + crewUpgrades.trainingGain)) + " training");
-    crewBody << detailRow(text::panel::details::simulatorStress, "+" + std::to_string(crewTrainingStressGain(state, catalog)) + " stress");
-    crewBody << detailRow(text::panel::details::medicalRest, "-" + std::to_string(crewRestStressRecovery(state, catalog)) + " stress now");
+    crewBody << detailRow(text::panel::details::simulatorGain, "+" + std::to_string(hangarOps.trainingGain) + " training");
+    crewBody << detailRow(text::panel::details::simulatorStress, "+" + std::to_string(hangarOps.trainingStressGain) + " stress");
+    crewBody << detailRow(text::panel::details::medicalRest, "-" + std::to_string(hangarOps.restStressRecovery) + " stress now");
     crewBody << detailRow(text::panel::details::launchStress, "-" + std::to_string(crewUpgrades.launchStressRelief) + " stress");
-    crewBody << detailRow(text::panel::details::traitModifiers, "+" + percent(std::max(0.0, crewUpgrades.traitModifier)));
+    crewBody << detailRow(text::panel::details::traitModifiers, display::signedPercent(std::max(0.0, crewUpgrades.traitModifier)));
     crewBody << "</div>";
 
     std::ostringstream frontierBody;
     frontierBody << "<div class=\"detail-stack\">";
     frontierBody << detailRow(text::panel::details::current, currentFrontier.name);
-    frontierBody << detailRow(text::labels::flightData, requiredReadiness == 0 ? std::string(text::panel::complete) : std::to_string(state.run.frontierReadiness) + "/" + std::to_string(requiredReadiness));
-    frontierBody << detailRow(text::labels::missionDifficulty, signedPercent(missionPressureModifier(state, catalog, currentFrontier)));
+    frontierBody << detailRow(text::labels::flightData, requiredReadiness == 0 ? std::string(text::panel::complete) : display::fraction(state.run.frontierReadiness, requiredReadiness));
+    frontierBody << detailRow(text::labels::missionDifficulty, display::signedPercent(missionPressureModifier(state, catalog, currentFrontier)));
     if (next != nullptr) {
         frontierBody << detailRow(text::panel::details::next, next->name);
-        frontierBody << detailRow(text::panel::details::transferBurn, multiplier(next->targetMultiplier));
+        frontierBody << detailRow(text::panel::details::transferBurn, display::multiplier(next->targetMultiplier));
     } else {
         frontierBody << detailRow(text::panel::details::next, text::panel::noneCharted);
     }
@@ -609,73 +426,70 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     if (crewLaunchBlocked) {
         launchBlockedBody << "<p class=\"status\">" << htmlEscape(text::panel::messages::noLivingCrewBlocked) << "</p>";
     }
-    launchBlockedBody << detailRow(text::labels::hullDamage, std::to_string(state.run.shipDamage) + "%");
+    launchBlockedBody << detailRow(text::labels::hullDamage, display::wholePercent(state.run.shipDamage));
     launchBlockedBody << detailRow(text::panel::details::crew, astronaut == nullptr ? std::string(text::panel::noneCleared) : astronaut->name);
     launchBlockedBody << detailRow(text::panel::details::requiredAction, hullLaunchBlocked ? text::panel::details::repairVehicle : text::panel::details::recruitCrew);
     launchBlockedBody << "</div><div class=\"modal-actions actions\">";
     if (hullLaunchBlocked) {
-        const double blockedRepairCost = repairShipCost(state);
-        launchBlockedBody << (state.run.credits >= blockedRepairCost
-            ? button(text::buttons::assignRepairBay, "rr.repairShip()", "ok")
-            : disabledButton(text::panel::needCredits(money(blockedRepairCost))));
+        launchBlockedBody << (hangarOps.repairAvailable
+            ? button(text::buttons::assignRepairBay, ui::actions::repairShip, "ok")
+            : disabledButton(display::needCredits(hangarOps.repairCost)));
     }
     if (crewLaunchBlocked) {
-        launchBlockedBody << button(text::buttons::recruitCrew, "rr.recruitCrew()", "ok");
+        launchBlockedBody << button(text::buttons::recruitCrew, ui::actions::recruitCrew, "ok");
     }
     launchBlockedBody << "</div>";
 
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
     out << "<div class=\"summary-grid\">";
-    out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::ship) << "</span><strong>" << state.run.shipDamage << "% damage</strong>"
-        << modalButton(text::buttons::details, "ship", "ghost") << "</article>";
+    out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::ship) << "</span><strong>" << htmlEscape(display::damage(state.run.shipDamage)) << "</strong>"
+        << modalButton(text::buttons::details, ui::modals::ship, "ghost") << "</article>";
     out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::crew) << "</span><strong>"
         << htmlEscape(astronaut == nullptr ? std::string(text::panel::noPilot) : astronaut->name) << "</strong>"
-        << modalButton(text::buttons::details, "crew", "ghost") << "</article>";
+        << modalButton(text::buttons::details, ui::modals::crew, "ghost") << "</article>";
     out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::frontier) << "</span><strong>" << htmlEscape(currentFrontier.name) << "</strong>"
-        << modalButton(text::buttons::details, "frontier", "ghost") << "</article>";
+        << modalButton(text::buttons::details, ui::modals::frontier, "ghost") << "</article>";
     out << "</div>";
 
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
     out << "<div class=\"ops-grid\">";
-    const int repairAmount = repairShipAmount(state);
-    const double repairCost = repairShipCost(state);
     out << operationCard(
         std::string(text::panel::ops::repairBay),
-        repairAmount > 0 ? text::panel::repairDetail(repairAmount) : std::string(text::panel::messages::noStructuralWork),
-        repairAmount > 0 ? text::panel::credits(money(repairCost)) : std::string(text::panel::shipStable),
-        "rr.repairShip()",
-        repairAmount > 0 && state.run.credits >= repairCost,
+        hangarOps.repairAmount > 0 ? text::panel::repairDetail(hangarOps.repairAmount) : std::string(text::panel::messages::noStructuralWork),
+        hangarOps.repairAmount > 0 ? display::credits(hangarOps.repairCost) : std::string(text::panel::shipStable),
+        ui::actions::repairShip,
+        hangarOps.repairAvailable,
         "repair");
     if (astronaut == nullptr) {
-        out << operationCard(std::string(text::panel::ops::crewIntake), std::string(text::panel::messages::emergencyReplacement), std::string(text::panel::zeroCredits), "rr.recruitCrew()", true, "crew");
-        out << operationCard(std::string(text::panel::ops::reserveRoster), std::string(text::panel::messages::reserveRoster), text::panel::credits(money(tuning::hangar::recruitCost)), "rr.recruitCrew()", state.run.credits >= tuning::hangar::recruitCost, "crew");
+        out << operationCard(std::string(text::panel::ops::crewIntake), std::string(text::panel::messages::emergencyReplacement), display::credits(hangarOps.recruitCost), ui::actions::recruitCrew, hangarOps.recruitAvailable, "crew");
+        out << operationCard(std::string(text::panel::ops::reserveRoster), std::string(text::panel::messages::reserveRoster), display::credits(tuning::hangar::recruitCost), ui::actions::recruitCrew, state.run.credits >= tuning::hangar::recruitCost, "crew");
     } else {
         out << operationCard(
             std::string(text::panel::ops::simulatorBurn),
-            text::panel::simulatorDetail(std::max(1, 1 + crewUpgrades.trainingGain), crewTrainingStressGain(state, catalog)),
-            text::panel::credits(money(crewTrainingCost(state, catalog))),
-            "rr.trainCrew()",
-            state.run.credits >= crewTrainingCost(state, catalog) && astronaut->stress + crewTrainingStressGain(state, catalog) <= tuning::crew::maxStress,
+            text::panel::simulatorDetail(hangarOps.trainingGain, hangarOps.trainingStressGain),
+            display::credits(hangarOps.trainingCost),
+            ui::actions::trainCrew,
+            hangarOps.trainingAvailable,
             "crew");
         out << operationCard(
             std::string(text::panel::ops::medicalRest),
-            text::panel::restDetail(crewRestStressRecovery(state, catalog)),
-            text::panel::credits(money(crewRestCost(state, catalog))),
-            "rr.restCrew()",
-            state.run.credits >= crewRestCost(state, catalog),
+            text::panel::restDetail(hangarOps.restStressRecovery),
+            display::credits(hangarOps.restCost),
+            ui::actions::restCrew,
+            hangarOps.restAvailable,
             "crew");
     }
     out << "</div>";
 
     out << "<div class=\"actions\">";
     out << (hullLaunchBlocked || crewLaunchBlocked
-        ? modalButton(text::buttons::launchProvingFlight, "launch_blocked", "ok")
-        : button(text::buttons::launchProvingFlight, "rr.startLaunch()", "ok"));
+        ? modalButton(text::buttons::launchProvingFlight, ui::modals::launchBlocked, "ok")
+        : button(text::buttons::launchProvingFlight, ui::actions::startLaunch, "ok"));
     if (next != nullptr) {
         if (canCommitToNextFrontier(state, catalog)) {
             out << (hullLaunchBlocked || crewLaunchBlocked
-                ? modalButton(text::panel::attemptFrontier(next->name), "launch_blocked", "danger")
-                : button(text::panel::attemptFrontier(next->name), "rr.attemptFrontier()", "danger"));
+                ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
+                : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger"));
         } else {
             out << disabledButton(text::buttons::needFlightData);
         }
@@ -691,14 +505,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     legacyBody << "</div>";
 
     out << "<div class=\"utility-row bottom-tools\">";
-    out << modalButton(text::buttons::legacy, "legacy", "ghost");
+    out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
     out << "</div>";
-    out << modalTemplate("ship", std::string(text::panel::modals::shipDetails), shipBody.str());
-    out << modalTemplate("crew", std::string(text::panel::modals::crewDetails), crewBody.str());
-    out << modalTemplate("frontier", std::string(text::panel::modals::frontierDetails), frontierBody.str());
-    out << modalTemplate("launch_blocked", std::string(text::panel::modals::launchHold), launchBlockedBody.str());
-    out << modalTemplate("legacy", std::string(text::panel::modals::legacy), legacyBody.str());
-    out << modalTemplate("settings", std::string(text::panel::modals::settings), settingsBody.str());
+    out << modalTemplate(ui::modals::ship, text::panel::modals::shipDetails, shipBody.str());
+    out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody.str());
+    out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody.str());
+    out << modalTemplate(ui::modals::launchBlocked, text::panel::modals::launchHold, launchBlockedBody.str());
+    out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody.str());
+    out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
 
     return out.str();
 }

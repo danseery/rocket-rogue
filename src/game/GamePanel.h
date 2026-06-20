@@ -17,12 +17,8 @@ struct PanelRenderContext {
     double returnBurnMultiplier = 1.0;
     double returnElapsed = 0.0;
     double returnDuration = 1.0;
-    bool returningHome = false;
-    bool cutEnginesActive = false;
+    FlightActionState flightActions;
     bool pressureReliefUsed = false;
-    bool pressureReliefOpen = false;
-    bool pressureReliefFailed = false;
-    bool cargoJettisoned = false;
 };
 
 std::string buildGamePanelHtml(const PanelRenderContext& context);

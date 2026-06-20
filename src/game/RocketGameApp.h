@@ -42,13 +42,9 @@ private:
     };
 
     struct FlightControlState {
-        bool returningHome = false;
         bool returnDriftHome = false;
-        bool cutEnginesActive = false;
         bool pressureReliefUsed = false;
-        bool pressureReliefOpen = false;
-        bool pressureReliefFailed = false;
-        bool cargoJettisoned = false;
+        FlightActionState actions;
     };
 
     struct ResultViewState {

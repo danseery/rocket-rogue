@@ -92,18 +92,32 @@ Refit economy should reward recovered risk in discrete shelves:
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 
+Flight controls that modify the launch model should flow through `FlightActionState` and `applyFlightActions` in `src/core/LaunchSimulation.*`. `RocketGameApp` owns when an action is available or consumed during the session, but core owns how active actions compose into telemetry, pacing, and return risk.
+
+Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
+
 Shared game constants and player-facing copy should have one owner:
 
 - `src/core/Tuning.h` owns balance values such as refit costs, crew stress steps, mission difficulty, action tradeoffs, launch pacing, warning thresholds, and reward shelves.
-- `src/core/GameText.h` owns reusable display text: status lines, telemetry warning copy, core labels, button labels, module stat labels, and module threat wording.
+- `src/core/GameText.h` owns reusable display text: status lines, telemetry warning copy, core labels, enum display labels, button labels, module stat labels, and module threat wording.
+- `src/core/GameFormat.h` owns reusable numeric display formatting such as credits, signed deltas, multipliers, percentages, readiness fractions, damage summaries, and crew stress/training summaries.
+- `src/core/GameMath.h` owns reusable equation helpers such as clamped `smoothStep` shaping. Do not duplicate easing or shaping formulas inside app, panel, or simulation code.
+- `src/core/LaunchStatus.h` owns launch/return status-line selection. App code should pass the current telemetry/action context into it instead of branching directly on warning thresholds for player-facing copy.
+- `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
+- `src/core/RefitPresentation.h` owns module and crew-upgrade card presentation: slot classes, glyphs, threat copy, primary impact, and stat chips. Panels should render the returned presentation data and keep pricing/action wiring separate.
+- `src/core/ContentIds.h` owns persistent content IDs and unlock keys for modules, crew facilities, frames, astronauts, and destinations. Content definitions, save migrations, tests, and scripted rewards should use these shared IDs instead of raw strings.
+- `src/core/SaveSchema.h` owns the current save header, field keys, and line-format delimiters. Serializer, parser, and migration tests should use these shared constants instead of duplicating save strings.
 - `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
+- `src/core/GameUi.h` owns stable browser panel action IDs and modal IDs. `GamePanel` should emit these data-like IDs, while `web/shell.html` maps them to exported C++ functions. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated HTML.
 
 Telemetry equation constants live under `tuning::telemetry`: pulse profiles, early/late channel buildup, readable minimums, abort certainty, and telemetry-driven stress. Balance the feel of warning dials there before changing formula structure.
 
 Outcome math should also stay tuned from one place. Survival odds, return-home risk, rescue costs, ship damage curves, useful-data thresholds, blueprint share thresholds, and post-flight crew stress all live under `tuning::outcomes` or `tuning::stress` so balance changes do not require spelunking through launch resolution branches.
 
+Post-launch crew stress should flow through `postLaunchCrewStress` / `postLaunchCrewStressGain` in `src/core/GameState.*`. That helper exposes base stress, warning contribution, abort contribution, facility relief, and total stress so future events, facilities, and UI can share one model.
+
 When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visible wording to `GameText.h`, and any reusable channel/event metadata to a small core helper before wiring the behavior into `GameState`, `LaunchSimulation`, `RocketGameApp`, or `GamePanel`.
 
 ## Persistence
 
-The save format is versioned and line-based for a small dependency-free POC. The web build stores it in `localStorage` via `RocketBridge`. Future production builds should replace this with a JSON or binary schema plus migration tests once the content stabilizes.
+The save format is versioned and line-based for a small dependency-free POC. `SaveSchema.h` defines the header, field keys, and delimiters so save/load code and tests stay synchronized as new fields are added. The web build stores saves in `localStorage` via `RocketBridge`. Future production builds should replace this with a JSON or binary schema plus migration tests once the content stabilizes.

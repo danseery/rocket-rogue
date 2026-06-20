@@ -1,4 +1,7 @@
 #include "core/SaveData.h"
+#include "core/ContentIds.h"
+#include "core/GameText.h"
+#include "core/SaveSchema.h"
 
 #include <algorithm>
 #include <charconv>
@@ -98,14 +101,23 @@ double parseDouble(std::string_view text, double fallback)
     return end == copy.c_str() ? fallback : value;
 }
 
+template <typename Value>
+void writeField(std::ostringstream& out, std::string_view key, const Value& value)
+{
+    out << key << save_schema::keyValueDelimiter << value << "\n";
+}
+
 std::string serializeCrew(const std::vector<Astronaut>& crew)
 {
     std::ostringstream out;
     for (std::size_t i = 0; i < crew.size(); ++i) {
         if (i > 0) {
-            out << ';';
+            out << save_schema::crewRecordDelimiter;
         }
-        out << crew[i].id << ':' << crew[i].training << ':' << crew[i].stress << ':' << statusToInt(crew[i].status);
+        out << crew[i].id
+            << save_schema::crewFieldDelimiter << crew[i].training
+            << save_schema::crewFieldDelimiter << crew[i].stress
+            << save_schema::crewFieldDelimiter << statusToInt(crew[i].status);
     }
     return out.str();
 }
@@ -113,8 +125,8 @@ std::string serializeCrew(const std::vector<Astronaut>& crew)
 std::vector<Astronaut> parseCrew(std::string_view text)
 {
     std::vector<Astronaut> crew;
-    for (const std::string& record : split(text, ';')) {
-        const std::vector<std::string> fields = split(record, ':');
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
         if (fields.empty()) {
             continue;
         }
@@ -138,7 +150,7 @@ std::vector<Astronaut> parseCrew(std::string_view text)
 std::vector<int> parseInts(std::string_view text)
 {
     std::vector<int> values;
-    for (const std::string& item : split(text, ',')) {
+    for (const std::string& item : split(text, save_schema::listDelimiter)) {
         values.push_back(parseInt(item, 0));
     }
     return values;
@@ -190,7 +202,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
-    state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{"starter"} : save.unlockKeys;
+    state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.furthestTier = save.furthestTier;
     state.meta.shipsLost = save.shipsLost;
@@ -217,9 +229,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             });
             if (found == state.run.crew.end()) {
                 Astronaut recruit = savedAstronaut;
-                recruit.name = savedAstronaut.id.find("replacement_") == 0 ? "Replacement Cadet" : savedAstronaut.id;
-                recruit.background = "Restored crew record";
-                recruit.trait = "Learns quickly";
+                recruit.name = text::isReplacementId(savedAstronaut.id) ? std::string(text::panel::messages::replacementCadet) : savedAstronaut.id;
+                recruit.background = std::string(text::panel::messages::restoredCrewBackground);
+                recruit.trait = std::string(text::panel::messages::generatedRecruitTrait);
                 state.run.crew.push_back(recruit);
             }
         }
@@ -230,43 +242,45 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
 std::string serializeSaveData(const SaveData& save)
 {
     std::ostringstream out;
-    out << "RR_SAVE_V1\n";
-    out << "version=" << save.version << "\n";
-    out << "seed=" << save.seed << "\n";
-    out << "credits=" << save.credits << "\n";
-    out << "destinationIndex=" << save.destinationIndex << "\n";
-    out << "frontierReadiness=" << save.frontierReadiness << "\n";
-    out << "shipDamage=" << save.shipDamage << "\n";
-    out << "frameId=" << save.frameId << "\n";
-    out << "offerRerolls=" << save.offerRerollsThisExpedition << "\n";
-    out << "repairOps=" << save.repairOpsThisExpedition << "\n";
-    out << "trainingOps=" << save.trainingOpsThisExpedition << "\n";
-    out << "restOps=" << save.restOpsThisExpedition << "\n";
-    out << "inventory=" << join(save.inventoryModuleIds, ',') << "\n";
-    out << "equipped=" << join(save.equippedModuleIds, ',') << "\n";
-    out << "crewUpgrades=" << join(save.crewUpgradeIds, ',') << "\n";
-    out << "unlocks=" << join(save.unlockKeys, ',') << "\n";
-    out << "blueprints=" << save.blueprintProgress << "\n";
-    out << "furthestTier=" << save.furthestTier << "\n";
-    out << "shipsLost=" << save.shipsLost << "\n";
-    out << "astronautsLost=" << save.astronautsLost << "\n";
-    out << "destinationAttempts=" << joinInts(save.destinationAttempts, ',') << "\n";
-    out << "destinationSuccesses=" << joinInts(save.destinationSuccesses, ',') << "\n";
-    out << "memorials=" << join(save.memorials, '|') << "\n";
-    out << "famousLaunches=" << join(save.famousLaunches, '|') << "\n";
-    out << "crew=" << serializeCrew(save.crew) << "\n";
+    out << save_schema::header << "\n";
+    writeField(out, save_schema::field::version, save.version);
+    writeField(out, save_schema::field::seed, save.seed);
+    writeField(out, save_schema::field::credits, save.credits);
+    writeField(out, save_schema::field::destinationIndex, save.destinationIndex);
+    writeField(out, save_schema::field::frontierReadiness, save.frontierReadiness);
+    writeField(out, save_schema::field::shipDamage, save.shipDamage);
+    writeField(out, save_schema::field::frameId, save.frameId);
+    writeField(out, save_schema::field::offerRerolls, save.offerRerollsThisExpedition);
+    writeField(out, save_schema::field::repairOps, save.repairOpsThisExpedition);
+    writeField(out, save_schema::field::trainingOps, save.trainingOpsThisExpedition);
+    writeField(out, save_schema::field::restOps, save.restOpsThisExpedition);
+    writeField(out, save_schema::field::inventory, join(save.inventoryModuleIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::equipped, join(save.equippedModuleIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::crewUpgrades, join(save.crewUpgradeIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
+    writeField(out, save_schema::field::blueprints, save.blueprintProgress);
+    writeField(out, save_schema::field::furthestTier, save.furthestTier);
+    writeField(out, save_schema::field::shipsLost, save.shipsLost);
+    writeField(out, save_schema::field::astronautsLost, save.astronautsLost);
+    writeField(out, save_schema::field::destinationAttempts, joinInts(save.destinationAttempts, save_schema::listDelimiter));
+    writeField(out, save_schema::field::destinationSuccesses, joinInts(save.destinationSuccesses, save_schema::listDelimiter));
+    writeField(out, save_schema::field::memorials, join(save.memorials, save_schema::textListDelimiter));
+    writeField(out, save_schema::field::famousLaunches, join(save.famousLaunches, save_schema::textListDelimiter));
+    writeField(out, save_schema::field::crew, serializeCrew(save.crew));
     return out.str();
 }
 
 std::optional<SaveData> deserializeSaveData(std::string_view text)
 {
-    if (text.empty() || text.find("RR_SAVE_V1") != 0) {
+    const std::size_t firstLineEnd = text.find('\n');
+    const std::string_view headerLine = firstLineEnd == std::string_view::npos ? text : text.substr(0, firstLineEnd);
+    if (headerLine != save_schema::header) {
         return std::nullopt;
     }
 
     SaveData save;
     for (std::string_view line : split(text, '\n')) {
-        const std::size_t equals = line.find('=');
+        const std::size_t equals = line.find(save_schema::keyValueDelimiter);
         if (equals == std::string_view::npos) {
             continue;
         }
@@ -274,53 +288,53 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         const std::string_view key = line.substr(0, equals);
         const std::string_view value = line.substr(equals + 1);
 
-        if (key == "version") {
+        if (key == save_schema::field::version) {
             save.version = parseInt(value, save.version);
-        } else if (key == "seed") {
+        } else if (key == save_schema::field::seed) {
             save.seed = parseU64(value, save.seed);
-        } else if (key == "credits") {
+        } else if (key == save_schema::field::credits) {
             save.credits = parseDouble(value, save.credits);
-        } else if (key == "destinationIndex") {
+        } else if (key == save_schema::field::destinationIndex) {
             save.destinationIndex = parseInt(value, save.destinationIndex);
-        } else if (key == "frontierReadiness") {
+        } else if (key == save_schema::field::frontierReadiness) {
             save.frontierReadiness = parseInt(value, save.frontierReadiness);
-        } else if (key == "shipDamage") {
+        } else if (key == save_schema::field::shipDamage) {
             save.shipDamage = parseInt(value, save.shipDamage);
-        } else if (key == "frameId") {
+        } else if (key == save_schema::field::frameId) {
             save.frameId = std::string(value);
-        } else if (key == "offerRerolls") {
+        } else if (key == save_schema::field::offerRerolls) {
             save.offerRerollsThisExpedition = parseInt(value, save.offerRerollsThisExpedition);
-        } else if (key == "repairOps") {
+        } else if (key == save_schema::field::repairOps) {
             save.repairOpsThisExpedition = parseInt(value, save.repairOpsThisExpedition);
-        } else if (key == "trainingOps") {
+        } else if (key == save_schema::field::trainingOps) {
             save.trainingOpsThisExpedition = parseInt(value, save.trainingOpsThisExpedition);
-        } else if (key == "restOps") {
+        } else if (key == save_schema::field::restOps) {
             save.restOpsThisExpedition = parseInt(value, save.restOpsThisExpedition);
-        } else if (key == "inventory") {
-            save.inventoryModuleIds = split(value, ',');
-        } else if (key == "equipped") {
-            save.equippedModuleIds = split(value, ',');
-        } else if (key == "crewUpgrades") {
-            save.crewUpgradeIds = split(value, ',');
-        } else if (key == "unlocks") {
-            save.unlockKeys = split(value, ',');
-        } else if (key == "blueprints") {
+        } else if (key == save_schema::field::inventory) {
+            save.inventoryModuleIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::equipped) {
+            save.equippedModuleIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::crewUpgrades) {
+            save.crewUpgradeIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::unlocks) {
+            save.unlockKeys = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::blueprints) {
             save.blueprintProgress = parseInt(value, save.blueprintProgress);
-        } else if (key == "furthestTier") {
+        } else if (key == save_schema::field::furthestTier) {
             save.furthestTier = parseInt(value, save.furthestTier);
-        } else if (key == "shipsLost") {
+        } else if (key == save_schema::field::shipsLost) {
             save.shipsLost = parseInt(value, save.shipsLost);
-        } else if (key == "astronautsLost") {
+        } else if (key == save_schema::field::astronautsLost) {
             save.astronautsLost = parseInt(value, save.astronautsLost);
-        } else if (key == "destinationAttempts") {
+        } else if (key == save_schema::field::destinationAttempts) {
             save.destinationAttempts = parseInts(value);
-        } else if (key == "destinationSuccesses") {
+        } else if (key == save_schema::field::destinationSuccesses) {
             save.destinationSuccesses = parseInts(value);
-        } else if (key == "memorials") {
-            save.memorials = split(value, '|');
-        } else if (key == "famousLaunches") {
-            save.famousLaunches = split(value, '|');
-        } else if (key == "crew") {
+        } else if (key == save_schema::field::memorials) {
+            save.memorials = split(value, save_schema::textListDelimiter);
+        } else if (key == save_schema::field::famousLaunches) {
+            save.famousLaunches = split(value, save_schema::textListDelimiter);
+        } else if (key == save_schema::field::crew) {
             save.crew = parseCrew(value);
         }
     }

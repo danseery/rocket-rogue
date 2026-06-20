@@ -1,4 +1,5 @@
 #include "core/LaunchSimulation.h"
+#include "core/GameMath.h"
 #include "core/GameText.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
@@ -139,12 +140,6 @@ double telemetryWave(double multiplier, double crashMultiplier, double frequency
 double telemetryPulse(const tuning::telemetry::PulseProfile& profile, double multiplier, double crashMultiplier)
 {
     return profile.base + telemetryWave(multiplier, crashMultiplier, profile.frequency, profile.phase) * profile.waveScale;
-}
-
-double smoothStep(double value)
-{
-    const double t = std::clamp(value, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
 }
 
 int destinationHistoryIndex(const ContentCatalog& catalog, std::string_view destinationId)
@@ -370,6 +365,21 @@ PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch)
     return lightened;
 }
 
+PreparedLaunch applyFlightActions(const PreparedLaunch& launch, const FlightActionState& actions)
+{
+    PreparedLaunch modified = launch;
+    if (actions.pressureReliefOpen || actions.pressureReliefFailed) {
+        modified = withPressureRelief(modified, actions.pressureReliefFailed);
+    }
+    if (actions.cargoJettisoned) {
+        modified = withJettisonedCargo(modified);
+    }
+    if (actions.cutEnginesActive && !actions.returningHome) {
+        modified = withCutEngines(modified);
+    }
+    return modified;
+}
+
 double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
 {
     const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
@@ -386,7 +396,7 @@ double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& dest
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
 {
     const double progress = std::clamp(returnElapsed / std::max(0.1, returnDuration), 0.0, 1.0);
-    const double shaped = smoothStep(progress);
+    const double shaped = math::smoothStep(progress);
     const double headroom = std::max(0.04, crashMultiplier - commitMultiplier);
     const double overshoot = std::min(headroom * 0.22, 0.18 + headroom * 0.10);
     const double bump = std::sin(shaped * 3.1415926535) * overshoot;

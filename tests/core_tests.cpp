@@ -1,15 +1,24 @@
 #include "core/Content.h"
+#include "core/ContentIds.h"
+#include "core/GameFormat.h"
+#include "core/GameMath.h"
 #include "core/GameState.h"
+#include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
+#include "core/OutcomePresentation.h"
+#include "core/RefitPresentation.h"
 #include "core/SaveData.h"
+#include "core/SaveSchema.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
+#include "core/GameUi.h"
 
 #include <cassert>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <string>
 
 using namespace rocket;
 
@@ -293,6 +302,73 @@ void emergencyActionsTradeOneRiskForAnother()
     require(returnHomeRisk(jettisoned, catalog, state, burn) > returnHomeRisk(launch, catalog, state, burn), "cargo jettison should make return home riskier");
 }
 
+void flightActionsComposeThroughOneCoreHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
+    Random rng(67);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+
+    FlightActionState actions;
+    actions.cutEnginesActive = true;
+    actions.pressureReliefOpen = true;
+    actions.cargoJettisoned = true;
+    const PreparedLaunch combined = applyFlightActions(launch, actions);
+    require(combined.throttleFactor == tuning::launch::cutEngineThrottleFactor, "action composition should apply cut-engine throttle");
+    require(combined.pressureRelief == tuning::launch::pressureReliefSuccessAmount, "action composition should apply relief valve pressure effect");
+    require(combined.cargoReturnPenalty == tuning::launch::cargoReturnPenalty, "action composition should apply cargo return penalty");
+
+    actions.returningHome = true;
+    const PreparedLaunch returning = applyFlightActions(launch, actions);
+    require(returning.throttleFactor == launch.throttleFactor, "return-home action composition should not keep cut-engine throttle");
+    require(returning.pressureRelief == tuning::launch::pressureReliefSuccessAmount, "return-home composition should preserve open relief valve effects");
+    require(returning.cargoReturnPenalty == tuning::launch::cargoReturnPenalty, "return-home composition should preserve cargo return penalty");
+}
+
+void launchStatusLinesComeFromSharedSelector()
+{
+    TelemetryEvent nominal;
+    nominal.message = "Tracking system margins below limits";
+
+    LaunchStatusContext context;
+    context.event = nominal;
+    require(launchStatusLine(context) == std::string(text::status::provingBurnStable), "nominal proving flight should use shared proving status");
+
+    context.pastDataGoal = true;
+    require(launchStatusLine(context) == std::string(text::status::dataGoalReached), "past-goal proving flight should use shared goal status");
+
+    context.actions.cutEnginesActive = true;
+    require(launchStatusLine(context) == std::string(text::status::enginesCutAfterGoal), "cut engines after goal should use shared cut-engine status");
+
+    context = {};
+    context.event = nominal;
+    context.frontierTransfer = true;
+    require(launchStatusLine(context) == std::string(text::status::transferBurnStable), "nominal transfer should use shared transfer status");
+
+    context = {};
+    context.event = nominal;
+    context.actions.returningHome = true;
+    context.returnProgress = tuning::session::returnEarlyProgressThreshold - 0.01;
+    require(launchStatusLine(context) == std::string(text::status::returnBurnRotating), "early return burn should use shared rotation status");
+
+    context.returnProgress = tuning::session::returnEarlyProgressThreshold + 0.01;
+    require(launchStatusLine(context) == std::string(text::status::returnBurnUnderway), "later return burn should use shared return status");
+
+    context.returnDriftHome = true;
+    require(launchStatusLine(context) == std::string(text::status::coastingHome), "drift return should use shared coast status");
+
+    TelemetryEvent critical = nominal;
+    critical.message = "TEMP: cooling runaway";
+    critical.warning = tuning::launch::warningCriticalThreshold + 0.01;
+    context = {};
+    context.event = critical;
+    require(launchStatusLine(context) == text::telemetryDecision(critical.message), "critical outbound warning should ask for a decision");
+
+    context.actions.returningHome = true;
+    context.returnDriftHome = true;
+    require(launchStatusLine(context) == text::returnDriftWarning(critical.message), "critical drift return should use return warning copy");
+}
+
 void emergencyRecruitmentPreventsDeadRosterSoftLock()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -372,7 +448,13 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 606);
     state.run.credits = 200.0;
-    state.meta.unlockKeys = {"starter", "thermal", "recovery", "deep_space", "ai"};
+    state.meta.unlockKeys = {
+        content::unlock::starter,
+        content::unlock::thermal,
+        content::unlock::recovery,
+        content::unlock::deepSpace,
+        content::unlock::ai
+    };
     state.run.inventoryModuleIds.clear();
     for (const ShipModule& module : catalog.modules) {
         state.run.inventoryModuleIds.push_back(module.id);
@@ -393,7 +475,13 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     require(buyOffer(state, catalog, crewOfferIndex), "buying a crew upgrade refit should succeed");
     require(std::find(state.run.crewUpgradeIds.begin(), state.run.crewUpgradeIds.end(), upgradeId) != state.run.crewUpgradeIds.end(), "crew upgrade should be installed");
 
-    state.run.crewUpgradeIds = {"analog_sim_bay", "high_g_simulator", "medical_recovery_ward", "mission_psych_office", "trait_coaching_lab"};
+    state.run.crewUpgradeIds = {
+        content::crewUpgrade::analogSimBay,
+        content::crewUpgrade::highGSimulator,
+        content::crewUpgrade::medicalRecoveryWard,
+        content::crewUpgrade::missionPsychOffice,
+        content::crewUpgrade::traitCoachingLab
+    };
     CrewUpgradeStats stats = aggregateCrewUpgradeStats(state, catalog);
     require(stats.trainingGain == 1, "crew simulator upgrades should aggregate training gain");
     require(stats.trainingStressRelief == 5, "crew simulator upgrades should aggregate stress relief");
@@ -437,7 +525,10 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
 
     GameState baseline = createNewGame(catalog, 707);
     GameState upgraded = baseline;
-    upgraded.run.crewUpgradeIds = {"mission_psych_office", "trait_coaching_lab"};
+    upgraded.run.crewUpgradeIds = {
+        content::crewUpgrade::missionPsychOffice,
+        content::crewUpgrade::traitCoachingLab
+    };
     Random baselineRng(7070);
     Random upgradedRng(7070);
     const PreparedLaunch baselineLaunch = prepareLaunch(baseline, catalog, baselineRng);
@@ -481,6 +572,40 @@ void hangarOpsStartCheapAndEscalate()
     require(state.run.restOpsThisExpedition == 0, "new expedition should reset rest escalation");
 }
 
+void hangarOperationPreviewMatchesCoreMath()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 818);
+    state.run.credits = 120.0;
+    state.run.shipDamage = 48;
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "hangar preview test needs a pilot");
+    pilot->stress = 42;
+
+    HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    require(preview.repairAmount == repairShipAmount(state), "hangar preview should share repair amount");
+    require(std::abs(preview.repairCost - repairShipCost(state)) < 0.001, "hangar preview should share repair cost");
+    require(preview.trainingGain == crewTrainingGain(state, catalog), "hangar preview should share training gain");
+    require(preview.trainingStressGain == crewTrainingStressGain(state, catalog), "hangar preview should share simulator stress");
+    require(std::abs(preview.trainingCost - crewTrainingCost(state, catalog)) < 0.001, "hangar preview should share training cost");
+    require(preview.restStressRecovery == crewRestStressRecovery(state, catalog), "hangar preview should share rest recovery");
+    require(std::abs(preview.restCost - crewRestCost(state, catalog)) < 0.001, "hangar preview should share rest cost");
+    require(preview.repairAvailable && preview.trainingAvailable && preview.restAvailable, "funded hangar preview should mark available ops");
+
+    pilot->stress = tuning::crew::maxStress;
+    preview = hangarOperationPreview(state, catalog);
+    require(!preview.trainingAvailable, "hangar preview should block training at max stress");
+
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    state.run.credits = 0.0;
+    preview = hangarOperationPreview(state, catalog);
+    require(preview.emergencyRecruitment, "hangar preview should flag emergency recruitment when no pilot is alive");
+    require(preview.recruitCost == tuning::hangar::emergencyRecruitCost, "hangar preview should use emergency recruit cost");
+    require(preview.recruitAvailable, "free emergency recruitment should be available when broke");
+}
+
 void lowCreditRefitWindowIncludesAffordableOffer()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -488,7 +613,11 @@ void lowCreditRefitWindowIncludesAffordableOffer()
     for (int i = 0; i < 40; ++i) {
         GameState state = createNewGame(catalog, 220 + static_cast<std::uint64_t>(i));
         state.run.credits = 35.0;
-        state.meta.unlockKeys = {"starter", "thermal", "recovery"};
+        state.meta.unlockKeys = {
+            content::unlock::starter,
+            content::unlock::thermal,
+            content::unlock::recovery
+        };
 
         Random rng(77000 + static_cast<std::uint64_t>(i));
         generateModuleOffers(state, catalog, rng);
@@ -561,24 +690,41 @@ void crewStressTracksPeakTelemetryDanger()
     tenseOutcome.peakWarning = 0.92;
     tenseOutcome.peakAbortRisk = 0.78;
 
+    const PostLaunchCrewStress calmStress = postLaunchCrewStress(calmOutcome, {});
+    const PostLaunchCrewStress tenseStress = postLaunchCrewStress(tenseOutcome, {});
+    require(calmStress.baseStress == tuning::stress::survivedLaunchStress, "survived launch stress should expose the tuned base value");
+    require(calmStress.warningStress == 0 && calmStress.abortStress == 0, "calm telemetry should not add danger stress");
+    require(calmStress.total == tuning::stress::survivedLaunchStress, "calm stress helper should match baseline stress");
+    require(tenseStress.warningStress > 0 && tenseStress.abortStress > 0, "high WARN and ABORT should both contribute stress");
+    require(tenseStress.total > calmStress.total, "near-failure telemetry should increase helper stress");
+
+    CrewUpgradeStats debriefSupport;
+    debriefSupport.launchStressRelief = 999;
+    require(postLaunchCrewStressGain(tenseOutcome, debriefSupport) == 0, "stress relief should clamp launch stress at zero");
+
     applyLaunchOutcome(calm, catalog, calmOutcome);
     applyLaunchOutcome(tense, catalog, tenseOutcome);
 
-    require(calmPilot->stress == 12, "calm survived launch should keep baseline stress gain");
+    require(calmPilot->stress == calmStress.total, "applied calm outcome should use shared stress helper");
     require(tensePilot->stress > calmPilot->stress, "near-failure telemetry should add crew stress");
-    require(tensePilot->stress >= 24, "high WARN and ABORT should create a noticeable stress penalty");
+    require(tensePilot->stress == tenseStress.total, "applied tense outcome should use shared stress helper");
 }
 
 void pressureControlModulesReducePressureTelemetry()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState bare = createNewGame(catalog, 404);
-    bare.run.equippedModuleIds = {"sparrow_engine", "patchwork_hull", "radiator_vanes", "spring_capsule"};
+    bare.run.equippedModuleIds = {
+        content::module::sparrowEngine,
+        content::module::patchworkHull,
+        content::module::radiatorVanes,
+        content::module::springCapsule
+    };
     syncLaunchConfig(bare, catalog);
 
     GameState controlled = bare;
-    controlled.run.equippedModuleIds.push_back("stable_tank");
-    controlled.run.equippedModuleIds.push_back("analog_telemetry");
+    controlled.run.equippedModuleIds.push_back(content::module::stableTank);
+    controlled.run.equippedModuleIds.push_back(content::module::analogTelemetry);
     syncLaunchConfig(controlled, catalog);
 
     Random bareRng(505);
@@ -750,13 +896,16 @@ void saveRoundTripPreservesProgress()
     state.run.repairOpsThisExpedition = 1;
     state.run.trainingOpsThisExpedition = 2;
     state.run.restOpsThisExpedition = 3;
-    state.meta.unlockKeys.push_back("thermal");
+    state.meta.unlockKeys.push_back(content::unlock::thermal);
     state.meta.blueprintProgress = 5;
     state.meta.shipsLost = 1;
     state.meta.destinationAttempts = {2, 1, 0};
     state.meta.destinationSuccesses = {1, 0, 0};
     state.meta.memorials.push_back("Test Pilot lost during Mars");
-    state.run.crewUpgradeIds = {"analog_sim_bay", "medical_recovery_ward"};
+    state.run.crewUpgradeIds = {
+        content::crewUpgrade::analogSimBay,
+        content::crewUpgrade::medicalRecoveryWard
+    };
     state.run.crew.front().training = 7;
     state.run.crew.front().stress = 42;
     state.run.crew.front().status = CrewStatus::Injured;
@@ -776,14 +925,115 @@ void saveRoundTripPreservesProgress()
     require(restored.run.repairOpsThisExpedition == 1, "repair escalation should round trip");
     require(restored.run.trainingOpsThisExpedition == 2, "training escalation should round trip");
     require(restored.run.restOpsThisExpedition == 3, "rest escalation should round trip");
-    require(hasUnlock(restored.meta, "thermal"), "unlock keys should round trip");
+    require(hasUnlock(restored.meta, content::unlock::thermal), "unlock keys should round trip");
     require(restored.meta.destinationAttempts.size() >= 3 && restored.meta.destinationAttempts[0] == 2, "destination attempts should round trip");
     require(restored.meta.destinationSuccesses.size() >= 3 && restored.meta.destinationSuccesses[0] == 1, "destination successes should round trip");
     require(restored.meta.memorials.size() == 1, "memorials should round trip");
-    require(restored.run.crewUpgradeIds.size() == 2 && restored.run.crewUpgradeIds[0] == "analog_sim_bay", "crew upgrades should round trip");
+    require(restored.run.crewUpgradeIds.size() == 2 && restored.run.crewUpgradeIds[0] == content::crewUpgrade::analogSimBay, "crew upgrades should round trip");
     require(restored.run.crew.front().training == 7, "crew training should round trip");
     require(restored.run.crew.front().stress == 42, "crew stress should round trip");
     require(restored.run.crew.front().status == CrewStatus::Injured, "crew status should round trip");
+}
+
+void saveSchemaConstantsMatchSerializedFields()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 12);
+    state.run.credits = 123.0;
+    state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
+    state.meta.memorials = {"Ada burned late", "Ben returned home"};
+
+    const std::string text = serializeSaveData(captureSaveData(state));
+    require(text.find(std::string(save_schema::header) + "\n") == 0, "save should start with shared schema header");
+    require(text.find(std::string(save_schema::field::credits) + save_schema::keyValueDelimiter) != std::string::npos, "credits key should use shared schema name");
+    require(text.find(std::string(save_schema::field::inventory) + save_schema::keyValueDelimiter) != std::string::npos, "inventory key should use shared schema name");
+    require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
+
+    const std::string minimalSave = std::string(save_schema::header) + "\n" +
+        std::string(save_schema::field::credits) + save_schema::keyValueDelimiter + "321\n";
+    const auto parsed = deserializeSaveData(minimalSave);
+    require(parsed.has_value(), "minimal save with shared header should parse");
+    require(std::abs(parsed->credits - 321.0) < 0.001, "shared credits key should parse");
+    require(!deserializeSaveData("RR_SAVE_V0\ncredits=1\n").has_value(), "unknown save header should not parse");
+}
+
+void launchOutcomePresentationIsShared()
+{
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.recoveryMethod = RecoveryMethod::ReturnHome;
+    destroyed.moduleDestroyedId = content::module::sparrowEngine;
+    destroyed.crewKilled = true;
+
+    LaunchOutcomePresentation presentation = launchOutcomePresentation(destroyed);
+    require(presentation.label == text::panel::outcomes::returnFailure, "return-home destruction should share return-failure label");
+    require(presentation.nextActionLabel == text::buttons::startReplacementRefit, "destroyed outcomes should share replacement action label");
+    require(presentation.notes.size() == 2, "destroyed outcomes should include module and crew notes");
+    require(presentation.notes[0] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
+    require(presentation.notes[1] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
+
+    LaunchOutcome transfer;
+    transfer.type = LaunchResultType::MissionComplete;
+    transfer.recoveryMethod = RecoveryMethod::TransferArrival;
+    transfer.frontierTransfer = true;
+    presentation = launchOutcomePresentation(transfer);
+    require(presentation.label == text::panel::outcomes::transferComplete, "successful transfer should share transfer label");
+    require(presentation.nextActionLabel == text::buttons::reviewRefitOptions, "survived outcomes should share refit review action label");
+    require(presentation.notes.empty(), "clean transfer should not invent result notes");
+
+    LaunchOutcome injuredEject;
+    injuredEject.type = LaunchResultType::SafeEject;
+    injuredEject.recoveryMethod = RecoveryMethod::ManualEject;
+    injuredEject.crewInjured = true;
+    presentation = launchOutcomePresentation(injuredEject);
+    require(presentation.label == text::panel::outcomes::emergencyEject, "manual ejection should share emergency eject label");
+    require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::crewInjured), "crew injury note should be shared");
+}
+
+void enumDisplayLabelsComeFromSharedText()
+{
+    require(toString(SlotType::Engine) == text::enums::slot::engine, "slot labels should come from shared text");
+    require(toString(SlotType::Cooling) == text::enums::slot::cooling, "cooling slot label should come from shared text");
+    require(toString(Rarity::Prototype) == text::enums::rarity::prototype, "rarity labels should come from shared text");
+    require(toString(CrewStatus::Injured) == text::enums::crewStatus::injured, "crew status labels should come from shared text");
+    require(toString(LaunchResultType::MissionComplete) == text::enums::launchResult::missionComplete, "launch result labels should come from shared text");
+    require(toString(RecoveryMethod::ReturnHome) == text::enums::recovery::returnHome, "recovery labels should come from shared text");
+}
+
+bool hasRefitChip(const RefitPresentation& presentation, std::string_view label, std::string_view value, bool positive)
+{
+    return std::find_if(presentation.statChips.begin(), presentation.statChips.end(), [&](const RefitStatChip& chip) {
+        return chip.label == label && chip.value == value && chip.positive == positive;
+    }) != presentation.statChips.end();
+}
+
+void refitPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const ShipModule* engine = catalog.findModule(content::module::sparrowEngine);
+    const ShipModule* tank = catalog.findModule(content::module::stableTank);
+    const CrewUpgrade* simBay = catalog.findCrewUpgrade(content::crewUpgrade::analogSimBay);
+    require(engine != nullptr && tank != nullptr && simBay != nullptr, "refit presentation test needs default content");
+
+    RefitPresentation engineCard = moduleRefitPresentation(*engine);
+    require(engineCard.slotClass == "engine", "module presentation should expose slot class");
+    require(engineCard.category == std::string(text::enums::slot::engine), "module presentation should expose shared slot label");
+    require(engineCard.rarity == std::string(text::enums::rarity::common), "module presentation should expose shared rarity label");
+    require(engineCard.glyph == "E", "module presentation should expose a stable card glyph");
+    require(engineCard.detail == std::string(text::moduleThreats::shortensExposure), "engine presentation should use shared threat copy");
+    require(engineCard.primaryImpact == "+2.0 Speed", "module presentation should expose strongest stat impact");
+    require(hasRefitChip(engineCard, text::moduleStats::speedChip, "+2.0", true), "module presentation should expose speed stat chip");
+
+    RefitPresentation tankCard = moduleRefitPresentation(*tank);
+    require(tankCard.detail == std::string(text::moduleThreats::stabilizesPressure), "fuel pressure modules should use pressure threat copy");
+    require(hasRefitChip(tankCard, text::moduleStats::pressureChip, "+0.4", true), "module presentation should expose pressure stat chip");
+
+    RefitPresentation crewCard = crewUpgradeRefitPresentation(*simBay);
+    require(crewCard.slotClass == "sensors", "crew upgrade presentation should use shared card slot class");
+    require(crewCard.category == std::string(text::panel::details::crew), "crew upgrade presentation should expose crew category");
+    require(crewCard.glyph == "C", "crew upgrade presentation should expose a stable card glyph");
+    require(crewCard.primaryImpact == text::panel::simulatorStressImpact(2), "crew upgrade presentation should expose strongest facility impact");
+    require(hasRefitChip(crewCard, text::moduleStats::simStressChip, "+2.0", true), "crew upgrade presentation should expose simulator stress chip");
 }
 
 void destinationRiskEscalates()
@@ -939,6 +1189,52 @@ void overpreparedReadinessRaisesProvingStakes()
     require(overpreparedLaunch.provingPayoutBonus > baselineLaunch.provingPayoutBonus, "extra data should increase proving flight reward");
 }
 
+void uiActionsUseStableSchemaIds()
+{
+    require(ui::actions::startLaunch == "start_launch", "start launch action should use a stable schema id");
+    require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
+    require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
+    require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
+
+    const std::string buyOffer = ui::actions::buyOffer(2);
+    require(buyOffer == "buy_offer:2", "indexed offer actions should encode the offer index in one reusable action family");
+    require(buyOffer.find("rr.") == std::string::npos, "panel action ids should not embed JavaScript snippets");
+}
+
+void contentIdsResolveAgainstDefaultCatalog()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    require(catalog.findModule(content::module::sparrowEngine) != nullptr, "starter module id should resolve");
+    require(catalog.findModule(content::module::radiatorVanes) != nullptr, "cooling module id should resolve");
+    require(catalog.findCrewUpgrade(content::crewUpgrade::analogSimBay) != nullptr, "crew upgrade id should resolve");
+    require(catalog.findFrame(content::frame::pathfinder) != nullptr, "ship frame id should resolve");
+    require(catalog.findAstronaut(content::astronaut::ava) != nullptr, "astronaut id should resolve");
+    require(catalog.findDestination(content::destination::moon) != nullptr, "destination id should resolve");
+
+    MetaProgress meta;
+    require(hasUnlock(meta, content::unlock::starter), "starter unlock should stay implicit");
+    meta.unlockKeys.push_back(content::unlock::thermal);
+    require(hasUnlock(meta, content::unlock::thermal), "named unlock key should resolve through shared ids");
+}
+
+void displayFormatAndMathHelpersAreShared()
+{
+    require(display::money(34.2) == "34", "display money should use whole mission-credit values");
+    require(display::signedMoney(12.0) == "+12", "signed money should show positive deltas explicitly");
+    require(display::multiplier(1.456) == "x1.46", "multiplier formatting should be consistent across panels");
+    require(display::percent(1.4) == "100%", "unit percent displays should clamp high values");
+    require(display::signedPercent(0.25) == "+25%", "signed percent should preserve modifier sign");
+    require(display::damage(12) == "12% damage", "damage summary should share wording and percent format");
+    require(display::trainingWithEffective(3, -2) == "3 (-2 effective)", "crew training summary should use one formatter");
+    require(display::stressWithSteps(100, 7) == "100% / 7 steps", "crew stress steps should use one formatter");
+    require(display::crewStressEffects(0.15, 2.0) == "NAV +15%, ABORT x2.00", "crew stress effects should share telemetry labels");
+
+    require(math::smoothStep(-0.5) == 0.0, "smoothStep should clamp below zero");
+    require(math::smoothStep(1.5) == 1.0, "smoothStep should clamp above one");
+    require(std::abs(math::smoothStep(0.5) - 0.5) < 0.000001, "smoothStep midpoint should stay stable");
+}
+
 } // namespace
 
 int main()
@@ -952,11 +1248,14 @@ int main()
     cutEnginesTradeHeatForNavigation();
     shipTravelIsFasterWithoutRetuningTelemetry();
     emergencyActionsTradeOneRiskForAnother();
+    flightActionsComposeThroughOneCoreHelper();
+    launchStatusLinesComeFromSharedSelector();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
     crewUpgradeOffersInstallAndModifyCrewOps();
     hangarOpsStartCheapAndEscalate();
+    hangarOperationPreviewMatchesCoreMath();
     lowCreditRefitWindowIncludesAffordableOffer();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
@@ -966,11 +1265,18 @@ int main()
     returnHomeRewardShelvesMatchRefitCosts();
     overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
+    saveSchemaConstantsMatchSerializedFields();
+    launchOutcomePresentationIsShared();
+    enumDisplayLabelsComeFromSharedText();
+    refitPresentationComesFromSharedHelper();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();
     frontierReadinessGatesProgression();
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();
+    uiActionsUseStableSchemaIds();
+    contentIdsResolveAgainstDefaultCatalog();
+    displayFormatAndMathHelpersAreShared();
 
     std::cout << "rocket_core_tests passed\n";
     return 0;
