@@ -150,6 +150,29 @@ EM_JS(int, rr_image_height, (const char* keyPtr), {
     return record && record.ready ? record.height : 0;
 });
 
+EM_JS(double, rr_device_pixel_ratio, (), {
+    const ratio = globalThis.devicePixelRatio || 1;
+    return Math.max(1, Math.min(2, ratio));
+});
+
+EM_JS(double, rr_scene_left_ndc, (), {
+    const canvas = document.getElementById("canvas");
+    const panel = document.getElementById("panel");
+    const width = (canvas && canvas.clientWidth) || globalThis.innerWidth || 1;
+    if (!panel || width <= 720) {
+        return -1;
+    }
+
+    const rect = panel.getBoundingClientRect();
+    const gutter = 24;
+    const leftPx = Math.max(0, rect.right + gutter);
+    if (width - leftPx < 520) {
+        return -1;
+    }
+
+    return Math.max(-1, Math.min(0.45, leftPx / width * 2 - 1));
+});
+
 GLuint compileShader(GLenum type, const char* source)
 {
     const GLuint shader = glCreateShader(type);
@@ -305,9 +328,20 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     double cssWidth = 1280.0;
     double cssHeight = 720.0;
     emscripten_get_element_css_size("#canvas", &cssWidth, &cssHeight);
-    emscripten_set_canvas_element_size("#canvas", static_cast<int>(cssWidth), static_cast<int>(cssHeight));
-    glViewport(0, 0, static_cast<int>(cssWidth), static_cast<int>(cssHeight));
-    viewportAspect_ = static_cast<float>(std::max(1.0, cssWidth) / std::max(1.0, cssHeight));
+    const double pixelRatio = rr_device_pixel_ratio();
+    const int drawingWidth = static_cast<int>(std::ceil(cssWidth * pixelRatio));
+    const int drawingHeight = static_cast<int>(std::ceil(cssHeight * pixelRatio));
+    emscripten_set_canvas_element_size("#canvas", drawingWidth, drawingHeight);
+    glViewport(0, 0, drawingWidth, drawingHeight);
+
+    sceneLeft_ = static_cast<float>(rr_scene_left_ndc());
+    sceneRight_ = 1.0F;
+    sceneBottom_ = -1.0F;
+    sceneTop_ = 1.0F;
+
+    const float sceneWidthPixels = std::max(1.0F, (sceneRight_ - sceneLeft_) * static_cast<float>(cssWidth) * 0.5F);
+    const float sceneHeightPixels = std::max(1.0F, (sceneTop_ - sceneBottom_) * static_cast<float>(cssHeight) * 0.5F);
+    sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
     glClearColor(0.02F + heat * 0.05F, 0.03F, 0.05F + heat * 0.02F, 1.0F);
@@ -742,12 +776,16 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bo
     const std::vector<float>* uploadVertices = &vertices;
     if (worldSpace) {
         projectedVertices_ = vertices;
-        const float aspect = std::max(0.10F, viewportAspect_);
+        const float aspect = std::max(0.10F, sceneAspect_);
         const float xScale = aspect >= 1.0F ? 1.0F / aspect : 1.0F;
         const float yScale = aspect >= 1.0F ? 1.0F : aspect;
+        const float sceneCenterX = (sceneLeft_ + sceneRight_) * 0.5F;
+        const float sceneCenterY = (sceneBottom_ + sceneTop_) * 0.5F;
+        const float sceneHalfWidth = (sceneRight_ - sceneLeft_) * 0.5F;
+        const float sceneHalfHeight = (sceneTop_ - sceneBottom_) * 0.5F;
         for (std::size_t i = 0; i + 1 < projectedVertices_.size(); i += 8) {
-            projectedVertices_[i] *= xScale;
-            projectedVertices_[i + 1] *= yScale;
+            projectedVertices_[i] = sceneCenterX + projectedVertices_[i] * xScale * sceneHalfWidth;
+            projectedVertices_[i + 1] = sceneCenterY + projectedVertices_[i + 1] * yScale * sceneHalfHeight;
         }
         uploadVertices = &projectedVertices_;
     }
