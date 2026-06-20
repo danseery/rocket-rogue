@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/GameText.h"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -205,7 +207,7 @@ struct GameState {
     MetaProgress meta;
     LaunchConfig launchConfig;
     LaunchOutcome lastOutcome;
-    std::string statusLine = "Welcome to Rocket Rogue.";
+    std::string statusLine = std::string(text::status::welcome);
 };
 
 std::string_view toString(SlotType slot);

@@ -34,36 +34,57 @@ public:
     void resetSave();
 
 private:
+    struct ReturnTripState {
+        double elapsed = 0.0;
+        double duration = 2.4;
+        double burnMultiplier = 1.0;
+        double startTravelProgress = 0.0;
+    };
+
+    struct FlightControlState {
+        bool returningHome = false;
+        bool returnDriftHome = false;
+        bool cutEnginesActive = false;
+        bool pressureReliefUsed = false;
+        bool pressureReliefOpen = false;
+        bool pressureReliefFailed = false;
+        bool cargoJettisoned = false;
+    };
+
+    struct ResultViewState {
+        bool usesTravelProgress = false;
+        double travelProgress = 0.0;
+        double elapsed = 0.0;
+    };
+
+    struct LaunchSessionState {
+        PreparedLaunch preparedLaunch;
+        double elapsed = 0.0;
+        double currentMultiplier = 1.0;
+        double peakWarning = 0.0;
+        double peakAbortRisk = 0.0;
+        ReturnTripState returnTrip;
+        FlightControlState controls;
+        ResultViewState result;
+    };
+
     void completeLaunch(double burnMultiplier, RecoveryMethod method);
     void save();
     void refreshPanel();
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
     void recordTelemetryPeak(const TelemetryEvent& event);
+    void beginLaunchSession(PreparedLaunch preparedLaunch);
+    void clearFlightControls();
+    void clearResultView();
+    double travelProgressFor(double burnMultiplier, const Destination& destination) const;
+    double liveBurnMultiplier() const;
 
     ContentCatalog catalog_;
     GameState state_;
     Random rng_;
     WebGLRenderer renderer_;
-    PreparedLaunch activeLaunch_;
-    double launchElapsed_ = 0.0;
-    double currentMultiplier_ = 1.0;
-    double peakWarning_ = 0.0;
-    double peakAbortRisk_ = 0.0;
-    bool returningHome_ = false;
-    bool returnDriftHome_ = false;
-    bool cutEnginesActive_ = false;
-    bool pressureReliefUsed_ = false;
-    bool pressureReliefOpen_ = false;
-    bool pressureReliefFailed_ = false;
-    bool cargoJettisoned_ = false;
-    double returnElapsed_ = 0.0;
-    double returnDuration_ = 2.4;
-    double returnBurnMultiplier_ = 1.0;
-    double returnStartTravelProgress_ = 0.0;
-    bool resultUsesTravelProgress_ = false;
-    double resultTravelProgress_ = 0.0;
-    double resultElapsed_ = 0.0;
+    LaunchSessionState session_;
     bool panelDirty_ = true;
 };
 

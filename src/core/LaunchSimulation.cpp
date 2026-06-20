@@ -1,4 +1,7 @@
 #include "core/LaunchSimulation.h"
+#include "core/GameText.h"
+#include "core/Telemetry.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,15 +18,15 @@ double crewTrainingBonus(const GameState& state, const ContentCatalog& catalog)
         return 0.0;
     }
 
-    double bonus = static_cast<double>(effectiveTrainingLevel(*astronaut)) * 0.055;
+    double bonus = static_cast<double>(effectiveTrainingLevel(*astronaut)) * tuning::crew::effectiveTrainingPerformanceBonus;
     const double traitMultiplier = 1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier);
 
-    if (astronaut->trait == "Calm under heat") {
-        bonus += 0.12 * traitMultiplier;
-    } else if (astronaut->trait == "Reads telemetry early") {
-        bonus += 0.06 * traitMultiplier;
-    } else if (astronaut->trait == "Improves ejection odds") {
-        bonus += 0.04 * traitMultiplier;
+    if (astronaut->trait == tuning::traits::calmUnderHeat) {
+        bonus += tuning::traits::calmUnderHeatBonus * traitMultiplier;
+    } else if (astronaut->trait == tuning::traits::readsTelemetryEarly) {
+        bonus += tuning::traits::readsTelemetryEarlyBonus * traitMultiplier;
+    } else if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
+        bonus += tuning::traits::improvesEjectionOddsPerformanceBonus * traitMultiplier;
     }
 
     return bonus;
@@ -36,9 +39,9 @@ double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
         return 0.0;
     }
 
-    double bonus = static_cast<double>(astronaut->training) * 0.025;
-    if (astronaut->trait == "Improves ejection odds") {
-        bonus += 0.16 * (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
+    double bonus = static_cast<double>(astronaut->training) * tuning::crew::escapeBonusPerTraining;
+    if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
+        bonus += tuning::traits::improvesEjectionOddsEscapeBonus * (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
     }
     return bonus;
 }
@@ -46,11 +49,11 @@ double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
 std::vector<TelemetryEvent> buildTelemetry(const PreparedLaunch& launch)
 {
     std::vector<TelemetryEvent> events;
-    events.reserve(12);
+    events.reserve(tuning::launch::telemetrySampleCount);
 
     const double maxSample = std::max(launch.config.burnGoalMultiplier, launch.crashMultiplier);
-    for (int i = 0; i < 12; ++i) {
-        const double t = static_cast<double>(i) / 11.0;
+    for (int i = 0; i < tuning::launch::telemetrySampleCount; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(tuning::launch::telemetrySampleCount - 1);
         const double multiplier = 1.0 + (maxSample - 1.0) * t;
         events.push_back(telemetryAt(launch, multiplier));
     }
@@ -62,8 +65,8 @@ TelemetryEvent peakTelemetryThrough(const PreparedLaunch& launch, double endMult
 {
     TelemetryEvent peak;
     const double maxSample = std::max(1.0, endMultiplier);
-    for (int i = 0; i < 18; ++i) {
-        const double t = static_cast<double>(i) / 17.0;
+    for (int i = 0; i < tuning::launch::peakTelemetrySampleCount; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(tuning::launch::peakTelemetrySampleCount - 1);
         const double multiplier = 1.0 + (maxSample - 1.0) * t;
         const TelemetryEvent sample = telemetryAt(launch, multiplier);
         if (sample.warning >= peak.warning) {
@@ -77,36 +80,16 @@ TelemetryEvent peakTelemetryThrough(const PreparedLaunch& launch, double endMult
 
 std::string warningMessage(const TelemetryEvent& event)
 {
-    struct Channel {
-        double value;
-        const char* critical;
-        const char* caution;
-    };
+    const TelemetryChannelSample worst = strongestTelemetrySample(event);
 
-    const Channel channels[] = {
-        {event.heat, "TEMP: cooling runaway", "TEMP: heat margin narrowing"},
-        {event.pressure, "PRESS: chamber overpressure", "PRESS: injector pressure unstable"},
-        {event.vibration, "VIB: structural oscillation", "VIB: frame resonance building"},
-        {event.guidance, "NAV: guidance divergence", "NAV: tracking solution drifting"},
-        {event.fuelMix, "MIX: fuel ratio out of range", "MIX: combustion efficiency falling"},
-        {event.abortRisk, "ABORT: escape window collapsing", "ABORT: capsule margin thinning"}
-    };
-
-    const Channel* worst = &channels[0];
-    for (const auto& channel : channels) {
-        if (channel.value > worst->value) {
-            worst = &channel;
-        }
+    if (worst.value > tuning::launch::warningCriticalThreshold) {
+        return std::string(worst.warningCopy.critical);
+    }
+    if (worst.value > tuning::launch::warningCautionThreshold) {
+        return std::string(worst.warningCopy.caution);
     }
 
-    if (worst->value > 0.88) {
-        return worst->critical;
-    }
-    if (worst->value > 0.62) {
-        return worst->caution;
-    }
-
-    return "Tracking system margins below limits";
+    return std::string(text::telemetry::nominal);
 }
 
 double overburnJackpotMultiplier(const Destination& destination, double burnMultiplier)
@@ -116,14 +99,14 @@ double overburnJackpotMultiplier(const Destination& destination, double burnMult
         return 1.0;
     }
 
-    const double normalizedOverburn = overGoal / std::max(0.20, destination.targetMultiplier - 1.0);
-    return std::clamp(std::exp(normalizedOverburn * 2.65), 1.0, 8.0);
+    const double normalizedOverburn = overGoal / std::max(tuning::launch::overburnMinimumDenominator, destination.targetMultiplier - 1.0);
+    return std::clamp(std::exp(normalizedOverburn * tuning::launch::overburnExponent), 1.0, tuning::launch::overburnMaximumMultiplier);
 }
 
 void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const ContentCatalog& catalog, const Destination& destination, const GameState& state, Random& rng)
 {
     outcome.type = LaunchResultType::Destroyed;
-    outcome.shipDamage = 100;
+    outcome.shipDamage = tuning::damage::destroyedShipDamage;
     outcome.blueprintGain = std::max(0, destination.tier / 2);
 
     const double baseSurvival = outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.48 : 0.22;
@@ -132,7 +115,7 @@ void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const C
     outcome.crewKilled = !survived;
     outcome.crewInjured = survived && rng.chance(outcome.recoveryMethod == RecoveryMethod::ManualEject ? 0.42 : 0.58);
 
-    if (!state.run.equippedModuleIds.empty() && rng.chance(0.62)) {
+    if (!state.run.equippedModuleIds.empty() && rng.chance(tuning::damage::moduleLossChance)) {
         const int index = rng.rangeInt(0, static_cast<int>(state.run.equippedModuleIds.size()) - 1);
         outcome.moduleDestroyedId = state.run.equippedModuleIds[static_cast<std::size_t>(index)];
     }
@@ -176,7 +159,7 @@ double incidentPulse(const TelemetryIncident& incident, double multiplier)
 
 double dampened(double amount, double mitigation)
 {
-    return std::clamp(amount - std::max(0.0, mitigation), 0.03, 0.52);
+    return std::clamp(amount - std::max(0.0, mitigation), tuning::launch::dampenedMinimum, tuning::launch::dampenedMaximum);
 }
 
 double returnHomeNetRewardFloor(const PreparedLaunch& launch, const Destination& destination, double burnMultiplier)
@@ -194,7 +177,7 @@ double returnHomeNetRewardFloor(const PreparedLaunch& launch, const Destination&
         return static_cast<double>(moduleOfferCost(Rarity::Rare));
     }
 
-    const double uncommonThreshold = dataGoal + (destination.targetMultiplier - dataGoal) * 0.45;
+    const double uncommonThreshold = dataGoal + (destination.targetMultiplier - dataGoal) * tuning::rewards::pushedProfileShelfShare;
     if (burnMultiplier + 0.000001 >= uncommonThreshold) {
         return static_cast<double>(moduleOfferCost(Rarity::Uncommon));
     }
@@ -234,7 +217,12 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         ? 1.0
         : std::clamp(static_cast<double>(currentReadiness) / static_cast<double>(requiredReadiness), 0.0, 1.0);
     launch.overpreparedData = requiredReadiness <= 0 ? 0 : std::max(0, currentReadiness - requiredReadiness);
-    launch.provingPayoutBonus = launch.config.frontierTransfer ? 0.0 : std::clamp(static_cast<double>(launch.overpreparedData) * 0.20, 0.0, 0.60);
+    launch.provingPayoutBonus = launch.config.frontierTransfer
+        ? 0.0
+        : std::clamp(
+              static_cast<double>(launch.overpreparedData) * tuning::rewards::provingPayoutPerExtraData,
+              0.0,
+              tuning::rewards::provingPayoutBonusMaximum);
     const double transferPrep = launch.config.frontierTransfer
         ? readinessRatio * 0.18 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.050
         : 0.0;
@@ -341,41 +329,43 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
 PreparedLaunch withCutEngines(const PreparedLaunch& launch)
 {
     PreparedLaunch throttled = launch;
-    throttled.throttleFactor = 0.58;
-    throttled.cutHeatRelief = 0.18;
-    throttled.cutVibrationRelief = 0.14;
-    throttled.cutGuidancePenalty = 0.22;
+    throttled.throttleFactor = tuning::launch::cutEngineThrottleFactor;
+    throttled.cutHeatRelief = tuning::launch::cutEngineHeatRelief;
+    throttled.cutVibrationRelief = tuning::launch::cutEngineVibrationRelief;
+    throttled.cutGuidancePenalty = tuning::launch::cutEngineGuidancePenalty;
     return throttled;
 }
 
 PreparedLaunch withPressureRelief(const PreparedLaunch& launch, bool failed)
 {
     PreparedLaunch relieved = launch;
-    relieved.pressureRelief = failed ? 0.05 : 0.24;
-    relieved.pressureReliefFailure = failed ? 0.16 : 0.0;
-    relieved.reliefGuidancePenalty = failed ? 0.08 : 0.14;
+    relieved.pressureRelief = failed ? tuning::launch::pressureReliefFailedAmount : tuning::launch::pressureReliefSuccessAmount;
+    relieved.pressureReliefFailure = failed ? tuning::launch::pressureReliefFailurePenalty : 0.0;
+    relieved.reliefGuidancePenalty = failed ? tuning::launch::pressureReliefFailedGuidancePenalty : tuning::launch::pressureReliefGuidancePenalty;
     return relieved;
 }
 
 PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch)
 {
     PreparedLaunch lightened = launch;
-    lightened.cargoFuelRelief = 0.22;
-    lightened.cargoGuidancePenalty = 0.16;
-    lightened.cargoVibrationPenalty = 0.12;
-    lightened.cargoReturnPenalty = 0.075;
+    lightened.cargoFuelRelief = tuning::launch::cargoFuelRelief;
+    lightened.cargoGuidancePenalty = tuning::launch::cargoGuidancePenalty;
+    lightened.cargoVibrationPenalty = tuning::launch::cargoVibrationPenalty;
+    lightened.cargoReturnPenalty = tuning::launch::cargoReturnPenalty;
     return lightened;
 }
 
 double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
 {
-    constexpr double travelSpeedMultiplier = 1.10;
-    const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
-    const double thrust = std::max(0.4, launch.stats.thrust);
-    const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
-    const double acceleration = (0.00026 + destination.hazard * 0.00008) * launch.throttleFactor;
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    const double thrust = std::max(tuning::launch::minimumEffectiveThrust, launch.stats.thrust);
+    const double cruiseRate =
+        tuning::launch::cruiseBaseRate +
+        thrust * tuning::launch::cruiseThrustScale +
+        static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
+    const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
     const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * travelSpeedMultiplier;
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * tuning::launch::travelSpeedMultiplier;
 }
 
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
@@ -436,7 +426,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {
         outcome.type = LaunchResultType::Destroyed;
-        outcome.shipDamage = 100;
+        outcome.shipDamage = tuning::damage::destroyedShipDamage;
         return outcome;
     }
 
@@ -456,7 +446,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
 
     if (method == RecoveryMethod::ManualEject) {
         outcome.type = LaunchResultType::SafeEject;
-        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * 0.26;
+        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::manualEjectPayoutFactor;
         outcome.recoveryCost = std::clamp(14.0 + static_cast<double>(destination->tier) * 7.0 + outcome.ejectMultiplier * 3.0 - launch.stats.escape * 1.2, 8.0, 64.0);
         const double ejectDamage = destination->hazard * 3.8 + outcome.ejectMultiplier * 2.2 + event.abortRisk * 10.0 - launch.stats.escape * 0.75;
         outcome.shipDamage = std::clamp(static_cast<int>(std::round(ejectDamage)), 4, 34);
@@ -468,7 +458,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
 
     if (method == RecoveryMethod::TransferArrival) {
         outcome.type = LaunchResultType::MissionComplete;
-        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * 1.45;
+        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::transferArrivalPayoutFactor;
         const double arrivalDamage = destination->hazard * 5.8 + outcome.ejectMultiplier * 1.9 + event.stress * 8.0 - launch.stats.hull * 0.72 - launch.stats.cooling * 0.54;
         outcome.shipDamage = std::clamp(static_cast<int>(std::round(arrivalDamage)), 4, 32);
         outcome.blueprintGain = 1 + destination->tier / 2;
@@ -477,7 +467,8 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
 
     outcome.type = reachedDestination ? LaunchResultType::MissionComplete : LaunchResultType::SafeEject;
     const double jackpotMultiplier = reachedDestination ? overburnJackpotMultiplier(*destination, outcome.ejectMultiplier) : 1.0;
-    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * (reachedDestination ? 1.18 * jackpotMultiplier : 0.74);
+    outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier *
+        (reachedDestination ? tuning::rewards::returnHomeReachedGoalFactor * jackpotMultiplier : tuning::rewards::returnHomeBasePayoutFactor);
     outcome.recoveryCost = std::clamp(3.0 + static_cast<double>(destination->tier) * 2.0 + outcome.ejectMultiplier * 1.5, 2.0, 28.0);
     const double netRewardFloor = returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
     if (netRewardFloor > 0.0) {

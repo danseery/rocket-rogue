@@ -92,6 +92,14 @@ Refit economy should reward recovered risk in discrete shelves:
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 
+Shared game constants and player-facing copy should have one owner:
+
+- `src/core/Tuning.h` owns balance values such as refit costs, crew stress steps, mission difficulty, action tradeoffs, launch pacing, warning thresholds, and reward shelves.
+- `src/core/GameText.h` owns reusable display text: status lines, telemetry warning copy, core labels, button labels, module stat labels, and module threat wording.
+- `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
+
+When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visible wording to `GameText.h`, and any reusable channel/event metadata to a small core helper before wiring the behavior into `GameState`, `LaunchSimulation`, `RocketGameApp`, or `GamePanel`.
+
 ## Persistence
 
 The save format is versioned and line-based for a small dependency-free POC. The web build stores it in `localStorage` via `RocketBridge`. Future production builds should replace this with a JSON or binary schema plus migration tests once the content stabilizes.

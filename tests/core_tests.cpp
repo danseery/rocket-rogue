@@ -2,6 +2,8 @@
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
 #include "core/SaveData.h"
+#include "core/Telemetry.h"
+#include "core/Tuning.h"
 
 #include <cassert>
 #include <algorithm>
@@ -63,7 +65,7 @@ void safeAndDestroyedOutcomesResolve()
     Random doomedRng(7);
     const LaunchOutcome doomed = simulateLaunchToTarget(doomedState, catalog, doomedRng);
     require(doomed.type == LaunchResultType::Destroyed, "extreme target should exceed hidden crash");
-    require(doomed.shipDamage == 100, "destroyed launch should total the ship");
+    require(doomed.shipDamage == tuning::damage::destroyedShipDamage, "destroyed launch should total the ship");
 }
 
 void moduleAggregationIncludesFrameAndDamage()
@@ -90,12 +92,9 @@ void earlyTelemetryShowsSystemLoad()
     const TelemetryEvent event = telemetryAt(launch, burn);
 
     int activeChannels = 0;
-    activeChannels += event.heat > 0.015 ? 1 : 0;
-    activeChannels += event.pressure > 0.015 ? 1 : 0;
-    activeChannels += event.vibration > 0.015 ? 1 : 0;
-    activeChannels += event.fuelMix > 0.015 ? 1 : 0;
-    activeChannels += event.guidance > 0.015 ? 1 : 0;
-    activeChannels += event.abortRisk > 0.015 ? 1 : 0;
+    for (const TelemetryChannelSample& sample : telemetrySamples(event)) {
+        activeChannels += sample.value > 0.015 ? 1 : 0;
+    }
 
     require(activeChannels >= 4, "early telemetry should show multiple non-zero system channels near the data goal");
     require(event.warning > 0.02, "early telemetry warning should not be completely flat near the data goal");
@@ -103,15 +102,18 @@ void earlyTelemetryShowsSystemLoad()
 
 double telemetryLoad(const TelemetryEvent& event)
 {
-    return event.heat + event.pressure + event.vibration + event.fuelMix + event.guidance + event.abortRisk;
+    return telemetryChannelLoad(event);
 }
 
-double legacyBurnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
+double unscaledBurnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
 {
-    const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
-    const double thrust = std::max(0.4, launch.stats.thrust);
-    const double cruiseRate = 0.016 + thrust * 0.0017 + static_cast<double>(destination.tier) * 0.0008;
-    const double acceleration = (0.00026 + destination.hazard * 0.00008) * launch.throttleFactor;
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    const double thrust = std::max(tuning::launch::minimumEffectiveThrust, launch.stats.thrust);
+    const double cruiseRate =
+        tuning::launch::cruiseBaseRate +
+        thrust * tuning::launch::cruiseThrustScale +
+        static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
+    const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
     const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
     return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration);
 }
@@ -158,13 +160,18 @@ void launchIncidentsAreChunkyAndRecoverable()
     bool foundRecoverableSpike = false;
     for (int i = 0; i < launch.incidentCount; ++i) {
         const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(i)];
+        TelemetryEvent incidentEvent;
+        incidentEvent.heat = incident.heat;
+        incidentEvent.pressure = incident.pressure;
+        incidentEvent.vibration = incident.vibration;
+        incidentEvent.fuelMix = incident.fuelMix;
+        incidentEvent.guidance = incident.guidance;
+        incidentEvent.abortRisk = incident.abortRisk;
+
         int activeChannels = 0;
-        activeChannels += incident.heat > 0.01 ? 1 : 0;
-        activeChannels += incident.pressure > 0.01 ? 1 : 0;
-        activeChannels += incident.vibration > 0.01 ? 1 : 0;
-        activeChannels += incident.fuelMix > 0.01 ? 1 : 0;
-        activeChannels += incident.guidance > 0.01 ? 1 : 0;
-        activeChannels += incident.abortRisk > 0.01 ? 1 : 0;
+        for (const TelemetryChannelSample& sample : telemetrySamples(incidentEvent)) {
+            activeChannels += sample.value > 0.01 ? 1 : 0;
+        }
         require(activeChannels >= 1 && activeChannels <= 2, "incidents should affect one or two systems, not every dial");
 
         const double before = std::max(1.0, incident.centerMultiplier - incident.width * 1.25);
@@ -191,13 +198,13 @@ void crewStressUsesDiscreteStepsForPilotRisk()
     GameState tense = calm;
     Astronaut* tensePilot = activeAstronaut(tense);
     require(tensePilot != nullptr, "stress test needs a tense pilot");
-    tensePilot->stress = 100;
+    tensePilot->stress = tuning::crew::maxStress;
 
-    require(crewStressStepCount(13) == 0, "stress below 14 should not create a stress step");
-    require(crewStressStepCount(14) == 1, "each 14 stress should create one stress step");
-    require(crewStressStepCount(100) == 7, "max stress should create seven stress steps");
+    require(crewStressStepCount(tuning::crew::stressPerStep - 1) == 0, "stress below one step should not create a stress step");
+    require(crewStressStepCount(tuning::crew::stressPerStep) == 1, "each stress step threshold should create one stress step");
+    require(crewStressStepCount(tuning::crew::maxStress) == tuning::crew::maxStressSteps, "max stress should create the tuned max stress steps");
     require(effectiveTrainingLevel(*tensePilot) == -4, "stress steps should cancel effective training in discrete chunks");
-    require(crewAbortRiskMultiplierFromStress(100) >= 1.99, "100 stress should effectively double ABORT growth");
+    require(crewAbortRiskMultiplierFromStress(tuning::crew::maxStress) >= 1.99, "max stress should effectively double ABORT growth");
 
     Random calmRng(616);
     Random tenseRng(616);
@@ -251,8 +258,8 @@ void shipTravelIsFasterWithoutRetuningTelemetry()
     const double delta = 1.0 / 60.0;
 
     const double boostedDelta = burnMultiplierDelta(launch, destination, elapsed, delta);
-    const double oldDelta = legacyBurnMultiplierDelta(launch, destination, elapsed, delta);
-    require(std::abs(boostedDelta - oldDelta * 1.10) < 0.000001, "ship travel should be ten percent faster than the previous burn step");
+    const double unscaledDelta = unscaledBurnMultiplierDelta(launch, destination, elapsed, delta);
+    require(std::abs(boostedDelta - unscaledDelta * tuning::launch::travelSpeedMultiplier) < 0.000001, "ship travel should apply the tuned travel speed multiplier");
 
     const double burn = 1.0 + (destination.targetMultiplier - 1.0) * 0.88;
     const TelemetryEvent telemetry = telemetryAt(launch, burn);
@@ -341,16 +348,16 @@ void refitRerollsSpendAndEscalate()
     Random rng(3030);
     generateModuleOffers(state, catalog, rng);
 
-    require(offerRerollCost(state) == 10.0, "first refit reroll should cost 10 credits");
+    require(offerRerollCost(state) == tuning::hangar::rerollBaseCost, "first refit reroll should cost the tuned base credits");
     require(rerollOffers(state, catalog, rng), "affordable refit reroll should succeed");
     require(state.run.credits == 190.0, "first refit reroll should spend 10 credits");
     require(state.run.offerRerollsThisExpedition == 1, "first refit reroll should increment run reroll count");
-    require(offerRerollCost(state) == 20.0, "second refit reroll should cost 20 credits");
+    require(offerRerollCost(state) == tuning::hangar::rerollBaseCost * 2.0, "second refit reroll should cost twice the base credits");
 
     require(rerollOffers(state, catalog, rng), "second affordable refit reroll should succeed");
     require(state.run.credits == 170.0, "second refit reroll should spend 20 credits");
     require(state.run.offerRerollsThisExpedition == 2, "second refit reroll should increment run reroll count");
-    require(offerRerollCost(state) == 30.0, "third refit reroll should cost 30 credits");
+    require(offerRerollCost(state) == tuning::hangar::rerollBaseCost * 3.0, "third refit reroll should cost three times the base credits");
 
     state.run.credits = 29.0;
     require(!rerollOffers(state, catalog, rng), "reroll should be blocked when credits are short");
@@ -403,9 +410,9 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     require(pilot->training == 3, "upgraded simulator should grant extra training");
     require(pilot->stress == 21, "upgraded simulator should reduce training stress gain");
     require(state.run.credits < creditsBeforeTraining, "training should still cost credits");
-    pilot->stress = 100;
+    pilot->stress = tuning::crew::maxStress;
     require(!trainCrew(state, catalog), "crew training should be blocked at max stress");
-    pilot->stress = 100 - crewTrainingStressGain(state, catalog) + 1;
+    pilot->stress = tuning::crew::maxStress - crewTrainingStressGain(state, catalog) + 1;
     require(!trainCrew(state, catalog), "crew training should be blocked if it would overflow stress");
 
     pilot->stress = 60;
@@ -830,7 +837,7 @@ void starterMoonTransferIsNotReliable()
         destroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
         const double sampleBurn = std::min(catalog.destinations[1].targetMultiplier, launch.crashMultiplier - 0.02);
         const TelemetryEvent event = telemetryAt(launch, sampleBurn);
-        const double worstNonHeat = std::max({event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk});
+        const double worstNonHeat = strongestNonHeatTelemetryValue(event);
         heatDominant += event.heat > worstNonHeat ? 1 : 0;
 
         GameState overprepared = createNewGame(catalog, 333);
