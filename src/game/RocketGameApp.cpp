@@ -1,6 +1,6 @@
 #include "game/RocketGameApp.h"
 
-#include "core/GameMath.h"
+#include "core/FlightProgress.h"
 #include "core/GameText.h"
 #include "core/LaunchStatus.h"
 #include "core/Tuning.h"
@@ -46,14 +46,6 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     clearResultView();
 }
 
-double RocketGameApp::travelProgressFor(double burnMultiplier, const Destination& destination) const
-{
-    return std::clamp(
-        (burnMultiplier - 1.0) / std::max(tuning::session::minTravelDenominator, destination.targetMultiplier - 1.0),
-        0.0,
-        tuning::session::maxTravelProgress);
-}
-
 double RocketGameApp::liveBurnMultiplier() const
 {
     if (!session_.controls.actions.returningHome) {
@@ -97,7 +89,7 @@ void RocketGameApp::tick(double deltaSeconds)
 
         if (session_.controls.actions.returningHome) {
             session_.returnTrip.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-            const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
+            const double returnProgress = flight_progress::returnCompletion(session_.returnTrip.elapsed, session_.returnTrip.duration);
             const double returnTelemetry = returnTelemetryMultiplier(
                 session_.returnTrip.burnMultiplier,
                 flightModel.crashMultiplier,
@@ -205,10 +197,8 @@ void RocketGameApp::returnHome()
     const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
     const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
     session_.returnTrip.burnMultiplier = session_.currentMultiplier;
-    session_.returnTrip.startTravelProgress = travelProgressFor(session_.currentMultiplier, destination);
+    session_.returnTrip.startTravelProgress = flight_progress::travelProgressForBurn(session_.currentMultiplier, destination);
     session_.returnTrip.elapsed = 0.0;
-    session_.returnTrip.duration = tuning::session::returnBaseDuration +
-        session_.returnTrip.startTravelProgress * tuning::session::returnDurationPerProgress;
     const PreparedLaunch flightModel = currentFlightModel();
     const TelemetryEvent event = telemetryAt(flightModel, session_.currentMultiplier);
     recordTelemetryPeak(event);
@@ -216,9 +206,9 @@ void RocketGameApp::returnHome()
     session_.controls.returnDriftHome = event.fuelMix > tuning::session::driftFuelMixThreshold ||
         (fuelReserve < tuning::session::driftFuelReserveThreshold &&
             session_.currentMultiplier > destination.targetMultiplier * tuning::session::driftTargetShare);
-    if (session_.controls.returnDriftHome) {
-        session_.returnTrip.duration *= tuning::session::returnDriftDurationMultiplier;
-    }
+    session_.returnTrip.duration = flight_progress::returnDuration(
+        session_.returnTrip.startTravelProgress,
+        session_.controls.returnDriftHome);
     session_.controls.actions.returningHome = true;
     session_.controls.actions.cutEnginesActive = false;
     state_.statusLine = session_.controls.returnDriftHome
@@ -438,15 +428,14 @@ void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
 {
     const PreparedLaunch flightModel = currentFlightModel();
     const bool wasReturningHome = session_.controls.actions.returningHome;
-    double frozenTravelProgress = travelProgressFor(burnMultiplier, currentDestination(state_, catalog_));
+    double frozenTravelProgress = flight_progress::travelProgressForBurn(burnMultiplier, currentDestination(state_, catalog_));
     if (wasReturningHome) {
-        const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
-        frozenTravelProgress = std::clamp(
-            session_.returnTrip.startTravelProgress * (1.0 - returnProgress),
-            0.0,
-            tuning::session::maxTravelProgress);
+        frozenTravelProgress = flight_progress::returnTravelProgress(
+            session_.returnTrip.startTravelProgress,
+            session_.returnTrip.elapsed,
+            session_.returnTrip.duration);
     } else if (const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId)) {
-        frozenTravelProgress = travelProgressFor(burnMultiplier, *activeDestination);
+        frozenTravelProgress = flight_progress::travelProgressForBurn(burnMultiplier, *activeDestination);
     }
 
     LaunchOutcome outcome = resolveLaunch(flightModel, catalog_, state_, burnMultiplier, method, rng_);
@@ -511,17 +500,16 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
     if (session_.controls.actions.returningHome) {
-        const double returnProgress = math::smoothStep(session_.returnTrip.elapsed / std::max(tuning::session::minTravelDenominator, session_.returnTrip.duration));
-        result.travelProgress = std::clamp(
-            session_.returnTrip.startTravelProgress * (1.0 - returnProgress),
-            0.0,
-            tuning::session::maxTravelProgress);
+        result.travelProgress = flight_progress::returnTravelProgress(
+            session_.returnTrip.startTravelProgress,
+            session_.returnTrip.elapsed,
+            session_.returnTrip.duration);
         result.returningHome = true;
         result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
     } else if (state_.screen == Screen::Results && session_.result.usesTravelProgress) {
         result.travelProgress = session_.result.travelProgress;
     } else {
-        result.travelProgress = travelProgressFor(session_.currentMultiplier, *visualDestination);
+        result.travelProgress = flight_progress::travelProgressForBurn(session_.currentMultiplier, *visualDestination);
     }
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;

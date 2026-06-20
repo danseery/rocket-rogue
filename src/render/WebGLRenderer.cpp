@@ -499,14 +499,14 @@ void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint,
 
 void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 {
-    const float left = 0.22F;
-    const float right = 0.92F;
+    const float left = 0.25F;
+    const float right = 1.22F;
     const float bottom = -0.86F;
-    const float top = -0.60F;
+    const float top = -0.58F;
 
-    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, right - left, top - bottom, {0.02F, 0.05F, 0.07F, 0.72F}, false);
-    drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F, false);
-    drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F}, 1.0F, false);
+    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, right - left, top - bottom, {0.02F, 0.05F, 0.07F, 0.72F});
+    drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F});
+    drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F});
 
     if (snapshot.telemetryCount <= 1) {
         return;
@@ -516,7 +516,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     Color warningHot {1.0F, 0.38F, 0.28F, 1.0F};
     Color heatColor {1.0F, 0.78F, 0.25F, 0.90F};
 
-    drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F}, 1.0F, false);
+    drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F});
 
     std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
@@ -528,7 +528,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x1 = left + t1 * (right - left);
         appendLine(heatVertices, x0, h0, x1, h1, heatColor);
     }
-    submitLines(heatVertices, 1.5F, false);
+    submitLines(heatVertices, 1.5F);
 
     std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
@@ -541,7 +541,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x1 = left + t1 * (right - left);
         appendLine(warningVertices, x0, y0, x1, y1, warningColor);
     }
-    submitLines(warningVertices, 2.2F, false);
+    submitLines(warningVertices, 2.2F);
 }
 
 void WebGLRenderer::drawStars()

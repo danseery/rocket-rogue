@@ -1,14 +1,18 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
 #include "core/CrewPresentation.h"
+#include "core/FlightProgress.h"
 #include "core/GameFormat.h"
 #include "core/GameMath.h"
 #include "core/GameState.h"
 #include "core/HangarPresentation.h"
 #include "core/LaunchBalance.h"
+#include "core/LaunchPresentation.h"
+#include "core/LaunchReadinessPresentation.h"
 #include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
 #include "core/OutcomePresentation.h"
+#include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
 #include "core/SaveData.h"
@@ -1080,6 +1084,22 @@ const HangarOperationCardPresentation* findHangarOperationCard(const std::vector
     return found == cards.end() ? nullptr : &(*found);
 }
 
+const PanelMetricPresentation* findPanelMetric(const std::vector<PanelMetricPresentation>& metrics, std::string_view label)
+{
+    const auto found = std::find_if(metrics.begin(), metrics.end(), [&](const PanelMetricPresentation& metric) {
+        return metric.label == label;
+    });
+    return found == metrics.end() ? nullptr : &(*found);
+}
+
+const FlightActionButtonPresentation* findFlightActionButton(const std::vector<FlightActionButtonPresentation>& buttons, std::string_view label)
+{
+    const auto found = std::find_if(buttons.begin(), buttons.end(), [&](const FlightActionButtonPresentation& button) {
+        return button.label == label;
+    });
+    return found == buttons.end() ? nullptr : &(*found);
+}
+
 void refitPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1107,6 +1127,57 @@ void refitPresentationComesFromSharedHelper()
     require(crewCard.glyph == "C", "crew upgrade presentation should expose a stable card glyph");
     require(crewCard.primaryImpact == text::panel::simulatorStressImpact(2), "crew upgrade presentation should expose strongest facility impact");
     require(hasRefitChip(crewCard, text::moduleStats::simStressChip, "+2.0", true), "crew upgrade presentation should expose simulator stress chip");
+}
+
+void refitWindowPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const ShipModule* engine = catalog.findModule(content::module::sparrowEngine);
+    const CrewUpgrade* simBay = catalog.findCrewUpgrade(content::crewUpgrade::analogSimBay);
+    require(engine != nullptr && simBay != nullptr, "refit window presentation test needs default offers");
+
+    GameState state = createNewGame(catalog, 448);
+    state.run.credits = 100.0;
+    state.run.offerModuleIds = {content::module::sparrowEngine, "", ""};
+    state.run.offerCrewUpgradeIds = {"", content::crewUpgrade::analogSimBay, ""};
+
+    const RefitWindowPresentation window = refitWindowPresentation(state, catalog);
+    require(window.offers.size() == 2, "refit window presentation should expose resolved module and crew offers");
+
+    const RefitOfferPresentation& moduleOffer = window.offers[0];
+    require(moduleOffer.kind == RefitOfferPresentationKind::ShipModule, "module offers should be typed for future render variants");
+    require(moduleOffer.index == 0, "module offers should retain their buy-offer index");
+    require(moduleOffer.cost == moduleOfferCost(*engine), "module offer presentation should use shared module pricing");
+    require(moduleOffer.affordable, "module offer should expose affordability");
+    require(moduleOffer.card.title == engine->name, "module offer should include shared card presentation");
+    require(moduleOffer.action.enabled, "affordable module offer should enable install action");
+    require(moduleOffer.action.label == std::string(text::buttons::install), "module offer should use shared install label");
+    require(moduleOffer.action.actionId == ui::actions::buyOffer(0), "module offer should use shared indexed buy action");
+    require(moduleOffer.action.cssClass == "ok", "module offer should expose install button style");
+
+    const RefitOfferPresentation& crewOffer = window.offers[1];
+    require(crewOffer.kind == RefitOfferPresentationKind::CrewUpgrade, "crew offers should be typed for future render variants");
+    require(crewOffer.index == 1, "crew offers should retain their buy-offer index");
+    require(crewOffer.cost == crewUpgradeCost(*simBay), "crew offer presentation should use shared crew upgrade pricing");
+    require(crewOffer.card.title == simBay->name, "crew offer should include shared card presentation");
+    require(crewOffer.action.actionId == ui::actions::buyOffer(1), "crew offer should use shared indexed buy action");
+
+    require(window.rerollCost == offerRerollCost(state), "refit window should expose shared reroll cost");
+    require(window.rerollAction.enabled, "affordable reroll should be enabled");
+    require(window.rerollAction.label == text::panel::rerollOffers(display::money(window.rerollCost)), "reroll action should use shared label formatting");
+    require(window.rerollAction.actionId == std::string(ui::actions::rerollOffers), "reroll action should use shared action id");
+    require(window.rerollAction.cssClass == "warn", "reroll action should expose warning button style");
+    require(window.skipAction.enabled && window.skipAction.label == std::string(text::buttons::skipRefit), "skip refit action should always be available");
+    require(window.skipAction.actionId == std::string(ui::actions::next), "skip refit action should advance through shared action id");
+
+    state.run.credits = 0.0;
+    const RefitWindowPresentation brokeWindow = refitWindowPresentation(state, catalog);
+    require(!brokeWindow.offers.empty(), "broke refit window should still expose offers");
+    require(!brokeWindow.offers[0].affordable, "broke module offer should expose unaffordable state");
+    require(!brokeWindow.offers[0].action.enabled, "broke module offer should disable install action");
+    require(brokeWindow.offers[0].action.label == text::needCredits(moduleOfferCost(*engine)), "broke module offer should use shared need-credits copy");
+    require(!brokeWindow.rerollAction.enabled, "broke reroll should be disabled");
+    require(brokeWindow.rerollAction.label == display::needCredits(brokeWindow.rerollCost), "broke reroll should use shared need-credits formatting");
 }
 
 void crewDetailsPresentationComesFromSharedHelper()
@@ -1202,6 +1273,201 @@ void programDetailsPresentationComesFromSharedHelper()
     require(shipsLost != nullptr && shipsLost->value == "3", "legacy presentation should expose ship losses");
     require(astronautsLost != nullptr && astronautsLost->value == "2", "legacy presentation should expose astronaut losses");
     require(furthestTier != nullptr && furthestTier->value == "1", "legacy presentation should expose furthest tier");
+}
+
+void flightProgressHelpersShareTravelAndReturnMath()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const Destination& earthOrbit = catalog.destinations[0];
+
+    const double midpointBurn = 1.0 + (earthOrbit.targetMultiplier - 1.0) * 0.50;
+    require(std::abs(flight_progress::travelProgressForBurn(midpointBurn, earthOrbit) - 0.50) < 0.000001, "travel progress helper should map burn depth to destination progress");
+    require(flight_progress::travelProgressForBurn(0.80, earthOrbit) == 0.0, "travel progress helper should clamp low burn depth");
+    require(flight_progress::travelProgressForBurn(earthOrbit.targetMultiplier + 5.0, earthOrbit) == tuning::session::maxTravelProgress, "travel progress helper should clamp high burn depth");
+
+    const double returnDuration = 2.4;
+    require(std::abs(flight_progress::returnCompletion(1.2, returnDuration) - math::smoothStep(0.5)) < 0.000001, "return completion should use shared smooth step");
+    require(std::abs(flight_progress::returnTravelProgress(0.80, 1.2, returnDuration) - 0.40) < 0.000001, "return travel helper should move the visual ship back home");
+
+    const double startTravel = 0.35;
+    const double baseDuration = tuning::session::returnBaseDuration + startTravel * tuning::session::returnDurationPerProgress;
+    require(std::abs(flight_progress::returnDuration(startTravel, false) - baseDuration) < 0.000001, "return duration helper should use tuned base duration");
+    require(std::abs(flight_progress::returnDuration(startTravel, true) - baseDuration * tuning::session::returnDriftDurationMultiplier) < 0.000001, "return duration helper should apply drift multiplier");
+}
+
+void launchPanelPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 907);
+    Random rng(907);
+    PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+
+    const double currentMultiplier = 1.24;
+    LaunchPanelPresentation panel = launchPanelPresentation(
+        state,
+        catalog,
+        launch,
+        currentMultiplier,
+        1.0,
+        0.0,
+        tuning::session::returnDefaultDuration,
+        {},
+        false);
+
+    const PanelMetricPresentation* burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
+    const PanelMetricPresentation* dataGoal = findPanelMetric(panel.metrics, text::labels::dataGoal);
+    const PanelMetricPresentation* returnRisk = findPanelMetric(panel.metrics, text::labels::returnRisk);
+    require(panel.sectionTitle == text::panel::sections::provingFlight, "launch presentation should select proving section title");
+    require(burn != nullptr && burn->value == display::multiplier(currentMultiplier), "launch presentation should expose displayed burn depth");
+    require(dataGoal != nullptr && dataGoal->value == display::multiplier(catalog.destinations[0].targetMultiplier), "launch presentation should expose data goal metric");
+    require(returnRisk != nullptr && returnRisk->value == display::percent(returnHomeRisk(launch, catalog, state, currentMultiplier)), "launch presentation should share return risk math");
+    require(panel.telemetry.size() == telemetrySamples(telemetryAt(launch, currentMultiplier)).size(), "launch presentation should expose all telemetry channel samples");
+    require(findDetailPresentationRow(panel.telemetryDetails, text::labels::returnRisk) != nullptr, "launch presentation should expose return risk in telemetry details");
+    require(findDetailPresentationRow(panel.telemetryDetails, text::labels::missionDifficulty) != nullptr, "launch presentation should expose mission difficulty in telemetry details");
+
+    const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
+    const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
+    const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
+    const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
+    const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
+    require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
+    require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
+    require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "launch presentation should expose cut-engines action");
+    require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "launch presentation should expose relief-valve action");
+    require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "launch presentation should expose jettison-cargo action");
+
+    FlightActionState returning;
+    returning.returningHome = true;
+    const double returnBurnMultiplier = 1.32;
+    const double returnElapsed = 1.2;
+    const double returnDuration = tuning::session::returnDefaultDuration;
+    panel = launchPanelPresentation(
+        state,
+        catalog,
+        launch,
+        currentMultiplier,
+        returnBurnMultiplier,
+        returnElapsed,
+        returnDuration,
+        returning,
+        false);
+
+    burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
+    const PanelMetricPresentation* returnProgress = findPanelMetric(panel.metrics, text::labels::returnProgress);
+    returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returningHome);
+    cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
+    require(panel.sectionTitle == text::panel::sections::returnBurn, "launch presentation should select return section title");
+    require(burn != nullptr && burn->value == display::multiplier(returnTelemetryMultiplier(returnBurnMultiplier, launch.crashMultiplier, returnElapsed, returnDuration)), "launch presentation should share return telemetry multiplier");
+    require(returnProgress != nullptr && returnProgress->value == display::percent(flight_progress::returnCompletion(returnElapsed, returnDuration)), "launch presentation should share return progress math");
+    require(returnHome != nullptr && !returnHome->enabled, "returning-home action should be disabled once committed");
+    require(cutEngines != nullptr && !cutEngines->enabled, "system actions should be disabled during return home");
+
+    FlightActionState reliefOpen;
+    reliefOpen.pressureReliefOpen = true;
+    panel = launchPanelPresentation(state, catalog, launch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
+    const FlightActionButtonPresentation* closeValve = findFlightActionButton(panel.systemActions, text::buttons::closeValve);
+    require(closeValve != nullptr && closeValve->enabled && closeValve->actionId == ui::actions::closeReliefValve, "open relief valve should expose close-valve action");
+
+    reliefOpen.pressureReliefFailed = true;
+    panel = launchPanelPresentation(state, catalog, launch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
+    const FlightActionButtonPresentation* failedValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValveFailed);
+    require(failedValve != nullptr && !failedValve->enabled, "failed relief valve should be disabled in presentation");
+}
+
+void launchReadinessPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 908);
+    state.run.credits = 500.0;
+
+    LaunchReadinessPresentation readiness = launchReadinessPresentation(state, catalog);
+    const DetailPresentationRow* requiredAction = findDetailPresentationRow(readiness.details, text::panel::details::requiredAction);
+    require(!readiness.blocked && !readiness.hullBlocked && !readiness.crewBlocked, "healthy vehicle and crew should clear launch readiness");
+    require(readiness.messages.empty(), "clear launch readiness should not emit hold messages");
+    require(readiness.actions.empty(), "clear launch readiness should not emit hold actions");
+    require(requiredAction != nullptr && requiredAction->value == text::panel::details::clearForLaunch, "clear launch readiness should expose clear-for-launch detail");
+
+    state.run.shipDamage = tuning::damage::destroyedShipDamage;
+    readiness = launchReadinessPresentation(state, catalog);
+    requiredAction = findDetailPresentationRow(readiness.details, text::panel::details::requiredAction);
+    const FlightActionButtonPresentation* repairAction = findFlightActionButton(readiness.actions, text::buttons::assignRepairBay);
+    require(readiness.blocked && readiness.hullBlocked && !readiness.crewBlocked, "destroyed hull should block launch readiness");
+    require(readiness.messages.size() == 1 && readiness.messages[0] == text::panel::messages::totalHullBlocked, "hull readiness should expose hull hold message");
+    require(requiredAction != nullptr && requiredAction->value == text::panel::details::repairVehicle, "hull readiness should require repair");
+    require(repairAction != nullptr && repairAction->enabled && repairAction->actionId == ui::actions::repairShip, "funded hull readiness should expose repair action");
+
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    state.run.credits = 0.0;
+    readiness = launchReadinessPresentation(state, catalog);
+    requiredAction = findDetailPresentationRow(readiness.details, text::panel::details::requiredAction);
+    const HangarOperationPreview hangarOps = hangarOperationPreview(state, catalog);
+    repairAction = findFlightActionButton(readiness.actions, display::needCredits(hangarOps.repairCost));
+    const FlightActionButtonPresentation* recruitAction = findFlightActionButton(readiness.actions, text::buttons::recruitCrew);
+    require(readiness.blocked && readiness.hullBlocked && readiness.crewBlocked, "destroyed hull and dead roster should both block launch readiness");
+    require(readiness.messages.size() == 2, "combined launch hold should expose both hold messages");
+    require(requiredAction != nullptr && requiredAction->value == text::panel::details::repairAndRecruitCrew, "combined launch hold should require repair and recruit");
+    require(repairAction != nullptr && !repairAction->enabled, "unfunded hull readiness should expose disabled repair cost");
+    require(recruitAction != nullptr && recruitAction->enabled && recruitAction->actionId == ui::actions::recruitCrew, "crew readiness should expose recruit action");
+}
+
+void panelChromePresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 909);
+    state.run.credits = 123.0;
+    state.run.shipDamage = 11;
+    state.run.frontierReadiness = 2;
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "panel chrome test needs an active astronaut");
+    pilot->stress = 28;
+
+    PreparedLaunch launch;
+    std::vector<PanelMetricPresentation> metrics = panelHeaderMetrics(state, catalog, launch, launch);
+    const PanelMetricPresentation* credits = findPanelMetric(metrics, text::labels::missionCredits);
+    const PanelMetricPresentation* hullDamage = findPanelMetric(metrics, text::labels::hullDamage);
+    const PanelMetricPresentation* currentFrontier = findPanelMetric(metrics, text::labels::currentFrontier);
+    const PanelMetricPresentation* flightData = findPanelMetric(metrics, text::labels::flightData);
+    const PanelMetricPresentation* difficulty = findPanelMetric(metrics, text::labels::missionDifficulty);
+    const PanelMetricPresentation* crewStress = findPanelMetric(metrics, text::labels::crewStress);
+
+    require(metrics.size() == 6, "panel chrome should expose six top-level metrics");
+    require(credits != nullptr && credits->value == display::money(state.run.credits), "panel chrome should format mission credits");
+    require(hullDamage != nullptr && hullDamage->value == display::wholePercent(state.run.shipDamage), "panel chrome should format hull damage");
+    require(currentFrontier != nullptr && currentFrontier->value == catalog.destinations[0].name, "panel chrome should show current frontier off launch");
+    require(flightData != nullptr && flightData->value == display::fraction(state.run.frontierReadiness, frontierReadinessRequired(state, catalog)), "panel chrome should show readiness off launch");
+    require(difficulty != nullptr && difficulty->value == display::signedPercent(missionPressureModifier(state, catalog, catalog.destinations[0])), "panel chrome should show mission difficulty off launch");
+    require(crewStress != nullptr && crewStress->value == display::wholePercent(pilot->stress), "panel chrome should show active crew stress");
+
+    state.screen = Screen::Launch;
+    launch.config.frontierTransfer = true;
+    launch.config.destinationId = catalog.destinations[1].id;
+    launch.pressureModifier = 0.37;
+    metrics = panelHeaderMetrics(state, catalog, launch, launch);
+    const PanelMetricPresentation* transferTarget = findPanelMetric(metrics, text::labels::transferTarget);
+    const PanelMetricPresentation* requiredBurn = findPanelMetric(metrics, text::labels::requiredBurn);
+    difficulty = findPanelMetric(metrics, text::labels::missionDifficulty);
+    require(transferTarget != nullptr && transferTarget->value == catalog.destinations[1].name, "panel chrome should show active transfer target on launch");
+    require(requiredBurn != nullptr && requiredBurn->value == display::multiplier(catalog.destinations[1].targetMultiplier), "panel chrome should show transfer burn on launch");
+    require(difficulty != nullptr && difficulty->value == display::signedPercent(launch.pressureModifier), "panel chrome should use prepared launch difficulty while flying");
+
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    metrics = panelHeaderMetrics(state, catalog, launch, launch);
+    crewStress = findPanelMetric(metrics, text::labels::crewStress);
+    require(crewStress != nullptr && crewStress->value == text::panel::noActiveCrew, "panel chrome should handle missing active crew");
+
+    const std::vector<DetailPresentationRow> settingsRows = settingsDetailsPresentation();
+    require(findDetailPresentationRow(settingsRows, text::panel::details::keyboard) != nullptr, "settings presentation should expose keyboard row");
+    require(findDetailPresentationRow(settingsRows, text::panel::details::save) != nullptr, "settings presentation should expose save row");
+    require(findDetailPresentationRow(settingsRows, text::panel::details::build) != nullptr, "settings presentation should expose build row");
+
+    const std::vector<PanelButtonPresentation> settingsActions = settingsActionPresentation();
+    const FlightActionButtonPresentation* reset = findFlightActionButton(settingsActions, text::buttons::resetSave);
+    require(settingsActions.size() == 1, "settings presentation should expose reset action");
+    require(reset != nullptr && reset->enabled && reset->actionId == ui::actions::resetSave && reset->cssClass == "danger", "settings presentation should expose reset-save danger action");
 }
 
 void launchBalanceHelpersDrivePreparedLaunch()
@@ -1472,9 +1738,14 @@ int main()
     launchOutcomePresentationIsShared();
     enumDisplayLabelsComeFromSharedText();
     refitPresentationComesFromSharedHelper();
+    refitWindowPresentationComesFromSharedHelper();
     crewDetailsPresentationComesFromSharedHelper();
     shipDetailsPresentationComesFromSharedHelper();
     programDetailsPresentationComesFromSharedHelper();
+    flightProgressHelpersShareTravelAndReturnMath();
+    launchPanelPresentationComesFromSharedHelper();
+    launchReadinessPresentationComesFromSharedHelper();
+    panelChromePresentationComesFromSharedHelper();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();

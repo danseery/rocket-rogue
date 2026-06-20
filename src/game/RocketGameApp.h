@@ -73,7 +73,6 @@ private:
     void beginLaunchSession(PreparedLaunch preparedLaunch);
     void clearFlightControls();
     void clearResultView();
-    double travelProgressFor(double burnMultiplier, const Destination& destination) const;
     double liveBurnMultiplier() const;
 
     ContentCatalog catalog_;

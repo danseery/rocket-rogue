@@ -2,7 +2,10 @@
 
 #include "core/Content.h"
 #include "core/GameFormat.h"
+#include "core/GameState.h"
 #include "core/GameText.h"
+#include "core/GameUi.h"
+#include "core/PanelPresentation.h"
 #include "core/Tuning.h"
 
 #include <array>
@@ -36,6 +39,27 @@ struct RefitPresentation {
     std::string detail;
     std::string primaryImpact;
     std::vector<RefitStatChip> statChips;
+};
+
+enum class RefitOfferPresentationKind {
+    ShipModule,
+    CrewUpgrade
+};
+
+struct RefitOfferPresentation {
+    RefitOfferPresentationKind kind = RefitOfferPresentationKind::ShipModule;
+    int index = 0;
+    int cost = 0;
+    bool affordable = false;
+    RefitPresentation card;
+    PanelButtonPresentation action;
+};
+
+struct RefitWindowPresentation {
+    std::vector<RefitOfferPresentation> offers;
+    double rerollCost = 0.0;
+    PanelButtonPresentation rerollAction;
+    PanelButtonPresentation skipAction;
 };
 
 inline std::string slotClass(SlotType slot)
@@ -186,6 +210,63 @@ inline RefitPresentation crewUpgradeRefitPresentation(const CrewUpgrade& upgrade
         crewUpgradePrimaryImpact(upgrade),
         crewUpgradeStatChips(upgrade)
     };
+}
+
+inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, int index, double credits)
+{
+    const int cost = moduleOfferCost(module);
+    const bool affordable = credits >= static_cast<double>(cost);
+    return {
+        RefitOfferPresentationKind::ShipModule,
+        index,
+        cost,
+        affordable,
+        moduleRefitPresentation(module),
+        affordable
+            ? panelActionButton(text::buttons::install, ui::actions::buyOffer(index), "ok")
+            : disabledPanelButton(text::needCredits(cost))
+    };
+}
+
+inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& upgrade, int index, double credits)
+{
+    const int cost = crewUpgradeCost(upgrade);
+    const bool affordable = credits >= static_cast<double>(cost);
+    return {
+        RefitOfferPresentationKind::CrewUpgrade,
+        index,
+        cost,
+        affordable,
+        crewUpgradeRefitPresentation(upgrade),
+        affordable
+            ? panelActionButton(text::buttons::install, ui::actions::buyOffer(index), "ok")
+            : disabledPanelButton(text::needCredits(cost))
+    };
+}
+
+inline RefitWindowPresentation refitWindowPresentation(const GameState& state, const ContentCatalog& catalog)
+{
+    RefitWindowPresentation presentation;
+    presentation.offers.reserve(state.run.offerModuleIds.size());
+
+    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
+        const int index = static_cast<int>(i);
+        if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
+            presentation.offers.push_back(moduleOfferPresentation(*module, index, state.run.credits));
+            continue;
+        }
+
+        if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[i])) {
+            presentation.offers.push_back(crewUpgradeOfferPresentation(*upgrade, index, state.run.credits));
+        }
+    }
+
+    presentation.rerollCost = offerRerollCost(state);
+    presentation.rerollAction = state.run.credits >= presentation.rerollCost
+        ? panelActionButton(text::panel::rerollOffers(display::money(presentation.rerollCost)), ui::actions::rerollOffers, "warn")
+        : disabledPanelButton(display::needCredits(presentation.rerollCost));
+    presentation.skipAction = panelActionButton(text::buttons::skipRefit, ui::actions::next);
+    return presentation;
 }
 
 } // namespace rocket

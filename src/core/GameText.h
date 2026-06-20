@@ -292,6 +292,8 @@ inline constexpr std::string_view astronautsLost = "Astronauts lost";
 inline constexpr std::string_view furthestTier = "Furthest tier";
 inline constexpr std::string_view repairVehicle = "Repair vehicle";
 inline constexpr std::string_view recruitCrew = "Recruit crew";
+inline constexpr std::string_view repairAndRecruitCrew = "Repair vehicle and recruit crew";
+inline constexpr std::string_view clearForLaunch = "Clear for launch";
 
 inline std::string trainingDelta(int trainingGain)
 {
