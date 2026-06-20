@@ -1,6 +1,7 @@
 #include "core/LaunchSimulation.h"
 #include "core/GameMath.h"
 #include "core/GameText.h"
+#include "core/LaunchBalance.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
 
@@ -164,7 +165,7 @@ double incidentPulse(const TelemetryIncident& incident, double multiplier)
 {
     const double distance = std::abs(multiplier - incident.centerMultiplier);
     const double pulse = std::clamp(1.0 - distance / std::max(0.01, incident.width), 0.0, 1.0);
-    return pulse * pulse * (3.0 - 2.0 * pulse);
+    return math::smoothStep(pulse);
 }
 
 double dampened(double amount, double mitigation)
@@ -209,13 +210,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     launch.config.frameId = state.run.frameId;
     launch.config.equippedModuleIds = state.run.equippedModuleIds;
 
-    const double performance = std::max(0.0,
-        launch.stats.thrust * 0.060 +
-        launch.stats.fuel * 0.040 +
-        launch.stats.hull * 0.055 +
-        launch.stats.cooling * 0.050 +
-        launch.stats.sensors * 0.035 +
-        crewTrainingBonus(state, catalog));
+    const double performance = launch_balance::performanceScore(launch.stats, crewTrainingBonus(state, catalog));
 
     const double missionPressure = missionPressureModifier(state, catalog, destination);
     const int historyIndex = destinationHistoryIndex(catalog, destination.id);
@@ -223,52 +218,33 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     const int successes = destinationHistoryValue(state.meta.destinationSuccesses, historyIndex);
     const int requiredReadiness = frontierReadinessRequired(state, catalog);
     const int currentReadiness = std::max(0, state.run.frontierReadiness);
-    const double readinessRatio = requiredReadiness <= 0
-        ? 1.0
-        : std::clamp(static_cast<double>(currentReadiness) / static_cast<double>(requiredReadiness), 0.0, 1.0);
-    launch.overpreparedData = requiredReadiness <= 0 ? 0 : std::max(0, currentReadiness - requiredReadiness);
-    launch.provingPayoutBonus = launch.config.frontierTransfer
-        ? 0.0
-        : std::clamp(
-              static_cast<double>(launch.overpreparedData) * tuning::rewards::provingPayoutPerExtraData,
-              0.0,
-              tuning::rewards::provingPayoutBonusMaximum);
-    const double transferPrep = launch.config.frontierTransfer
-        ? readinessRatio * 0.18 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.050
-        : 0.0;
-    const double transferHazard = launch.config.frontierTransfer
-        ? std::max(0.50, 1.00 + static_cast<double>(destination.tier) * 0.10 - transferPrep)
-        : 0.0;
-    const double unprovenHazard = successes == 0 ? std::max(0.0, 0.20 - static_cast<double>(attempts) * 0.035) : 0.0;
-    const double hazard = destination.hazard * 0.26 + transferHazard + unprovenHazard + std::max(0.0, launch.stats.volatility) * 0.11 + static_cast<double>(state.run.shipDamage) * 0.008;
-    const double safety = std::clamp(1.0 + performance - hazard, 0.55, 1.75);
-    const bool longShotBreak = successes == 0 && rng.chance(std::clamp(0.012 + static_cast<double>(attempts) * 0.006 + launch.stats.sensors * 0.0015, 0.012, 0.055));
+    const double readinessRatio = launch_balance::readinessRatio(currentReadiness, requiredReadiness);
+    launch.overpreparedData = launch_balance::overpreparedData(currentReadiness, requiredReadiness);
+    launch.provingPayoutBonus = launch_balance::provingPayoutBonus(launch.overpreparedData, launch.config.frontierTransfer);
+    const double transferPrep = launch_balance::transferPreparation(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
+    const double transferHazard = launch_balance::transferHazard(destination, transferPrep, launch.config.frontierTransfer);
+    const double unprovenHazard = launch_balance::unprovenHazard(attempts, successes);
+    const double hazard = launch_balance::launchHazard(destination, launch.stats, state.run.shipDamage, transferHazard, unprovenHazard);
+    const double safety = launch_balance::launchSafety(performance, hazard);
+    const bool longShotBreak = successes == 0 && rng.chance(launch_balance::longShotChance(attempts, launch.stats.sensors));
     const double tail = std::pow(rng.next01(), 1.0 / safety);
 
     const double minCrash = destination.minCrashMultiplier;
-    const double transferCeilingPenalty = launch.config.frontierTransfer
-        ? std::max(0.28, 0.90 + static_cast<double>(destination.tier) * 0.10 - performance * 0.32 - readinessRatio * 0.22 - static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.080)
+    const double transferCeilingPenalty = launch_balance::transferCeilingPenalty(destination, performance, readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
+    const double unprovenPrepRelief = launch_balance::unprovenPrepRelief(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
+    const double unprovenCeilingPenalty = launch_balance::unprovenCeilingPenalty(attempts, successes, unprovenPrepRelief);
+    const double pressureCeilingPenalty = launch_balance::pressureCeilingPenalty(successes, missionPressure);
+    const double longShotBonus = longShotBreak
+        ? rng.range(tuning::launch::longShotBonusMinimum, tuning::launch::longShotBonusMaximum)
         : 0.0;
-    const double unprovenPrepRelief = launch.config.frontierTransfer
-        ? readinessRatio * 0.20 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.075
-        : 0.0;
-    const double unprovenCeilingPenalty = successes == 0
-        ? std::max(0.42, 0.86 - static_cast<double>(std::min(attempts, 8)) * 0.025 - unprovenPrepRelief)
-        : 0.0;
-    const double pressureCeilingPenalty = successes == 0 ? missionPressure * 0.38 : missionPressure * 0.12;
-    const double longShotBonus = longShotBreak ? rng.range(0.24, 0.52) : 0.0;
-    const double transferReadinessCeilingBonus = launch.config.frontierTransfer
-        ? readinessRatio * 0.20 + static_cast<double>(std::min(launch.overpreparedData, 3)) * 0.12
-        : 0.0;
-    const double overpreparedCeilingBonus = launch.config.frontierTransfer
-        ? 0.0
-        : static_cast<double>(launch.overpreparedData) * 0.18;
-    const double maxCrash = std::max(minCrash + 0.18, destination.maxCrashMultiplier - transferCeilingPenalty - unprovenCeilingPenalty - pressureCeilingPenalty + longShotBonus + transferReadinessCeilingBonus + overpreparedCeilingBonus + safety * 0.14);
+    const double transferReadinessCeilingBonus = launch_balance::transferReadinessCeilingBonus(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
+    const double overpreparedCeilingBonus = launch_balance::provingOverpreparedCeilingBonus(launch.overpreparedData, launch.config.frontierTransfer);
+    const double maxCrash = launch_balance::maxCrashCeiling(destination, transferCeilingPenalty, unprovenCeilingPenalty, pressureCeilingPenalty, longShotBonus, transferReadinessCeilingBonus, overpreparedCeilingBonus, safety);
     launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
-    launch.sensorQuality = std::clamp(0.22 + launch.stats.sensors * 0.065, 0.15, 0.92);
-    const double transferHeatLoad = launch.config.frontierTransfer ? 0.04 + static_cast<double>(destination.tier) * 0.035 : 0.0;
-    launch.heatRate = std::clamp(destination.hazard * 0.56 + transferHeatLoad + std::max(0.0, launch.stats.volatility) * 0.16 - launch.stats.cooling * 0.046, 0.34, 2.45);
-    launch.pressureModifier = std::clamp(missionPressure - std::max(0.0, launch.stats.pressure) * 0.040, 0.03, 0.60);
+    launch.sensorQuality = launch_balance::sensorQuality(launch.stats);
+    const double transferHeatLoad = launch_balance::transferHeatLoad(destination, launch.config.frontierTransfer);
+    launch.heatRate = launch_balance::heatRate(destination, launch.stats, transferHeatLoad);
+    launch.pressureModifier = launch_balance::pressureModifier(missionPressure, launch.stats);
     launch.throttleFactor = 1.0;
     launch.cutHeatRelief = 0.0;
     launch.cutVibrationRelief = 0.0;
@@ -285,48 +261,56 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         launch.crewGuidancePenalty = crewNavigationPenaltyFromStress(astronaut->stress);
         launch.crewAbortMultiplier = crewAbortRiskMultiplierFromStress(astronaut->stress);
     }
-    launch.incidentCount = std::clamp(2 + destination.tier / 2 + (launch.config.frontierTransfer ? 1 : 0), 2, static_cast<int>(launch.incidents.size()));
+    launch.incidentCount = launch_balance::incidentCount(destination, launch.config.frontierTransfer, static_cast<int>(launch.incidents.size()));
 
     const double profileEnd = std::max(launch.config.burnGoalMultiplier, destination.targetMultiplier);
-    const double profileSpan = std::max(0.16, profileEnd - 1.0);
-    const double incidentSeverity =
-        0.12 +
-        destination.hazard * 0.032 +
-        missionPressure * 0.10 +
-        std::max(0.0, launch.stats.volatility) * 0.035 +
-        static_cast<double>(state.run.shipDamage) * 0.0012;
+    const double profileSpan = launch_balance::incidentProfileSpan(profileEnd);
+    const double incidentSeverity = launch_balance::incidentSeverity(destination, launch.stats, state.run.shipDamage, missionPressure);
 
     for (int i = 0; i < launch.incidentCount; ++i) {
         TelemetryIncident incident;
-        const double lane = (static_cast<double>(i) + rng.range(0.22, 0.82)) / static_cast<double>(launch.incidentCount + 1);
-        incident.centerMultiplier = std::clamp(1.0 + profileSpan * lane, 1.04, std::max(1.05, launch.crashMultiplier - 0.035));
-        incident.width = rng.range(0.045, 0.105) + destination.hazard * 0.006;
+        const double lane = launch_balance::incidentLane(
+            i,
+            launch.incidentCount,
+            rng.range(tuning::launch::incidentLaneJitterMinimum, tuning::launch::incidentLaneJitterMaximum));
+        incident.centerMultiplier = launch_balance::incidentCenterMultiplier(profileSpan, lane, launch.crashMultiplier);
+        incident.width = launch_balance::incidentWidth(
+            destination,
+            rng.range(tuning::launch::incidentWidthMinimum, tuning::launch::incidentWidthMaximum));
 
-        const double amount = incidentSeverity * rng.range(0.78, 1.42);
-        switch (rng.rangeInt(0, 5)) {
+        const double amount = launch_balance::incidentAmount(
+            incidentSeverity,
+            rng.range(tuning::launch::incidentAmountMinimum, tuning::launch::incidentAmountMaximum));
+        switch (rng.rangeInt(0, tuning::launch::incidentVariantCount - 1)) {
         case 0:
-            incident.heat = dampened(amount + 0.08, launch.stats.cooling * 0.026);
-            incident.pressure = dampened(amount * 0.34, launch.stats.pressure * 0.020);
+            incident.heat = dampened(amount + tuning::launch::incidentHeatOffset, launch.stats.cooling * tuning::launch::incidentHeatCoolingMitigation);
+            incident.pressure = dampened(amount * tuning::launch::incidentHeatPressureScale, launch.stats.pressure * tuning::launch::incidentHeatPressureMitigation);
             break;
         case 1:
-            incident.pressure = dampened(amount + 0.07, launch.stats.pressure * 0.034 + launch.stats.fuel * 0.010);
-            incident.fuelMix = dampened(amount * 0.42, launch.stats.fuel * 0.019);
+            incident.pressure = dampened(
+                amount + tuning::launch::incidentPressureOffset,
+                launch.stats.pressure * tuning::launch::incidentPressureControlMitigation +
+                    launch.stats.fuel * tuning::launch::incidentPressureFuelMitigation);
+            incident.fuelMix = dampened(amount * tuning::launch::incidentPressureFuelMixScale, launch.stats.fuel * tuning::launch::incidentPressureFuelMixMitigation);
             break;
         case 2:
-            incident.vibration = dampened(amount + 0.06, launch.stats.hull * 0.030);
-            incident.guidance = dampened(amount * 0.36, launch.stats.sensors * 0.024);
+            incident.vibration = dampened(amount + tuning::launch::incidentVibrationOffset, launch.stats.hull * tuning::launch::incidentVibrationHullMitigation);
+            incident.guidance = dampened(amount * tuning::launch::incidentVibrationGuidanceScale, launch.stats.sensors * tuning::launch::incidentVibrationGuidanceMitigation);
             break;
         case 3:
-            incident.fuelMix = dampened(amount + 0.05, launch.stats.fuel * 0.034);
-            incident.pressure = dampened(amount * 0.30, launch.stats.pressure * 0.024);
+            incident.fuelMix = dampened(amount + tuning::launch::incidentFuelMixOffset, launch.stats.fuel * tuning::launch::incidentFuelMixFuelMitigation);
+            incident.pressure = dampened(amount * tuning::launch::incidentFuelMixPressureScale, launch.stats.pressure * tuning::launch::incidentFuelMixPressureMitigation);
             break;
         case 4:
-            incident.guidance = dampened(amount + 0.06, launch.stats.sensors * 0.036);
-            incident.vibration = dampened(amount * 0.28, launch.stats.hull * 0.022);
+            incident.guidance = dampened(amount + tuning::launch::incidentGuidanceOffset, launch.stats.sensors * tuning::launch::incidentGuidanceSensorMitigation);
+            incident.vibration = dampened(amount * tuning::launch::incidentGuidanceVibrationScale, launch.stats.hull * tuning::launch::incidentGuidanceVibrationMitigation);
             break;
         default:
-            incident.abortRisk = dampened(amount + 0.05, launch.stats.escape * 0.040 + launch.stats.sensors * 0.018);
-            incident.guidance = dampened(amount * 0.32, launch.stats.sensors * 0.026);
+            incident.abortRisk = dampened(
+                amount + tuning::launch::incidentAbortOffset,
+                launch.stats.escape * tuning::launch::incidentAbortEscapeMitigation +
+                    launch.stats.sensors * tuning::launch::incidentAbortSensorMitigation);
+            incident.guidance = dampened(amount * tuning::launch::incidentAbortGuidanceScale, launch.stats.sensors * tuning::launch::incidentAbortGuidanceMitigation);
             break;
         }
 
@@ -395,13 +379,15 @@ double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& dest
 
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
 {
-    const double progress = std::clamp(returnElapsed / std::max(0.1, returnDuration), 0.0, 1.0);
+    const double progress = std::clamp(returnElapsed / std::max(tuning::session::returnTelemetryProgressDenominator, returnDuration), 0.0, 1.0);
     const double shaped = math::smoothStep(progress);
-    const double headroom = std::max(0.04, crashMultiplier - commitMultiplier);
-    const double overshoot = std::min(headroom * 0.22, 0.18 + headroom * 0.10);
-    const double bump = std::sin(shaped * 3.1415926535) * overshoot;
-    const double settle = shaped * std::min(headroom * 0.08, 0.06);
-    return std::min(crashMultiplier - 0.02, commitMultiplier + bump - settle);
+    const double headroom = std::max(tuning::session::returnTelemetryHeadroomMinimum, crashMultiplier - commitMultiplier);
+    const double overshoot = std::min(
+        headroom * tuning::session::returnTelemetryOvershootHeadroomScale,
+        tuning::session::returnTelemetryOvershootBase + headroom * tuning::session::returnTelemetryOvershootExtraHeadroomScale);
+    const double bump = std::sin(shaped * math::pi) * overshoot;
+    const double settle = shaped * std::min(headroom * tuning::session::returnTelemetrySettleHeadroomScale, tuning::session::returnTelemetrySettleMaximum);
+    return std::min(crashMultiplier - tuning::session::returnTelemetryCrashMargin, commitMultiplier + bump - settle);
 }
 
 double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier)

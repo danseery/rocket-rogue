@@ -1,14 +1,19 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/CrewPresentation.h"
 #include "core/GameFormat.h"
 #include "core/GameMath.h"
 #include "core/GameState.h"
+#include "core/HangarPresentation.h"
+#include "core/LaunchBalance.h"
 #include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
 #include "core/OutcomePresentation.h"
+#include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
+#include "core/ShipPresentation.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
@@ -19,6 +24,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 using namespace rocket;
 
@@ -31,6 +37,8 @@ void require(bool condition, const char* message)
         std::abort();
     }
 }
+
+const HangarOperationCardPresentation* findHangarOperationCard(const std::vector<HangarOperationCardPresentation>& cards, std::string_view title);
 
 GameState configuredState(const ContentCatalog& catalog, int destinationIndex, double targetMultiplier)
 {
@@ -606,6 +614,48 @@ void hangarOperationPreviewMatchesCoreMath()
     require(preview.recruitAvailable, "free emergency recruitment should be available when broke");
 }
 
+void hangarOperationCardsComeFromSharedPreview()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 819);
+    state.run.credits = 120.0;
+    state.run.shipDamage = 24;
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "hangar card test needs a pilot");
+    pilot->stress = 20;
+
+    const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    std::vector<HangarOperationCardPresentation> cards = hangarOperationCards(state, catalog);
+    require(cards.size() == 3, "active-crew hangar should show repair, simulator, and rest cards");
+
+    const HangarOperationCardPresentation* repair = findHangarOperationCard(cards, text::panel::ops::repairBay);
+    const HangarOperationCardPresentation* simulator = findHangarOperationCard(cards, text::panel::ops::simulatorBurn);
+    const HangarOperationCardPresentation* rest = findHangarOperationCard(cards, text::panel::ops::medicalRest);
+    require(repair != nullptr && repair->detail == text::panel::repairDetail(preview.repairAmount), "repair card should share preview repair detail");
+    require(repair != nullptr && repair->cost == display::credits(preview.repairCost), "repair card should share preview repair cost");
+    require(repair != nullptr && repair->actionId == ui::actions::repairShip && repair->available == preview.repairAvailable, "repair card should share action and availability");
+    require(simulator != nullptr && simulator->detail == text::panel::simulatorDetail(preview.trainingGain, preview.trainingStressGain), "simulator card should share training detail");
+    require(simulator != nullptr && simulator->cost == display::credits(preview.trainingCost), "simulator card should share training cost");
+    require(simulator != nullptr && simulator->actionId == ui::actions::trainCrew && simulator->available == preview.trainingAvailable, "simulator card should share action and availability");
+    require(rest != nullptr && rest->detail == text::panel::restDetail(preview.restStressRecovery), "rest card should share rest detail");
+    require(rest != nullptr && rest->cost == display::credits(preview.restCost), "rest card should share rest cost");
+    require(rest != nullptr && rest->actionId == ui::actions::restCrew && rest->available == preview.restAvailable, "rest card should share action and availability");
+
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    state.run.credits = 0.0;
+    cards = hangarOperationCards(state, catalog);
+    require(cards.size() == 3, "no-pilot hangar should show repair and two recruit cards");
+    const HangarOperationCardPresentation* crewIntake = findHangarOperationCard(cards, text::panel::ops::crewIntake);
+    const HangarOperationCardPresentation* reserveRoster = findHangarOperationCard(cards, text::panel::ops::reserveRoster);
+    require(crewIntake != nullptr && crewIntake->detail == std::string(text::panel::messages::emergencyReplacement), "crew intake card should use emergency copy");
+    require(crewIntake != nullptr && crewIntake->cost == display::credits(tuning::hangar::emergencyRecruitCost), "crew intake card should use emergency recruit cost");
+    require(crewIntake != nullptr && crewIntake->available, "free emergency crew intake should be available");
+    require(reserveRoster != nullptr && reserveRoster->cost == display::credits(tuning::hangar::recruitCost), "reserve roster card should use standard recruit cost");
+    require(reserveRoster != nullptr && !reserveRoster->available, "reserve roster card should respect credits");
+}
+
 void lowCreditRefitWindowIncludesAffordableOffer()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1007,6 +1057,29 @@ bool hasRefitChip(const RefitPresentation& presentation, std::string_view label,
     }) != presentation.statChips.end();
 }
 
+const DetailPresentationRow* findDetailPresentationRow(const std::vector<DetailPresentationRow>& rows, std::string_view label)
+{
+    const auto found = std::find_if(rows.begin(), rows.end(), [&](const DetailPresentationRow& row) {
+        return !row.heading && row.label == label;
+    });
+    return found == rows.end() ? nullptr : &(*found);
+}
+
+bool hasDetailPresentationHeader(const std::vector<DetailPresentationRow>& rows, std::string_view label)
+{
+    return std::find_if(rows.begin(), rows.end(), [&](const DetailPresentationRow& row) {
+        return row.heading && row.label == label;
+    }) != rows.end();
+}
+
+const HangarOperationCardPresentation* findHangarOperationCard(const std::vector<HangarOperationCardPresentation>& cards, std::string_view title)
+{
+    const auto found = std::find_if(cards.begin(), cards.end(), [&](const HangarOperationCardPresentation& card) {
+        return card.title == title;
+    });
+    return found == cards.end() ? nullptr : &(*found);
+}
+
 void refitPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1034,6 +1107,135 @@ void refitPresentationComesFromSharedHelper()
     require(crewCard.glyph == "C", "crew upgrade presentation should expose a stable card glyph");
     require(crewCard.primaryImpact == text::panel::simulatorStressImpact(2), "crew upgrade presentation should expose strongest facility impact");
     require(hasRefitChip(crewCard, text::moduleStats::simStressChip, "+2.0", true), "crew upgrade presentation should expose simulator stress chip");
+}
+
+void crewDetailsPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 441);
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "crew presentation test needs an active astronaut");
+    pilot->training = 3;
+    pilot->stress = tuning::crew::stressPerStep * 2;
+    state.run.crewUpgradeIds.push_back(content::crewUpgrade::analogSimBay);
+
+    const std::vector<DetailPresentationRow> rows = crewDetailsPresentation(state, catalog);
+    const DetailPresentationRow* active = findDetailPresentationRow(rows, text::panel::details::active);
+    const DetailPresentationRow* training = findDetailPresentationRow(rows, text::panel::details::training);
+    const DetailPresentationRow* stress = findDetailPresentationRow(rows, text::panel::details::stress);
+    const DetailPresentationRow* simulatorStress = findDetailPresentationRow(rows, text::panel::details::simulatorStress);
+
+    require(active != nullptr && active->value == pilot->name, "crew presentation should expose active astronaut name");
+    require(training != nullptr && training->value == display::trainingWithEffective(pilot->training, effectiveTrainingLevel(*pilot)), "crew presentation should share training display format");
+    require(stress != nullptr && stress->value == display::stressWithSteps(pilot->stress, crewStressStepCount(pilot->stress)), "crew presentation should share stress display format");
+    require(hasDetailPresentationHeader(rows, text::panel::details::crewFacilities), "crew presentation should include crew facilities section");
+    require(hasDetailPresentationHeader(rows, text::panel::details::facilityEffects), "crew presentation should include facility effects section");
+    require(findDetailPresentationRow(rows, text::enums::rarity::common) != nullptr, "crew presentation should show installed facility rarity row");
+    require(simulatorStress != nullptr && simulatorStress->value == text::panel::details::stressDelta(hangarOperationPreview(state, catalog).trainingStressGain), "crew presentation should share simulator stress wording");
+
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    const std::vector<DetailPresentationRow> deadRosterRows = crewDetailsPresentation(state, catalog);
+    active = findDetailPresentationRow(deadRosterRows, text::panel::details::active);
+    require(active != nullptr && active->value == std::string(text::panel::noneCleared), "crew presentation should handle no cleared astronaut");
+}
+
+void shipDetailsPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 442);
+
+    const std::vector<DetailPresentationRow> rows = shipDetailsPresentation(state, catalog);
+    const DetailPresentationRow* thrust = findDetailPresentationRow(rows, text::moduleStats::thrustDetail);
+    const DetailPresentationRow* damage = findDetailPresentationRow(rows, text::moduleStats::damage);
+    const DetailPresentationRow* engine = findDetailPresentationRow(rows, text::enums::slot::engine);
+    const DetailPresentationRow* inventory = findDetailPresentationRow(rows, text::panel::details::inventory);
+
+    require(thrust != nullptr && !thrust->value.empty(), "ship presentation should expose formatted ship stats");
+    require(damage != nullptr && damage->value == display::wholePercent(state.run.shipDamage), "ship presentation should expose damage row");
+    require(hasDetailPresentationHeader(rows, text::panel::details::equippedShipUpgrades), "ship presentation should include equipped upgrades section");
+    require(hasDetailPresentationHeader(rows, text::panel::details::storedShipUpgrades), "ship presentation should include stored upgrades section");
+    require(engine != nullptr && engine->value.find("Sparrow Engine") != std::string::npos, "ship presentation should summarize equipped modules");
+    require(inventory != nullptr && inventory->value == std::string(text::panel::noSpareModules), "ship presentation should show no-spares fallback");
+
+    const ShipModule* spareModule = catalog.findModule(content::module::cryoLoop);
+    require(spareModule != nullptr, "ship presentation test needs a non-starter spare module");
+    state.run.inventoryModuleIds.push_back(spareModule->id);
+    const std::vector<DetailPresentationRow> rowsWithSpare = shipDetailsPresentation(state, catalog);
+    const std::string spareSummary = shipModuleSummary(*spareModule);
+    require(std::find_if(rowsWithSpare.begin(), rowsWithSpare.end(), [&](const DetailPresentationRow& row) {
+        return !row.heading && row.value == spareSummary;
+    }) != rowsWithSpare.end(), "ship presentation should summarize stored spare modules");
+}
+
+void programDetailsPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 443);
+    const int required = frontierReadinessRequired(state, catalog);
+    state.run.frontierReadiness = 2;
+    state.meta.blueprintProgress = 9;
+    state.meta.shipsLost = 3;
+    state.meta.astronautsLost = 2;
+    state.meta.furthestTier = 1;
+
+    const std::vector<DetailPresentationRow> frontierRows = frontierDetailsPresentation(state, catalog);
+    const DetailPresentationRow* current = findDetailPresentationRow(frontierRows, text::panel::details::current);
+    const DetailPresentationRow* flightData = findDetailPresentationRow(frontierRows, text::labels::flightData);
+    const DetailPresentationRow* difficulty = findDetailPresentationRow(frontierRows, text::labels::missionDifficulty);
+    const DetailPresentationRow* next = findDetailPresentationRow(frontierRows, text::panel::details::next);
+    const DetailPresentationRow* transferBurn = findDetailPresentationRow(frontierRows, text::panel::details::transferBurn);
+
+    require(current != nullptr && current->value == catalog.destinations[0].name, "frontier presentation should expose current frontier");
+    require(flightData != nullptr && flightData->value == display::fraction(state.run.frontierReadiness, required), "frontier presentation should share readiness display format");
+    require(difficulty != nullptr && difficulty->value == display::signedPercent(missionPressureModifier(state, catalog, catalog.destinations[0])), "frontier presentation should share mission difficulty format");
+    require(next != nullptr && next->value == catalog.destinations[1].name, "frontier presentation should expose next frontier");
+    require(transferBurn != nullptr && transferBurn->value == display::multiplier(catalog.destinations[1].targetMultiplier), "frontier presentation should expose next transfer burn");
+
+    const std::vector<DetailPresentationRow> legacyRows = legacyDetailsPresentation(state);
+    const DetailPresentationRow* blueprints = findDetailPresentationRow(legacyRows, text::panel::details::blueprints);
+    const DetailPresentationRow* shipsLost = findDetailPresentationRow(legacyRows, text::panel::details::shipsLost);
+    const DetailPresentationRow* astronautsLost = findDetailPresentationRow(legacyRows, text::panel::details::astronautsLost);
+    const DetailPresentationRow* furthestTier = findDetailPresentationRow(legacyRows, text::panel::details::furthestTier);
+    require(blueprints != nullptr && blueprints->value == "9", "legacy presentation should expose blueprint progress");
+    require(shipsLost != nullptr && shipsLost->value == "3", "legacy presentation should expose ship losses");
+    require(astronautsLost != nullptr && astronautsLost->value == "2", "legacy presentation should expose astronaut losses");
+    require(furthestTier != nullptr && furthestTier->value == "1", "legacy presentation should expose furthest tier");
+}
+
+void launchBalanceHelpersDrivePreparedLaunch()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 818);
+    const Destination& moon = catalog.destinations[1];
+    const int required = frontierReadinessRequired(state, catalog);
+    state.run.frontierReadiness = required + 2;
+    state.run.shipDamage = 12;
+    state.launchConfig.frontierTransfer = true;
+    state.launchConfig.destinationId = moon.id;
+    state.launchConfig.burnGoalMultiplier = moon.targetMultiplier;
+
+    const ModuleStats stats = aggregateShipStats(state, catalog);
+    const double pressure = missionPressureModifier(state, catalog, moon);
+    Random rng(818);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+
+    const int expectedOverprepared = launch_balance::overpreparedData(state.run.frontierReadiness, required);
+    require(launch.overpreparedData == expectedOverprepared, "prepared launch should use shared overprepared-data math");
+    require(std::abs(launch.provingPayoutBonus - launch_balance::provingPayoutBonus(expectedOverprepared, true)) < 0.000001, "transfer launch should use shared proving-payout helper");
+    require(std::abs(launch.sensorQuality - launch_balance::sensorQuality(stats)) < 0.000001, "prepared launch should use shared sensor quality helper");
+    require(std::abs(launch.heatRate - launch_balance::heatRate(moon, stats, launch_balance::transferHeatLoad(moon, true))) < 0.000001, "prepared launch should use shared heat-rate helper");
+    require(std::abs(launch.pressureModifier - launch_balance::pressureModifier(pressure, stats)) < 0.000001, "prepared launch should use shared pressure modifier helper");
+    require(launch.incidentCount == launch_balance::incidentCount(moon, true, static_cast<int>(launch.incidents.size())), "prepared launch should use shared incident-count helper");
+
+    const double ratio = launch_balance::readinessRatio(state.run.frontierReadiness, required);
+    const double transferPrep = launch_balance::transferPreparation(ratio, expectedOverprepared, true);
+    const double transferRisk = launch_balance::transferHazard(moon, transferPrep, true);
+    const double unprovenRisk = launch_balance::unprovenHazard(0, 0);
+    const double hazard = launch_balance::launchHazard(moon, stats, state.run.shipDamage, transferRisk, unprovenRisk);
+    require(hazard > 0.0, "shared launch hazard helper should expose a usable risk value");
+    require(launch_balance::launchSafety(0.0, hazard) >= tuning::launch::safetyMinimum, "shared launch safety should honor tuned lower bound");
 }
 
 void destinationRiskEscalates()
@@ -1256,6 +1458,7 @@ int main()
     crewUpgradeOffersInstallAndModifyCrewOps();
     hangarOpsStartCheapAndEscalate();
     hangarOperationPreviewMatchesCoreMath();
+    hangarOperationCardsComeFromSharedPreview();
     lowCreditRefitWindowIncludesAffordableOffer();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
@@ -1269,6 +1472,10 @@ int main()
     launchOutcomePresentationIsShared();
     enumDisplayLabelsComeFromSharedText();
     refitPresentationComesFromSharedHelper();
+    crewDetailsPresentationComesFromSharedHelper();
+    shipDetailsPresentationComesFromSharedHelper();
+    programDetailsPresentationComesFromSharedHelper();
+    launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();
     frontierReadinessGatesProgression();

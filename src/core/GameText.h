@@ -292,6 +292,26 @@ inline constexpr std::string_view astronautsLost = "Astronauts lost";
 inline constexpr std::string_view furthestTier = "Furthest tier";
 inline constexpr std::string_view repairVehicle = "Repair vehicle";
 inline constexpr std::string_view recruitCrew = "Recruit crew";
+
+inline std::string trainingDelta(int trainingGain)
+{
+    return "+" + std::to_string(trainingGain) + " training";
+}
+
+inline std::string stressDelta(int stressGain)
+{
+    return "+" + std::to_string(stressGain) + " stress";
+}
+
+inline std::string stressRecoveryNow(int stressRecovery)
+{
+    return "-" + std::to_string(stressRecovery) + " stress now";
+}
+
+inline std::string launchStressRelief(int stressRelief)
+{
+    return "-" + std::to_string(stressRelief) + " stress";
+}
 } // namespace details
 
 namespace outcomes {

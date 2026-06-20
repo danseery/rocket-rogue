@@ -1,9 +1,13 @@
 #include "game/GamePanel.h"
+#include "core/CrewPresentation.h"
 #include "core/GameFormat.h"
 #include "core/GameMath.h"
 #include "core/GameText.h"
+#include "core/HangarPresentation.h"
 #include "core/OutcomePresentation.h"
+#include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
+#include "core/ShipPresentation.h"
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
@@ -160,6 +164,11 @@ std::string operationCard(std::string title, std::string detail, std::string cos
     return out.str();
 }
 
+std::string operationCard(const HangarOperationCardPresentation& card)
+{
+    return operationCard(card.title, card.detail, card.cost, card.actionId, card.available, card.cssClass);
+}
+
 std::string detailRow(std::string_view label, std::string_view value)
 {
     return "<div class=\"detail-row\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
@@ -168,6 +177,16 @@ std::string detailRow(std::string_view label, std::string_view value)
 std::string detailHeader(std::string_view label)
 {
     return "<div class=\"detail-section\">" + htmlEscape(label) + "</div>";
+}
+
+std::string detailStack(const std::vector<DetailPresentationRow>& rows)
+{
+    std::string body = "<div class=\"detail-stack\">";
+    for (const DetailPresentationRow& row : rows) {
+        body += row.heading ? detailHeader(row.label) : detailRow(row.label, row.value);
+    }
+    body += "</div>";
+    return body;
 }
 
 std::string crewStressSummary(const Astronaut* astronaut)
@@ -193,7 +212,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
 
     const Astronaut* astronaut = activeAstronaut(state);
-    const ModuleStats stats = aggregateShipStats(state, catalog);
+    const HangarOperationPreview hangarOps = hangarOperationPreview(state, catalog);
     const bool transferLaunch = state.screen == Screen::Launch && context.activeLaunch.config.frontierTransfer;
     const int requiredReadiness = frontierReadinessRequired(state, catalog);
     const Destination* next = nextDestination(state, catalog);
@@ -342,81 +361,9 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         return out.str();
     }
 
-    std::ostringstream shipBody;
-    shipBody << "<div class=\"detail-stack\">";
-    for (const ModuleStatDisplay& display : moduleStatDisplays(stats)) {
-        if (display.showInShipDetails) {
-            shipBody << detailRow(std::string(display.detailLabel), display::money(display.value));
-        }
-    }
-    shipBody << detailRow(std::string(text::moduleStats::damage), display::wholePercent(state.run.shipDamage));
-    shipBody << detailHeader(text::panel::details::equippedShipUpgrades);
-    for (const std::string& moduleId : state.run.equippedModuleIds) {
-        if (const ShipModule* module = catalog.findModule(moduleId)) {
-            shipBody << detailRow(std::string(toString(module->slot)), module->name + " (" + std::string(toString(module->rarity)) + ")");
-        }
-    }
-    shipBody << detailHeader(text::panel::details::storedShipUpgrades);
-    bool hasStoredModule = false;
-    for (const std::string& moduleId : state.run.inventoryModuleIds) {
-        const bool equipped = std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end();
-        if (!equipped) {
-            if (const ShipModule* module = catalog.findModule(moduleId)) {
-                hasStoredModule = true;
-                shipBody << detailRow(std::string(toString(module->slot)), module->name + " (" + std::string(toString(module->rarity)) + ")");
-            }
-        }
-    }
-    if (!hasStoredModule) {
-        shipBody << detailRow(text::panel::details::inventory, text::panel::noSpareModules);
-    }
-    shipBody << "</div>";
-
-    std::ostringstream crewBody;
-    crewBody << "<div class=\"detail-stack\">";
-    const CrewUpgradeStats crewUpgrades = aggregateCrewUpgradeStats(state, catalog);
-    const HangarOperationPreview hangarOps = hangarOperationPreview(state, catalog);
-    if (astronaut != nullptr) {
-        const int stressSteps = crewStressStepCount(astronaut->stress);
-        crewBody << detailRow(text::panel::details::active, astronaut->name);
-        crewBody << detailRow(text::panel::details::trait, astronaut->trait);
-        crewBody << detailRow(text::panel::details::training, display::trainingWithEffective(astronaut->training, effectiveTrainingLevel(*astronaut)));
-        crewBody << detailRow(text::panel::details::stress, display::stressWithSteps(astronaut->stress, stressSteps));
-        crewBody << detailRow(text::panel::details::stressEffects, display::crewStressEffects(crewNavigationPenaltyFromStress(astronaut->stress), crewAbortRiskMultiplierFromStress(astronaut->stress)));
-        crewBody << detailRow(text::panel::details::status, std::string(toString(astronaut->status)));
-    } else {
-        crewBody << detailRow(text::panel::details::active, text::panel::noneCleared);
-    }
-    crewBody << detailHeader(text::panel::details::crewFacilities);
-    if (state.run.crewUpgradeIds.empty()) {
-        crewBody << detailRow(text::panel::details::facilities, text::panel::baselineTrainingRoom);
-    } else {
-        for (const std::string& upgradeId : state.run.crewUpgradeIds) {
-            if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(upgradeId)) {
-                crewBody << detailRow(std::string(toString(upgrade->rarity)), upgrade->name);
-            }
-        }
-    }
-    crewBody << detailHeader(text::panel::details::facilityEffects);
-    crewBody << detailRow(text::panel::details::simulatorGain, "+" + std::to_string(hangarOps.trainingGain) + " training");
-    crewBody << detailRow(text::panel::details::simulatorStress, "+" + std::to_string(hangarOps.trainingStressGain) + " stress");
-    crewBody << detailRow(text::panel::details::medicalRest, "-" + std::to_string(hangarOps.restStressRecovery) + " stress now");
-    crewBody << detailRow(text::panel::details::launchStress, "-" + std::to_string(crewUpgrades.launchStressRelief) + " stress");
-    crewBody << detailRow(text::panel::details::traitModifiers, display::signedPercent(std::max(0.0, crewUpgrades.traitModifier)));
-    crewBody << "</div>";
-
-    std::ostringstream frontierBody;
-    frontierBody << "<div class=\"detail-stack\">";
-    frontierBody << detailRow(text::panel::details::current, currentFrontier.name);
-    frontierBody << detailRow(text::labels::flightData, requiredReadiness == 0 ? std::string(text::panel::complete) : display::fraction(state.run.frontierReadiness, requiredReadiness));
-    frontierBody << detailRow(text::labels::missionDifficulty, display::signedPercent(missionPressureModifier(state, catalog, currentFrontier)));
-    if (next != nullptr) {
-        frontierBody << detailRow(text::panel::details::next, next->name);
-        frontierBody << detailRow(text::panel::details::transferBurn, display::multiplier(next->targetMultiplier));
-    } else {
-        frontierBody << detailRow(text::panel::details::next, text::panel::noneCharted);
-    }
-    frontierBody << "</div>";
+    const std::string shipBody = detailStack(shipDetailsPresentation(state, catalog));
+    const std::string crewBody = detailStack(crewDetailsPresentation(state, catalog));
+    const std::string frontierBody = detailStack(frontierDetailsPresentation(state, catalog));
 
     std::ostringstream launchBlockedBody;
     launchBlockedBody << "<div class=\"detail-stack\">";
@@ -453,31 +400,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
     out << "<div class=\"ops-grid\">";
-    out << operationCard(
-        std::string(text::panel::ops::repairBay),
-        hangarOps.repairAmount > 0 ? text::panel::repairDetail(hangarOps.repairAmount) : std::string(text::panel::messages::noStructuralWork),
-        hangarOps.repairAmount > 0 ? display::credits(hangarOps.repairCost) : std::string(text::panel::shipStable),
-        ui::actions::repairShip,
-        hangarOps.repairAvailable,
-        "repair");
-    if (astronaut == nullptr) {
-        out << operationCard(std::string(text::panel::ops::crewIntake), std::string(text::panel::messages::emergencyReplacement), display::credits(hangarOps.recruitCost), ui::actions::recruitCrew, hangarOps.recruitAvailable, "crew");
-        out << operationCard(std::string(text::panel::ops::reserveRoster), std::string(text::panel::messages::reserveRoster), display::credits(tuning::hangar::recruitCost), ui::actions::recruitCrew, state.run.credits >= tuning::hangar::recruitCost, "crew");
-    } else {
-        out << operationCard(
-            std::string(text::panel::ops::simulatorBurn),
-            text::panel::simulatorDetail(hangarOps.trainingGain, hangarOps.trainingStressGain),
-            display::credits(hangarOps.trainingCost),
-            ui::actions::trainCrew,
-            hangarOps.trainingAvailable,
-            "crew");
-        out << operationCard(
-            std::string(text::panel::ops::medicalRest),
-            text::panel::restDetail(hangarOps.restStressRecovery),
-            display::credits(hangarOps.restCost),
-            ui::actions::restCrew,
-            hangarOps.restAvailable,
-            "crew");
+    for (const HangarOperationCardPresentation& card : hangarOperationCards(state, catalog)) {
+        out << operationCard(card);
     }
     out << "</div>";
 
@@ -496,22 +420,16 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
-    std::ostringstream legacyBody;
-    legacyBody << "<div class=\"detail-stack\">";
-    legacyBody << detailRow(text::panel::details::blueprints, std::to_string(state.meta.blueprintProgress));
-    legacyBody << detailRow(text::panel::details::shipsLost, std::to_string(state.meta.shipsLost));
-    legacyBody << detailRow(text::panel::details::astronautsLost, std::to_string(state.meta.astronautsLost));
-    legacyBody << detailRow(text::panel::details::furthestTier, std::to_string(state.meta.furthestTier));
-    legacyBody << "</div>";
+    const std::string legacyBody = detailStack(legacyDetailsPresentation(state));
 
     out << "<div class=\"utility-row bottom-tools\">";
     out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
     out << "</div>";
-    out << modalTemplate(ui::modals::ship, text::panel::modals::shipDetails, shipBody.str());
-    out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody.str());
-    out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody.str());
+    out << modalTemplate(ui::modals::ship, text::panel::modals::shipDetails, shipBody);
+    out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody);
+    out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody);
     out << modalTemplate(ui::modals::launchBlocked, text::panel::modals::launchHold, launchBlockedBody.str());
-    out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody.str());
+    out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
 
     return out.str();
