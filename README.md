@@ -20,7 +20,7 @@ You need:
 - Ninja
 - A C++20 compiler for native tests
 - Emscripten SDK for the browser build
-- Node.js for the included static server
+- Node.js 24 for repo scripts and the included static server
 
 ## Install dependencies
 
@@ -47,7 +47,7 @@ Both installers keep project-local development state in ignored folders:
 - `node_modules` if Node dependencies are added later
 
 Use `EMSDK_VERSION` or the script option to install a specific SDK version instead of `latest`.
-Node dependencies are managed through `package-lock.json`; the installers use `npm ci` when the lockfile exists.
+Node dependencies are managed through `package-lock.json`; the installers use `npm ci` when the lockfile exists. The repo standard is Node 24, recorded in `.node-version` and `package.json`.
 
 ## Build for the browser with presets
 

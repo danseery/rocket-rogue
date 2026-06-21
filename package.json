@@ -5,7 +5,7 @@
   "license": "UNLICENSED",
   "description": "C++20/WebGL2 proof of concept for a rocket-launch roguelite.",
   "engines": {
-    "node": ">=16"
+    "node": ">=24 <25"
   },
   "scripts": {
     "sanity": "node tools/sanity-check.mjs",

@@ -14,10 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EMSDK_VERSION: 6.0.0
+      NODE_VERSION: 24
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Capture Node.js 24 path
+        run: |
+          echo "NODE24_BIN=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"
+          node --version
 
       - name: Install toolchain
         run: |
@@ -27,21 +39,28 @@ jobs:
       - name: Configure web build
         run: |
           source scripts/env-ubuntu.sh
+          export PATH="$NODE24_BIN:$PATH"
+          node --version
           cmake --preset web-release
 
       - name: Build web game
         run: |
           source scripts/env-ubuntu.sh
+          export PATH="$NODE24_BIN:$PATH"
           cmake --build --preset web-release
 
       - name: Test web build
         run: |
           source scripts/env-ubuntu.sh
+          export PATH="$NODE24_BIN:$PATH"
+          node --version
           ctest --preset web-release
           node tools/sanity-check.mjs
 
       - name: Prepare static app package
-        run: npm run prepare:azure
+        run: |
+          node --version
+          npm run prepare:azure
 
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
