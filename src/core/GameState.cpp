@@ -39,6 +39,9 @@ void ensureDestinationHistory(GameState& state, const ContentCatalog& catalog)
     const std::size_t count = catalog.destinations.size();
     state.meta.destinationAttempts.resize(count, 0);
     state.meta.destinationSuccesses.resize(count, 0);
+    state.meta.destinationFlybys.resize(count, 0);
+    state.meta.destinationOrbits.resize(count, 0);
+    state.meta.destinationLandings.resize(count, 0);
 }
 
 int destinationIndexForId(const ContentCatalog& catalog, const std::string& destinationId)
@@ -49,6 +52,18 @@ int destinationIndexForId(const ContentCatalog& catalog, const std::string& dest
         }
     }
     return -1;
+}
+
+bool isShallowRecoveryOutcome(const Destination& destination, const LaunchOutcome& outcome)
+{
+    return (outcome.recoveryMethod == RecoveryMethod::ReturnHome || outcome.recoveryMethod == RecoveryMethod::ManualEject)
+        && outcome.ejectMultiplier < 1.0 + (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
+}
+
+bool isCleanShallowRecoveryOutcome(const Destination& destination, const LaunchOutcome& outcome)
+{
+    return isShallowRecoveryOutcome(destination, outcome)
+        && outcome.peakWarning < tuning::rewards::cleanShallowRecoveryWarningThreshold;
 }
 
 } // namespace
@@ -66,6 +81,29 @@ int moduleOfferCost(const ShipModule& module)
 int crewUpgradeCost(const CrewUpgrade& upgrade)
 {
     return moduleOfferCost(upgrade.rarity);
+}
+
+bool canAffordMaterials(const MaterialInventory& owned, const MaterialInventory& cost)
+{
+    return owned.common >= cost.common && owned.rare >= cost.rare && owned.exotic >= cost.exotic;
+}
+
+bool spendMaterials(MaterialInventory& owned, const MaterialInventory& cost)
+{
+    if (!canAffordMaterials(owned, cost)) {
+        return false;
+    }
+
+    owned.common -= cost.common;
+    owned.rare -= cost.rare;
+    owned.exotic -= cost.exotic;
+    return true;
+}
+
+bool canAffordModuleOffer(const GameState& state, const ShipModule& module)
+{
+    return state.run.credits >= static_cast<double>(moduleOfferCost(module)) &&
+        canAffordMaterials(state.meta.materials, module.materialCost);
 }
 
 CrewUpgradeStats& operator+=(CrewUpgradeStats& lhs, const CrewUpgradeStats& rhs)
@@ -307,7 +345,7 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
         const std::string& moduleId = state.run.offerModuleIds[index];
         if (!moduleId.empty()) {
             const ShipModule* module = catalog.findModule(moduleId);
-            return module != nullptr && state.run.credits >= static_cast<double>(moduleOfferCost(*module));
+            return module != nullptr && canAffordModuleOffer(state, *module);
         }
 
         const std::string& upgradeId = state.run.offerCrewUpgradeIds[index];
@@ -381,9 +419,14 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
         state.statusLine = text::insufficientCreditsFor(module != nullptr ? module->name : crewUpgrade->name);
         return false;
     }
+    if (module != nullptr && !canAffordMaterials(state.meta.materials, module->materialCost)) {
+        state.statusLine = std::string(text::panel::needMaterials);
+        return false;
+    }
 
     state.run.credits -= static_cast<double>(cost);
     if (module != nullptr) {
+        spendMaterials(state.meta.materials, module->materialCost);
         state.run.inventoryModuleIds.push_back(module->id);
 
         auto slotIt = std::find_if(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), [&](const std::string& equippedId) {
@@ -451,7 +494,7 @@ int crewTrainingGain(const GameState& state, const ContentCatalog& catalog)
 int crewTrainingStressGain(const GameState& state, const ContentCatalog& catalog)
 {
     const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
-    return std::max(0, tuning::hangar::trainingBaseStress - upgrades.trainingStressRelief);
+    return std::max(tuning::hangar::trainingMinimumStress, tuning::hangar::trainingBaseStress - upgrades.trainingStressRelief);
 }
 
 double crewTrainingCost(const GameState& state, const ContentCatalog&)
@@ -478,6 +521,11 @@ bool trainCrew(GameState& state, const ContentCatalog& catalog)
     }
 
     const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    if (astronaut->training >= tuning::crew::maxTraining) {
+        state.statusLine = std::string(text::panel::messages::simulatorMastered);
+        return false;
+    }
+
     if (astronaut->stress >= tuning::crew::maxStress || astronaut->stress + preview.trainingStressGain > tuning::crew::maxStress) {
         state.statusLine = text::tooStressedForTraining(astronaut->name);
         return false;
@@ -515,6 +563,11 @@ bool restCrew(GameState& state, const ContentCatalog& catalog)
     }
 
     const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    if (!preview.restNeeded) {
+        state.statusLine = std::string(text::status::noRestNeeded);
+        return false;
+    }
+
     if (!preview.restAvailable) {
         state.statusLine = std::string(text::status::restBudgetDenied);
         return false;
@@ -550,12 +603,14 @@ HangarOperationPreview hangarOperationPreview(const GameState& state, const Cont
     preview.trainingCost = crewTrainingCost(state, catalog);
     preview.trainingAvailable = astronaut != nullptr &&
         state.run.credits >= preview.trainingCost &&
+        astronaut->training < tuning::crew::maxTraining &&
         astronaut->stress < tuning::crew::maxStress &&
         astronaut->stress + preview.trainingStressGain <= tuning::crew::maxStress;
 
     preview.restStressRecovery = crewRestStressRecovery(state, catalog);
     preview.restCost = crewRestCost(state, catalog);
-    preview.restAvailable = astronaut != nullptr && state.run.credits >= preview.restCost;
+    preview.restNeeded = astronaut != nullptr && (astronaut->stress > 0 || astronaut->status == CrewStatus::Injured);
+    preview.restAvailable = preview.restNeeded && state.run.credits >= preview.restCost;
 
     preview.emergencyRecruitment = astronaut == nullptr;
     preview.recruitCost = recruitCrewCost(state);
@@ -685,10 +740,29 @@ void unlockFromBlueprints(GameState& state)
     }
 }
 
+void updateLegacyRecords(MetaProgress& meta, const LaunchOutcome& outcome)
+{
+    const double creditDelta = outcome.payout - outcome.recoveryCost;
+    meta.maxBurnDepth = std::max(meta.maxBurnDepth, outcome.ejectMultiplier);
+    meta.maxPeakWarning = std::max(meta.maxPeakWarning, outcome.peakWarning);
+    meta.maxPeakAbortRisk = std::max(meta.maxPeakAbortRisk, outcome.peakAbortRisk);
+    meta.bestCreditDelta = std::max(meta.bestCreditDelta, creditDelta);
+    meta.worstCreditDelta = std::min(meta.worstCreditDelta, creditDelta);
+
+    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    if (outcome.type != LaunchResultType::Destroyed && survivalMargin > 0.0
+        && (meta.closestSurvivalMargin <= 0.0 || survivalMargin < meta.closestSurvivalMargin)) {
+        meta.closestSurvivalMargin = survivalMargin;
+        meta.closestSurvivalBurn = outcome.ejectMultiplier;
+        meta.closestSurvivalFailurePoint = outcome.crashMultiplier;
+    }
+}
+
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& outcome)
 {
     ensureDestinationHistory(state, catalog);
     state.lastOutcome = outcome;
+    updateLegacyRecords(state.meta, outcome);
     state.launchConfig.frontierTransfer = false;
     state.run.launchesThisExpedition += 1;
     state.run.shipDamage = std::clamp(state.run.shipDamage + outcome.shipDamage, 0, tuning::damage::destroyedShipDamage);
@@ -701,6 +775,20 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         if (outcome.type == LaunchResultType::MissionComplete) {
             state.meta.destinationSuccesses[index] += 1;
         }
+    }
+    const Destination* outcomeDestination = catalog.findDestination(outcome.destinationId);
+    const bool shallowRecovery = outcomeDestination != nullptr && isShallowRecoveryOutcome(*outcomeDestination, outcome);
+    const bool cleanShallowRecovery = outcomeDestination != nullptr && isCleanShallowRecoveryOutcome(*outcomeDestination, outcome);
+    const bool cleanShallowRecoveryDestroyed = outcome.type == LaunchResultType::Destroyed
+        && cleanShallowRecovery
+        && state.run.cleanShallowRecoveryStreak + 1 >= tuning::rewards::cleanShallowRecoveryDestructionStreak;
+
+    if (outcome.type != LaunchResultType::Destroyed && shallowRecovery) {
+        state.run.shallowRecoveryStreak += 1;
+        state.run.cleanShallowRecoveryStreak = cleanShallowRecovery ? state.run.cleanShallowRecoveryStreak + 1 : 0;
+    } else {
+        state.run.shallowRecoveryStreak = 0;
+        state.run.cleanShallowRecoveryStreak = 0;
     }
 
     Astronaut* astronaut = activeAstronaut(state);
@@ -726,7 +814,9 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         state.run.frontierReadiness = outcome.frontierTransfer ? 0 : std::max(0, state.run.frontierReadiness - 1);
         state.run.credits = std::max(tuning::hangar::minimumExpeditionCredits, state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.active = false;
-        if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
+        if (cleanShallowRecoveryDestroyed) {
+            state.statusLine = std::string(text::status::cleanShallowRecoveryDestroyed);
+        } else if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
             state.statusLine = std::string(text::status::returnVehicleLost);
         } else if (outcome.frontierTransfer) {
             state.statusLine = std::string(text::status::transferVehicleLost);
@@ -735,7 +825,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         }
     } else {
         state.run.credits = std::max(0.0, state.run.credits + outcome.payout - outcome.recoveryCost);
-        const Destination* destination = catalog.findDestination(outcome.destinationId);
+        const Destination* destination = outcomeDestination;
         if (destination != nullptr) {
             if (!outcome.frontierTransfer || outcome.type == LaunchResultType::MissionComplete) {
                 state.meta.furthestTier = std::max(state.meta.furthestTier, destination->tier);

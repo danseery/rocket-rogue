@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/SaveSchema.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <charconv>
@@ -79,6 +80,59 @@ CrewStatus statusFromInt(int value)
     }
 }
 
+int surfaceSiteProfileToInt(SurfaceSiteProfile profile)
+{
+    switch (profile) {
+    case SurfaceSiteProfile::SurveyBasin:
+        return 0;
+    case SurfaceSiteProfile::OreShelf:
+        return 1;
+    case SurfaceSiteProfile::FractureField:
+        return 2;
+    }
+    return 0;
+}
+
+SurfaceSiteProfile surfaceSiteProfileFromInt(int value)
+{
+    switch (value) {
+    case 1:
+        return SurfaceSiteProfile::OreShelf;
+    case 2:
+        return SurfaceSiteProfile::FractureField;
+    default:
+        return SurfaceSiteProfile::SurveyBasin;
+    }
+}
+
+int screenToInt(Screen screen)
+{
+    switch (screen) {
+    case Screen::ArrivalOps:
+        return 2;
+    case Screen::Research:
+        return 3;
+    case Screen::SurfaceExpedition:
+        return 4;
+    default:
+        return 0;
+    }
+}
+
+Screen screenFromInt(int value)
+{
+    switch (value) {
+    case 2:
+        return Screen::ArrivalOps;
+    case 3:
+        return Screen::Research;
+    case 4:
+        return Screen::SurfaceExpedition;
+    default:
+        return Screen::Hangar;
+    }
+}
+
 int parseInt(std::string_view text, int fallback)
 {
     int value = fallback;
@@ -147,6 +201,65 @@ std::vector<Astronaut> parseCrew(std::string_view text)
     return crew;
 }
 
+std::string serializeMaterials(const MaterialInventory& materials)
+{
+    std::ostringstream out;
+    out << materials.common
+        << save_schema::crewFieldDelimiter << materials.rare
+        << save_schema::crewFieldDelimiter << materials.exotic;
+    return out.str();
+}
+
+MaterialInventory parseMaterials(std::string_view text)
+{
+    MaterialInventory materials;
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        materials.common = parseInt(fields[0], 0);
+    }
+    if (fields.size() > 1) {
+        materials.rare = parseInt(fields[1], 0);
+    }
+    if (fields.size() > 2) {
+        materials.exotic = parseInt(fields[2], 0);
+    }
+    return materials;
+}
+
+std::string serializeArtifacts(const std::vector<ArtifactRecord>& artifacts)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < artifacts.size(); ++i) {
+        if (i > 0) {
+            out << save_schema::artifactRecordDelimiter;
+        }
+        out << artifacts[i].id
+            << save_schema::artifactFieldDelimiter << artifacts[i].originDestinationId
+            << save_schema::artifactFieldDelimiter << (artifacts[i].identified ? 1 : 0);
+    }
+    return out.str();
+}
+
+std::vector<ArtifactRecord> parseArtifacts(std::string_view text)
+{
+    std::vector<ArtifactRecord> artifacts;
+    for (const std::string& record : split(text, save_schema::artifactRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::artifactFieldDelimiter);
+        if (fields.size() < 2) {
+            continue;
+        }
+
+        ArtifactRecord artifact;
+        artifact.id = fields[0];
+        artifact.originDestinationId = fields[1];
+        if (fields.size() > 2) {
+            artifact.identified = parseInt(fields[2], 0) != 0;
+        }
+        artifacts.push_back(artifact);
+    }
+    return artifacts;
+}
+
 std::vector<int> parseInts(std::string_view text)
 {
     std::vector<int> values;
@@ -154,6 +267,21 @@ std::vector<int> parseInts(std::string_view text)
         values.push_back(parseInt(item, 0));
     }
     return values;
+}
+
+std::vector<std::string> arrayToVector(const std::array<std::string, 3>& values)
+{
+    return {values.begin(), values.end()};
+}
+
+std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& values)
+{
+    std::array<std::string, 3> result {};
+    const std::size_t count = std::min(result.size(), values.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        result[i] = values[i];
+    }
+    return result;
 }
 
 } // namespace
@@ -171,16 +299,35 @@ SaveData captureSaveData(const GameState& state)
     save.repairOpsThisExpedition = state.run.repairOpsThisExpedition;
     save.trainingOpsThisExpedition = state.run.trainingOpsThisExpedition;
     save.restOpsThisExpedition = state.run.restOpsThisExpedition;
+    save.shallowRecoveryStreak = state.run.shallowRecoveryStreak;
+    save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
+    save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition ? state.screen : Screen::Hangar;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
+    save.researchProjectIds = arrayToVector(state.run.researchProjectIds);
+    save.arrivalOps = state.run.arrivalOps;
+    save.surfaceExpedition = state.run.surfaceExpedition;
     save.unlockKeys = state.meta.unlockKeys;
     save.blueprintProgress = state.meta.blueprintProgress;
+    save.materials = state.meta.materials;
+    save.artifacts = state.meta.artifacts;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
     save.astronautsLost = state.meta.astronautsLost;
+    save.closestSurvivalMargin = state.meta.closestSurvivalMargin;
+    save.closestSurvivalBurn = state.meta.closestSurvivalBurn;
+    save.closestSurvivalFailurePoint = state.meta.closestSurvivalFailurePoint;
+    save.maxBurnDepth = state.meta.maxBurnDepth;
+    save.maxPeakWarning = state.meta.maxPeakWarning;
+    save.maxPeakAbortRisk = state.meta.maxPeakAbortRisk;
+    save.bestCreditDelta = state.meta.bestCreditDelta;
+    save.worstCreditDelta = state.meta.worstCreditDelta;
     save.destinationAttempts = state.meta.destinationAttempts;
     save.destinationSuccesses = state.meta.destinationSuccesses;
+    save.destinationFlybys = state.meta.destinationFlybys;
+    save.destinationOrbits = state.meta.destinationOrbits;
+    save.destinationLandings = state.meta.destinationLandings;
     save.memorials = state.meta.memorials;
     save.famousLaunches = state.meta.famousLaunches;
     save.crew = state.run.crew;
@@ -199,16 +346,49 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.repairOpsThisExpedition = std::max(0, save.repairOpsThisExpedition);
     state.run.trainingOpsThisExpedition = std::max(0, save.trainingOpsThisExpedition);
     state.run.restOpsThisExpedition = std::max(0, save.restOpsThisExpedition);
+    state.run.shallowRecoveryStreak = std::max(0, save.shallowRecoveryStreak);
+    state.run.cleanShallowRecoveryStreak = std::max(0, save.cleanShallowRecoveryStreak);
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
+    state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
+    state.run.arrivalOps = save.arrivalOps;
+    state.run.surfaceExpedition = save.surfaceExpedition;
+    if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
+        state.run.surfaceExpedition.logEntries.erase(
+            state.run.surfaceExpedition.logEntries.begin(),
+            state.run.surfaceExpedition.logEntries.end() - tuning::research::surfaceLogEntryLimit);
+    }
+    state.screen = save.screen;
+    if (state.screen == Screen::ArrivalOps && !state.run.arrivalOps.active) {
+        state.screen = Screen::Hangar;
+    }
+    if (state.screen == Screen::Research && save.researchProjectIds.empty()) {
+        state.screen = Screen::Hangar;
+    }
+    if (state.screen == Screen::SurfaceExpedition && !state.run.surfaceExpedition.active) {
+        state.screen = Screen::Hangar;
+    }
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
+    state.meta.materials = save.materials;
+    state.meta.artifacts = save.artifacts;
     state.meta.furthestTier = save.furthestTier;
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
+    state.meta.closestSurvivalMargin = std::max(0.0, save.closestSurvivalMargin);
+    state.meta.closestSurvivalBurn = std::max(0.0, save.closestSurvivalBurn);
+    state.meta.closestSurvivalFailurePoint = std::max(0.0, save.closestSurvivalFailurePoint);
+    state.meta.maxBurnDepth = std::max(0.0, save.maxBurnDepth);
+    state.meta.maxPeakWarning = std::max(0.0, save.maxPeakWarning);
+    state.meta.maxPeakAbortRisk = std::max(0.0, save.maxPeakAbortRisk);
+    state.meta.bestCreditDelta = save.bestCreditDelta;
+    state.meta.worstCreditDelta = save.worstCreditDelta;
     state.meta.destinationAttempts = save.destinationAttempts;
     state.meta.destinationSuccesses = save.destinationSuccesses;
+    state.meta.destinationFlybys = save.destinationFlybys;
+    state.meta.destinationOrbits = save.destinationOrbits;
+    state.meta.destinationLandings = save.destinationLandings;
     state.meta.memorials = save.memorials;
     state.meta.famousLaunches = save.famousLaunches;
     if (!save.crew.empty()) {
@@ -254,16 +434,46 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::repairOps, save.repairOpsThisExpedition);
     writeField(out, save_schema::field::trainingOps, save.trainingOpsThisExpedition);
     writeField(out, save_schema::field::restOps, save.restOpsThisExpedition);
+    writeField(out, save_schema::field::shallowRecoveryStreak, save.shallowRecoveryStreak);
+    writeField(out, save_schema::field::cleanShallowRecoveryStreak, save.cleanShallowRecoveryStreak);
+    writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::inventory, join(save.inventoryModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equipped, join(save.equippedModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::crewUpgrades, join(save.crewUpgradeIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::researchProjects, join(save.researchProjectIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::arrivalActive, save.arrivalOps.active ? 1 : 0);
+    writeField(out, save_schema::field::arrivalDestination, save.arrivalOps.destinationId);
+    writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
+    writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
+    writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
+    writeField(out, save_schema::field::surfaceSupply, save.surfaceExpedition.supply);
+    writeField(out, save_schema::field::surfaceCargo, save.surfaceExpedition.cargo);
+    writeField(out, save_schema::field::surfaceHazard, save.surfaceExpedition.hazard);
+    writeField(out, save_schema::field::surfaceDepth, save.surfaceExpedition.depth);
+    writeField(out, save_schema::field::surfaceMaterials, serializeMaterials(save.surfaceExpedition.temporaryMaterials));
+    writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
+    writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
+    writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
     writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
     writeField(out, save_schema::field::blueprints, save.blueprintProgress);
+    writeField(out, save_schema::field::materials, serializeMaterials(save.materials));
+    writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::furthestTier, save.furthestTier);
     writeField(out, save_schema::field::shipsLost, save.shipsLost);
     writeField(out, save_schema::field::astronautsLost, save.astronautsLost);
+    writeField(out, save_schema::field::closestSurvivalMargin, save.closestSurvivalMargin);
+    writeField(out, save_schema::field::closestSurvivalBurn, save.closestSurvivalBurn);
+    writeField(out, save_schema::field::closestSurvivalFailurePoint, save.closestSurvivalFailurePoint);
+    writeField(out, save_schema::field::maxBurnDepth, save.maxBurnDepth);
+    writeField(out, save_schema::field::maxPeakWarning, save.maxPeakWarning);
+    writeField(out, save_schema::field::maxPeakAbortRisk, save.maxPeakAbortRisk);
+    writeField(out, save_schema::field::bestCreditDelta, save.bestCreditDelta);
+    writeField(out, save_schema::field::worstCreditDelta, save.worstCreditDelta);
     writeField(out, save_schema::field::destinationAttempts, joinInts(save.destinationAttempts, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationSuccesses, joinInts(save.destinationSuccesses, save_schema::listDelimiter));
+    writeField(out, save_schema::field::destinationFlybys, joinInts(save.destinationFlybys, save_schema::listDelimiter));
+    writeField(out, save_schema::field::destinationOrbits, joinInts(save.destinationOrbits, save_schema::listDelimiter));
+    writeField(out, save_schema::field::destinationLandings, joinInts(save.destinationLandings, save_schema::listDelimiter));
     writeField(out, save_schema::field::memorials, join(save.memorials, save_schema::textListDelimiter));
     writeField(out, save_schema::field::famousLaunches, join(save.famousLaunches, save_schema::textListDelimiter));
     writeField(out, save_schema::field::crew, serializeCrew(save.crew));
@@ -310,26 +520,86 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.trainingOpsThisExpedition = parseInt(value, save.trainingOpsThisExpedition);
         } else if (key == save_schema::field::restOps) {
             save.restOpsThisExpedition = parseInt(value, save.restOpsThisExpedition);
+        } else if (key == save_schema::field::shallowRecoveryStreak) {
+            save.shallowRecoveryStreak = parseInt(value, save.shallowRecoveryStreak);
+        } else if (key == save_schema::field::cleanShallowRecoveryStreak) {
+            save.cleanShallowRecoveryStreak = parseInt(value, save.cleanShallowRecoveryStreak);
+        } else if (key == save_schema::field::screen) {
+            save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::inventory) {
             save.inventoryModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::equipped) {
             save.equippedModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::crewUpgrades) {
             save.crewUpgradeIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::researchProjects) {
+            save.researchProjectIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::arrivalActive) {
+            save.arrivalOps.active = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::arrivalDestination) {
+            save.arrivalOps.destinationId = std::string(value);
+        } else if (key == save_schema::field::surfaceActive) {
+            save.surfaceExpedition.active = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfaceDestination) {
+            save.surfaceExpedition.destinationId = std::string(value);
+        } else if (key == save_schema::field::surfaceSite) {
+            save.surfaceExpedition.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile)));
+        } else if (key == save_schema::field::surfaceSupply) {
+            save.surfaceExpedition.supply = parseInt(value, save.surfaceExpedition.supply);
+        } else if (key == save_schema::field::surfaceCargo) {
+            save.surfaceExpedition.cargo = parseInt(value, save.surfaceExpedition.cargo);
+        } else if (key == save_schema::field::surfaceHazard) {
+            save.surfaceExpedition.hazard = parseDouble(value, save.surfaceExpedition.hazard);
+        } else if (key == save_schema::field::surfaceDepth) {
+            save.surfaceExpedition.depth = parseInt(value, save.surfaceExpedition.depth);
+        } else if (key == save_schema::field::surfaceMaterials) {
+            save.surfaceExpedition.temporaryMaterials = parseMaterials(value);
+        } else if (key == save_schema::field::surfaceArtifacts) {
+            save.surfaceExpedition.temporaryArtifacts = parseArtifacts(value);
+        } else if (key == save_schema::field::surfaceEnemies) {
+            save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfaceLog) {
+            save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
         } else if (key == save_schema::field::unlocks) {
             save.unlockKeys = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::blueprints) {
             save.blueprintProgress = parseInt(value, save.blueprintProgress);
+        } else if (key == save_schema::field::materials) {
+            save.materials = parseMaterials(value);
+        } else if (key == save_schema::field::artifacts) {
+            save.artifacts = parseArtifacts(value);
         } else if (key == save_schema::field::furthestTier) {
             save.furthestTier = parseInt(value, save.furthestTier);
         } else if (key == save_schema::field::shipsLost) {
             save.shipsLost = parseInt(value, save.shipsLost);
         } else if (key == save_schema::field::astronautsLost) {
             save.astronautsLost = parseInt(value, save.astronautsLost);
+        } else if (key == save_schema::field::closestSurvivalMargin) {
+            save.closestSurvivalMargin = parseDouble(value, save.closestSurvivalMargin);
+        } else if (key == save_schema::field::closestSurvivalBurn) {
+            save.closestSurvivalBurn = parseDouble(value, save.closestSurvivalBurn);
+        } else if (key == save_schema::field::closestSurvivalFailurePoint) {
+            save.closestSurvivalFailurePoint = parseDouble(value, save.closestSurvivalFailurePoint);
+        } else if (key == save_schema::field::maxBurnDepth) {
+            save.maxBurnDepth = parseDouble(value, save.maxBurnDepth);
+        } else if (key == save_schema::field::maxPeakWarning) {
+            save.maxPeakWarning = parseDouble(value, save.maxPeakWarning);
+        } else if (key == save_schema::field::maxPeakAbortRisk) {
+            save.maxPeakAbortRisk = parseDouble(value, save.maxPeakAbortRisk);
+        } else if (key == save_schema::field::bestCreditDelta) {
+            save.bestCreditDelta = parseDouble(value, save.bestCreditDelta);
+        } else if (key == save_schema::field::worstCreditDelta) {
+            save.worstCreditDelta = parseDouble(value, save.worstCreditDelta);
         } else if (key == save_schema::field::destinationAttempts) {
             save.destinationAttempts = parseInts(value);
         } else if (key == save_schema::field::destinationSuccesses) {
             save.destinationSuccesses = parseInts(value);
+        } else if (key == save_schema::field::destinationFlybys) {
+            save.destinationFlybys = parseInts(value);
+        } else if (key == save_schema::field::destinationOrbits) {
+            save.destinationOrbits = parseInts(value);
+        } else if (key == save_schema::field::destinationLandings) {
+            save.destinationLandings = parseInts(value);
         } else if (key == save_schema::field::memorials) {
             save.memorials = split(value, save_schema::textListDelimiter);
         } else if (key == save_schema::field::famousLaunches) {

@@ -1,10 +1,17 @@
 #pragma once
 
+#include "core/GameTypes.h"
+
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace rocket {
+
+enum class PanelLayoutMode {
+    ControlPanel,
+    PhaseBoard
+};
 
 struct PanelMetricPresentation {
     std::string label;
@@ -31,6 +38,16 @@ inline PanelButtonPresentation panelActionButton(std::string_view label, std::st
 inline PanelButtonPresentation disabledPanelButton(std::string_view label)
 {
     return {std::string(label), {}, {}, false};
+}
+
+inline PanelLayoutMode panelLayoutMode(Screen screen)
+{
+    return screen == Screen::Launch ? PanelLayoutMode::ControlPanel : PanelLayoutMode::PhaseBoard;
+}
+
+inline bool usesPhaseBoard(Screen screen)
+{
+    return panelLayoutMode(screen) == PanelLayoutMode::PhaseBoard;
 }
 
 } // namespace rocket

@@ -94,6 +94,30 @@ std::string warningMessage(const TelemetryEvent& event)
     return std::string(text::telemetry::nominal);
 }
 
+bool isShallowRecovery(const Destination& destination, double multiplier)
+{
+    return multiplier < 1.0 + (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
+}
+
+bool isCleanShallowRecovery(const Destination& destination, const LaunchOutcome& outcome)
+{
+    return isShallowRecovery(destination, outcome.ejectMultiplier)
+        && outcome.peakWarning < tuning::rewards::cleanShallowRecoveryWarningThreshold;
+}
+
+double shallowRecoveryPenalty(int shallowRecoveryStreak)
+{
+    const int exponent = std::clamp(
+        std::max(0, shallowRecoveryStreak),
+        0,
+        tuning::rewards::shallowRecoveryPenaltyMaxExponent);
+    double penalty = tuning::rewards::shallowRecoveryPenaltyBase;
+    for (int i = 0; i < exponent; ++i) {
+        penalty *= 2.0;
+    }
+    return penalty;
+}
+
 double overburnJackpotMultiplier(const Destination& destination, double burnMultiplier)
 {
     const double overGoal = std::max(0.0, burnMultiplier - destination.targetMultiplier);
@@ -461,6 +485,13 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     }
 
     if (method == RecoveryMethod::ManualEject) {
+        if (isCleanShallowRecovery(*destination, outcome)
+            && state.run.cleanShallowRecoveryStreak + 1 >= tuning::rewards::cleanShallowRecoveryDestructionStreak) {
+            markDestroyed(outcome, launch, catalog, *destination, state, rng);
+            outcome.recoveryCost = 0.0;
+            return outcome;
+        }
+
         outcome.type = LaunchResultType::SafeEject;
         outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::manualEjectPayoutFactor;
         outcome.recoveryCost = std::clamp(
@@ -488,6 +519,9 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
             tuning::outcomes::manualEjectCrewInjuryMaximum);
         outcome.crewInjured = rng.chance(injuryChance);
         outcome.blueprintGain = outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::manualEjectBlueprintTargetShare ? 1 : 0;
+        if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
+            outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
+        }
         return outcome;
     }
 
@@ -518,7 +552,18 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
             outcome.ejectMultiplier * tuning::outcomes::returnHomeRecoveryBurnScale,
         tuning::outcomes::returnHomeRecoveryMinimum,
         tuning::outcomes::returnHomeRecoveryMaximum);
-    const double netRewardFloor = returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
+    if (isCleanShallowRecovery(*destination, outcome)
+        && state.run.cleanShallowRecoveryStreak + 1 >= tuning::rewards::cleanShallowRecoveryDestructionStreak) {
+        markDestroyed(outcome, launch, catalog, *destination, state, rng);
+        outcome.recoveryCost = 0.0;
+        return outcome;
+    }
+    if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
+        outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
+    }
+    const double netRewardFloor = isShallowRecovery(*destination, outcome.ejectMultiplier)
+        ? 0.0
+        : returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
     if (netRewardFloor > 0.0) {
         outcome.payout = std::max(outcome.payout, outcome.recoveryCost + netRewardFloor);
     }

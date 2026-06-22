@@ -9,7 +9,7 @@ namespace rocket {
 
 namespace {
 
-ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity, ModuleStats stats, std::string unlockKey, std::vector<std::string> tags)
+ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity, ModuleStats stats, std::string unlockKey, std::vector<std::string> tags, MaterialInventory materialCost = {})
 {
     ShipModule result;
     result.id = std::move(id);
@@ -17,6 +17,7 @@ ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity
     result.slot = slot;
     result.rarity = rarity;
     result.stats = stats;
+    result.materialCost = materialCost;
     result.unlockKey = std::move(unlockKey);
     result.tags = std::move(tags);
     return result;
@@ -31,6 +32,32 @@ CrewUpgrade crewUpgrade(std::string id, std::string name, std::string descriptio
     result.rarity = rarity;
     result.stats = stats;
     result.unlockKey = std::move(unlockKey);
+    result.tags = std::move(tags);
+    return result;
+}
+
+ResearchProject researchProject(
+    std::string id,
+    std::string name,
+    std::string description,
+    Rarity rarity,
+    int requiredDestinationTier,
+    int blueprintGain,
+    MaterialInventory materialCost,
+    std::string unlockKey,
+    std::string rewardUnlockKey,
+    std::vector<std::string> tags)
+{
+    ResearchProject result;
+    result.id = std::move(id);
+    result.name = std::move(name);
+    result.description = std::move(description);
+    result.rarity = rarity;
+    result.requiredDestinationTier = requiredDestinationTier;
+    result.blueprintGain = blueprintGain;
+    result.materialCost = materialCost;
+    result.unlockKey = std::move(unlockKey);
+    result.rewardUnlockKey = std::move(rewardUnlockKey);
     result.tags = std::move(tags);
     return result;
 }
@@ -51,6 +78,14 @@ const CrewUpgrade* ContentCatalog::findCrewUpgrade(std::string_view id) const
         return upgrade.id == id;
     });
     return found == crewUpgrades.end() ? nullptr : &*found;
+}
+
+const ResearchProject* ContentCatalog::findResearchProject(std::string_view id) const
+{
+    const auto found = std::find_if(researchProjects.begin(), researchProjects.end(), [id](const ResearchProject& project) {
+        return project.id == id;
+    });
+    return found == researchProjects.end() ? nullptr : &*found;
 }
 
 const ShipFrame* ContentCatalog::findFrame(std::string_view id) const
@@ -84,11 +119,11 @@ ContentCatalog createDefaultContent()
     catalog.modules = {
         module(content::module::sparrowEngine, "Sparrow Engine", SlotType::Engine, Rarity::Common, {.thrust = 2.0, .volatility = 0.2}, content::unlock::starter, {"steady", content::unlock::starter}),
         module(content::module::kestrelEngine, "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 3.6, .fuel = -0.4, .volatility = 0.45, .payout = 0.4}, content::unlock::deepSpace, {"fast", "hungry"}),
-        module(content::module::novaDrive, "Nova Drive", SlotType::Engine, Rarity::Rare, {.thrust = 5.2, .cooling = -0.8, .volatility = 1.1, .payout = 1.1}, content::unlock::exotic, {"prototype", "dangerous"}),
+        module(content::module::novaDrive, "Nova Drive", SlotType::Engine, Rarity::Rare, {.thrust = 5.2, .cooling = -0.8, .volatility = 1.1, .payout = 1.1}, content::unlock::exotic, {"prototype", "dangerous"}, {.rare = 2, .exotic = 1}),
 
         module(content::module::stableTank, "Stable Tank", SlotType::Fuel, Rarity::Common, {.fuel = 2.5, .hull = 0.2, .pressure = 0.4}, content::unlock::starter, {"safe", "pressure"}),
         module(content::module::slushTank, "Slush Tank", SlotType::Fuel, Rarity::Uncommon, {.fuel = 4.0, .cooling = 0.4, .pressure = 0.8, .volatility = 0.35}, content::unlock::thermal, {"cold", "pressure"}),
-        module(content::module::deepReservoir, "Deep Reservoir", SlotType::Fuel, Rarity::Rare, {.thrust = 0.5, .fuel = 5.4, .volatility = 0.75}, content::unlock::deepSpace, {"long-haul"}),
+        module(content::module::deepReservoir, "Deep Reservoir", SlotType::Fuel, Rarity::Rare, {.thrust = 0.5, .fuel = 5.4, .volatility = 0.75}, content::unlock::deepSpace, {"long-haul"}, {.common = 2, .rare = 1}),
 
         module(content::module::patchworkHull, "Patchwork Hull", SlotType::Hull, Rarity::Common, {.hull = 2.6, .repair = 0.6}, content::unlock::starter, {"cheap"}),
         module(content::module::titaniumRib, "Titanium Rib", SlotType::Hull, Rarity::Uncommon, {.hull = 4.2, .cooling = -0.2}, content::unlock::recovery, {"durable"}),
@@ -100,11 +135,11 @@ ContentCatalog createDefaultContent()
 
         module(content::module::analogTelemetry, "Analog Telemetry", SlotType::Sensors, Rarity::Common, {.sensors = 2.0, .pressure = 0.3}, content::unlock::starter, {"honest", "pressure"}),
         module(content::module::hazardRadar, "Hazard Radar", SlotType::Sensors, Rarity::Uncommon, {.sensors = 3.8, .escape = 0.2, .pressure = 0.7}, content::unlock::deepSpace, {"warning", "pressure"}),
-        module(content::module::predictiveGuidance, "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 5.2, .pressure = 1.0, .volatility = 0.25}, content::unlock::ai, {"forecast", "pressure"}),
+        module(content::module::predictiveGuidance, "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 5.2, .pressure = 1.0, .volatility = 0.25}, content::unlock::ai, {"forecast", "pressure"}, {.rare = 2}),
 
         module(content::module::springCapsule, "Spring Capsule", SlotType::Escape, Rarity::Common, {.thrust = -0.2, .escape = 2.8}, content::unlock::starter, {"eject"}),
         module(content::module::abortTower, "Abort Tower", SlotType::Escape, Rarity::Uncommon, {.hull = 0.5, .escape = 4.6, .payout = -0.2}, content::unlock::recovery, {"crew-first"}),
-        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, content::unlock::exotic, {"legendary"})
+        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, content::unlock::exotic, {"legendary"}, {.rare = 1, .exotic = 1})
     };
 
     catalog.crewUpgrades = {
@@ -113,6 +148,19 @@ ContentCatalog createDefaultContent()
         crewUpgrade(content::crewUpgrade::medicalRecoveryWard, "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, content::unlock::recovery, {"medical", "stress"}),
         crewUpgrade(content::crewUpgrade::missionPsychOffice, "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, content::unlock::thermal, {"psych", "stress"}),
         crewUpgrade(content::crewUpgrade::traitCoachingLab, "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, content::unlock::ai, {"coaching", "traits"})
+    };
+
+    catalog.researchProjects = {
+        researchProject(content::research::blueprintSurvey, "Blueprint Survey", "Map Mars strata for recoverable ship schematics.", Rarity::Common, 2, 2, {}, content::unlock::starter, "", {"blueprint", "survey"}),
+        researchProject(content::research::fieldProbeNetwork, "Field Probe Network", "Seed landing zones with small probes before the crew commits supply.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "survey"}),
+        researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
+        researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner blueprints.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
+        researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
+        researchProject(content::research::cargoReturnRig, "Cargo Return Rig", "Prototype restraint frames that make heavier payloads less terrifying to extract.", Rarity::Uncommon, 2, 3, {.common = 3}, content::unlock::recovery, content::unlock::cargoRigs, {"surface", "extraction"}),
+        researchProject(content::research::prototypeSchematic, "Prototype Schematic", "Use rare samples to unlock experimental ship components.", Rarity::Rare, 2, 4, {.common = 1, .rare = 1}, content::unlock::starter, content::unlock::thermal, {"prototype", "ship"}),
+        researchProject(content::research::xenogeologyProgram, "Xenogeology Program", "Study outer-system deposits for deep-space unlocks.", Rarity::Rare, 3, 5, {.rare = 2}, content::unlock::deepSpace, content::unlock::ai, {"materials", "deep_space"}),
+        researchProject(content::research::perimeterDroneNetwork, "Perimeter Drone Network", "Deploy autonomous sentries so field teams can keep working under hostile contact.", Rarity::Rare, 4, 5, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::perimeterDrones, {"surface", "defense"}),
+        researchProject(content::research::artifactDecoding, "Artifact Decoding", "Decode recovered signals into exotic research threads.", Rarity::Prototype, 4, 7, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::exotic, {"artifact", "story"})
     };
 
     catalog.frames = {
@@ -149,6 +197,41 @@ bool hasUnlock(const MetaProgress& meta, std::string_view key)
     }
 
     return std::find(meta.unlockKeys.begin(), meta.unlockKeys.end(), key) != meta.unlockKeys.end();
+}
+
+std::string unlockDisplayName(std::string_view key)
+{
+    if (key == content::unlock::thermal) {
+        return "Thermal systems";
+    }
+    if (key == content::unlock::recovery) {
+        return "Recovery hardware";
+    }
+    if (key == content::unlock::deepSpace) {
+        return "Deep-space modules";
+    }
+    if (key == content::unlock::ai) {
+        return "Predictive guidance";
+    }
+    if (key == content::unlock::exotic) {
+        return "Exotic prototypes";
+    }
+    if (key == content::unlock::surfaceProbes) {
+        return "Field probes";
+    }
+    if (key == content::unlock::surfaceDrills) {
+        return "Surface drills";
+    }
+    if (key == content::unlock::cargoRigs) {
+        return "Cargo return rigs";
+    }
+    if (key == content::unlock::analysisLab) {
+        return "Mission analysis lab";
+    }
+    if (key == content::unlock::perimeterDrones) {
+        return "Perimeter drones";
+    }
+    return {};
 }
 
 bool isModuleUnlocked(const MetaProgress& meta, const ShipModule& module)

@@ -22,6 +22,10 @@ namespace presentation {
 inline constexpr double statChipMinimumMagnitude = 0.05;
 } // namespace presentation
 
+namespace records {
+inline constexpr double closeCallSurvivalMargin = 0.05;
+} // namespace records
+
 inline int moduleOfferCost(Rarity rarity)
 {
     switch (rarity) {
@@ -70,7 +74,8 @@ inline constexpr double operationCostGrowth = 1.35;
 inline constexpr double operationUseSurcharge = 12.0;
 inline constexpr double rerollBaseCost = 10.0;
 inline constexpr double trainingBaseCost = 10.0;
-inline constexpr int trainingBaseStress = 6;
+inline constexpr int trainingBaseStress = 30;
+inline constexpr int trainingMinimumStress = crew::stressPerStep + crew::stressPerStep / 2;
 inline constexpr double restNoCrewBaseCost = 8.0;
 inline constexpr double restBaseCost = 6.0;
 inline constexpr double restCostPerStress = 0.06;
@@ -446,7 +451,88 @@ inline constexpr double manualEjectPayoutFactor = 0.26;
 inline constexpr double transferArrivalPayoutFactor = 1.45;
 inline constexpr double fullProfileRewardFloor = 1.00;
 inline constexpr double pushedProfileShelfShare = 0.45;
+inline constexpr double shallowRecoveryTargetShare = 0.25;
+inline constexpr double shallowRecoveryPenaltyBase = 15.0;
+inline constexpr int shallowRecoveryPenaltyMaxExponent = 6;
+inline constexpr double cleanShallowRecoveryWarningThreshold = 0.62;
+inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 } // namespace rewards
+
+namespace research {
+inline constexpr int firstResearchTier = 2;
+inline constexpr int enemyEncounterTier = 4;
+inline constexpr int offerCount = 3;
+inline constexpr int baseSupply = 7;
+inline constexpr int supplyPerTier = 1;
+inline constexpr int surveySupplyCost = 1;
+inline constexpr int mineSupplyCost = 2;
+inline constexpr int pushSupplyCost = 2;
+inline constexpr int surveyCommonGain = 1;
+inline constexpr int mineCommonGain = 2;
+inline constexpr int mineRareDepthThreshold = 1;
+inline constexpr int artifactDepthThreshold = 2;
+inline constexpr int extractionRareLossDivisor = 2;
+inline constexpr int probeSupplyBonus = 1;
+inline constexpr int probeSurveyCommonBonus = 1;
+inline constexpr int drillMineCommonBonus = 1;
+inline constexpr double drillRareChanceBonus = 0.18;
+inline constexpr double cargoRigExtractionRiskRelief = 0.08;
+inline constexpr double cargoRigCargoRiskRelief = 0.006;
+inline constexpr double baseHazard = 0.12;
+inline constexpr double hazardPerTier = 0.035;
+inline constexpr double hazardPerDepth = 0.055;
+inline constexpr double extractionRiskBase = 0.05;
+inline constexpr double extractionRiskHazardScale = 0.42;
+inline constexpr double extractionRiskCargoScale = 0.018;
+inline constexpr double extractionRiskLowSupplyPenalty = 0.10;
+inline constexpr double extractionRiskMaximum = 0.72;
+inline constexpr double surveyHazardChanceScale = 0.16;
+inline constexpr double mineHazardChanceScale = 0.22;
+inline constexpr double pushHazardChanceScale = 0.34;
+inline constexpr double probeHazardRelief = 0.06;
+inline constexpr double drillHazardRelief = 0.08;
+inline constexpr double cargoRigHazardRelief = 0.05;
+inline constexpr double surfaceHazardChanceMinimum = 0.02;
+inline constexpr double surfaceHazardChanceMaximum = 0.58;
+inline constexpr double dustHazardIncrease = 0.020;
+inline constexpr double drillHazardIncrease = 0.030;
+inline constexpr double unstableTerrainHazardIncrease = 0.045;
+inline constexpr int dustHazardSupplyLoss = 1;
+inline constexpr int drillHazardCargoLoss = 1;
+inline constexpr int pushHazardSupplyLoss = 1;
+inline constexpr int siteSurveyBasinSurveyBonus = 1;
+inline constexpr int siteOreShelfMineBonus = 1;
+inline constexpr double siteOreShelfRareChanceBonus = 0.10;
+inline constexpr double siteFractureFieldArtifactChanceBonus = 0.20;
+inline constexpr double siteSurveyBasinHazardRelief = 0.025;
+inline constexpr double siteOreShelfHazardIncrease = 0.015;
+inline constexpr double siteFractureFieldHazardIncrease = 0.045;
+inline constexpr double siteFractureFieldExtractionRiskIncrease = 0.04;
+inline constexpr double artifactChanceBase = 0.45;
+inline constexpr double surfaceEventChanceBase = 0.14;
+inline constexpr double surfaceEventChanceHazardScale = 0.12;
+inline constexpr double surfaceEventChanceMaximum = 0.42;
+inline constexpr double surfaceEnemyChanceBase = 0.10;
+inline constexpr double surfaceEnemyChanceHazardScale = 0.18;
+inline constexpr double surfaceEnemyChanceMaximum = 0.36;
+inline constexpr double perimeterDroneEnemyRelief = 0.12;
+inline constexpr int surfaceEnemySupplyLoss = 1;
+inline constexpr int surfaceEnemyCargoLoss = 1;
+inline constexpr double surfaceEnemyHazardIncrease = 0.030;
+inline constexpr double surfaceEquipmentFailureShare = 0.30;
+inline constexpr double surfaceToolFailureRelief = 0.08;
+inline constexpr double surfaceEquipmentFailureMinimumShare = 0.12;
+inline constexpr double surfaceUnexpectedDepositShare = 0.46;
+inline constexpr int surfaceEquipmentFailureSupplyLoss = 1;
+inline constexpr double surfaceEquipmentFailureHazardIncrease = 0.020;
+inline constexpr int surfaceDepositCommonGain = 1;
+inline constexpr double surfaceDepositRareChance = 0.25;
+inline constexpr int surfaceCrewDiscoveryBlueprintGain = 1;
+inline constexpr int analysisLabBlueprintBonus = 1;
+inline constexpr int artifactInsightBlueprintPerIdentified = 1;
+inline constexpr int artifactInsightBlueprintMaximum = 3;
+inline constexpr int surfaceLogEntryLimit = 5;
+} // namespace research
 
 namespace outcomes {
 inline constexpr double manualEjectSurvivalBase = 0.48;

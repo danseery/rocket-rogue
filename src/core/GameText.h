@@ -15,6 +15,7 @@ inline constexpr std::string_view repairsUnaffordable = "Not enough mission cred
 inline constexpr std::string_view noTrainableAstronaut = "No active astronaut is available to train.";
 inline constexpr std::string_view trainingBudgetDenied = "Training budget denied.";
 inline constexpr std::string_view noRestableAstronaut = "No active astronaut is available to rest.";
+inline constexpr std::string_view noRestNeeded = "Crew is already rested and cleared for duty.";
 inline constexpr std::string_view restBudgetDenied = "No room in the budget for shore leave.";
 inline constexpr std::string_view noRecruitProfiles = "Mission control has no recruit profiles on file.";
 inline constexpr std::string_view recruitUnaffordable = "Not enough mission credits to recruit new crew.";
@@ -23,6 +24,30 @@ inline constexpr std::string_view transferLedgerRejected = "Transfer data accept
 inline constexpr std::string_view refitWindowOpened = "Choose one refit. Installation takes the whole hangar window.";
 inline constexpr std::string_view refitWindowClosed = "Refit window closed. Handle repairs, crew, and the next flight plan.";
 inline constexpr std::string_view refitRerollUnaffordable = "Not enough mission credits to reroll the refit board.";
+inline constexpr std::string_view researchWindowOpened = "Mars arrival confirmed. Pick one research priority before the field team deploys.";
+inline constexpr std::string_view arrivalOpsOpened = "Arrival confirmed. Choose how much mission risk to take before refit.";
+inline constexpr std::string_view flybyCompleted = "Flyby complete. The probe pass banked safe science and kept the vehicle moving.";
+inline constexpr std::string_view orbitCompleted = "Orbital insertion complete. High-value mapping data recovered.";
+inline constexpr std::string_view moonFlybyRequired = "Moon landing requires one flyby before the agency clears orbital work.";
+inline constexpr std::string_view moonOrbitRequired = "Moon landing requires a successful orbit before descent.";
+inline constexpr std::string_view landingCommitted = "Landing committed. Surface team is preparing the extraction plan.";
+inline constexpr std::string_view researchWindowClosed = "Research window closed. Surface team is preparing the landing zone.";
+inline constexpr std::string_view researchCompleted = "Research completed. Blueprint work logged in the agency archive.";
+inline constexpr std::string_view researchSkipped = "Research skipped. The field team kept the schedule moving.";
+inline constexpr std::string_view surfaceExpeditionStarted = "Surface expedition underway. Gather what you can, then extract before the risk spikes.";
+inline constexpr std::string_view surfaceSurveyed = "Surface survey logged recoverable samples.";
+inline constexpr std::string_view surfaceMined = "Mining team filled the return canisters.";
+inline constexpr std::string_view surfacePushed = "Expedition pushed into riskier terrain.";
+inline constexpr std::string_view surfaceExtracted = "Surface payload recovered.";
+inline constexpr std::string_view surfaceExtractionRough = "Extraction was rough; only part of the payload survived.";
+inline constexpr std::string_view surfaceSupplyBlocked = "Surface team does not have enough supply for that action.";
+inline constexpr std::string_view surfaceDustHazard = "Dust interference burned extra supply during the survey.";
+inline constexpr std::string_view surfaceDrillHazard = "Drill chatter damaged cargo canisters.";
+inline constexpr std::string_view surfaceTerrainHazard = "Unstable terrain forced a costly route correction.";
+inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault consumed spare supplies.";
+inline constexpr std::string_view surfaceUnexpectedDeposit = "Field team uncovered an unexpected deposit.";
+inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added a blueprint lead.";
+inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced the field team into a defensive retreat.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
 inline constexpr std::string_view launchCrewBlocked = "No living astronaut is cleared for launch.";
 inline constexpr std::string_view provingBurnStarted = "Proving burn underway. Return home to bank data; eject only when the vehicle leaves you no choice.";
@@ -55,6 +80,8 @@ inline constexpr std::string_view emergencyEjectUseful = "Emergency eject confir
 inline constexpr std::string_view earlyReturnUseful = "Early return confirmed. Useful flight data recovered from the proving route.";
 inline constexpr std::string_view emergencyEjectShallow = "Emergency eject confirmed. Crew survived, budget bruised, little data banked.";
 inline constexpr std::string_view earlyReturnShallow = "Early return confirmed. Safe, but the burn was too shallow to teach much.";
+inline constexpr std::string_view shallowRecoveryPenalty = "Mission control flagged repeated shallow recoveries and cut the credit award.";
+inline constexpr std::string_view cleanShallowRecoveryDestroyed = "Mission control caught the pattern. The next clean panic recovery was denied, and the vehicle was lost.";
 inline constexpr std::string_view rapidDecompression = "Rapid decompression after relief-valve actuation. Vehicle lost.";
 inline constexpr std::string_view pressureReliefClosed = "Pressure relief valve closed. PRESS is building normally again, and the vent drift is fading.";
 inline constexpr std::string_view cargoJettisoned = "Cargo jettisoned. Fuel mix stabilized, but debris and mass shift hurt NAV, VIB, and return margin.";
@@ -95,6 +122,21 @@ inline constexpr std::string_view failurePoint = "Failure point";
 inline constexpr std::string_view peakWarning = "Peak warning";
 inline constexpr std::string_view peakAbort = "Peak abort";
 inline constexpr std::string_view creditDelta = "Credit delta";
+inline constexpr std::string_view blueprints = "Blueprints";
+inline constexpr std::string_view artifactInsight = "Artifact insight";
+inline constexpr std::string_view labBonus = "Lab bonus";
+inline constexpr std::string_view commonMaterials = "Common mats";
+inline constexpr std::string_view rareMaterials = "Rare mats";
+inline constexpr std::string_view exoticMaterials = "Exotic mats";
+inline constexpr std::string_view artifacts = "Artifacts";
+inline constexpr std::string_view site = "Site";
+inline constexpr std::string_view fieldKit = "Field kit";
+inline constexpr std::string_view hazard = "Hazard";
+inline constexpr std::string_view supply = "Supply";
+inline constexpr std::string_view cargo = "Cargo";
+inline constexpr std::string_view depth = "Depth";
+inline constexpr std::string_view extractionRisk = "Extraction risk";
+inline constexpr std::string_view contactRisk = "Contact risk";
 inline constexpr std::string_view temp = "TEMP";
 inline constexpr std::string_view press = "PRESS";
 inline constexpr std::string_view vibration = "VIB";
@@ -196,6 +238,7 @@ inline constexpr std::string_view improvesMissionOdds = "Improves mission odds";
 namespace buttons {
 inline constexpr std::string_view returnHome = "Return home";
 inline constexpr std::string_view returningHome = "Returning home";
+inline constexpr std::string_view arrivalOps = "Arrival ops";
 inline constexpr std::string_view eject = "Eject";
 inline constexpr std::string_view cutEngines = "Cut engines";
 inline constexpr std::string_view restoreThrust = "Restore thrust";
@@ -213,24 +256,38 @@ inline constexpr std::string_view launchProvingFlight = "Launch proving flight";
 inline constexpr std::string_view needFlightData = "Need flight data";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view details = "Details";
+inline constexpr std::string_view briefing = "Briefing";
 inline constexpr std::string_view resetSave = "Reset save";
 inline constexpr std::string_view startReplacementRefit = "Start replacement refit";
 inline constexpr std::string_view reviewRefitOptions = "Review refit options";
 inline constexpr std::string_view assignRepairBay = "Assign repair bay";
 inline constexpr std::string_view recruitCrew = "Recruit crew";
 inline constexpr std::string_view legacy = "Legacy";
+inline constexpr std::string_view runFlyby = "Run flyby";
+inline constexpr std::string_view enterOrbit = "Enter orbit";
+inline constexpr std::string_view attemptLanding = "Attempt landing";
+inline constexpr std::string_view conductResearch = "Conduct research";
+inline constexpr std::string_view skipResearch = "Skip research";
+inline constexpr std::string_view surveySite = "Survey site";
+inline constexpr std::string_view mineDeposit = "Mine deposit";
+inline constexpr std::string_view pushDeeper = "Push deeper";
+inline constexpr std::string_view extractPayload = "Extract payload";
 } // namespace buttons
 
 namespace panel {
 inline constexpr std::string_view title = "Rocket Rogue";
 inline constexpr std::string_view complete = "Complete";
+inline constexpr std::string_view ready = "Ready";
 inline constexpr std::string_view noActiveCrew = "No active crew";
 inline constexpr std::string_view noneCleared = "None cleared";
 inline constexpr std::string_view noPilot = "No pilot";
 inline constexpr std::string_view noSpareModules = "No spare modules";
+inline constexpr std::string_view noMaterials = "No materials";
+inline constexpr std::string_view needMaterials = "Need materials";
 inline constexpr std::string_view baselineTrainingRoom = "Baseline training room";
 inline constexpr std::string_view noneCharted = "None charted";
 inline constexpr std::string_view shipStable = "Ship stable";
+inline constexpr std::string_view crewRested = "Crew rested";
 inline constexpr std::string_view zeroCredits = "0 credits";
 
 namespace sections {
@@ -240,10 +297,27 @@ inline constexpr std::string_view provingFlight = "Proving flight";
 inline constexpr std::string_view telemetry = "Telemetry";
 inline constexpr std::string_view flightControls = "Flight controls";
 inline constexpr std::string_view result = "Result";
+inline constexpr std::string_view arrivalOps = "Arrival Ops";
+inline constexpr std::string_view missionResult = "Mission result";
+inline constexpr std::string_view burnProfile = "Burn profile";
+inline constexpr std::string_view peakTelemetry = "Peak telemetry";
+inline constexpr std::string_view research = "Research Phase";
+inline constexpr std::string_view surfaceExpedition = "Surface Expedition";
 inline constexpr std::string_view refitWindow = "Refit window";
+inline constexpr std::string_view recoveredResources = "Recovered resources";
 inline constexpr std::string_view hangarBay = "Hangar Bay";
 inline constexpr std::string_view hangarOps = "Hangar ops";
+inline constexpr std::string_view missionLog = "Mission log";
 } // namespace sections
+
+namespace surfaceSites {
+inline constexpr std::string_view surveyBasin = "Survey Basin";
+inline constexpr std::string_view surveyBasinDetail = "Open terrain favors safe surveying and extra common samples.";
+inline constexpr std::string_view oreShelf = "Ore Shelf";
+inline constexpr std::string_view oreShelfDetail = "Dense deposits improve mining returns, but equipment strain rises.";
+inline constexpr std::string_view fractureField = "Fracture Field";
+inline constexpr std::string_view fractureFieldDetail = "Broken terrain improves artifact odds, while extraction gets uglier.";
+} // namespace surfaceSites
 
 namespace modals {
 inline constexpr std::string_view telemetryDetails = "Telemetry Details";
@@ -253,6 +327,11 @@ inline constexpr std::string_view crewDetails = "Crew Details";
 inline constexpr std::string_view frontierDetails = "Frontier Details";
 inline constexpr std::string_view launchHold = "Launch Hold";
 inline constexpr std::string_view legacy = "Legacy";
+inline constexpr std::string_view researchDetails = "Research Details";
+inline constexpr std::string_view surfaceDetails = "Surface Details";
+inline constexpr std::string_view arrivalBriefing = "Arrival Briefing";
+inline constexpr std::string_view researchBriefing = "Research Briefing";
+inline constexpr std::string_view surfaceBriefing = "Surface Briefing";
 } // namespace modals
 
 namespace details {
@@ -287,13 +366,51 @@ inline constexpr std::string_view requiredAction = "Required action";
 inline constexpr std::string_view ship = "Ship";
 inline constexpr std::string_view frontier = "Frontier";
 inline constexpr std::string_view blueprints = "Blueprints";
+inline constexpr std::string_view commonMaterials = "Common materials";
+inline constexpr std::string_view rareMaterials = "Rare materials";
+inline constexpr std::string_view exoticMaterials = "Exotic materials";
+inline constexpr std::string_view artifacts = "Artifacts";
+inline constexpr std::string_view artifactArchive = "Artifact Archive";
+inline constexpr std::string_view decoded = "Decoded";
+inline constexpr std::string_view awaitingResearch = "Awaiting research";
 inline constexpr std::string_view shipsLost = "Ships lost";
 inline constexpr std::string_view astronautsLost = "Astronauts lost";
 inline constexpr std::string_view furthestTier = "Furthest tier";
+inline constexpr std::string_view closestSurvival = "Closest survival";
+inline constexpr std::string_view maxBurnDepth = "Max burn depth";
+inline constexpr std::string_view maxPeakWarning = "Max peak warning";
+inline constexpr std::string_view maxPeakAbort = "Max peak abort";
+inline constexpr std::string_view bestCreditDelta = "Best credit delta";
+inline constexpr std::string_view worstCreditDelta = "Worst credit delta";
 inline constexpr std::string_view repairVehicle = "Repair vehicle";
 inline constexpr std::string_view recruitCrew = "Recruit crew";
 inline constexpr std::string_view repairAndRecruitCrew = "Repair vehicle and recruit crew";
 inline constexpr std::string_view clearForLaunch = "Clear for launch";
+inline constexpr std::string_view fieldRules = "Field Rules";
+inline constexpr std::string_view researchRules = "Research Rules";
+inline constexpr std::string_view arrivalPhase = "Arrival";
+inline constexpr std::string_view researchPhase = "Research";
+inline constexpr std::string_view surfacePhase = "Surface";
+inline constexpr std::string_view refitPhase = "Refit";
+inline constexpr std::string_view flyby = "Flyby";
+inline constexpr std::string_view orbit = "Orbit";
+inline constexpr std::string_view landing = "Landing";
+inline constexpr std::string_view blueprintUse = "Blueprint use";
+inline constexpr std::string_view materialsUse = "Materials use";
+inline constexpr std::string_view artifactInsightUse = "Artifact insight";
+inline constexpr std::string_view labBonusUse = "Lab bonus";
+inline constexpr std::string_view skippedResearch = "Skipping research";
+inline constexpr std::string_view surveyRisk = "Survey risk";
+inline constexpr std::string_view miningRisk = "Mining risk";
+inline constexpr std::string_view depthRisk = "Depth risk";
+inline constexpr std::string_view extraction = "Extraction";
+inline constexpr std::string_view toolMitigation = "Tool mitigation";
+inline constexpr std::string_view hostileContact = "Hostile contact";
+inline constexpr std::string_view phaseIntent = "Intent";
+inline constexpr std::string_view phaseInputs = "Inputs";
+inline constexpr std::string_view phaseOutputs = "Outputs";
+inline constexpr std::string_view phaseRisk = "Risk";
+inline constexpr std::string_view phaseNext = "Next";
 
 inline std::string trainingDelta(int trainingGain)
 {
@@ -332,10 +449,18 @@ inline constexpr std::string_view provingReturn = "Proving Return";
 namespace messages {
 inline constexpr std::string_view crewLossRecorded = "Crew loss recorded in the memorial ledger.";
 inline constexpr std::string_view crewInjured = "Crew injured. Rest before you ask for another miracle.";
+inline constexpr std::string_view postArrivalResearchReady = "Arrival opens a research window and surface expedition before refit.";
+inline constexpr std::string_view chooseArrivalOperation = "Choose the arrival posture. Flyby is safest, orbit gives better science, landing opens surface materials and artifacts.";
+inline constexpr std::string_view flybyDetail = "Safe science pass. Banks credits and blueprint progress, then returns to refit.";
+inline constexpr std::string_view orbitDetail = "Riskier orbital work. Banks stronger science and opens research where facilities exist.";
+inline constexpr std::string_view landingDetail = "Highest-value operation. Opens surface exploration, material recovery, and artifacts.";
 inline constexpr std::string_view chooseOneRefit = "Choose one ship or crew upgrade. The install crew can only complete one refit before the next launch cycle.";
+inline constexpr std::string_view recoveredResourcesDetail = "Recovered samples, blueprints, and artifacts feed research and material-gated ship parts.";
 inline constexpr std::string_view totalHullBlocked = "Mission control will not clear a vehicle at total hull damage.";
 inline constexpr std::string_view noLivingCrewBlocked = "No living astronaut is currently cleared for launch.";
 inline constexpr std::string_view noStructuralWork = "No structural work is needed right now.";
+inline constexpr std::string_view simulatorMastered = "Simulator plan exhausted; this pilot is already at max training.";
+inline constexpr std::string_view simulatorWouldOverstress = "Simulator burn would push crew stress over safe limits.";
 inline constexpr std::string_view emergencyReplacement = "Emergency replacement clears the launch soft lock.";
 inline constexpr std::string_view reserveRoster = "Add another qualified astronaut before the next proving run.";
 inline constexpr std::string_view crewOpsFallback = "Improves crew operations";
@@ -344,6 +469,43 @@ inline constexpr std::string_view agencyIntakeBackground = "New agency intake";
 inline constexpr std::string_view replacementCadet = "Replacement Cadet";
 inline constexpr std::string_view restoredCrewBackground = "Restored crew record";
 inline constexpr std::string_view generatedRecruitTrait = "Learns quickly";
+inline constexpr std::string_view chooseOneResearch = "Choose one research priority. Mars field work can turn blueprints and recovered materials into better options.";
+inline constexpr std::string_view researchAdvisoryReady = "Research choice ready";
+inline constexpr std::string_view researchAdvisoryReadyDetail = "At least one project is funded. Choose the unlock that best supports the next launch cycle.";
+inline constexpr std::string_view researchAdvisoryMaterials = "Materials short";
+inline constexpr std::string_view researchAdvisoryMaterialsDetail = "Current projects need samples you do not have. Skip research and deploy the surface team to recover materials.";
+inline constexpr std::string_view researchAdvisoryEmpty = "No active projects";
+inline constexpr std::string_view researchAdvisoryEmptyDetail = "The lab has no viable project queued for this arrival. Send the field team down and keep the expedition moving.";
+inline constexpr std::string_view surfaceExpeditionBrief = "Spend supply to survey, mine, or push deeper. Extraction banks recovered materials and moves the program back to refit.";
+inline constexpr std::string_view surfacePostureScout = "Scout the site";
+inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Survey or mine before spending supply on deeper risk.";
+inline constexpr std::string_view surfacePostureStable = "Payload secure";
+inline constexpr std::string_view surfacePostureStableDetail = "The field team has recoverable cargo and enough margin for one more careful action.";
+inline constexpr std::string_view surfacePostureNarrowing = "Extraction window narrowing";
+inline constexpr std::string_view surfacePostureNarrowingDetail = "Supply or recovery margin is getting thin. Extract soon unless the next action is worth the risk.";
+inline constexpr std::string_view surfacePostureGreedy = "Greed check";
+inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is valuable, but recovery risk is climbing into expensive territory.";
+inline constexpr std::string_view surfacePostureExtract = "Extract now";
+inline constexpr std::string_view surfacePostureExtractDetail = "No supply remains for field work. Bring the payload home before conditions get worse.";
+inline constexpr std::string_view surfaceSurveyDetail = "Recover common samples; probes improve yield and reduce dust trouble.";
+inline constexpr std::string_view surfaceMineDetail = "Fill cargo canisters; drills improve yield and rare-material odds.";
+inline constexpr std::string_view surfacePushDetail = "Increase depth for artifacts and richer deposits; terrain gets less forgiving.";
+inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to refit. Cargo rigs reduce extraction risk.";
+
+inline std::string closeCallSurvival(std::string_view margin)
+{
+    return "Skin of your teeth: survived within " + std::string(margin) + " of the failure point.";
+}
+
+inline std::string supplyCost(int cost)
+{
+    return std::to_string(cost) + " supply";
+}
+
+inline std::string needSupply(int cost)
+{
+    return "Need " + supplyCost(cost);
+}
 } // namespace messages
 
 namespace ops {
@@ -379,6 +541,31 @@ inline std::string rerollOffers(std::string cost)
     return "Reroll offers (" + cost + " credits)";
 }
 
+inline std::string blueprintGain(int amount)
+{
+    return "+" + std::to_string(amount) + " BP";
+}
+
+inline std::string materialSummary(int common, int rare, int exotic)
+{
+    return std::to_string(common) + " common, " + std::to_string(rare) + " rare, " + std::to_string(exotic) + " exotic";
+}
+
+inline std::string creditsAndMaterials(std::string_view credits, std::string_view materials)
+{
+    return std::string(credits) + " + " + std::string(materials);
+}
+
+inline std::string artifactSummary(int identified, int total)
+{
+    return std::to_string(identified) + " identified / " + std::to_string(total) + " recovered";
+}
+
+inline std::string unlocksFamily(std::string_view family)
+{
+    return "Unlocks: " + std::string(family);
+}
+
 inline std::string repairDetail(int repairAmount)
 {
     return "Restore up to " + std::to_string(repairAmount) + " hull damage. Repeated assignments cost more this expedition.";
@@ -393,6 +580,10 @@ inline std::string restDetail(int stressRecovery)
 {
     return "-" + std::to_string(stressRecovery) + " stress at current difficulty. Repeated assignments cost more this expedition.";
 }
+
+inline constexpr std::string_view noRestDetail = "No stress or injury requires medical rest right now.";
+inline constexpr std::string_view simulatorCapped = "Training capped";
+inline constexpr std::string_view crewTooStressed = "Crew too stressed";
 
 inline std::string trainingImpact(int trainingGain)
 {

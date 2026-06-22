@@ -9,6 +9,7 @@
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
+#include "core/ResearchPresentation.h"
 #include "core/ShipPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
@@ -96,11 +97,27 @@ std::string statChip(const RefitStatChip& chip)
         htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
 }
 
+std::string resourceChip(const PanelMetricPresentation& chip)
+{
+    const bool positive = chip.value.empty() || chip.value.front() != '-';
+    return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") + "\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
+}
+
 std::string statChipGrid(const std::vector<RefitStatChip>& chips)
 {
     std::string tags;
     for (const RefitStatChip& chip : chips) {
         tags += statChip(chip);
+    }
+    return tags;
+}
+
+std::string resourceChipGrid(const std::vector<PanelMetricPresentation>& chips)
+{
+    std::string tags;
+    for (const PanelMetricPresentation& chip : chips) {
+        tags += resourceChip(chip);
     }
     return tags;
 }
@@ -142,8 +159,56 @@ std::string refitOfferCard(const RefitOfferPresentation& offer)
     out << "<p class=\"module-threat\">" << htmlEscape(presentation.detail) << "</p>";
     out << "<strong class=\"module-impact\">" << htmlEscape(presentation.primaryImpact) << "</strong>";
     out << "<div class=\"stat-grid\">" << statChipGrid(presentation.statChips) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape(display::credits(offer.cost)) << "</span>"
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(offer.costSummary) << "</span>"
         << panelButton(offer.action) << "</div></article>";
+    return out.str();
+}
+
+std::string researchProjectCard(const ResearchProjectCardPresentation& project)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(project.rarity) << "</span><span>"
+        << htmlEscape(project.blueprintGain) << "</span></div>";
+    out << "<h3>" << htmlEscape(project.title) << "</h3>";
+    out << "<p>" << htmlEscape(project.detail) << "</p>";
+    if (!project.reward.empty()) {
+        out << "<strong class=\"module-impact\">" << htmlEscape(project.reward) << "</strong>";
+    }
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(project.resourceChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(project.materialCost) << "</span>"
+        << panelButton(project.action) << "</div></article>";
+    return out.str();
+}
+
+std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(action.cost) << "</span><span>"
+        << htmlEscape(action.risk) << " " << htmlEscape(action.riskLabel) << "</span></div>";
+    out << "<h3>" << htmlEscape(action.title) << "</h3>";
+    out << "<p>" << htmlEscape(action.detail) << "</p>";
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(action.payoffChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(action.availability)
+        << "</span>" << panelButton(action.action) << "</div></article>";
+    return out.str();
+}
+
+std::string arrivalOperationCard(
+    std::string_view title,
+    std::string_view detail,
+    std::string_view risk,
+    std::string_view reward,
+    const PanelButtonPresentation& action)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card arrival-card\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(risk) << "</span><span>" << htmlEscape(reward) << "</span></div>";
+    out << "<h3>" << htmlEscape(title) << "</h3>";
+    out << "<p>" << htmlEscape(detail) << "</p>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(action.enabled ? std::string(text::panel::ready) : std::string(text::buttons::unavailable))
+        << "</span>" << panelButton(action) << "</div></article>";
     return out.str();
 }
 
@@ -167,6 +232,70 @@ std::string detailStack(const std::vector<DetailPresentationRow>& rows)
     return body;
 }
 
+std::string missionLog(const std::vector<std::string>& entries)
+{
+    std::string body = "<div class=\"detail-stack\">";
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        body += detailRow(std::to_string(i + 1), entries[i]);
+    }
+    body += "</div>";
+    return body;
+}
+
+std::string phaseBoardOpen(std::string_view cssClass, std::string_view status)
+{
+    std::string out = "<section class=\"phase-board " + htmlEscape(cssClass) + "\" data-panel-mode=\"phase-board\">";
+    if (!status.empty()) {
+        out += "<p class=\"phase-status\">" + htmlEscape(status) + "</p>";
+    }
+    return out;
+}
+
+std::string phaseBoardClose()
+{
+    return "</section>";
+}
+
+std::string boardNote(std::string_view note)
+{
+    return "<p class=\"board-note\">" + htmlEscape(note) + "</p>";
+}
+
+std::string phaseTrack(const std::vector<PhaseStepPresentation>& steps)
+{
+    std::string out = "<ol class=\"phase-track\">";
+    for (const PhaseStepPresentation& step : steps) {
+        out += "<li class=\"" + htmlEscape(step.stateClass) + "\"><span>" + htmlEscape(step.label) +
+            "</span><strong>" + htmlEscape(step.stateLabel) + "</strong></li>";
+    }
+    out += "</ol>";
+    return out;
+}
+
+std::string surfacePosture(const SurfaceExpeditionPresentation& surface)
+{
+    return "<article class=\"phase-advisory " + htmlEscape(surface.postureClass) + "\"><strong>" +
+        htmlEscape(surface.postureTitle) + "</strong><span>" + htmlEscape(surface.postureDetail) + "</span></article>";
+}
+
+std::string phaseAdvisory(const PhaseAdvisoryPresentation& advisory)
+{
+    return "<article class=\"phase-advisory " + htmlEscape(advisory.cssClass) + "\"><strong>" +
+        htmlEscape(advisory.title) + "</strong><span>" + htmlEscape(advisory.detail) + "</span></article>";
+}
+
+std::string resultMetricGroup(const LaunchOutcomeMetricGroupPresentation& group)
+{
+    const std::string classAttr = group.cssClass.empty() ? "" : " " + htmlEscape(group.cssClass);
+    std::string out = "<article class=\"result-group" + classAttr + "\"><h3>" + htmlEscape(group.title) + "</h3>";
+    for (const LaunchOutcomeMetricPresentation& metricItem : group.metrics) {
+        out += "<div class=\"result-row\"><span>" + htmlEscape(metricItem.label) + "</span><strong>" +
+            htmlEscape(metricItem.value) + "</strong></div>";
+    }
+    out += "</article>";
+    return out;
+}
+
 } // namespace
 
 std::string buildGamePanelHtml(const PanelRenderContext& context)
@@ -179,6 +308,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     const Destination* next = nextDestination(state, catalog);
     const LaunchReadinessPresentation launchReadiness = launchReadinessPresentation(state, catalog);
     const std::vector<PanelMetricPresentation> headerMetrics = panelHeaderMetrics(state, catalog, context.activeLaunch, context.flightModel);
+    const PanelLayoutMode layoutMode = panelLayoutMode(state.screen);
 
     std::ostringstream out;
     out << "<div class=\"panel-head\"><div><h1>" << htmlEscape(text::panel::title) << "</h1></div>"
@@ -199,7 +329,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
-    if (state.screen == Screen::Launch) {
+    if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Launch) {
         const LaunchPanelPresentation launchPanel = launchPanelPresentation(
             state,
             catalog,
@@ -245,31 +375,159 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
 
     if (state.screen == Screen::Results) {
-        const LaunchOutcomePresentation presentation = launchOutcomePresentation(state.lastOutcome);
+        const bool opensPostArrival = shouldOpenPostArrivalPhases(state.lastOutcome, catalog);
+        const LaunchOutcomePresentation presentation = launchOutcomePresentation(
+            state.lastOutcome,
+            opensPostArrival);
+        out << phaseBoardOpen("phase-board-results", state.statusLine);
         out << "<h2>" << htmlEscape(text::panel::sections::result) << "</h2>";
-        out << "<div class=\"metric-grid\">";
-        out << metric(text::labels::outcome, std::string(presentation.label));
-        out << metric(text::labels::recovery, std::string(toString(state.lastOutcome.recoveryMethod)));
-        out << metric(text::labels::burnDepth, display::multiplier(state.lastOutcome.ejectMultiplier));
-        out << metric(text::labels::failurePoint, display::multiplier(state.lastOutcome.crashMultiplier));
-        out << metric(text::labels::peakWarning, display::percent(state.lastOutcome.peakWarning));
-        out << metric(text::labels::peakAbort, display::percent(state.lastOutcome.peakAbortRisk));
-        out << metric(text::labels::creditDelta, display::signedMoney(state.lastOutcome.payout - state.lastOutcome.recoveryCost));
+        if (opensPostArrival) {
+            const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
+            out << phaseTrack(postArrivalPhaseSteps(Screen::Results));
+            out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div>";
+            out << modalTemplate(ui::modals::phaseBriefing, arrivalBriefing.title, detailStack(arrivalBriefing.rows));
+        }
+        out << "<div class=\"result-grid\">";
+        for (const LaunchOutcomeMetricGroupPresentation& group : presentation.metricGroups) {
+            out << resultMetricGroup(group);
+        }
         out << "</div>";
         for (const std::string& note : presentation.notes) {
-            out << "<p class=\"status\">" << htmlEscape(note) << "</p>";
+            out << boardNote(note);
         }
         out << "<div class=\"actions\">";
         out << button(presentation.nextActionLabel, ui::actions::next, "ok");
         out << "</div>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
+    if (state.screen == Screen::ArrivalOps) {
+        const Destination* arrivalDestination = catalog.findDestination(state.run.arrivalOps.destinationId);
+        const std::string destinationName = arrivalDestination == nullptr ? currentFrontier.name : arrivalDestination->name;
+        const bool flybyAvailable = canRunArrivalFlyby(state, catalog);
+        const bool orbitAvailable = canEnterArrivalOrbit(state, catalog);
+        const bool landingAvailable = canAttemptArrivalLanding(state, catalog);
+        const std::string orbitReason = arrivalOperationBlockReason(state, catalog, "orbit");
+        const std::string landingReason = arrivalOperationBlockReason(state, catalog, "landing");
+        const std::string orbitDetail = orbitReason.empty() ? std::string(text::panel::messages::orbitDetail) : orbitReason;
+        const std::string landingDetail = landingReason.empty() ? std::string(text::panel::messages::landingDetail) : landingReason;
+
+        out << phaseBoardOpen("phase-board-arrival", state.statusLine);
+        out << "<h2>" << htmlEscape(text::panel::sections::arrivalOps) << "</h2>";
+        out << "<p>" << htmlEscape(text::panel::messages::chooseArrivalOperation) << "</p>";
+        out << "<div class=\"metric-grid\">";
+        out << metric(text::labels::currentFrontier, destinationName);
+        out << metric(text::panel::details::flyby, std::to_string(destinationHistoryValue(state.meta.destinationFlybys, catalog, state.run.arrivalOps.destinationId)));
+        out << metric(text::panel::details::orbit, std::to_string(destinationHistoryValue(state.meta.destinationOrbits, catalog, state.run.arrivalOps.destinationId)));
+        out << metric(text::panel::details::landing, std::to_string(destinationHistoryValue(state.meta.destinationLandings, catalog, state.run.arrivalOps.destinationId)));
+        out << "</div>";
+        out << "<div class=\"ops-grid\">";
+        out << arrivalOperationCard(
+            text::panel::details::flyby,
+            text::panel::messages::flybyDetail,
+            "Low risk",
+            "Credits + BP",
+            flybyAvailable
+                ? panelActionButton(text::buttons::runFlyby, ui::actions::arrivalFlyby, "ok")
+                : disabledPanelButton(text::buttons::unavailable));
+        out << arrivalOperationCard(
+            text::panel::details::orbit,
+            orbitDetail,
+            "Medium risk",
+            arrivalDestination != nullptr && destinationSupportsResearch(*arrivalDestination) ? "Research" : "Science + BP",
+            orbitAvailable
+                ? panelActionButton(text::buttons::enterOrbit, ui::actions::arrivalOrbit, "warn")
+                : disabledPanelButton(text::buttons::unavailable));
+        out << arrivalOperationCard(
+            text::panel::details::landing,
+            landingDetail,
+            "High risk",
+            "Materials + artifacts",
+            landingAvailable
+                ? panelActionButton(text::buttons::attemptLanding, ui::actions::arrivalLanding, "danger")
+                : disabledPanelButton(text::buttons::unavailable));
+        out << "</div>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
+    if (state.screen == Screen::Research) {
+        const ResearchPhasePresentation researchPanel = researchPhasePresentation(state, catalog);
+        out << phaseBoardOpen("phase-board-research", state.statusLine);
+        out << "<h2>" << htmlEscape(text::panel::sections::research) << "</h2>";
+        out << "<p>" << htmlEscape(text::panel::messages::chooseOneResearch) << "</p>";
+        out << phaseTrack(researchPanel.phaseSteps);
+        out << phaseAdvisory(researchPanel.advisory);
+        out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
+            << modalButton(text::buttons::details, ui::modals::research, "ghost") << "</div>";
+        out << "<div class=\"metric-grid\">";
+        for (const PanelMetricPresentation& metricItem : researchPanel.metrics) {
+            out << metric(metricItem.label, metricItem.value);
+        }
+        out << "</div>";
+        out << "<div class=\"ops-grid\">";
+        for (const ResearchProjectCardPresentation& project : researchPanel.projects) {
+            out << researchProjectCard(project);
+        }
+        out << "</div>";
+        out << "<div class=\"actions\">";
+        out << panelButton(researchPanel.skipAction);
+        out << "</div>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::phaseBriefing, researchPanel.briefing.title, detailStack(researchPanel.briefing.rows));
+        out << modalTemplate(ui::modals::research, text::panel::modals::researchDetails, detailStack(researchPanel.details));
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
+    if (state.screen == Screen::SurfaceExpedition) {
+        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state);
+        out << phaseBoardOpen("phase-board-surface", state.statusLine);
+        out << "<h2>" << htmlEscape(text::panel::sections::surfaceExpedition) << "</h2>";
+        out << "<p>" << htmlEscape(text::panel::messages::surfaceExpeditionBrief) << "</p>";
+        out << phaseTrack(surfacePanel.phaseSteps);
+        out << boardNote(surfacePanel.siteDetail);
+        out << surfacePosture(surfacePanel);
+        out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
+            << modalButton(text::buttons::details, ui::modals::surface, "ghost") << "</div>";
+        out << "<div class=\"metric-grid\">";
+        for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
+            out << metric(metricItem.label, metricItem.value);
+        }
+        out << "</div>";
+        out << "<section class=\"board-primary surface-actions\">";
+        out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
+        out << "<div class=\"ops-grid\">";
+        for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
+            out << surfaceActionCard(action);
+        }
+        out << "</div></section>";
+        if (!surfacePanel.logEntries.empty()) {
+            out << "<aside class=\"board-secondary surface-log\">";
+            out << "<h2>" << htmlEscape(text::panel::sections::missionLog) << "</h2>";
+            out << missionLog(surfacePanel.logEntries);
+            out << "</aside>";
+        }
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::phaseBriefing, surfacePanel.briefing.title, detailStack(surfacePanel.briefing.rows));
+        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
 
     if (state.screen == Screen::Upgrade) {
         const RefitWindowPresentation refitWindow = refitWindowPresentation(state, catalog);
+        out << phaseBoardOpen("phase-board-refit", state.statusLine);
         out << "<h2>" << htmlEscape(text::panel::sections::refitWindow) << "</h2>";
         out << "<p>" << htmlEscape(text::panel::messages::chooseOneRefit) << "</p>";
+        if (!refitWindow.resourceChips.empty() || !refitWindow.recoveryDetail.empty()) {
+            out << "<section class=\"resource-bank\"><div><h2>" << htmlEscape(text::panel::sections::recoveredResources)
+                << "</h2><p>" << htmlEscape(refitWindow.recoveryDetail) << "</p></div>";
+            out << "<div class=\"stat-grid\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
+        }
         out << "<div class=\"upgrade-grid\">";
         for (const RefitOfferPresentation& offer : refitWindow.offers) {
             out << refitOfferCard(offer);
@@ -278,6 +536,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << panelButton(refitWindow.rerollAction);
         out << panelButton(refitWindow.skipAction);
         out << "</div>";
+        out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
@@ -297,6 +556,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     launchBlockedBody << "</div>";
 
+    out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
     out << "<div class=\"summary-grid\">";
     out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::ship) << "</span><strong>" << htmlEscape(display::damage(state.run.shipDamage)) << "</strong>"
@@ -330,11 +590,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
-    const std::string legacyBody = detailStack(legacyDetailsPresentation(state));
+    const std::string legacyBody = detailStack(legacyDetailsPresentation(state, catalog));
 
     out << "<div class=\"utility-row bottom-tools\">";
     out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
     out << "</div>";
+    out << phaseBoardClose();
     out << modalTemplate(ui::modals::ship, text::panel::modals::shipDetails, shipBody);
     out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody);
     out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody);

@@ -9,6 +9,11 @@ inline constexpr const char* recovery = "recovery";
 inline constexpr const char* deepSpace = "deep_space";
 inline constexpr const char* ai = "ai";
 inline constexpr const char* exotic = "exotic";
+inline constexpr const char* surfaceProbes = "surface_probes";
+inline constexpr const char* surfaceDrills = "surface_drills";
+inline constexpr const char* cargoRigs = "cargo_rigs";
+inline constexpr const char* analysisLab = "analysis_lab";
+inline constexpr const char* perimeterDrones = "perimeter_drones";
 } // namespace unlock
 
 namespace module {
@@ -39,6 +44,19 @@ inline constexpr const char* medicalRecoveryWard = "medical_recovery_ward";
 inline constexpr const char* missionPsychOffice = "mission_psych_office";
 inline constexpr const char* traitCoachingLab = "trait_coaching_lab";
 } // namespace crewUpgrade
+
+namespace research {
+inline constexpr const char* blueprintSurvey = "blueprint_survey";
+inline constexpr const char* appliedMaterialsLab = "applied_materials_lab";
+inline constexpr const char* prototypeSchematic = "prototype_schematic";
+inline constexpr const char* xenogeologyProgram = "xenogeology_program";
+inline constexpr const char* artifactDecoding = "artifact_decoding";
+inline constexpr const char* fieldProbeNetwork = "field_probe_network";
+inline constexpr const char* regolithDrillRig = "regolith_drill_rig";
+inline constexpr const char* cargoReturnRig = "cargo_return_rig";
+inline constexpr const char* missionAnalysisLab = "mission_analysis_lab";
+inline constexpr const char* perimeterDroneNetwork = "perimeter_drone_network";
+} // namespace research
 
 namespace frame {
 inline constexpr const char* pathfinder = "pathfinder";

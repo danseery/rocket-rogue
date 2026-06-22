@@ -15,6 +15,9 @@ enum class Screen {
     Hangar,
     Launch,
     Results,
+    ArrivalOps,
+    Research,
+    SurfaceExpedition,
     Upgrade,
     Legacy
 };
@@ -39,6 +42,12 @@ enum class CrewStatus {
     Active,
     Injured,
     Dead
+};
+
+enum class SurfaceSiteProfile {
+    SurveyBasin,
+    OreShelf,
+    FractureField
 };
 
 enum class LaunchResultType {
@@ -76,12 +85,19 @@ struct CrewUpgradeStats {
     double traitModifier = 0.0;
 };
 
+struct MaterialInventory {
+    int common = 0;
+    int rare = 0;
+    int exotic = 0;
+};
+
 struct ShipModule {
     std::string id;
     std::string name;
     SlotType slot = SlotType::Engine;
     Rarity rarity = Rarity::Common;
     ModuleStats stats;
+    MaterialInventory materialCost;
     int durability = 100;
     std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
@@ -94,6 +110,25 @@ struct CrewUpgrade {
     Rarity rarity = Rarity::Common;
     CrewUpgradeStats stats;
     std::string unlockKey = content::unlock::starter;
+    std::vector<std::string> tags;
+};
+
+struct ArtifactRecord {
+    std::string id;
+    std::string originDestinationId;
+    bool identified = false;
+};
+
+struct ResearchProject {
+    std::string id;
+    std::string name;
+    std::string description;
+    Rarity rarity = Rarity::Common;
+    int requiredDestinationTier = 2;
+    int blueprintGain = 0;
+    MaterialInventory materialCost;
+    std::string unlockKey = content::unlock::starter;
+    std::string rewardUnlockKey;
     std::vector<std::string> tags;
 };
 
@@ -172,13 +207,45 @@ struct LaunchOutcome {
 struct MetaProgress {
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
+    MaterialInventory materials;
+    std::vector<ArtifactRecord> artifacts;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
+    double closestSurvivalMargin = 0.0;
+    double closestSurvivalBurn = 0.0;
+    double closestSurvivalFailurePoint = 0.0;
+    double maxBurnDepth = 0.0;
+    double maxPeakWarning = 0.0;
+    double maxPeakAbortRisk = 0.0;
+    double bestCreditDelta = 0.0;
+    double worstCreditDelta = 0.0;
     std::vector<int> destinationAttempts;
     std::vector<int> destinationSuccesses;
+    std::vector<int> destinationFlybys;
+    std::vector<int> destinationOrbits;
+    std::vector<int> destinationLandings;
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
+};
+
+struct ArrivalOpsState {
+    bool active = false;
+    std::string destinationId;
+};
+
+struct SurfaceExpeditionState {
+    bool active = false;
+    std::string destinationId;
+    SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
+    int supply = 0;
+    int cargo = 0;
+    double hazard = 0.0;
+    int depth = 0;
+    MaterialInventory temporaryMaterials;
+    std::vector<ArtifactRecord> temporaryArtifacts;
+    std::vector<std::string> logEntries;
+    bool enemyEncountersEnabled = false;
 };
 
 struct RunState {
@@ -194,11 +261,16 @@ struct RunState {
     std::vector<Astronaut> crew;
     std::array<std::string, 3> offerModuleIds {};
     std::array<std::string, 3> offerCrewUpgradeIds {};
+    std::array<std::string, 3> researchProjectIds {};
+    ArrivalOpsState arrivalOps;
+    SurfaceExpeditionState surfaceExpedition;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;
     int trainingOpsThisExpedition = 0;
     int restOpsThisExpedition = 0;
+    int shallowRecoveryStreak = 0;
+    int cleanShallowRecoveryStreak = 0;
 };
 
 struct GameState {

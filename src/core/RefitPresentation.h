@@ -50,12 +50,15 @@ struct RefitOfferPresentation {
     RefitOfferPresentationKind kind = RefitOfferPresentationKind::ShipModule;
     int index = 0;
     int cost = 0;
+    std::string costSummary;
     bool affordable = false;
     RefitPresentation card;
     PanelButtonPresentation action;
 };
 
 struct RefitWindowPresentation {
+    std::vector<PanelMetricPresentation> resourceChips;
+    std::string recoveryDetail;
     std::vector<RefitOfferPresentation> offers;
     double rerollCost = 0.0;
     PanelButtonPresentation rerollAction;
@@ -212,19 +215,72 @@ inline RefitPresentation crewUpgradeRefitPresentation(const CrewUpgrade& upgrade
     };
 }
 
-inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, int index, double credits)
+inline std::string refitCostSummary(int credits, const MaterialInventory& materials)
+{
+    const std::string creditCost = display::credits(credits);
+    if (materials.common == 0 && materials.rare == 0 && materials.exotic == 0) {
+        return creditCost;
+    }
+    return text::panel::creditsAndMaterials(creditCost, text::panel::materialSummary(materials.common, materials.rare, materials.exotic));
+}
+
+inline std::string missingModuleCostLabel(const GameState& state, const ShipModule& module)
+{
+    if (state.run.credits < static_cast<double>(moduleOfferCost(module))) {
+        return text::needCredits(moduleOfferCost(module));
+    }
+    if (!canAffordMaterials(state.meta.materials, module.materialCost)) {
+        return std::string(text::panel::needMaterials);
+    }
+    return std::string(text::buttons::install);
+}
+
+inline void addResourceChip(std::vector<PanelMetricPresentation>& chips, std::string_view label, int value)
+{
+    if (value > 0) {
+        chips.push_back(panelMetric(label, std::to_string(value)));
+    }
+}
+
+inline std::vector<PanelMetricPresentation> refitResourceChips(const GameState& state)
+{
+    std::vector<PanelMetricPresentation> chips;
+    addResourceChip(chips, text::labels::blueprints, state.meta.blueprintProgress);
+    addResourceChip(chips, text::labels::commonMaterials, state.meta.materials.common);
+    addResourceChip(chips, text::labels::rareMaterials, state.meta.materials.rare);
+    addResourceChip(chips, text::labels::exoticMaterials, state.meta.materials.exotic);
+    addResourceChip(chips, text::labels::artifacts, static_cast<int>(state.meta.artifacts.size()));
+    return chips;
+}
+
+inline bool startsWith(std::string_view text, std::string_view prefix)
+{
+    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+inline std::string refitRecoveryDetail(const GameState& state, bool hasResources)
+{
+    if (startsWith(state.statusLine, text::status::surfaceExtracted) ||
+        startsWith(state.statusLine, text::status::surfaceExtractionRough)) {
+        return state.statusLine;
+    }
+    return hasResources ? std::string(text::panel::messages::recoveredResourcesDetail) : std::string();
+}
+
+inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, int index, const GameState& state)
 {
     const int cost = moduleOfferCost(module);
-    const bool affordable = credits >= static_cast<double>(cost);
+    const bool affordable = canAffordModuleOffer(state, module);
     return {
         RefitOfferPresentationKind::ShipModule,
         index,
         cost,
+        refitCostSummary(cost, module.materialCost),
         affordable,
         moduleRefitPresentation(module),
         affordable
             ? panelActionButton(text::buttons::install, ui::actions::buyOffer(index), "ok")
-            : disabledPanelButton(text::needCredits(cost))
+            : disabledPanelButton(missingModuleCostLabel(state, module))
     };
 }
 
@@ -236,6 +292,7 @@ inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& up
         RefitOfferPresentationKind::CrewUpgrade,
         index,
         cost,
+        display::credits(cost),
         affordable,
         crewUpgradeRefitPresentation(upgrade),
         affordable
@@ -247,12 +304,14 @@ inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& up
 inline RefitWindowPresentation refitWindowPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     RefitWindowPresentation presentation;
+    presentation.resourceChips = refitResourceChips(state);
+    presentation.recoveryDetail = refitRecoveryDetail(state, !presentation.resourceChips.empty());
     presentation.offers.reserve(state.run.offerModuleIds.size());
 
     for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
         const int index = static_cast<int>(i);
         if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
-            presentation.offers.push_back(moduleOfferPresentation(*module, index, state.run.credits));
+            presentation.offers.push_back(moduleOfferPresentation(*module, index, state));
             continue;
         }
 

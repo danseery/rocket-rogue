@@ -62,6 +62,16 @@ void rr_return_home()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_arrival_ops()
+{
+    if (g_app) {
+        g_app->arrivalOps();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_cut_engines()
 {
     if (g_app) {
@@ -136,6 +146,96 @@ void rr_reroll_offers()
 {
     if (g_app) {
         g_app->rerollOffers();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_arrival_flyby()
+{
+    if (g_app) {
+        g_app->runArrivalFlyby();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_arrival_orbit()
+{
+    if (g_app) {
+        g_app->enterArrivalOrbit();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_arrival_landing()
+{
+    if (g_app) {
+        g_app->attemptArrivalLanding();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_research_project(int index)
+{
+    if (g_app) {
+        g_app->selectResearchProject(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_skip_research()
+{
+    if (g_app) {
+        g_app->skipResearch();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_survey_surface()
+{
+    if (g_app) {
+        g_app->surveySurface();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mine_surface()
+{
+    if (g_app) {
+        g_app->mineSurface();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_push_surface()
+{
+    if (g_app) {
+        g_app->pushSurface();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_extract_surface()
+{
+    if (g_app) {
+        g_app->extractSurface();
     }
 }
 

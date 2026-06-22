@@ -18,6 +18,7 @@ public:
 
     void startLaunch();
     void returnHome();
+    void arrivalOps();
     void cutEngines();
     void pressureReliefValve();
     void closePressureReliefValve();
@@ -27,6 +28,15 @@ public:
     void attemptFrontierTransfer();
     void buyOffer(int index);
     void rerollOffers();
+    void runArrivalFlyby();
+    void enterArrivalOrbit();
+    void attemptArrivalLanding();
+    void selectResearchProject(int index);
+    void skipResearch();
+    void surveySurface();
+    void mineSurface();
+    void pushSurface();
+    void extractSurface();
     void repairShip();
     void recruitCrew();
     void trainCrew();
@@ -73,6 +83,7 @@ private:
     void beginLaunchSession(PreparedLaunch preparedLaunch);
     void clearFlightControls();
     void clearResultView();
+    void beginSurfaceExpeditionOrRefit();
     double liveBurnMultiplier() const;
 
     ContentCatalog catalog_;

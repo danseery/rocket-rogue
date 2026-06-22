@@ -50,13 +50,27 @@ inline std::string launchSectionTitle(const FlightActionState& actions, bool fro
     return std::string(frontierTransfer ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight);
 }
 
-inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions)
+inline bool canCommitArrivalOps(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel, double currentMultiplier)
+{
+    const Destination* configuredDestination = catalog.findDestination(flightModel.config.destinationId);
+    const Destination& destination = configuredDestination == nullptr ? currentDestination(state, catalog) : *configuredDestination;
+    return !flightModel.config.frontierTransfer
+        && destination.tier >= 1
+        && currentMultiplier >= destination.targetMultiplier;
+}
+
+inline std::vector<FlightActionButtonPresentation> primaryFlightActions(
+    const FlightActionState& actions,
+    bool arrivalOpsAvailable)
 {
     std::vector<FlightActionButtonPresentation> buttons;
     if (actions.returningHome) {
         buttons.push_back(disabledFlightActionButton(text::buttons::returningHome));
     } else {
         buttons.push_back(flightActionButton(text::buttons::returnHome, ui::actions::returnHome, "ok"));
+        if (arrivalOpsAvailable) {
+            buttons.push_back(flightActionButton(text::buttons::arrivalOps, ui::actions::arrivalOps, "warn"));
+        }
     }
     buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
     return buttons;
@@ -140,7 +154,7 @@ inline LaunchPanelPresentation launchPanelPresentation(
     }
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(flightModel.pressureModifier)));
-    presentation.primaryActions = primaryFlightActions(actions);
+    presentation.primaryActions = primaryFlightActions(actions, canCommitArrivalOps(state, catalog, flightModel, currentMultiplier));
     presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
     return presentation;
 }

@@ -3,6 +3,7 @@
 #include "core/FlightProgress.h"
 #include "core/GameText.h"
 #include "core/LaunchStatus.h"
+#include "core/ResearchSystem.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
 #include "game/GamePanel.h"
@@ -33,6 +34,18 @@ void RocketGameApp::clearFlightControls()
 void RocketGameApp::clearResultView()
 {
     session_.result = {};
+}
+
+void RocketGameApp::beginSurfaceExpeditionOrRefit()
+{
+    startSurfaceExpedition(state_, catalog_, &rng_);
+    state_.screen = state_.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Upgrade;
+    state_.statusLine = state_.run.surfaceExpedition.active
+        ? std::string(text::status::surfaceExpeditionStarted)
+        : std::string(text::status::refitWindowOpened);
+    if (state_.screen == Screen::Upgrade) {
+        generateModuleOffers(state_, catalog_, rng_);
+    }
 }
 
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
@@ -217,6 +230,21 @@ void RocketGameApp::returnHome()
     panelDirty_ = true;
 }
 
+void RocketGameApp::arrivalOps()
+{
+    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
+        return;
+    }
+
+    const Destination& destination = currentDestination(state_, catalog_);
+    if (destination.tier < 1 || session_.currentMultiplier < destination.targetMultiplier) {
+        return;
+    }
+
+    recordTelemetryPeak(telemetryAt(currentFlightModel(), session_.currentMultiplier));
+    completeLaunch(session_.currentMultiplier, RecoveryMethod::TransferArrival);
+}
+
 void RocketGameApp::cutEngines()
 {
     if (state_.screen != Screen::Launch || session_.controls.actions.returningHome) {
@@ -301,6 +329,15 @@ void RocketGameApp::next()
         if (!state_.run.active || state_.lastOutcome.type == LaunchResultType::Destroyed) {
             startNewExpedition(state_, catalog_);
         }
+        if (shouldOpenArrivalOps(state_.lastOutcome, catalog_)) {
+            startArrivalOps(state_, state_.lastOutcome);
+            state_.screen = Screen::ArrivalOps;
+            state_.statusLine = std::string(text::status::arrivalOpsOpened);
+            syncLaunchConfig(state_, catalog_);
+            save();
+            panelDirty_ = true;
+            return;
+        }
         generateModuleOffers(state_, catalog_, rng_);
         state_.screen = Screen::Upgrade;
         state_.statusLine = std::string(text::status::refitWindowOpened);
@@ -314,6 +351,145 @@ void RocketGameApp::next()
         syncLaunchConfig(state_, catalog_);
         save();
     }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::runArrivalFlyby()
+{
+    if (state_.screen != Screen::ArrivalOps || !canRunArrivalFlyby(state_, catalog_)) {
+        return;
+    }
+
+    completeArrivalFlyby(state_, catalog_);
+    generateModuleOffers(state_, catalog_, rng_);
+    state_.screen = Screen::Upgrade;
+    state_.statusLine = std::string(text::status::flybyCompleted);
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::enterArrivalOrbit()
+{
+    if (state_.screen != Screen::ArrivalOps || !canEnterArrivalOrbit(state_, catalog_)) {
+        state_.statusLine = arrivalOperationBlockReason(state_, catalog_, "orbit");
+        panelDirty_ = true;
+        return;
+    }
+
+    completeArrivalOrbit(state_, catalog_);
+    if (shouldOpenPostArrivalPhases(state_.lastOutcome, catalog_)) {
+        generateResearchProjects(state_, catalog_, rng_);
+        state_.screen = Screen::Research;
+        state_.statusLine = std::string(text::status::researchWindowOpened);
+    } else {
+        generateModuleOffers(state_, catalog_, rng_);
+        state_.screen = Screen::Upgrade;
+        state_.statusLine = std::string(text::status::orbitCompleted);
+    }
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::attemptArrivalLanding()
+{
+    if (state_.screen != Screen::ArrivalOps || !canAttemptArrivalLanding(state_, catalog_)) {
+        state_.statusLine = arrivalOperationBlockReason(state_, catalog_, "landing");
+        panelDirty_ = true;
+        return;
+    }
+
+    state_.statusLine = std::string(text::status::landingCommitted);
+    beginSurfaceExpeditionOrRefit();
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::selectResearchProject(int index)
+{
+    if (state_.screen != Screen::Research) {
+        return;
+    }
+
+    const ResearchOutcome outcome = completeResearchProject(state_, catalog_, index);
+    if (!outcome.completed) {
+        panelDirty_ = true;
+        return;
+    }
+
+    const std::string researchSummary = researchOutcomeSummary(outcome);
+    beginSurfaceExpeditionOrRefit();
+    state_.statusLine = researchSummary;
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::skipResearch()
+{
+    if (state_.screen != Screen::Research) {
+        return;
+    }
+
+    beginSurfaceExpeditionOrRefit();
+    state_.statusLine = std::string(text::status::researchSkipped);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::surveySurface()
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = surveySurfaceSite(state_, rng_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::mineSurface()
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = mineSurfaceDeposit(state_, rng_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::pushSurface()
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = pushSurfaceDeeper(state_, rng_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::extractSurface()
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = extractSurfacePayload(state_, rng_);
+    if (!outcome.applied) {
+        panelDirty_ = true;
+        return;
+    }
+
+    state_.statusLine = surfaceActionSummary(outcome);
+    generateModuleOffers(state_, catalog_, rng_);
+    state_.screen = Screen::Upgrade;
+    save();
     panelDirty_ = true;
 }
 

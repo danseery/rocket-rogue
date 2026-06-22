@@ -15,6 +15,7 @@ struct HangarOperationPreview {
     bool trainingAvailable = false;
     int restStressRecovery = 0;
     double restCost = 0.0;
+    bool restNeeded = false;
     bool restAvailable = false;
     bool emergencyRecruitment = false;
     double recruitCost = 0.0;
@@ -34,6 +35,9 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed);
 int moduleOfferCost(Rarity rarity);
 int moduleOfferCost(const ShipModule& module);
 int crewUpgradeCost(const CrewUpgrade& upgrade);
+bool canAffordMaterials(const MaterialInventory& owned, const MaterialInventory& cost);
+bool canAffordModuleOffer(const GameState& state, const ShipModule& module);
+bool spendMaterials(MaterialInventory& owned, const MaterialInventory& cost);
 int crewStressStepCount(int stress);
 int effectiveTrainingLevel(const Astronaut& astronaut);
 double crewNavigationPenaltyFromStress(int stress);

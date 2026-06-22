@@ -19,6 +19,24 @@
 7. Repeat proving flights until enough frontier readiness is banked.
 8. Commit the agency to the next frontier, then repeat the loop farther from home.
 
+## Post-arrival research loop
+
+Research and surface expeditions start at Mars. Earth Orbit and Moon remain about proving the rocket program; Mars is the first destination where the agency can land, investigate, and turn discoveries into better long-term capability.
+
+See `docs/POST_ARRIVAL_PHASES.md` for the detailed phase breakdown and Unity prototype takeaways.
+
+The first implemented phase model is:
+
+1. Complete a frontier-transfer arrival at Mars or beyond.
+2. Choose from generated research projects that convert blueprints and recovered materials into unlock variety.
+3. Start a surface expedition with a limited supply clock.
+4. Survey, mine, or push deeper for better returns.
+5. Extract the payload before supply and hazard make recovery too risky.
+
+Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" Early solar-system expeditions do not have enemies. Enemy encounters should stay disabled until the Nearby Star tier, when the game leaves familiar planetary exploration and starts introducing hostile unknowns.
+
+Research rewards should primarily widen the roguelite possibility space: module families, research facilities, special components, artifact threads, and story leads. Material-funded projects can directly unlock new module or facility families. Artifact-tagged projects identify one recovered artifact when possible; the identified record is tracked now, while its specific story payload remains a later content pass. Raw permanent stat inflation should remain secondary.
+
 ## Risk model
 
 Each launch creates a deterministic hidden crash point from:
@@ -96,6 +114,8 @@ Flight controls that modify the launch model should flow through `FlightActionSt
 
 Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
 
+Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface supply/cargo, extraction risk, and the solar-system enemy gate. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
+
 Shared game constants and player-facing copy should have one owner:
 
 - `src/core/Tuning.h` owns balance values such as refit costs, crew stress steps, mission difficulty, action tradeoffs, launch pacing, warning thresholds, and reward shelves.
@@ -112,9 +132,11 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/LaunchStatus.h` owns launch/return status-line selection. App code should pass the current telemetry/action context into it instead of branching directly on warning thresholds for player-facing copy.
 - `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
 - `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, slot classes, glyphs, threat copy, primary impact, stat chips, prices, affordability, install actions, reroll action, and skip action. Panels should render this returned data instead of rebuilding offer rules inline.
+- `src/core/ResearchPresentation.h` owns research and surface-expedition presentation: blueprint/material metrics, research project cards, surface supply/cargo/risk metrics, and field action availability. Panels should render this returned data instead of rebuilding research/resource rules inline.
 - `src/core/CrewPresentation.h` owns Crew Details rows and facility-effect value wording. Panels should render detail rows and headers from this helper instead of recomputing training, stress, facility, and trait modifier strings.
 - `src/core/ShipPresentation.h` owns Ship Details rows, equipped/stored module summaries, and inventory fallback wording. Panels should render those rows instead of recomputing ship stats and module inventory display.
 - `src/core/ProgramPresentation.h` owns Frontier and Legacy detail rows: readiness, mission difficulty, next transfer target, blueprint progress, losses, and furthest tier. Panels should render these rows instead of rebuilding program-progress detail modals inline.
+- Legacy details should include recovered surface resources and artifact counts so the research/resource loop is inspectable without adding a separate inventory screen too early.
 - `src/core/HangarPresentation.h` owns Hangar Ops card presentation: operation titles, details, costs, action IDs, availability, and card classes derived from `HangarOperationPreview`. Panels should render these cards instead of branching on repair/training/rest/recruit state.
 - `src/core/ContentIds.h` owns persistent content IDs and unlock keys for modules, crew facilities, frames, astronauts, and destinations. Content definitions, save migrations, tests, and scripted rewards should use these shared IDs instead of raw strings.
 - `src/core/SaveSchema.h` owns the current save header, field keys, and line-format delimiters. Serializer, parser, and migration tests should use these shared constants instead of duplicating save strings.

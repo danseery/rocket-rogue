@@ -70,17 +70,26 @@ inline std::vector<HangarOperationCardPresentation> hangarOperationCards(const G
             state.run.credits >= tuning::hangar::recruitCost,
             "crew"));
     } else {
+        std::string simulatorDetail = text::panel::simulatorDetail(preview.trainingGain, preview.trainingStressGain);
+        std::string simulatorCost = display::credits(preview.trainingCost);
+        if (astronaut->training >= tuning::crew::maxTraining) {
+            simulatorDetail = std::string(text::panel::messages::simulatorMastered);
+            simulatorCost = std::string(text::panel::simulatorCapped);
+        } else if (astronaut->stress + preview.trainingStressGain > tuning::crew::maxStress) {
+            simulatorDetail = std::string(text::panel::messages::simulatorWouldOverstress);
+            simulatorCost = std::string(text::panel::crewTooStressed);
+        }
         cards.push_back(hangarOperationCard(
             text::panel::ops::simulatorBurn,
-            text::panel::simulatorDetail(preview.trainingGain, preview.trainingStressGain),
-            display::credits(preview.trainingCost),
+            simulatorDetail,
+            simulatorCost,
             ui::actions::trainCrew,
             preview.trainingAvailable,
             "crew"));
         cards.push_back(hangarOperationCard(
             text::panel::ops::medicalRest,
-            text::panel::restDetail(preview.restStressRecovery),
-            display::credits(preview.restCost),
+            preview.restNeeded ? text::panel::restDetail(preview.restStressRecovery) : std::string(text::panel::noRestDetail),
+            preview.restNeeded ? display::credits(preview.restCost) : std::string(text::panel::crewRested),
             ui::actions::restCrew,
             preview.restAvailable,
             "crew"));

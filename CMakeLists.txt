@@ -14,6 +14,7 @@ add_library(rocket_core
     src/core/GameState.cpp
     src/core/LaunchSimulation.cpp
     src/core/Random.cpp
+    src/core/ResearchSystem.cpp
     src/core/SaveData.cpp)
 
 target_include_directories(rocket_core PUBLIC src)
@@ -61,7 +62,7 @@ if(EMSCRIPTEN)
     target_include_directories(rocket_rogue PRIVATE src)
 
     set(ROCKET_EXPORTED_FUNCTIONS
-        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_buy_offer','_rr_repair_ship','_rr_recruit_crew','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
+        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_buy_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_arrival_orbit','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_repair_ship','_rr_recruit_crew','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
 
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"

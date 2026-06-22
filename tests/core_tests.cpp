@@ -15,6 +15,8 @@
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
+#include "core/ResearchPresentation.h"
+#include "core/ResearchSystem.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
@@ -43,6 +45,8 @@ void require(bool condition, const char* message)
 }
 
 const HangarOperationCardPresentation* findHangarOperationCard(const std::vector<HangarOperationCardPresentation>& cards, std::string_view title);
+const DetailPresentationRow* findDetailPresentationRow(const std::vector<DetailPresentationRow>& rows, std::string_view label);
+bool hasDetailPresentationHeader(const std::vector<DetailPresentationRow>& rows, std::string_view label);
 
 GameState configuredState(const ContentCatalog& catalog, int destinationIndex, double targetMultiplier)
 {
@@ -87,6 +91,38 @@ void safeAndDestroyedOutcomesResolve()
     const LaunchOutcome doomed = simulateLaunchToTarget(doomedState, catalog, doomedRng);
     require(doomed.type == LaunchResultType::Destroyed, "extreme target should exceed hidden crash");
     require(doomed.shipDamage == tuning::damage::destroyedShipDamage, "destroyed launch should total the ship");
+}
+
+void shallowRecoveryCheeseEscalatesAndThenFails()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
+    const double shallowBurn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.20;
+
+    Random firstRng(77);
+    const PreparedLaunch firstLaunch = prepareLaunch(state, catalog, firstRng);
+    const LaunchOutcome first = resolveLaunch(firstLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, firstRng);
+    require(first.type != LaunchResultType::Destroyed, "first shallow clean return should survive");
+    require(first.recoveryCost >= tuning::rewards::shallowRecoveryPenaltyBase - 0.001, "first shallow return should include base penalty");
+    applyLaunchOutcome(state, catalog, first);
+    require(state.run.shallowRecoveryStreak == 1, "first shallow return should start shallow recovery streak");
+    require(state.run.cleanShallowRecoveryStreak == 1, "clean shallow return should start clean streak");
+
+    Random secondRng(78);
+    const PreparedLaunch secondLaunch = prepareLaunch(state, catalog, secondRng);
+    const LaunchOutcome second = resolveLaunch(secondLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, secondRng);
+    require(second.type != LaunchResultType::Destroyed, "second shallow clean return should still survive");
+    require(second.recoveryCost - first.recoveryCost >= tuning::rewards::shallowRecoveryPenaltyBase - 0.001, "second shallow return should double the cheese penalty");
+    applyLaunchOutcome(state, catalog, second);
+    require(state.run.cleanShallowRecoveryStreak == 2, "second clean shallow return should arm the cheese detector");
+
+    Random thirdRng(79);
+    const PreparedLaunch thirdLaunch = prepareLaunch(state, catalog, thirdRng);
+    const LaunchOutcome third = resolveLaunch(thirdLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, thirdRng);
+    require(third.type == LaunchResultType::Destroyed, "third clean shallow return should destroy the vehicle");
+    applyLaunchOutcome(state, catalog, third);
+    require(state.statusLine == std::string(text::status::cleanShallowRecoveryDestroyed), "cheese destruction should explain what happened");
+    require(state.run.shallowRecoveryStreak == 0 && state.run.cleanShallowRecoveryStreak == 0, "destruction should reset cheese counters");
 }
 
 void moduleAggregationIncludesFrameAndDamage()
@@ -455,6 +491,36 @@ void refitRerollsSpendAndEscalate()
     require(state.run.offerRerollsThisExpedition == 0, "new expedition should reset reroll escalation");
 }
 
+void specialShipComponentsRequireRecoveredMaterials()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 434);
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.run.credits = 200.0;
+    state.meta.materials = {.common = 2};
+    state.run.offerModuleIds = {content::module::deepReservoir, "", ""};
+    state.run.offerCrewUpgradeIds = {};
+
+    const ShipModule* module = catalog.findModule(content::module::deepReservoir);
+    require(module != nullptr, "special component test needs deep reservoir module");
+    require(module->materialCost.common == 2 && module->materialCost.rare == 1, "deep reservoir should require recovered materials");
+    require(!canAffordModuleOffer(state, *module), "special ship components should check material affordability");
+    require(!buyOffer(state, catalog, 0), "buying without required materials should fail");
+    require(state.run.credits == 200.0, "failed material-gated refit should not spend credits");
+
+    const RefitWindowPresentation blocked = refitWindowPresentation(state, catalog);
+    require(!blocked.offers.empty(), "material-gated refit should still present the offer");
+    require(!blocked.offers.front().affordable, "material-gated offer should expose unaffordable state");
+    require(blocked.offers.front().action.label == std::string(text::panel::needMaterials), "material-gated offer should explain missing materials");
+    require(blocked.offers.front().costSummary.find("rare") != std::string::npos, "material-gated offer should show material cost");
+
+    state.meta.materials.rare = 1;
+    require(canAffordModuleOffer(state, *module), "adding recovered materials should satisfy special component cost");
+    require(buyOffer(state, catalog, 0), "buying with credits and materials should succeed");
+    require(state.meta.materials.common == 0 && state.meta.materials.rare == 0, "buying special component should spend recovered materials");
+    require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::deepReservoir) != state.run.inventoryModuleIds.end(), "bought special component should enter inventory");
+}
+
 void crewUpgradeOffersInstallAndModifyCrewOps()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -508,8 +574,13 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     const double creditsBeforeTraining = state.run.credits;
     require(trainCrew(state, catalog), "crew training should use facility upgrades");
     require(pilot->training == 3, "upgraded simulator should grant extra training");
-    require(pilot->stress == 21, "upgraded simulator should reduce training stress gain");
+    require(pilot->stress == 45, "upgraded simulator should reduce training stress gain without eliminating stress");
     require(state.run.credits < creditsBeforeTraining, "training should still cost credits");
+    require(crewTrainingStressGain(state, catalog) >= tuning::crew::stressPerStep, "crew training should always carry at least one stress step");
+    pilot->training = tuning::crew::maxTraining;
+    pilot->stress = 0;
+    require(!trainCrew(state, catalog), "crew training should be blocked when no training benefit remains");
+    pilot->training = 3;
     pilot->stress = tuning::crew::maxStress;
     require(!trainCrew(state, catalog), "crew training should be blocked at max stress");
     pilot->stress = tuning::crew::maxStress - crewTrainingStressGain(state, catalog) + 1;
@@ -604,9 +675,26 @@ void hangarOperationPreviewMatchesCoreMath()
     require(std::abs(preview.restCost - crewRestCost(state, catalog)) < 0.001, "hangar preview should share rest cost");
     require(preview.repairAvailable && preview.trainingAvailable && preview.restAvailable, "funded hangar preview should mark available ops");
 
+    pilot->training = tuning::crew::maxTraining;
+    preview = hangarOperationPreview(state, catalog);
+    require(!preview.trainingAvailable, "hangar preview should block training when the pilot is capped");
+    pilot->training = 0;
+
     pilot->stress = tuning::crew::maxStress;
     preview = hangarOperationPreview(state, catalog);
     require(!preview.trainingAvailable, "hangar preview should block training at max stress");
+
+    pilot->stress = 0;
+    pilot->status = CrewStatus::Active;
+    preview = hangarOperationPreview(state, catalog);
+    require(!preview.restNeeded, "hangar preview should not need medical rest for a healthy calm crew");
+    require(!preview.restAvailable, "hangar preview should block medical rest when there is no benefit");
+    require(!restCrew(state, catalog), "medical rest should not spend credits on a healthy calm crew");
+    require(state.statusLine == std::string(text::status::noRestNeeded), "medical rest should explain when no rest is needed");
+
+    pilot->status = CrewStatus::Injured;
+    preview = hangarOperationPreview(state, catalog);
+    require(preview.restNeeded && preview.restAvailable, "injured crew should still be eligible for medical rest at zero stress");
 
     for (Astronaut& astronaut : state.run.crew) {
         astronaut.status = CrewStatus::Dead;
@@ -644,6 +732,14 @@ void hangarOperationCardsComeFromSharedPreview()
     require(rest != nullptr && rest->detail == text::panel::restDetail(preview.restStressRecovery), "rest card should share rest detail");
     require(rest != nullptr && rest->cost == display::credits(preview.restCost), "rest card should share rest cost");
     require(rest != nullptr && rest->actionId == ui::actions::restCrew && rest->available == preview.restAvailable, "rest card should share action and availability");
+
+    pilot->stress = 0;
+    pilot->status = CrewStatus::Active;
+    cards = hangarOperationCards(state, catalog);
+    rest = findHangarOperationCard(cards, text::panel::ops::medicalRest);
+    require(rest != nullptr && rest->detail == std::string(text::panel::noRestDetail), "rest card should explain when no medical rest is useful");
+    require(rest != nullptr && rest->cost == std::string(text::panel::crewRested), "rest card should not show a payable rest cost when crew is already rested");
+    require(rest != nullptr && !rest->available, "rest card should be disabled when crew is already rested");
 
     for (Astronaut& astronaut : state.run.crew) {
         astronaut.status = CrewStatus::Dead;
@@ -889,6 +985,784 @@ void returnHomeRewardShelvesMatchRefitCosts()
     require(rareReturn.payout - rareReturn.recoveryCost >= static_cast<double>(moduleOfferCost(Rarity::Rare)) - 0.001, "surviving the full target should guarantee a rare refit");
 }
 
+void researchPhasesUnlockOnlyAfterMarsArrival()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+    require(!shouldOpenPostArrivalPhases(moonArrival, catalog), "Moon arrival should not open the Mars research loop yet");
+
+    LaunchOutcome marsArrival = moonArrival;
+    marsArrival.destinationId = content::destination::mars;
+    require(shouldOpenPostArrivalPhases(marsArrival, catalog), "Mars arrival should open post-arrival research and surface phases");
+    const std::vector<PhaseStepPresentation> arrivalSteps = postArrivalPhaseSteps(Screen::Results);
+    require(arrivalSteps.size() == 4, "arrival result should expose the full post-arrival phase track");
+    require(arrivalSteps[0].label == std::string(text::panel::details::arrivalPhase), "arrival phase track should start with arrival");
+    require(arrivalSteps[0].stateLabel == "Now" && arrivalSteps[0].stateClass == "active", "arrival phase track should mark arrival active on results");
+    require(arrivalSteps[1].label == std::string(text::panel::details::researchPhase) && arrivalSteps[1].stateLabel == "Next", "arrival phase track should stage research next");
+    const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
+    require(arrivalBriefing.title == std::string(text::panel::modals::arrivalBriefing), "arrival results should expose an arrival briefing");
+    require(findDetailPresentationRow(arrivalBriefing.rows, text::panel::details::phaseIntent) != nullptr, "arrival briefing should explain phase intent");
+    require(findDetailPresentationRow(arrivalBriefing.rows, text::panel::details::phaseNext) != nullptr, "arrival briefing should explain the research handoff");
+}
+
+void arrivalOperationsGateMoonButAllowMarsRisk()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 607);
+
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+    require(shouldOpenArrivalOps(moonArrival, catalog), "Moon transfer arrival should open arrival operations");
+
+    startArrivalOps(state, moonArrival);
+    require(canRunArrivalFlyby(state, catalog), "Moon flyby should always be available after arrival");
+    require(!canEnterArrivalOrbit(state, catalog), "Moon orbit should require a prior flyby");
+    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should require flyby and orbit clearance");
+    require(arrivalOperationBlockReason(state, catalog, "landing") == std::string(text::status::moonFlybyRequired), "Moon landing should explain missing flyby");
+
+    completeArrivalFlyby(state, catalog);
+    startArrivalOps(state, moonArrival);
+    require(canEnterArrivalOrbit(state, catalog), "Moon orbit should unlock after a flyby");
+    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should still require orbit");
+    require(arrivalOperationBlockReason(state, catalog, "landing") == std::string(text::status::moonOrbitRequired), "Moon landing should explain missing orbit");
+
+    completeArrivalOrbit(state, catalog);
+    startArrivalOps(state, moonArrival);
+    require(canAttemptArrivalLanding(state, catalog), "Moon landing should unlock after flyby and orbit");
+
+    LaunchOutcome marsArrival = moonArrival;
+    marsArrival.destinationId = content::destination::mars;
+    GameState mars = createNewGame(catalog, 608);
+    startArrivalOps(mars, marsArrival);
+    require(canAttemptArrivalLanding(mars, catalog), "Mars landing should allow a high-risk YOLO descent without prior recon");
+    const Destination* marsDestination = catalog.findDestination(content::destination::mars);
+    require(marsDestination != nullptr, "Mars destination should resolve");
+    const double expectedNoReconPenalty = 0.20;
+    startSurfaceExpedition(mars, catalog);
+    require(mars.run.surfaceExpedition.active, "Mars YOLO landing should start surface operations");
+    require(mars.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001, "YOLO landing should carry extra surface hazard");
+}
+
+void researchProjectsGenerateAndCompleteFromSharedRules()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 606);
+    state.run.destinationIndex = 2;
+    state.meta.materials = {.common = 4, .rare = 2};
+    Random rng(606);
+
+    generateResearchProjects(state, catalog, rng);
+    const auto firstProject = std::find_if(state.run.researchProjectIds.begin(), state.run.researchProjectIds.end(), [](const std::string& id) {
+        return !id.empty();
+    });
+    require(firstProject != state.run.researchProjectIds.end(), "Mars research should generate at least one available project");
+
+    const auto index = static_cast<int>(std::distance(state.run.researchProjectIds.begin(), firstProject));
+    const ResearchProject* project = catalog.findResearchProject(*firstProject);
+    require(project != nullptr, "generated research project id should resolve");
+    const int blueprintsBefore = state.meta.blueprintProgress;
+    const int expectedBlueprintGain = researchBlueprintGain(state.meta, *project);
+    const MaterialInventory materialsBefore = state.meta.materials;
+
+    const ResearchOutcome outcome = completeResearchProject(state, catalog, index);
+    require(outcome.completed, "affordable research project should complete");
+    require(outcome.projectId == project->id, "research outcome should identify the project");
+    require(outcome.blueprintGain == expectedBlueprintGain, "research outcome should report effective blueprint progress");
+    require(state.meta.blueprintProgress == blueprintsBefore + expectedBlueprintGain, "research should grant effective blueprint progress");
+    require(state.meta.materials.common == materialsBefore.common - project->materialCost.common, "research should spend common material cost");
+    require(state.meta.materials.rare == materialsBefore.rare - project->materialCost.rare, "research should spend rare material cost");
+    require(state.run.researchProjectIds[static_cast<std::size_t>(index)].empty(), "completed research slot should be consumed");
+}
+
+void materialResearchUnlocksModuleFamilies()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 616);
+    state.run.destinationIndex = 2;
+    state.meta.materials = {.common = 1, .rare = 1};
+    state.run.researchProjectIds = {content::research::prototypeSchematic, "", ""};
+
+    require(!hasUnlock(state.meta, content::unlock::thermal), "test starts before thermal research unlock");
+    const ResearchOutcome outcome = completeResearchProject(state, catalog, 0);
+    require(outcome.completed, "material-funded prototype research should complete");
+    require(outcome.rewardUnlockKey == content::unlock::thermal, "prototype research should report its reward unlock");
+    require(outcome.unlockedReward, "first material research completion should report a new unlock");
+    require(hasUnlock(state.meta, content::unlock::thermal), "material-funded research should unlock the module family");
+    require(catalog.findModule(content::module::slushTank) != nullptr, "test needs thermal module content");
+    require(isModuleUnlocked(state.meta, *catalog.findModule(content::module::slushTank)), "new research unlock should affect module availability");
+
+    state.meta.materials = {.common = 1, .rare = 1};
+    state.run.researchProjectIds = {content::research::prototypeSchematic, "", ""};
+    const ResearchOutcome repeated = completeResearchProject(state, catalog, 0);
+    require(repeated.completed, "repeating an already-unlocked project should still complete if affordable");
+    require(!repeated.unlockedReward, "repeating an already-unlocked project should not report a fresh unlock");
+}
+
+void artifactInsightImprovesFutureResearch()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 627);
+    state.run.destinationIndex = 2;
+    state.meta.materials = {.common = 4};
+    state.meta.artifacts = {
+        {"mars_artifact_1", content::destination::mars, true},
+        {"mars_artifact_2", content::destination::mars, true},
+        {"mars_artifact_3", content::destination::mars, false}
+    };
+    state.run.researchProjectIds = {content::research::appliedMaterialsLab, "", ""};
+
+    const ResearchProject* project = catalog.findResearchProject(content::research::appliedMaterialsLab);
+    require(project != nullptr, "artifact insight test needs materials research content");
+    require(identifiedArtifactCount(state.meta) == 2, "artifact insight should count only decoded artifacts");
+    require(artifactInsightBlueprintBonus(state.meta) == 2, "decoded artifacts should add blueprint insight");
+
+    const ResearchOutcome outcome = completeResearchProject(state, catalog, 0);
+    require(outcome.completed, "research should complete with artifact insight active");
+    require(outcome.blueprintGain == project->blueprintGain + 2, "artifact insight should improve future research output");
+    require(state.meta.blueprintProgress == project->blueprintGain + 2, "artifact insight should be added to meta blueprint progress");
+
+    state.meta.artifacts = {
+        {"a", content::destination::mars, true},
+        {"b", content::destination::mars, true},
+        {"c", content::destination::mars, true},
+        {"d", content::destination::mars, true}
+    };
+    require(artifactInsightBlueprintBonus(state.meta) == tuning::research::artifactInsightBlueprintMaximum, "artifact insight should be capped");
+}
+
+void researchFacilitiesImproveFutureResearch()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 628);
+    state.run.destinationIndex = 2;
+    state.meta.materials = {.common = 3, .rare = 1};
+    state.run.researchProjectIds = {content::research::missionAnalysisLab, "", ""};
+
+    const ResearchOutcome labOutcome = completeResearchProject(state, catalog, 0);
+    require(labOutcome.completed, "mission analysis lab should complete when funded");
+    require(hasUnlock(state.meta, content::unlock::analysisLab), "mission analysis lab research should unlock the research facility");
+    require(researchFacilityBlueprintBonus(state.meta) == tuning::research::analysisLabBlueprintBonus, "analysis lab should add future blueprint output");
+
+    const ResearchProject* project = catalog.findResearchProject(content::research::blueprintSurvey);
+    require(project != nullptr, "research facility test needs blueprint survey content");
+    state.meta.materials = {};
+    state.run.researchProjectIds = {content::research::blueprintSurvey, "", ""};
+    const ResearchOutcome surveyOutcome = completeResearchProject(state, catalog, 0);
+    require(surveyOutcome.completed, "no-cost blueprint survey should complete after lab research");
+    require(surveyOutcome.blueprintGain == project->blueprintGain + tuning::research::analysisLabBlueprintBonus, "analysis lab should improve future research blueprint gain");
+}
+
+void artifactResearchIdentifiesRecoveredArtifacts()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 626);
+    state.run.destinationIndex = 4;
+    state.meta.unlockKeys.push_back(content::unlock::ai);
+    state.meta.materials = {.rare = 2, .exotic = 1};
+    state.meta.artifacts.push_back({"mars_artifact_3", content::destination::mars, false});
+    state.run.researchProjectIds = {content::research::artifactDecoding, "", ""};
+    const ResearchProject* project = catalog.findResearchProject(content::research::artifactDecoding);
+    require(project != nullptr, "artifact research test needs artifact decoding content");
+
+    const ResearchOutcome outcome = completeResearchProject(state, catalog, 0);
+    require(outcome.completed, "artifact research should complete when affordable and unlocked");
+    require(outcome.blueprintGain == project->blueprintGain, "newly decoded artifacts should improve future research, not the current decoding pass");
+    require(outcome.identifiedArtifact, "artifact research should identify a recovered artifact");
+    require(outcome.artifactId == "mars_artifact_3", "artifact research should report the identified artifact");
+    require(state.meta.artifacts.front().identified, "identified artifact should persist in meta progress");
+
+    state.meta.materials = {.rare = 2, .exotic = 1};
+    state.run.researchProjectIds = {content::research::artifactDecoding, "", ""};
+    const ResearchOutcome repeated = completeResearchProject(state, catalog, 0);
+    require(repeated.completed, "artifact research should still complete when every artifact is already identified");
+    require(!repeated.identifiedArtifact, "artifact research should not report a new artifact when none are unidentified");
+}
+
+void researchOutcomeSummaryShowsRewardsAndCosts()
+{
+    ResearchOutcome outcome;
+    outcome.completed = true;
+    outcome.blueprintGain = 3;
+    outcome.materialCost = {.common = 2, .rare = 1};
+    outcome.rewardUnlockKey = content::unlock::surfaceProbes;
+    outcome.unlockedReward = true;
+    outcome.identifiedArtifact = true;
+    outcome.artifactId = "mars_artifact_1";
+
+    const std::string summary = researchOutcomeSummary(outcome);
+    require(summary.find(std::string(text::status::researchCompleted)) != std::string::npos, "research summary should include completion text");
+    require(summary.find("+3 BP") != std::string::npos, "research summary should include blueprint gain");
+    require(summary.find("Spent 2 common, 1 rare, 0 exotic") != std::string::npos, "research summary should include material cost");
+    require(summary.find("Unlocks: Field probes") != std::string::npos, "research summary should include newly unlocked family");
+    require(summary.find("Decoded mars_artifact_1") != std::string::npos, "research summary should include decoded artifact id");
+}
+
+void surfaceToolResearchImprovesExpeditions()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState baseline = createNewGame(catalog, 636);
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    const int baselineSupply = baseline.run.surfaceExpedition.supply;
+    Random baselineRng(636);
+    const SurfaceActionOutcome baselineSurvey = surveySurfaceSite(baseline, baselineRng);
+    const SurfaceActionOutcome baselineMine = mineSurfaceDeposit(baseline, baselineRng);
+    baseline.run.surfaceExpedition.cargo = 8;
+    const double baselineRisk = surfaceExtractionRisk(baseline);
+
+    GameState upgraded = createNewGame(catalog, 637);
+    upgraded.run.destinationIndex = 2;
+    upgraded.meta.unlockKeys.push_back(content::unlock::surfaceProbes);
+    upgraded.meta.unlockKeys.push_back(content::unlock::surfaceDrills);
+    upgraded.meta.unlockKeys.push_back(content::unlock::cargoRigs);
+    startSurfaceExpedition(upgraded, catalog);
+    require(upgraded.run.surfaceExpedition.supply > baselineSupply, "field probes should add surface expedition supply");
+
+    Random upgradedRng(636);
+    const SurfaceActionOutcome upgradedSurvey = surveySurfaceSite(upgraded, upgradedRng);
+    const SurfaceActionOutcome upgradedMine = mineSurfaceDeposit(upgraded, upgradedRng);
+    require(upgradedSurvey.materialDelta.common > baselineSurvey.materialDelta.common, "field probes should improve survey returns");
+    require(upgradedMine.materialDelta.common > baselineMine.materialDelta.common, "surface drills should improve mine returns");
+
+    upgraded.run.surfaceExpedition.cargo = 8;
+    const double upgradedRisk = surfaceExtractionRisk(upgraded);
+    require(upgradedRisk < baselineRisk, "cargo rigs should reduce extraction risk for matching cargo");
+
+    const SurfaceExpeditionPresentation presentation = surfaceExpeditionPresentation(upgraded);
+    const auto fieldKit = std::find_if(presentation.metrics.begin(), presentation.metrics.end(), [](const PanelMetricPresentation& metric) {
+        return metric.label == std::string(text::labels::fieldKit);
+    });
+    require(fieldKit != presentation.metrics.end(), "surface presentation should expose active field kit");
+    require(fieldKit->value.find("Field probes") != std::string::npos, "surface presentation should name field probe unlocks");
+    require(!presentation.actions.empty() && presentation.actions.front().risk.find("%") != std::string::npos, "surface presentation should expose action hazard risk");
+}
+
+void surfaceSiteProfilesChangeExpeditionRules()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState survey = createNewGame(catalog, 1);
+    survey.run.destinationIndex = 2;
+    startSurfaceExpedition(survey, catalog);
+    require(survey.run.surfaceExpedition.siteProfile == SurfaceSiteProfile::SurveyBasin, "seeded fallback should generate survey basin profile");
+    require(surfaceSiteProfileName(survey.run.surfaceExpedition.siteProfile) == text::panel::surfaceSites::surveyBasin, "survey basin profile should have shared display text");
+    Random surveyRng(1001);
+    const SurfaceActionOutcome surveyOutcome = surveySurfaceSite(survey, surveyRng);
+    require(surveyOutcome.materialDelta.common >= tuning::research::surveyCommonGain + tuning::research::siteSurveyBasinSurveyBonus, "survey basin should improve survey returns");
+
+    GameState ore = createNewGame(catalog, 2);
+    ore.run.destinationIndex = 2;
+    startSurfaceExpedition(ore, catalog);
+    require(ore.run.surfaceExpedition.siteProfile == SurfaceSiteProfile::OreShelf, "seeded fallback should generate ore shelf profile");
+    Random oreRng(1002);
+    const SurfaceActionOutcome mineOutcome = mineSurfaceDeposit(ore, oreRng);
+    require(mineOutcome.materialDelta.common >= tuning::research::mineCommonGain + tuning::research::siteOreShelfMineBonus, "ore shelf should improve mining returns");
+
+    GameState fracture = createNewGame(catalog, 3);
+    fracture.run.destinationIndex = 2;
+    startSurfaceExpedition(fracture, catalog);
+    require(fracture.run.surfaceExpedition.siteProfile == SurfaceSiteProfile::FractureField, "seeded fallback should generate fracture field profile");
+    GameState surveyRisk = createNewGame(catalog, 1);
+    surveyRisk.run.destinationIndex = 2;
+    startSurfaceExpedition(surveyRisk, catalog);
+    fracture.run.surfaceExpedition.cargo = 6;
+    surveyRisk.run.surfaceExpedition.cargo = 6;
+    require(surfaceExtractionRisk(fracture) > surfaceExtractionRisk(surveyRisk), "fracture field should raise extraction pressure");
+}
+
+void surfaceHazardsCreateEnvironmentalSetbacks()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    auto triggerSurveyHazard = [&catalog]() {
+        for (int seed = 1; seed < 400; ++seed) {
+            GameState state = createNewGame(catalog, seed);
+            state.run.destinationIndex = 2;
+            startSurfaceExpedition(state, catalog);
+            state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+            state.run.surfaceExpedition.hazard = 10.0;
+            const int supplyBefore = state.run.surfaceExpedition.supply;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = surveySurfaceSite(state, rng);
+            if (outcome.hazardTriggered) {
+                require(outcome.hazardMessage == std::string(text::status::surfaceDustHazard), "survey hazard should report dust interference");
+                require(outcome.hazardDelta > 0.0, "survey hazard should raise site hazard");
+                require(outcome.supplyDelta == -(tuning::research::surveySupplyCost + tuning::research::dustHazardSupplyLoss), "survey hazard should spend extra supply when possible");
+                require(state.run.surfaceExpedition.supply == supplyBefore + outcome.supplyDelta, "survey hazard supply delta should match expedition state");
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto triggerMineHazard = [&catalog]() {
+        for (int seed = 1; seed < 400; ++seed) {
+            GameState state = createNewGame(catalog, seed);
+            state.run.destinationIndex = 2;
+            startSurfaceExpedition(state, catalog);
+            state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+            state.run.surfaceExpedition.hazard = 10.0;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = mineSurfaceDeposit(state, rng);
+            if (outcome.hazardTriggered) {
+                require(outcome.hazardMessage == std::string(text::status::surfaceDrillHazard), "mine hazard should report drill chatter");
+                require(outcome.cargoDelta == 3, "mine hazard should reduce the net cargo delta");
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto triggerPushHazard = [&catalog]() {
+        for (int seed = 1; seed < 400; ++seed) {
+            GameState state = createNewGame(catalog, seed);
+            state.run.destinationIndex = 2;
+            startSurfaceExpedition(state, catalog);
+            state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+            state.run.surfaceExpedition.hazard = 10.0;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = pushSurfaceDeeper(state, rng);
+            if (outcome.hazardTriggered) {
+                require(outcome.hazardMessage == std::string(text::status::surfaceTerrainHazard), "push hazard should report terrain instability");
+                require(outcome.hazardDelta == tuning::research::unstableTerrainHazardIncrease, "push hazard should report the extra terrain hazard");
+                return true;
+            }
+        }
+        return false;
+    };
+
+    require(triggerSurveyHazard(), "high-hazard surveys should be able to trigger environmental setbacks");
+    require(triggerMineHazard(), "high-hazard mining should be able to trigger environmental setbacks");
+    require(triggerPushHazard(), "high-hazard deeper pushes should be able to trigger environmental setbacks");
+}
+
+void surfaceEventsCreateSmallRunVariation()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    auto triggerEvent = [&catalog](SurfaceEventType expected) {
+        for (int seed = 1; seed < 8000; ++seed) {
+            GameState state = createNewGame(catalog, seed);
+            state.run.destinationIndex = 2;
+            startSurfaceExpedition(state, catalog);
+            state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+            state.run.surfaceExpedition.hazard = 0.0;
+            const int supplyBefore = state.run.surfaceExpedition.supply;
+            const int blueprintsBefore = state.meta.blueprintProgress;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = surveySurfaceSite(state, rng);
+            if (outcome.eventType != expected) {
+                continue;
+            }
+
+            require(!outcome.hazardTriggered, "surface events should not stack on top of hazards");
+            require(!outcome.eventMessage.empty(), "surface event should report a player-facing message");
+            if (expected == SurfaceEventType::EquipmentFailure) {
+                require(outcome.eventMessage == std::string(text::status::surfaceEquipmentFailure), "equipment event should use shared status text");
+                require(state.run.surfaceExpedition.supply == supplyBefore + outcome.supplyDelta, "equipment event supply delta should match expedition state");
+                require(outcome.supplyDelta == -(tuning::research::surveySupplyCost + tuning::research::surfaceEquipmentFailureSupplyLoss), "equipment event should consume spare supply");
+            } else if (expected == SurfaceEventType::UnexpectedDeposit) {
+                require(outcome.eventMessage == std::string(text::status::surfaceUnexpectedDeposit), "deposit event should use shared status text");
+                require(outcome.materialDelta.common >= tuning::research::surveyCommonGain + tuning::research::siteSurveyBasinSurveyBonus + tuning::research::surfaceDepositCommonGain, "deposit event should add material yield");
+            } else if (expected == SurfaceEventType::CrewDiscovery) {
+                require(outcome.eventMessage == std::string(text::status::surfaceCrewDiscovery), "crew discovery event should use shared status text");
+                require(outcome.blueprintDelta == tuning::research::surfaceCrewDiscoveryBlueprintGain, "crew discovery should report blueprint gain");
+                require(state.meta.blueprintProgress == blueprintsBefore + outcome.blueprintDelta, "crew discovery should bank blueprint progress");
+            }
+            return true;
+        }
+        return false;
+    };
+
+    require(triggerEvent(SurfaceEventType::EquipmentFailure), "surface actions should sometimes trigger equipment failure events");
+    require(triggerEvent(SurfaceEventType::UnexpectedDeposit), "surface actions should sometimes trigger unexpected deposit events");
+    require(triggerEvent(SurfaceEventType::CrewDiscovery), "surface actions should sometimes trigger crew discovery events");
+}
+
+void enemyContactStartsBeyondSolarSystemAndCanBeMitigated()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState mars = createNewGame(catalog, 1201);
+    mars.run.destinationIndex = 2;
+    startSurfaceExpedition(mars, catalog);
+    require(!mars.run.surfaceExpedition.enemyEncountersEnabled, "Mars expedition should not enable enemy contact");
+    require(surfaceEnemyEncounterChance(mars) == 0.0, "solar-system expeditions should have no contact risk");
+
+    GameState nearbyStar = createNewGame(catalog, 1202);
+    nearbyStar.run.destinationIndex = 4;
+    nearbyStar.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    startSurfaceExpedition(nearbyStar, catalog);
+    nearbyStar.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+    nearbyStar.run.surfaceExpedition.hazard = 0.0;
+    nearbyStar.run.surfaceExpedition.supply = 20;
+    const double baselineRisk = surfaceEnemyEncounterChance(nearbyStar);
+    require(nearbyStar.run.surfaceExpedition.enemyEncountersEnabled, "Nearby Star expedition should enable enemy contact");
+    require(baselineRisk > 0.0, "Nearby Star expedition should expose contact risk");
+
+    GameState defended = nearbyStar;
+    defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    require(surfaceEnemyEncounterChance(defended) < baselineRisk, "perimeter drones should reduce enemy contact risk");
+
+    auto triggerEnemyContact = [&catalog]() {
+        for (int seed = 1; seed < 8000; ++seed) {
+            GameState state = createNewGame(catalog, seed);
+            state.run.destinationIndex = 4;
+            state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+            startSurfaceExpedition(state, catalog);
+            state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+            state.run.surfaceExpedition.hazard = 0.0;
+            state.run.surfaceExpedition.supply = 20;
+            const int supplyBefore = state.run.surfaceExpedition.supply;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = surveySurfaceSite(state, rng);
+            if (outcome.eventType != SurfaceEventType::EnemyContact) {
+                continue;
+            }
+
+            require(outcome.enemyEncounter, "enemy contact event should set the encounter flag");
+            require(outcome.eventMessage == std::string(text::status::surfaceEnemyContact), "enemy contact should use shared status text");
+            require(state.run.surfaceExpedition.supply == supplyBefore + outcome.supplyDelta, "enemy contact supply delta should match expedition state");
+            require(outcome.supplyDelta == -(tuning::research::surveySupplyCost + tuning::research::surfaceEnemySupplyLoss), "enemy contact should consume supply in addition to the action");
+            require(outcome.hazardDelta == tuning::research::surfaceEnemyHazardIncrease, "enemy contact should raise site hazard");
+            return true;
+        }
+        return false;
+    };
+
+    require(triggerEnemyContact(), "post-solar expeditions should sometimes trigger enemy contact events");
+}
+
+void surfaceExpeditionBanksMaterialsAndDefersEnemies()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 707);
+    state.run.destinationIndex = 2;
+    Random rng(707);
+
+    startSurfaceExpedition(state, catalog);
+    require(state.run.surfaceExpedition.active, "Mars surface expedition should start");
+    require(!state.run.surfaceExpedition.enemyEncountersEnabled, "solar-system expeditions should not enable enemies");
+
+    const SurfaceActionOutcome survey = surveySurfaceSite(state, rng);
+    const SurfaceActionOutcome mine = mineSurfaceDeposit(state, rng);
+    const SurfaceActionOutcome push = pushSurfaceDeeper(state, rng);
+    require(survey.applied && mine.applied && push.applied, "surface actions should consume supply while active");
+    require(survey.extractionRiskDelta > 0.0, "surface survey should report extraction-risk pressure from added cargo");
+    require(push.extractionRiskDelta > 0.0, "pushing deeper should report higher extraction risk");
+    require(state.run.surfaceExpedition.cargo > 0, "surface actions should build a return cargo payload");
+    require(surfaceExtractionRisk(state) > 0.0, "surface extraction should expose a nonzero recovery risk");
+
+    const SurfaceActionOutcome extraction = extractSurfacePayload(state, rng);
+    require(extraction.applied, "surface extraction should resolve");
+    require(!state.run.surfaceExpedition.active, "extraction should end the active surface expedition");
+    require(state.meta.materials.common > 0, "extraction should bank at least partial material progress");
+    require(surfaceActionSummary(extraction).find("Common mats") != std::string::npos, "surface extraction summary should show banked materials");
+    require(surfaceActionSummary(extraction).find("Extraction risk") != std::string::npos, "surface extraction summary should show resolved extraction risk");
+
+    GameState deepSpace = createNewGame(catalog, 808);
+    deepSpace.run.destinationIndex = 4;
+    startSurfaceExpedition(deepSpace, catalog);
+    require(deepSpace.run.surfaceExpedition.enemyEncountersEnabled, "enemy encounters should wait until the Nearby Star tier");
+}
+
+void surfaceExpeditionRoundTripsThroughSave()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 9090);
+    state.run.destinationIndex = 2;
+    state.screen = Screen::SurfaceExpedition;
+    startSurfaceExpedition(state, catalog);
+    Random rng(9091);
+    require(surveySurfaceSite(state, rng).applied, "test setup should gather a surface payload");
+
+    const std::string text = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(text);
+    require(save.has_value(), "surface expedition save should parse");
+
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+
+    require(restored.screen == Screen::SurfaceExpedition, "active surface expedition screen should round trip");
+    require(restored.run.surfaceExpedition.active, "active surface expedition state should round trip");
+    require(restored.run.surfaceExpedition.destinationId == content::destination::mars, "surface destination should round trip");
+    require(restored.run.surfaceExpedition.siteProfile == state.run.surfaceExpedition.siteProfile, "surface site profile should round trip");
+    require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
+    require(restored.run.surfaceExpedition.logEntries == state.run.surfaceExpedition.logEntries, "surface mission log should round trip");
+}
+
+void surfaceMissionLogIsBounded()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 9393);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(!state.run.surfaceExpedition.logEntries.empty(), "surface expedition should log the starting site profile");
+
+    state.run.surfaceExpedition.supply = 20;
+    Random rng(9394);
+    for (int i = 0; i < tuning::research::surfaceLogEntryLimit + 3; ++i) {
+        require(surveySurfaceSite(state, rng).applied, "surface survey should keep logging while supply remains");
+    }
+
+    require(static_cast<int>(state.run.surfaceExpedition.logEntries.size()) == tuning::research::surfaceLogEntryLimit, "surface mission log should keep only recent entries");
+}
+
+void surfaceActionSummaryShowsResourceDeltas()
+{
+    SurfaceActionOutcome outcome;
+    outcome.applied = true;
+    outcome.message = std::string(text::status::surfaceSurveyed);
+    outcome.supplyDelta = -2;
+    outcome.materialDelta = {.common = 2, .rare = 1, .exotic = 1};
+    outcome.materialLost = {.common = 1, .rare = 1};
+    outcome.cargoDelta = 8;
+    outcome.blueprintDelta = 1;
+    outcome.artifactFound = true;
+    outcome.artifactsLost = 1;
+    outcome.extractionRisk = 0.24;
+    outcome.extractionRiskDelta = 0.06;
+    outcome.hazardDelta = 0.05;
+
+    const std::string summary = surfaceActionSummary(outcome);
+    require(summary.find("-2 Supply") != std::string::npos, "surface action summary should include supply deltas");
+    require(summary.find("+2 Common mats") != std::string::npos, "surface action summary should include common material deltas");
+    require(summary.find("+1 Rare mats") != std::string::npos, "surface action summary should include rare material deltas");
+    require(summary.find("+1 Exotic mats") != std::string::npos, "surface action summary should include exotic material deltas");
+    require(summary.find("Lost 1 Common mats") != std::string::npos, "surface action summary should include lost common materials");
+    require(summary.find("Lost 1 Rare mats") != std::string::npos, "surface action summary should include lost rare materials");
+    require(summary.find("+8 Cargo") != std::string::npos, "surface action summary should include cargo deltas");
+    require(summary.find("+1 Blueprints") != std::string::npos, "surface action summary should include blueprint deltas");
+    require(summary.find("+1 Artifacts") != std::string::npos, "surface action summary should include artifact deltas");
+    require(summary.find("Lost 1 Artifacts") != std::string::npos, "surface action summary should include lost artifacts");
+    require(summary.find("24% Extraction risk") != std::string::npos, "surface action summary should include extraction risk when present");
+    require(summary.find("+6% Extraction risk") != std::string::npos, "surface action summary should include extraction-risk deltas");
+    require(summary.find("+5% Hazard") != std::string::npos, "surface action summary should include hazard deltas");
+}
+
+void roughSurfaceExtractionReportsLostPayload()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 8181);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.supply = 0;
+    state.run.surfaceExpedition.cargo = 30;
+    state.run.surfaceExpedition.hazard = 1.0;
+    state.run.surfaceExpedition.temporaryMaterials = {.common = 5, .rare = 3, .exotic = 1};
+    state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_loss", content::destination::mars, false});
+
+    for (int seed = 1; seed < 400; ++seed) {
+        GameState candidate = state;
+        Random rng(seed);
+        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, rng);
+        if (outcome.cargoRecovered) {
+            continue;
+        }
+
+        require(outcome.applied, "rough extraction should still resolve");
+        require(outcome.materialDelta.common > 0, "rough extraction should recover partial common materials");
+        require(outcome.materialLost.common > 0, "rough extraction should report lost common materials");
+        require(outcome.materialLost.rare > 0, "rough extraction should report lost rare materials");
+        require(outcome.materialLost.exotic > 0, "rough extraction should report lost exotic materials");
+        require(outcome.artifactsLost == 1, "rough extraction should report lost artifacts");
+        const std::string summary = surfaceActionSummary(outcome);
+        require(summary.find("Lost") != std::string::npos, "rough extraction summary should include lost payload text");
+        require(candidate.meta.artifacts.empty(), "rough extraction should not bank lost artifacts");
+        return;
+    }
+
+    require(false, "test should find a rough extraction seed");
+}
+
+void researchPresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 9191);
+    state.run.destinationIndex = 2;
+    state.meta.materials = {.common = 4, .rare = 1};
+    Random rng(9191);
+    generateResearchProjects(state, catalog, rng);
+
+    const ResearchPhasePresentation research = researchPhasePresentation(state, catalog);
+    require(research.metrics.size() == 6, "research presentation should expose blueprint, insight, lab, and material metrics");
+    require(research.phaseSteps.size() == 4, "research presentation should expose post-arrival phase steps");
+    require(research.phaseSteps[0].label == std::string(text::panel::details::arrivalPhase), "research phase track should start after arrival");
+    require(research.phaseSteps[0].stateLabel == "Done" && research.phaseSteps[0].stateClass == "done", "research phase track should mark arrival complete");
+    require(research.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "research phase track should include research");
+    require(research.phaseSteps[1].stateLabel == "Now" && research.phaseSteps[1].stateClass == "active", "research phase track should mark research active");
+    require(research.phaseSteps[2].label == std::string(text::panel::details::surfacePhase) && research.phaseSteps[2].stateLabel == "Next", "research phase track should stage surface next");
+    require(research.phaseSteps[3].label == std::string(text::panel::details::refitPhase) && research.phaseSteps[3].stateLabel == "Next", "research phase track should stage refit next");
+    require(research.briefing.title == std::string(text::panel::modals::researchBriefing), "research presentation should expose a briefing modal title");
+    require(findDetailPresentationRow(research.briefing.rows, text::panel::details::phaseIntent) != nullptr, "research briefing should explain phase intent");
+    require(findDetailPresentationRow(research.briefing.rows, text::panel::details::phaseNext) != nullptr, "research briefing should explain the next phase");
+    require(research.advisory.title == std::string(text::panel::messages::researchAdvisoryReady), "funded research should present ready advisory");
+    require(research.advisory.cssClass == "ok", "funded research advisory should use ok styling");
+    require(!research.details.empty(), "research presentation should expose detail modal rows");
+    require(hasDetailPresentationHeader(research.details, text::panel::details::researchRules), "research details should include rule guidance");
+    require(findDetailPresentationRow(research.details, text::panel::details::blueprintUse) != nullptr, "research details should explain blueprint use");
+    require(findDetailPresentationRow(research.details, text::panel::details::materialsUse) != nullptr, "research details should explain material costs");
+    require(findDetailPresentationRow(research.details, text::panel::details::skippedResearch) != nullptr, "research details should explain skipped research");
+    require(!research.projects.empty(), "research presentation should expose resolved project cards");
+    require(research.skipAction.enabled && research.skipAction.actionId == std::string(ui::actions::skipResearch), "research presentation should expose shared skip action");
+
+    const ResearchProjectCardPresentation& card = research.projects.front();
+    require(!card.title.empty() && !card.detail.empty(), "research project card should expose content text");
+    require(card.blueprintGain.find("BP") != std::string::npos, "research project card should expose blueprint gain");
+    require(card.materialCost.find("Cost:") != std::string::npos && card.materialCost.find("Have:") != std::string::npos, "research project card should show cost and owned materials");
+    require(!card.resourceChips.empty(), "research project card should expose resource chips");
+    require(card.resourceChips.front().label == std::string(text::labels::blueprints), "research project resource chips should lead with blueprint output");
+    require(card.resourceChips.front().value == card.blueprintGain, "research project blueprint chip should match card blueprint gain");
+    require(card.action.actionId == ui::actions::researchProject(card.index), "research project card should use shared indexed research action");
+
+    GameState broke = state;
+    broke.meta.materials = {};
+    broke.run.researchProjectIds = {content::research::appliedMaterialsLab, "", ""};
+    const ResearchPhasePresentation brokeResearch = researchPhasePresentation(broke, catalog);
+    require(!brokeResearch.projects.empty(), "unaffordable research should still present the project");
+    require(!brokeResearch.projects.front().reward.empty(), "unowned reward unlock should be visible on research card");
+    require(brokeResearch.projects.front().materialCost.find("Have: No materials") != std::string::npos, "unaffordable research should show empty owned material inventory");
+    require(!brokeResearch.projects.front().affordable, "research project should expose unaffordable state");
+    require(!brokeResearch.projects.front().action.enabled, "unaffordable research should disable its action");
+    require(brokeResearch.projects.front().action.label == std::string(text::panel::needMaterials), "unaffordable research should use shared need-materials label");
+    require(brokeResearch.advisory.title == std::string(text::panel::messages::researchAdvisoryMaterials), "unfunded research should explain material shortage");
+    require(brokeResearch.advisory.cssClass == "caution", "unfunded research advisory should use caution styling");
+
+    GameState emptyResearch = state;
+    emptyResearch.run.researchProjectIds = {"", "", ""};
+    const ResearchPhasePresentation emptyResearchPanel = researchPhasePresentation(emptyResearch, catalog);
+    require(emptyResearchPanel.projects.empty(), "empty research board should expose no project cards");
+    require(emptyResearchPanel.advisory.title == std::string(text::panel::messages::researchAdvisoryEmpty), "empty research board should explain missing projects");
+
+    broke.meta.unlockKeys.push_back(content::unlock::recovery);
+    const ResearchPhasePresentation ownedReward = researchPhasePresentation(broke, catalog);
+    require(ownedReward.projects.front().reward.empty(), "already-owned reward unlock should not be advertised as new");
+
+    state.meta.artifacts.push_back({"mars_artifact_4", content::destination::mars, true});
+    state.meta.unlockKeys.push_back(content::unlock::analysisLab);
+    state.run.researchProjectIds = {content::research::appliedMaterialsLab, "", ""};
+    const ResearchPhasePresentation insightfulResearch = researchPhasePresentation(state, catalog);
+    require(insightfulResearch.metrics[1].value == text::panel::blueprintGain(1), "research presentation should expose artifact insight bonus");
+    require(insightfulResearch.metrics[2].value == text::panel::blueprintGain(tuning::research::analysisLabBlueprintBonus), "research presentation should expose lab bonus");
+    const ResearchProject* insightProject = catalog.findResearchProject(content::research::appliedMaterialsLab);
+    require(insightProject != nullptr, "presentation insight test needs materials research content");
+    require(insightfulResearch.projects.front().blueprintGain == text::panel::blueprintGain(researchBlueprintGain(state.meta, *insightProject)), "research cards should show effective blueprint gain");
+    require(std::find_if(insightfulResearch.projects.front().resourceChips.begin(), insightfulResearch.projects.front().resourceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::commonMaterials) && chip.value == "-2";
+    }) != insightfulResearch.projects.front().resourceChips.end(), "research cards should expose material costs as resource chips");
+}
+
+void surfacePresentationComesFromSharedHelper()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 9292);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.temporaryMaterials = {.common = 2, .rare = 1, .exotic = 1};
+    state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_surface", content::destination::mars, false});
+
+    SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state);
+    require(surface.metrics.size() == 11, "surface presentation should expose site, field kit, hazard, supply, cargo, depth, risk, materials, and artifacts");
+    require(surface.phaseSteps.size() == 4, "surface presentation should expose post-arrival phase steps");
+    require(surface.phaseSteps[0].stateLabel == "Done" && surface.phaseSteps[0].stateClass == "done", "surface phase track should mark arrival complete");
+    require(surface.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "surface phase track should include research");
+    require(surface.phaseSteps[1].stateLabel == "Done" && surface.phaseSteps[1].stateClass == "done", "surface phase track should mark research complete");
+    require(surface.phaseSteps[2].label == std::string(text::panel::details::surfacePhase), "surface phase track should include surface");
+    require(surface.phaseSteps[2].stateLabel == "Now" && surface.phaseSteps[2].stateClass == "active", "surface phase track should mark surface active");
+    require(surface.phaseSteps[3].label == std::string(text::panel::details::refitPhase) && surface.phaseSteps[3].stateLabel == "Next", "surface phase track should stage refit next");
+    require(surface.briefing.title == std::string(text::panel::modals::surfaceBriefing), "surface presentation should expose a briefing modal title");
+    require(findDetailPresentationRow(surface.briefing.rows, text::panel::details::phaseRisk) != nullptr, "surface briefing should explain extraction risk");
+    require(findDetailPresentationRow(surface.briefing.rows, text::panel::details::phaseNext) != nullptr, "surface briefing should explain the next phase");
+    require(surface.postureTitle == std::string(text::panel::messages::surfacePostureStable), "loaded low-risk surface payload should present stable posture");
+    require(surface.postureClass == "ok", "stable surface posture should use ok styling");
+    require(surface.metrics.front().label == std::string(text::labels::site), "surface presentation should expose active site profile");
+    require(std::find_if(surface.metrics.begin(), surface.metrics.end(), [](const PanelMetricPresentation& metric) {
+        return metric.label == std::string(text::labels::exoticMaterials) && metric.value == "1";
+    }) != surface.metrics.end(), "surface presentation should expose temporary exotic material cargo");
+    require(std::find_if(surface.metrics.begin(), surface.metrics.end(), [](const PanelMetricPresentation& metric) {
+        return metric.label == std::string(text::labels::artifacts) && metric.value == "1";
+    }) != surface.metrics.end(), "surface presentation should expose temporary artifact cargo");
+    require(!surface.siteDetail.empty(), "surface presentation should expose active site detail");
+    require(!surface.details.empty(), "surface presentation should expose field rule details");
+    require(hasDetailPresentationHeader(surface.details, text::panel::details::fieldRules), "surface details should include field rules");
+    require(findDetailPresentationRow(surface.details, text::panel::details::surveyRisk) != nullptr, "surface details should explain survey hazards");
+    require(findDetailPresentationRow(surface.details, text::panel::details::miningRisk) != nullptr, "surface details should explain mining hazards");
+    require(findDetailPresentationRow(surface.details, text::panel::details::extraction) != nullptr, "surface details should explain extraction risk");
+    require(!surface.logEntries.empty(), "surface presentation should expose recent mission log entries");
+    require(surface.actions.size() == 4, "surface presentation should expose the four action preview cards");
+    require(surface.actions[0].title == std::string(text::buttons::surveySite), "surface survey preview should use shared title text");
+    require(surface.actions[0].cost == text::panel::messages::supplyCost(tuning::research::surveySupplyCost), "surface survey preview should expose supply cost");
+    require(surface.actions[0].riskLabel == std::string(text::labels::hazard), "surface field actions should label action hazard risk");
+    require(std::find_if(surface.actions[0].payoffChips.begin(), surface.actions[0].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::commonMaterials) && !chip.value.empty() && chip.value.front() == '+';
+    }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose material payoff chips");
+    require(std::find_if(surface.actions[0].payoffChips.begin(), surface.actions[0].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
+    }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose projected extraction-risk impact");
+    require(surface.actions[0].action.actionId == std::string(ui::actions::surveySurface), "surface survey should use shared action id");
+    require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "surface mine should use shared action id");
+    require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::commonMaterials);
+    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose material payoff chips");
+    require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
+    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose projected extraction-risk impact");
+    require(surface.actions[2].action.cssClass == "danger", "push deeper should expose danger styling");
+    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::depth) && chip.value == "+1";
+    }) != surface.actions[2].payoffChips.end(), "push deeper preview should expose depth payoff");
+    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
+    }) != surface.actions[2].payoffChips.end(), "push deeper preview should expose projected extraction-risk impact");
+    require(surface.actions[3].action.actionId == std::string(ui::actions::extractSurface), "surface extraction should use shared action id");
+    require(surface.actions[3].riskLabel == std::string(text::labels::extractionRisk), "surface extraction should label extraction risk instead of hazard");
+    require(std::find_if(surface.actions[3].payoffChips.begin(), surface.actions[3].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::artifacts) && chip.value == "+1";
+    }) != surface.actions[3].payoffChips.end(), "surface extraction preview should expose loaded artifact payoff");
+
+    state.run.surfaceExpedition.supply = 0;
+    surface = surfaceExpeditionPresentation(state);
+    require(surface.postureTitle == std::string(text::panel::messages::surfacePostureExtract), "zero-supply surface payload should tell the player to extract");
+    require(surface.postureClass == "danger", "zero-supply surface posture should use danger styling");
+    require(!surface.actions[0].action.enabled && !surface.actions[1].action.enabled && !surface.actions[2].action.enabled, "surface supply should disable field actions");
+    require(surface.actions[3].action.enabled, "surface extraction should remain available at zero supply");
+
+    GameState empty = createNewGame(catalog, 9293);
+    empty.run.destinationIndex = 2;
+    startSurfaceExpedition(empty, catalog);
+    const SurfaceExpeditionPresentation emptySurface = surfaceExpeditionPresentation(empty);
+    require(emptySurface.postureTitle == std::string(text::panel::messages::surfacePostureScout), "empty surface payload should encourage scouting");
+    require(emptySurface.postureClass == "neutral", "empty surface posture should use neutral styling");
+
+    GameState risky = state;
+    risky.run.surfaceExpedition.active = true;
+    risky.run.surfaceExpedition.supply = 1;
+    risky.run.surfaceExpedition.cargo = 12;
+    risky.run.surfaceExpedition.hazard = 0.45;
+    const SurfaceExpeditionPresentation riskySurface = surfaceExpeditionPresentation(risky);
+    require(riskySurface.postureTitle == std::string(text::panel::messages::surfacePostureGreedy), "high extraction risk should call out greed pressure");
+    require(riskySurface.postureClass == "danger", "greed posture should use danger styling");
+
+    GameState deepSpace = createNewGame(catalog, 9395);
+    deepSpace.run.destinationIndex = 4;
+    deepSpace.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    startSurfaceExpedition(deepSpace, catalog);
+    const SurfaceExpeditionPresentation deepSurface = surfaceExpeditionPresentation(deepSpace);
+    require(deepSurface.metrics.size() == 12, "post-solar surface presentation should expose contact risk");
+    require(std::find_if(deepSurface.metrics.begin(), deepSurface.metrics.end(), [](const PanelMetricPresentation& metric) {
+        return metric.label == std::string(text::labels::contactRisk);
+    }) != deepSurface.metrics.end(), "post-solar surface presentation should label contact risk");
+    require(deepSurface.metrics[1].value.find("Perimeter drones") != std::string::npos, "surface presentation should name passive defense unlocks");
+    require(findDetailPresentationRow(deepSurface.details, text::panel::details::hostileContact) != nullptr, "post-solar surface details should explain hostile contact");
+}
+
 void overburnRewardsBeatLinearScalingAfterGoal()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -952,7 +1826,17 @@ void saveRoundTripPreservesProgress()
     state.run.restOpsThisExpedition = 3;
     state.meta.unlockKeys.push_back(content::unlock::thermal);
     state.meta.blueprintProgress = 5;
+    state.meta.materials = {.common = 3, .rare = 2, .exotic = 1};
+    state.meta.artifacts.push_back({"mars_signal_1", content::destination::mars, true});
     state.meta.shipsLost = 1;
+    state.meta.closestSurvivalMargin = 0.04;
+    state.meta.closestSurvivalBurn = 2.78;
+    state.meta.closestSurvivalFailurePoint = 2.82;
+    state.meta.maxBurnDepth = 3.48;
+    state.meta.maxPeakWarning = 1.0;
+    state.meta.maxPeakAbortRisk = 0.94;
+    state.meta.bestCreditDelta = 524.0;
+    state.meta.worstCreditDelta = -30.0;
     state.meta.destinationAttempts = {2, 1, 0};
     state.meta.destinationSuccesses = {1, 0, 0};
     state.meta.memorials.push_back("Test Pilot lost during Mars");
@@ -980,6 +1864,16 @@ void saveRoundTripPreservesProgress()
     require(restored.run.trainingOpsThisExpedition == 2, "training escalation should round trip");
     require(restored.run.restOpsThisExpedition == 3, "rest escalation should round trip");
     require(hasUnlock(restored.meta, content::unlock::thermal), "unlock keys should round trip");
+    require(restored.meta.materials.common == 3 && restored.meta.materials.rare == 2 && restored.meta.materials.exotic == 1, "materials should round trip");
+    require(restored.meta.artifacts.size() == 1 && restored.meta.artifacts[0].identified, "artifacts should round trip");
+    require(std::abs(restored.meta.closestSurvivalMargin - 0.04) < 0.001, "closest survival margin should round trip");
+    require(std::abs(restored.meta.closestSurvivalBurn - 2.78) < 0.001, "closest survival burn should round trip");
+    require(std::abs(restored.meta.closestSurvivalFailurePoint - 2.82) < 0.001, "closest survival failure point should round trip");
+    require(std::abs(restored.meta.maxBurnDepth - 3.48) < 0.001, "max burn depth should round trip");
+    require(std::abs(restored.meta.maxPeakWarning - 1.0) < 0.001, "max peak warning should round trip");
+    require(std::abs(restored.meta.maxPeakAbortRisk - 0.94) < 0.001, "max peak abort should round trip");
+    require(std::abs(restored.meta.bestCreditDelta - 524.0) < 0.001, "best credit delta should round trip");
+    require(std::abs(restored.meta.worstCreditDelta + 30.0) < 0.001, "worst credit delta should round trip");
     require(restored.meta.destinationAttempts.size() >= 3 && restored.meta.destinationAttempts[0] == 2, "destination attempts should round trip");
     require(restored.meta.destinationSuccesses.size() >= 3 && restored.meta.destinationSuccesses[0] == 1, "destination successes should round trip");
     require(restored.meta.memorials.size() == 1, "memorials should round trip");
@@ -1001,6 +1895,10 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::header) + "\n") == 0, "save should start with shared schema header");
     require(text.find(std::string(save_schema::field::credits) + save_schema::keyValueDelimiter) != std::string::npos, "credits key should use shared schema name");
     require(text.find(std::string(save_schema::field::inventory) + save_schema::keyValueDelimiter) != std::string::npos, "inventory key should use shared schema name");
+    require(text.find(std::string(save_schema::field::screen) + save_schema::keyValueDelimiter) != std::string::npos, "screen key should use shared schema name");
+    require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
+    require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
+    require(text.find(std::string(save_schema::field::surfaceLog) + save_schema::keyValueDelimiter) != std::string::npos, "surface log key should use shared schema name");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -1009,6 +1907,45 @@ void saveSchemaConstantsMatchSerializedFields()
     require(parsed.has_value(), "minimal save with shared header should parse");
     require(std::abs(parsed->credits - 321.0) < 0.001, "shared credits key should parse");
     require(!deserializeSaveData("RR_SAVE_V0\ncredits=1\n").has_value(), "unknown save header should not parse");
+}
+
+void legacyRecordsTrackAchievementStats()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 909);
+
+    LaunchOutcome first;
+    first.type = LaunchResultType::MissionComplete;
+    first.recoveryMethod = RecoveryMethod::ReturnHome;
+    first.destinationId = content::destination::earthOrbit;
+    first.ejectMultiplier = 2.78;
+    first.crashMultiplier = 2.82;
+    first.payout = 600.0;
+    first.recoveryCost = 76.0;
+    first.peakWarning = 1.0;
+    first.peakAbortRisk = 0.99;
+    applyLaunchOutcome(state, catalog, first);
+
+    require(std::abs(state.meta.closestSurvivalMargin - 0.04) < 0.001, "closest survival margin should track close successful recoveries");
+    require(std::abs(state.meta.closestSurvivalBurn - 2.78) < 0.001, "closest survival burn should track the recovered burn depth");
+    require(std::abs(state.meta.closestSurvivalFailurePoint - 2.82) < 0.001, "closest survival failure point should track the hidden failure");
+    require(std::abs(state.meta.maxBurnDepth - 2.78) < 0.001, "max burn should track launch depth");
+    require(std::abs(state.meta.maxPeakWarning - 1.0) < 0.001, "max warning should track peak telemetry");
+    require(std::abs(state.meta.maxPeakAbortRisk - 0.99) < 0.001, "max abort should track peak abort");
+    require(std::abs(state.meta.bestCreditDelta - 524.0) < 0.001, "best credit delta should track launch rewards");
+
+    LaunchOutcome later = first;
+    later.ejectMultiplier = 3.20;
+    later.crashMultiplier = 3.90;
+    later.payout = 0.0;
+    later.recoveryCost = 15.0;
+    later.peakWarning = 0.50;
+    later.peakAbortRisk = 0.45;
+    applyLaunchOutcome(state, catalog, later);
+
+    require(std::abs(state.meta.closestSurvivalMargin - 0.04) < 0.001, "wider recoveries should not replace the closest survival");
+    require(std::abs(state.meta.maxBurnDepth - 3.20) < 0.001, "max burn should continue to update independently");
+    require(std::abs(state.meta.worstCreditDelta + 15.0) < 0.001, "worst credit delta should track expensive recoveries");
 }
 
 void launchOutcomePresentationIsShared()
@@ -1022,6 +1959,11 @@ void launchOutcomePresentationIsShared()
     LaunchOutcomePresentation presentation = launchOutcomePresentation(destroyed);
     require(presentation.label == text::panel::outcomes::returnFailure, "return-home destruction should share return-failure label");
     require(presentation.nextActionLabel == text::buttons::startReplacementRefit, "destroyed outcomes should share replacement action label");
+    require(presentation.metricGroups.size() == 3, "result presentation should group post-flight metrics");
+    require(presentation.metricGroups[0].title == text::panel::sections::missionResult, "mission result group should lead the result summary");
+    require(presentation.metricGroups[0].metrics.size() == 3, "mission result group should show outcome, recovery, and credits");
+    require(presentation.metricGroups[1].title == text::panel::sections::burnProfile, "burn profile group should be explicit");
+    require(presentation.metricGroups[2].title == text::panel::sections::peakTelemetry, "peak telemetry group should be explicit");
     require(presentation.notes.size() == 2, "destroyed outcomes should include module and crew notes");
     require(presentation.notes[0] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
     require(presentation.notes[1] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
@@ -1035,6 +1977,10 @@ void launchOutcomePresentationIsShared()
     require(presentation.nextActionLabel == text::buttons::reviewRefitOptions, "survived outcomes should share refit review action label");
     require(presentation.notes.empty(), "clean transfer should not invent result notes");
 
+    presentation = launchOutcomePresentation(transfer, true);
+    require(presentation.nextActionLabel == text::buttons::conductResearch, "post-arrival outcomes should route toward research");
+    require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::postArrivalResearchReady), "post-arrival outcomes should explain the research handoff");
+
     LaunchOutcome injuredEject;
     injuredEject.type = LaunchResultType::SafeEject;
     injuredEject.recoveryMethod = RecoveryMethod::ManualEject;
@@ -1042,6 +1988,14 @@ void launchOutcomePresentationIsShared()
     presentation = launchOutcomePresentation(injuredEject);
     require(presentation.label == text::panel::outcomes::emergencyEject, "manual ejection should share emergency eject label");
     require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::crewInjured), "crew injury note should be shared");
+
+    LaunchOutcome closeCall;
+    closeCall.type = LaunchResultType::MissionComplete;
+    closeCall.recoveryMethod = RecoveryMethod::ReturnHome;
+    closeCall.ejectMultiplier = 2.78;
+    closeCall.crashMultiplier = 2.82;
+    presentation = launchOutcomePresentation(closeCall);
+    require(presentation.notes.size() == 1 && presentation.notes[0].find("Skin of your teeth") != std::string::npos, "close recoveries should call out the near miss");
 }
 
 void enumDisplayLabelsComeFromSharedText()
@@ -1143,11 +2097,14 @@ void refitWindowPresentationComesFromSharedHelper()
 
     const RefitWindowPresentation window = refitWindowPresentation(state, catalog);
     require(window.offers.size() == 2, "refit window presentation should expose resolved module and crew offers");
+    require(window.resourceChips.empty(), "refit window should not show an empty recovered resource bank");
+    require(window.recoveryDetail.empty(), "refit window should not show recovery detail without resources or extraction");
 
     const RefitOfferPresentation& moduleOffer = window.offers[0];
     require(moduleOffer.kind == RefitOfferPresentationKind::ShipModule, "module offers should be typed for future render variants");
     require(moduleOffer.index == 0, "module offers should retain their buy-offer index");
     require(moduleOffer.cost == moduleOfferCost(*engine), "module offer presentation should use shared module pricing");
+    require(moduleOffer.costSummary == display::credits(moduleOfferCost(*engine)), "credit-only module offer should expose shared cost summary");
     require(moduleOffer.affordable, "module offer should expose affordability");
     require(moduleOffer.card.title == engine->name, "module offer should include shared card presentation");
     require(moduleOffer.action.enabled, "affordable module offer should enable install action");
@@ -1159,6 +2116,7 @@ void refitWindowPresentationComesFromSharedHelper()
     require(crewOffer.kind == RefitOfferPresentationKind::CrewUpgrade, "crew offers should be typed for future render variants");
     require(crewOffer.index == 1, "crew offers should retain their buy-offer index");
     require(crewOffer.cost == crewUpgradeCost(*simBay), "crew offer presentation should use shared crew upgrade pricing");
+    require(crewOffer.costSummary == display::credits(crewUpgradeCost(*simBay)), "crew offer should expose shared cost summary");
     require(crewOffer.card.title == simBay->name, "crew offer should include shared card presentation");
     require(crewOffer.action.actionId == ui::actions::buyOffer(1), "crew offer should use shared indexed buy action");
 
@@ -1169,6 +2127,30 @@ void refitWindowPresentationComesFromSharedHelper()
     require(window.rerollAction.cssClass == "warn", "reroll action should expose warning button style");
     require(window.skipAction.enabled && window.skipAction.label == std::string(text::buttons::skipRefit), "skip refit action should always be available");
     require(window.skipAction.actionId == std::string(ui::actions::next), "skip refit action should advance through shared action id");
+
+    state.meta.blueprintProgress = 3;
+    state.meta.materials = {.common = 2, .rare = 1};
+    state.meta.artifacts.push_back({"mars_artifact_refit", content::destination::mars, false});
+    const RefitWindowPresentation resourceWindow = refitWindowPresentation(state, catalog);
+    require(resourceWindow.recoveryDetail == std::string(text::panel::messages::recoveredResourcesDetail), "refit resource bank should explain resource use");
+    require(resourceWindow.resourceChips.size() == 4, "refit window should expose recovered blueprint, material, and artifact resources");
+    require(std::find_if(resourceWindow.resourceChips.begin(), resourceWindow.resourceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::blueprints) && chip.value == "3";
+    }) != resourceWindow.resourceChips.end(), "refit resource bank should expose blueprint progress");
+    require(std::find_if(resourceWindow.resourceChips.begin(), resourceWindow.resourceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::commonMaterials) && chip.value == "2";
+    }) != resourceWindow.resourceChips.end(), "refit resource bank should expose common materials");
+    require(std::find_if(resourceWindow.resourceChips.begin(), resourceWindow.resourceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::artifacts) && chip.value == "1";
+    }) != resourceWindow.resourceChips.end(), "refit resource bank should expose recovered artifacts");
+
+    state.meta.blueprintProgress = 0;
+    state.meta.materials = {};
+    state.meta.artifacts = {};
+    state.statusLine = std::string(text::status::surfaceExtractionRough) + " (Lost 1 Artifacts; 42% Extraction risk)";
+    const RefitWindowPresentation roughRecoveryWindow = refitWindowPresentation(state, catalog);
+    require(roughRecoveryWindow.resourceChips.empty(), "rough empty extraction should not invent recovered resources");
+    require(roughRecoveryWindow.recoveryDetail == state.statusLine, "rough empty extraction should still explain the recovery result");
 
     state.run.credits = 0.0;
     const RefitWindowPresentation brokeWindow = refitWindowPresentation(state, catalog);
@@ -1247,6 +2229,11 @@ void programDetailsPresentationComesFromSharedHelper()
     const int required = frontierReadinessRequired(state, catalog);
     state.run.frontierReadiness = 2;
     state.meta.blueprintProgress = 9;
+    state.meta.materials = {.common = 3, .rare = 2, .exotic = 1};
+    state.meta.artifacts = {
+        {"mars_signal_1", content::destination::mars, true},
+        {"mars_signal_2", content::destination::mars, false}
+    };
     state.meta.shipsLost = 3;
     state.meta.astronautsLost = 2;
     state.meta.furthestTier = 1;
@@ -1266,13 +2253,42 @@ void programDetailsPresentationComesFromSharedHelper()
 
     const std::vector<DetailPresentationRow> legacyRows = legacyDetailsPresentation(state);
     const DetailPresentationRow* blueprints = findDetailPresentationRow(legacyRows, text::panel::details::blueprints);
+    const DetailPresentationRow* commonMaterials = findDetailPresentationRow(legacyRows, text::panel::details::commonMaterials);
+    const DetailPresentationRow* rareMaterials = findDetailPresentationRow(legacyRows, text::panel::details::rareMaterials);
+    const DetailPresentationRow* exoticMaterials = findDetailPresentationRow(legacyRows, text::panel::details::exoticMaterials);
+    const DetailPresentationRow* artifacts = findDetailPresentationRow(legacyRows, text::panel::details::artifacts);
     const DetailPresentationRow* shipsLost = findDetailPresentationRow(legacyRows, text::panel::details::shipsLost);
     const DetailPresentationRow* astronautsLost = findDetailPresentationRow(legacyRows, text::panel::details::astronautsLost);
     const DetailPresentationRow* furthestTier = findDetailPresentationRow(legacyRows, text::panel::details::furthestTier);
+    const DetailPresentationRow* closestSurvival = findDetailPresentationRow(legacyRows, text::panel::details::closestSurvival);
+    const DetailPresentationRow* maxBurnDepth = findDetailPresentationRow(legacyRows, text::panel::details::maxBurnDepth);
+    const DetailPresentationRow* maxPeakWarning = findDetailPresentationRow(legacyRows, text::panel::details::maxPeakWarning);
+    const DetailPresentationRow* maxPeakAbort = findDetailPresentationRow(legacyRows, text::panel::details::maxPeakAbort);
     require(blueprints != nullptr && blueprints->value == "9", "legacy presentation should expose blueprint progress");
+    require(commonMaterials != nullptr && commonMaterials->value == "3", "legacy presentation should expose common materials");
+    require(rareMaterials != nullptr && rareMaterials->value == "2", "legacy presentation should expose rare materials");
+    require(exoticMaterials != nullptr && exoticMaterials->value == "1", "legacy presentation should expose exotic materials");
+    require(artifacts != nullptr && artifacts->value == text::panel::artifactSummary(1, 2), "legacy presentation should expose artifact recovery summary");
     require(shipsLost != nullptr && shipsLost->value == "3", "legacy presentation should expose ship losses");
     require(astronautsLost != nullptr && astronautsLost->value == "2", "legacy presentation should expose astronaut losses");
     require(furthestTier != nullptr && furthestTier->value == "1", "legacy presentation should expose furthest tier");
+    require(closestSurvival != nullptr, "legacy presentation should expose closest survival record");
+    require(maxBurnDepth != nullptr, "legacy presentation should expose max burn record");
+    require(maxPeakWarning != nullptr, "legacy presentation should expose peak warning record");
+    require(maxPeakAbort != nullptr, "legacy presentation should expose peak abort record");
+
+    const std::vector<DetailPresentationRow> archiveRows = artifactArchivePresentation(state, catalog);
+    require(hasDetailPresentationHeader(archiveRows, text::panel::details::artifactArchive), "artifact archive should include a section header when artifacts exist");
+    const DetailPresentationRow* firstArtifact = findDetailPresentationRow(archiveRows, "Mars artifact 1");
+    const DetailPresentationRow* secondArtifact = findDetailPresentationRow(archiveRows, "Mars artifact 2");
+    require(firstArtifact != nullptr && firstArtifact->value == std::string(text::panel::details::decoded), "artifact archive should show decoded artifact status");
+    require(secondArtifact != nullptr && secondArtifact->value == std::string(text::panel::details::awaitingResearch), "artifact archive should show unidentified artifact status");
+
+    const std::vector<DetailPresentationRow> combinedLegacyRows = legacyDetailsPresentation(state, catalog);
+    require(hasDetailPresentationHeader(combinedLegacyRows, text::panel::details::artifactArchive), "catalog-aware legacy presentation should include artifact archive rows");
+
+    GameState noArtifacts = createNewGame(catalog, 446);
+    require(artifactArchivePresentation(noArtifacts, catalog).empty(), "artifact archive should stay hidden until artifacts are recovered");
 }
 
 void flightProgressHelpersShareTravelAndReturnMath()
@@ -1332,6 +2348,7 @@ void launchPanelPresentationComesFromSharedHelper()
     const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
     require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
     require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
+    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "Earth Orbit proving flights should not expose arrival ops");
     require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "launch presentation should expose cut-engines action");
     require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "launch presentation should expose relief-valve action");
     require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "launch presentation should expose jettison-cargo action");
@@ -1372,6 +2389,24 @@ void launchPanelPresentationComesFromSharedHelper()
     panel = launchPanelPresentation(state, catalog, launch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
     const FlightActionButtonPresentation* failedValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValveFailed);
     require(failedValve != nullptr && !failedValve->enabled, "failed relief valve should be disabled in presentation");
+
+    GameState marsState = createNewGame(catalog, 911);
+    marsState.run.destinationIndex = 2;
+    syncLaunchConfig(marsState, catalog);
+    Random marsRng(911);
+    PreparedLaunch marsLaunch = prepareLaunch(marsState, catalog, marsRng);
+    panel = launchPanelPresentation(
+        marsState,
+        catalog,
+        marsLaunch,
+        catalog.destinations[2].targetMultiplier,
+        1.0,
+        0.0,
+        returnDuration,
+        {},
+        false);
+    const FlightActionButtonPresentation* arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
+    require(arrivalOps != nullptr && arrivalOps->enabled && arrivalOps->actionId == ui::actions::arrivalOps, "Mars proving flights should expose arrival ops after the data goal");
 }
 
 void launchReadinessPresentationComesFromSharedHelper()
@@ -1661,12 +2696,26 @@ void uiActionsUseStableSchemaIds()
 {
     require(ui::actions::startLaunch == "start_launch", "start launch action should use a stable schema id");
     require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
+    require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
+    require(ui::actions::researchProject(2) == "research_project:2", "indexed research actions should share one action family");
+    require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
 
     const std::string buyOffer = ui::actions::buyOffer(2);
     require(buyOffer == "buy_offer:2", "indexed offer actions should encode the offer index in one reusable action family");
     require(buyOffer.find("rr.") == std::string::npos, "panel action ids should not embed JavaScript snippets");
+}
+
+void panelLayoutModeIsPortablePresentationData()
+{
+    require(panelLayoutMode(Screen::Launch) == PanelLayoutMode::ControlPanel, "launch should remain a compact action control panel");
+    require(panelLayoutMode(Screen::Hangar) == PanelLayoutMode::PhaseBoard, "hangar should use the management board layout");
+    require(panelLayoutMode(Screen::Results) == PanelLayoutMode::PhaseBoard, "results should use the management board layout");
+    require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
+    require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::PhaseBoard, "surface expedition should use the management board layout");
+    require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::PhaseBoard, "refit should use the management board layout");
+    require(usesPhaseBoard(Screen::Research), "phase-board checks should go through a shared helper");
 }
 
 void contentIdsResolveAgainstDefaultCatalog()
@@ -1679,11 +2728,22 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(catalog.findFrame(content::frame::pathfinder) != nullptr, "ship frame id should resolve");
     require(catalog.findAstronaut(content::astronaut::ava) != nullptr, "astronaut id should resolve");
     require(catalog.findDestination(content::destination::moon) != nullptr, "destination id should resolve");
+    require(catalog.findResearchProject(content::research::blueprintSurvey) != nullptr, "research project id should resolve");
+    require(catalog.findResearchProject(content::research::fieldProbeNetwork) != nullptr, "field probe research id should resolve");
+    require(catalog.findResearchProject(content::research::regolithDrillRig) != nullptr, "drill research id should resolve");
+    require(catalog.findResearchProject(content::research::cargoReturnRig) != nullptr, "cargo research id should resolve");
+    require(catalog.findResearchProject(content::research::perimeterDroneNetwork) != nullptr, "perimeter drone research id should resolve");
 
     MetaProgress meta;
     require(hasUnlock(meta, content::unlock::starter), "starter unlock should stay implicit");
     meta.unlockKeys.push_back(content::unlock::thermal);
     require(hasUnlock(meta, content::unlock::thermal), "named unlock key should resolve through shared ids");
+    meta.unlockKeys.push_back(content::unlock::surfaceProbes);
+    require(hasUnlock(meta, content::unlock::surfaceProbes), "surface unlock key should resolve through shared ids");
+    meta.unlockKeys.push_back(content::unlock::analysisLab);
+    require(hasUnlock(meta, content::unlock::analysisLab), "research facility unlock key should resolve through shared ids");
+    meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    require(hasUnlock(meta, content::unlock::perimeterDrones), "passive defense unlock key should resolve through shared ids");
 }
 
 void displayFormatAndMathHelpersAreShared()
@@ -1709,6 +2769,7 @@ int main()
 {
     deterministicLaunchesMatch();
     safeAndDestroyedOutcomesResolve();
+    shallowRecoveryCheeseEscalatesAndThenFails();
     moduleAggregationIncludesFrameAndDamage();
     earlyTelemetryShowsSystemLoad();
     launchIncidentsAreChunkyAndRecoverable();
@@ -1721,6 +2782,7 @@ int main()
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
+    specialShipComponentsRequireRecoveredMaterials();
     crewUpgradeOffersInstallAndModifyCrewOps();
     hangarOpsStartCheapAndEscalate();
     hangarOperationPreviewMatchesCoreMath();
@@ -1732,9 +2794,30 @@ int main()
     starterEarthOrbitIsProvingFirst();
     starterProvingEconomyFundsEarlyRefits();
     returnHomeRewardShelvesMatchRefitCosts();
+    researchPhasesUnlockOnlyAfterMarsArrival();
+    arrivalOperationsGateMoonButAllowMarsRisk();
+    researchProjectsGenerateAndCompleteFromSharedRules();
+    materialResearchUnlocksModuleFamilies();
+    artifactInsightImprovesFutureResearch();
+    researchFacilitiesImproveFutureResearch();
+    artifactResearchIdentifiesRecoveredArtifacts();
+    researchOutcomeSummaryShowsRewardsAndCosts();
+    surfaceToolResearchImprovesExpeditions();
+    surfaceSiteProfilesChangeExpeditionRules();
+    surfaceHazardsCreateEnvironmentalSetbacks();
+    surfaceEventsCreateSmallRunVariation();
+    enemyContactStartsBeyondSolarSystemAndCanBeMitigated();
+    surfaceExpeditionBanksMaterialsAndDefersEnemies();
+    surfaceExpeditionRoundTripsThroughSave();
+    surfaceMissionLogIsBounded();
+    surfaceActionSummaryShowsResourceDeltas();
+    roughSurfaceExtractionReportsLostPayload();
+    researchPresentationComesFromSharedHelper();
+    surfacePresentationComesFromSharedHelper();
     overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
     saveSchemaConstantsMatchSerializedFields();
+    legacyRecordsTrackAchievementStats();
     launchOutcomePresentationIsShared();
     enumDisplayLabelsComeFromSharedText();
     refitPresentationComesFromSharedHelper();
@@ -1753,6 +2836,7 @@ int main()
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();
     uiActionsUseStableSchemaIds();
+    panelLayoutModeIsPortablePresentationData();
     contentIdsResolveAgainstDefaultCatalog();
     displayFormatAndMathHelpersAreShared();
 
