@@ -53,6 +53,11 @@ std::string metric(std::string_view label, std::string value)
     return "<div class=\"metric\"><strong>" + htmlEscape(value) + "</strong><span>" + htmlEscape(label) + "</span></div>";
 }
 
+std::string compactMetric(std::string_view label, std::string value)
+{
+    return "<div class=\"surface-kpi\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
+}
+
 std::string button(std::string_view label, std::string_view action, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
@@ -62,7 +67,7 @@ std::string button(std::string_view label, std::string_view action, std::string 
 std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
-    return "<button" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
+    return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
 }
 
 std::string modalTemplate(std::string_view modalId, std::string_view title, std::string body)
@@ -283,6 +288,32 @@ std::string surfacePosture(const SurfaceExpeditionPresentation& surface)
         htmlEscape(surface.postureTitle) + "</strong><span>" + htmlEscape(surface.postureDetail) + "</span></article>";
 }
 
+std::string surfaceCommandSummary(const SurfaceExpeditionPresentation& surface)
+{
+    std::ostringstream out;
+    out << "<section class=\"surface-command\">";
+    out << "<div><span>" << htmlEscape(text::labels::site) << "</span><strong>" << htmlEscape(surface.metrics[0].value)
+        << "</strong><p>" << htmlEscape(surface.siteDetail) << "</p></div>";
+    out << surfacePosture(surface);
+    out << "</section>";
+    return out.str();
+}
+
+std::string surfaceKpiGrid(const SurfaceExpeditionState& expedition, double extractionRisk)
+{
+    std::ostringstream out;
+    out << "<div class=\"surface-kpi-grid\">";
+    out << compactMetric(text::labels::supply, std::to_string(expedition.supply));
+    out << compactMetric(text::labels::cargo, std::to_string(expedition.cargo));
+    out << compactMetric(text::labels::hazard, display::percent(expedition.hazard));
+    out << compactMetric(text::labels::extractionRisk, display::percent(extractionRisk));
+    out << compactMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common));
+    out << compactMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare));
+    out << compactMetric(text::labels::artifacts, std::to_string(expedition.temporaryArtifacts.size()));
+    out << "</div>";
+    return out.str();
+}
+
 std::string phaseAdvisory(const PhaseAdvisoryPresentation& advisory)
 {
     return "<article class=\"phase-advisory " + htmlEscape(advisory.cssClass) + "\"><strong>" +
@@ -299,6 +330,13 @@ std::string resultMetricGroup(const LaunchOutcomeMetricGroupPresentation& group)
     }
     out += "</article>";
     return out;
+}
+
+std::string achievementCard(const AchievementPresentation& achievement)
+{
+    return "<article class=\"achievement-card\" data-achievement-id=\"" + htmlEscape(achievement.id) + "\"><span>" +
+        htmlEscape(text::panel::sections::achievements) + "</span><strong>" + htmlEscape(achievement.title) +
+        "</strong><p>" + htmlEscape(achievement.detail) + "</p></article>";
 }
 
 } // namespace
@@ -399,6 +437,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         for (const std::string& note : presentation.notes) {
             out << boardNote(note);
+        }
+        if (!presentation.achievements.empty()) {
+            out << "<h2>" << htmlEscape(text::panel::sections::achievements) << "</h2>";
+            out << "<div class=\"achievement-grid\">";
+            for (const AchievementPresentation& achievement : presentation.achievements) {
+                out << achievementCard(achievement);
+            }
+            out << "</div>";
         }
         out << "<div class=\"actions\">";
         out << button(presentation.nextActionLabel, ui::actions::next, "ok");
@@ -513,35 +559,31 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state);
+        const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+        const double extractionRisk = surfaceExtractionRisk(state);
         out << phaseBoardOpen("phase-board-surface", state.statusLine);
-        out << "<h2>" << htmlEscape(text::panel::sections::surfaceExpedition) << "</h2>";
-        out << "<p>" << htmlEscape(text::panel::messages::surfaceExpeditionBrief) << "</p>";
-        out << phaseTrack(surfacePanel.phaseSteps);
-        out << boardNote(surfacePanel.siteDetail);
-        out << surfacePosture(surfacePanel);
-        out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
-            << modalButton(text::buttons::details, ui::modals::surface, "ghost") << "</div>";
-        out << "<div class=\"metric-grid\">";
-        for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
-            out << metric(metricItem.label, metricItem.value);
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
+            << "</h2><p>" << htmlEscape(text::panel::messages::surfaceExpeditionBrief) << "</p></div>";
+        out << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
+            << modalButton(text::buttons::details, ui::modals::surface, "ghost");
+        if (!surfacePanel.logEntries.empty()) {
+            out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
-        out << "</div>";
+        out << "</div></div>";
+        out << phaseTrack(surfacePanel.phaseSteps);
+        out << surfaceCommandSummary(surfacePanel);
+        out << surfaceKpiGrid(expedition, extractionRisk);
         out << "<section class=\"board-primary surface-actions\">";
-        out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
+        out << "<h2>" << htmlEscape("Field Actions") << "</h2>";
         out << "<div class=\"ops-grid\">";
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             out << surfaceActionCard(action);
         }
         out << "</div></section>";
-        if (!surfacePanel.logEntries.empty()) {
-            out << "<aside class=\"board-secondary surface-log\">";
-            out << "<h2>" << htmlEscape(text::panel::sections::missionLog) << "</h2>";
-            out << missionLog(surfacePanel.logEntries);
-            out << "</aside>";
-        }
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::phaseBriefing, surfacePanel.briefing.title, detailStack(surfacePanel.briefing.rows));
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
+        out << modalTemplate(ui::modals::missionLog, text::panel::sections::missionLog, missionLog(surfacePanel.logEntries));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }

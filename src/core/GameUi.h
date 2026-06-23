@@ -58,6 +58,7 @@ inline constexpr std::string_view legacy = "legacy";
 inline constexpr std::string_view research = "research";
 inline constexpr std::string_view surface = "surface";
 inline constexpr std::string_view phaseBriefing = "phase_briefing";
+inline constexpr std::string_view missionLog = "mission_log";
 } // namespace modals
 
 } // namespace rocket::ui

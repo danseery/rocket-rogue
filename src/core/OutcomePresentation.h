@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/ContentIds.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/GameTypes.h"
@@ -22,11 +23,18 @@ struct LaunchOutcomeMetricGroupPresentation {
     std::vector<LaunchOutcomeMetricPresentation> metrics;
 };
 
+struct AchievementPresentation {
+    std::string_view id;
+    std::string_view title;
+    std::string detail;
+};
+
 struct LaunchOutcomePresentation {
     std::string_view label;
     std::string_view nextActionLabel;
     std::vector<LaunchOutcomeMetricGroupPresentation> metricGroups;
     std::vector<std::string> notes;
+    std::vector<AchievementPresentation> achievements;
 };
 
 inline std::string_view launchOutcomeLabel(const LaunchOutcome& outcome)
@@ -73,10 +81,6 @@ inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome,
     if (opensPostArrivalPhases) {
         notes.emplace_back(text::panel::messages::postArrivalResearchReady);
     }
-    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
-    if (outcome.type != LaunchResultType::Destroyed && survivalMargin > 0.0 && survivalMargin <= tuning::records::closeCallSurvivalMargin) {
-        notes.push_back(text::panel::messages::closeCallSurvival(display::multiplier(survivalMargin)));
-    }
     if (!outcome.moduleDestroyedId.empty()) {
         notes.push_back(text::panel::lostModule(outcome.moduleDestroyedId));
     }
@@ -86,6 +90,20 @@ inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome,
         notes.emplace_back(text::panel::messages::crewInjured);
     }
     return notes;
+}
+
+inline std::vector<AchievementPresentation> launchOutcomeAchievements(const LaunchOutcome& outcome)
+{
+    std::vector<AchievementPresentation> achievements;
+    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    if (outcome.type != LaunchResultType::Destroyed && survivalMargin > 0.0 && survivalMargin <= tuning::records::closeCallSurvivalMargin) {
+        achievements.push_back({
+            content::achievement::skinOfYourTeeth,
+            text::panel::achievements::skinOfYourTeethTitle,
+            text::panel::achievements::skinOfYourTeethDetail(display::multiplier(survivalMargin))
+        });
+    }
+    return achievements;
 }
 
 inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGroups(const LaunchOutcome& outcome)
@@ -125,7 +143,8 @@ inline LaunchOutcomePresentation launchOutcomePresentation(const LaunchOutcome& 
         launchOutcomeLabel(outcome),
         launchOutcomeNextActionLabel(outcome, opensPostArrivalPhases),
         launchOutcomeMetricGroups(outcome),
-        launchOutcomeNotes(outcome, opensPostArrivalPhases)
+        launchOutcomeNotes(outcome, opensPostArrivalPhases),
+        launchOutcomeAchievements(outcome)
     };
 }
 

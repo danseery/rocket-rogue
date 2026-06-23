@@ -202,6 +202,18 @@ double miningContactResistance(MiningCellMaterial material)
     return 0.0;
 }
 
+double contactLimitedPosition(double current, double proposed, int obstacleCell)
+{
+    constexpr double contactPadding = 0.018;
+    if (proposed > current) {
+        return std::min(proposed, static_cast<double>(obstacleCell) - contactPadding);
+    }
+    if (proposed < current) {
+        return std::max(proposed, static_cast<double>(obstacleCell + 1) + contactPadding);
+    }
+    return current;
+}
+
 void updateContactBounce(MiningRunState& mining, double dt)
 {
     mining.contactBounceCooldown = std::max(0.0, mining.contactBounceCooldown - dt);
@@ -775,11 +787,15 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
                 setAimDirection(mining, dirX, dirY);
                 const double resistance = miningContactResistance(obstacle->material);
                 mining.contactIntensity = std::max(mining.contactIntensity, softMiningMaterial(obstacle->material) ? 0.45 : 1.0);
-                applyDrillDamage(state, stats, cellX, cellY, dt * (softMiningMaterial(obstacle->material) ? 1.18 : 1.0));
+                const bool brokeCell = applyDrillDamage(state, stats, cellX, cellY, dt * (softMiningMaterial(obstacle->material) ? 1.18 : 1.0));
+                const bool clearedCell = brokeCell || !miningMaterialSolid(obstacle->material);
                 if (resistance > 0.0) {
                     mining.recoilX = -dirX;
                     mining.recoilY = -dirY;
-                    position = std::clamp(position + (proposed - position) * resistance, 1.0, xAxis ? static_cast<double>(mining.terrain.width - 2) : static_cast<double>(mining.terrain.height - 2));
+                    const double limited = clearedCell
+                        ? proposed
+                        : contactLimitedPosition(position, position + (proposed - position) * resistance, xAxis ? cellX : cellY);
+                    position = std::clamp(limited, 1.0, xAxis ? static_cast<double>(mining.terrain.width - 2) : static_cast<double>(mining.terrain.height - 2));
                 } else {
                     triggerHardContactBounce(mining, dirX, dirY);
                 }

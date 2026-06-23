@@ -330,6 +330,7 @@ inline constexpr std::string_view arrivalOps = "Arrival Ops";
 inline constexpr std::string_view missionResult = "Mission result";
 inline constexpr std::string_view burnProfile = "Burn profile";
 inline constexpr std::string_view peakTelemetry = "Peak telemetry";
+inline constexpr std::string_view achievements = "Achievements";
 inline constexpr std::string_view research = "Research Phase";
 inline constexpr std::string_view surfaceExpedition = "Surface Expedition";
 inline constexpr std::string_view miningRun = "Mining Run";
@@ -348,6 +349,15 @@ inline constexpr std::string_view oreShelfDetail = "Dense deposits improve minin
 inline constexpr std::string_view fractureField = "Fracture Field";
 inline constexpr std::string_view fractureFieldDetail = "Broken terrain improves artifact odds, while extraction gets uglier.";
 } // namespace surfaceSites
+
+namespace achievements {
+inline constexpr std::string_view skinOfYourTeethTitle = "Skin of your teeth";
+
+inline std::string skinOfYourTeethDetail(std::string_view margin)
+{
+    return "Survived within " + std::string(margin) + " of the failure point.";
+}
+} // namespace achievements
 
 namespace modals {
 inline constexpr std::string_view telemetryDetails = "Telemetry Details";
@@ -508,16 +518,16 @@ inline constexpr std::string_view researchAdvisoryMaterials = "Materials short";
 inline constexpr std::string_view researchAdvisoryMaterialsDetail = "Current projects need samples you do not have. Skip research and deploy the surface team to recover materials.";
 inline constexpr std::string_view researchAdvisoryEmpty = "No active projects";
 inline constexpr std::string_view researchAdvisoryEmptyDetail = "The lab has no viable project queued for this arrival. Send the field team down and keep the expedition moving.";
-inline constexpr std::string_view surfaceExpeditionBrief = "Spend supply to survey, mine, or push deeper. Extraction banks recovered materials and moves the program back to refit.";
-inline constexpr std::string_view surfacePostureScout = "Scout the site";
-inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Survey or mine before spending supply on deeper risk.";
-inline constexpr std::string_view surfacePostureStable = "Payload secure";
-inline constexpr std::string_view surfacePostureStableDetail = "The field team has recoverable cargo and enough margin for one more careful action.";
-inline constexpr std::string_view surfacePostureNarrowing = "Extraction window narrowing";
-inline constexpr std::string_view surfacePostureNarrowingDetail = "Supply or recovery margin is getting thin. Extract soon unless the next action is worth the risk.";
-inline constexpr std::string_view surfacePostureGreedy = "Greed check";
+inline constexpr std::string_view surfaceExpeditionBrief = "Choose one field action, then extract the payload when the risk is no longer worth the next dig.";
+inline constexpr std::string_view surfacePostureScout = "Recommended: gather data";
+inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Survey or mine before spending supply on deeper terrain.";
+inline constexpr std::string_view surfacePostureStable = "Recommended: one more action is reasonable";
+inline constexpr std::string_view surfacePostureStableDetail = "You have recoverable cargo and enough supply margin to keep working.";
+inline constexpr std::string_view surfacePostureNarrowing = "Recommended: extract soon";
+inline constexpr std::string_view surfacePostureNarrowingDetail = "Supply is low or recovery risk is rising. Take another action only if the reward is worth it.";
+inline constexpr std::string_view surfacePostureGreedy = "Recommended: extract now";
 inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is valuable, but recovery risk is climbing into expensive territory.";
-inline constexpr std::string_view surfacePostureExtract = "Extract now";
+inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
 inline constexpr std::string_view surfacePostureExtractDetail = "No supply remains for field work. Bring the payload home before conditions get worse.";
 inline constexpr std::string_view surfaceSurveyDetail = "Recover common samples; probes improve yield and reduce dust trouble.";
 inline constexpr std::string_view surfaceMineDetail = "Fill cargo canisters; drills improve yield and rare-material odds.";

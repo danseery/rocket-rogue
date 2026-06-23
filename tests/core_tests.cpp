@@ -1621,8 +1621,15 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     updateMiningRun(state, catalog, 0.08);
 
     require(mining.droneX > 32.85, "drilling into regolith should let the drone grind forward slowly");
+    require(static_cast<int>(std::floor(mining.droneX)) == 32, "the drone should not occupy unbroken regolith before the drill clears it");
     require(mining.contactIntensity > 0.0, "soft contact should set mining feedback intensity");
     require(soft->remainingToughness < soft->maxToughness, "pushing into regolith while drilling should do terrain work");
+
+    for (int i = 0; i < 12 && soft->material != MiningCellMaterial::Empty; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+
+    require(soft->material == MiningCellMaterial::Empty, "continued drilling should visibly clear soft terrain before the drone passes through");
 
     mining.droneX = 32.85;
     mining.droneY = 12.0;
@@ -2238,7 +2245,11 @@ void launchOutcomePresentationIsShared()
     closeCall.ejectMultiplier = 2.78;
     closeCall.crashMultiplier = 2.82;
     presentation = launchOutcomePresentation(closeCall);
-    require(presentation.notes.size() == 1 && presentation.notes[0].find("Skin of your teeth") != std::string::npos, "close recoveries should call out the near miss");
+    require(presentation.notes.empty(), "close recoveries should not be rendered as generic mission notes");
+    require(presentation.achievements.size() == 1, "close recoveries should unlock a close-call achievement");
+    require(presentation.achievements[0].id == content::achievement::skinOfYourTeeth, "close-call achievement should use a stable content id");
+    require(presentation.achievements[0].title == text::panel::achievements::skinOfYourTeethTitle, "close-call achievement should expose a clear title");
+    require(presentation.achievements[0].detail.find("x0.04") != std::string::npos, "close-call achievement should explain the survival margin");
 }
 
 void enumDisplayLabelsComeFromSharedText()

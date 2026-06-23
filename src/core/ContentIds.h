@@ -88,4 +88,8 @@ inline constexpr const char* nearbyStar = "nearby_star";
 inline constexpr const char* nearbyGalaxy = "nearby_galaxy";
 } // namespace destination
 
+namespace achievement {
+inline constexpr const char* skinOfYourTeeth = "skin_of_your_teeth";
+} // namespace achievement
+
 } // namespace rocket::content

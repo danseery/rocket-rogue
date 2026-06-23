@@ -675,8 +675,8 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drillDirection = normalize({target.x - drone.x, target.y - drone.y});
     }
     const Vec2 drillOrigin {
-        drone.x + drillDirection.x * droneSize * 0.34F,
-        drone.y + drillDirection.y * droneSize * 0.34F
+        drone.x + drillDirection.x * droneSize * 0.40F,
+        drone.y + drillDirection.y * droneSize * 0.40F
     };
     const Color heatColor = mix({0.35F, 0.86F, 1.0F, 1.0F}, {1.0F, 0.45F, 0.20F, 1.0F}, static_cast<float>(snapshot.miningHeat));
 
@@ -684,21 +684,39 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float dx = target.x - drillOrigin.x;
         const float dy = target.y - drillOrigin.y;
         const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
-        const float drillH = std::clamp(contactDistance + cellSize * 0.55F, cellSize * 2.10F, cellSize * 3.45F);
-        const float drillW = drillH * 0.72F;
+        const float drillH = std::clamp(contactDistance + cellSize * 0.95F, cellSize * 3.10F, cellSize * 4.85F);
+        const float drillW = drillH * 0.92F;
         const Vec2 bitCenter {
             drillOrigin.x + drillDirection.x * drillH * 0.5F,
             drillOrigin.y + drillDirection.y * drillH * 0.5F
         };
+        const Vec2 drillRight {-drillDirection.y, drillDirection.x};
         const Vec2 bitRoot {
-            drillOrigin.x,
-            drillOrigin.y
+            drillOrigin.x + drillDirection.x * cellSize * 0.12F,
+            drillOrigin.y + drillDirection.y * cellSize * 0.12F
         };
         const Vec2 bitTip {
             drillOrigin.x + drillDirection.x * drillH,
             drillOrigin.y + drillDirection.y * drillH
         };
-        drawLine(bitRoot.x, bitRoot.y, bitTip.x, bitTip.y, {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.28F : 0.08F}, snapshot.miningDrilling ? 1.0F : 0.6F);
+        const float baseHalf = drillW * 0.44F;
+        drawTriangle(
+            bitTip.x + drillDirection.x * cellSize * 0.10F,
+            bitTip.y + drillDirection.y * cellSize * 0.10F,
+            bitRoot.x + drillRight.x * baseHalf,
+            bitRoot.y + drillRight.y * baseHalf,
+            bitRoot.x - drillRight.x * baseHalf,
+            bitRoot.y - drillRight.y * baseHalf,
+            {0.05F, 0.07F, 0.08F, 0.82F});
+        drawTriangle(
+            bitTip.x,
+            bitTip.y,
+            bitRoot.x + drillRight.x * baseHalf * 0.78F,
+            bitRoot.y + drillRight.y * baseHalf * 0.78F,
+            bitRoot.x - drillRight.x * baseHalf * 0.78F,
+            bitRoot.y - drillRight.y * baseHalf * 0.78F,
+            {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.38F : 0.16F});
+        drawLine(bitRoot.x, bitRoot.y, bitTip.x, bitTip.y, {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.36F : 0.12F}, snapshot.miningDrilling ? 1.4F : 0.8F);
         const int drillFrame = snapshot.miningDrilling ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
         drawSpriteRotated(
             bitCenter.x,
