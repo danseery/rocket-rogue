@@ -767,9 +767,13 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningScannerPulse = mining.scannerPulseSeconds;
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
-        result.miningBounce = mining.contactBounce;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
         const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
+        const double pressureX = -mining.recoilX;
+        const double pressureY = -mining.recoilY;
+        const double movePressure = mining.moveX * pressureX + mining.moveY * pressureY;
+        const bool activelyPressingContact = (mining.drilling && targetDrillable) || movePressure > 0.20;
+        result.miningBounce = activelyPressingContact ? mining.contactBounce : 0.0;
         result.miningInputDrilling = mining.drilling;
         result.miningTargetDrillable = targetDrillable;
         result.miningDrilling = mining.drilling && targetDrillable;

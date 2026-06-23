@@ -678,7 +678,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drone.x + drillDirection.x * droneSize * 0.40F,
         drone.y + drillDirection.y * droneSize * 0.40F
     };
-    const Color heatColor = mix({0.35F, 0.86F, 1.0F, 1.0F}, {1.0F, 0.45F, 0.20F, 1.0F}, static_cast<float>(snapshot.miningHeat));
+    Vec2 particleAnchor = target;
 
     if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable) {
         const float dx = target.x - drillOrigin.x;
@@ -690,33 +690,10 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             drillOrigin.x + drillDirection.x * drillH * 0.5F,
             drillOrigin.y + drillDirection.y * drillH * 0.5F
         };
-        const Vec2 drillRight {-drillDirection.y, drillDirection.x};
-        const Vec2 bitRoot {
-            drillOrigin.x + drillDirection.x * cellSize * 0.12F,
-            drillOrigin.y + drillDirection.y * cellSize * 0.12F
-        };
-        const Vec2 bitTip {
+        particleAnchor = {
             drillOrigin.x + drillDirection.x * drillH,
             drillOrigin.y + drillDirection.y * drillH
         };
-        const float baseHalf = drillW * 0.44F;
-        drawTriangle(
-            bitTip.x + drillDirection.x * cellSize * 0.10F,
-            bitTip.y + drillDirection.y * cellSize * 0.10F,
-            bitRoot.x + drillRight.x * baseHalf,
-            bitRoot.y + drillRight.y * baseHalf,
-            bitRoot.x - drillRight.x * baseHalf,
-            bitRoot.y - drillRight.y * baseHalf,
-            {0.05F, 0.07F, 0.08F, 0.82F});
-        drawTriangle(
-            bitTip.x,
-            bitTip.y,
-            bitRoot.x + drillRight.x * baseHalf * 0.78F,
-            bitRoot.y + drillRight.y * baseHalf * 0.78F,
-            bitRoot.x - drillRight.x * baseHalf * 0.78F,
-            bitRoot.y - drillRight.y * baseHalf * 0.78F,
-            {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.38F : 0.16F});
-        drawLine(bitRoot.x, bitRoot.y, bitTip.x, bitTip.y, {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.36F : 0.12F}, snapshot.miningDrilling ? 1.4F : 0.8F);
         const int drillFrame = snapshot.miningDrilling ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
         drawSpriteRotated(
             bitCenter.x,
@@ -729,12 +706,6 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             DrillBitAsset,
             drillFrame,
             6);
-    } else {
-        const float alpha = snapshot.miningInputDrilling ? 0.36F : 0.18F;
-        drawLine(drillOrigin.x, drillOrigin.y, target.x, target.y, {heatColor.r, heatColor.g, heatColor.b, alpha}, snapshot.miningInputDrilling ? 1.5F : 0.9F);
-        if (snapshot.miningInputDrilling) {
-            drawCircle(target.x, target.y, cellSize * 0.28F, {1.0F, 0.84F, 0.30F, 0.18F}, 18);
-        }
     }
 
     if (textureReady(MiningDroneAsset)) {
@@ -752,8 +723,8 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37, 1.0));
             const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
             const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F)) * std::min(cellW, cellH);
-            const float px = target.x + std::cos(angle) * radius;
-            const float py = target.y + std::sin(angle) * radius;
+            const float px = particleAnchor.x + std::cos(angle) * radius;
+            const float py = particleAnchor.y + std::sin(angle) * radius;
             const Color spark = mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
             appendRect(particleVertices, px, py, cellW * 0.22F, cellH * 0.22F, spark);
         }

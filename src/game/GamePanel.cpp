@@ -190,7 +190,7 @@ std::string researchProjectCard(const ResearchProjectCardPresentation& project)
 std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
 {
     std::ostringstream out;
-    out << "<article class=\"ops-card\">";
+    out << "<article class=\"ops-card surface-action-card\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(action.cost) << "</span><span>"
         << htmlEscape(action.risk) << " " << htmlEscape(action.riskLabel) << "</span></div>";
     out << "<h3>" << htmlEscape(action.title) << "</h3>";
