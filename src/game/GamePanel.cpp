@@ -360,6 +360,19 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     std::ostringstream settingsBody;
     settingsBody << detailStack(settingsDetailsPresentation());
+    settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
+        << "<div><h3>" << htmlEscape("Game speed") << "</h3>"
+        << "<p>" << htmlEscape("Local testing multiplier. Shared builds start at 1x.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Multiplier") << "</span>"
+        << "<select data-game-speed-select aria-label=\"Game speed multiplier\">"
+        << "<option value=\"0.5\">0.5x</option>"
+        << "<option value=\"1\">1x</option>"
+        << "<option value=\"1.5\">1.5x</option>"
+        << "<option value=\"2\">2x</option>"
+        << "<option value=\"3\">3x</option>"
+        << "<option value=\"5\">5x</option>"
+        << "<option value=\"8\">8x</option>"
+        << "</select></label></section>";
     settingsBody << "<div class=\"modal-actions\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         settingsBody << panelButton(action);

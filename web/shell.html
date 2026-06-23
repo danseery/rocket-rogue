@@ -927,6 +927,45 @@
       opacity: 0.82;
     }
 
+    .settings-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+      gap: 12px;
+      align-items: end;
+      margin: 12px 0;
+      padding: 12px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .settings-control h3 {
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .settings-control p {
+      margin-top: 4px;
+    }
+
+    .settings-control label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .settings-control select {
+      min-height: 34px;
+      border: 1px solid rgba(137, 178, 211, 0.26);
+      border-radius: 7px;
+      background: rgba(20, 29, 39, 0.96);
+      color: var(--text);
+      padding: 0 10px;
+      font: inherit;
+    }
+
     .utility-row {
       display: flex;
       gap: 8px;
@@ -1178,6 +1217,50 @@
     const toastRoot = document.getElementById("toast-root");
     let lastToastText = "";
     let lastToastAt = 0;
+    const gameSpeedStorageKey = "rocket_rogue_game_speed";
+    const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
+
+    function normalizedGameSpeed(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return "1";
+      }
+      const exact = gameSpeedOptions.find((candidate) => Number(candidate) === numeric);
+      if (exact) {
+        return exact;
+      }
+      const clamped = Math.min(8, Math.max(0.25, numeric));
+      return String(clamped);
+    }
+
+    function gameSpeedMultiplier() {
+      try {
+        return Number(normalizedGameSpeed(window.localStorage.getItem(gameSpeedStorageKey) || "1"));
+      } catch (error) {
+        return 1;
+      }
+    }
+
+    function setGameSpeedMultiplier(value) {
+      const normalized = normalizedGameSpeed(value);
+      try {
+        if (normalized === "1") {
+          window.localStorage.removeItem(gameSpeedStorageKey);
+        } else {
+          window.localStorage.setItem(gameSpeedStorageKey, normalized);
+        }
+      } catch (error) {
+        return 1;
+      }
+      return Number(normalized);
+    }
+
+    function syncGameSpeedControls(root = document) {
+      const speed = normalizedGameSpeed(String(gameSpeedMultiplier()));
+      root.querySelectorAll("[data-game-speed-select]").forEach((select) => {
+        select.value = gameSpeedOptions.includes(speed) ? speed : "1";
+      });
+    }
 
     function showToast(message) {
       const text = (message || "").trim();
@@ -1207,6 +1290,7 @@
     window.RocketBridge = {
       setPanel(html) {
         panel.innerHTML = html;
+        syncGameSpeedControls(panel);
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
         panel.classList.toggle("phase-board-panel", phaseBoard);
@@ -1222,6 +1306,9 @@
       },
       clearSave() {
         window.localStorage.removeItem("rocket_rogue_save_v1");
+      },
+      gameSpeedMultiplier() {
+        return gameSpeedMultiplier();
       }
     };
 
@@ -1347,6 +1434,7 @@
 
       modalTitle.textContent = template.dataset.title || "Details";
       modalContent.innerHTML = template.innerHTML;
+      syncGameSpeedControls(modalContent);
       modalRoot.hidden = false;
       modalClose.focus();
       return true;
@@ -1439,8 +1527,19 @@
       }
     }
 
+    function handleGameSpeedChange(event) {
+      const select = event.target.closest("[data-game-speed-select]");
+      if (!select || !(panel.contains(select) || modalRoot.contains(select))) {
+        return;
+      }
+      setGameSpeedMultiplier(select.value);
+      syncGameSpeedControls(panel);
+      syncGameSpeedControls(modalRoot);
+    }
+
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
+    document.addEventListener("change", handleGameSpeedChange, true);
     panel.addEventListener("pointerdown", handlePanelAction, true);
     panel.addEventListener("click", handlePanelAction, true);
     panel.addEventListener("keydown", (event) => {

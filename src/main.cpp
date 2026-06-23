@@ -4,6 +4,7 @@
 #include <emscripten.h>
 #endif
 
+#include <algorithm>
 #include <memory>
 
 namespace {
@@ -12,6 +13,18 @@ std::unique_ptr<rocket::RocketGameApp> g_app;
 double g_lastTimeMs = 0.0;
 
 #ifdef __EMSCRIPTEN__
+EM_JS(double, rr_game_speed_multiplier, (), {
+    try {
+        const raw = Number(window.localStorage.getItem("rocket_rogue_game_speed") || "1");
+        if (!Number.isFinite(raw)) {
+            return 1.0;
+        }
+        return Math.min(8.0, Math.max(0.25, raw));
+    } catch (error) {
+        return 1.0;
+    }
+});
+
 void mainLoop()
 {
     const double now = emscripten_get_now();
@@ -19,7 +32,14 @@ void mainLoop()
     g_lastTimeMs = now;
 
     if (g_app) {
-        g_app->tick(delta);
+        double remaining = std::clamp(delta, 0.0, 0.25) * rr_game_speed_multiplier();
+        int steps = 0;
+        while (remaining > 0.0 && steps < 24) {
+            const double step = std::min(remaining, 1.0 / 30.0);
+            g_app->tick(step);
+            remaining -= step;
+            ++steps;
+        }
         g_app->render();
     }
 }
