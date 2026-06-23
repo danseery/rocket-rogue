@@ -21,6 +21,7 @@ inline std::vector<DetailPresentationRow> crewDetailsPresentation(const GameStat
     if (astronaut != nullptr) {
         const int stressSteps = crewStressStepCount(astronaut->stress);
         rows.push_back(detailPresentationRow(text::panel::details::active, astronaut->name));
+        rows.push_back(detailPresentationRow(text::panel::details::crewClass, astronaut->background));
         rows.push_back(detailPresentationRow(text::panel::details::trait, astronaut->trait));
         rows.push_back(detailPresentationRow(text::panel::details::training, display::trainingWithEffective(astronaut->training, effectiveTrainingLevel(*astronaut))));
         rows.push_back(detailPresentationRow(text::panel::details::stress, display::stressWithSteps(astronaut->stress, stressSteps)));

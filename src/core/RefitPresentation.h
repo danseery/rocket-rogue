@@ -84,7 +84,7 @@ inline std::string slotClass(SlotType slot)
     return "module";
 }
 
-inline std::array<ModuleStatDisplay, 10> moduleStatDisplays(const ModuleStats& stats)
+inline std::array<ModuleStatDisplay, 16> moduleStatDisplays(const ModuleStats& stats)
 {
     return {{
         {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail},
@@ -96,12 +96,37 @@ inline std::array<ModuleStatDisplay, 10> moduleStatDisplays(const ModuleStats& s
         {stats.pressure, text::moduleStats::pressureControl, text::moduleStats::pressureChip, text::moduleStats::pressureControl},
         {stats.volatility, text::moduleStats::volatility, text::moduleStats::volatilityChip, text::moduleStats::volatility, false},
         {stats.payout, text::moduleStats::dataPayout, text::moduleStats::payoutChip, text::moduleStats::dataPayout, false},
-        {stats.repair, text::moduleStats::repairCost, text::moduleStats::repairChip, text::moduleStats::repairCost, false}
+        {stats.repair, text::moduleStats::repairCost, text::moduleStats::repairChip, text::moduleStats::repairCost, false},
+        {stats.miningPower, text::moduleStats::miningPower, text::moduleStats::miningPowerChip, text::moduleStats::miningPower},
+        {stats.miningYield, text::moduleStats::miningYield, text::moduleStats::miningYieldChip, text::moduleStats::miningYield},
+        {stats.miningCooling, text::moduleStats::miningCooling, text::moduleStats::miningCoolingChip, text::moduleStats::miningCooling},
+        {stats.miningDurability, text::moduleStats::miningDurability, text::moduleStats::miningDurabilityChip, text::moduleStats::miningDurability},
+        {stats.miningWidth, text::moduleStats::miningWidth, text::moduleStats::miningWidthChip, text::moduleStats::miningWidth},
+        {stats.miningDepth, text::moduleStats::miningDepth, text::moduleStats::miningDepthChip, text::moduleStats::miningDepth}
     }};
 }
 
 inline std::string moduleThreat(const ShipModule& module)
 {
+    if (module.stats.miningPower > 0.0) {
+        return std::string(text::moduleThreats::cutsTougherRock);
+    }
+    if (module.stats.miningYield > 0.0) {
+        return std::string(text::moduleThreats::recoversMoreOre);
+    }
+    if (module.stats.miningCooling > 0.0) {
+        return std::string(text::moduleThreats::keepsDrillCool);
+    }
+    if (module.stats.miningDurability > 0.0) {
+        return std::string(text::moduleThreats::protectsDrillHead);
+    }
+    if (module.stats.miningWidth > 0.0) {
+        return std::string(text::moduleThreats::expandsSurveyGrid);
+    }
+    if (module.stats.miningDepth > 0.0) {
+        return std::string(text::moduleThreats::opensDeeperShaft);
+    }
+
     switch (module.slot) {
     case SlotType::Engine:
         return std::string(module.stats.thrust >= 0.0 ? text::moduleThreats::shortensExposure : text::moduleThreats::reducesEngineLoad);

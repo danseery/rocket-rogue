@@ -141,7 +141,7 @@
     }
 
     .actions.primary-actions {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .actions.system-actions {
@@ -151,6 +151,7 @@
 
     button {
       min-height: 38px;
+      min-width: 0;
       border: 1px solid rgba(137, 178, 211, 0.25);
       border-radius: 6px;
       background: rgba(103, 210, 255, 0.12);
@@ -158,6 +159,9 @@
       font: inherit;
       font-size: 13px;
       cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     button:hover {
@@ -255,6 +259,14 @@
     .status {
       margin-top: 12px;
       color: var(--warn);
+      min-height: 19px;
+    }
+
+    .telemetry-status {
+      display: flex;
+      align-items: flex-start;
+      min-height: 42px;
+      margin-bottom: 0;
     }
 
     .tag-row {
@@ -626,6 +638,15 @@
       justify-content: end;
       border-top: 1px solid rgba(137, 178, 211, 0.14);
       padding-top: 14px;
+    }
+
+    .phase-board-mining .mining-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .phase-board-mining .actions {
+      grid-template-columns: 1fr;
+      justify-content: stretch;
     }
 
     .phase-board-surface {
@@ -1037,6 +1058,12 @@
       mineSurface: () => rrCall("rr_mine_surface"),
       pushSurface: () => rrCall("rr_push_surface"),
       extractSurface: () => rrCall("rr_extract_surface"),
+      miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
+      miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
+      miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
+      miningScanner: () => rrCall("rr_mining_scanner"),
+      miningStow: () => rrCall("rr_mining_stow"),
+      miningAbort: () => rrCall("rr_mining_abort"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
       trainCrew: () => rrCall("rr_train_crew"),
@@ -1070,6 +1097,9 @@
       mineSurface: "mine_surface",
       pushSurface: "push_surface",
       extractSurface: "extract_surface",
+      miningScanner: "mining_scanner",
+      miningStow: "mining_stow",
+      miningAbort: "mining_abort",
       repairShip: "repair_ship",
       recruitCrew: "recruit_crew",
       trainCrew: "train_crew",
@@ -1097,6 +1127,9 @@
       [rrActionIds.mineSurface]: () => rr.mineSurface(),
       [rrActionIds.pushSurface]: () => rr.pushSurface(),
       [rrActionIds.extractSurface]: () => rr.extractSurface(),
+      [rrActionIds.miningScanner]: () => rr.miningScanner(),
+      [rrActionIds.miningStow]: () => rr.miningStow(),
+      [rrActionIds.miningAbort]: () => rr.miningAbort(),
       [rrActionIds.repairShip]: () => rr.repairShip(),
       [rrActionIds.recruitCrew]: () => rr.recruitCrew(),
       [rrActionIds.trainCrew]: () => rr.trainCrew(),
@@ -1219,9 +1252,113 @@
       handlePanelAction(event);
     }, true);
 
+    const miningKeys = new Set();
+    let miningPointerDown = false;
+
+    function isMiningActive() {
+      return Boolean(panel.querySelector(".phase-board-mining"));
+    }
+
+    function updateMiningMove() {
+      const left = miningKeys.has("a") || miningKeys.has("arrowleft");
+      const right = miningKeys.has("d") || miningKeys.has("arrowright");
+      const up = miningKeys.has("w") || miningKeys.has("arrowup");
+      const down = miningKeys.has("s") || miningKeys.has("arrowdown");
+      rr.miningMove((right ? 1 : 0) - (left ? 1 : 0), (down ? 1 : 0) - (up ? 1 : 0));
+    }
+
+    function updateMiningAimFromPointer(event) {
+      const rect = canvas.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      const sceneLeft = Math.min(rect.right, Math.max(rect.left, panelRect.right));
+      const sceneWidth = Math.max(1, rect.right - sceneLeft);
+      if (sceneWidth <= 0 || rect.height <= 0) {
+        return;
+      }
+      rr.miningAim((event.clientX - sceneLeft) / sceneWidth, (event.clientY - rect.top) / rect.height);
+    }
+
+    function handleMiningKeyDown(event) {
+      if (!isMiningActive() || event.ctrlKey || event.metaKey || event.altKey) {
+        return false;
+      }
+      const key = event.key.toLowerCase();
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) {
+        miningKeys.add(key);
+        updateMiningMove();
+        event.preventDefault();
+        return true;
+      }
+      if (key === " ") {
+        rr.miningDrill(true);
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && key === "e") {
+        rr.miningScanner();
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && key === "r") {
+        rr.miningStow();
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && key === "escape") {
+        rr.miningAbort();
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    function handleMiningKeyUp(event) {
+      const key = event.key.toLowerCase();
+      if (miningKeys.delete(key)) {
+        updateMiningMove();
+        event.preventDefault();
+        return;
+      }
+      if (key === " ") {
+        rr.miningDrill(false);
+        event.preventDefault();
+      }
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      if (!isMiningActive()) {
+        return;
+      }
+      miningPointerDown = true;
+      canvas.setPointerCapture?.(event.pointerId);
+      updateMiningAimFromPointer(event);
+      rr.miningDrill(true);
+      event.preventDefault();
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      if (!isMiningActive()) {
+        return;
+      }
+      updateMiningAimFromPointer(event);
+    });
+
+    canvas.addEventListener("pointerup", (event) => {
+      if (!miningPointerDown) {
+        return;
+      }
+      miningPointerDown = false;
+      rr.miningDrill(false);
+      canvas.releasePointerCapture?.(event.pointerId);
+      event.preventDefault();
+    });
+
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !modalRoot.hidden) {
         closePanelModal();
+        return;
+      }
+      if (handleMiningKeyDown(event)) {
         return;
       }
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
@@ -1233,6 +1370,8 @@
         rr.ejectNow();
       }
     });
+
+    window.addEventListener("keyup", handleMiningKeyUp);
 
     var Module = {
       canvas,

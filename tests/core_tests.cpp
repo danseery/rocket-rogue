@@ -11,6 +11,7 @@
 #include "core/LaunchReadinessPresentation.h"
 #include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
+#include "core/MiningSystem.h"
 #include "core/OutcomePresentation.h"
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
@@ -47,6 +48,14 @@ void require(bool condition, const char* message)
 const HangarOperationCardPresentation* findHangarOperationCard(const std::vector<HangarOperationCardPresentation>& cards, std::string_view title);
 const DetailPresentationRow* findDetailPresentationRow(const std::vector<DetailPresentationRow>& rows, std::string_view label);
 bool hasDetailPresentationHeader(const std::vector<DetailPresentationRow>& rows, std::string_view label);
+bool hasRefitChip(const RefitPresentation& presentation, std::string_view label, std::string_view value, bool positive);
+
+void activateOnlyCrew(GameState& state, std::string_view id)
+{
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = astronaut.id == id ? CrewStatus::Active : CrewStatus::Dead;
+    }
+}
 
 GameState configuredState(const ContentCatalog& catalog, int destinationIndex, double targetMultiplier)
 {
@@ -316,7 +325,7 @@ void shipTravelIsFasterWithoutRetuningTelemetry()
 
     const double boostedDelta = burnMultiplierDelta(launch, destination, elapsed, delta);
     const double unscaledDelta = unscaledBurnMultiplierDelta(launch, destination, elapsed, delta);
-    require(std::abs(boostedDelta - unscaledDelta * tuning::launch::travelSpeedMultiplier) < 0.000001, "ship travel should apply the tuned travel speed multiplier");
+    require(std::abs(boostedDelta - unscaledDelta * tuning::launch::baseTravelSpeedMultiplier) < 0.000001, "ship travel should apply the tuned base travel speed multiplier");
 
     const double burn = 1.0 + (destination.targetMultiplier - 1.0) * 0.88;
     const TelemetryEvent telemetry = telemetryAt(launch, burn);
@@ -1244,6 +1253,33 @@ void surfaceToolResearchImprovesExpeditions()
     require(!presentation.actions.empty() && presentation.actions.front().risk.find("%") != std::string::npos, "surface presentation should expose action hazard risk");
 }
 
+void animalCrewClassesModifySurfaceExpeditions()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState prairieDog = createNewGame(catalog, 638);
+    activateOnlyCrew(prairieDog, content::astronaut::eli);
+    const SurfaceCrewEffects prairieDogEffects = surfaceCrewEffects(prairieDog);
+    require(prairieDogEffects.surveyCommonBonus > 0, "prairie dog scouts should improve surface surveying");
+    require(prairieDogEffects.artifactChanceBonus > 0.0, "prairie dog scouts should improve anomaly reads");
+
+    GameState squirrel = createNewGame(catalog, 639);
+    activateOnlyCrew(squirrel, content::astronaut::jo);
+    const SurfaceCrewEffects squirrelEffects = surfaceCrewEffects(squirrel);
+    require(squirrelEffects.mineRareChanceBonus > 0.0, "squirrel hoarders should improve rare material odds");
+
+    GameState fox = createNewGame(catalog, 640);
+    activateOnlyCrew(fox, content::astronaut::nia);
+    const SurfaceCrewEffects foxEffects = surfaceCrewEffects(fox);
+    require(foxEffects.extractionRiskRelief > 0.0, "fox aces should improve extraction routing");
+
+    GameState capybara = createNewGame(catalog, 641);
+    capybara.run.destinationIndex = 2;
+    startSurfaceExpedition(capybara, catalog);
+    const SurfaceExpeditionPresentation presentation = surfaceExpeditionPresentation(capybara);
+    require(findDetailPresentationRow(presentation.details, text::panel::details::fieldSpecialist) != nullptr, "surface details should show the active animal class effect");
+}
+
 void surfaceSiteProfilesChangeExpeditionRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1515,6 +1551,213 @@ void surfaceMissionLogIsBounded()
     require(static_cast<int>(state.run.surfaceExpedition.logEntries.size()) == tuning::research::surfaceLogEntryLimit, "surface mission log should keep only recent entries");
 }
 
+void miningTerrainIsDeterministicAndDepthScales()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91919);
+    const Destination& mars = catalog.destinations[2];
+    const MiningTerrain a = generateMiningTerrain(state, mars, SurfaceSiteProfile::OreShelf, 1);
+    const MiningTerrain b = generateMiningTerrain(state, mars, SurfaceSiteProfile::OreShelf, 1);
+    require(a.width == tuning::mining::terrainWidth && a.height == tuning::mining::terrainHeight, "mining terrain should use the active-zone dimensions");
+    require(a.cells.size() == b.cells.size(), "matching mining terrain should have matching cell counts");
+    for (std::size_t i = 0; i < a.cells.size(); ++i) {
+        require(a.cells[i].material == b.cells[i].material, "mining terrain generation should be deterministic");
+        require(std::abs(a.cells[i].maxToughness - b.cells[i].maxToughness) < 0.000001, "mining toughness should be deterministic");
+    }
+    require(
+        miningMaterialToughness(MiningCellMaterial::CommonOre, 2) > miningMaterialToughness(MiningCellMaterial::CommonOre, 0),
+        "deeper mining zones should increase terrain toughness");
+}
+
+void miningDrillBreaksCellsAndMarksChunks()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92929);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    const int supplyBefore = state.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome started = startMiningRun(state, catalog);
+    require(started.applied, "mining should start when supply is available");
+    require(state.screen == Screen::Mining, "starting mining should move to the mining screen");
+    require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::mineSupplyCost, "starting mining should spend the mine supply cost");
+
+    MiningRunState& mining = state.run.mining;
+    MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
+    require(ore != nullptr, "test ore cell should exist");
+    *ore = {MiningCellMaterial::CommonOre, 0.25, 0.25, true, false};
+    std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 0);
+    mining.droneX = 32.0;
+    mining.droneY = 4.0;
+    setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+    setMiningDrilling(state, true);
+    for (int i = 0; i < 8; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+
+    require(ore->material == MiningCellMaterial::Empty, "drilling should break depleted terrain cells");
+    require(state.run.mining.temporaryMaterials.common > 0, "breaking common ore should add common material");
+    require(state.run.mining.cargo > 0, "breaking ore should add cargo");
+    require(
+        std::any_of(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), [](std::uint8_t value) { return value != 0; }),
+        "drilling should mark the changed chunk dirty");
+}
+
+void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92931);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog).applied, "mining should start for movement feel test");
+
+    MiningRunState& mining = state.run.mining;
+    mining.droneX = 32.85;
+    mining.droneY = 10.0;
+    MiningCell* soft = miningCellAt(mining.terrain, 33, 10);
+    require(soft != nullptr, "soft contact cell should exist");
+    *soft = {MiningCellMaterial::Regolith, 3.0, 3.0, false, false};
+    setMiningMove(state, 1.0, 0.0);
+    setMiningDrilling(state, true);
+    updateMiningRun(state, catalog, 0.08);
+
+    require(mining.droneX > 32.85, "drilling into regolith should let the drone grind forward slowly");
+    require(mining.contactIntensity > 0.0, "soft contact should set mining feedback intensity");
+    require(soft->remainingToughness < soft->maxToughness, "pushing into regolith while drilling should do terrain work");
+
+    mining.droneX = 32.85;
+    mining.droneY = 12.0;
+    MiningCell* hard = miningCellAt(mining.terrain, 33, 12);
+    require(hard != nullptr, "hard contact cell should exist");
+    *hard = {MiningCellMaterial::HardRock, 8.0, 8.0, false, false};
+    mining.contactIntensity = 0.0;
+    setMiningMove(state, 1.0, 0.0);
+    setMiningDrilling(state, true);
+    updateMiningRun(state, catalog, 0.08);
+
+    require(mining.droneX <= 32.90, "hard rock should resist forward movement before it breaks");
+    require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
+    require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
+    require(mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0, "hard contact should trigger a damped bounce impulse");
+    require(hard->remainingToughness < hard->maxToughness, "hard contact should still drill the terrain");
+}
+
+void miningDrillTargetsFirstSolidCellOnRay()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92930);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog).applied, "mining should start for targeting test");
+
+    MiningRunState& mining = state.run.mining;
+    mining.droneX = 32.9;
+    mining.droneY = 10.0;
+    MiningCell* nearOre = miningCellAt(mining.terrain, 33, 10);
+    MiningCell* farOre = miningCellAt(mining.terrain, 34, 10);
+    require(nearOre != nullptr && farOre != nullptr, "targeting test cells should exist");
+    *nearOre = {MiningCellMaterial::CommonOre, 1.0, 1.0, true, false};
+    *farOre = {MiningCellMaterial::RareOre, 1.0, 1.0, true, false};
+
+    setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+
+    require(mining.targetCellX == 33 && mining.targetCellY == 10, "drill targeting should stop at the first solid cell on the ray");
+    require(mining.targetTipX < 34.0, "drill visual tip should stop before the far cell when terrain blocks the ray");
+}
+
+void miningCompletionFeedsSurfacePayload()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 93939);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog).applied, "mining should start for completion test");
+    state.run.mining.temporaryMaterials.common = 2;
+    state.run.mining.temporaryMaterials.rare = 1;
+    state.run.mining.cargo = 4;
+    state.run.mining.hazardDelta = 0.05;
+
+    const SurfaceActionOutcome finished = finishMiningRun(state, catalog, false);
+    require(finished.applied, "finishing mining should produce a surface action outcome");
+    require(state.screen == Screen::SurfaceExpedition, "finishing mining should return to surface expedition");
+    require(!state.run.mining.active, "finishing mining should clear the active mining run");
+    require(state.run.surfaceExpedition.temporaryMaterials.common == 2, "mined common material should move to surface payload");
+    require(state.run.surfaceExpedition.temporaryMaterials.rare == 1, "mined rare material should move to surface payload");
+    require(state.run.surfaceExpedition.cargo == 4, "mined cargo should move to surface payload");
+    require(state.run.surfaceExpedition.hazard > tuning::research::baseHazard, "mining hazard should affect extraction pressure");
+}
+
+void miningRefitModulesImproveDrillProfileIncrementally()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 96969);
+    GameState upgraded = createNewGame(catalog, 96969);
+    upgraded.meta.unlockKeys.push_back(content::unlock::surfaceProbes);
+    upgraded.meta.unlockKeys.push_back(content::unlock::surfaceDrills);
+    upgraded.meta.unlockKeys.push_back(content::unlock::cargoRigs);
+    upgraded.run.equippedModuleIds = {
+        content::module::surfaceMapper,
+        content::module::regolithAuger,
+        content::module::oreSorter,
+        content::module::coolantSleeve,
+        content::module::diamondBearings,
+        content::module::deepBoreFrame
+    };
+
+    const MiningDrillStats baseStats = miningDrillStats(baseline, catalog);
+    const MiningDrillStats upgradedStats = miningDrillStats(upgraded, catalog);
+    require(upgradedStats.power > baseStats.power, "mining drill modules should improve terrain break speed");
+    require(upgradedStats.oreYieldChance > baseStats.oreYieldChance, "mining yield modules should add bonus ore chance");
+    require(upgradedStats.heatRiseScale < baseStats.heatRiseScale, "mining cooling modules should reduce heat rise");
+    require(upgradedStats.heatCoolingPerSecond > baseStats.heatCoolingPerSecond, "mining cooling modules should improve heat recovery");
+    require(upgradedStats.integrityRelief > baseStats.integrityRelief, "durability modules should protect the mining drill");
+    require(upgradedStats.terrainWidth > baseStats.terrainWidth, "survey modules should widen the mining terrain");
+    require(upgradedStats.terrainHeight > baseStats.terrainHeight, "deep-bore modules should deepen the mining terrain");
+
+    upgraded.run.destinationIndex = 2;
+    startSurfaceExpedition(upgraded, catalog);
+    require(startMiningRun(upgraded, catalog).applied, "upgraded mining state should start mining");
+    require(upgraded.run.mining.terrain.width == upgradedStats.terrainWidth, "mining terrain should use upgraded width");
+    require(upgraded.run.mining.terrain.height == upgradedStats.terrainHeight, "mining terrain should use upgraded depth");
+
+    const ShipModule* mapper = catalog.findModule(content::module::surfaceMapper);
+    require(mapper != nullptr, "surface mapper module should exist");
+    const RefitPresentation mapperCard = moduleRefitPresentation(*mapper);
+    require(hasRefitChip(mapperCard, text::moduleStats::miningWidthChip, "+1.0", true), "mining refit cards should expose mining stat chips");
+}
+
+void activeMiningRoundTripsThroughSave()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94949);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog).applied, "mining should start before save");
+    state.statusLine = std::string(text::status::miningStarted);
+    state.run.mining.droneX = 21.5;
+    state.run.mining.droneY = 9.25;
+    state.run.mining.temporaryMaterials.exotic = 1;
+    if (MiningCell* cell = miningCellAt(state.run.mining.terrain, 20, 10)) {
+        cell->material = MiningCellMaterial::RareOre;
+        cell->maxToughness = 7.0;
+        cell->remainingToughness = 3.5;
+        cell->revealed = true;
+    }
+
+    const std::string serialized = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(serialized);
+    require(save.has_value(), "active mining save should parse");
+
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.screen == Screen::Mining, "active mining screen should round trip");
+    require(restored.run.mining.active, "active mining state should round trip");
+    require(std::abs(restored.run.mining.droneX - 21.5) < 0.000001, "mining drone x should round trip");
+    require(restored.run.mining.temporaryMaterials.exotic == 1, "mining temporary materials should round trip");
+    const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
+    require(restoredCell != nullptr && restoredCell->material == MiningCellMaterial::RareOre, "mining terrain material should round trip");
+    require(restoredCell != nullptr && std::abs(restoredCell->remainingToughness - 3.5) < 0.000001, "mining terrain toughness should round trip");
+}
+
 void surfaceActionSummaryShowsResourceDeltas()
 {
     SurfaceActionOutcome outcome;
@@ -1744,8 +1987,8 @@ void surfacePresentationComesFromSharedHelper()
     GameState risky = state;
     risky.run.surfaceExpedition.active = true;
     risky.run.surfaceExpedition.supply = 1;
-    risky.run.surfaceExpedition.cargo = 12;
-    risky.run.surfaceExpedition.hazard = 0.45;
+    risky.run.surfaceExpedition.cargo = 16;
+    risky.run.surfaceExpedition.hazard = 0.55;
     const SurfaceExpeditionPresentation riskySurface = surfaceExpeditionPresentation(risky);
     require(riskySurface.postureTitle == std::string(text::panel::messages::surfacePostureGreedy), "high extraction risk should call out greed pressure");
     require(riskySurface.postureClass == "danger", "greed posture should use danger styling");
@@ -2174,11 +2417,13 @@ void crewDetailsPresentationComesFromSharedHelper()
 
     const std::vector<DetailPresentationRow> rows = crewDetailsPresentation(state, catalog);
     const DetailPresentationRow* active = findDetailPresentationRow(rows, text::panel::details::active);
+    const DetailPresentationRow* crewClass = findDetailPresentationRow(rows, text::panel::details::crewClass);
     const DetailPresentationRow* training = findDetailPresentationRow(rows, text::panel::details::training);
     const DetailPresentationRow* stress = findDetailPresentationRow(rows, text::panel::details::stress);
     const DetailPresentationRow* simulatorStress = findDetailPresentationRow(rows, text::panel::details::simulatorStress);
 
     require(active != nullptr && active->value == pilot->name, "crew presentation should expose active astronaut name");
+    require(crewClass != nullptr && crewClass->value == pilot->background, "crew presentation should expose the animal class");
     require(training != nullptr && training->value == display::trainingWithEffective(pilot->training, effectiveTrainingLevel(*pilot)), "crew presentation should share training display format");
     require(stress != nullptr && stress->value == display::stressWithSteps(pilot->stress, crewStressStepCount(pilot->stress)), "crew presentation should share stress display format");
     require(hasDetailPresentationHeader(rows, text::panel::details::crewFacilities), "crew presentation should include crew facilities section");
@@ -2343,12 +2588,13 @@ void launchPanelPresentationComesFromSharedHelper()
 
     const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
     const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
+    const FlightActionButtonPresentation* arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
     const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
     const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
     const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
     require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
     require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
-    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "Earth Orbit proving flights should not expose arrival ops");
+    require(arrivalOps != nullptr && !arrivalOps->enabled, "Earth Orbit proving flights should reserve disabled arrival ops");
     require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "launch presentation should expose cut-engines action");
     require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "launch presentation should expose relief-valve action");
     require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "launch presentation should expose jettison-cargo action");
@@ -2405,7 +2651,7 @@ void launchPanelPresentationComesFromSharedHelper()
         returnDuration,
         {},
         false);
-    const FlightActionButtonPresentation* arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
+    arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
     require(arrivalOps != nullptr && arrivalOps->enabled && arrivalOps->actionId == ui::actions::arrivalOps, "Mars proving flights should expose arrival ops after the data goal");
 }
 
@@ -2726,7 +2972,9 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(catalog.findModule(content::module::radiatorVanes) != nullptr, "cooling module id should resolve");
     require(catalog.findCrewUpgrade(content::crewUpgrade::analogSimBay) != nullptr, "crew upgrade id should resolve");
     require(catalog.findFrame(content::frame::pathfinder) != nullptr, "ship frame id should resolve");
-    require(catalog.findAstronaut(content::astronaut::ava) != nullptr, "astronaut id should resolve");
+    const Astronaut* startingCrew = catalog.findAstronaut(content::astronaut::ava);
+    require(startingCrew != nullptr, "astronaut id should resolve");
+    require(startingCrew->background.find("Capybara") != std::string::npos, "starter roster should use animal class themes");
     require(catalog.findDestination(content::destination::moon) != nullptr, "destination id should resolve");
     require(catalog.findResearchProject(content::research::blueprintSurvey) != nullptr, "research project id should resolve");
     require(catalog.findResearchProject(content::research::fieldProbeNetwork) != nullptr, "field probe research id should resolve");
@@ -2803,6 +3051,7 @@ int main()
     artifactResearchIdentifiesRecoveredArtifacts();
     researchOutcomeSummaryShowsRewardsAndCosts();
     surfaceToolResearchImprovesExpeditions();
+    animalCrewClassesModifySurfaceExpeditions();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();
     surfaceEventsCreateSmallRunVariation();
@@ -2810,6 +3059,13 @@ int main()
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
     surfaceMissionLogIsBounded();
+    miningTerrainIsDeterministicAndDepthScales();
+    miningDrillBreaksCellsAndMarksChunks();
+    miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
+    miningDrillTargetsFirstSolidCellOnRay();
+    miningCompletionFeedsSurfacePayload();
+    miningRefitModulesImproveDrillProfileIncrementally();
+    activeMiningRoundTripsThroughSave();
     surfaceActionSummaryShowsResourceDeltas();
     roughSurfaceExtractionReportsLostPayload();
     researchPresentationComesFromSharedHelper();

@@ -3,6 +3,7 @@
 #include "core/FlightProgress.h"
 #include "core/GameText.h"
 #include "core/LaunchStatus.h"
+#include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
@@ -149,6 +150,14 @@ void RocketGameApp::tick(double deltaSeconds)
             }
         }
 
+        panelDirty_ = true;
+    } else if (state_.screen == Screen::Mining) {
+        const bool wasActive = state_.run.mining.active;
+        updateMiningRun(state_, catalog_, deltaSeconds);
+        if (wasActive && !state_.run.mining.active) {
+            state_.statusLine = std::string(text::status::miningAborted);
+            save();
+        }
         panelDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
@@ -456,8 +465,8 @@ void RocketGameApp::mineSurface()
         return;
     }
 
-    const SurfaceActionOutcome outcome = mineSurfaceDeposit(state_, rng_);
-    state_.statusLine = surfaceActionSummary(outcome);
+    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
+    state_.statusLine = outcome.applied ? std::string(text::status::miningStarted) : surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
 }
@@ -489,6 +498,56 @@ void RocketGameApp::extractSurface()
     state_.statusLine = surfaceActionSummary(outcome);
     generateModuleOffers(state_, catalog_, rng_);
     state_.screen = Screen::Upgrade;
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningMove(double xAxis, double yAxis)
+{
+    setMiningMove(state_, xAxis, yAxis);
+}
+
+void RocketGameApp::miningAim(double normalizedX, double normalizedY)
+{
+    setMiningAim(state_, normalizedX, normalizedY);
+}
+
+void RocketGameApp::miningDrill(bool active)
+{
+    setMiningDrilling(state_, active);
+}
+
+void RocketGameApp::miningScanner()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+
+    pulseMiningScanner(state_, catalog_);
+    state_.statusLine = "Scanner pulse widened the terrain readout.";
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningStow()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
+    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningStowed);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningAbort()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
+    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
 }
@@ -660,7 +719,9 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.screen = state_.screen;
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
     result.currentMultiplier = session_.currentMultiplier;
-    result.animationTime = state_.screen == Screen::Launch ? session_.elapsed : session_.result.elapsed;
+    result.animationTime = state_.screen == Screen::Launch
+        ? session_.elapsed
+        : (state_.screen == Screen::Mining ? state_.run.mining.elapsedSeconds : session_.result.elapsed);
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
     if (state_.screen == Screen::Launch) {
@@ -690,6 +751,48 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
     result.currentFrontierTier = currentFrontier.tier;
+
+    if (state_.screen == Screen::Mining && state_.run.mining.active) {
+        const MiningRunState& mining = state_.run.mining;
+        result.miningWidth = mining.terrain.width;
+        result.miningHeight = mining.terrain.height;
+        result.miningDroneX = mining.droneX;
+        result.miningDroneY = mining.droneY;
+        result.miningTargetX = mining.targetTipX;
+        result.miningTargetY = mining.targetTipY;
+        result.miningDrillDirX = mining.aimDirX;
+        result.miningDrillDirY = mining.aimDirY;
+        result.miningHeat = mining.drillHeat;
+        result.miningContactIntensity = mining.contactIntensity;
+        result.miningScannerPulse = mining.scannerPulseSeconds;
+        result.miningRecoilX = mining.recoilX;
+        result.miningRecoilY = mining.recoilY;
+        result.miningBounce = mining.contactBounce;
+        const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
+        const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
+        result.miningInputDrilling = mining.drilling;
+        result.miningTargetDrillable = targetDrillable;
+        result.miningDrilling = mining.drilling && targetDrillable;
+        result.miningCells.reserve(mining.terrain.cells.size());
+        for (int y = 0; y < mining.terrain.height; ++y) {
+            for (int x = 0; x < mining.terrain.width; ++x) {
+                const std::size_t index = static_cast<std::size_t>(y * mining.terrain.width + x);
+                if (index >= mining.terrain.cells.size()) {
+                    continue;
+                }
+                const MiningCell& cell = mining.terrain.cells[index];
+                const double integrity = cell.maxToughness <= 0.0 ? 1.0 : std::clamp(cell.remainingToughness / cell.maxToughness, 0.0, 1.0);
+                result.miningCells.push_back({
+                    x,
+                    y,
+                    static_cast<int>(cell.material),
+                    integrity,
+                    cell.revealed,
+                    cell.hazard
+                });
+            }
+        }
+    }
 
     if (state_.screen == Screen::Launch) {
         const double displayedMultiplier = liveBurnMultiplier();

@@ -37,6 +37,12 @@ public:
     void mineSurface();
     void pushSurface();
     void extractSurface();
+    void miningMove(double xAxis, double yAxis);
+    void miningAim(double normalizedX, double normalizedY);
+    void miningDrill(bool active);
+    void miningScanner();
+    void miningStow();
+    void miningAbort();
     void repairShip();
     void recruitCrew();
     void trainCrew();

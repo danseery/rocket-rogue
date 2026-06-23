@@ -327,21 +327,21 @@ inline double projectedSurfaceExtractionRiskDelta(const GameState& state, const 
     return surfaceExtractionRisk(projected) - surfaceExtractionRisk(state);
 }
 
-inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceSiteProfileEffects& site)
+inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     SurfaceExpeditionState projected = expedition;
     projected.supply = std::max(0, projected.supply - tuning::research::surveySupplyCost);
-    const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + site.surveyCommonBonus};
+    const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
     projected.temporaryMaterials.common += gain.common;
     projected.cargo += std::max(0, gain.common);
     return projected;
 }
 
-inline SurfaceExpeditionState projectedMineExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceSiteProfileEffects& site)
+inline SurfaceExpeditionState projectedMineExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     SurfaceExpeditionState projected = expedition;
     projected.supply = std::max(0, projected.supply - tuning::research::mineSupplyCost);
-    const MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + site.mineCommonBonus};
+    const MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus};
     projected.temporaryMaterials.common += gain.common;
     projected.cargo += std::max(0, gain.common);
     return projected;
@@ -356,28 +356,28 @@ inline SurfaceExpeditionState projectedPushExpedition(const SurfaceExpeditionSta
     return projected;
 }
 
-inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceSiteProfileEffects& site)
+inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     std::vector<PanelMetricPresentation> chips;
-    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + site.surveyCommonBonus);
-    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedSurveyExpedition(state.run.surfaceExpedition, tools, site)));
+    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
+    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedSurveyExpedition(state.run.surfaceExpedition, tools, crew, site)));
     return chips;
 }
 
-inline std::vector<PanelMetricPresentation> minePayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceSiteProfileEffects& site)
+inline std::vector<PanelMetricPresentation> minePayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     std::vector<PanelMetricPresentation> chips;
-    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::mineCommonGain + tools.mineCommonBonus + site.mineCommonBonus);
-    addPercentChip(chips, text::labels::rareMaterials, std::min(1.0, tools.mineRareChanceBonus + site.mineRareChanceBonus));
-    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedMineExpedition(state.run.surfaceExpedition, tools, site)));
+    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus);
+    addPercentChip(chips, text::labels::rareMaterials, std::min(1.0, tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus));
+    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedMineExpedition(state.run.surfaceExpedition, tools, crew, site)));
     return chips;
 }
 
-inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& state, const SurfaceSiteProfileEffects& site)
+inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& state, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     std::vector<PanelMetricPresentation> chips;
     chips.push_back(panelMetric(text::labels::depth, "+1"));
-    addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + site.artifactChanceBonus));
+    addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus));
     chips.push_back(panelMetric(text::labels::hazard, display::signedPercent(tuning::research::hazardPerDepth)));
     addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedPushExpedition(state.run.surfaceExpedition)));
     return chips;
@@ -466,12 +466,14 @@ inline std::string surfaceFieldKitSummary(const MetaProgress& meta)
 inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     const SurfaceExpeditionState& expedition,
     const MetaProgress& meta,
+    const SurfaceCrewEffects& crew,
     double extractionRisk)
 {
     const SurfaceToolEffects tools = surfaceToolEffects(meta);
     std::vector<DetailPresentationRow> rows {
         detailPresentationRow(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
         detailPresentationRow(text::labels::fieldKit, surfaceFieldKitSummary(meta)),
+        detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
@@ -495,13 +497,14 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
 {
     const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const double extractionRisk = surfaceExtractionRisk(state);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
-    presentation.details = surfaceDetailsPresentation(expedition, state.meta, extractionRisk);
+    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, extractionRisk);
     presentation.logEntries = expedition.logEntries;
     presentation.metrics = {
         panelMetric(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
@@ -525,27 +528,27 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
             std::string(text::panel::messages::surfaceSurveyDetail),
             expedition.supply,
             tuning::research::surveySupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0),
+            surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief),
             std::string(text::labels::hazard),
-            surveyPayoffChips(state, tools, site),
+            surveyPayoffChips(state, tools, crew, site),
             surfaceActionButton(text::buttons::surveySite, ui::actions::surveySurface, expedition.supply, tuning::research::surveySupplyCost)),
         surfaceActionPreview(
             text::buttons::mineDeposit,
             std::string(text::panel::messages::surfaceMineDetail),
             expedition.supply,
             tuning::research::mineSupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::mineHazardChanceScale, tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0),
+            surfaceHazardRisk(expedition.hazard, tuning::research::mineHazardChanceScale, (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief),
             std::string(text::labels::hazard),
-            minePayoffChips(state, tools, site),
+            minePayoffChips(state, tools, crew, site),
             surfaceActionButton(text::buttons::mineDeposit, ui::actions::mineSurface, expedition.supply, tuning::research::mineSupplyCost)),
         surfaceActionPreview(
             text::buttons::pushDeeper,
             std::string(text::panel::messages::surfacePushDetail),
             expedition.supply,
             tuning::research::pushSupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, tools.extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0),
+            surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, (tools.extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief),
             std::string(text::labels::hazard),
-            pushPayoffChips(state, site),
+            pushPayoffChips(state, crew, site),
             surfaceActionButton(text::buttons::pushDeeper, ui::actions::pushSurface, expedition.supply, tuning::research::pushSupplyCost, "danger")),
         surfaceActionPreview(
             text::buttons::extractPayload,

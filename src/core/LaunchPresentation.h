@@ -66,11 +66,12 @@ inline std::vector<FlightActionButtonPresentation> primaryFlightActions(
     std::vector<FlightActionButtonPresentation> buttons;
     if (actions.returningHome) {
         buttons.push_back(disabledFlightActionButton(text::buttons::returningHome));
+        buttons.push_back(disabledFlightActionButton(text::buttons::arrivalOps));
     } else {
         buttons.push_back(flightActionButton(text::buttons::returnHome, ui::actions::returnHome, "ok"));
-        if (arrivalOpsAvailable) {
-            buttons.push_back(flightActionButton(text::buttons::arrivalOps, ui::actions::arrivalOps, "warn"));
-        }
+        buttons.push_back(arrivalOpsAvailable
+            ? flightActionButton(text::buttons::arrivalOps, ui::actions::arrivalOps, "warn")
+            : disabledFlightActionButton(text::buttons::arrivalOps));
     }
     buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
     return buttons;

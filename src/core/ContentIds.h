@@ -35,6 +35,12 @@ inline constexpr const char* predictiveGuidance = "predictive_guidance";
 inline constexpr const char* springCapsule = "spring_capsule";
 inline constexpr const char* abortTower = "abort_tower";
 inline constexpr const char* phoenixPod = "phoenix_pod";
+inline constexpr const char* surfaceMapper = "surface_mapper";
+inline constexpr const char* regolithAuger = "regolith_auger";
+inline constexpr const char* oreSorter = "ore_sorter";
+inline constexpr const char* coolantSleeve = "coolant_sleeve";
+inline constexpr const char* diamondBearings = "diamond_bearings";
+inline constexpr const char* deepBoreFrame = "deep_bore_frame";
 } // namespace module
 
 namespace crewUpgrade {

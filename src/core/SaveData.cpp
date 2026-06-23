@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <sstream>
 
@@ -105,6 +106,55 @@ SurfaceSiteProfile surfaceSiteProfileFromInt(int value)
     }
 }
 
+int miningMaterialToInt(MiningCellMaterial material)
+{
+    switch (material) {
+    case MiningCellMaterial::Empty:
+        return 0;
+    case MiningCellMaterial::Regolith:
+        return 1;
+    case MiningCellMaterial::HardRock:
+        return 2;
+    case MiningCellMaterial::CommonOre:
+        return 3;
+    case MiningCellMaterial::RareOre:
+        return 4;
+    case MiningCellMaterial::ExoticVein:
+        return 5;
+    case MiningCellMaterial::ArtifactCache:
+        return 6;
+    case MiningCellMaterial::HazardPocket:
+        return 7;
+    case MiningCellMaterial::Bedrock:
+        return 8;
+    }
+    return 0;
+}
+
+MiningCellMaterial miningMaterialFromInt(int value)
+{
+    switch (value) {
+    case 1:
+        return MiningCellMaterial::Regolith;
+    case 2:
+        return MiningCellMaterial::HardRock;
+    case 3:
+        return MiningCellMaterial::CommonOre;
+    case 4:
+        return MiningCellMaterial::RareOre;
+    case 5:
+        return MiningCellMaterial::ExoticVein;
+    case 6:
+        return MiningCellMaterial::ArtifactCache;
+    case 7:
+        return MiningCellMaterial::HazardPocket;
+    case 8:
+        return MiningCellMaterial::Bedrock;
+    default:
+        return MiningCellMaterial::Empty;
+    }
+}
+
 int screenToInt(Screen screen)
 {
     switch (screen) {
@@ -114,6 +164,8 @@ int screenToInt(Screen screen)
         return 3;
     case Screen::SurfaceExpedition:
         return 4;
+    case Screen::Mining:
+        return 5;
     default:
         return 0;
     }
@@ -128,6 +180,8 @@ Screen screenFromInt(int value)
         return Screen::Research;
     case 4:
         return Screen::SurfaceExpedition;
+    case 5:
+        return Screen::Mining;
     default:
         return Screen::Hangar;
     }
@@ -226,6 +280,94 @@ MaterialInventory parseMaterials(std::string_view text)
     return materials;
 }
 
+std::string serializePair(double x, double y)
+{
+    std::ostringstream out;
+    out << x << save_schema::crewFieldDelimiter << y;
+    return out.str();
+}
+
+void parsePair(std::string_view text, double& x, double& y)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        x = parseDouble(fields[0], x);
+    }
+    if (fields.size() > 1) {
+        y = parseDouble(fields[1], y);
+    }
+}
+
+std::string serializeMiningTerrainSize(const MiningTerrain& terrain)
+{
+    std::ostringstream out;
+    out << terrain.width
+        << save_schema::crewFieldDelimiter << terrain.height
+        << save_schema::crewFieldDelimiter << terrain.depthZone;
+    return out.str();
+}
+
+void parseMiningTerrainSize(std::string_view text, MiningTerrain& terrain)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        terrain.width = std::max(1, parseInt(fields[0], terrain.width));
+    }
+    if (fields.size() > 1) {
+        terrain.height = std::max(1, parseInt(fields[1], terrain.height));
+    }
+    if (fields.size() > 2) {
+        terrain.depthZone = std::max(0, parseInt(fields[2], terrain.depthZone));
+    }
+}
+
+std::string serializeMiningCells(const MiningTerrain& terrain)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < terrain.cells.size(); ++i) {
+        if (i > 0) {
+            out << save_schema::listDelimiter;
+        }
+        const MiningCell& cell = terrain.cells[i];
+        out << miningMaterialToInt(cell.material)
+            << save_schema::crewFieldDelimiter << cell.maxToughness
+            << save_schema::crewFieldDelimiter << cell.remainingToughness
+            << save_schema::crewFieldDelimiter << (cell.revealed ? 1 : 0)
+            << save_schema::crewFieldDelimiter << (cell.hazard ? 1 : 0);
+    }
+    return out.str();
+}
+
+void parseMiningCells(std::string_view text, MiningTerrain& terrain)
+{
+    terrain.cells.clear();
+    terrain.cells.reserve(static_cast<std::size_t>(terrain.width * terrain.height));
+    for (const std::string& record : split(text, save_schema::listDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.empty()) {
+            continue;
+        }
+        MiningCell cell;
+        cell.material = miningMaterialFromInt(parseInt(fields[0], 0));
+        if (fields.size() > 1) {
+            cell.maxToughness = parseDouble(fields[1], cell.maxToughness);
+        }
+        if (fields.size() > 2) {
+            cell.remainingToughness = parseDouble(fields[2], cell.remainingToughness);
+        }
+        if (fields.size() > 3) {
+            cell.revealed = parseInt(fields[3], 0) != 0;
+        }
+        if (fields.size() > 4) {
+            cell.hazard = parseInt(fields[4], 0) != 0;
+        }
+        terrain.cells.push_back(cell);
+    }
+    const int chunksX = (terrain.width + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
+    const int chunksY = (terrain.height + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
+    terrain.dirtyChunks.assign(static_cast<std::size_t>(std::max(1, chunksX * chunksY)), 1);
+}
+
 std::string serializeArtifacts(const std::vector<ArtifactRecord>& artifacts)
 {
     std::ostringstream out;
@@ -301,13 +443,14 @@ SaveData captureSaveData(const GameState& state)
     save.restOpsThisExpedition = state.run.restOpsThisExpedition;
     save.shallowRecoveryStreak = state.run.shallowRecoveryStreak;
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
-    save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition ? state.screen : Screen::Hangar;
+    save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::Mining ? state.screen : Screen::Hangar;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
     save.researchProjectIds = arrayToVector(state.run.researchProjectIds);
     save.arrivalOps = state.run.arrivalOps;
     save.surfaceExpedition = state.run.surfaceExpedition;
+    save.mining = state.run.mining;
     save.unlockKeys = state.meta.unlockKeys;
     save.blueprintProgress = state.meta.blueprintProgress;
     save.materials = state.meta.materials;
@@ -354,6 +497,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
+    state.run.mining = save.mining;
     if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
         state.run.surfaceExpedition.logEntries.erase(
             state.run.surfaceExpedition.logEntries.begin(),
@@ -368,6 +512,16 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     if (state.screen == Screen::SurfaceExpedition && !state.run.surfaceExpedition.active) {
         state.screen = Screen::Hangar;
+    }
+    if (state.screen == Screen::Mining && (!state.run.surfaceExpedition.active || !state.run.mining.active)) {
+        state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+        state.run.mining = {};
+    }
+    if (state.run.mining.active && static_cast<int>(state.run.mining.terrain.cells.size()) != state.run.mining.terrain.width * state.run.mining.terrain.height) {
+        state.run.mining = {};
+        if (state.screen == Screen::Mining) {
+            state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+        }
     }
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
@@ -454,6 +608,22 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
+    writeField(out, save_schema::field::miningActive, save.mining.active ? 1 : 0);
+    writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
+    writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
+    writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
+    writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
+    writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
+    writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
+    writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
+    writeField(out, save_schema::field::miningDepth, save.mining.depthZone);
+    writeField(out, save_schema::field::miningCargo, save.mining.cargo);
+    writeField(out, save_schema::field::miningMaterials, serializeMaterials(save.mining.temporaryMaterials));
+    writeField(out, save_schema::field::miningArtifacts, serializeArtifacts(save.mining.temporaryArtifacts));
+    writeField(out, save_schema::field::miningHazard, save.mining.hazardDelta);
+    writeField(out, save_schema::field::miningCellsBroken, save.mining.cellsBroken);
+    writeField(out, save_schema::field::miningTerrainSize, serializeMiningTerrainSize(save.mining.terrain));
+    writeField(out, save_schema::field::miningTerrainCells, serializeMiningCells(save.mining.terrain));
     writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
     writeField(out, save_schema::field::blueprints, save.blueprintProgress);
     writeField(out, save_schema::field::materials, serializeMaterials(save.materials));
@@ -560,6 +730,45 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceLog) {
             save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
+        } else if (key == save_schema::field::miningActive) {
+            save.mining.active = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::miningDestination) {
+            save.mining.destinationId = std::string(value);
+        } else if (key == save_schema::field::miningSite) {
+            save.mining.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.mining.siteProfile)));
+        } else if (key == save_schema::field::miningElapsed) {
+            save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);
+        } else if (key == save_schema::field::miningOxygen) {
+            save.mining.oxygenSeconds = parseDouble(value, save.mining.oxygenSeconds);
+        } else if (key == save_schema::field::miningDrone) {
+            parsePair(value, save.mining.droneX, save.mining.droneY);
+        } else if (key == save_schema::field::miningAim) {
+            parsePair(value, save.mining.aimX, save.mining.aimY);
+            const double aimDirX = save.mining.aimX - save.mining.droneX;
+            const double aimDirY = save.mining.aimY - save.mining.droneY;
+            const double aimDirLength = std::sqrt(aimDirX * aimDirX + aimDirY * aimDirY);
+            if (aimDirLength > 0.0001) {
+                save.mining.aimDirX = aimDirX / aimDirLength;
+                save.mining.aimDirY = aimDirY / aimDirLength;
+            }
+        } else if (key == save_schema::field::miningDrill) {
+            parsePair(value, save.mining.drillHeat, save.mining.drillIntegrity);
+        } else if (key == save_schema::field::miningDepth) {
+            save.mining.depthZone = parseInt(value, save.mining.depthZone);
+        } else if (key == save_schema::field::miningCargo) {
+            save.mining.cargo = parseInt(value, save.mining.cargo);
+        } else if (key == save_schema::field::miningMaterials) {
+            save.mining.temporaryMaterials = parseMaterials(value);
+        } else if (key == save_schema::field::miningArtifacts) {
+            save.mining.temporaryArtifacts = parseArtifacts(value);
+        } else if (key == save_schema::field::miningHazard) {
+            save.mining.hazardDelta = parseDouble(value, save.mining.hazardDelta);
+        } else if (key == save_schema::field::miningCellsBroken) {
+            save.mining.cellsBroken = parseInt(value, save.mining.cellsBroken);
+        } else if (key == save_schema::field::miningTerrainSize) {
+            parseMiningTerrainSize(value, save.mining.terrain);
+        } else if (key == save_schema::field::miningTerrainCells) {
+            parseMiningCells(value, save.mining.terrain);
         } else if (key == save_schema::field::unlocks) {
             save.unlockKeys = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::blueprints) {

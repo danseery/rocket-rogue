@@ -14,6 +14,15 @@ struct Color {
     float a = 1.0F;
 };
 
+struct MiningCellSnapshot {
+    int x = 0;
+    int y = 0;
+    int material = 0;
+    double integrity = 1.0;
+    bool revealed = false;
+    bool hazard = false;
+};
+
 struct RenderSnapshot {
     Screen screen = Screen::Hangar;
     LaunchResultType lastResult = LaunchResultType::None;
@@ -33,6 +42,24 @@ struct RenderSnapshot {
     std::array<double, 12> heatTelemetry {};
     int telemetryCount = 0;
     double animationTime = 0.0;
+    int miningWidth = 0;
+    int miningHeight = 0;
+    double miningDroneX = 0.0;
+    double miningDroneY = 0.0;
+    double miningTargetX = 0.0;
+    double miningTargetY = 0.0;
+    double miningDrillDirX = 0.0;
+    double miningDrillDirY = 1.0;
+    double miningHeat = 0.0;
+    double miningContactIntensity = 0.0;
+    double miningScannerPulse = 0.0;
+    double miningRecoilX = 0.0;
+    double miningRecoilY = 0.0;
+    double miningBounce = 0.0;
+    bool miningInputDrilling = false;
+    bool miningTargetDrillable = false;
+    bool miningDrilling = false;
+    std::vector<MiningCellSnapshot> miningCells;
 };
 
 class WebGLRenderer {
@@ -47,6 +74,7 @@ private:
     void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace = true);
     void drawCircle(float cx, float cy, float radius, Color color, int segments = 36, bool worldSpace = true);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
+    void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<float>& scratchVertices(std::size_t reserveCount);
     void appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color);
     void appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color);
@@ -55,7 +83,8 @@ private:
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
-    void drawStars();
+    void drawMining(const RenderSnapshot& snapshot);
+    void drawSolarBackground(const RenderSnapshot& snapshot, float alpha);
     void drawRoute(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
     void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0, bool worldSpace = true);
@@ -75,7 +104,7 @@ private:
         bool requested = false;
         bool ready = false;
     };
-    std::array<TextureAsset, 6> assets_ {};
+    std::array<TextureAsset, 9> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
     float sceneCssWidth_ = 1280.0F;

@@ -27,6 +27,7 @@ struct SaveData {
     std::vector<std::string> researchProjectIds;
     ArrivalOpsState arrivalOps;
     SurfaceExpeditionState surfaceExpedition;
+    MiningRunState mining;
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
     MaterialInventory materials;

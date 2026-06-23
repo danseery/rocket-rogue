@@ -38,6 +38,17 @@ struct SurfaceToolEffects {
     double enemyEncounterRelief = 0.0;
 };
 
+struct SurfaceCrewEffects {
+    int supplyBonus = 0;
+    int surveyCommonBonus = 0;
+    int mineCommonBonus = 0;
+    double mineRareChanceBonus = 0.0;
+    double hazardRelief = 0.0;
+    double extractionRiskRelief = 0.0;
+    double artifactChanceBonus = 0.0;
+    std::string summary;
+};
+
 struct SurfaceSiteProfileEffects {
     int supplyBonus = 0;
     int surveyCommonBonus = 0;
@@ -90,6 +101,7 @@ int researchFacilityBlueprintBonus(const MetaProgress& meta);
 int artifactInsightBlueprintBonus(const MetaProgress& meta);
 int researchBlueprintGain(const MetaProgress& meta, const ResearchProject& project);
 SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta);
+SurfaceCrewEffects surfaceCrewEffects(const GameState& state);
 SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);

@@ -42,13 +42,22 @@ inline int moduleOfferCost(Rarity rarity)
 }
 
 namespace traits {
-inline constexpr std::string_view calmUnderHeat = "Calm under heat";
-inline constexpr std::string_view readsTelemetryEarly = "Reads telemetry early";
-inline constexpr std::string_view improvesEjectionOdds = "Improves ejection odds";
+inline constexpr std::string_view beastMode = "Beast Mode";
+inline constexpr std::string_view hardReboot = "Hard Reboot";
+inline constexpr std::string_view outtaHere = "Outta Here";
+inline constexpr std::string_view deepFocus = "Deep Focus";
+inline constexpr std::string_view rummageSale = "Rummage Sale";
+inline constexpr std::string_view phaseShift = "Phase Shift";
+inline constexpr std::string_view fieldInstincts = "Field Instincts";
+inline constexpr std::string_view calmUnderHeat = beastMode;
+inline constexpr std::string_view readsTelemetryEarly = deepFocus;
+inline constexpr std::string_view improvesEjectionOdds = outtaHere;
 inline constexpr double calmUnderHeatBonus = 0.12;
 inline constexpr double readsTelemetryEarlyBonus = 0.06;
 inline constexpr double improvesEjectionOddsPerformanceBonus = 0.04;
 inline constexpr double improvesEjectionOddsEscapeBonus = 0.16;
+inline constexpr double hardRebootPerformanceBonus = 0.08;
+inline constexpr double phaseShiftPerformanceBonus = 0.05;
 } // namespace traits
 
 namespace crew {
@@ -152,7 +161,7 @@ inline constexpr double warningCriticalThreshold = 0.88;
 inline constexpr double overburnMinimumDenominator = 0.20;
 inline constexpr double overburnExponent = 2.65;
 inline constexpr double overburnMaximumMultiplier = 8.0;
-inline constexpr double travelSpeedMultiplier = 1.10;
+inline constexpr double baseTravelSpeedMultiplier = 5.25;
 inline constexpr double maxFrameStepSeconds = 0.08;
 inline constexpr double minimumEffectiveThrust = 0.40;
 inline constexpr double cruiseBaseRate = 0.016;
@@ -533,6 +542,60 @@ inline constexpr int artifactInsightBlueprintPerIdentified = 1;
 inline constexpr int artifactInsightBlueprintMaximum = 3;
 inline constexpr int surfaceLogEntryLimit = 5;
 } // namespace research
+
+namespace mining {
+inline constexpr int terrainWidth = 64;
+inline constexpr int terrainHeight = 40;
+inline constexpr int chunkSize = 8;
+inline constexpr double oxygenSeconds = 180.0;
+inline constexpr double targetRunSeconds = 120.0;
+inline constexpr double droneSpeedCellsPerSecond = 7.2;
+inline constexpr double softTerrainMoveScale = 0.42;
+inline constexpr double hardTerrainBounceImpulse = 9.0;
+inline constexpr double hardTerrainBounceCooldownSeconds = 0.30;
+inline constexpr double contactBounceSpring = 58.0;
+inline constexpr double contactBounceDamping = 0.68;
+inline constexpr double contactBounceMaxCells = 0.42;
+inline constexpr double passiveLightRadius = 2.15;
+inline constexpr double drillRangeCells = 2.05;
+inline constexpr double drillAimDeadzoneCells = 0.75;
+inline constexpr int drillAimDirections = 8;
+inline constexpr double baseDrillPower = 4.2;
+inline constexpr double trainingDrillPowerScale = 0.10;
+inline constexpr double surfaceDrillPowerBonus = 1.15;
+inline constexpr double prairieDogDrillBonus = 0.90;
+inline constexpr double beaverIntegrityRelief = 0.18;
+inline constexpr double chipmunkSpeedBonus = 1.30;
+inline constexpr double capybaraOxygenBonusSeconds = 18.0;
+inline constexpr double foxExtractionRiskRelief = 0.025;
+inline constexpr double squirrelRareYieldChance = 0.20;
+inline constexpr double heatRisePerSecond = 0.20;
+inline constexpr double heatHardRockBonus = 0.08;
+inline constexpr double heatCoolingPerSecond = 0.16;
+inline constexpr double heatSlowThreshold = 0.72;
+inline constexpr double heatDamageThreshold = 0.90;
+inline constexpr double overheatedDrillSlow = 0.48;
+inline constexpr double overheatIntegrityDamagePerSecond = 0.055;
+inline constexpr double hazardPocketIntegrityDamage = 0.12;
+inline constexpr double hazardPocketRisk = 0.035;
+inline constexpr double depthHazardRisk = 0.030;
+inline constexpr double cargoExtractionRiskScale = 0.006;
+inline constexpr double maxMiningHazardDelta = 0.26;
+inline constexpr double scannerRevealRadius = 5.5;
+inline constexpr double scannerProbeBonus = 2.0;
+inline constexpr double scannerCooldownSeconds = 4.0;
+inline constexpr double regolithToughness = 2.4;
+inline constexpr double hardRockToughness = 6.0;
+inline constexpr double commonOreToughness = 4.6;
+inline constexpr double rareOreToughness = 6.8;
+inline constexpr double exoticVeinToughness = 8.8;
+inline constexpr double artifactCacheToughness = 10.0;
+inline constexpr double bedrockToughness = 10000.0;
+inline constexpr int commonCargo = 1;
+inline constexpr int rareCargo = 2;
+inline constexpr int exoticCargo = 4;
+inline constexpr int artifactCargo = 3;
+} // namespace mining
 
 namespace outcomes {
 inline constexpr double manualEjectSurvivalBase = 0.48;

@@ -18,6 +18,7 @@ enum class Screen {
     ArrivalOps,
     Research,
     SurfaceExpedition,
+    Mining,
     Upgrade,
     Legacy
 };
@@ -50,6 +51,18 @@ enum class SurfaceSiteProfile {
     FractureField
 };
 
+enum class MiningCellMaterial {
+    Empty,
+    Regolith,
+    HardRock,
+    CommonOre,
+    RareOre,
+    ExoticVein,
+    ArtifactCache,
+    HazardPocket,
+    Bedrock
+};
+
 enum class LaunchResultType {
     None,
     SafeEject,
@@ -75,6 +88,12 @@ struct ModuleStats {
     double volatility = 0.0;
     double payout = 0.0;
     double repair = 0.0;
+    double miningPower = 0.0;
+    double miningYield = 0.0;
+    double miningCooling = 0.0;
+    double miningDurability = 0.0;
+    double miningWidth = 0.0;
+    double miningDepth = 0.0;
 };
 
 struct CrewUpgradeStats {
@@ -248,6 +267,62 @@ struct SurfaceExpeditionState {
     bool enemyEncountersEnabled = false;
 };
 
+struct MiningCell {
+    MiningCellMaterial material = MiningCellMaterial::Empty;
+    double maxToughness = 0.0;
+    double remainingToughness = 0.0;
+    bool revealed = false;
+    bool hazard = false;
+};
+
+struct MiningTerrain {
+    int width = 64;
+    int height = 40;
+    int depthZone = 0;
+    std::vector<MiningCell> cells;
+    std::vector<std::uint8_t> dirtyChunks;
+};
+
+struct MiningRunState {
+    bool active = false;
+    std::string destinationId;
+    SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
+    double elapsedSeconds = 0.0;
+    double oxygenSeconds = 180.0;
+    double droneX = 32.0;
+    double droneY = 4.0;
+    double moveX = 0.0;
+    double moveY = 0.0;
+    double aimX = 32.0;
+    double aimY = 5.0;
+    double aimDirX = 0.0;
+    double aimDirY = 1.0;
+    bool drilling = false;
+    double drillHeat = 0.0;
+    double drillIntegrity = 1.0;
+    double contactIntensity = 0.0;
+    double recoilX = 0.0;
+    double recoilY = 0.0;
+    double contactBounce = 0.0;
+    double contactBounceVelocity = 0.0;
+    double contactBounceCooldown = 0.0;
+    double scannerPulseSeconds = 0.0;
+    int depthZone = 0;
+    int cargo = 0;
+    MaterialInventory temporaryMaterials;
+    std::vector<ArtifactRecord> temporaryArtifacts;
+    double hazardDelta = 0.0;
+    int cellsBroken = 0;
+    int targetCellX = -1;
+    int targetCellY = -1;
+    double targetTipX = 32.0;
+    double targetTipY = 5.0;
+    MiningCellMaterial targetMaterial = MiningCellMaterial::Empty;
+    double targetRemainingToughness = 0.0;
+    double targetMaxToughness = 0.0;
+    MiningTerrain terrain;
+};
+
 struct RunState {
     bool active = true;
     int destinationIndex = 0;
@@ -264,6 +339,7 @@ struct RunState {
     std::array<std::string, 3> researchProjectIds {};
     ArrivalOpsState arrivalOps;
     SurfaceExpeditionState surfaceExpedition;
+    MiningRunState mining;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;

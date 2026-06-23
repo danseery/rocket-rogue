@@ -1,5 +1,7 @@
 #include "render/WebGLRenderer.h"
 
+#include "core/Tuning.h"
+
 #ifdef __EMSCRIPTEN__
 #include <GLES3/gl3.h>
 #include <emscripten.h>
@@ -15,6 +17,8 @@ namespace {
 
 constexpr float kPi = 3.1415926535F;
 constexpr float kSceneViewportPadding = 0.92F;
+constexpr float kMiningLightRadiusCells = 2.15F;
+constexpr float kMiningScannerPulseSeconds = 0.9F;
 
 enum ArtAsset {
     EarthAsset = 0,
@@ -22,7 +26,10 @@ enum ArtAsset {
     MarsAsset = 2,
     RocketAsset = 3,
     ExplosionAsset = 4,
-    ThrustAsset = 5
+    ThrustAsset = 5,
+    MiningDroneAsset = 6,
+    DrillBitAsset = 7,
+    LocalSolarBgAsset = 8
 };
 
 struct Vec2 {
@@ -260,6 +267,60 @@ Color mix(Color a, Color b, float t)
     };
 }
 
+Color miningMaterialColor(int material, float integrity, bool revealed, bool hazard, int destinationTier, float light)
+{
+    Color color {0.025F, 0.035F, 0.040F, 1.0F};
+    const bool moon = destinationTier == 1;
+    const bool mars = destinationTier == 2;
+    if (!revealed) {
+        const bool empty = material == 0;
+        color = empty
+            ? Color {0.010F, 0.015F, 0.020F, 0.24F}
+            : (mars ? Color {0.105F, 0.055F, 0.038F, 0.58F} : (moon ? Color {0.092F, 0.090F, 0.084F, 0.58F} : Color {0.070F, 0.060F, 0.052F, 0.58F}));
+        const float shade = 0.16F + light * 0.70F;
+        color.r *= shade;
+        color.g *= shade;
+        color.b *= shade;
+        return color;
+    }
+    switch (material) {
+    case 1:
+        color = mars ? Color {0.54F, 0.25F, 0.16F, 1.0F} : (moon ? Color {0.46F, 0.43F, 0.39F, 1.0F} : Color {0.38F, 0.32F, 0.26F, 1.0F});
+        break;
+    case 2:
+        color = mars ? Color {0.27F, 0.15F, 0.13F, 1.0F} : (moon ? Color {0.26F, 0.27F, 0.29F, 1.0F} : Color {0.22F, 0.23F, 0.26F, 1.0F});
+        break;
+    case 3:
+        color = mars ? Color {0.66F, 0.36F, 0.18F, 1.0F} : (moon ? Color {0.54F, 0.52F, 0.45F, 1.0F} : Color {0.38F, 0.42F, 0.34F, 1.0F});
+        break;
+    case 4:
+        color = mars ? Color {0.40F, 0.40F, 0.55F, 1.0F} : (moon ? Color {0.36F, 0.52F, 0.62F, 1.0F} : Color {0.22F, 0.48F, 0.58F, 1.0F});
+        break;
+    case 5:
+        color = mars ? Color {0.58F, 0.26F, 0.72F, 1.0F} : (moon ? Color {0.45F, 0.36F, 0.70F, 1.0F} : Color {0.46F, 0.28F, 0.70F, 1.0F});
+        break;
+    case 6:
+        color = {0.78F, 0.55F, 0.18F, 1.0F};
+        break;
+    case 7:
+        color = {0.56F, 0.18F, 0.16F, 1.0F};
+        break;
+    case 8:
+        color = {0.10F, 0.11F, 0.13F, 1.0F};
+        break;
+    default:
+        color = mars ? Color {0.030F, 0.020F, 0.018F, 1.0F} : (moon ? Color {0.026F, 0.028F, 0.032F, 1.0F} : Color {0.020F, 0.030F, 0.035F, 1.0F});
+        break;
+    }
+    const float breakGlow = 1.0F + (1.0F - integrity) * 0.20F;
+    const float lit = 0.62F + light * 0.58F;
+    color.r *= lit * breakGlow;
+    color.g *= lit * breakGlow;
+    color.b *= lit * breakGlow;
+    color.a = material == 0 ? 0.20F : (hazard ? 0.92F : 0.86F);
+    return color;
+}
+
 } // namespace
 
 bool WebGLRenderer::initialize()
@@ -270,6 +331,9 @@ bool WebGLRenderer::initialize()
     assets_[RocketAsset] = {"rocket", "assets/art/rocket.png"};
     assets_[ExplosionAsset] = {"explosion", "assets/art/explosion-sheet.png"};
     assets_[ThrustAsset] = {"thrust", "assets/art/thrust-sheet.png"};
+    assets_[MiningDroneAsset] = {"mining_drone", "assets/art/mining-drone.png"};
+    assets_[DrillBitAsset] = {"drill_bit", "assets/art/drill-bit-sheet.png"};
+    assets_[LocalSolarBgAsset] = {"local_solar_bg", "assets/art/local-solar-bg-sheet.png"};
 
 #ifdef __EMSCRIPTEN__
     EmscriptenWebGLContextAttributes attributes;
@@ -304,7 +368,7 @@ bool WebGLRenderer::initialize()
     glUniform1i(samplerUniform_, 0);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    std::array<GLuint, 6> textureIds {};
+    std::array<GLuint, 9> textureIds {};
     glGenTextures(static_cast<GLsizei>(textureIds.size()), textureIds.data());
     for (std::size_t i = 0; i < assets_.size(); ++i) {
         assets_[i].texture = textureIds[i];
@@ -331,6 +395,10 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
 
     beginFrame(snapshot);
     warmTextures();
+    if (snapshot.screen == Screen::Mining) {
+        drawMining(snapshot);
+        return;
+    }
     drawBackdrop(snapshot);
     drawRocket(snapshot);
     drawTelemetry(snapshot);
@@ -497,6 +565,184 @@ void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint,
     submit(vertices, 0x0004, true, asset.texture, worldSpace);
 }
 
+void WebGLRenderer::drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
+{
+    if (!textureReady(assetIndex)) {
+        return;
+    }
+
+    TextureAsset& asset = assets_[static_cast<std::size_t>(assetIndex)];
+    const Vec2 forward = normalize({forwardX, forwardY});
+    const Vec2 right {forward.y, -forward.x};
+    const float halfW = w * 0.5F;
+    const float halfH = h * 0.5F;
+    const int frames = std::max(1, frameCount);
+    const int frame = std::clamp(frameIndex, 0, frames - 1);
+    const float u0 = static_cast<float>(frame) / static_cast<float>(frames);
+    const float u1 = static_cast<float>(frame + 1) / static_cast<float>(frames);
+
+    auto corner = [&](float sx, float sy) {
+        return Vec2 {
+            cx + right.x * sx * halfW + forward.x * sy * halfH,
+            cy + right.y * sx * halfW + forward.y * sy * halfH
+        };
+    };
+
+    const Vec2 bl = corner(-1.0F, -1.0F);
+    const Vec2 br = corner(1.0F, -1.0F);
+    const Vec2 tr = corner(1.0F, 1.0F);
+    const Vec2 tl = corner(-1.0F, 1.0F);
+    std::vector<float>& vertices = scratchVertices(48);
+    pushVertex(vertices, bl.x, bl.y, tint, u0, 1.0F);
+    pushVertex(vertices, br.x, br.y, tint, u1, 1.0F);
+    pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
+    pushVertex(vertices, bl.x, bl.y, tint, u0, 1.0F);
+    pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
+    pushVertex(vertices, tl.x, tl.y, tint, u0, 0.0F);
+    submit(vertices, 0x0004, true, asset.texture, worldSpace);
+}
+
+void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
+{
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.012F, 0.014F, 0.018F, 1.0F}, false);
+    drawSolarBackground(snapshot, 0.42F);
+    if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
+        return;
+    }
+
+    const float left = -0.92F;
+    const float right = 0.92F;
+    const float top = 0.78F;
+    const float bottom = -0.86F;
+    const float cellW = (right - left) / static_cast<float>(snapshot.miningWidth);
+    const float cellH = (top - bottom) / static_cast<float>(snapshot.miningHeight);
+    auto cellCenter = [&](double x, double y) {
+        return Vec2 {
+            left + static_cast<float>(x) * cellW + cellW * 0.5F,
+            top - static_cast<float>(y) * cellH - cellH * 0.5F
+        };
+    };
+    auto gridPoint = [&](double x, double y) {
+        return Vec2 {
+            left + static_cast<float>(x) * cellW,
+            top - static_cast<float>(y) * cellH
+        };
+    };
+
+    drawRect((left + right) * 0.5F, (top + bottom) * 0.5F, right - left + 0.035F, top - bottom + 0.035F, {0.02F, 0.03F, 0.04F, 0.92F});
+
+    std::vector<float>& terrainVertices = scratchVertices(snapshot.miningCells.size() * 48U);
+    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
+        float localLight = std::clamp(1.0F - distCells / kMiningLightRadiusCells, 0.0F, 1.0F);
+        if (snapshot.miningScannerPulse > 0.0) {
+            const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
+            const float ringRadius = 2.2F + (1.0F - pulse) * 4.9F;
+            const float ringWidth = 1.4F + pulse * 0.7F;
+            const float ring = std::clamp(1.0F - std::abs(distCells - ringRadius) / ringWidth, 0.0F, 1.0F) * 0.42F * pulse;
+            localLight = std::max(localLight, ring);
+        }
+        const Color color = miningMaterialColor(cell.material, static_cast<float>(cell.integrity), cell.revealed, cell.hazard && cell.revealed, snapshot.destinationTier, localLight);
+        appendRect(terrainVertices, center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
+    }
+    submit(terrainVertices, 0x0004);
+
+    Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+    if (snapshot.miningBounce > 0.0) {
+        const float bounce = static_cast<float>(std::clamp(snapshot.miningBounce, 0.0, tuning::mining::contactBounceMaxCells));
+        drone.x += static_cast<float>(snapshot.miningRecoilX) * cellW * bounce;
+        drone.y -= static_cast<float>(snapshot.miningRecoilY) * cellH * bounce;
+    }
+    const float cellSize = std::min(cellW, cellH);
+    drawCircle(drone.x, drone.y, cellSize * 6.8F, {0.18F, 0.52F, 0.68F, 0.055F}, 40);
+    drawCircle(drone.x, drone.y, cellSize * 3.2F, {0.28F, 0.82F, 0.98F, 0.080F}, 32);
+    if (snapshot.miningScannerPulse > 0.0) {
+        const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
+        const float radius = cellSize * (5.2F + (1.0F - pulse) * 12.0F);
+        drawCircle(drone.x, drone.y, radius, {0.30F, 0.88F, 1.0F, 0.055F * pulse}, 48);
+    }
+
+    const Vec2 target = gridPoint(snapshot.miningTargetX, snapshot.miningTargetY);
+    const float droneSize = std::min(cellW, cellH) * 4.35F;
+    Vec2 drillDirection = normalize({
+        static_cast<float>(snapshot.miningDrillDirX) * cellW,
+        -static_cast<float>(snapshot.miningDrillDirY) * cellH
+    });
+    if (std::abs(drillDirection.x) + std::abs(drillDirection.y) < 0.001F) {
+        drillDirection = normalize({target.x - drone.x, target.y - drone.y});
+    }
+    const Vec2 drillOrigin {
+        drone.x + drillDirection.x * droneSize * 0.34F,
+        drone.y + drillDirection.y * droneSize * 0.34F
+    };
+    const Color heatColor = mix({0.35F, 0.86F, 1.0F, 1.0F}, {1.0F, 0.45F, 0.20F, 1.0F}, static_cast<float>(snapshot.miningHeat));
+
+    if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable) {
+        const float dx = target.x - drillOrigin.x;
+        const float dy = target.y - drillOrigin.y;
+        const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
+        const float drillH = std::clamp(contactDistance + cellSize * 0.55F, cellSize * 2.10F, cellSize * 3.45F);
+        const float drillW = drillH * 0.72F;
+        const Vec2 bitCenter {
+            drillOrigin.x + drillDirection.x * drillH * 0.5F,
+            drillOrigin.y + drillDirection.y * drillH * 0.5F
+        };
+        const Vec2 bitRoot {
+            drillOrigin.x,
+            drillOrigin.y
+        };
+        const Vec2 bitTip {
+            drillOrigin.x + drillDirection.x * drillH,
+            drillOrigin.y + drillDirection.y * drillH
+        };
+        drawLine(bitRoot.x, bitRoot.y, bitTip.x, bitTip.y, {heatColor.r, heatColor.g, heatColor.b, snapshot.miningDrilling ? 0.28F : 0.08F}, snapshot.miningDrilling ? 1.0F : 0.6F);
+        const int drillFrame = snapshot.miningDrilling ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
+        drawSpriteRotated(
+            bitCenter.x,
+            bitCenter.y,
+            drillW,
+            drillH,
+            -drillDirection.x,
+            -drillDirection.y,
+            {1.0F, 1.0F, 1.0F, 1.0F},
+            DrillBitAsset,
+            drillFrame,
+            6);
+    } else {
+        const float alpha = snapshot.miningInputDrilling ? 0.36F : 0.18F;
+        drawLine(drillOrigin.x, drillOrigin.y, target.x, target.y, {heatColor.r, heatColor.g, heatColor.b, alpha}, snapshot.miningInputDrilling ? 1.5F : 0.9F);
+        if (snapshot.miningInputDrilling) {
+            drawCircle(target.x, target.y, cellSize * 0.28F, {1.0F, 0.84F, 0.30F, 0.18F}, 18);
+        }
+    }
+
+    if (textureReady(MiningDroneAsset)) {
+        drawSprite(drone.x, drone.y, droneSize, droneSize, {1.0F, 1.0F, 1.0F, 1.0F}, MiningDroneAsset);
+    } else {
+        drawCircle(drone.x, drone.y, cellW * 1.15F, {0.10F, 0.14F, 0.18F, 1.0F}, 24);
+        drawCircle(drone.x, drone.y, cellW * 0.72F, {0.28F, 0.82F, 0.98F, 1.0F}, 20);
+        drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F, 0.88F, 0.92F, 1.0F});
+    }
+
+    if (snapshot.miningDrilling) {
+        const int particleCount = 8 + static_cast<int>(std::round(snapshot.miningContactIntensity * 10.0));
+        std::vector<float>& particleVertices = scratchVertices(static_cast<std::size_t>(particleCount) * 48U);
+        for (int i = 0; i < particleCount; ++i) {
+            const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37, 1.0));
+            const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
+            const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F)) * std::min(cellW, cellH);
+            const float px = target.x + std::cos(angle) * radius;
+            const float py = target.y + std::sin(angle) * radius;
+            const Color spark = mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
+            appendRect(particleVertices, px, py, cellW * 0.22F, cellH * 0.22F, spark);
+        }
+        submit(particleVertices, 0x0004);
+    }
+}
+
 void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 {
     const float left = 0.25F;
@@ -544,16 +790,20 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     submitLines(warningVertices, 2.2F);
 }
 
-void WebGLRenderer::drawStars()
+void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float alpha)
 {
-    std::vector<float>& vertices = scratchVertices(52 * 48);
-    for (int i = 0; i < 52; ++i) {
-        const float x = -0.95F + static_cast<float>((i * 37) % 190) / 95.0F;
-        const float y = -0.92F + static_cast<float>((i * 71) % 184) / 92.0F;
-        const float alpha = 0.18F + static_cast<float>((i * 19) % 60) / 100.0F;
-        appendRect(vertices, x, y, 0.004F, 0.004F, {0.75F, 0.88F, 1.0F, alpha});
+    if (!textureReady(LocalSolarBgAsset)) {
+        return;
     }
-    submit(vertices, 0x0004);
+
+    const double cycle = std::fmod(std::max(0.0, snapshot.animationTime) * 0.16, 4.0);
+    const int frame = std::clamp(static_cast<int>(std::floor(cycle)), 0, 3);
+    const int nextFrame = (frame + 1) % 4;
+    const float blend = static_cast<float>(cycle - static_cast<double>(frame));
+    const float smoothBlend = blend * blend * (3.0F - 2.0F * blend);
+    const float clampedAlpha = std::clamp(alpha, 0.0F, 1.0F);
+    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, clampedAlpha * (1.0F - smoothBlend)}, LocalSolarBgAsset, frame, 4, false);
+    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, clampedAlpha * smoothBlend}, LocalSolarBgAsset, nextFrame, 4, false);
 }
 
 void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
@@ -695,7 +945,7 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
 void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
-    drawStars();
+    drawSolarBackground(snapshot, 0.70F);
 
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;

@@ -242,6 +242,66 @@ void rr_extract_surface()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_move(double xAxis, double yAxis)
+{
+    if (g_app) {
+        g_app->miningMove(xAxis, yAxis);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_aim(double normalizedX, double normalizedY)
+{
+    if (g_app) {
+        g_app->miningAim(normalizedX, normalizedY);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_drill(int active)
+{
+    if (g_app) {
+        g_app->miningDrill(active != 0);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_scanner()
+{
+    if (g_app) {
+        g_app->miningScanner();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_stow()
+{
+    if (g_app) {
+        g_app->miningStow();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_abort()
+{
+    if (g_app) {
+        g_app->miningAbort();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_repair_ship()
 {
     if (g_app) {

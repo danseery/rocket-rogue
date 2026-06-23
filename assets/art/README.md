@@ -8,5 +8,7 @@
 - `rocket.png` - Player rocket sprite with alpha and no active thrust.
 - `thrust-sheet.png` - 6-frame horizontal thrust animation sheet with alpha, extracted from the original rocket flame.
 - `explosion-sheet.png` - 8-frame horizontal explosion sprite sheet with alpha.
+- `mining-drone.png` - Mining drone sprite with alpha, packed on a 512x512 square.
+- `drill-bit-sheet.png` - 6-frame horizontal drill bit animation sheet with alpha, packed as fixed 256x256 frames.
 
 The source images used a magenta chroma-key background. The committed PNGs are cleaned, cropped, and packed for the WebGL renderer.

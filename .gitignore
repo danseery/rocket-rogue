@@ -27,6 +27,7 @@ yarn-error.log*
 pnpm-debug.log*
 .DS_Store
 Thumbs.db
+tmp_generated_*
 *.user
 *.suo
 *.obj

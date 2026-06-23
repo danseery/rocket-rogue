@@ -25,8 +25,12 @@ double crewTrainingBonus(const GameState& state, const ContentCatalog& catalog)
 
     if (astronaut->trait == tuning::traits::calmUnderHeat) {
         bonus += tuning::traits::calmUnderHeatBonus * traitMultiplier;
+    } else if (astronaut->trait == tuning::traits::hardReboot) {
+        bonus += tuning::traits::hardRebootPerformanceBonus * traitMultiplier;
     } else if (astronaut->trait == tuning::traits::readsTelemetryEarly) {
         bonus += tuning::traits::readsTelemetryEarlyBonus * traitMultiplier;
+    } else if (astronaut->trait == tuning::traits::phaseShift) {
+        bonus += tuning::traits::phaseShiftPerformanceBonus * traitMultiplier;
     } else if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
         bonus += tuning::traits::improvesEjectionOddsPerformanceBonus * traitMultiplier;
     }
@@ -398,7 +402,7 @@ double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& dest
         static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
     const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
     const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * tuning::launch::travelSpeedMultiplier;
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * tuning::launch::baseTravelSpeedMultiplier;
 }
 
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)

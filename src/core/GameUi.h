@@ -32,6 +32,9 @@ inline constexpr std::string_view surveySurface = "survey_surface";
 inline constexpr std::string_view mineSurface = "mine_surface";
 inline constexpr std::string_view pushSurface = "push_surface";
 inline constexpr std::string_view extractSurface = "extract_surface";
+inline constexpr std::string_view miningScanner = "mining_scanner";
+inline constexpr std::string_view miningStow = "mining_stow";
+inline constexpr std::string_view miningAbort = "mining_abort";
 
 inline std::string buyOffer(int index)
 {

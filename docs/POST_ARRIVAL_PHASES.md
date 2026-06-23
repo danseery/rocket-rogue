@@ -95,6 +95,8 @@ These events should remain short, readable pulses attached to menu actions. They
 
 The surface screen keeps a short recent mission log. It should preserve the last few site/action/hazard/event summaries so the player can understand why supply, cargo, hazard, or blueprints changed after several clicks. Keep it bounded and lightweight; it is a memory aid, not a full journal.
 
+The next layer is a compact mining mini-game opened from the Mine deposit action after landing. The current menu action should keep resolving through the same surface outcome model, but the richer version can add seam scanning, drill stability, mitigation buttons, cargo stowing, and a sharper extraction decision. See `docs/MINING_MINIGAME_PLAN.md` for the focused playable slice and animal crew class hooks.
+
 ## Later Enemy Layer
 
 Enemy encounters should arrive as a tonal shift after the solar system. That keeps the early game focused on human ambition, fragile machinery, and exploration, then lets the galaxy become stranger later.

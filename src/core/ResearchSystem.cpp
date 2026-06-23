@@ -556,6 +556,51 @@ SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta)
     return effects;
 }
 
+SurfaceCrewEffects surfaceCrewEffects(const GameState& state)
+{
+    SurfaceCrewEffects effects;
+    const Astronaut* astronaut = activeAstronaut(state);
+    if (astronaut == nullptr) {
+        effects.summary = "No field specialist assigned.";
+        return effects;
+    }
+
+    const int training = std::max(0, effectiveTrainingLevel(*astronaut));
+    const double trainedRiskRelief = static_cast<double>(training) * 0.003;
+
+    if (astronaut->trait == tuning::traits::beastMode) {
+        effects.supplyBonus = 1;
+        effects.hazardRelief = std::min(0.08, 0.025 + trainedRiskRelief);
+        effects.extractionRiskRelief = std::min(0.10, 0.035 + static_cast<double>(training) * 0.004);
+        effects.summary = "Capybara survival: extra supply, lower hazard, and safer extraction.";
+    } else if (astronaut->trait == tuning::traits::hardReboot) {
+        effects.hazardRelief = std::min(0.09, 0.040 + static_cast<double>(training) * 0.004);
+        effects.summary = "Beaver resilience: fewer equipment scares and steadier surface operations.";
+    } else if (astronaut->trait == tuning::traits::outtaHere) {
+        effects.extractionRiskRelief = std::min(0.11, 0.055 + static_cast<double>(training) * 0.005);
+        effects.summary = "Fox navigation: cleaner extraction routes when the payload gets heavy.";
+    } else if (astronaut->trait == tuning::traits::deepFocus) {
+        effects.surveyCommonBonus = 1 + training / 5;
+        effects.artifactChanceBonus = std::min(0.12, 0.030 + static_cast<double>(training) * 0.006);
+        effects.summary = "Prairie Dog scouting: better surveys and sharper reads on buried anomalies.";
+    } else if (astronaut->trait == tuning::traits::rummageSale) {
+        effects.mineCommonBonus = training >= 4 ? 1 : 0;
+        effects.mineRareChanceBonus = std::min(0.22, 0.120 + static_cast<double>(training) * 0.010);
+        effects.summary = "Squirrel hoarding: better odds of rare materials while mining.";
+    } else if (astronaut->trait == tuning::traits::phaseShift) {
+        effects.supplyBonus = 1;
+        effects.hazardRelief = std::min(0.08, 0.025 + static_cast<double>(training) * 0.005);
+        effects.summary = "Chipmunk exploration: faster site work with fewer field hazards.";
+    } else if (astronaut->trait == tuning::traits::fieldInstincts) {
+        effects.extractionRiskRelief = std::min(0.06, 0.020 + trainedRiskRelief);
+        effects.summary = "Field instincts: modestly safer extractions.";
+    } else {
+        effects.summary = astronaut->background.empty() ? astronaut->trait : astronaut->background;
+    }
+
+    return effects;
+}
+
 SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile)
 {
     SurfaceSiteProfileEffects effects;
@@ -704,8 +749,11 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     expedition.destinationId = destination->id;
     expedition.siteProfile = generatedSurfaceSiteProfile(state, *destination, rng);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + site.supplyBonus;
-    expedition.hazard = std::max(0.0, tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier + site.hazardDelta + landingReconHazardPenalty(state, catalog, *destination));
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
+    const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
+    const double reconPenalty = landingReconHazardPenalty(state, catalog, *destination);
+    expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
+    expedition.hazard = std::max(baseHazard + reconPenalty, baseHazard + site.hazardDelta + reconPenalty - crew.hazardRelief);
     expedition.enemyEncountersEnabled = destinationAllowsEnemyEncounters(*destination);
     addDestinationHistoryValue(state.meta.destinationLandings, catalog, destination->id);
     state.run.arrivalOps = {};
@@ -721,11 +769,13 @@ double surfaceExtractionRisk(const GameState& state)
     }
 
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     double risk = tuning::research::extractionRiskBase
         + expedition.hazard * tuning::research::extractionRiskHazardScale
         + static_cast<double>(std::max(0, expedition.cargo)) * std::max(0.0, tuning::research::extractionRiskCargoScale - tools.cargoRiskRelief)
         - tools.extractionRiskRelief
+        - crew.extractionRiskRelief
         + site.extractionRiskDelta;
     if (expedition.supply <= 0) {
         risk += tuning::research::extractionRiskLowSupplyPenalty;
@@ -759,8 +809,9 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
     }
 
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + site.surveyCommonBonus};
+    const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
     addMaterials(expedition.temporaryMaterials, gain);
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
@@ -770,7 +821,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::surveyHazardChanceScale,
-        tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0,
+        (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief,
         text::status::surfaceDustHazard,
         tuning::research::dustHazardSupplyLoss,
         0,
@@ -790,9 +841,10 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     }
 
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + site.mineCommonBonus};
-    if (expedition.depth >= tuning::research::mineRareDepthThreshold || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + site.mineRareChanceBonus))) {
+    MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus};
+    if (expedition.depth >= tuning::research::mineRareDepthThreshold || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus))) {
         gain.rare += 1;
     }
 
@@ -805,7 +857,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::mineHazardChanceScale,
-        tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0,
+        (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief,
         text::status::surfaceDrillHazard,
         0,
         tuning::research::drillHazardCargoLoss,
@@ -826,8 +878,9 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
 
     expedition.depth += 1;
     expedition.hazard += tuning::research::hazardPerDepth;
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    if (expedition.depth >= tuning::research::artifactDepthThreshold && expedition.temporaryArtifacts.empty() && rng.chance(std::min(1.0, tuning::research::artifactChanceBase + site.artifactChanceBonus))) {
+    if (expedition.depth >= tuning::research::artifactDepthThreshold && expedition.temporaryArtifacts.empty() && rng.chance(std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus))) {
         expedition.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
         outcome.artifactFound = true;
         outcome.cargoDelta += 3;
@@ -838,7 +891,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::pushHazardChanceScale,
-        surfaceToolEffects(state.meta).extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0,
+        (surfaceToolEffects(state.meta).extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief,
         text::status::surfaceTerrainHazard,
         tuning::research::pushHazardSupplyLoss,
         0,

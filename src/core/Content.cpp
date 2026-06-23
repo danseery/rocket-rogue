@@ -1,6 +1,7 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <utility>
@@ -139,7 +140,14 @@ ContentCatalog createDefaultContent()
 
         module(content::module::springCapsule, "Spring Capsule", SlotType::Escape, Rarity::Common, {.thrust = -0.2, .escape = 2.8}, content::unlock::starter, {"eject"}),
         module(content::module::abortTower, "Abort Tower", SlotType::Escape, Rarity::Uncommon, {.hull = 0.5, .escape = 4.6, .payout = -0.2}, content::unlock::recovery, {"crew-first"}),
-        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, content::unlock::exotic, {"legendary"}, {.rare = 1, .exotic = 1})
+        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, content::unlock::exotic, {"legendary"}, {.rare = 1, .exotic = 1}),
+
+        module(content::module::surfaceMapper, "Surface Mapper", SlotType::Sensors, Rarity::Common, {.sensors = 0.4, .miningWidth = 1.0}, content::unlock::surfaceProbes, {"surface", "mining", "survey"}),
+        module(content::module::regolithAuger, "Regolith Auger", SlotType::Engine, Rarity::Common, {.volatility = 0.10, .miningPower = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "drill"}),
+        module(content::module::oreSorter, "Ore Sorter", SlotType::Fuel, Rarity::Uncommon, {.fuel = -0.2, .miningYield = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "yield"}, {.common = 1}),
+        module(content::module::coolantSleeve, "Coolant Sleeve", SlotType::Cooling, Rarity::Uncommon, {.cooling = 0.4, .miningCooling = 1.1}, content::unlock::surfaceDrills, {"surface", "mining", "cooling"}, {.common = 1}),
+        module(content::module::diamondBearings, "Diamond Bearings", SlotType::Hull, Rarity::Rare, {.hull = 0.2, .miningDurability = 1.2}, content::unlock::surfaceDrills, {"surface", "mining", "durable"}, {.common = 1, .rare = 1}),
+        module(content::module::deepBoreFrame, "Deep-Bore Frame", SlotType::Fuel, Rarity::Rare, {.fuel = -0.4, .miningPower = 0.4, .miningDepth = 1.0}, content::unlock::cargoRigs, {"surface", "mining", "deep"}, {.common = 2, .rare = 1})
     };
 
     catalog.crewUpgrades = {
@@ -170,12 +178,12 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.astronauts = {
-        {content::astronaut::ava, "Ava Singh", "Test pilot", "Calm under heat", 2, 0, CrewStatus::Active},
-        {content::astronaut::marco, "Marco Bell", "Flight engineer", "Repairs modules faster", 1, 5, CrewStatus::Active},
-        {content::astronaut::nia, "Nia Okonkwo", "Navigator", "Reads telemetry early", 1, 0, CrewStatus::Active},
-        {content::astronaut::eli, "Eli Park", "Rescue specialist", "Improves ejection odds", 1, 0, CrewStatus::Active},
-        {content::astronaut::jo, "Jo Alvarez", "Rookie", "Learns quickly", 0, 0, CrewStatus::Active},
-        {content::astronaut::sana, "Sana Wright", "Systems analyst", "Finds blueprint fragments", 1, 10, CrewStatus::Active}
+        {content::astronaut::ava, "Mara Capybara", "Capybara Tank - Survival", std::string(tuning::traits::beastMode), 2, 0, CrewStatus::Active},
+        {content::astronaut::marco, "Bram Beaver", "Beaver Engineer - Resilience", std::string(tuning::traits::hardReboot), 1, 5, CrewStatus::Active},
+        {content::astronaut::nia, "Vela Fox", "Fox Ace - Navigation", std::string(tuning::traits::outtaHere), 1, 0, CrewStatus::Active},
+        {content::astronaut::eli, "Pip Prairie Dog", "Prairie Dog Scout - Digging", std::string(tuning::traits::deepFocus), 1, 0, CrewStatus::Active},
+        {content::astronaut::jo, "Nix Squirrel", "Squirrel Hoarder - Resource Gathering", std::string(tuning::traits::rummageSale), 0, 0, CrewStatus::Active},
+        {content::astronaut::sana, "Kip Chipmunk", "Chipmunk Speedster - Exploration", std::string(tuning::traits::phaseShift), 1, 10, CrewStatus::Active}
     };
 
     catalog.destinations = {
@@ -355,6 +363,12 @@ ModuleStats& operator+=(ModuleStats& lhs, const ModuleStats& rhs)
     lhs.volatility += rhs.volatility;
     lhs.payout += rhs.payout;
     lhs.repair += rhs.repair;
+    lhs.miningPower += rhs.miningPower;
+    lhs.miningYield += rhs.miningYield;
+    lhs.miningCooling += rhs.miningCooling;
+    lhs.miningDurability += rhs.miningDurability;
+    lhs.miningWidth += rhs.miningWidth;
+    lhs.miningDepth += rhs.miningDepth;
     return lhs;
 }
 

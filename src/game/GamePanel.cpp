@@ -5,6 +5,7 @@
 #include "core/HangarPresentation.h"
 #include "core/LaunchPresentation.h"
 #include "core/LaunchReadinessPresentation.h"
+#include "core/MiningPresentation.h"
 #include "core/OutcomePresentation.h"
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
@@ -242,9 +243,13 @@ std::string missionLog(const std::vector<std::string>& entries)
     return body;
 }
 
-std::string phaseBoardOpen(std::string_view cssClass, std::string_view status)
+std::string phaseBoardOpen(std::string_view cssClass, std::string_view status, bool fullPanel = true)
 {
-    std::string out = "<section class=\"phase-board " + htmlEscape(cssClass) + "\" data-panel-mode=\"phase-board\">";
+    std::string out = "<section class=\"phase-board " + htmlEscape(cssClass) + "\"";
+    if (fullPanel) {
+        out += " data-panel-mode=\"phase-board\"";
+    }
+    out += ">";
     if (!status.empty()) {
         out += "<p class=\"phase-status\">" + htmlEscape(status) + "</p>";
     }
@@ -355,7 +360,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "</div>";
         out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
-        out << "<p class=\"status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
+        out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
 
         out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
         out << "<div class=\"actions primary-actions\">";
@@ -479,6 +484,29 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::phaseBriefing, researchPanel.briefing.title, detailStack(researchPanel.briefing.rows));
         out << modalTemplate(ui::modals::research, text::panel::modals::researchDetails, detailStack(researchPanel.details));
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
+    if (state.screen == Screen::Mining) {
+        const MiningRunPresentation miningPanel = miningRunPresentation(state, catalog);
+        out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
+        out << "<h2>" << htmlEscape(text::panel::sections::miningRun) << "</h2>";
+        out << "<p>" << htmlEscape("Pilot the mining drone through destructible terrain. Stow early with partial cargo or keep drilling for deeper pockets.") << "</p>";
+        out << "<div class=\"utility-row\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost") << "</div>";
+        out << "<div class=\"metric-grid mining-metrics\">";
+        for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
+            out << metric(metricItem.label, metricItem.value);
+        }
+        out << "</div>";
+        out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
+        out << "<div class=\"actions system-actions\">";
+        for (const PanelButtonPresentation& action : miningPanel.actions) {
+            out << panelButton(action);
+        }
+        out << "</div>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(miningPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
