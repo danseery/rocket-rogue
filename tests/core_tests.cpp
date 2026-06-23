@@ -24,6 +24,7 @@
 #include "core/Telemetry.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
+#include "game/GamePanel.h"
 
 #include <cassert>
 #include <algorithm>
@@ -2762,6 +2763,47 @@ void panelChromePresentationComesFromSharedHelper()
     require(reset != nullptr && reset->enabled && reset->actionId == ui::actions::resetSave && reset->cssClass == "danger", "settings presentation should expose reset-save danger action");
 }
 
+void panelHtmlIncludesContextualTutorialLayer()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState launchState = createNewGame(catalog, 711);
+    launchState.screen = Screen::Launch;
+    Random launchRng(711);
+    const PreparedLaunch launch = prepareLaunch(launchState, catalog, launchRng);
+    PanelRenderContext launchContext {launchState, catalog, launch, launch};
+    launchContext.currentMultiplier = 1.12;
+    const std::string launchHtml = buildGamePanelHtml(launchContext);
+    require(launchHtml.find("data-help-topic=\"launch-controls\"") != std::string::npos, "launch panel should introduce return/eject/mitigation help");
+    require(launchHtml.find("Return home banks data") != std::string::npos, "launch help should mention returning home");
+    require(launchHtml.find("relief valve") != std::string::npos, "launch help should mention mitigation controls");
+    require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+
+    GameState arrivalState = createNewGame(catalog, 712);
+    LaunchOutcome arrival;
+    arrival.type = LaunchResultType::MissionComplete;
+    arrival.frontierTransfer = true;
+    arrival.destinationId = content::destination::moon;
+    startArrivalOps(arrivalState, arrival);
+    arrivalState.screen = Screen::ArrivalOps;
+    Random arrivalRng(712);
+    const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
+    const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
+    require(arrivalHtml.find("data-help-topic=\"arrival-ops\"") != std::string::npos, "arrival ops panel should introduce flyby/orbit/land help");
+    require(arrivalHtml.find("Flyby is the safest scan") != std::string::npos, "arrival help should explain flyby/orbit/landing progression");
+
+    GameState miningState = createNewGame(catalog, 713);
+    miningState.run.destinationIndex = 2;
+    startSurfaceExpedition(miningState, catalog);
+    require(startMiningRun(miningState, catalog).applied, "test mining run should start");
+    Random miningRng(713);
+    const PreparedLaunch miningLaunch = prepareLaunch(miningState, catalog, miningRng);
+    const std::string miningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(miningHtml.find("data-help-topic=\"mining-basics\"") != std::string::npos, "mining panel should introduce controls and purpose");
+    require(miningHtml.find("Move with WASD or arrows") != std::string::npos, "mining help should explain movement controls");
+    require(miningHtml.find("materials and artifacts") != std::string::npos, "mining help should explain the mining purpose");
+}
+
 void launchBalanceHelpersDrivePreparedLaunch()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -3096,6 +3138,7 @@ int main()
     launchPanelPresentationComesFromSharedHelper();
     launchReadinessPresentationComesFromSharedHelper();
     panelChromePresentationComesFromSharedHelper();
+    panelHtmlIncludesContextualTutorialLayer();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();

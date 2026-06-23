@@ -27,6 +27,7 @@ else()
 endif()
 
 add_executable(rocket_core_tests
+    src/game/GamePanel.cpp
     tests/core_tests.cpp)
 target_link_libraries(rocket_core_tests PRIVATE rocket_core)
 set_target_properties(rocket_core_tests PROPERTIES

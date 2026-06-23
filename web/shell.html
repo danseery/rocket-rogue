@@ -966,6 +966,68 @@
       font: inherit;
     }
 
+    .settings-control .settings-checkbox {
+      align-self: center;
+      display: inline-flex;
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      justify-content: end;
+      text-transform: none;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .settings-checkbox input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
+
+    .tutorial-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      margin: 10px 0 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 209, 102, 0.24);
+      border-radius: 8px;
+      background: rgba(255, 209, 102, 0.060);
+    }
+
+    .tutorial-card[hidden] {
+      display: none;
+    }
+
+    .tutorial-card span {
+      display: block;
+      color: var(--warn);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .tutorial-card strong {
+      display: block;
+      margin-top: 3px;
+      font-size: 14px;
+      line-height: 1.18;
+    }
+
+    .tutorial-card p {
+      margin-top: 5px;
+      color: var(--muted);
+    }
+
+    .tutorial-card button {
+      min-width: 68px;
+      min-height: 30px;
+      padding-inline: 10px;
+    }
+
     .utility-row {
       display: flex;
       gap: 8px;
@@ -1219,6 +1281,8 @@
     let lastToastAt = 0;
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
     const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
+    const helpDisabledStorageKey = "rocket_rogue_help_disabled";
+    const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
 
     function normalizedGameSpeed(value) {
       const numeric = Number(value);
@@ -1262,6 +1326,65 @@
       });
     }
 
+    function helpDisabled() {
+      try {
+        return window.localStorage.getItem(helpDisabledStorageKey) === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function setHelpDisabled(disabled) {
+      try {
+        if (disabled) {
+          window.localStorage.setItem(helpDisabledStorageKey, "1");
+        } else {
+          window.localStorage.removeItem(helpDisabledStorageKey);
+        }
+      } catch (error) {
+        return;
+      }
+    }
+
+    function dismissedHelpTopics() {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem(helpDismissedStorageKey) || "[]");
+        return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+      } catch (error) {
+        return new Set();
+      }
+    }
+
+    function dismissHelpTopic(topic) {
+      if (!topic) {
+        return;
+      }
+      const topics = dismissedHelpTopics();
+      topics.add(topic);
+      try {
+        window.localStorage.setItem(helpDismissedStorageKey, JSON.stringify(Array.from(topics)));
+      } catch (error) {
+        return;
+      }
+    }
+
+    function syncHelpControls(root = document) {
+      const disabled = helpDisabled();
+      const dismissed = dismissedHelpTopics();
+      root.querySelectorAll("[data-help-toggle]").forEach((input) => {
+        input.checked = !disabled;
+      });
+      root.querySelectorAll("[data-help-topic]").forEach((card) => {
+        const topic = card.dataset.helpTopic || "";
+        card.hidden = disabled || dismissed.has(topic);
+      });
+    }
+
+    function syncLocalControls(root = document) {
+      syncGameSpeedControls(root);
+      syncHelpControls(root);
+    }
+
     function showToast(message) {
       const text = (message || "").trim();
       if (!text) {
@@ -1290,7 +1413,7 @@
     window.RocketBridge = {
       setPanel(html) {
         panel.innerHTML = html;
-        syncGameSpeedControls(panel);
+        syncLocalControls(panel);
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
         panel.classList.toggle("phase-board-panel", phaseBoard);
@@ -1434,7 +1557,7 @@
 
       modalTitle.textContent = template.dataset.title || "Details";
       modalContent.innerHTML = template.innerHTML;
-      syncGameSpeedControls(modalContent);
+      syncLocalControls(modalContent);
       modalRoot.hidden = false;
       modalClose.focus();
       return true;
@@ -1527,19 +1650,39 @@
       }
     }
 
-    function handleGameSpeedChange(event) {
+    function handleSettingsChange(event) {
       const select = event.target.closest("[data-game-speed-select]");
-      if (!select || !(panel.contains(select) || modalRoot.contains(select))) {
+      if (select && (panel.contains(select) || modalRoot.contains(select))) {
+        setGameSpeedMultiplier(select.value);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
         return;
       }
-      setGameSpeedMultiplier(select.value);
-      syncGameSpeedControls(panel);
-      syncGameSpeedControls(modalRoot);
+
+      const helpToggle = event.target.closest("[data-help-toggle]");
+      if (helpToggle && (panel.contains(helpToggle) || modalRoot.contains(helpToggle))) {
+        setHelpDisabled(!helpToggle.checked);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+      }
+    }
+
+    function handleHelpDismiss(event) {
+      const button = event.target.closest("[data-help-dismiss]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      dismissHelpTopic(button.dataset.helpDismiss || "");
+      syncLocalControls(panel);
+      syncLocalControls(modalRoot);
     }
 
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
-    document.addEventListener("change", handleGameSpeedChange, true);
+    document.addEventListener("click", handleHelpDismiss, true);
+    document.addEventListener("change", handleSettingsChange, true);
     panel.addEventListener("pointerdown", handlePanelAction, true);
     panel.addEventListener("click", handlePanelAction, true);
     panel.addEventListener("keydown", (event) => {

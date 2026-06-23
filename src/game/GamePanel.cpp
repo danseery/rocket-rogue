@@ -339,6 +339,13 @@ std::string achievementCard(const AchievementPresentation& achievement)
         "</strong><p>" + htmlEscape(achievement.detail) + "</p></article>";
 }
 
+std::string tutorialCard(std::string_view topic, std::string_view title, std::string_view detail)
+{
+    return "<aside class=\"tutorial-card\" data-help-topic=\"" + htmlEscape(topic) + "\"><div><span>Mission help</span><strong>" +
+        htmlEscape(title) + "</strong><p>" + htmlEscape(detail) +
+        "</p></div><button type=\"button\" class=\"ghost\" data-help-dismiss=\"" + htmlEscape(topic) + "\">Got it</button></aside>";
+}
+
 } // namespace
 
 std::string buildGamePanelHtml(const PanelRenderContext& context)
@@ -373,6 +380,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<option value=\"5\">5x</option>"
         << "<option value=\"8\">8x</option>"
         << "</select></label></section>";
+    settingsBody << "<section class=\"settings-control\" data-help-settings>"
+        << "<div><h3>" << htmlEscape("Mission help") << "</h3>"
+        << "<p>" << htmlEscape("Show light tips when new systems appear.") << "</p></div>"
+        << "<label class=\"settings-checkbox\"><input type=\"checkbox\" data-help-toggle checked><span>"
+        << htmlEscape("Show help") << "</span></label></section>";
     settingsBody << "<div class=\"modal-actions\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         settingsBody << panelButton(action);
@@ -412,6 +424,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
         out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
+        out << tutorialCard(
+            "launch-controls",
+            "Press your luck, then get home",
+            "Return home banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs.");
 
         out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
         out << "<div class=\"actions primary-actions\">";
@@ -481,6 +497,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-arrival", state.statusLine);
         out << "<h2>" << htmlEscape(text::panel::sections::arrivalOps) << "</h2>";
         out << "<p>" << htmlEscape(text::panel::messages::chooseArrivalOperation) << "</p>";
+        out << tutorialCard(
+            "arrival-ops",
+            "Flyby, orbit, then land",
+            "Flyby is the safest scan. Orbit opens stronger science. Landing is the risky payoff for surface work and mining. The Moon requires flyby and orbit first; later worlds let you gamble.");
         out << "<div class=\"metric-grid\">";
         out << metric(text::labels::currentFrontier, destinationName);
         out << metric(text::panel::details::flyby, std::to_string(destinationHistoryValue(state.meta.destinationFlybys, catalog, state.run.arrivalOps.destinationId)));
@@ -552,6 +572,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
         out << "<h2>" << htmlEscape(text::panel::sections::miningRun) << "</h2>";
         out << "<p>" << htmlEscape("Pilot the mining drone through destructible terrain. Stow early with partial cargo or keep drilling for deeper pockets.") << "</p>";
+        out << tutorialCard(
+            "mining-basics",
+            "Dig, scan, stow",
+            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. Bring back materials and artifacts before oxygen or extraction risk gets ugly.");
         out << "<div class=\"utility-row\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost") << "</div>";
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
