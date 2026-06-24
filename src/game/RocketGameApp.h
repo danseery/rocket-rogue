@@ -44,6 +44,7 @@ public:
     void miningScanner();
     void miningStow();
     void miningAbort();
+    void miningFailureAck();
     void repairShip();
     void recruitCrew();
     void recruitCrew(int candidateIndex);

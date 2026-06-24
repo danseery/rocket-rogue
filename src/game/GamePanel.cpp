@@ -100,6 +100,11 @@ std::string modalTemplate(std::string_view modalId, std::string_view title, std:
     return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
 }
 
+std::string autoModalTemplate(std::string_view modalId, std::string_view title, std::string body)
+{
+    return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-auto-modal=\"1\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+}
+
 std::string disabledButton(std::string_view label)
 {
     return "<button disabled>" + htmlEscape(label) + "</button>";
@@ -690,6 +695,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             "mining-basics",
             "Dig, scan, stow",
             "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. Bring back materials and artifacts before oxygen or extraction risk gets ugly.");
+        if (miningPanel.failurePending) {
+            out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
+                << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
+        }
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
             out << metric(metricItem.label, metricItem.value);
@@ -703,6 +712,15 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "</div></section>";
         out << phaseBoardClose();
+        if (miningPanel.failurePending) {
+            std::ostringstream failureBody;
+            failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
+                << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
+            failureBody << "<div class=\"modal-actions actions\">"
+                << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"))
+                << "</div>";
+            out << autoModalTemplate(ui::modals::miningFailure, miningPanel.failureTitle, failureBody.str());
+        }
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(miningPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();

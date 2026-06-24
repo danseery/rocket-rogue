@@ -54,6 +54,7 @@ struct RenderSnapshot {
     double miningHeat = 0.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
+    double miningFailurePulse = 0.0;
     double miningRecoilX = 0.0;
     double miningRecoilY = 0.0;
     double miningBounce = 0.0;

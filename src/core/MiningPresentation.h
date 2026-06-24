@@ -18,6 +18,9 @@ struct MiningRunPresentation {
     std::vector<PanelMetricPresentation> metrics;
     std::vector<DetailPresentationRow> details;
     std::vector<PanelButtonPresentation> actions;
+    bool failurePending = false;
+    std::string failureTitle;
+    std::string failureBody;
 };
 
 inline std::string miningOxygenValue(double seconds)
@@ -43,6 +46,11 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         0.0,
         tuning::mining::maxMiningHazardDelta);
     MiningRunPresentation presentation;
+    presentation.failurePending = mining.failurePending;
+    presentation.failureTitle = mining.drillIntegrity <= 0.0 ? "Drill failure" : "Emergency recall";
+    presentation.failureBody = mining.failureMessage.empty()
+        ? std::string("Mining drone recall is in progress.")
+        : mining.failureMessage;
     presentation.metrics = {
         panelMetric(text::labels::oxygen, miningOxygenValue(mining.oxygenSeconds)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
@@ -69,11 +77,17 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Run target", std::string("Bank useful payload in 1-3 minutes, then extract from the surface phase.")),
         detailPresentationRow("Depth pressure", std::string("Deeper zones have tougher terrain, richer pockets, and more extraction risk."))
     };
-    presentation.actions = {
-        panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
-        panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"),
-        panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
-    };
+    if (mining.failurePending) {
+        presentation.actions = {
+            disabledPanelButton("Drill disabled")
+        };
+    } else {
+        presentation.actions = {
+            panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
+            panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"),
+            panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
+        };
+    }
     return presentation;
 }
 

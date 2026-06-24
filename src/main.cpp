@@ -332,6 +332,16 @@ void rr_mining_abort()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_failure_ack()
+{
+    if (g_app) {
+        g_app->miningFailureAck();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_repair_ship()
 {
     if (g_app) {

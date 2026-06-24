@@ -755,6 +755,14 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return;
     }
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
+    if (mining.failurePending) {
+        mining.elapsedSeconds += dt;
+        mining.failureSeconds = std::min(1.5, mining.failureSeconds + dt);
+        mining.contactIntensity = 1.0;
+        mining.scannerPulseSeconds = std::max(mining.scannerPulseSeconds, 0.35);
+        mining.drilling = false;
+        return;
+    }
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.elapsedSeconds += dt;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
@@ -840,7 +848,17 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     refreshTargetCell(mining);
 
     if (mining.oxygenSeconds <= 0.0 || mining.drillIntegrity <= 0.0) {
-        finishMiningRun(state, catalog, true);
+        mining.failurePending = true;
+        mining.failureSeconds = 0.0;
+        mining.drilling = false;
+        mining.drillIntegrity = std::max(0.0, mining.drillIntegrity);
+        mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds);
+        mining.contactIntensity = 1.0;
+        mining.scannerPulseSeconds = 0.9;
+        mining.failureMessage = mining.drillIntegrity <= 0.0
+            ? std::string(text::status::miningDrillFailed)
+            : std::string(text::status::miningOxygenFailed);
+        state.statusLine = mining.failureMessage;
     }
 }
 
@@ -854,7 +872,9 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     }
 
     outcome.applied = true;
-    outcome.message = abort ? "Mining drone recalled under pressure." : "Mining payload stowed for extraction.";
+    outcome.message = abort
+        ? (mining.failureMessage.empty() ? std::string("Mining drone recalled under pressure.") : mining.failureMessage)
+        : std::string("Mining payload stowed for extraction.");
     outcome.materialDelta = mining.temporaryMaterials;
     outcome.artifactFound = !mining.temporaryArtifacts.empty();
     outcome.cargoDelta = mining.cargo;

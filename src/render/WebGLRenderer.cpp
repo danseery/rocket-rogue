@@ -665,6 +665,12 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     const float cellSize = std::min(cellW, cellH);
     drawCircle(drone.x, drone.y, cellSize * 6.8F, {0.18F, 0.52F, 0.68F, 0.055F}, 40);
     drawCircle(drone.x, drone.y, cellSize * 3.2F, {0.28F, 0.82F, 0.98F, 0.080F}, 32);
+    if (snapshot.miningFailurePulse > 0.0) {
+        const float pulse = static_cast<float>(std::clamp(snapshot.miningFailurePulse, 0.0, 1.0));
+        const float beat = 0.55F + 0.45F * std::sin(static_cast<float>(snapshot.animationTime) * 34.0F);
+        drawCircle(drone.x, drone.y, cellSize * (4.0F + (1.0F - pulse) * 5.0F), {1.0F, 0.16F, 0.08F, 0.16F * pulse}, 42);
+        drawCircle(drone.x, drone.y, cellSize * (2.1F + beat * 0.9F), {1.0F, 0.48F, 0.18F, 0.18F * pulse}, 30);
+    }
     if (snapshot.miningScannerPulse > 0.0) {
         const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
         const float radius = cellSize * (5.2F + (1.0F - pulse) * 12.0F);
@@ -722,16 +728,20 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F, 0.88F, 0.92F, 1.0F});
     }
 
-    if (snapshot.miningDrilling) {
-        const int particleCount = 8 + static_cast<int>(std::round(snapshot.miningContactIntensity * 10.0));
+    if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0) {
+        const int failureBurst = snapshot.miningFailurePulse > 0.0 ? 18 : 0;
+        const int particleCount = 8 + failureBurst + static_cast<int>(std::round(snapshot.miningContactIntensity * 10.0));
         std::vector<float>& particleVertices = scratchVertices(static_cast<std::size_t>(particleCount) * 48U);
         for (int i = 0; i < particleCount; ++i) {
             const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37, 1.0));
             const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
-            const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F)) * std::min(cellW, cellH);
+            const float failureScale = static_cast<float>(snapshot.miningFailurePulse);
+            const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F + failureScale * 1.3F)) * std::min(cellW, cellH);
             const float px = particleAnchor.x + std::cos(angle) * radius;
             const float py = particleAnchor.y + std::sin(angle) * radius;
-            const Color spark = mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
+            const Color spark = snapshot.miningFailurePulse > 0.0
+                ? mix({1.0F, 0.18F, 0.08F, 0.95F}, {1.0F, 0.78F, 0.22F, 0.20F}, t)
+                : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
             appendRect(particleVertices, px, py, cellW * 0.22F, cellH * 0.22F, spark);
         }
         submit(particleVertices, 0x0004);

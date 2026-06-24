@@ -579,6 +579,18 @@ void RocketGameApp::miningAbort()
     panelDirty_ = true;
 }
 
+void RocketGameApp::miningFailureAck()
+{
+    if (state_.screen != Screen::Mining || !state_.run.mining.failurePending) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
+    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
+    save();
+    panelDirty_ = true;
+}
+
 void RocketGameApp::attemptFrontierTransfer()
 {
     if (state_.screen != Screen::Hangar) {
@@ -809,6 +821,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningHeat = mining.drillHeat;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
+        result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);

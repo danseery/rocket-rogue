@@ -1738,6 +1738,43 @@ void miningCompletionFeedsSurfacePayload()
     require(state.run.surfaceExpedition.hazard > tuning::research::baseHazard, "mining hazard should affect extraction pressure");
 }
 
+void miningDrillFailureShowsRecallBeatBeforeReturning()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94949);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog).applied, "mining should start for drill failure test");
+
+    state.run.mining.drillIntegrity = 0.0;
+    updateMiningRun(state, catalog, 0.08);
+
+    require(state.screen == Screen::Mining, "drill failure should stay on mining screen for a visible recall beat");
+    require(state.run.mining.active, "drill failure recall beat should keep the mining run active briefly");
+    require(state.run.mining.failurePending, "drill failure should mark a pending recall");
+    require(state.statusLine.find("Drill head sheared off") != std::string::npos, "drill failure should explain why mining is ending");
+
+    Random rng(94949);
+    const PreparedLaunch prepared = prepareLaunch(state, catalog, rng);
+    const std::string html = buildGamePanelHtml({state, catalog, prepared, prepared});
+    require(html.find("Drill failure") != std::string::npos, "mining panel should show a drill failure callout");
+    require(html.find("Drill disabled") != std::string::npos, "mining controls should lock during failure recall");
+    require(html.find("Return to Surface Ops") != std::string::npos, "mining failure modal should require player acknowledgement");
+    require(html.find("data-auto-modal=\"1\"") != std::string::npos, "mining failure modal should open automatically");
+
+    for (int i = 0; i < 24; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+
+    require(state.screen == Screen::Mining, "drill failure should wait for player dismissal instead of returning abruptly");
+    require(state.run.mining.active, "failed mining run should remain active until acknowledged");
+
+    const SurfaceActionOutcome acknowledged = finishMiningRun(state, catalog, true);
+    require(acknowledged.applied, "acknowledging failure should resolve mining outcome");
+    require(state.screen == Screen::SurfaceExpedition, "acknowledging drill failure should return to surface expedition");
+    require(!state.run.mining.active, "acknowledging drill failure should clear mining");
+}
+
 void miningRefitModulesImproveDrillProfileIncrementally()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -3219,6 +3256,7 @@ int main()
     miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
     miningDrillTargetsFirstSolidCellOnRay();
     miningCompletionFeedsSurfacePayload();
+    miningDrillFailureShowsRecallBeatBeforeReturning();
     miningRefitModulesImproveDrillProfileIncrementally();
     activeMiningRoundTripsThroughSave();
     surfaceActionSummaryShowsResourceDeltas();

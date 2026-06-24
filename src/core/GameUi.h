@@ -37,6 +37,7 @@ inline constexpr std::string_view extractSurface = "extract_surface";
 inline constexpr std::string_view miningScanner = "mining_scanner";
 inline constexpr std::string_view miningStow = "mining_stow";
 inline constexpr std::string_view miningAbort = "mining_abort";
+inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
 
 inline std::string buyOffer(int index)
 {
@@ -67,6 +68,7 @@ inline constexpr std::string_view research = "research";
 inline constexpr std::string_view surface = "surface";
 inline constexpr std::string_view phaseBriefing = "phase_briefing";
 inline constexpr std::string_view missionLog = "mission_log";
+inline constexpr std::string_view miningFailure = "mining_failure";
 } // namespace modals
 
 } // namespace rocket::ui

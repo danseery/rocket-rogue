@@ -298,6 +298,9 @@ struct MiningRunState {
     double aimDirX = 0.0;
     double aimDirY = 1.0;
     bool drilling = false;
+    bool failurePending = false;
+    double failureSeconds = 0.0;
+    std::string failureMessage;
     double drillHeat = 0.0;
     double drillIntegrity = 1.0;
     double contactIntensity = 0.0;

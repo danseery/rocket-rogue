@@ -1085,6 +1085,12 @@
       background: rgba(255, 100, 100, 0.09);
     }
 
+    .mining-failure-callout {
+      max-width: none;
+      border-color: rgba(255, 94, 75, 0.62);
+      box-shadow: 0 0 30px rgba(255, 70, 48, 0.12), inset 0 0 24px rgba(255, 70, 48, 0.06);
+    }
+
     .surface-kpi-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
@@ -1942,6 +1948,10 @@
           showToast(panel.querySelector(".phase-status")?.textContent || "");
         }
         syncSceneOverlays();
+        const autoModal = panel.querySelector("template[data-auto-modal='1']");
+        if (autoModal && modalRoot.hidden) {
+          openPanelModal(autoModal.dataset.modal || "");
+        }
       },
       loadSave() {
         return window.localStorage.getItem("rocket_rogue_save_v1") || "";
@@ -2011,6 +2021,7 @@
       miningScanner: () => rrCall("rr_mining_scanner"),
       miningStow: () => rrCall("rr_mining_stow"),
       miningAbort: () => rrCall("rr_mining_abort"),
+      miningFailureAck: () => rrCall("rr_mining_failure_ack"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
       recruitCandidate: (index) => rrCall("rr_recruit_candidate", [index], ["number"]),
@@ -2049,6 +2060,7 @@
       miningScanner: "mining_scanner",
       miningStow: "mining_stow",
       miningAbort: "mining_abort",
+      miningFailureAck: "mining_failure_ack",
       repairShip: "repair_ship",
       recruitCrew: "recruit_crew",
       recruitCandidatePrefix: "recruit_candidate:",
@@ -2081,6 +2093,7 @@
       [rrActionIds.miningScanner]: () => rr.miningScanner(),
       [rrActionIds.miningStow]: () => rr.miningStow(),
       [rrActionIds.miningAbort]: () => rr.miningAbort(),
+      [rrActionIds.miningFailureAck]: () => rr.miningFailureAck(),
       [rrActionIds.repairShip]: () => rr.repairShip(),
       [rrActionIds.recruitCrew]: () => rr.recruitCrew(),
       [rrActionIds.trainCrew]: () => rr.trainCrew(),
