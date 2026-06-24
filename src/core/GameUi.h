@@ -6,6 +6,7 @@
 namespace rocket::ui {
 
 namespace actions {
+inline constexpr std::string_view prepareLaunch = "prepare_launch";
 inline constexpr std::string_view startLaunch = "start_launch";
 inline constexpr std::string_view ejectNow = "eject_now";
 inline constexpr std::string_view returnHome = "return_home";
@@ -22,6 +23,7 @@ inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
 inline constexpr std::string_view repairShip = "repair_ship";
 inline constexpr std::string_view recruitCrew = "recruit_crew";
+inline constexpr std::string_view recruitCandidatePrefix = "recruit_candidate:";
 inline constexpr std::string_view trainCrew = "train_crew";
 inline constexpr std::string_view restCrew = "rest_crew";
 inline constexpr std::string_view resetSave = "reset_save";
@@ -45,6 +47,11 @@ inline std::string researchProject(int index)
 {
     return std::string(researchProjectPrefix) + std::to_string(index);
 }
+
+inline std::string recruitCandidate(int index)
+{
+    return std::string(recruitCandidatePrefix) + std::to_string(index);
+}
 } // namespace actions
 
 namespace modals {
@@ -54,6 +61,7 @@ inline constexpr std::string_view ship = "ship";
 inline constexpr std::string_view crew = "crew";
 inline constexpr std::string_view frontier = "frontier";
 inline constexpr std::string_view launchBlocked = "launch_blocked";
+inline constexpr std::string_view pilotIntake = "pilot_intake";
 inline constexpr std::string_view legacy = "legacy";
 inline constexpr std::string_view research = "research";
 inline constexpr std::string_view surface = "surface";

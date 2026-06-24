@@ -15,7 +15,9 @@
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 
+#include <algorithm>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 namespace rocket {
@@ -56,6 +58,29 @@ std::string metric(std::string_view label, std::string value)
 std::string compactMetric(std::string_view label, std::string value)
 {
     return "<div class=\"surface-kpi\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
+}
+
+std::string phaseTitle(Screen screen)
+{
+    switch (screen) {
+    case Screen::Launch:
+        return "Flight";
+    case Screen::Results:
+        return "Debrief";
+    case Screen::ArrivalOps:
+        return "Approach";
+    case Screen::Research:
+        return "Science";
+    case Screen::SurfaceExpedition:
+        return "Surface Ops";
+    case Screen::Mining:
+        return "Mining";
+    case Screen::Upgrade:
+        return "Refit";
+    case Screen::Hangar:
+    default:
+        return "Hangar";
+    }
 }
 
 std::string button(std::string_view label, std::string_view action, std::string cssClass = "")
@@ -145,6 +170,49 @@ std::string operationCard(const HangarOperationCardPresentation& card)
     return operationCard(card.title, card.detail, card.cost, card.actionId, card.available, card.cssClass);
 }
 
+std::string operationModalCard(const HangarOperationCardPresentation& card, std::string_view buttonLabel, std::string_view modalId)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card " << htmlEscape(card.cssClass) << "\">";
+    out << "<h3>" << htmlEscape(card.title) << "</h3>";
+    out << "<p>" << htmlEscape(card.detail) << "</p>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(card.cost) << "</span>";
+    out << (card.available ? modalButton(buttonLabel, modalId) : disabledButton(text::buttons::unavailable));
+    out << "</div></article>";
+    return out.str();
+}
+
+std::pair<std::string, std::string> crewClassAndFocus(const Astronaut& astronaut)
+{
+    const std::string marker = " - ";
+    const std::size_t split = astronaut.background.find(marker);
+    if (split == std::string::npos) {
+        return {astronaut.background, "Field specialist"};
+    }
+    return {
+        astronaut.background.substr(0, split),
+        astronaut.background.substr(split + marker.size())
+    };
+}
+
+std::string pilotCandidateCard(const Astronaut& candidate, int index, bool available)
+{
+    const auto [crewClass, focus] = crewClassAndFocus(candidate);
+    std::ostringstream out;
+    out << "<article class=\"pilot-card\">";
+    out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(focus) << "</span><strong>" << htmlEscape(crewClass) << "</strong></div>";
+    out << "<div class=\"pilot-portrait-placeholder\"><span>" << htmlEscape(candidate.name.substr(0, 1)) << "</span></div>";
+    out << "<h3>" << htmlEscape(candidate.name) << "</h3>";
+    out << "<p>" << htmlEscape(candidate.trait) << "</p>";
+    out << "<div class=\"pilot-stat-grid\">";
+    out << "<span>Training <strong>" << htmlEscape(std::to_string(candidate.training)) << "</strong></span>";
+    out << "<span>Stress <strong>" << htmlEscape(display::percent(candidate.stress)) << "</strong></span>";
+    out << "</div>";
+    out << (available ? button("Select pilot", ui::actions::recruitCandidate(index), "ok") : disabledButton(text::buttons::unavailable));
+    out << "</article>";
+    return out.str();
+}
+
 std::string panelButton(const PanelButtonPresentation& action)
 {
     if (!action.enabled) {
@@ -190,7 +258,8 @@ std::string researchProjectCard(const ResearchProjectCardPresentation& project)
 std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
 {
     std::ostringstream out;
-    out << "<article class=\"ops-card surface-action-card\">";
+    const bool isMining = action.action.actionId == ui::actions::mineSurface;
+    out << "<article class=\"ops-card surface-action-card" << (isMining ? " featured-action" : "") << "\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(action.cost) << "</span><span>"
         << htmlEscape(action.risk) << " " << htmlEscape(action.riskLabel) << "</span></div>";
     out << "<h3>" << htmlEscape(action.title) << "</h3>";
@@ -198,6 +267,20 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
     out << "<div class=\"stat-grid\">" << resourceChipGrid(action.payoffChips) << "</div>";
     out << "<div class=\"card-footer\"><span>" << htmlEscape(action.availability)
         << "</span>" << panelButton(action.action) << "</div></article>";
+    return out.str();
+}
+
+std::string primarySurfaceActionCard(const SurfaceActionPreviewPresentation& action)
+{
+    std::ostringstream out;
+    out << "<article class=\"surface-primary-action\">";
+    out << "<div><span>" << htmlEscape(action.cost) << " / " << htmlEscape(action.risk) << " "
+        << htmlEscape(action.riskLabel) << "</span>";
+    out << "<h3>" << htmlEscape(action.title) << "</h3>";
+    out << "<p>" << htmlEscape(action.detail) << "</p>";
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(action.payoffChips) << "</div></div>";
+    out << panelButton(action.action);
+    out << "</article>";
     return out.str();
 }
 
@@ -361,7 +444,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     const PanelLayoutMode layoutMode = panelLayoutMode(state.screen);
 
     std::ostringstream out;
-    out << "<div class=\"panel-head\"><div><h1>" << htmlEscape(text::panel::title) << "</h1></div>"
+    out << "<div class=\"panel-head\"><div><span class=\"game-mark\">" << htmlEscape(text::panel::title)
+        << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
         << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div>";
     out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
 
@@ -391,7 +475,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     settingsBody << "</div>";
 
-    out << "<div class=\"metric-grid\">";
+    out << "<div class=\"metric-grid panel-kpis\">";
     for (const PanelMetricPresentation& metricItem : headerMetrics) {
         out << metric(metricItem.label, metricItem.value);
     }
@@ -408,9 +492,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             context.returnDuration,
             context.flightActions,
             context.pressureReliefUsed);
+        if (!context.flightArmed) {
+            out << "<div data-preflight-launch=\"1\" hidden></div>";
+        }
 
         out << "<h2>" << htmlEscape(launchPanel.sectionTitle) << "</h2>";
-        out << "<div class=\"metric-grid\">";
+        out << "<div class=\"metric-grid flight-readout\">";
         for (const PanelMetricPresentation& metricItem : launchPanel.metrics) {
             out << metric(metricItem.label, metricItem.value);
         }
@@ -429,18 +516,25 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             "Press your luck, then get home",
             "Return home banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs.");
 
-        out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
-        out << "<div class=\"actions primary-actions\">";
-        for (const FlightActionButtonPresentation& action : launchPanel.primaryActions) {
-            out << panelButton(action);
-        }
-        out << "</div>";
+        out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
+            << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
+            << htmlEscape(context.flightArmed ? "Choose the next move" : "Start the burn when ready") << "</strong></div>";
+        if (!context.flightArmed) {
+            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Review the burn profile, then use the cockpit launch control beside the vehicle.") << "</p>";
+        } else {
+            out << "<div class=\"actions primary-actions\">";
+            for (const FlightActionButtonPresentation& action : launchPanel.primaryActions) {
+                out << panelButton(action);
+            }
+            out << "</div>";
 
-        out << "<div class=\"actions system-actions\">";
-        for (const FlightActionButtonPresentation& action : launchPanel.systemActions) {
-            out << panelButton(action);
+            out << "<div class=\"actions system-actions\">";
+            for (const FlightActionButtonPresentation& action : launchPanel.systemActions) {
+                out << panelButton(action);
+            }
+            out << "</div>";
         }
-        out << "</div>";
+        out << "</section>";
         out << modalTemplate(ui::modals::telemetry, text::panel::modals::telemetryDetails, detailStack(launchPanel.telemetryDetails));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
@@ -495,12 +589,31 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const std::string landingDetail = landingReason.empty() ? std::string(text::panel::messages::landingDetail) : landingReason;
 
         out << phaseBoardOpen("phase-board-arrival", state.statusLine);
-        out << "<h2>" << htmlEscape(text::panel::sections::arrivalOps) << "</h2>";
-        out << "<p>" << htmlEscape(text::panel::messages::chooseArrivalOperation) << "</p>";
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
+            << "</h2><p>" << htmlEscape("You made it. Choose how boldly to engage the destination.") << "</p></div></div>";
+        const LaunchOutcomePresentation arrivalResult = launchOutcomePresentation(state.lastOutcome);
+        out << "<h2>" << htmlEscape("Arrival summary") << "</h2>";
+        out << "<div class=\"result-grid\">";
+        for (const LaunchOutcomeMetricGroupPresentation& group : arrivalResult.metricGroups) {
+            out << resultMetricGroup(group);
+        }
+        out << "</div>";
+        for (const std::string& note : arrivalResult.notes) {
+            out << boardNote(note);
+        }
+        if (!arrivalResult.achievements.empty()) {
+            out << "<h2>" << htmlEscape(text::panel::sections::achievements) << "</h2>";
+            out << "<div class=\"achievement-grid\">";
+            for (const AchievementPresentation& achievement : arrivalResult.achievements) {
+                out << achievementCard(achievement);
+            }
+            out << "</div>";
+        }
         out << tutorialCard(
             "arrival-ops",
             "Flyby, orbit, then land",
             "Flyby is the safest scan. Orbit opens stronger science. Landing is the risky payoff for surface work and mining. The Moon requires flyby and orbit first; later worlds let you gamble.");
+        out << "<h2>" << htmlEscape("Choose approach") << "</h2>";
         out << "<div class=\"metric-grid\">";
         out << metric(text::labels::currentFrontier, destinationName);
         out << metric(text::panel::details::flyby, std::to_string(destinationHistoryValue(state.meta.destinationFlybys, catalog, state.run.arrivalOps.destinationId)));
@@ -541,22 +654,21 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     if (state.screen == Screen::Research) {
         const ResearchPhasePresentation researchPanel = researchPhasePresentation(state, catalog);
         out << phaseBoardOpen("phase-board-research", state.statusLine);
-        out << "<h2>" << htmlEscape(text::panel::sections::research) << "</h2>";
-        out << "<p>" << htmlEscape(text::panel::messages::chooseOneResearch) << "</p>";
-        out << phaseTrack(researchPanel.phaseSteps);
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::research)
+            << "</h2><p>" << htmlEscape("Turn arrival data into better tools, or continue down to the surface.") << "</p></div>"
+            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::research, "ghost")
+            << "</div></div>";
         out << phaseAdvisory(researchPanel.advisory);
-        out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
-            << modalButton(text::buttons::details, ui::modals::research, "ghost") << "</div>";
-        out << "<div class=\"metric-grid\">";
+        out << "<div class=\"metric-grid focus-metrics\">";
         for (const PanelMetricPresentation& metricItem : researchPanel.metrics) {
             out << metric(metricItem.label, metricItem.value);
         }
         out << "</div>";
-        out << "<div class=\"ops-grid\">";
+        out << "<section class=\"board-primary\"><h2>" << htmlEscape("Research options") << "</h2><div class=\"ops-grid\">";
         for (const ResearchProjectCardPresentation& project : researchPanel.projects) {
             out << researchProjectCard(project);
         }
-        out << "</div>";
+        out << "</div></section>";
         out << "<div class=\"actions\">";
         out << panelButton(researchPanel.skipAction);
         out << "</div>";
@@ -570,24 +682,26 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     if (state.screen == Screen::Mining) {
         const MiningRunPresentation miningPanel = miningRunPresentation(state, catalog);
         out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
-        out << "<h2>" << htmlEscape(text::panel::sections::miningRun) << "</h2>";
-        out << "<p>" << htmlEscape("Pilot the mining drone through destructible terrain. Stow early with partial cargo or keep drilling for deeper pockets.") << "</p>";
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
+            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, and stow payload before oxygen or extraction risk turns ugly.") << "</p></div>"
+            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+            << "</div></div>";
         out << tutorialCard(
             "mining-basics",
             "Dig, scan, stow",
             "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. Bring back materials and artifacts before oxygen or extraction risk gets ugly.");
-        out << "<div class=\"utility-row\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost") << "</div>";
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
             out << metric(metricItem.label, metricItem.value);
         }
         out << "</div>";
-        out << "<h2>" << htmlEscape(text::panel::sections::flightControls) << "</h2>";
+        out << "<section class=\"cockpit-hud mining-hud\"><div class=\"cockpit-label\"><span>"
+            << htmlEscape("Mining controls") << "</span><strong>" << htmlEscape("Scan, stow, or abort") << "</strong></div>";
         out << "<div class=\"actions system-actions\">";
         for (const PanelButtonPresentation& action : miningPanel.actions) {
             out << panelButton(action);
         }
-        out << "</div>";
+        out << "</div></section>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(miningPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
@@ -607,13 +721,21 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
         out << "</div></div>";
-        out << phaseTrack(surfacePanel.phaseSteps);
         out << surfaceCommandSummary(surfacePanel);
         out << surfaceKpiGrid(expedition, extractionRisk);
+        const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
+            return action.action.actionId == ui::actions::mineSurface;
+        });
+        if (mineAction != surfacePanel.actions.end()) {
+            out << primarySurfaceActionCard(*mineAction);
+        }
         out << "<section class=\"board-primary surface-actions\">";
-        out << "<h2>" << htmlEscape("Field Actions") << "</h2>";
+        out << "<h2>" << htmlEscape("Field actions") << "</h2>";
         out << "<div class=\"ops-grid\">";
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
+            if (action.action.actionId == ui::actions::mineSurface) {
+                continue;
+            }
             out << surfaceActionCard(action);
         }
         out << "</div></section>";
@@ -659,9 +781,23 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     launchBlockedBody << detailStack(launchReadiness.details);
     launchBlockedBody << "<div class=\"modal-actions actions\">";
     for (const PanelButtonPresentation& action : launchReadiness.actions) {
-        launchBlockedBody << panelButton(action);
+        if (astronaut == nullptr && action.actionId == ui::actions::recruitCrew) {
+            launchBlockedBody << modalButton("Choose pilot", ui::modals::pilotIntake, action.cssClass);
+        } else {
+            launchBlockedBody << panelButton(action);
+        }
     }
     launchBlockedBody << "</div>";
+
+    std::ostringstream pilotIntakeBody;
+    pilotIntakeBody << "<p class=\"modal-intro\">Choose one specialist for the next launch window.</p>";
+    pilotIntakeBody << "<div class=\"pilot-card-grid\">";
+    const std::vector<const Astronaut*> pilotCandidates = recruitCandidateTemplates(state, catalog);
+    const HangarOperationPreview hangarPreview = hangarOperationPreview(state, catalog);
+    for (int index = 0; index < static_cast<int>(pilotCandidates.size()); ++index) {
+        pilotIntakeBody << pilotCandidateCard(*pilotCandidates[static_cast<std::size_t>(index)], index, hangarPreview.recruitAvailable);
+    }
+    pilotIntakeBody << "</div>";
 
     out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
@@ -678,14 +814,18 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
     out << "<div class=\"ops-grid\">";
     for (const HangarOperationCardPresentation& card : hangarOperationCards(state, catalog)) {
-        out << operationCard(card);
+        if (astronaut == nullptr && card.actionId == ui::actions::recruitCrew) {
+            out << operationModalCard(card, "Choose pilot", ui::modals::pilotIntake);
+        } else {
+            out << operationCard(card);
+        }
     }
     out << "</div>";
 
     out << "<div class=\"actions\">";
     out << (launchReadiness.blocked
         ? modalButton(text::buttons::launchProvingFlight, ui::modals::launchBlocked, "ok")
-        : button(text::buttons::launchProvingFlight, ui::actions::startLaunch, "ok"));
+        : button(text::buttons::launchProvingFlight, ui::actions::prepareLaunch, "ok"));
     if (next != nullptr) {
         if (canCommitToNextFrontier(state, catalog)) {
             out << (launchReadiness.blocked
@@ -707,6 +847,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody);
     out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody);
     out << modalTemplate(ui::modals::launchBlocked, text::panel::modals::launchHold, launchBlockedBody.str());
+    out << modalTemplate(ui::modals::pilotIntake, text::panel::modals::pilotIntake, pilotIntakeBody.str());
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
 

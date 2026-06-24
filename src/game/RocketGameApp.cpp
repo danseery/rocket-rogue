@@ -52,6 +52,7 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
     session_.preparedLaunch = preparedLaunch;
+    session_.flightArmed = false;
     session_.elapsed = 0.0;
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
@@ -97,6 +98,9 @@ bool RocketGameApp::initialize()
 void RocketGameApp::tick(double deltaSeconds)
 {
     if (state_.screen == Screen::Launch) {
+        if (!session_.flightArmed) {
+            return;
+        }
         const PreparedLaunch flightModel = currentFlightModel();
         const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
@@ -133,6 +137,9 @@ void RocketGameApp::tick(double deltaSeconds)
                 recordTelemetryPeak(telemetryAt(flightModel, flightModel.crashMultiplier));
                 completeLaunch(flightModel.crashMultiplier, RecoveryMethod::None);
             } else if (session_.preparedLaunch.config.frontierTransfer && session_.currentMultiplier >= destination.targetMultiplier) {
+                recordTelemetryPeak(telemetryAt(flightModel, destination.targetMultiplier));
+                completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
+            } else if (!session_.preparedLaunch.config.frontierTransfer && destination.tier >= 1 && session_.currentMultiplier >= destination.targetMultiplier) {
                 recordTelemetryPeak(telemetryAt(flightModel, destination.targetMultiplier));
                 completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
             } else {
@@ -173,36 +180,55 @@ void RocketGameApp::render()
     renderer_.render(snapshot());
 }
 
-void RocketGameApp::startLaunch()
+void RocketGameApp::prepareForLaunch()
 {
-    if (state_.screen != Screen::Hangar || !state_.run.active) {
+    if (state_.screen != Screen::Hangar) {
         return;
     }
 
     if (state_.run.shipDamage >= tuning::damage::destroyedShipDamage) {
         state_.statusLine = std::string(text::status::launchHullBlocked);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
     if (activeAstronaut(state_) == nullptr) {
         state_.statusLine = std::string(text::status::launchCrewBlocked);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
+    state_.run.active = true;
     syncLaunchConfig(state_, catalog_);
     state_.launchConfig.frontierTransfer = false;
     state_.launchConfig.destinationId = currentDestination(state_, catalog_).id;
-    beginLaunchSession(prepareLaunch(state_, catalog_, rng_));
+    beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     state_.screen = Screen::Launch;
-    state_.statusLine = std::string(text::status::provingBurnStarted);
-    panelDirty_ = true;
+    state_.statusLine = std::string(text::status::preflightReady);
+    refreshPanel();
+}
+
+void RocketGameApp::startLaunch()
+{
+    if (state_.screen == Screen::Hangar) {
+        prepareForLaunch();
+        return;
+    }
+
+    if (state_.screen != Screen::Launch || session_.flightArmed) {
+        return;
+    }
+
+    session_.flightArmed = true;
+    state_.statusLine = session_.preparedLaunch.config.frontierTransfer
+        ? std::string(text::status::transferBurnStarted)
+        : std::string(text::status::provingBurnStarted);
+    refreshPanel();
 }
 
 void RocketGameApp::ejectNow()
 {
-    if (state_.screen != Screen::Launch) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed) {
         return;
     }
     const double liveMultiplier = liveBurnMultiplier();
@@ -212,7 +238,7 @@ void RocketGameApp::ejectNow()
 
 void RocketGameApp::returnHome()
 {
-    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome) {
         return;
     }
 
@@ -241,7 +267,7 @@ void RocketGameApp::returnHome()
 
 void RocketGameApp::arrivalOps()
 {
-    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
         return;
     }
 
@@ -256,7 +282,7 @@ void RocketGameApp::arrivalOps()
 
 void RocketGameApp::cutEngines()
 {
-    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome) {
         return;
     }
 
@@ -269,7 +295,7 @@ void RocketGameApp::cutEngines()
 
 void RocketGameApp::pressureReliefValve()
 {
-    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.controls.pressureReliefUsed) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.controls.pressureReliefUsed) {
         return;
     }
 
@@ -310,6 +336,7 @@ void RocketGameApp::pressureReliefValve()
 void RocketGameApp::closePressureReliefValve()
 {
     if (state_.screen != Screen::Launch ||
+        !session_.flightArmed ||
         session_.controls.actions.returningHome ||
         !session_.controls.actions.pressureReliefOpen ||
         session_.controls.actions.pressureReliefFailed) {
@@ -323,7 +350,7 @@ void RocketGameApp::closePressureReliefValve()
 
 void RocketGameApp::jettisonCargo()
 {
-    if (state_.screen != Screen::Launch || session_.controls.actions.returningHome || session_.controls.actions.cargoJettisoned) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.controls.actions.cargoJettisoned) {
         return;
     }
 
@@ -587,9 +614,9 @@ void RocketGameApp::attemptFrontierTransfer()
     state_.launchConfig.frontierTransfer = true;
     state_.launchConfig.destinationId = next->id;
     state_.launchConfig.burnGoalMultiplier = next->targetMultiplier;
-    beginLaunchSession(prepareLaunch(state_, catalog_, rng_));
+    beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     state_.screen = Screen::Launch;
-    state_.statusLine = std::string(text::status::transferBurnStarted);
+    state_.statusLine = std::string(text::status::preflightReady);
     panelDirty_ = true;
 }
 
@@ -628,6 +655,14 @@ void RocketGameApp::repairShip()
 void RocketGameApp::recruitCrew()
 {
     if (rocket::recruitCrew(state_, catalog_)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::recruitCrew(int candidateIndex)
+{
+    if (rocket::recruitCrew(state_, catalog_, candidateIndex)) {
         save();
     }
     panelDirty_ = true;
@@ -677,7 +712,13 @@ void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
     outcome.peakAbortRisk = std::max(outcome.peakAbortRisk, session_.peakAbortRisk);
     applyLaunchOutcome(state_, catalog_, outcome);
-    state_.screen = Screen::Results;
+    if (shouldOpenArrivalOps(outcome, catalog_)) {
+        startArrivalOps(state_, outcome);
+        state_.screen = Screen::ArrivalOps;
+        state_.statusLine = std::string(text::status::arrivalOpsOpened);
+    } else {
+        state_.screen = Screen::Results;
+    }
     session_.currentMultiplier = outcome.ejectMultiplier;
     session_.peakWarning = 0.0;
     session_.peakAbortRisk = 0.0;
@@ -707,6 +748,7 @@ void RocketGameApp::refreshPanel()
         session_.returnTrip.elapsed,
         session_.returnTrip.duration,
         session_.controls.actions,
+        session_.flightArmed,
         session_.controls.pressureReliefUsed,
     }));
     panelDirty_ = false;
@@ -736,7 +778,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
-    if (session_.controls.actions.returningHome) {
+    if (state_.screen == Screen::Launch && !session_.flightArmed) {
+        result.travelProgress = 0.0;
+    } else if (session_.controls.actions.returningHome) {
         result.travelProgress = flight_progress::returnTravelProgress(
             session_.returnTrip.startTravelProgress,
             session_.returnTrip.elapsed,
@@ -799,6 +843,13 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
 
     if (state_.screen == Screen::Launch) {
+        if (!session_.flightArmed) {
+            result.telemetryCount = 0;
+            result.poweredFlight = false;
+            result.launchShake = 0.0;
+            return result;
+        }
+
         const double displayedMultiplier = liveBurnMultiplier();
         const TelemetryEvent event = telemetryAt(flightModel, displayedMultiplier);
         result.heat = event.heat;
@@ -814,9 +865,12 @@ RenderSnapshot RocketGameApp::snapshot() const
             result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sample.heat, 0.0, 1.0);
         }
         result.telemetryCount = static_cast<int>(result.telemetry.size());
-        result.poweredFlight = session_.controls.actions.returningHome
+        result.poweredFlight = session_.flightArmed && (session_.controls.actions.returningHome
             ? !session_.controls.returnDriftHome
-            : !session_.controls.actions.cutEnginesActive;
+            : !session_.controls.actions.cutEnginesActive);
+        result.launchShake = session_.flightArmed
+            ? std::clamp(1.0 - session_.elapsed / tuning::session::launchShakeSeconds, 0.0, 1.0)
+            : 0.0;
     } else if (!state_.lastOutcome.telemetry.empty()) {
         const int count = std::min(static_cast<int>(result.telemetry.size()), static_cast<int>(state_.lastOutcome.telemetry.size()));
         for (int i = 0; i < count; ++i) {

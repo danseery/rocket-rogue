@@ -67,6 +67,17 @@
       gap: 12px;
     }
 
+    .game-mark {
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
     h1, h2, h3, p {
       margin: 0;
     }
@@ -101,6 +112,19 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       margin-top: 12px;
+    }
+
+    .panel-kpis {
+      margin-top: 14px;
+    }
+
+    .phase-board-panel > .panel-kpis {
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      margin-bottom: 14px;
+    }
+
+    .flight-readout {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .phase-board-panel > .metric-grid,
@@ -147,6 +171,119 @@
     .actions.system-actions {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       margin-top: 8px;
+    }
+
+    .cockpit-hud {
+      position: sticky;
+      bottom: 12px;
+      z-index: 8;
+      width: 100%;
+      max-width: 100%;
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid rgba(137, 178, 211, 0.24);
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, rgba(13, 18, 25, 0.82), rgba(8, 12, 17, 0.92)),
+        rgba(13, 18, 25, 0.88);
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
+      backdrop-filter: blur(12px);
+    }
+
+    .cockpit-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 0 2px 8px;
+      border-bottom: 1px solid rgba(137, 178, 211, 0.12);
+    }
+
+    .cockpit-label span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .cockpit-label strong {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    .cockpit-hud .actions {
+      margin-top: 10px;
+    }
+
+    .cockpit-hud button {
+      min-height: 44px;
+      font-weight: 650;
+    }
+
+    .cockpit-hud .primary-actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cockpit-hud .system-actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cockpit-hud .launch-commit-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .cockpit-hud .launch-button {
+      min-height: 58px;
+      font-size: 16px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .cockpit-hold-copy {
+      margin-top: 10px;
+      min-height: 42px;
+    }
+
+    .scene-launch-control {
+      position: fixed;
+      z-index: 9;
+      display: none;
+      min-width: 190px;
+      min-height: 70px;
+      padding: 0 28px;
+      border-color: rgba(114, 224, 168, 0.72);
+      border-radius: 10px;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.22), transparent 28%),
+        linear-gradient(180deg, rgba(114, 224, 168, 0.34), rgba(39, 119, 82, 0.58));
+      box-shadow:
+        0 0 28px rgba(114, 224, 168, 0.24),
+        0 20px 60px rgba(0, 0, 0, 0.44);
+      color: var(--text);
+      font-size: 20px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .scene-launch-control.is-visible {
+      display: block;
+      animation: launch-ready-pulse 1.2s ease-in-out infinite alternate;
+    }
+
+    @keyframes launch-ready-pulse {
+      from {
+        box-shadow:
+          0 0 18px rgba(114, 224, 168, 0.18),
+          0 20px 60px rgba(0, 0, 0, 0.44);
+      }
+      to {
+        box-shadow:
+          0 0 42px rgba(114, 224, 168, 0.36),
+          0 20px 60px rgba(0, 0, 0, 0.44);
+      }
     }
 
     button {
@@ -267,6 +404,121 @@
       align-items: flex-start;
       min-height: 42px;
       margin-bottom: 0;
+    }
+
+    .telemetry-legend {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 10px 0 12px;
+    }
+
+    .telemetry-chart-legend {
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 6;
+      display: none;
+      width: 0;
+      margin: 0;
+      pointer-events: none;
+    }
+
+    .telemetry-chart-legend.is-visible {
+      display: grid;
+    }
+
+    .telemetry-legend-chip {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "swatch title"
+        "swatch detail";
+      column-gap: 10px;
+      row-gap: 2px;
+      align-items: center;
+      min-height: 52px;
+      padding: 9px 10px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+        rgba(9, 16, 24, 0.72);
+      overflow: hidden;
+    }
+
+    .telemetry-legend-chip .swatch {
+      grid-area: swatch;
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      box-shadow: 0 0 18px rgba(0, 0, 0, 0.28);
+    }
+
+    .telemetry-legend-chip strong {
+      grid-area: title;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.1;
+      text-transform: uppercase;
+    }
+
+    .telemetry-legend-chip small {
+      grid-area: detail;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .telemetry-legend-chip.warn {
+      border-color: rgba(97, 220, 255, 0.28);
+      background:
+        radial-gradient(circle at 18% 50%, rgba(89, 205, 255, 0.14), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+        rgba(9, 16, 24, 0.72);
+    }
+
+    .telemetry-legend-chip.warn .swatch {
+      background: linear-gradient(135deg, rgba(83, 218, 255, 1), rgba(255, 111, 72, 0.95));
+    }
+
+    .telemetry-legend-chip.heat {
+      border-color: rgba(255, 196, 96, 0.26);
+      background:
+        radial-gradient(circle at 18% 50%, rgba(255, 196, 96, 0.12), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+        rgba(9, 16, 24, 0.72);
+    }
+
+    .telemetry-legend-chip.heat .swatch {
+      background: linear-gradient(180deg, rgba(255, 232, 122, 1), rgba(255, 161, 50, 0.95));
+    }
+
+    .telemetry-legend-chip.threshold {
+      border-color: rgba(255, 209, 102, 0.24);
+      background:
+        radial-gradient(circle at 18% 50%, rgba(255, 209, 102, 0.10), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+        rgba(9, 16, 24, 0.72);
+    }
+
+    .telemetry-legend-chip.threshold .swatch {
+      position: relative;
+      background: rgba(255, 209, 102, 0.10);
+    }
+
+    .telemetry-legend-chip.threshold .swatch::after {
+      content: "";
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      top: 50%;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(255, 209, 102, 0.92);
+      transform: translateY(-50%);
+      box-shadow: 0 0 10px rgba(255, 209, 102, 0.38);
     }
 
     .tag-row {
@@ -716,11 +968,20 @@
 
     .phase-board-mining .mining-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      max-width: 430px;
     }
 
     .phase-board-mining .actions {
       grid-template-columns: 1fr;
       justify-content: stretch;
+    }
+
+    .phase-board-mining {
+      max-width: 440px;
+    }
+
+    .mining-hud {
+      width: 100%;
     }
 
     .phase-board-surface {
@@ -831,6 +1092,53 @@
       max-width: 980px;
     }
 
+    .focus-metrics {
+      max-width: 840px;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    }
+
+    .surface-primary-action {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(190px, 240px);
+      gap: 16px;
+      align-items: center;
+      max-width: 980px;
+      padding: 16px;
+      border: 1px solid rgba(114, 224, 168, 0.42);
+      border-radius: 10px;
+      background:
+        linear-gradient(135deg, rgba(114, 224, 168, 0.14), rgba(103, 210, 255, 0.06)),
+        rgba(255, 255, 255, 0.04);
+      box-shadow: inset 0 0 28px rgba(114, 224, 168, 0.04);
+    }
+
+    .surface-primary-action span {
+      color: var(--warn);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .surface-primary-action h3 {
+      margin-top: 4px;
+      color: var(--text);
+      font-size: 22px;
+      line-height: 1.1;
+    }
+
+    .surface-primary-action p {
+      margin-top: 6px;
+      max-width: 620px;
+    }
+
+    .surface-primary-action button {
+      min-height: 54px;
+      font-size: 15px;
+      font-weight: 800;
+      background: rgba(114, 224, 168, 0.20);
+      border-color: rgba(114, 224, 168, 0.50);
+    }
+
     .surface-kpi {
       min-width: 0;
       padding: 8px 10px;
@@ -894,6 +1202,11 @@
       min-height: 172px;
     }
 
+    .surface-action-card.featured-action {
+      border-color: rgba(114, 224, 168, 0.36);
+      background: rgba(114, 224, 168, 0.055);
+    }
+
     .surface-action-card p {
       min-height: 42px;
     }
@@ -913,6 +1226,118 @@
 
     .ops-card.crew {
       border-color: rgba(255, 209, 102, 0.24);
+    }
+
+    .modal-panel:has(.pilot-card-grid) {
+      width: min(980px, calc(100vw - 36px));
+    }
+
+    .modal-intro {
+      margin: 0 0 14px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .pilot-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .pilot-card {
+      display: grid;
+      gap: 10px;
+      min-height: 390px;
+      padding: 12px;
+      border: 1px solid rgba(255, 209, 102, 0.34);
+      border-radius: 10px;
+      background:
+        linear-gradient(145deg, rgba(255, 209, 102, 0.14), rgba(103, 210, 255, 0.05) 42%, rgba(17, 25, 34, 0.96)),
+        rgba(255, 255, 255, 0.035);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+    }
+
+    .pilot-card-top {
+      display: grid;
+      gap: 3px;
+      min-height: 44px;
+    }
+
+    .pilot-card-top span {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .pilot-card-top strong {
+      color: var(--text);
+      line-height: 1.15;
+    }
+
+    .pilot-portrait-placeholder {
+      display: grid;
+      place-items: center;
+      min-height: 150px;
+      border: 1px solid rgba(137, 178, 211, 0.28);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(103, 210, 255, 0.20), rgba(103, 210, 255, 0.02) 52%, transparent 54%),
+        linear-gradient(180deg, rgba(237, 244, 248, 0.10), rgba(237, 244, 248, 0.02)),
+        rgba(7, 12, 18, 0.72);
+    }
+
+    .pilot-portrait-placeholder span {
+      display: grid;
+      place-items: center;
+      width: 62px;
+      height: 62px;
+      border: 1px solid rgba(237, 244, 248, 0.24);
+      border-radius: 999px;
+      color: var(--accent);
+      background: rgba(0, 0, 0, 0.24);
+      font-size: 28px;
+      font-weight: 900;
+    }
+
+    .pilot-card h3 {
+      font-size: 17px;
+      line-height: 1.15;
+    }
+
+    .pilot-card p {
+      min-height: 36px;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .pilot-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      margin-top: auto;
+    }
+
+    .pilot-stat-grid span {
+      display: grid;
+      gap: 3px;
+      padding: 7px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      background: rgba(0, 0, 0, 0.16);
+    }
+
+    .pilot-stat-grid strong {
+      color: var(--text);
+      font-size: 14px;
+      text-transform: none;
+    }
+
+    .pilot-card button {
+      width: 100%;
+      min-height: 38px;
     }
 
     .settings-footer {
@@ -1046,9 +1471,10 @@
 
     .compact-tools button {
       flex: 0 0 auto;
-      min-width: 76px;
-      min-height: 30px;
+      min-width: 68px;
+      min-height: 28px;
       padding-inline: 10px;
+      font-size: 12px;
     }
 
     .bottom-tools {
@@ -1142,6 +1568,24 @@
       margin-top: 14px;
     }
 
+    @media (max-width: 760px) {
+      .telemetry-legend {
+        grid-template-columns: 1fr;
+      }
+
+      .telemetry-chart-legend {
+        display: none;
+      }
+
+      .pilot-card-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .pilot-card {
+        min-height: 0;
+      }
+    }
+
     .toast-root {
       position: fixed;
       right: 24px;
@@ -1228,6 +1672,14 @@
         grid-template-columns: 1fr;
       }
 
+      .flight-readout {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .surface-primary-action {
+        grid-template-columns: 1fr;
+      }
+
       .compact-tools {
         justify-content: start;
       }
@@ -1258,6 +1710,12 @@
     <h1>Rocket Rogue</h1>
     <p class="status">Loading WebAssembly...</p>
   </aside>
+  <button id="scene-launch-control" class="scene-launch-control" type="button">Launch</button>
+  <div id="telemetry-chart-legend" class="telemetry-legend telemetry-chart-legend" aria-hidden="true">
+    <div class="telemetry-legend-chip warn"><span class="swatch"></span><strong>Warning</strong><small>overall system risk trend</small></div>
+    <div class="telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong><small>thermal buildup over the burn</small></div>
+    <div class="telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong><small>where the burn starts feeling spicy</small></div>
+  </div>
   <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
   <div id="modal-root" class="modal-root" hidden>
     <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -1277,6 +1735,8 @@
     const modalContent = document.getElementById("modal-content");
     const modalClose = modalRoot.querySelector(".modal-close");
     const toastRoot = document.getElementById("toast-root");
+    const sceneLaunchControl = document.getElementById("scene-launch-control");
+    const telemetryChartLegend = document.getElementById("telemetry-chart-legend");
     let lastToastText = "";
     let lastToastAt = 0;
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
@@ -1385,6 +1845,67 @@
       syncHelpControls(root);
     }
 
+    function sceneMetrics() {
+      const width = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
+      const height = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
+      let leftPx = 0;
+      if (panel && width > 720) {
+        const rect = panel.getBoundingClientRect();
+        leftPx = Math.max(0, rect.right + 24);
+        if (width - leftPx < 520) {
+          leftPx = 0;
+        }
+      }
+      const sceneWidth = Math.max(1, width - leftPx);
+      const unit = Math.max(1, Math.min(sceneWidth, height) * 0.5 * 0.92);
+      return {
+        width,
+        height,
+        left: leftPx,
+        centerX: leftPx + sceneWidth * 0.5,
+        centerY: height * 0.5,
+        unit
+      };
+    }
+
+    function worldToScreen(x, y) {
+      const scene = sceneMetrics();
+      return {
+        x: scene.centerX + x * scene.unit,
+        y: scene.centerY - y * scene.unit,
+        unit: scene.unit
+      };
+    }
+
+    function syncSceneOverlays() {
+      const preflight = Boolean(panel.querySelector("[data-preflight-launch]"));
+      const flight = Boolean(panel.querySelector(".flight-hud"));
+      const phaseBoard = panel.classList.contains("phase-board-panel");
+
+      sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard);
+      sceneLaunchControl.hidden = !(preflight && !phaseBoard);
+      if (preflight && !phaseBoard) {
+        const anchor = worldToScreen(0.04, -0.60);
+        sceneLaunchControl.style.left = `${Math.round(anchor.x)}px`;
+        sceneLaunchControl.style.top = `${Math.round(anchor.y)}px`;
+        sceneLaunchControl.style.transform = "translate(-50%, -50%)";
+      }
+
+      const showLegend = flight && !preflight && !phaseBoard;
+      telemetryChartLegend.classList.toggle("is-visible", showLegend);
+      telemetryChartLegend.hidden = !showLegend;
+      if (showLegend) {
+        const graphTopLeft = worldToScreen(0.25, -0.58);
+        const graphRight = worldToScreen(1.22, -0.58);
+        const graphBottom = worldToScreen(0.25, -0.86);
+        const graphWidth = Math.max(300, graphRight.x - graphTopLeft.x);
+        telemetryChartLegend.style.left = `${Math.round(graphTopLeft.x + 12)}px`;
+        telemetryChartLegend.style.top = `${Math.round(graphTopLeft.y + 10)}px`;
+        telemetryChartLegend.style.width = `${Math.round(Math.min(graphWidth - 24, 520))}px`;
+        telemetryChartLegend.style.gridTemplateColumns = graphWidth < 500 ? "1fr" : "repeat(3, minmax(0, 1fr))";
+      }
+    }
+
     function showToast(message) {
       const text = (message || "").trim();
       if (!text) {
@@ -1420,6 +1941,7 @@
         if (phaseBoard) {
           showToast(panel.querySelector(".phase-status")?.textContent || "");
         }
+        syncSceneOverlays();
       },
       loadSave() {
         return window.localStorage.getItem("rocket_rogue_save_v1") || "";
@@ -1435,14 +1957,33 @@
       }
     };
 
+    sceneLaunchControl.addEventListener("click", (event) => {
+      event.preventDefault();
+      rr.startLaunch();
+    });
+
+    window.addEventListener("resize", syncSceneOverlays);
+    window.visualViewport?.addEventListener("resize", syncSceneOverlays);
+    window.visualViewport?.addEventListener("scroll", syncSceneOverlays);
+
     function rrCall(name, args = [], sig = []) {
-      if (!window.Module || !Module.ccall) {
+      if (typeof Module === "undefined") {
+        return;
+      }
+      const directExport = Module[`_${name}`];
+      if (typeof directExport === "function") {
+        directExport(...args);
+        return;
+      }
+      if (!Module.ccall) {
+        console.warn(`Rocket Rogue action bridge missing export: ${name}`);
         return;
       }
       Module.ccall(name, null, sig, args);
     }
 
     window.rr = {
+      prepareLaunch: () => rrCall("rr_prepare_launch"),
       startLaunch: () => rrCall("rr_start_launch"),
       ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
@@ -1472,6 +2013,7 @@
       miningAbort: () => rrCall("rr_mining_abort"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
+      recruitCandidate: (index) => rrCall("rr_recruit_candidate", [index], ["number"]),
       trainCrew: () => rrCall("rr_train_crew"),
       restCrew: () => rrCall("rr_rest_crew"),
       resetSave: () => {
@@ -1482,6 +2024,7 @@
     };
 
     const rrActionIds = Object.freeze({
+      prepareLaunch: "prepare_launch",
       startLaunch: "start_launch",
       ejectNow: "eject_now",
       returnHome: "return_home",
@@ -1508,12 +2051,14 @@
       miningAbort: "mining_abort",
       repairShip: "repair_ship",
       recruitCrew: "recruit_crew",
+      recruitCandidatePrefix: "recruit_candidate:",
       trainCrew: "train_crew",
       restCrew: "rest_crew",
       resetSave: "reset_save"
     });
 
     const rrActions = {
+      [rrActionIds.prepareLaunch]: () => rr.prepareLaunch(),
       [rrActionIds.startLaunch]: () => rr.startLaunch(),
       [rrActionIds.ejectNow]: () => rr.ejectNow(),
       [rrActionIds.returnHome]: () => rr.returnHome(),
@@ -1547,6 +2092,14 @@
     let lastPanelAction = "";
     let lastPanelModalAt = 0;
     let lastPanelModal = "";
+
+    function closestFromEvent(event, selector) {
+      let target = event.target;
+      if (target && target.nodeType !== 1) {
+        target = target.parentElement;
+      }
+      return target && typeof target.closest === "function" ? target.closest(selector) : null;
+    }
 
     function openPanelModal(id) {
       const template = Array.from(panel.querySelectorAll("template[data-modal]"))
@@ -1600,6 +2153,21 @@
         return false;
       }
 
+      if (action.startsWith(rrActionIds.recruitCandidatePrefix)) {
+        const rawIndex = action.slice(rrActionIds.recruitCandidatePrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.recruitCandidate(index);
+          return true;
+        }
+        return false;
+      }
+
       const handler = rrActions[action];
       if (!handler) {
         return false;
@@ -1611,7 +2179,7 @@
     }
 
     function handlePanelAction(event) {
-      const button = event.target.closest("button[data-rr-action]");
+      const button = closestFromEvent(event, "button[data-rr-action]");
       const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
       if (!button || !validContainer || button.disabled) {
         return;
@@ -1632,8 +2200,9 @@
     }
 
     function handleModalTrigger(event) {
-      const button = event.target.closest("button[data-ui-modal]");
-      if (!button || !panel.contains(button) || button.disabled) {
+      const button = closestFromEvent(event, "button[data-ui-modal]");
+      const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
+      if (!button || !validContainer || button.disabled) {
         return;
       }
       const modalId = button.dataset.uiModal || "";
@@ -1651,7 +2220,7 @@
     }
 
     function handleSettingsChange(event) {
-      const select = event.target.closest("[data-game-speed-select]");
+      const select = closestFromEvent(event, "[data-game-speed-select]");
       if (select && (panel.contains(select) || modalRoot.contains(select))) {
         setGameSpeedMultiplier(select.value);
         syncLocalControls(panel);
@@ -1659,7 +2228,7 @@
         return;
       }
 
-      const helpToggle = event.target.closest("[data-help-toggle]");
+      const helpToggle = closestFromEvent(event, "[data-help-toggle]");
       if (helpToggle && (panel.contains(helpToggle) || modalRoot.contains(helpToggle))) {
         setHelpDisabled(!helpToggle.checked);
         syncLocalControls(panel);
@@ -1668,7 +2237,7 @@
     }
 
     function handleHelpDismiss(event) {
-      const button = event.target.closest("[data-help-dismiss]");
+      const button = closestFromEvent(event, "[data-help-dismiss]");
       if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
         return;
       }
@@ -1681,10 +2250,11 @@
 
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
+    document.addEventListener("pointerdown", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpDismiss, true);
     document.addEventListener("change", handleSettingsChange, true);
-    panel.addEventListener("pointerdown", handlePanelAction, true);
-    panel.addEventListener("click", handlePanelAction, true);
+    document.addEventListener("pointerdown", handlePanelAction, true);
+    document.addEventListener("click", handlePanelAction, true);
     panel.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
@@ -1692,7 +2262,6 @@
       handleModalTrigger(event);
       handlePanelAction(event);
     }, true);
-    modalRoot.addEventListener("pointerdown", handlePanelAction, true);
     modalRoot.addEventListener("click", (event) => {
       if (performance.now() - lastPanelModalAt < 220) {
         event.preventDefault();
@@ -1830,6 +2399,10 @@
 
     var Module = {
       canvas,
+      locateFile(path, prefix) {
+        const base = (prefix || "") + path;
+        return path.endsWith(".wasm") ? `${base}?v=${Date.now()}` : base;
+      },
       print(text) {
         console.log(text);
       },

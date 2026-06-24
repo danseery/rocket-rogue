@@ -62,6 +62,16 @@ void rr_start_launch()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_prepare_launch()
+{
+    if (g_app) {
+        g_app->prepareForLaunch();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_eject_now()
 {
     if (g_app) {
@@ -336,6 +346,16 @@ void rr_recruit_crew()
 {
     if (g_app) {
         g_app->recruitCrew();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_recruit_candidate(int index)
+{
+    if (g_app) {
+        g_app->recruitCrew(index);
     }
 }
 

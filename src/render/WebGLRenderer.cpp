@@ -429,6 +429,12 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
     sceneWorldUnit_ = std::max(1.0F, std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * kSceneViewportPadding);
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
+    const float launchShake = static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0));
+    if (launchShake > 0.0F) {
+        const float shake = launchShake * launchShake;
+        scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 72.0F) * shake * 7.0F;
+        scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 61.0F) * shake * 5.0F;
+    }
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
     glClearColor(0.02F + heat * 0.05F, 0.03F, 0.05F + heat * 0.02F, 1.0F);
@@ -738,10 +744,27 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     const float right = 1.22F;
     const float bottom = -0.86F;
     const float top = -0.58F;
+    const float width = right - left;
+    const float height = top - bottom;
+    const float cautionY = bottom + height * 0.70F;
 
-    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, right - left, top - bottom, {0.02F, 0.05F, 0.07F, 0.72F});
+    drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, width, height, {0.02F, 0.05F, 0.07F, 0.72F});
+    drawRect((left + right) * 0.5F, top - 0.03F, width, 0.02F, {0.18F, 0.30F, 0.42F, 0.10F});
+    drawRect((left + right) * 0.5F, cautionY + height * 0.15F, width, height * 0.30F, {0.24F, 0.09F, 0.08F, 0.08F});
     drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F});
     drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F});
+    drawLine(left, top, right, top, {0.24F, 0.42F, 0.54F, 0.28F});
+    drawLine(right, bottom, right, top, {0.24F, 0.42F, 0.54F, 0.22F});
+
+    for (int i = 1; i <= 3; ++i) {
+        const float y = bottom + height * (static_cast<float>(i) / 4.0F);
+        drawLine(left, y, right, y, {0.24F, 0.38F, 0.48F, 0.14F});
+    }
+
+    for (int i = 1; i <= 4; ++i) {
+        const float x = left + width * (static_cast<float>(i) / 5.0F);
+        drawLine(x, bottom, x, top, {0.18F, 0.30F, 0.40F, 0.10F});
+    }
 
     if (snapshot.telemetryCount <= 1) {
         return;
@@ -750,33 +773,51 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     Color warningSafe {0.35F, 0.84F, 1.0F, 1.0F};
     Color warningHot {1.0F, 0.38F, 0.28F, 1.0F};
     Color heatColor {1.0F, 0.78F, 0.25F, 0.90F};
+    Color heatGlow {1.0F, 0.72F, 0.22F, 0.18F};
+    Color cautionColor {1.0F, 0.80F, 0.30F, 0.22F};
 
-    drawLine(left, bottom + (top - bottom) * 0.70F, right, bottom + (top - bottom) * 0.70F, {1.0F, 0.80F, 0.30F, 0.22F});
+    drawLine(left, cautionY, right, cautionY, cautionColor, 1.6F);
 
     std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    std::vector<float>& heatGlowVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
         const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
         const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
-        const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * (top - bottom);
-        const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * (top - bottom);
-        const float x0 = left + t0 * (right - left);
-        const float x1 = left + t1 * (right - left);
+        const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * height;
+        const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * height;
+        const float x0 = left + t0 * width;
+        const float x1 = left + t1 * width;
+        appendLine(heatGlowVertices, x0, h0, x1, h1, heatGlow);
         appendLine(heatVertices, x0, h0, x1, h1, heatColor);
     }
+    submitLines(heatGlowVertices, 5.0F);
     submitLines(heatVertices, 1.5F);
 
     std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    std::vector<float>& warningGlowVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
+    const Color warningGlow = {warningColor.r, warningColor.g, warningColor.b, 0.22F};
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
         const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
         const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
-        const float y0 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i - 1)]) * (top - bottom);
-        const float y1 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i)]) * (top - bottom);
-        const float x0 = left + t0 * (right - left);
-        const float x1 = left + t1 * (right - left);
+        const float y0 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i - 1)]) * height;
+        const float y1 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i)]) * height;
+        const float x0 = left + t0 * width;
+        const float x1 = left + t1 * width;
+        appendLine(warningGlowVertices, x0, y0, x1, y1, warningGlow);
         appendLine(warningVertices, x0, y0, x1, y1, warningColor);
     }
+    submitLines(warningGlowVertices, 6.0F);
     submitLines(warningVertices, 2.2F);
+
+    const float warningX = right;
+    const float warningY = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(snapshot.telemetryCount - 1)]) * height;
+    const float heatX = right;
+    const float heatY = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(snapshot.telemetryCount - 1)]) * height;
+    drawCircle(warningX, warningY, 0.016F, {warningColor.r, warningColor.g, warningColor.b, 0.20F}, 20);
+    drawCircle(warningX, warningY, 0.007F, warningColor, 18);
+    drawCircle(heatX, heatY, 0.014F, {heatColor.r, heatColor.g, heatColor.b, 0.18F}, 18);
+    drawCircle(heatX, heatY, 0.006F, heatColor, 16);
 }
 
 void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float alpha)

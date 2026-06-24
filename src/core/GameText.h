@@ -52,7 +52,8 @@ inline constexpr std::string_view miningStarted = "Mining drone deployed. Drill,
 inline constexpr std::string_view miningStowed = "Mining payload stowed for surface extraction.";
 inline constexpr std::string_view miningAborted = "Mining drone recalled. Payload is partial, but the crew is back on plan.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
-inline constexpr std::string_view launchCrewBlocked = "No living astronaut is cleared for launch.";
+inline constexpr std::string_view launchCrewBlocked = "Choose a pilot before launch.";
+inline constexpr std::string_view preflightReady = "Pre-flight checks are holding. Review the gauges, then launch when ready.";
 inline constexpr std::string_view provingBurnStarted = "Proving burn underway. Return home to bank data; eject only when the vehicle leaves you no choice.";
 inline constexpr std::string_view transferBurnStarted = "Transfer attempt committed. Survive to the required burn, or abort before the ship decides for you.";
 inline constexpr std::string_view returningWithThrust = "Return burn committed. Engines are pulling the ship home, but the systems are still under load.";
@@ -264,7 +265,7 @@ inline constexpr std::string_view opensDeeperShaft = "Opens deeper mining lanes"
 namespace buttons {
 inline constexpr std::string_view returnHome = "Return home";
 inline constexpr std::string_view returningHome = "Returning home";
-inline constexpr std::string_view arrivalOps = "Arrival ops";
+inline constexpr std::string_view arrivalOps = "Approach";
 inline constexpr std::string_view eject = "Eject";
 inline constexpr std::string_view cutEngines = "Cut engines";
 inline constexpr std::string_view restoreThrust = "Restore thrust";
@@ -278,7 +279,8 @@ inline constexpr std::string_view install = "Install";
 inline constexpr std::string_view assign = "Assign";
 inline constexpr std::string_view unavailable = "Unavailable";
 inline constexpr std::string_view skipRefit = "Skip refit";
-inline constexpr std::string_view launchProvingFlight = "Launch proving flight";
+inline constexpr std::string_view launchProvingFlight = "Prepare for launch";
+inline constexpr std::string_view launch = "Launch";
 inline constexpr std::string_view needFlightData = "Need flight data";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view details = "Details";
@@ -307,9 +309,9 @@ namespace panel {
 inline constexpr std::string_view title = "Rocket Rogue";
 inline constexpr std::string_view complete = "Complete";
 inline constexpr std::string_view ready = "Ready";
-inline constexpr std::string_view noActiveCrew = "No active crew";
+inline constexpr std::string_view noActiveCrew = "Choose pilot";
 inline constexpr std::string_view noneCleared = "None cleared";
-inline constexpr std::string_view noPilot = "No pilot";
+inline constexpr std::string_view noPilot = "Choose pilot";
 inline constexpr std::string_view noSpareModules = "No spare modules";
 inline constexpr std::string_view noMaterials = "No materials";
 inline constexpr std::string_view needMaterials = "Need materials";
@@ -326,14 +328,14 @@ inline constexpr std::string_view provingFlight = "Proving flight";
 inline constexpr std::string_view telemetry = "Telemetry";
 inline constexpr std::string_view flightControls = "Flight controls";
 inline constexpr std::string_view result = "Result";
-inline constexpr std::string_view arrivalOps = "Arrival Ops";
+inline constexpr std::string_view arrivalOps = "Approach";
 inline constexpr std::string_view missionResult = "Mission result";
 inline constexpr std::string_view burnProfile = "Burn profile";
 inline constexpr std::string_view peakTelemetry = "Peak telemetry";
 inline constexpr std::string_view achievements = "Achievements";
-inline constexpr std::string_view research = "Research Phase";
-inline constexpr std::string_view surfaceExpedition = "Surface Expedition";
-inline constexpr std::string_view miningRun = "Mining Run";
+inline constexpr std::string_view research = "Science";
+inline constexpr std::string_view surfaceExpedition = "Surface Ops";
+inline constexpr std::string_view miningRun = "Mining";
 inline constexpr std::string_view refitWindow = "Refit window";
 inline constexpr std::string_view recoveredResources = "Recovered resources";
 inline constexpr std::string_view hangarBay = "Hangar Bay";
@@ -364,6 +366,7 @@ inline constexpr std::string_view telemetryDetails = "Telemetry Details";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view shipDetails = "Ship Details";
 inline constexpr std::string_view crewDetails = "Crew Details";
+inline constexpr std::string_view pilotIntake = "Crew Intake";
 inline constexpr std::string_view frontierDetails = "Frontier Details";
 inline constexpr std::string_view launchHold = "Launch Hold";
 inline constexpr std::string_view legacy = "Legacy";
@@ -499,14 +502,15 @@ inline constexpr std::string_view landingDetail = "Highest-value operation. Open
 inline constexpr std::string_view chooseOneRefit = "Choose one ship or crew upgrade. The install crew can only complete one refit before the next launch cycle.";
 inline constexpr std::string_view recoveredResourcesDetail = "Recovered samples, blueprints, and artifacts feed research and material-gated ship parts.";
 inline constexpr std::string_view totalHullBlocked = "Mission control will not clear a vehicle at total hull damage.";
-inline constexpr std::string_view noLivingCrewBlocked = "No living crew specialist is currently cleared for launch.";
+inline constexpr std::string_view noLivingCrewBlocked = "Choose the next crew specialist before launch.";
 inline constexpr std::string_view noStructuralWork = "No structural work is needed right now.";
+inline constexpr std::string_view salvageRebuildCost = "Salvage rebuild";
 inline constexpr std::string_view simulatorMastered = "Simulator plan exhausted; this pilot is already at max training.";
 inline constexpr std::string_view simulatorWouldOverstress = "Simulator burn would push crew stress over safe limits.";
-inline constexpr std::string_view emergencyReplacement = "Emergency field specialist clears the launch soft lock.";
+inline constexpr std::string_view emergencyReplacement = "Pick the next field specialist for this run.";
 inline constexpr std::string_view reserveRoster = "Add another qualified specialist before the next proving run.";
 inline constexpr std::string_view crewOpsFallback = "Improves crew operations";
-inline constexpr std::string_view emergencyRecruitBackground = "Emergency habitat roster";
+inline constexpr std::string_view emergencyRecruitBackground = "Frontier habitat roster";
 inline constexpr std::string_view agencyIntakeBackground = "Frontier habitat intake";
 inline constexpr std::string_view replacementCadet = "Reserve Habitat Cadet";
 inline constexpr std::string_view restoredCrewBackground = "Restored habitat crew record";
@@ -613,6 +617,11 @@ inline std::string repairDetail(int repairAmount)
     return "Restore up to " + std::to_string(repairAmount) + " hull damage. Repeated assignments cost more this expedition.";
 }
 
+inline std::string salvageRebuildDetail(int repairAmount)
+{
+    return "Strip spares from the yard and restore " + std::to_string(repairAmount) + " hull. It gets you launchable, not pretty.";
+}
+
 inline std::string simulatorDetail(int trainingGain, int stressGain)
 {
     return "+" + std::to_string(trainingGain) + " training, +" + std::to_string(stressGain) + " stress. Repeated assignments cost more this expedition.";
@@ -678,6 +687,11 @@ inline std::string repairedHull(int repaired)
     return "Repaired " + std::to_string(repaired) + " hull damage.";
 }
 
+inline std::string salvagedHull(int repaired)
+{
+    return "Salvage rebuild restored " + std::to_string(repaired) + " hull. The vehicle is launchable again.";
+}
+
 inline std::string tooStressedForTraining(std::string_view astronautName)
 {
     return std::string(astronautName) + " is too stressed for simulator work. Rest the crew first.";
@@ -696,7 +710,7 @@ inline std::string crewRecovered(std::string_view astronautName, int stressRecov
 inline std::string recruitJoined(std::string_view recruitName, bool emergency)
 {
     return emergency
-        ? std::string(recruitName) + " was rushed in from the emergency recruitment pool."
+        ? std::string(recruitName) + " took the next pilot slot."
         : std::string(recruitName) + " joined the roster.";
 }
 
@@ -717,7 +731,7 @@ inline bool isReplacementId(std::string_view astronautId)
 
 inline std::string emergencyCadetName(int recruitNumber)
 {
-    return "Emergency Cadet " + std::to_string(recruitNumber);
+    return "Habitat Pilot " + std::to_string(recruitNumber);
 }
 
 inline std::string nextGenerationName(std::string_view templateName)

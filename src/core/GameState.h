@@ -3,6 +3,8 @@
 #include "core/Content.h"
 #include "core/Random.h"
 
+#include <vector>
+
 namespace rocket {
 
 struct HangarOperationPreview {
@@ -62,7 +64,9 @@ bool restCrew(GameState& state, const ContentCatalog& catalog);
 int crewRestStressRecovery(const GameState& state, const ContentCatalog& catalog);
 double recruitCrewCost(const GameState& state);
 HangarOperationPreview hangarOperationPreview(const GameState& state, const ContentCatalog& catalog);
+std::vector<const Astronaut*> recruitCandidateTemplates(const GameState& state, const ContentCatalog& catalog, int count = 3);
 bool recruitCrew(GameState& state, const ContentCatalog& catalog);
+bool recruitCrew(GameState& state, const ContentCatalog& catalog, int candidateIndex);
 bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog);
 double defaultProvingTarget(const Destination& destination);
 void unlockFromBlueprints(GameState& state);

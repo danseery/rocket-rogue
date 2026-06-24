@@ -64,10 +64,11 @@ if(EMSCRIPTEN)
     target_include_directories(rocket_rogue PRIVATE src)
 
     set(ROCKET_EXPORTED_FUNCTIONS
-        "['_main','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_buy_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_arrival_orbit','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_mining_move','_rr_mining_aim','_rr_mining_drill','_rr_mining_scanner','_rr_mining_stow','_rr_mining_abort','_rr_repair_ship','_rr_recruit_crew','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
+        "['_main','_rr_prepare_launch','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_buy_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_arrival_orbit','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_mining_move','_rr_mining_aim','_rr_mining_drill','_rr_mining_scanner','_rr_mining_stow','_rr_mining_abort','_rr_repair_ship','_rr_recruit_crew','_rr_recruit_candidate','_rr_train_crew','_rr_rest_crew','_rr_reset_save']")
 
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"
         SUFFIX ".html"
+        LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html"
         LINK_FLAGS "--shell-file ${CMAKE_SOURCE_DIR}/web/shell.html -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
 endif()

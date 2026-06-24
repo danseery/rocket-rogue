@@ -72,7 +72,7 @@ inline std::string_view launchOutcomeNextActionLabel(const LaunchOutcome& outcom
     if (outcome.type == LaunchResultType::Destroyed) {
         return text::buttons::startReplacementRefit;
     }
-    return opensPostArrivalPhases ? text::buttons::conductResearch : text::buttons::reviewRefitOptions;
+    return opensPostArrivalPhases ? text::buttons::arrivalOps : text::buttons::reviewRefitOptions;
 }
 
 inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome, bool opensPostArrivalPhases = false)

@@ -423,6 +423,7 @@ inline constexpr double returnBaseDuration = 2.10;
 inline constexpr double returnDurationPerProgress = 1.40;
 inline constexpr double returnDriftDurationMultiplier = 1.25;
 inline constexpr double returnTurnSeconds = 1.15;
+inline constexpr double launchShakeSeconds = 0.55;
 inline constexpr double returnTelemetryProgressDenominator = 0.10;
 inline constexpr double returnTelemetryHeadroomMinimum = 0.04;
 inline constexpr double returnTelemetryOvershootHeadroomScale = 0.22;

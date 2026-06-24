@@ -37,6 +37,7 @@ struct RenderSnapshot {
     bool frontierTransfer = false;
     bool returningHome = false;
     bool poweredFlight = false;
+    double launchShake = 0.0;
     double returnTurnProgress = 1.0;
     std::array<double, 12> telemetry {};
     std::array<double, 12> heatTelemetry {};

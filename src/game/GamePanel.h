@@ -18,6 +18,7 @@ struct PanelRenderContext {
     double returnElapsed = 0.0;
     double returnDuration = 1.0;
     FlightActionState flightActions;
+    bool flightArmed = true;
     bool pressureReliefUsed = false;
 };
 

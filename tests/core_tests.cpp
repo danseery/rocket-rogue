@@ -444,6 +444,29 @@ void emergencyRecruitmentPreventsDeadRosterSoftLock()
     require(!state.launchConfig.astronautId.empty(), "recruitment should select the new astronaut");
 }
 
+void emergencyRecruitmentOffersAnimalCandidateChoice()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 102);
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    state.run.credits = 0.0;
+    syncLaunchConfig(state, catalog);
+
+    const std::vector<const Astronaut*> candidates = recruitCandidateTemplates(state, catalog);
+    require(candidates.size() == 3, "pilot intake should offer three candidate cards");
+    require(candidates[0]->background.find(" - ") != std::string::npos, "candidate card should expose animal class and focus");
+    const std::string pickedName = candidates[1]->name;
+    const std::string pickedClass = candidates[1]->background;
+
+    require(recruitCrew(state, catalog, 1), "indexed pilot intake should recruit the chosen card");
+    const Astronaut* recruited = activeAstronaut(state);
+    require(recruited != nullptr && recruited->name == pickedName, "indexed recruitment should preserve the selected animal pilot");
+    require(recruited->background == pickedClass, "indexed recruitment should preserve the animal class text");
+    require(state.run.credits == 0.0, "emergency pilot intake should remain free");
+}
+
 void moduleOffersAreOneChoiceRefits()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -756,14 +779,35 @@ void hangarOperationCardsComeFromSharedPreview()
     }
     state.run.credits = 0.0;
     cards = hangarOperationCards(state, catalog);
-    require(cards.size() == 3, "no-pilot hangar should show repair and two recruit cards");
+    require(cards.size() == 2, "no-pilot hangar should show repair and one pilot intake card");
     const HangarOperationCardPresentation* crewIntake = findHangarOperationCard(cards, text::panel::ops::crewIntake);
-    const HangarOperationCardPresentation* reserveRoster = findHangarOperationCard(cards, text::panel::ops::reserveRoster);
     require(crewIntake != nullptr && crewIntake->detail == std::string(text::panel::messages::emergencyReplacement), "crew intake card should use emergency copy");
     require(crewIntake != nullptr && crewIntake->cost == display::credits(tuning::hangar::emergencyRecruitCost), "crew intake card should use emergency recruit cost");
     require(crewIntake != nullptr && crewIntake->available, "free emergency crew intake should be available");
-    require(reserveRoster != nullptr && reserveRoster->cost == display::credits(tuning::hangar::recruitCost), "reserve roster card should use standard recruit cost");
-    require(reserveRoster != nullptr && !reserveRoster->available, "reserve roster card should respect credits");
+}
+
+void totaledShipCanAlwaysReachSalvageRepair()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 820);
+    state.run.shipDamage = tuning::damage::destroyedShipDamage;
+    state.run.credits = 5.0;
+
+    const int repaired = repairShipAmount(state);
+    const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    require(repaired == tuning::hangar::repairAmountCap, "salvage rebuild should still use the repair bay cap");
+    require(preview.repairAvailable, "totaled ships should always have a repair path even when broke");
+    require(preview.repairCost == 5.0, "salvage rebuild should consume remaining credits instead of blocking");
+
+    const std::vector<HangarOperationCardPresentation> cards = hangarOperationCards(state, catalog);
+    const HangarOperationCardPresentation* repair = findHangarOperationCard(cards, text::panel::ops::repairBay);
+    require(repair != nullptr && repair->detail == text::panel::salvageRebuildDetail(repaired), "repair card should explain salvage rebuilds");
+    require(repair != nullptr && repair->cost == std::string(text::panel::messages::salvageRebuildCost), "repair card should not present salvage as a normal invoice");
+
+    require(repairShip(state), "salvage rebuild should repair a totaled ship");
+    require(state.run.credits == 0.0, "salvage rebuild should consume remaining credits");
+    require(state.run.shipDamage == tuning::damage::destroyedShipDamage - repaired, "salvage rebuild should make the ship launchable but damaged");
+    require(state.statusLine == text::salvagedHull(repaired), "salvage rebuild should use first-class status copy");
 }
 
 void lowCreditRefitWindowIncludesAffordableOffer()
@@ -2229,7 +2273,7 @@ void launchOutcomePresentationIsShared()
     require(presentation.notes.empty(), "clean transfer should not invent result notes");
 
     presentation = launchOutcomePresentation(transfer, true);
-    require(presentation.nextActionLabel == text::buttons::conductResearch, "post-arrival outcomes should route toward research");
+    require(presentation.nextActionLabel == text::buttons::arrivalOps, "post-arrival outcomes should route toward the approach choice");
     require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::postArrivalResearchReady), "post-arrival outcomes should explain the research handoff");
 
     LaunchOutcome injuredEject;
@@ -2600,13 +2644,12 @@ void launchPanelPresentationComesFromSharedHelper()
 
     const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
     const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
-    const FlightActionButtonPresentation* arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
     const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
     const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
     const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
     require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
     require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
-    require(arrivalOps != nullptr && !arrivalOps->enabled, "Earth Orbit proving flights should reserve disabled arrival ops");
+    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "launch presentation should not expose a manual approach button");
     require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "launch presentation should expose cut-engines action");
     require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "launch presentation should expose relief-valve action");
     require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "launch presentation should expose jettison-cargo action");
@@ -2663,8 +2706,7 @@ void launchPanelPresentationComesFromSharedHelper()
         returnDuration,
         {},
         false);
-    arrivalOps = findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps);
-    require(arrivalOps != nullptr && arrivalOps->enabled && arrivalOps->actionId == ui::actions::arrivalOps, "Mars proving flights should expose arrival ops after the data goal");
+    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "Mars proving flights should auto-open approach instead of exposing an approach button");
 }
 
 void launchReadinessPresentationComesFromSharedHelper()
@@ -2696,12 +2738,13 @@ void launchReadinessPresentationComesFromSharedHelper()
     readiness = launchReadinessPresentation(state, catalog);
     requiredAction = findDetailPresentationRow(readiness.details, text::panel::details::requiredAction);
     const HangarOperationPreview hangarOps = hangarOperationPreview(state, catalog);
-    repairAction = findFlightActionButton(readiness.actions, display::needCredits(hangarOps.repairCost));
+    repairAction = findFlightActionButton(readiness.actions, text::buttons::assignRepairBay);
     const FlightActionButtonPresentation* recruitAction = findFlightActionButton(readiness.actions, text::buttons::recruitCrew);
     require(readiness.blocked && readiness.hullBlocked && readiness.crewBlocked, "destroyed hull and dead roster should both block launch readiness");
     require(readiness.messages.size() == 2, "combined launch hold should expose both hold messages");
     require(requiredAction != nullptr && requiredAction->value == text::panel::details::repairAndRecruitCrew, "combined launch hold should require repair and recruit");
-    require(repairAction != nullptr && !repairAction->enabled, "unfunded hull readiness should expose disabled repair cost");
+    require(hangarOps.repairAvailable && hangarOps.repairCost == 0.0, "unfunded totaled hull should expose salvage repair");
+    require(repairAction != nullptr && repairAction->enabled && repairAction->actionId == ui::actions::repairShip, "unfunded hull readiness should expose salvage repair action");
     require(recruitAction != nullptr && recruitAction->enabled && recruitAction->actionId == ui::actions::recruitCrew, "crew readiness should expose recruit action");
 }
 
@@ -2774,23 +2817,39 @@ void panelHtmlIncludesContextualTutorialLayer()
     PanelRenderContext launchContext {launchState, catalog, launch, launch};
     launchContext.currentMultiplier = 1.12;
     const std::string launchHtml = buildGamePanelHtml(launchContext);
+    require(launchHtml.find("<h1>Flight</h1>") != std::string::npos, "launch panel should title the current phase instead of repeating the game title");
+    require(launchHtml.find("class=\"cockpit-hud flight-hud\"") != std::string::npos, "launch controls should render in a cockpit HUD");
     require(launchHtml.find("data-help-topic=\"launch-controls\"") != std::string::npos, "launch panel should introduce return/eject/mitigation help");
     require(launchHtml.find("Return home banks data") != std::string::npos, "launch help should mention returning home");
     require(launchHtml.find("relief valve") != std::string::npos, "launch help should mention mitigation controls");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+
+    launchContext.flightArmed = false;
+    const std::string preflightHtml = buildGamePanelHtml(launchContext);
+    require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
+    require(preflightHtml.find(">Return home</button>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
+    require(preflightHtml.find("Start the burn when ready") != std::string::npos, "pre-flight panel should explain the launch hold");
 
     GameState arrivalState = createNewGame(catalog, 712);
     LaunchOutcome arrival;
     arrival.type = LaunchResultType::MissionComplete;
     arrival.frontierTransfer = true;
     arrival.destinationId = content::destination::moon;
+    arrival.recoveryMethod = RecoveryMethod::TransferArrival;
+    arrival.ejectMultiplier = 1.95;
+    arrival.crashMultiplier = 2.4;
+    arrival.payout = 120.0;
+    arrival.peakWarning = 0.42;
     startArrivalOps(arrivalState, arrival);
+    arrivalState.lastOutcome = arrival;
     arrivalState.screen = Screen::ArrivalOps;
     Random arrivalRng(712);
     const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
     const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
     require(arrivalHtml.find("data-help-topic=\"arrival-ops\"") != std::string::npos, "arrival ops panel should introduce flyby/orbit/land help");
     require(arrivalHtml.find("Flyby is the safest scan") != std::string::npos, "arrival help should explain flyby/orbit/landing progression");
+    require(arrivalHtml.find("Arrival summary") != std::string::npos, "arrival ops panel should consolidate debrief summary");
+    require(arrivalHtml.find("Mission result") != std::string::npos, "arrival ops panel should include outcome metrics");
 
     GameState miningState = createNewGame(catalog, 713);
     miningState.run.destinationIndex = 2;
@@ -2799,9 +2858,48 @@ void panelHtmlIncludesContextualTutorialLayer()
     Random miningRng(713);
     const PreparedLaunch miningLaunch = prepareLaunch(miningState, catalog, miningRng);
     const std::string miningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(miningHtml.find("<h1>Mining</h1>") != std::string::npos, "mining panel should title the mining phase");
+    require(miningHtml.find("class=\"cockpit-hud mining-hud\"") != std::string::npos, "mining controls should render in a cockpit HUD");
     require(miningHtml.find("data-help-topic=\"mining-basics\"") != std::string::npos, "mining panel should introduce controls and purpose");
     require(miningHtml.find("Move with WASD or arrows") != std::string::npos, "mining help should explain movement controls");
     require(miningHtml.find("materials and artifacts") != std::string::npos, "mining help should explain the mining purpose");
+}
+
+void surfaceHtmlPromotesMiningAction()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 714);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.screen = Screen::SurfaceExpedition;
+
+    Random rng(714);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("<h1>Surface Ops</h1>") != std::string::npos, "surface panel should title the surface phase");
+    require(html.find("class=\"surface-primary-action\"") != std::string::npos, "surface panel should promote the mining action");
+    require(html.find("Mine deposit") != std::string::npos, "surface panel should keep mining obvious");
+}
+
+void hangarHtmlShowsPilotIntakeModal()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 715);
+    for (Astronaut& astronaut : state.run.crew) {
+        astronaut.status = CrewStatus::Dead;
+    }
+    syncLaunchConfig(state, catalog);
+
+    Random rng(715);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("data-modal=\"pilot_intake\"") != std::string::npos, "hangar should expose the pilot intake modal when no crew is active");
+    require(html.find("pilot-card-grid") != std::string::npos, "pilot intake should render candidate cards");
+    require(html.find("pilot-portrait-placeholder") != std::string::npos, "pilot intake should reserve portrait art slots");
+    require(html.find("recruit_candidate:0") != std::string::npos, "pilot intake should expose indexed candidate action zero");
+    require(html.find("recruit_candidate:1") != std::string::npos, "pilot intake should expose indexed candidate action one");
+    require(html.find("recruit_candidate:2") != std::string::npos, "pilot intake should expose indexed candidate action two");
+    require(html.find("Choose pilot") != std::string::npos, "dead roster hangar card should open the pilot chooser instead of instant-hiring");
 }
 
 void launchBalanceHelpersDrivePreparedLaunch()
@@ -2993,10 +3091,12 @@ void overpreparedReadinessRaisesProvingStakes()
 
 void uiActionsUseStableSchemaIds()
 {
+    require(ui::actions::prepareLaunch == "prepare_launch", "prepare launch action should use a stable schema id");
     require(ui::actions::startLaunch == "start_launch", "start launch action should use a stable schema id");
     require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
     require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
     require(ui::actions::researchProject(2) == "research_project:2", "indexed research actions should share one action family");
+    require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
@@ -3081,6 +3181,7 @@ int main()
     flightActionsComposeThroughOneCoreHelper();
     launchStatusLinesComeFromSharedSelector();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
+    emergencyRecruitmentOffersAnimalCandidateChoice();
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
@@ -3088,6 +3189,7 @@ int main()
     hangarOpsStartCheapAndEscalate();
     hangarOperationPreviewMatchesCoreMath();
     hangarOperationCardsComeFromSharedPreview();
+    totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
@@ -3139,6 +3241,8 @@ int main()
     launchReadinessPresentationComesFromSharedHelper();
     panelChromePresentationComesFromSharedHelper();
     panelHtmlIncludesContextualTutorialLayer();
+    surfaceHtmlPromotesMiningAction();
+    hangarHtmlShowsPilotIntakeModal();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
     starterMoonTransferIsNotReliable();

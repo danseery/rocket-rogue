@@ -59,19 +59,13 @@ inline bool canCommitArrivalOps(const GameState& state, const ContentCatalog& ca
         && currentMultiplier >= destination.targetMultiplier;
 }
 
-inline std::vector<FlightActionButtonPresentation> primaryFlightActions(
-    const FlightActionState& actions,
-    bool arrivalOpsAvailable)
+inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions)
 {
     std::vector<FlightActionButtonPresentation> buttons;
     if (actions.returningHome) {
         buttons.push_back(disabledFlightActionButton(text::buttons::returningHome));
-        buttons.push_back(disabledFlightActionButton(text::buttons::arrivalOps));
     } else {
         buttons.push_back(flightActionButton(text::buttons::returnHome, ui::actions::returnHome, "ok"));
-        buttons.push_back(arrivalOpsAvailable
-            ? flightActionButton(text::buttons::arrivalOps, ui::actions::arrivalOps, "warn")
-            : disabledFlightActionButton(text::buttons::arrivalOps));
     }
     buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
     return buttons;
@@ -155,7 +149,7 @@ inline LaunchPanelPresentation launchPanelPresentation(
     }
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(flightModel.pressureModifier)));
-    presentation.primaryActions = primaryFlightActions(actions, canCommitArrivalOps(state, catalog, flightModel, currentMultiplier));
+    presentation.primaryActions = primaryFlightActions(actions);
     presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
     return presentation;
 }

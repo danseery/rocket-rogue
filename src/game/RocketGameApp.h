@@ -16,6 +16,7 @@ public:
     void tick(double deltaSeconds);
     void render();
 
+    void prepareForLaunch();
     void startLaunch();
     void returnHome();
     void arrivalOps();
@@ -45,6 +46,7 @@ public:
     void miningAbort();
     void repairShip();
     void recruitCrew();
+    void recruitCrew(int candidateIndex);
     void trainCrew();
     void restCrew();
     void resetSave();
@@ -71,6 +73,7 @@ private:
 
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
+        bool flightArmed = false;
         double elapsed = 0.0;
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;

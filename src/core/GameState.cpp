@@ -448,12 +448,9 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
     return true;
 }
 
-int repairShipAmount(const GameState& state)
-{
-    return std::min(tuning::hangar::repairAmountCap, state.run.shipDamage);
-}
+namespace {
 
-double repairShipCost(const GameState& state)
+double standardRepairShipCost(const GameState& state)
 {
     const int repaired = repairShipAmount(state);
     if (repaired <= 0) {
@@ -464,6 +461,27 @@ double repairShipCost(const GameState& state)
     return tuning::escalatedHangarOpCost(baseCost, state.run.repairOpsThisExpedition);
 }
 
+bool salvageRebuildAvailable(const GameState& state)
+{
+    return state.run.shipDamage >= tuning::damage::destroyedShipDamage && state.run.credits < standardRepairShipCost(state);
+}
+
+} // namespace
+
+int repairShipAmount(const GameState& state)
+{
+    return std::min(tuning::hangar::repairAmountCap, state.run.shipDamage);
+}
+
+double repairShipCost(const GameState& state)
+{
+    const double standardCost = standardRepairShipCost(state);
+    if (salvageRebuildAvailable(state)) {
+        return std::max(0.0, state.run.credits);
+    }
+    return standardCost;
+}
+
 bool repairShip(GameState& state)
 {
     if (state.run.shipDamage <= 0) {
@@ -472,6 +490,7 @@ bool repairShip(GameState& state)
     }
 
     const int repaired = repairShipAmount(state);
+    const bool salvageRebuild = salvageRebuildAvailable(state);
     const double cost = repairShipCost(state);
     if (state.run.credits < cost) {
         state.statusLine = std::string(text::status::repairsUnaffordable);
@@ -481,7 +500,7 @@ bool repairShip(GameState& state)
     state.run.credits -= cost;
     state.run.shipDamage -= repaired;
     state.run.repairOpsThisExpedition += 1;
-    state.statusLine = text::repairedHull(repaired);
+    state.statusLine = salvageRebuild ? text::salvagedHull(repaired) : text::repairedHull(repaired);
     return true;
 }
 
@@ -619,7 +638,28 @@ HangarOperationPreview hangarOperationPreview(const GameState& state, const Cont
     return preview;
 }
 
-bool recruitCrew(GameState& state, const ContentCatalog& catalog)
+std::vector<const Astronaut*> recruitCandidateTemplates(const GameState& state, const ContentCatalog& catalog, int count)
+{
+    std::vector<const Astronaut*> candidates;
+    if (catalog.astronauts.empty() || count <= 0) {
+        return candidates;
+    }
+
+    const int rosterSize = static_cast<int>(catalog.astronauts.size());
+    const int start = (state.meta.astronautsLost + state.meta.shipsLost + state.run.launchesThisExpedition +
+        static_cast<int>(state.run.crew.size())) % rosterSize;
+    const int candidateCount = std::min(count, rosterSize);
+
+    candidates.reserve(static_cast<std::size_t>(candidateCount));
+    for (int offset = 0; offset < candidateCount; ++offset) {
+        const int index = (start + offset) % rosterSize;
+        candidates.push_back(&catalog.astronauts[static_cast<std::size_t>(index)]);
+    }
+
+    return candidates;
+}
+
+bool recruitCrew(GameState& state, const ContentCatalog& catalog, int candidateIndex)
 {
     if (catalog.astronauts.empty()) {
         state.statusLine = std::string(text::status::noRecruitProfiles);
@@ -632,16 +672,33 @@ bool recruitCrew(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    const Astronaut& templateAstronaut = catalog.astronauts[static_cast<std::size_t>(
-        (state.meta.astronautsLost + state.meta.shipsLost + state.run.launchesThisExpedition + state.run.crew.size()) %
-        static_cast<int>(catalog.astronauts.size()))];
+    const Astronaut* selectedTemplate = nullptr;
+    if (preview.emergencyRecruitment && candidateIndex >= 0) {
+        const std::vector<const Astronaut*> candidates = recruitCandidateTemplates(state, catalog);
+        if (candidateIndex >= static_cast<int>(candidates.size())) {
+            state.statusLine = std::string(text::status::noRecruitProfiles);
+            return false;
+        }
+        selectedTemplate = candidates[static_cast<std::size_t>(candidateIndex)];
+    }
 
-    Astronaut recruit = templateAstronaut;
+    if (selectedTemplate == nullptr) {
+        selectedTemplate = catalog.astronauts.empty() ? nullptr : &catalog.astronauts[static_cast<std::size_t>(
+            (state.meta.astronautsLost + state.meta.shipsLost + state.run.launchesThisExpedition + state.run.crew.size()) %
+            static_cast<int>(catalog.astronauts.size()))];
+    }
+
+    if (selectedTemplate == nullptr) {
+        state.statusLine = std::string(text::status::noRecruitProfiles);
+        return false;
+    }
+
+    Astronaut recruit = *selectedTemplate;
     const int recruitNumber = state.meta.astronautsLost + state.meta.shipsLost + static_cast<int>(state.run.crew.size()) + 1;
     recruit.id = text::recruitId(recruitNumber);
-    recruit.name = preview.emergencyRecruitment ? text::emergencyCadetName(recruitNumber) : text::nextGenerationName(templateAstronaut.name);
-    recruit.background = preview.emergencyRecruitment ? std::string(text::panel::messages::emergencyRecruitBackground) : std::string(text::panel::messages::agencyIntakeBackground);
-    recruit.training = preview.emergencyRecruitment ? 0 : std::max(0, templateAstronaut.training - tuning::hangar::recruitTrainingPenalty);
+    recruit.name = preview.emergencyRecruitment ? selectedTemplate->name : text::nextGenerationName(selectedTemplate->name);
+    recruit.background = selectedTemplate->background;
+    recruit.training = preview.emergencyRecruitment ? selectedTemplate->training : std::max(0, selectedTemplate->training - tuning::hangar::recruitTrainingPenalty);
     recruit.stress = preview.emergencyRecruitment ? tuning::hangar::emergencyRecruitStress : tuning::hangar::recruitStress;
     recruit.status = CrewStatus::Active;
 
@@ -650,6 +707,11 @@ bool recruitCrew(GameState& state, const ContentCatalog& catalog)
     syncLaunchConfig(state, catalog);
     state.statusLine = text::recruitJoined(recruit.name, preview.emergencyRecruitment);
     return true;
+}
+
+bool recruitCrew(GameState& state, const ContentCatalog& catalog)
+{
+    return recruitCrew(state, catalog, -1);
 }
 
 int frontierReadinessRequired(const GameState& state, const ContentCatalog& catalog)
