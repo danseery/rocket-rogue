@@ -1739,12 +1739,13 @@
 
     .toast-root {
       position: fixed;
-      right: 24px;
+      left: 50%;
       bottom: 24px;
       z-index: 18;
       display: grid;
       gap: 8px;
       width: min(420px, calc(100vw - 48px));
+      transform: translateX(-50%);
       pointer-events: none;
     }
 
@@ -1756,6 +1757,8 @@
       color: var(--text);
       box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
       animation: toast-in 140ms ease-out;
+      cursor: pointer;
+      pointer-events: auto;
     }
 
     .toast strong {
@@ -1848,7 +1851,7 @@
       }
 
       .toast-root {
-        right: 12px;
+        left: 50%;
         bottom: 12px;
         width: calc(100vw - 24px);
       }
@@ -2082,6 +2085,11 @@
         telemetryChartLegend.style.width = `${Math.round(Math.min(graphWidth - 20, 420))}px`;
         telemetryChartLegend.style.gridTemplateColumns = graphWidth < 430 ? "repeat(3, minmax(0, 1fr))" : "repeat(3, minmax(0, 1fr))";
       }
+
+      const scene = sceneMetrics();
+      const toastWidth = Math.min(420, Math.max(240, scene.width - 48));
+      toastRoot.style.left = `${Math.round(scene.centerX)}px`;
+      toastRoot.style.width = `${Math.round(toastWidth)}px`;
     }
 
     function showToast(message) {
@@ -2100,6 +2108,9 @@
       toast.className = "toast";
       toast.innerHTML = `<strong>Mission update</strong><span></span>`;
       toast.querySelector("span").textContent = text;
+      toast.addEventListener("click", () => {
+        toast.remove();
+      });
       toastRoot.appendChild(toast);
       while (toastRoot.children.length > 3) {
         toastRoot.firstElementChild?.remove();
