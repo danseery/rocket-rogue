@@ -67,6 +67,8 @@ std::string phaseTitle(Screen screen)
         return "Flight";
     case Screen::Results:
         return "Debrief";
+    case Screen::ArrivalFanfare:
+        return "Arrival";
     case Screen::ArrivalOps:
         return "Approach";
     case Screen::Research:
@@ -272,6 +274,20 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
     out << "<div class=\"stat-grid\">" << resourceChipGrid(action.payoffChips) << "</div>";
     out << "<div class=\"card-footer\"><span>" << htmlEscape(action.availability)
         << "</span>" << panelButton(action.action) << "</div></article>";
+    return out.str();
+}
+
+std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card surface-upgrade-card\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(upgrade.category) << "</span><span>"
+        << htmlEscape(upgrade.rarity) << "</span></div>";
+    out << "<h3>" << htmlEscape(upgrade.title) << "</h3>";
+    out << "<p>" << htmlEscape(upgrade.detail) << "</p>";
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(upgrade.effectChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape("Temporary") << "</span>"
+        << panelButton(upgrade.action) << "</div></article>";
     return out.str();
 }
 
@@ -485,6 +501,25 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << metric(metricItem.label, metricItem.value);
     }
     out << "</div>";
+
+    if (state.screen == Screen::ArrivalFanfare) {
+        const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId);
+        const std::string destinationName = arrivalDestination == nullptr ? currentFrontier.name : arrivalDestination->name;
+        const bool closeCall = !launchOutcomeAchievements(state.lastOutcome).empty();
+        out << "<div data-arrival-fanfare=\"1\" data-arrival-destination=\"" << htmlEscape(destinationName)
+            << "\" data-arrival-close-call=\"" << (closeCall ? "1" : "0") << "\" hidden></div>";
+        out << "<section class=\"arrival-fanfare-panel\">";
+        out << "<h2>" << htmlEscape("Arrival lock") << "</h2>";
+        out << "<p>" << htmlEscape("Mission control has the vehicle on target. Approach choices are coming online.") << "</p>";
+        out << "<div class=\"metric-grid flight-readout\">";
+        out << metric(text::labels::burnDepth, display::multiplier(state.lastOutcome.ejectMultiplier));
+        out << metric(text::labels::failurePoint, display::multiplier(state.lastOutcome.crashMultiplier));
+        out << metric(text::labels::peakWarning, display::percent(state.lastOutcome.peakWarning));
+        out << "</div>";
+        out << "</section>";
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
 
     if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Launch) {
         const LaunchPanelPresentation launchPanel = launchPanelPresentation(
@@ -727,7 +762,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
 
     if (state.screen == Screen::SurfaceExpedition) {
-        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state);
+        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
         const double extractionRisk = surfaceExtractionRisk(state);
         out << phaseBoardOpen("phase-board-surface", state.statusLine);
@@ -741,6 +776,15 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div></div>";
         out << surfaceCommandSummary(surfacePanel);
         out << surfaceKpiGrid(expedition, extractionRisk);
+        if (!surfacePanel.upgradeOffers.empty()) {
+            out << "<section class=\"board-primary surface-upgrades\">";
+            out << "<h2>" << htmlEscape("Choose field upgrade") << "</h2>";
+            out << "<div class=\"ops-grid\">";
+            for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
+                out << surfaceUpgradeCard(upgrade);
+            }
+            out << "</div></section>";
+        }
         const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
             return action.action.actionId == ui::actions::mineSurface;
         });

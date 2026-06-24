@@ -37,6 +37,26 @@ CrewUpgrade crewUpgrade(std::string id, std::string name, std::string descriptio
     return result;
 }
 
+SurfaceUpgrade surfaceUpgrade(
+    std::string id,
+    std::string name,
+    std::string description,
+    Rarity rarity,
+    SurfaceUpgradeCategory category,
+    SurfaceUpgradeStats stats,
+    std::vector<std::string> tags)
+{
+    SurfaceUpgrade result;
+    result.id = std::move(id);
+    result.name = std::move(name);
+    result.description = std::move(description);
+    result.rarity = rarity;
+    result.category = category;
+    result.stats = stats;
+    result.tags = std::move(tags);
+    return result;
+}
+
 ResearchProject researchProject(
     std::string id,
     std::string name,
@@ -79,6 +99,14 @@ const CrewUpgrade* ContentCatalog::findCrewUpgrade(std::string_view id) const
         return upgrade.id == id;
     });
     return found == crewUpgrades.end() ? nullptr : &*found;
+}
+
+const SurfaceUpgrade* ContentCatalog::findSurfaceUpgrade(std::string_view id) const
+{
+    const auto found = std::find_if(surfaceUpgrades.begin(), surfaceUpgrades.end(), [id](const SurfaceUpgrade& upgrade) {
+        return upgrade.id == id;
+    });
+    return found == surfaceUpgrades.end() ? nullptr : &*found;
 }
 
 const ResearchProject* ContentCatalog::findResearchProject(std::string_view id) const
@@ -156,6 +184,15 @@ ContentCatalog createDefaultContent()
         crewUpgrade(content::crewUpgrade::medicalRecoveryWard, "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, content::unlock::recovery, {"medical", "stress"}),
         crewUpgrade(content::crewUpgrade::missionPsychOffice, "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, content::unlock::thermal, {"psych", "stress"}),
         crewUpgrade(content::crewUpgrade::traitCoachingLab, "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, content::unlock::ai, {"coaching", "traits"})
+    };
+
+    catalog.surfaceUpgrades = {
+        surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4}, {"drill", "cooling"}),
+        surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams and bad pockets.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.0, .hazardRelief = 0.02}, {"scanner", "reveal"}),
+        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids keep loaded canisters from turning extraction into drama.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.03}, {"drone", "cargo"}),
+        surfaceUpgrade(content::surfaceUpgrade::microDroneBay, "Micro-Drone Bay", "Tiny outriders clear grit and keep the main drone moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.25, .oxygenSeconds = 12.0}, {"drone", "speed"}),
+        surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.0, .hazardRelief = 0.015}, {"drill", "durability"}),
+        surfaceUpgrade(content::surfaceUpgrade::oreScentArray, "Ore-Scent Array", "Spectral sniffers help the crew sort richer pockets from plain dust.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.12, .scannerRadius = 1.0}, {"scanner", "yield"})
     };
 
     catalog.researchProjects = {
@@ -304,6 +341,19 @@ std::string_view toString(Rarity rarity)
         return text::enums::rarity::rare;
     case Rarity::Prototype:
         return text::enums::rarity::prototype;
+    }
+    return text::enums::unknown;
+}
+
+std::string_view toString(SurfaceUpgradeCategory category)
+{
+    switch (category) {
+    case SurfaceUpgradeCategory::Drill:
+        return "Drill";
+    case SurfaceUpgradeCategory::Scanner:
+        return "Scanner";
+    case SurfaceUpgradeCategory::Drone:
+        return "Drone";
     }
     return text::enums::unknown;
 }

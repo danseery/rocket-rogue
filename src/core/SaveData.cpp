@@ -443,7 +443,11 @@ SaveData captureSaveData(const GameState& state)
     save.restOpsThisExpedition = state.run.restOpsThisExpedition;
     save.shallowRecoveryStreak = state.run.shallowRecoveryStreak;
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
-    save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::Mining ? state.screen : Screen::Hangar;
+    if (state.screen == Screen::ArrivalFanfare && state.run.arrivalOps.active) {
+        save.screen = Screen::ArrivalOps;
+    } else {
+        save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::Mining ? state.screen : Screen::Hangar;
+    }
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
@@ -608,6 +612,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
+    writeField(out, save_schema::field::surfaceUpgrades, join(save.surfaceExpedition.surfaceUpgradeIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::surfaceUpgradeOffers, join(arrayToVector(save.surfaceExpedition.surfaceUpgradeOfferIds), save_schema::listDelimiter));
+    writeField(out, save_schema::field::surfaceUpgradeOfferAvailable, save.surfaceExpedition.surfaceUpgradeOfferAvailable ? 1 : 0);
+    writeField(out, save_schema::field::surfaceUpgradeOffersSeen, save.surfaceExpedition.surfaceUpgradeOffersSeen);
     writeField(out, save_schema::field::miningActive, save.mining.active ? 1 : 0);
     writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
@@ -730,6 +738,14 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceLog) {
             save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
+        } else if (key == save_schema::field::surfaceUpgrades) {
+            save.surfaceExpedition.surfaceUpgradeIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::surfaceUpgradeOffers) {
+            save.surfaceExpedition.surfaceUpgradeOfferIds = vectorToOfferArray(split(value, save_schema::listDelimiter));
+        } else if (key == save_schema::field::surfaceUpgradeOfferAvailable) {
+            save.surfaceExpedition.surfaceUpgradeOfferAvailable = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfaceUpgradeOffersSeen) {
+            save.surfaceExpedition.surfaceUpgradeOffersSeen = parseInt(value, save.surfaceExpedition.surfaceUpgradeOffersSeen);
         } else if (key == save_schema::field::miningActive) {
             save.mining.active = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDestination) {

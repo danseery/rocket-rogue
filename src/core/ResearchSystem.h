@@ -6,6 +6,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocket {
 
@@ -59,6 +60,19 @@ struct SurfaceSiteProfileEffects {
     double artifactChanceBonus = 0.0;
 };
 
+struct SurfaceUpgradeEffects {
+    double drillPower = 0.0;
+    double drillCooling = 0.0;
+    double drillDurability = 0.0;
+    double oreYieldChance = 0.0;
+    double scannerRadius = 0.0;
+    double hazardRelief = 0.0;
+    double droneSpeed = 0.0;
+    double oxygenSeconds = 0.0;
+    double extractionRiskRelief = 0.0;
+    std::vector<std::string> names;
+};
+
 struct SurfaceActionOutcome {
     bool applied = false;
     std::string message;
@@ -103,12 +117,15 @@ int researchBlueprintGain(const MetaProgress& meta, const ResearchProject& proje
 SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta);
 SurfaceCrewEffects surfaceCrewEffects(const GameState& state);
 SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile);
+SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);
 std::string researchOutcomeSummary(const ResearchOutcome& outcome);
 std::string surfaceActionSummary(const SurfaceActionOutcome& outcome);
 ResearchOutcome completeResearchProject(GameState& state, const ContentCatalog& catalog, int index);
 void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random* rng = nullptr);
+void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
+bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index);
 double surfaceExtractionRisk(const GameState& state);
 double surfaceEnemyEncounterChance(const GameState& state);
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng);

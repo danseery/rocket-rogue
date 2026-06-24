@@ -64,6 +64,15 @@ inline constexpr const char* missionAnalysisLab = "mission_analysis_lab";
 inline constexpr const char* perimeterDroneNetwork = "perimeter_drone_network";
 } // namespace research
 
+namespace surfaceUpgrade {
+inline constexpr const char* thermalDrillJackets = "thermal_drill_jackets";
+inline constexpr const char* widebandPulse = "wideband_pulse";
+inline constexpr const char* cargoSkids = "cargo_skids";
+inline constexpr const char* microDroneBay = "micro_drone_bay";
+inline constexpr const char* shockMounts = "shock_mounts";
+inline constexpr const char* oreScentArray = "ore_scent_array";
+} // namespace surfaceUpgrade
+
 namespace frame {
 inline constexpr const char* pathfinder = "pathfinder";
 inline constexpr const char* sprinter = "sprinter";

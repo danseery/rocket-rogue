@@ -11,8 +11,41 @@
 #include "platform/WebSaveStore.h"
 
 #include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace rocket {
+namespace {
+
+std::vector<TelemetryEvent> chartTelemetryForOutcome(
+    const PreparedLaunch& launch,
+    const ContentCatalog& catalog,
+    double burnMultiplier,
+    bool returningHome,
+    double travelProgress)
+{
+    constexpr int sampleCapacity = tuning::launch::telemetrySampleCount;
+    const Destination* destination = catalog.findDestination(launch.config.destinationId);
+    const double destinationTarget = destination == nullptr ? burnMultiplier : destination->targetMultiplier;
+    const double sampleCeiling = returningHome
+        ? burnMultiplier
+        : std::max(burnMultiplier, destinationTarget);
+    const double plotProgress = returningHome ? 1.0 : std::clamp(travelProgress, 0.0, 1.0);
+    const int sampleCount = std::clamp(
+        static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
+        2,
+        sampleCapacity);
+
+    std::vector<TelemetryEvent> telemetry;
+    telemetry.reserve(static_cast<std::size_t>(sampleCount));
+    for (int i = 0; i < sampleCount; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
+        telemetry.push_back(telemetryAt(launch, 1.0 + (sampleCeiling - 1.0) * t));
+    }
+    return telemetry;
+}
+
+} // namespace
 
 PreparedLaunch RocketGameApp::currentFlightModel() const
 {
@@ -37,6 +70,24 @@ void RocketGameApp::clearResultView()
     session_.result = {};
 }
 
+void RocketGameApp::beginArrivalFanfare()
+{
+    session_.arrivalFanfare = {true, 0.0};
+    state_.screen = Screen::ArrivalFanfare;
+    state_.statusLine = std::string(text::status::arrivalFanfare);
+}
+
+void RocketGameApp::finishArrivalFanfare()
+{
+    if (state_.screen != Screen::ArrivalFanfare) {
+        return;
+    }
+    session_.arrivalFanfare = {};
+    state_.screen = Screen::ArrivalOps;
+    state_.statusLine = std::string(text::status::arrivalOpsOpened);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::beginSurfaceExpeditionOrRefit()
 {
     startSurfaceExpedition(state_, catalog_, &rng_);
@@ -59,6 +110,7 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.peakAbortRisk = 0.0;
     clearFlightControls();
     clearResultView();
+    session_.arrivalFanfare = {};
 }
 
 double RocketGameApp::liveBurnMultiplier() const
@@ -168,6 +220,10 @@ void RocketGameApp::tick(double deltaSeconds)
         panelDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    } else if (state_.screen == Screen::ArrivalFanfare) {
+        session_.arrivalFanfare.elapsed = std::min(
+            session_.arrivalFanfare.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
+            tuning::session::arrivalFanfareSeconds);
     }
 
     if (panelDirty_) {
@@ -278,6 +334,14 @@ void RocketGameApp::arrivalOps()
 
     recordTelemetryPeak(telemetryAt(currentFlightModel(), session_.currentMultiplier));
     completeLaunch(session_.currentMultiplier, RecoveryMethod::TransferArrival);
+}
+
+void RocketGameApp::skipArrivalFanfare()
+{
+    finishArrivalFanfare();
+    if (panelDirty_) {
+        refreshPanel();
+    }
 }
 
 void RocketGameApp::cutEngines()
@@ -481,6 +545,9 @@ void RocketGameApp::surveySurface()
     }
 
     const SurfaceActionOutcome outcome = surveySurfaceSite(state_, rng_);
+    if (outcome.applied) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -505,6 +572,9 @@ void RocketGameApp::pushSurface()
     }
 
     const SurfaceActionOutcome outcome = pushSurfaceDeeper(state_, rng_);
+    if (outcome.applied) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -526,6 +596,18 @@ void RocketGameApp::extractSurface()
     generateModuleOffers(state_, catalog_, rng_);
     state_.screen = Screen::Upgrade;
     save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::selectSurfaceUpgrade(int index)
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+
+    if (chooseSurfaceUpgrade(state_, catalog_, index)) {
+        save();
+    }
     panelDirty_ = true;
 }
 
@@ -562,10 +644,26 @@ void RocketGameApp::miningStow()
     }
 
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
+    if (outcome.applied) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningStowed);
     save();
     panelDirty_ = true;
 }
+
+namespace {
+
+bool hasRecoveredSurfacePayload(const SurfaceExpeditionState& expedition)
+{
+    return expedition.cargo > 0
+        || expedition.temporaryMaterials.common > 0
+        || expedition.temporaryMaterials.rare > 0
+        || expedition.temporaryMaterials.exotic > 0
+        || !expedition.temporaryArtifacts.empty();
+}
+
+} // namespace
 
 void RocketGameApp::miningAbort()
 {
@@ -574,6 +672,9 @@ void RocketGameApp::miningAbort()
     }
 
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
+    if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
@@ -586,6 +687,9 @@ void RocketGameApp::miningFailureAck()
     }
 
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
+    if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
@@ -723,11 +827,11 @@ void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
     LaunchOutcome outcome = resolveLaunch(flightModel, catalog_, state_, burnMultiplier, method, rng_);
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
     outcome.peakAbortRisk = std::max(outcome.peakAbortRisk, session_.peakAbortRisk);
+    outcome.telemetry = chartTelemetryForOutcome(flightModel, catalog_, burnMultiplier, wasReturningHome, frozenTravelProgress);
     applyLaunchOutcome(state_, catalog_, outcome);
     if (shouldOpenArrivalOps(outcome, catalog_)) {
         startArrivalOps(state_, outcome);
-        state_.screen = Screen::ArrivalOps;
-        state_.statusLine = std::string(text::status::arrivalOpsOpened);
+        beginArrivalFanfare();
     } else {
         state_.screen = Screen::Results;
     }
@@ -775,7 +879,8 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.currentMultiplier = session_.currentMultiplier;
     result.animationTime = state_.screen == Screen::Launch
         ? session_.elapsed
-        : (state_.screen == Screen::Mining ? state_.run.mining.elapsedSeconds : session_.result.elapsed);
+        : (state_.screen == Screen::Mining ? state_.run.mining.elapsedSeconds :
+            (state_.screen == Screen::ArrivalFanfare ? session_.arrivalFanfare.elapsed : session_.result.elapsed));
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
     if (state_.screen == Screen::Launch) {
@@ -783,7 +888,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             visualDestination = activeDestination;
         }
         result.frontierTransfer = session_.preparedLaunch.config.frontierTransfer;
-    } else if (state_.screen == Screen::Results) {
+    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps) {
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
         }
@@ -799,6 +904,10 @@ RenderSnapshot RocketGameApp::snapshot() const
             session_.returnTrip.duration);
         result.returningHome = true;
         result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
+    } else if (state_.screen == Screen::ArrivalFanfare) {
+        result.travelProgress = 0.985;
+    } else if (state_.screen == Screen::ArrivalOps) {
+        result.travelProgress = 1.0;
     } else if (state_.screen == Screen::Results && session_.result.usesTravelProgress) {
         result.travelProgress = session_.result.travelProgress;
     } else {
@@ -867,8 +976,14 @@ RenderSnapshot RocketGameApp::snapshot() const
         const TelemetryEvent event = telemetryAt(flightModel, displayedMultiplier);
         result.heat = event.heat;
         result.warning = event.warning;
-        for (int i = 0; i < static_cast<int>(result.telemetry.size()); ++i) {
-            const double t = static_cast<double>(i) / static_cast<double>(result.telemetry.size() - 1);
+        const int sampleCapacity = static_cast<int>(result.telemetry.size());
+        const double plotProgress = std::clamp(result.travelProgress, 0.0, 1.0);
+        const int liveSampleCount = std::clamp(
+            static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
+            2,
+            sampleCapacity);
+        for (int i = 0; i < liveSampleCount; ++i) {
+            const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
             const double sampleCeiling = session_.controls.actions.returningHome
                 ? displayedMultiplier
                 : std::max(session_.currentMultiplier, result.targetMultiplier);
@@ -877,7 +992,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             result.telemetry[static_cast<std::size_t>(i)] = sample.warning;
             result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sample.heat, 0.0, 1.0);
         }
-        result.telemetryCount = static_cast<int>(result.telemetry.size());
+        result.telemetryCount = liveSampleCount;
         result.poweredFlight = session_.flightArmed && (session_.controls.actions.returningHome
             ? !session_.controls.returnDriftHome
             : !session_.controls.actions.cutEnginesActive);

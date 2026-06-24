@@ -21,6 +21,7 @@ inline constexpr std::string_view rerollOffers = "reroll_offers";
 inline constexpr std::string_view arrivalFlyby = "arrival_flyby";
 inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
+inline constexpr std::string_view skipArrivalFanfare = "skip_arrival_fanfare";
 inline constexpr std::string_view repairShip = "repair_ship";
 inline constexpr std::string_view recruitCrew = "recruit_crew";
 inline constexpr std::string_view recruitCandidatePrefix = "recruit_candidate:";
@@ -29,6 +30,7 @@ inline constexpr std::string_view restCrew = "rest_crew";
 inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
+inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view skipResearch = "skip_research";
 inline constexpr std::string_view surveySurface = "survey_surface";
 inline constexpr std::string_view mineSurface = "mine_surface";
@@ -52,6 +54,11 @@ inline std::string researchProject(int index)
 inline std::string recruitCandidate(int index)
 {
     return std::string(recruitCandidatePrefix) + std::to_string(index);
+}
+
+inline std::string surfaceUpgrade(int index)
+{
+    return std::string(surfaceUpgradePrefix) + std::to_string(index);
 }
 } // namespace actions
 

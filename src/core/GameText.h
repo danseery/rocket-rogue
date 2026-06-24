@@ -25,6 +25,7 @@ inline constexpr std::string_view refitWindowOpened = "Choose one refit. Install
 inline constexpr std::string_view refitWindowClosed = "Refit window closed. Handle repairs, crew, and the next flight plan.";
 inline constexpr std::string_view refitRerollUnaffordable = "Not enough mission credits to reroll the refit board.";
 inline constexpr std::string_view researchWindowOpened = "Mars arrival confirmed. Pick one research priority before the field team deploys.";
+inline constexpr std::string_view arrivalFanfare = "Arrival confirmed. Approach window ready.";
 inline constexpr std::string_view arrivalOpsOpened = "Arrival confirmed. Choose how much mission risk to take before refit.";
 inline constexpr std::string_view flybyCompleted = "Flyby complete. The probe pass banked safe science and kept the vehicle moving.";
 inline constexpr std::string_view orbitCompleted = "Orbital insertion complete. High-value mapping data recovered.";

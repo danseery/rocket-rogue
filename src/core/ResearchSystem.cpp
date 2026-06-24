@@ -623,6 +623,29 @@ SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile)
     return effects;
 }
 
+SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog)
+{
+    SurfaceUpgradeEffects effects;
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    for (const std::string& upgradeId : expedition.surfaceUpgradeIds) {
+        const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
+        if (upgrade == nullptr) {
+            continue;
+        }
+        effects.drillPower += upgrade->stats.drillPower;
+        effects.drillCooling += upgrade->stats.drillCooling;
+        effects.drillDurability += upgrade->stats.drillDurability;
+        effects.oreYieldChance += upgrade->stats.oreYieldChance;
+        effects.scannerRadius += upgrade->stats.scannerRadius;
+        effects.hazardRelief += upgrade->stats.hazardRelief;
+        effects.droneSpeed += upgrade->stats.droneSpeed;
+        effects.oxygenSeconds += upgrade->stats.oxygenSeconds;
+        effects.extractionRiskRelief += upgrade->stats.extractionRiskRelief;
+        effects.names.push_back(upgrade->name);
+    }
+    return effects;
+}
+
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile)
 {
     switch (profile) {
@@ -761,6 +784,59 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     state.run.surfaceExpedition = expedition;
 }
 
+void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active || expedition.surfaceUpgradeOfferAvailable || expedition.surfaceUpgradeOffersSeen > 0) {
+        return;
+    }
+
+    std::vector<const SurfaceUpgrade*> available;
+    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
+        if (std::find(expedition.surfaceUpgradeIds.begin(), expedition.surfaceUpgradeIds.end(), upgrade.id) == expedition.surfaceUpgradeIds.end()) {
+            available.push_back(&upgrade);
+        }
+    }
+
+    expedition.surfaceUpgradeOfferIds = {};
+    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && !available.empty(); ++slot) {
+        const int picked = rng.rangeInt(0, static_cast<int>(available.size()) - 1);
+        expedition.surfaceUpgradeOfferIds[slot] = available[static_cast<std::size_t>(picked)]->id;
+        available.erase(available.begin() + picked);
+    }
+
+    expedition.surfaceUpgradeOfferAvailable = std::any_of(
+        expedition.surfaceUpgradeOfferIds.begin(),
+        expedition.surfaceUpgradeOfferIds.end(),
+        [](const std::string& id) {
+            return !id.empty();
+        });
+    if (expedition.surfaceUpgradeOfferAvailable) {
+        expedition.surfaceUpgradeOffersSeen += 1;
+    }
+}
+
+bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active || !expedition.surfaceUpgradeOfferAvailable || index < 0 || index >= static_cast<int>(expedition.surfaceUpgradeOfferIds.size())) {
+        return false;
+    }
+
+    const std::string upgradeId = expedition.surfaceUpgradeOfferIds[static_cast<std::size_t>(index)];
+    const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
+    if (upgrade == nullptr) {
+        return false;
+    }
+
+    expedition.surfaceUpgradeIds.push_back(upgrade->id);
+    expedition.surfaceUpgradeOfferIds = {};
+    expedition.surfaceUpgradeOfferAvailable = false;
+    appendSurfaceLog(expedition, "Field upgrade installed: " + upgrade->name + ".");
+    state.statusLine = "Field upgrade installed: " + upgrade->name + ".";
+    return true;
+}
+
 double surfaceExtractionRisk(const GameState& state)
 {
     const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
@@ -771,11 +847,13 @@ double surfaceExtractionRisk(const GameState& state)
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
     double risk = tuning::research::extractionRiskBase
         + expedition.hazard * tuning::research::extractionRiskHazardScale
         + static_cast<double>(std::max(0, expedition.cargo)) * std::max(0.0, tuning::research::extractionRiskCargoScale - tools.cargoRiskRelief)
         - tools.extractionRiskRelief
         - crew.extractionRiskRelief
+        - upgrades.extractionRiskRelief
         + site.extractionRiskDelta;
     if (expedition.supply <= 0) {
         risk += tuning::research::extractionRiskLowSupplyPenalty;
@@ -811,6 +889,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
     const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
     addMaterials(expedition.temporaryMaterials, gain);
     expedition.cargo += materialCargo(gain);
@@ -821,7 +900,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::surveyHazardChanceScale,
-        (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief,
+        (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
         text::status::surfaceDustHazard,
         tuning::research::dustHazardSupplyLoss,
         0,
@@ -843,8 +922,9 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
     MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus};
-    if (expedition.depth >= tuning::research::mineRareDepthThreshold || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus))) {
+    if (expedition.depth >= tuning::research::mineRareDepthThreshold || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus + upgrades.oreYieldChance))) {
         gain.rare += 1;
     }
 
@@ -857,7 +937,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::mineHazardChanceScale,
-        (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief,
+        (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
         text::status::surfaceDrillHazard,
         0,
         tuning::research::drillHazardCargoLoss,
@@ -880,6 +960,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
     expedition.hazard += tuning::research::hazardPerDepth;
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
     if (expedition.depth >= tuning::research::artifactDepthThreshold && expedition.temporaryArtifacts.empty() && rng.chance(std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus))) {
         expedition.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
         outcome.artifactFound = true;
@@ -891,7 +972,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::pushHazardChanceScale,
-        (surfaceToolEffects(state.meta).extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief,
+        (surfaceToolEffects(state.meta).extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
         text::status::surfaceTerrainHazard,
         tuning::research::pushHazardSupplyLoss,
         0,

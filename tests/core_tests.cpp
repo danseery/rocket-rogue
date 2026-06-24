@@ -1325,6 +1325,101 @@ void animalCrewClassesModifySurfaceExpeditions()
     require(findDetailPresentationRow(presentation.details, text::panel::details::fieldSpecialist) != nullptr, "surface details should show the active animal class effect");
 }
 
+void surfaceUpgradeOffersAreDistinctAndSelectable()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 642);
+    state.run.destinationIndex = 2;
+    state.screen = Screen::SurfaceExpedition;
+    startSurfaceExpedition(state, catalog);
+
+    Random rng(643);
+    generateSurfaceUpgradeOffers(state, catalog, rng);
+    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "successful surface progress should expose a field upgrade offer");
+
+    std::vector<std::string> offers;
+    for (const std::string& offerId : state.run.surfaceExpedition.surfaceUpgradeOfferIds) {
+        if (!offerId.empty()) {
+            offers.push_back(offerId);
+            require(catalog.findSurfaceUpgrade(offerId) != nullptr, "surface upgrade offer ids should resolve through content");
+        }
+    }
+    require(offers.size() == 3, "surface upgrade offers should present three options when possible");
+    std::sort(offers.begin(), offers.end());
+    require(std::adjacent_find(offers.begin(), offers.end()) == offers.end(), "surface upgrade offers should be distinct");
+
+    const std::string chosenId = state.run.surfaceExpedition.surfaceUpgradeOfferIds[0];
+    require(chooseSurfaceUpgrade(state, catalog, 0), "selecting a valid surface upgrade should apply it");
+    require(!state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "choosing a surface upgrade should consume the offer");
+    require(state.run.surfaceExpedition.surfaceUpgradeIds.size() == 1 && state.run.surfaceExpedition.surfaceUpgradeIds.front() == chosenId, "selected surface upgrade should persist in active expedition state");
+    require(!state.run.surfaceExpedition.logEntries.empty() && state.run.surfaceExpedition.logEntries.back().find("Field upgrade installed") != std::string::npos, "surface upgrade selection should be logged");
+}
+
+void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 644);
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    baseline.run.surfaceExpedition.cargo = 8;
+
+    GameState upgraded = baseline;
+    upgraded.run.surfaceExpedition.surfaceUpgradeIds = {
+        content::surfaceUpgrade::thermalDrillJackets,
+        content::surfaceUpgrade::widebandPulse,
+        content::surfaceUpgrade::cargoSkids,
+        content::surfaceUpgrade::microDroneBay,
+        content::surfaceUpgrade::oreScentArray
+    };
+
+    const MiningDrillStats baselineStats = miningDrillStats(baseline, catalog);
+    const MiningDrillStats upgradedStats = miningDrillStats(upgraded, catalog);
+    require(upgradedStats.heatRiseScale < baselineStats.heatRiseScale, "thermal field upgrades should reduce mining heat rise");
+    require(upgradedStats.scannerRadius > baselineStats.scannerRadius, "scanner field upgrades should widen pulse reveal radius");
+    require(upgradedStats.speed > baselineStats.speed, "drone field upgrades should improve mining movement speed");
+    require(upgradedStats.oxygenSeconds > baselineStats.oxygenSeconds, "drone field upgrades should extend mining oxygen");
+    require(upgradedStats.oreYieldChance > baselineStats.oreYieldChance, "ore field upgrades should improve yield odds");
+    require(surfaceExtractionRisk(upgraded) < surfaceExtractionRisk(baseline), "cargo field upgrades should reduce extraction risk");
+
+    const SurfaceExpeditionPresentation presentation = surfaceExpeditionPresentation(upgraded, catalog);
+    require(!presentation.selectedUpgradeNames.empty(), "surface presentation should expose selected field upgrades");
+    require(findDetailPresentationRow(presentation.details, "Field upgrades") != nullptr, "surface details should list field upgrades");
+}
+
+void surfaceUpgradesClearAfterExtractionAndRoundTripSave()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 645);
+    state.run.destinationIndex = 2;
+    state.screen = Screen::SurfaceExpedition;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids};
+    state.run.surfaceExpedition.surfaceUpgradeOfferIds = {
+        content::surfaceUpgrade::thermalDrillJackets,
+        content::surfaceUpgrade::widebandPulse,
+        content::surfaceUpgrade::microDroneBay
+    };
+    state.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
+    state.run.surfaceExpedition.surfaceUpgradeOffersSeen = 1;
+
+    const std::string serialized = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(serialized);
+    require(save.has_value(), "surface upgrade save should parse");
+
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.run.surfaceExpedition.surfaceUpgradeIds == state.run.surfaceExpedition.surfaceUpgradeIds, "selected surface upgrades should round trip");
+    require(restored.run.surfaceExpedition.surfaceUpgradeOfferIds == state.run.surfaceExpedition.surfaceUpgradeOfferIds, "surface upgrade offers should round trip");
+    require(restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offer availability should round trip");
+
+    Random rng(646);
+    restored.run.surfaceExpedition.temporaryMaterials.common = 1;
+    const SurfaceActionOutcome extracted = extractSurfacePayload(restored, rng);
+    require(extracted.applied, "surface extraction should resolve while upgrades are active");
+    require(restored.run.surfaceExpedition.surfaceUpgradeIds.empty(), "surface upgrades should clear after extraction");
+    require(!restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offers should clear after extraction");
+}
+
 void surfaceSiteProfilesChangeExpeditionRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2231,6 +2326,8 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceLog) + save_schema::keyValueDelimiter) != std::string::npos, "surface log key should use shared schema name");
+    require(text.find(std::string(save_schema::field::surfaceUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrades key should use shared schema name");
+    require(text.find(std::string(save_schema::field::surfaceUpgradeOffers) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrade offers key should use shared schema name");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -2888,6 +2985,18 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(arrivalHtml.find("Arrival summary") != std::string::npos, "arrival ops panel should consolidate debrief summary");
     require(arrivalHtml.find("Mission result") != std::string::npos, "arrival ops panel should include outcome metrics");
 
+    arrivalState.screen = Screen::ArrivalFanfare;
+    const std::string fanfareHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
+    require(fanfareHtml.find("<h1>Arrival</h1>") != std::string::npos, "arrival fanfare should title the transient phase");
+    require(fanfareHtml.find("data-arrival-fanfare=\"1\"") != std::string::npos, "arrival fanfare should signal the scene overlay");
+    require(fanfareHtml.find("data-arrival-destination=\"Moon\"") != std::string::npos, "arrival fanfare should expose the destination to the overlay");
+    require(fanfareHtml.find("Arrival lock") != std::string::npos, "arrival fanfare panel should present a compact confirmation readout");
+    const SaveData fanfareSave = captureSaveData(arrivalState);
+    require(fanfareSave.screen == Screen::ArrivalOps, "arrival fanfare should persist as approach so reloads do not resume a transient screen");
+    GameState restoredArrival = createNewGame(catalog, 713);
+    restoreSaveData(restoredArrival, catalog, fanfareSave);
+    require(restoredArrival.screen == Screen::ArrivalOps, "restoring during arrival fanfare should resume at approach");
+
     GameState miningState = createNewGame(catalog, 713);
     miningState.run.destinationIndex = 2;
     startSurfaceExpedition(miningState, catalog);
@@ -3132,7 +3241,9 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::startLaunch == "start_launch", "start launch action should use a stable schema id");
     require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
     require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
+    require(ui::actions::skipArrivalFanfare == "skip_arrival_fanfare", "arrival fanfare skip action should use a stable schema id");
     require(ui::actions::researchProject(2) == "research_project:2", "indexed research actions should share one action family");
+    require(ui::actions::surfaceUpgrade(2) == "surface_upgrade:2", "indexed surface upgrade actions should share one action family");
     require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
@@ -3146,6 +3257,7 @@ void uiActionsUseStableSchemaIds()
 void panelLayoutModeIsPortablePresentationData()
 {
     require(panelLayoutMode(Screen::Launch) == PanelLayoutMode::ControlPanel, "launch should remain a compact action control panel");
+    require(panelLayoutMode(Screen::ArrivalFanfare) == PanelLayoutMode::ControlPanel, "arrival fanfare should keep the scene open for the celebration overlay");
     require(panelLayoutMode(Screen::Hangar) == PanelLayoutMode::PhaseBoard, "hangar should use the management board layout");
     require(panelLayoutMode(Screen::Results) == PanelLayoutMode::PhaseBoard, "results should use the management board layout");
     require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
@@ -3171,6 +3283,8 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(catalog.findResearchProject(content::research::regolithDrillRig) != nullptr, "drill research id should resolve");
     require(catalog.findResearchProject(content::research::cargoReturnRig) != nullptr, "cargo research id should resolve");
     require(catalog.findResearchProject(content::research::perimeterDroneNetwork) != nullptr, "perimeter drone research id should resolve");
+    require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets) != nullptr, "surface upgrade ids should resolve");
+    require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::widebandPulse) != nullptr, "scanner surface upgrade id should resolve");
 
     MetaProgress meta;
     require(hasUnlock(meta, content::unlock::starter), "starter unlock should stay implicit");
@@ -3244,6 +3358,9 @@ int main()
     researchOutcomeSummaryShowsRewardsAndCosts();
     surfaceToolResearchImprovesExpeditions();
     animalCrewClassesModifySurfaceExpeditions();
+    surfaceUpgradeOffersAreDistinctAndSelectable();
+    selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
+    surfaceUpgradesClearAfterExtractionAndRoundTripSave();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();
     surfaceEventsCreateSmallRunVariation();

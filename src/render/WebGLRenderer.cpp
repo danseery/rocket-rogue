@@ -435,9 +435,18 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 72.0F) * shake * 7.0F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 61.0F) * shake * 5.0F;
     }
+    if (snapshot.screen == Screen::ArrivalFanfare) {
+        const float arrival = 1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0));
+        const float shimmer = arrival * arrival;
+        scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 34.0F) * shimmer * 3.5F;
+        scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 29.0F) * shimmer * 2.5F;
+    }
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
-    glClearColor(0.02F + heat * 0.05F, 0.03F, 0.05F + heat * 0.02F, 1.0F);
+    const float arrivalGlow = snapshot.screen == Screen::ArrivalFanfare
+        ? 0.018F * (1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0)))
+        : 0.0F;
+    glClearColor(0.02F + heat * 0.05F + arrivalGlow, 0.03F + arrivalGlow * 0.70F, 0.05F + heat * 0.02F + arrivalGlow * 0.35F, 1.0F);
     glClear(GL_COLOR_BUFFER_BIT);
 #else
     (void)snapshot;
@@ -750,8 +759,8 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
 
 void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 {
-    const float left = 0.25F;
-    const float right = 1.22F;
+    const float left = 0.18F;
+    const float right = 0.94F;
     const float bottom = -0.86F;
     const float top = -0.58F;
     const float width = right - left;
@@ -779,6 +788,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     if (snapshot.telemetryCount <= 1) {
         return;
     }
+    const float sampleDenominator = static_cast<float>(std::max(1, static_cast<int>(snapshot.telemetry.size()) - 1));
 
     Color warningSafe {0.35F, 0.84F, 1.0F, 1.0F};
     Color warningHot {1.0F, 0.38F, 0.28F, 1.0F};
@@ -791,8 +801,8 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     std::vector<float>& heatGlowVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
-        const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
-        const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
+        const float t0 = static_cast<float>(i - 1) / sampleDenominator;
+        const float t1 = static_cast<float>(i) / sampleDenominator;
         const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * height;
         const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * height;
         const float x0 = left + t0 * width;
@@ -808,8 +818,8 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
     const Color warningGlow = {warningColor.r, warningColor.g, warningColor.b, 0.22F};
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
-        const float t0 = static_cast<float>(i - 1) / static_cast<float>(snapshot.telemetryCount - 1);
-        const float t1 = static_cast<float>(i) / static_cast<float>(snapshot.telemetryCount - 1);
+        const float t0 = static_cast<float>(i - 1) / sampleDenominator;
+        const float t1 = static_cast<float>(i) / sampleDenominator;
         const float y0 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i - 1)]) * height;
         const float y1 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i)]) * height;
         const float x0 = left + t0 * width;
@@ -820,9 +830,10 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     submitLines(warningGlowVertices, 6.0F);
     submitLines(warningVertices, 2.2F);
 
-    const float warningX = right;
+    const float endpointT = static_cast<float>(snapshot.telemetryCount - 1) / sampleDenominator;
+    const float warningX = left + endpointT * width;
     const float warningY = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(snapshot.telemetryCount - 1)]) * height;
-    const float heatX = right;
+    const float heatX = warningX;
     const float heatY = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(snapshot.telemetryCount - 1)]) * height;
     drawCircle(warningX, warningY, 0.016F, {warningColor.r, warningColor.g, warningColor.b, 0.20F}, 20);
     drawCircle(warningX, warningY, 0.007F, warningColor, 18);
@@ -848,16 +859,36 @@ void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float al
 
 void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
 {
+    const bool arrivalFanfare = snapshot.screen == Screen::ArrivalFanfare;
+    const float flash = arrivalFanfare
+        ? 0.55F + 0.45F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
+        : 0.0F;
     std::vector<float>& routeVertices = scratchVertices(28 * 16);
     Vec2 previous = routePoint(snapshot, 0.0F);
     for (int i = 1; i <= 28; ++i) {
         const float t = static_cast<float>(i) / 28.0F;
         const Vec2 next = routePoint(snapshot, t);
-        const Color routeColor = t <= snapshot.travelProgress ? Color{0.42F, 0.88F, 1.0F, 0.42F} : Color{0.25F, 0.42F, 0.52F, 0.22F};
+        const bool completed = arrivalFanfare || t <= snapshot.travelProgress;
+        const Color routeColor = completed
+            ? mix({0.42F, 0.88F, 1.0F, 0.46F}, {1.0F, 0.82F, 0.28F, 0.72F}, flash)
+            : Color{0.25F, 0.42F, 0.52F, 0.22F};
         appendLine(routeVertices, previous.x, previous.y, next.x, next.y, routeColor);
         previous = next;
     }
-    submitLines(routeVertices, 1.0F);
+    submitLines(routeVertices, arrivalFanfare ? 2.0F : 1.0F);
+
+    if (arrivalFanfare) {
+        std::vector<float>& flashVertices = scratchVertices(28 * 16);
+        previous = routePoint(snapshot, 0.0F);
+        for (int i = 1; i <= 28; ++i) {
+            const float t = static_cast<float>(i) / 28.0F;
+            const Vec2 next = routePoint(snapshot, t);
+            const float tail = std::clamp(1.0F - std::abs(t - 0.78F - flash * 0.18F) / 0.22F, 0.0F, 1.0F);
+            appendLine(flashVertices, previous.x, previous.y, next.x, next.y, {0.95F, 0.96F, 1.0F, 0.22F * tail});
+            previous = next;
+        }
+        submitLines(flashVertices, 3.0F);
+    }
 
     if (snapshot.travelProgress <= 1.0) {
         return;
@@ -1058,6 +1089,31 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
     if ((snapshot.destinationTier == 0 && !snapshot.frontierTransfer) || snapshot.destinationTier > 2) {
         const Vec2 targetMarker = routePoint(snapshot, 1.0F);
         drawLine(targetMarker.x, targetMarker.y - 0.055F, targetMarker.x, targetMarker.y + 0.055F, {0.98F, 0.82F, 0.36F, 0.70F}, 2.0F);
+    }
+
+    if (snapshot.screen == Screen::ArrivalFanfare) {
+        const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        const float time = static_cast<float>(snapshot.animationTime);
+        const float life = 1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0));
+        const float beat = 0.5F + 0.5F * std::sin(time * 15.0F);
+        const float baseRadius = 0.13F + static_cast<float>(snapshot.destinationTier) * 0.015F;
+        drawCircle(endpoint.x, endpoint.y, baseRadius * (1.0F + beat * 0.22F), {0.30F, 0.88F, 1.0F, 0.12F + beat * 0.06F}, 64);
+        drawCircle(endpoint.x, endpoint.y, baseRadius * (1.58F + (1.0F - life) * 0.36F), {1.0F, 0.78F, 0.22F, 0.16F * life}, 72);
+        drawCircle(endpoint.x, endpoint.y, baseRadius * (2.10F + (1.0F - life) * 0.72F), {0.36F, 0.90F, 1.0F, 0.10F * life}, 72);
+        for (int i = 0; i < 14; ++i) {
+            const float seed = static_cast<float>(i) * 2.39996F;
+            const float angle = seed + time * (0.15F + static_cast<float>(i % 3) * 0.025F);
+            const float radius = baseRadius * (1.35F + 0.46F * std::sin(time * 3.0F + seed));
+            const float length = baseRadius * (0.14F + 0.06F * static_cast<float>(i % 4));
+            const float ax = endpoint.x + std::cos(angle) * radius;
+            const float ay = endpoint.y + std::sin(angle) * radius;
+            const float bx = endpoint.x + std::cos(angle) * (radius + length);
+            const float by = endpoint.y + std::sin(angle) * (radius + length);
+            const Color sparkle = (i % 2 == 0)
+                ? Color{1.0F, 0.84F, 0.30F, 0.34F * life}
+                : Color{0.40F, 0.92F, 1.0F, 0.28F * life};
+            drawLine(ax, ay, bx, by, sparkle, 1.4F);
+        }
     }
 }
 

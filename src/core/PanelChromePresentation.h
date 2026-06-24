@@ -28,6 +28,11 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
             return *activeDestination;
         }
     }
+    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps) {
+        if (const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId)) {
+            return *arrivalDestination;
+        }
+    }
     return currentDestination(state, catalog);
 }
 

@@ -102,6 +102,16 @@ void rr_arrival_ops()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_skip_arrival_fanfare()
+{
+    if (g_app) {
+        g_app->skipArrivalFanfare();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_cut_engines()
 {
     if (g_app) {
@@ -266,6 +276,16 @@ void rr_extract_surface()
 {
     if (g_app) {
         g_app->extractSurface();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_upgrade(int index)
+{
+    if (g_app) {
+        g_app->selectSurfaceUpgrade(index);
     }
 }
 

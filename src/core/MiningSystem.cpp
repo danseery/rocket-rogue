@@ -641,6 +641,16 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     if (traitIs(state, tuning::traits::phaseShift)) {
         stats.speed += tuning::mining::chipmunkSpeedBonus;
     }
+    const SurfaceUpgradeEffects surfaceUpgrades = surfaceUpgradeEffects(state, catalog);
+    stats.power += surfaceUpgrades.drillPower * 0.75;
+    stats.oreYieldChance += surfaceUpgrades.oreYieldChance;
+    stats.scannerRadius += surfaceUpgrades.scannerRadius;
+    stats.speed += surfaceUpgrades.droneSpeed;
+    stats.oxygenSeconds += surfaceUpgrades.oxygenSeconds;
+    stats.heatRiseScale = std::clamp(stats.heatRiseScale - surfaceUpgrades.drillCooling * 0.060, 0.50, 1.0);
+    stats.heatCoolingPerSecond += surfaceUpgrades.drillCooling * 0.025;
+    stats.integrityRelief += surfaceUpgrades.drillDurability * 0.070;
+    stats.extractionRiskRelief += surfaceUpgrades.extractionRiskRelief;
     stats.oreYieldChance = std::clamp(stats.oreYieldChance, 0.0, 0.36);
     stats.rareYieldChance = std::clamp(stats.rareYieldChance, 0.0, 0.48);
     stats.integrityRelief = std::clamp(stats.integrityRelief, 0.0, 0.70);

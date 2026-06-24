@@ -15,6 +15,7 @@ enum class Screen {
     Hangar,
     Launch,
     Results,
+    ArrivalFanfare,
     ArrivalOps,
     Research,
     SurfaceExpedition,
@@ -49,6 +50,12 @@ enum class SurfaceSiteProfile {
     SurveyBasin,
     OreShelf,
     FractureField
+};
+
+enum class SurfaceUpgradeCategory {
+    Drill,
+    Scanner,
+    Drone
 };
 
 enum class MiningCellMaterial {
@@ -104,6 +111,18 @@ struct CrewUpgradeStats {
     double traitModifier = 0.0;
 };
 
+struct SurfaceUpgradeStats {
+    double drillPower = 0.0;
+    double drillCooling = 0.0;
+    double drillDurability = 0.0;
+    double oreYieldChance = 0.0;
+    double scannerRadius = 0.0;
+    double hazardRelief = 0.0;
+    double droneSpeed = 0.0;
+    double oxygenSeconds = 0.0;
+    double extractionRiskRelief = 0.0;
+};
+
 struct MaterialInventory {
     int common = 0;
     int rare = 0;
@@ -129,6 +148,16 @@ struct CrewUpgrade {
     Rarity rarity = Rarity::Common;
     CrewUpgradeStats stats;
     std::string unlockKey = content::unlock::starter;
+    std::vector<std::string> tags;
+};
+
+struct SurfaceUpgrade {
+    std::string id;
+    std::string name;
+    std::string description;
+    Rarity rarity = Rarity::Common;
+    SurfaceUpgradeCategory category = SurfaceUpgradeCategory::Drill;
+    SurfaceUpgradeStats stats;
     std::vector<std::string> tags;
 };
 
@@ -265,6 +294,10 @@ struct SurfaceExpeditionState {
     std::vector<ArtifactRecord> temporaryArtifacts;
     std::vector<std::string> logEntries;
     bool enemyEncountersEnabled = false;
+    std::vector<std::string> surfaceUpgradeIds;
+    std::array<std::string, 3> surfaceUpgradeOfferIds {};
+    bool surfaceUpgradeOfferAvailable = false;
+    int surfaceUpgradeOffersSeen = 0;
 };
 
 struct MiningCell {
@@ -364,6 +397,7 @@ struct GameState {
 
 std::string_view toString(SlotType slot);
 std::string_view toString(Rarity rarity);
+std::string_view toString(SurfaceUpgradeCategory category);
 std::string_view toString(CrewStatus status);
 std::string_view toString(LaunchResultType result);
 std::string_view toString(RecoveryMethod method);

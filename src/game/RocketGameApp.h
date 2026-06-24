@@ -20,6 +20,7 @@ public:
     void startLaunch();
     void returnHome();
     void arrivalOps();
+    void skipArrivalFanfare();
     void cutEngines();
     void pressureReliefValve();
     void closePressureReliefValve();
@@ -38,6 +39,7 @@ public:
     void mineSurface();
     void pushSurface();
     void extractSurface();
+    void selectSurfaceUpgrade(int index);
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);
     void miningDrill(bool active);
@@ -72,6 +74,11 @@ private:
         double elapsed = 0.0;
     };
 
+    struct ArrivalFanfareState {
+        bool active = false;
+        double elapsed = 0.0;
+    };
+
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
         bool flightArmed = false;
@@ -82,9 +89,12 @@ private:
         ReturnTripState returnTrip;
         FlightControlState controls;
         ResultViewState result;
+        ArrivalFanfareState arrivalFanfare;
     };
 
     void completeLaunch(double burnMultiplier, RecoveryMethod method);
+    void beginArrivalFanfare();
+    void finishArrivalFanfare();
     void save();
     void refreshPanel();
     RenderSnapshot snapshot() const;

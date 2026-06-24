@@ -10,6 +10,7 @@ namespace rocket {
 struct ContentCatalog {
     std::vector<ShipModule> modules;
     std::vector<CrewUpgrade> crewUpgrades;
+    std::vector<SurfaceUpgrade> surfaceUpgrades;
     std::vector<ResearchProject> researchProjects;
     std::vector<ShipFrame> frames;
     std::vector<Astronaut> astronauts;
@@ -17,6 +18,7 @@ struct ContentCatalog {
 
     const ShipModule* findModule(std::string_view id) const;
     const CrewUpgrade* findCrewUpgrade(std::string_view id) const;
+    const SurfaceUpgrade* findSurfaceUpgrade(std::string_view id) const;
     const ResearchProject* findResearchProject(std::string_view id) const;
     const ShipFrame* findFrame(std::string_view id) const;
     const Astronaut* findAstronaut(std::string_view id) const;
