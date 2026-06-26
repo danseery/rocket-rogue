@@ -1,5 +1,7 @@
 # Post-Arrival Phases
 
+For the latest agent-facing design priority order, see `docs/AGENT_DESIGN_CONTEXT.md`. USG Notes is the primary source for surface, mining, animal class, and drone direction.
+
 This note extends the current launch/refit prototype with the next two layers: research and landed exploration. The goal is to keep the press-your-luck rocket loop as the spine, then make successful arrivals feel like new opportunities instead of just a bigger payout screen.
 
 ## Phase Structure

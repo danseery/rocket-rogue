@@ -36,10 +36,23 @@ inline std::string miningToughnessValue(const MiningRunState& mining)
     return display::percent(std::clamp(mining.targetRemainingToughness / mining.targetMaxToughness, 0.0, 1.0));
 }
 
+inline std::string miningDroneSummary(const MiniDroneLoadoutEffects& drones)
+{
+    if (drones.names.empty()) {
+        return "None";
+    }
+    std::string summary = drones.names.front();
+    for (std::size_t i = 1; i < drones.names.size(); ++i) {
+        summary += ", " + drones.names[i];
+    }
+    return summary;
+}
+
 inline MiningRunPresentation miningRunPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const MiningRunState& mining = state.run.mining;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
     const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
     const double extractionDelta = std::clamp(
         mining.hazardDelta + static_cast<double>(std::max(0, mining.cargo)) * tuning::mining::cargoExtractionRiskScale - stats.extractionRiskRelief,
@@ -62,6 +75,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::rareMaterials, std::to_string(mining.temporaryMaterials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(mining.temporaryMaterials.exotic)),
         panelMetric(text::labels::artifacts, std::to_string(mining.temporaryArtifacts.size())),
+        panelMetric("Drones", drones.names.empty() ? "0" : std::to_string(static_cast<int>(drones.names.size()))),
         panelMetric(text::labels::targetMaterial, std::string(miningMaterialName(mining.targetMaterial))),
         panelMetric(text::labels::toughness, miningToughnessValue(mining))
     };
@@ -70,6 +84,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
         detailPresentationRow("Drill power", display::fixed(stats.power, 1)),
         detailPresentationRow("Scanner radius", display::fixed(stats.scannerRadius, 1)),
+        detailPresentationRow("Drone loadout", miningDroneSummary(drones)),
+        detailPresentationRow("Drone auto-mining", drones.passiveMiningRate > 0.0 ? ("+" + display::fixed(drones.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
+        detailPresentationRow("Drone oxygen reserve", drones.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(drones.oxygenSeconds))) + "s") : "None"),
+        detailPresentationRow("Drone stability", drones.hardRockBounceRelief > 0.0 ? display::percent(drones.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
         detailPresentationRow("Ore efficiency", display::signedPercent(stats.oreYieldChance)),
         detailPresentationRow("Heat control", display::fixed(stats.heatCoolingPerSecond, 2)),
         detailPresentationRow("Drill protection", display::signedPercent(stats.integrityRelief)),

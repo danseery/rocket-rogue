@@ -21,7 +21,27 @@ enum class Screen {
     SurfaceExpedition,
     Mining,
     Upgrade,
-    Legacy
+    Legacy,
+    DroneOps,
+    Navigation
+};
+
+enum class CampaignMilestone {
+    SolarTutorial,
+    ArkDiscovered,
+    FirstArkJumpReady,
+    FirstArkJumpComplete,
+    GravityWellDisaster,
+    HostileSystemStranded,
+    ArkRepairing
+};
+
+enum class ArkCondition {
+    NotFound,
+    DerelictOperable,
+    InFlight,
+    DamagedStranded,
+    Repairing
 };
 
 enum class SlotType {
@@ -56,6 +76,15 @@ enum class SurfaceUpgradeCategory {
     Drill,
     Scanner,
     Drone
+};
+
+enum class MiniDroneRole {
+    Mining,
+    Resource,
+    Survey,
+    Stabilizer,
+    Attack,
+    Defense
 };
 
 enum class MiningCellMaterial {
@@ -115,12 +144,23 @@ struct SurfaceUpgradeStats {
     double drillPower = 0.0;
     double drillCooling = 0.0;
     double drillDurability = 0.0;
+    double hardRockBounceRelief = 0.0;
     double oreYieldChance = 0.0;
     double scannerRadius = 0.0;
     double hazardRelief = 0.0;
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
     double extractionRiskRelief = 0.0;
+};
+
+struct MiniDroneStats {
+    double passiveMiningRate = 0.0;
+    double oxygenSeconds = 0.0;
+    double scannerRadius = 0.0;
+    double drillIntegrityRelief = 0.0;
+    double hardRockBounceRelief = 0.0;
+    double extractionRiskRelief = 0.0;
+    double enemyEncounterRelief = 0.0;
 };
 
 struct MaterialInventory {
@@ -158,6 +198,17 @@ struct SurfaceUpgrade {
     Rarity rarity = Rarity::Common;
     SurfaceUpgradeCategory category = SurfaceUpgradeCategory::Drill;
     SurfaceUpgradeStats stats;
+    std::vector<std::string> tags;
+};
+
+struct MiniDrone {
+    std::string id;
+    std::string name;
+    std::string description;
+    Rarity rarity = Rarity::Common;
+    MiniDroneRole role = MiniDroneRole::Mining;
+    MiniDroneStats stats;
+    std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
 };
 
@@ -252,10 +303,34 @@ struct LaunchOutcome {
     std::vector<TelemetryEvent> telemetry;
 };
 
+struct ArkState {
+    ArkCondition condition = ArkCondition::NotFound;
+    int fuelReserve = 0;
+    int hullDamage = 0;
+    std::vector<std::string> repairModuleIds;
+    bool firstJumpComplete = false;
+    bool gravityWellDisaster = false;
+};
+
+struct NavigationState {
+    std::string currentSystemId = "solar_system";
+    std::string arkLocationId;
+    std::string selectedDestinationId;
+    std::vector<std::string> discoveredDestinationIds;
+};
+
 struct MetaProgress {
+    CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
+    ArkState ark;
+    NavigationState navigation;
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
     MaterialInventory materials;
+    std::vector<std::string> ownedModuleIds;
+    std::vector<std::string> defaultEquippedModuleIds;
+    int droneBaySlots = 0;
+    std::vector<std::string> ownedDroneIds;
+    std::vector<std::string> equippedDroneIds;
     std::vector<ArtifactRecord> artifacts;
     int furthestTier = 0;
     int shipsLost = 0;
@@ -294,7 +369,6 @@ struct SurfaceExpeditionState {
     std::vector<ArtifactRecord> temporaryArtifacts;
     std::vector<std::string> logEntries;
     bool enemyEncountersEnabled = false;
-    std::vector<std::string> surfaceUpgradeIds;
     std::array<std::string, 3> surfaceUpgradeOfferIds {};
     bool surfaceUpgradeOfferAvailable = false;
     int surfaceUpgradeOffersSeen = 0;
@@ -348,6 +422,7 @@ struct MiningRunState {
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
     double hazardDelta = 0.0;
+    int passiveDroneYield = 0;
     int cellsBroken = 0;
     int targetCellX = -1;
     int targetCellY = -1;
@@ -368,6 +443,7 @@ struct RunState {
     std::string frameId;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
+    std::vector<std::string> surfaceUpgradeIds;
     std::vector<std::string> crewUpgradeIds;
     std::vector<Astronaut> crew;
     std::array<std::string, 3> offerModuleIds {};
@@ -398,9 +474,12 @@ struct GameState {
 std::string_view toString(SlotType slot);
 std::string_view toString(Rarity rarity);
 std::string_view toString(SurfaceUpgradeCategory category);
+std::string_view toString(MiniDroneRole role);
 std::string_view toString(CrewStatus status);
 std::string_view toString(LaunchResultType result);
 std::string_view toString(RecoveryMethod method);
+std::string_view toString(CampaignMilestone milestone);
+std::string_view toString(ArkCondition condition);
 
 ModuleStats operator+(ModuleStats lhs, const ModuleStats& rhs);
 ModuleStats& operator+=(ModuleStats& lhs, const ModuleStats& rhs);

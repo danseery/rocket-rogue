@@ -227,14 +227,15 @@ void updateContactBounce(MiningRunState& mining, double dt)
     }
 }
 
-void triggerHardContactBounce(MiningRunState& mining, double dirX, double dirY)
+void triggerHardContactBounce(MiningRunState& mining, double dirX, double dirY, double bounceRelief)
 {
     mining.recoilX = -dirX;
     mining.recoilY = -dirY;
     if (mining.contactBounceCooldown > 0.0) {
         return;
     }
-    mining.contactBounceVelocity += tuning::mining::hardTerrainBounceImpulse * (1.0 + mining.contactIntensity * 0.35);
+    const double reliefScale = std::clamp(1.0 - bounceRelief, 0.35, 1.0);
+    mining.contactBounceVelocity += tuning::mining::hardTerrainBounceImpulse * reliefScale * (1.0 + mining.contactIntensity * 0.35);
     mining.contactBounceCooldown = tuning::mining::hardTerrainBounceCooldownSeconds;
 }
 
@@ -253,6 +254,25 @@ bool drillableCell(const MiningCell* cell)
 
 void addBrokenCellReward(GameState& state, const MiningDrillStats& stats, MiningCellMaterial material);
 
+double drillHeatDelta(MiningCellMaterial material, const MiningDrillStats& stats, double dt)
+{
+    return (tuning::mining::heatRisePerSecond +
+        (material == MiningCellMaterial::HardRock ? tuning::mining::heatHardRockBonus : 0.0)) * stats.heatRiseScale * dt;
+}
+
+void applyDrillSystemLoad(MiningRunState& mining, const MiningDrillStats& stats, double heatDelta, double exposureSeconds)
+{
+    mining.drillHeat += heatDelta;
+    if (mining.drillHeat > tuning::mining::heatDamageThreshold) {
+        mining.drillIntegrity = std::max(
+            0.0,
+            mining.drillIntegrity -
+                std::max(0.0, 1.0 - stats.integrityRelief) *
+                    tuning::mining::overheatIntegrityDamagePerSecond *
+                    exposureSeconds);
+    }
+}
+
 bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, int y, double dt)
 {
     MiningRunState& mining = state.run.mining;
@@ -263,18 +283,14 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
 
     const MiningCellMaterial material = target->material;
     double drillPower = stats.power;
+    if (!softMiningMaterial(material)) {
+        drillPower *= tuning::mining::denseMaterialDrillPowerScale;
+    }
     if (mining.drillHeat >= tuning::mining::heatSlowThreshold) {
         drillPower *= tuning::mining::overheatedDrillSlow;
     }
     target->remainingToughness = std::max(0.0, target->remainingToughness - drillPower * dt);
     target->revealed = true;
-    mining.drillHeat += (tuning::mining::heatRisePerSecond +
-        (material == MiningCellMaterial::HardRock ? tuning::mining::heatHardRockBonus : 0.0)) * stats.heatRiseScale * dt;
-    if (mining.drillHeat > tuning::mining::heatDamageThreshold) {
-        mining.drillIntegrity = std::max(
-            0.0,
-            mining.drillIntegrity - std::max(0.0, 1.0 - stats.integrityRelief) * tuning::mining::overheatIntegrityDamagePerSecond * dt);
-    }
     markDirty(mining.terrain, x, y);
     if (target->remainingToughness <= 0.0) {
         const MiningCellMaterial brokenMaterial = target->material;
@@ -287,6 +303,113 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
         return true;
     }
     return false;
+}
+
+struct DrillFootprintCell {
+    int x = 0;
+    int y = 0;
+    double powerScale = 1.0;
+};
+
+std::vector<DrillFootprintCell> drillFootprintCells(const MiningRunState& mining, double dirX, double dirY)
+{
+    const double length = std::sqrt(dirX * dirX + dirY * dirY);
+    if (length < 0.001) {
+        return {};
+    }
+    dirX /= length;
+    dirY /= length;
+
+    const double footprintLength = tuning::mining::drillRangeCells + 0.95;
+    const double baseHalfWidth = 0.95;
+    const double tipHalfWidth = 0.24;
+    const double originX = mining.droneX + dirX * 0.25;
+    const double originY = mining.droneY + dirY * 0.25;
+    const int minX = std::max(0, static_cast<int>(std::floor(originX - footprintLength - baseHalfWidth)));
+    const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(originX + footprintLength + baseHalfWidth)));
+    const int minY = std::max(0, static_cast<int>(std::floor(originY - footprintLength - baseHalfWidth)));
+    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::ceil(originY + footprintLength + baseHalfWidth)));
+
+    std::vector<DrillFootprintCell> cells;
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            if (!drillableCell(cell)) {
+                continue;
+            }
+
+            const double cellX = static_cast<double>(x) + 0.5;
+            const double cellY = static_cast<double>(y) + 0.5;
+            const double vx = cellX - originX;
+            const double vy = cellY - originY;
+            const double along = vx * dirX + vy * dirY;
+            if (along < -0.10 || along > footprintLength) {
+                continue;
+            }
+
+            const double cross = std::abs(vx * dirY - vy * dirX);
+            const double t = std::clamp(along / footprintLength, 0.0, 1.0);
+            const double halfWidth = baseHalfWidth + (tipHalfWidth - baseHalfWidth) * t + 0.18;
+            if (cross > halfWidth) {
+                continue;
+            }
+
+            const double centerBias = 1.0 - std::clamp(cross / std::max(0.001, halfWidth), 0.0, 1.0);
+            cells.push_back({x, y, 0.48 + centerBias * 0.52});
+        }
+    }
+
+    std::sort(cells.begin(), cells.end(), [&](const DrillFootprintCell& lhs, const DrillFootprintCell& rhs) {
+        const double lhsX = static_cast<double>(lhs.x) + 0.5 - originX;
+        const double lhsY = static_cast<double>(lhs.y) + 0.5 - originY;
+        const double rhsX = static_cast<double>(rhs.x) + 0.5 - originX;
+        const double rhsY = static_cast<double>(rhs.y) + 0.5 - originY;
+        const double lhsAlong = lhsX * dirX + lhsY * dirY;
+        const double rhsAlong = rhsX * dirX + rhsY * dirY;
+        if (std::abs(lhsAlong - rhsAlong) > 0.001) {
+            return lhsAlong < rhsAlong;
+        }
+        const double lhsCross = std::abs(lhsX * dirY - lhsY * dirX);
+        const double rhsCross = std::abs(rhsX * dirY - rhsY * dirX);
+        return lhsCross < rhsCross;
+    });
+    return cells;
+}
+
+bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, double dirX, double dirY, double dt)
+{
+    MiningRunState& mining = state.run.mining;
+    const std::vector<DrillFootprintCell> cells = drillFootprintCells(mining, dirX, dirY);
+    if (cells.empty()) {
+        return false;
+    }
+
+    bool touchedHardMaterial = false;
+    bool touchedSoftMaterial = false;
+    bool brokeAny = false;
+    double maxHeatDelta = 0.0;
+    double maxIntegrityExposure = 0.0;
+    for (const DrillFootprintCell& contact : cells) {
+        const MiningCell* cell = miningCellAt(mining.terrain, contact.x, contact.y);
+        if (cell == nullptr) {
+            continue;
+        }
+        const double contactDt = dt * contact.powerScale;
+        touchedSoftMaterial = touchedSoftMaterial || softMiningMaterial(cell->material);
+        touchedHardMaterial = touchedHardMaterial || !softMiningMaterial(cell->material);
+        maxHeatDelta = std::max(maxHeatDelta, drillHeatDelta(cell->material, stats, contactDt));
+        maxIntegrityExposure = std::max(maxIntegrityExposure, contactDt);
+        brokeAny = applyDrillDamage(state, stats, contact.x, contact.y, contactDt) || brokeAny;
+    }
+
+    applyDrillSystemLoad(mining, stats, maxHeatDelta, maxIntegrityExposure);
+    mining.contactIntensity = std::max(mining.contactIntensity, touchedHardMaterial ? 0.82 : 0.35);
+    mining.recoilX = -dirX;
+    mining.recoilY = -dirY;
+    if (touchedHardMaterial && !touchedSoftMaterial) {
+        triggerHardContactBounce(mining, dirX, dirY, stats.hardRockBounceRelief);
+    }
+    return brokeAny || !cells.empty();
 }
 
 void setAimDirection(MiningRunState& mining, double dirX, double dirY)
@@ -650,10 +773,23 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.heatRiseScale = std::clamp(stats.heatRiseScale - surfaceUpgrades.drillCooling * 0.060, 0.50, 1.0);
     stats.heatCoolingPerSecond += surfaceUpgrades.drillCooling * 0.025;
     stats.integrityRelief += surfaceUpgrades.drillDurability * 0.070;
+    stats.hardRockBounceRelief += surfaceUpgrades.hardRockBounceRelief;
     stats.extractionRiskRelief += surfaceUpgrades.extractionRiskRelief;
+
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
+    stats.passiveDroneMiningRate += drones.passiveMiningRate;
+    stats.oxygenSeconds += drones.oxygenSeconds;
+    stats.scannerRadius += drones.scannerRadius;
+    stats.integrityRelief += drones.drillIntegrityRelief;
+    stats.hardRockBounceRelief += drones.hardRockBounceRelief;
+    stats.extractionRiskRelief += drones.extractionRiskRelief;
+    stats.hardRockBounceRelief += miningDurability * 0.035;
+
     stats.oreYieldChance = std::clamp(stats.oreYieldChance, 0.0, 0.36);
     stats.rareYieldChance = std::clamp(stats.rareYieldChance, 0.0, 0.48);
     stats.integrityRelief = std::clamp(stats.integrityRelief, 0.0, 0.70);
+    stats.passiveDroneMiningRate = std::clamp(stats.passiveDroneMiningRate, 0.0, 0.40);
+    stats.hardRockBounceRelief = std::clamp(stats.hardRockBounceRelief, 0.0, 0.55);
     return stats;
 }
 
@@ -710,7 +846,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     refreshTargetCell(mining);
     state.run.mining = std::move(mining);
     state.screen = Screen::Mining;
-    appendSurfaceLog(expedition, "Mining drone deployed: -2 supply.");
+    appendSurfaceLog(expedition, "Mining drone deployed: -2 action kits.");
     return outcome;
 }
 
@@ -776,6 +912,12 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.elapsedSeconds += dt;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
+    const int passiveTarget = static_cast<int>(std::floor(mining.elapsedSeconds * stats.passiveDroneMiningRate));
+    while (mining.passiveDroneYield < passiveTarget) {
+        mining.temporaryMaterials.common += 1;
+        mining.cargo += 1;
+        mining.passiveDroneYield += 1;
+    }
     mining.contactIntensity = std::max(0.0, mining.contactIntensity - dt * 5.5);
     mining.scannerPulseSeconds = std::max(0.0, mining.scannerPulseSeconds - dt);
     updateContactBounce(mining, dt);
@@ -805,8 +947,13 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
                 setAimDirection(mining, dirX, dirY);
                 const double resistance = miningContactResistance(obstacle->material);
                 mining.contactIntensity = std::max(mining.contactIntensity, softMiningMaterial(obstacle->material) ? 0.45 : 1.0);
-                const bool brokeCell = applyDrillDamage(state, stats, cellX, cellY, dt * (softMiningMaterial(obstacle->material) ? 1.18 : 1.0));
-                const bool clearedCell = brokeCell || !miningMaterialSolid(obstacle->material);
+                applyDrillFootprintDamage(
+                    state,
+                    stats,
+                    dirX,
+                    dirY,
+                    dt * (softMiningMaterial(obstacle->material) ? 1.18 : tuning::mining::contactDrillPowerScale));
+                const bool clearedCell = !miningMaterialSolid(obstacle->material);
                 if (resistance > 0.0) {
                     mining.recoilX = -dirX;
                     mining.recoilY = -dirY;
@@ -815,7 +962,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
                         : contactLimitedPosition(position, position + (proposed - position) * resistance, xAxis ? cellX : cellY);
                     position = std::clamp(limited, 1.0, xAxis ? static_cast<double>(mining.terrain.width - 2) : static_cast<double>(mining.terrain.height - 2));
                 } else {
-                    triggerHardContactBounce(mining, dirX, dirY);
+                    triggerHardContactBounce(mining, dirX, dirY, stats.hardRockBounceRelief);
                 }
             }
         };
@@ -840,16 +987,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
 
     refreshTargetCell(mining);
-    MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
-    const bool canDrill = mining.drilling && target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
-    if (canDrill) {
-        mining.contactIntensity = std::max(mining.contactIntensity, softMiningMaterial(target->material) ? 0.35 : 0.82);
-        mining.recoilX = -mining.aimDirX;
-        mining.recoilY = -mining.aimDirY;
-        if (!softMiningMaterial(target->material)) {
-            triggerHardContactBounce(mining, mining.aimDirX, mining.aimDirY);
-        }
-        applyDrillDamage(state, stats, mining.targetCellX, mining.targetCellY, dt);
+    const bool drillTouchesTerrain = mining.drilling && !drillFootprintCells(mining, mining.aimDirX, mining.aimDirY).empty();
+    if (drillTouchesTerrain) {
+        applyDrillFootprintDamage(state, stats, mining.aimDirX, mining.aimDirY, dt);
     } else {
         mining.drillHeat = std::max(0.0, mining.drillHeat - stats.heatCoolingPerSecond * dt);
     }

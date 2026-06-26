@@ -31,6 +31,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -490,6 +491,7 @@ void moduleOffersAreOneChoiceRefits()
     if (picked.find("module:") == 0) {
         const std::string moduleId = picked.substr(7);
         require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), moduleId) != state.run.inventoryModuleIds.end(), "installed module should enter inventory");
+        require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), moduleId) != state.meta.ownedModuleIds.end(), "installed module should enter permanent shipyard inventory");
     } else {
         const std::string upgradeId = picked.substr(5);
         require(std::find(state.run.crewUpgradeIds.begin(), state.run.crewUpgradeIds.end(), upgradeId) != state.run.crewUpgradeIds.end(), "installed crew upgrade should enter facilities");
@@ -552,6 +554,33 @@ void specialShipComponentsRequireRecoveredMaterials()
     require(buyOffer(state, catalog, 0), "buying with credits and materials should succeed");
     require(state.meta.materials.common == 0 && state.meta.materials.rare == 0, "buying special component should spend recovered materials");
     require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::deepReservoir) != state.run.inventoryModuleIds.end(), "bought special component should enter inventory");
+    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::deepReservoir) != state.meta.ownedModuleIds.end(), "bought special component should enter permanent shipyard inventory");
+}
+
+void shipModuleProgressSurvivesDestroyedVehicles()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 435);
+    state.meta.unlockKeys.push_back(content::unlock::thermal);
+    state.run.credits = 200.0;
+    state.run.offerModuleIds = {content::module::cryoLoop, "", ""};
+    state.run.offerCrewUpgradeIds = {};
+
+    require(buyOffer(state, catalog, 0), "buying a thermal ship module should succeed");
+    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship upgrades should become permanent shipyard tech");
+    require(std::find(state.meta.defaultEquippedModuleIds.begin(), state.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != state.meta.defaultEquippedModuleIds.end(), "installed ship upgrades should become the default new-build loadout");
+
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.destinationId = currentDestination(state, catalog).id;
+    destroyed.moduleDestroyedId = content::module::cryoLoop;
+    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
+    applyLaunchOutcome(state, catalog, destroyed);
+    startNewExpedition(state, catalog);
+
+    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship destruction should not erase permanent shipyard tech");
+    require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::cryoLoop) != state.run.inventoryModuleIds.end(), "replacement ships should inherit permanent shipyard inventory");
+    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
 }
 
 void crewUpgradeOffersInstallAndModifyCrewOps()
@@ -570,6 +599,7 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     for (const ShipModule& module : catalog.modules) {
         state.run.inventoryModuleIds.push_back(module.id);
     }
+    state.meta.ownedModuleIds = state.run.inventoryModuleIds;
 
     Random rng(6060);
     generateModuleOffers(state, catalog, rng);
@@ -686,6 +716,34 @@ void hangarOpsStartCheapAndEscalate()
     require(state.run.repairOpsThisExpedition == 0, "new expedition should reset repair escalation");
     require(state.run.trainingOpsThisExpedition == 0, "new expedition should reset training escalation");
     require(state.run.restOpsThisExpedition == 0, "new expedition should reset rest escalation");
+}
+
+void medicalRestEscalationResetsAfterSurvivedMission()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 809);
+    state.run.credits = 300.0;
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "medical rest reset test needs a pilot");
+    pilot->stress = 80;
+
+    const double baseRestCost = crewRestCost(state, catalog);
+    require(restCrew(state, catalog), "first medical rest should succeed");
+    pilot->stress = 80;
+    require(crewRestCost(state, catalog) > baseRestCost, "medical rest should escalate before a flight");
+
+    LaunchOutcome outcome;
+    outcome.type = LaunchResultType::SafeEject;
+    outcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    outcome.destinationId = catalog.destinations.front().id;
+    outcome.ejectMultiplier = 1.3;
+    applyLaunchOutcome(state, catalog, outcome);
+
+    pilot = activeAstronaut(state);
+    require(pilot != nullptr, "pilot should survive the recovered mission");
+    pilot->stress = 80;
+    require(state.run.restOpsThisExpedition == 0, "survived missions should reset medical rest escalation");
+    require(std::abs(crewRestCost(state, catalog) - baseRestCost) < 0.001, "medical rest should return to base cost after a survived mission");
 }
 
 void hangarOperationPreviewMatchesCoreMath()
@@ -1074,6 +1132,12 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     moonArrival.destinationId = content::destination::moon;
     require(shouldOpenArrivalOps(moonArrival, catalog), "Moon transfer arrival should open arrival operations");
 
+    LaunchOutcome outerPlanetsArrival;
+    outerPlanetsArrival.type = LaunchResultType::MissionComplete;
+    outerPlanetsArrival.frontierTransfer = true;
+    outerPlanetsArrival.destinationId = content::destination::outerPlanets;
+    require(shouldOpenArrivalOps(outerPlanetsArrival, catalog), "Outer Planets transfer arrival should open arrival operations");
+
     startArrivalOps(state, moonArrival);
     require(canRunArrivalFlyby(state, catalog), "Moon flyby should always be available after arrival");
     require(!canEnterArrivalOrbit(state, catalog), "Moon orbit should require a prior flyby");
@@ -1351,7 +1415,7 @@ void surfaceUpgradeOffersAreDistinctAndSelectable()
     const std::string chosenId = state.run.surfaceExpedition.surfaceUpgradeOfferIds[0];
     require(chooseSurfaceUpgrade(state, catalog, 0), "selecting a valid surface upgrade should apply it");
     require(!state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "choosing a surface upgrade should consume the offer");
-    require(state.run.surfaceExpedition.surfaceUpgradeIds.size() == 1 && state.run.surfaceExpedition.surfaceUpgradeIds.front() == chosenId, "selected surface upgrade should persist in active expedition state");
+    require(state.run.surfaceUpgradeIds.size() == 1 && state.run.surfaceUpgradeIds.front() == chosenId, "selected surface upgrade should persist on the current ship");
     require(!state.run.surfaceExpedition.logEntries.empty() && state.run.surfaceExpedition.logEntries.back().find("Field upgrade installed") != std::string::npos, "surface upgrade selection should be logged");
 }
 
@@ -1364,11 +1428,11 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     baseline.run.surfaceExpedition.cargo = 8;
 
     GameState upgraded = baseline;
-    upgraded.run.surfaceExpedition.surfaceUpgradeIds = {
+    upgraded.run.surfaceUpgradeIds = {
         content::surfaceUpgrade::thermalDrillJackets,
         content::surfaceUpgrade::widebandPulse,
         content::surfaceUpgrade::cargoSkids,
-        content::surfaceUpgrade::microDroneBay,
+        content::surfaceUpgrade::shockMounts,
         content::surfaceUpgrade::oreScentArray
     };
 
@@ -1376,8 +1440,8 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     const MiningDrillStats upgradedStats = miningDrillStats(upgraded, catalog);
     require(upgradedStats.heatRiseScale < baselineStats.heatRiseScale, "thermal field upgrades should reduce mining heat rise");
     require(upgradedStats.scannerRadius > baselineStats.scannerRadius, "scanner field upgrades should widen pulse reveal radius");
-    require(upgradedStats.speed > baselineStats.speed, "drone field upgrades should improve mining movement speed");
-    require(upgradedStats.oxygenSeconds > baselineStats.oxygenSeconds, "drone field upgrades should extend mining oxygen");
+    require(upgradedStats.integrityRelief > baselineStats.integrityRelief, "shock mounts should improve mining durability");
+    require(upgradedStats.hardRockBounceRelief > baselineStats.hardRockBounceRelief, "shock mounts should reduce hard-rock recoil");
     require(upgradedStats.oreYieldChance > baselineStats.oreYieldChance, "ore field upgrades should improve yield odds");
     require(surfaceExtractionRisk(upgraded) < surfaceExtractionRisk(baseline), "cargo field upgrades should reduce extraction risk");
 
@@ -1386,18 +1450,18 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     require(findDetailPresentationRow(presentation.details, "Field upgrades") != nullptr, "surface details should list field upgrades");
 }
 
-void surfaceUpgradesClearAfterExtractionAndRoundTripSave()
+void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 645);
     state.run.destinationIndex = 2;
     state.screen = Screen::SurfaceExpedition;
     startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids};
+    state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids};
     state.run.surfaceExpedition.surfaceUpgradeOfferIds = {
         content::surfaceUpgrade::thermalDrillJackets,
         content::surfaceUpgrade::widebandPulse,
-        content::surfaceUpgrade::microDroneBay
+        content::surfaceUpgrade::shockMounts
     };
     state.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
     state.run.surfaceExpedition.surfaceUpgradeOffersSeen = 1;
@@ -1408,7 +1472,7 @@ void surfaceUpgradesClearAfterExtractionAndRoundTripSave()
 
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *save);
-    require(restored.run.surfaceExpedition.surfaceUpgradeIds == state.run.surfaceExpedition.surfaceUpgradeIds, "selected surface upgrades should round trip");
+    require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "selected surface upgrades should round trip");
     require(restored.run.surfaceExpedition.surfaceUpgradeOfferIds == state.run.surfaceExpedition.surfaceUpgradeOfferIds, "surface upgrade offers should round trip");
     require(restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offer availability should round trip");
 
@@ -1416,8 +1480,107 @@ void surfaceUpgradesClearAfterExtractionAndRoundTripSave()
     restored.run.surfaceExpedition.temporaryMaterials.common = 1;
     const SurfaceActionOutcome extracted = extractSurfacePayload(restored, rng);
     require(extracted.applied, "surface extraction should resolve while upgrades are active");
-    require(restored.run.surfaceExpedition.surfaceUpgradeIds.empty(), "surface upgrades should clear after extraction");
+    require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "surface upgrades should persist after successful extraction");
     require(!restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offers should clear after extraction");
+
+    restored.run.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.destinationId = currentDestination(restored, catalog).id;
+    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
+    applyLaunchOutcome(restored, catalog, destroyed);
+    require(restored.run.surfaceUpgradeIds.empty(), "surface upgrades should clear immediately when the current ship is destroyed");
+
+    restored.run.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
+    startNewExpedition(restored, catalog);
+    require(restored.run.surfaceUpgradeIds.empty(), "surface upgrades should clear when the current ship/run is replaced");
+}
+
+void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState locked = createNewGame(catalog, 647);
+    ensureDroneBayState(locked, catalog);
+    require(locked.meta.droneBaySlots == 0, "locked drone bay should not expose slots");
+    require(locked.meta.ownedDroneIds.empty(), "locked drone bay should not seed owned drones");
+
+    GameState state = createNewGame(catalog, 648);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.materials.common = 4;
+    ensureDroneBayState(state, catalog);
+    require(state.meta.droneBaySlots == 1, "drone bay unlock should initialize one slot");
+    require(state.meta.ownedDroneIds.size() == 4, "drone bay should seed environmental starter drones");
+    require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::surveyDrone) != nullptr, "survey drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::stabilizerDrone) != nullptr, "stabilizer drone id should resolve");
+
+    const MiningDrillStats baseline = miningDrillStats(state, catalog);
+    require(equipMiniDrone(state, catalog, 0), "first equipped drone should fit in the starter slot");
+    require(!equipMiniDrone(state, catalog, 1), "equipped drones should not exceed slot count");
+    const MiningDrillStats miningSupported = miningDrillStats(state, catalog);
+    require(miningSupported.passiveDroneMiningRate > baseline.passiveDroneMiningRate, "mining drone should add passive mining support");
+
+    state.meta.materials.common = 10;
+    state.meta.materials.rare = 10;
+    state.meta.materials.exotic = 10;
+    require(upgradeDroneSlot(state, catalog), "material-funded slot upgrade should succeed");
+    require(state.meta.droneBaySlots == 2, "slot upgrade should increase drone bay capacity");
+    require(equipMiniDrone(state, catalog, 1), "second drone should fit after slot upgrade");
+    const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
+    require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
+
+    for (int i = 0; i < 4; ++i) {
+        state.meta.materials.common = 99;
+        state.meta.materials.rare = 99;
+        state.meta.materials.exotic = 99;
+        upgradeDroneSlot(state, catalog);
+    }
+    require(state.meta.droneBaySlots == 6, "drone bay slots should cap at six");
+    require(!upgradeDroneSlot(state, catalog), "maxed drone bay should reject further slot upgrades");
+
+    const std::string serialized = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(serialized);
+    require(save.has_value(), "drone bay save should parse");
+
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.meta.droneBaySlots == state.meta.droneBaySlots, "drone bay slots should round trip");
+    require(restored.meta.ownedDroneIds == state.meta.ownedDroneIds, "owned drones should round trip");
+    require(restored.meta.equippedDroneIds == state.meta.equippedDroneIds, "equipped drones should round trip");
+
+    restored.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(restored, catalog);
+    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::attackDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add attack drones to the owned pool");
+    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::defenseDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add defense drones to the owned pool");
+}
+
+void droneOpsPresentationExposesPersistentLoadout()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 649);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.materials.common = 4;
+    ensureDroneBayState(state, catalog);
+
+    SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state, catalog);
+    require(surface.droneOpsAction.enabled, "surface ops should expose Drone Ops once the bay is unlocked");
+    require(surface.droneOpsAction.actionId == std::string(ui::actions::droneOps), "Drone Ops surface action should use stable action id");
+
+    DroneOpsPresentation drones = droneOpsPresentation(state, catalog);
+    require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
+    require(drones.drones.front().title == "Mining Drone", "Drone Ops should present mining support first");
+    require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
+    require(drones.upgradeSlotAction.enabled, "funded first slot upgrade should be offered when materials allow");
+
+    state.meta.materials = {};
+    drones = droneOpsPresentation(state, catalog);
+    require(!drones.upgradeSlotAction.enabled, "unfunded slot upgrade should be disabled");
+    require(drones.upgradeSlotAction.label.find("Need") != std::string::npos, "unfunded slot upgrade should show material need");
 }
 
 void surfaceSiteProfilesChangeExpeditionRules()
@@ -1725,6 +1888,9 @@ void miningDrillBreaksCellsAndMarksChunks()
     MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
     require(ore != nullptr, "test ore cell should exist");
     *ore = {MiningCellMaterial::CommonOre, 0.25, 0.25, true, false};
+    MiningCell* farOre = miningCellAt(mining.terrain, 34, 4);
+    require(farOre != nullptr, "test far ore cell should exist");
+    *farOre = {MiningCellMaterial::CommonOre, 0.45, 0.45, true, false};
     std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 0);
     mining.droneX = 32.0;
     mining.droneY = 4.0;
@@ -1735,11 +1901,57 @@ void miningDrillBreaksCellsAndMarksChunks()
     }
 
     require(ore->material == MiningCellMaterial::Empty, "drilling should break depleted terrain cells");
+    require(farOre->material == MiningCellMaterial::Empty, "drilling should damage every solid tile under the drill footprint instead of one tile at a time");
     require(state.run.mining.temporaryMaterials.common > 0, "breaking common ore should add common material");
     require(state.run.mining.cargo > 0, "breaking ore should add cargo");
     require(
         std::any_of(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), [](std::uint8_t value) { return value != 0; }),
         "drilling should mark the changed chunk dirty");
+}
+
+void miningDrillFootprintCapsWearToWorstContact()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto prepareState = [&](bool secondRock) {
+        GameState state = createNewGame(catalog, 92932);
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        require(startMiningRun(state, catalog).applied, "mining should start for footprint wear test");
+
+        MiningRunState& mining = state.run.mining;
+        for (MiningCell& cell : mining.terrain.cells) {
+            cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+        }
+
+        MiningCell* rock = miningCellAt(mining.terrain, 33, 4);
+        require(rock != nullptr, "primary rock should exist");
+        *rock = {MiningCellMaterial::HardRock, 40.0, 40.0, true, false};
+        if (secondRock) {
+            MiningCell* extraRock = miningCellAt(mining.terrain, 34, 4);
+            require(extraRock != nullptr, "secondary rock should exist");
+            *extraRock = {MiningCellMaterial::HardRock, 40.0, 40.0, true, false};
+        }
+
+        mining.droneX = 32.0;
+        mining.droneY = 4.0;
+        mining.drillHeat = 0.96;
+        mining.drillIntegrity = 1.0;
+        setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+        setMiningDrilling(state, true);
+        updateMiningRun(state, catalog, 0.08);
+        return state;
+    };
+
+    GameState singleContact = prepareState(false);
+    GameState doubleContact = prepareState(true);
+    const double singleLoss = 1.0 - singleContact.run.mining.drillIntegrity;
+    const double doubleLoss = 1.0 - doubleContact.run.mining.drillIntegrity;
+    require(doubleLoss <= singleLoss + 0.000001, "multiple footprint contacts should not stack drill integrity wear");
+
+    const MiningCell* first = miningCellAt(doubleContact.run.mining.terrain, 33, 4);
+    const MiningCell* second = miningCellAt(doubleContact.run.mining.terrain, 34, 4);
+    require(first != nullptr && first->remainingToughness < first->maxToughness, "first hard rock should still take drill damage");
+    require(second != nullptr && second->remainingToughness < second->maxToughness, "second hard rock should still take drill damage");
 }
 
 void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
@@ -1786,6 +1998,23 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
     require(mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0, "hard contact should trigger a damped bounce impulse");
     require(hard->remainingToughness < hard->maxToughness, "hard contact should still drill the terrain");
+
+    hard->material = MiningCellMaterial::HardRock;
+    hard->maxToughness = miningMaterialToughness(MiningCellMaterial::HardRock, 0);
+    hard->remainingToughness = hard->maxToughness;
+    hard->revealed = false;
+    mining.droneX = 32.85;
+    mining.droneY = 12.0;
+    setMiningMove(state, 1.0, 0.0);
+    setMiningDrilling(state, true);
+    for (int i = 0; i < 4; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(hard->material == MiningCellMaterial::HardRock, "hard rock should require several hard contacts before breaking");
+    for (int i = 0; i < 14 && hard->material != MiningCellMaterial::Empty; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(hard->material == MiningCellMaterial::Empty, "default hard rock should clear in a short arcade burst");
 }
 
 void miningDrillTargetsFirstSolidCellOnRay()
@@ -1894,6 +2123,7 @@ void miningRefitModulesImproveDrillProfileIncrementally()
     require(upgradedStats.heatRiseScale < baseStats.heatRiseScale, "mining cooling modules should reduce heat rise");
     require(upgradedStats.heatCoolingPerSecond > baseStats.heatCoolingPerSecond, "mining cooling modules should improve heat recovery");
     require(upgradedStats.integrityRelief > baseStats.integrityRelief, "durability modules should protect the mining drill");
+    require(upgradedStats.hardRockBounceRelief > baseStats.hardRockBounceRelief, "durability modules should reduce hard-rock recoil");
     require(upgradedStats.terrainWidth > baseStats.terrainWidth, "survey modules should widen the mining terrain");
     require(upgradedStats.terrainHeight > baseStats.terrainHeight, "deep-bore modules should deepen the mining terrain");
 
@@ -1959,7 +2189,7 @@ void surfaceActionSummaryShowsResourceDeltas()
     outcome.hazardDelta = 0.05;
 
     const std::string summary = surfaceActionSummary(outcome);
-    require(summary.find("-2 Supply") != std::string::npos, "surface action summary should include supply deltas");
+    require(summary.find("-2 Action kits") != std::string::npos, "surface action summary should include action-kit deltas");
     require(summary.find("+2 Common mats") != std::string::npos, "surface action summary should include common material deltas");
     require(summary.find("+1 Rare mats") != std::string::npos, "surface action summary should include rare material deltas");
     require(summary.find("+1 Exotic mats") != std::string::npos, "surface action summary should include exotic material deltas");
@@ -2096,7 +2326,7 @@ void surfacePresentationComesFromSharedHelper()
     state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_surface", content::destination::mars, false});
 
     SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state);
-    require(surface.metrics.size() == 11, "surface presentation should expose site, field kit, hazard, supply, cargo, depth, risk, materials, and artifacts");
+    require(surface.metrics.size() == 11, "surface presentation should expose site, field kit, hazard, action kits, cargo, depth, risk, materials, and artifacts");
     require(surface.phaseSteps.size() == 4, "surface presentation should expose post-arrival phase steps");
     require(surface.phaseSteps[0].stateLabel == "Done" && surface.phaseSteps[0].stateClass == "done", "surface phase track should mark arrival complete");
     require(surface.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "surface phase track should include research");
@@ -2254,6 +2484,8 @@ void saveRoundTripPreservesProgress()
     state.meta.unlockKeys.push_back(content::unlock::thermal);
     state.meta.blueprintProgress = 5;
     state.meta.materials = {.common = 3, .rare = 2, .exotic = 1};
+    state.meta.ownedModuleIds.push_back(content::module::cryoLoop);
+    state.meta.defaultEquippedModuleIds.push_back(content::module::cryoLoop);
     state.meta.artifacts.push_back({"mars_signal_1", content::destination::mars, true});
     state.meta.shipsLost = 1;
     state.meta.closestSurvivalMargin = 0.04;
@@ -2292,6 +2524,8 @@ void saveRoundTripPreservesProgress()
     require(restored.run.restOpsThisExpedition == 3, "rest escalation should round trip");
     require(hasUnlock(restored.meta, content::unlock::thermal), "unlock keys should round trip");
     require(restored.meta.materials.common == 3 && restored.meta.materials.rare == 2 && restored.meta.materials.exotic == 1, "materials should round trip");
+    require(std::find(restored.meta.ownedModuleIds.begin(), restored.meta.ownedModuleIds.end(), content::module::cryoLoop) != restored.meta.ownedModuleIds.end(), "permanent shipyard modules should round trip");
+    require(std::find(restored.meta.defaultEquippedModuleIds.begin(), restored.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != restored.meta.defaultEquippedModuleIds.end(), "default shipyard loadout should round trip");
     require(restored.meta.artifacts.size() == 1 && restored.meta.artifacts[0].identified, "artifacts should round trip");
     require(std::abs(restored.meta.closestSurvivalMargin - 0.04) < 0.001, "closest survival margin should round trip");
     require(std::abs(restored.meta.closestSurvivalBurn - 2.78) < 0.001, "closest survival burn should round trip");
@@ -2322,12 +2556,17 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::header) + "\n") == 0, "save should start with shared schema header");
     require(text.find(std::string(save_schema::field::credits) + save_schema::keyValueDelimiter) != std::string::npos, "credits key should use shared schema name");
     require(text.find(std::string(save_schema::field::inventory) + save_schema::keyValueDelimiter) != std::string::npos, "inventory key should use shared schema name");
+    require(text.find(std::string(save_schema::field::ownedModules) + save_schema::keyValueDelimiter) != std::string::npos, "owned modules key should use shared schema name");
+    require(text.find(std::string(save_schema::field::defaultEquippedModules) + save_schema::keyValueDelimiter) != std::string::npos, "default equipped modules key should use shared schema name");
     require(text.find(std::string(save_schema::field::screen) + save_schema::keyValueDelimiter) != std::string::npos, "screen key should use shared schema name");
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceLog) + save_schema::keyValueDelimiter) != std::string::npos, "surface log key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrades key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceUpgradeOffers) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrade offers key should use shared schema name");
+    require(text.find(std::string(save_schema::field::droneBaySlots) + save_schema::keyValueDelimiter) != std::string::npos, "drone bay slots key should use shared schema name");
+    require(text.find(std::string(save_schema::field::ownedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "owned drones key should use shared schema name");
+    require(text.find(std::string(save_schema::field::equippedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "equipped drones key should use shared schema name");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -2778,15 +3017,32 @@ void launchPanelPresentationComesFromSharedHelper()
 
     const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
     const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
-    const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
-    const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
-    const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
     require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
     require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
     require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "launch presentation should not expose a manual approach button");
-    require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "launch presentation should expose cut-engines action");
-    require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "launch presentation should expose relief-valve action");
-    require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "launch presentation should expose jettison-cargo action");
+    require(panel.systemActions.empty(), "first Earth Orbit proving flights should teach only return/eject controls");
+
+    GameState moonState = createNewGame(catalog, 908);
+    moonState.run.destinationIndex = 1;
+    syncLaunchConfig(moonState, catalog);
+    Random moonRng(908);
+    PreparedLaunch moonLaunch = prepareLaunch(moonState, catalog, moonRng);
+    panel = launchPanelPresentation(
+        moonState,
+        catalog,
+        moonLaunch,
+        currentMultiplier,
+        1.0,
+        0.0,
+        tuning::session::returnDefaultDuration,
+        {},
+        false);
+    const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
+    const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
+    const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
+    require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "Moon-tier launch presentation should expose cut-engines action");
+    require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "Moon-tier launch presentation should expose relief-valve action");
+    require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "Moon-tier launch presentation should expose jettison-cargo action");
 
     FlightActionState returning;
     returning.returningHome = true;
@@ -2794,9 +3050,9 @@ void launchPanelPresentationComesFromSharedHelper()
     const double returnElapsed = 1.2;
     const double returnDuration = tuning::session::returnDefaultDuration;
     panel = launchPanelPresentation(
-        state,
+        moonState,
         catalog,
-        launch,
+        moonLaunch,
         currentMultiplier,
         returnBurnMultiplier,
         returnElapsed,
@@ -2809,19 +3065,19 @@ void launchPanelPresentationComesFromSharedHelper()
     returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returningHome);
     cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
     require(panel.sectionTitle == text::panel::sections::returnBurn, "launch presentation should select return section title");
-    require(burn != nullptr && burn->value == display::multiplier(returnTelemetryMultiplier(returnBurnMultiplier, launch.crashMultiplier, returnElapsed, returnDuration)), "launch presentation should share return telemetry multiplier");
+    require(burn != nullptr && burn->value == display::multiplier(returnTelemetryMultiplier(returnBurnMultiplier, moonLaunch.crashMultiplier, returnElapsed, returnDuration)), "launch presentation should share return telemetry multiplier");
     require(returnProgress != nullptr && returnProgress->value == display::percent(flight_progress::returnCompletion(returnElapsed, returnDuration)), "launch presentation should share return progress math");
     require(returnHome != nullptr && !returnHome->enabled, "returning-home action should be disabled once committed");
     require(cutEngines != nullptr && !cutEngines->enabled, "system actions should be disabled during return home");
 
     FlightActionState reliefOpen;
     reliefOpen.pressureReliefOpen = true;
-    panel = launchPanelPresentation(state, catalog, launch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
+    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
     const FlightActionButtonPresentation* closeValve = findFlightActionButton(panel.systemActions, text::buttons::closeValve);
     require(closeValve != nullptr && closeValve->enabled && closeValve->actionId == ui::actions::closeReliefValve, "open relief valve should expose close-valve action");
 
     reliefOpen.pressureReliefFailed = true;
-    panel = launchPanelPresentation(state, catalog, launch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
+    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
     const FlightActionButtonPresentation* failedValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValveFailed);
     require(failedValve != nullptr && !failedValve->enabled, "failed relief valve should be disabled in presentation");
 
@@ -2954,14 +3210,25 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(launchHtml.find("<h1>Flight</h1>") != std::string::npos, "launch panel should title the current phase instead of repeating the game title");
     require(launchHtml.find("class=\"cockpit-hud flight-hud\"") != std::string::npos, "launch controls should render in a cockpit HUD");
     require(launchHtml.find("data-help-topic=\"launch-controls\"") != std::string::npos, "launch panel should introduce return/eject/mitigation help");
-    require(launchHtml.find("Return home banks data") != std::string::npos, "launch help should mention returning home");
-    require(launchHtml.find("relief valve") != std::string::npos, "launch help should mention mitigation controls");
+    require(launchHtml.find("Return to Earth banks data") != std::string::npos, "launch help should mention returning to Earth");
+    require(launchHtml.find("unlock the Moon route") != std::string::npos, "first launch help should keep the intro focused on return/eject");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+
+    GameState moonLaunchState = createNewGame(catalog, 713);
+    moonLaunchState.run.destinationIndex = 1;
+    moonLaunchState.screen = Screen::Launch;
+    syncLaunchConfig(moonLaunchState, catalog);
+    Random moonLaunchRng(713);
+    const PreparedLaunch moonLaunch = prepareLaunch(moonLaunchState, catalog, moonLaunchRng);
+    PanelRenderContext moonLaunchContext {moonLaunchState, catalog, moonLaunch, moonLaunch};
+    moonLaunchContext.currentMultiplier = 1.12;
+    const std::string moonLaunchHtml = buildGamePanelHtml(moonLaunchContext);
+    require(moonLaunchHtml.find("relief valve") != std::string::npos, "Moon-tier launch help should mention mitigation controls");
 
     launchContext.flightArmed = false;
     const std::string preflightHtml = buildGamePanelHtml(launchContext);
     require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
-    require(preflightHtml.find(">Return home</button>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
+    require(preflightHtml.find(">Return to Earth</button>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
     require(preflightHtml.find("Start the burn when ready") != std::string::npos, "pre-flight panel should explain the launch hold");
 
     GameState arrivalState = createNewGame(catalog, 712);
@@ -3174,6 +3441,7 @@ void frontierReadinessGatesProgression()
     require(commitToNextFrontier(state, catalog), "commit should advance exactly one frontier");
     require(state.run.destinationIndex == 1, "commit should move from Earth Orbit to Moon");
     require(state.run.frontierReadiness == 0, "commit should reset readiness for the new frontier");
+    require(frontierReadinessRequired(state, catalog) == 3, "Moon frontier should require three data flights before Mars");
 }
 
 void transferAttemptAdvancesOnlyOnSuccess()
@@ -3235,6 +3503,114 @@ void overpreparedReadinessRaisesProvingStakes()
     require(overpreparedLaunch.provingPayoutBonus > baselineLaunch.provingPayoutBonus, "extra data should increase proving flight reward");
 }
 
+void arkDiscoveryAndScriptedJumpProgression()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 62001);
+
+    LaunchOutcome outerPlanetsArrival;
+    outerPlanetsArrival.type = LaunchResultType::MissionComplete;
+    outerPlanetsArrival.frontierTransfer = true;
+    outerPlanetsArrival.destinationId = content::destination::outerPlanets;
+    outerPlanetsArrival.ejectMultiplier = 3.55;
+    outerPlanetsArrival.crashMultiplier = 4.20;
+    applyLaunchOutcome(state, catalog, outerPlanetsArrival);
+
+    require(arkDiscovered(state), "reaching Outer Planets should discover the operable derelict Ark");
+    require(state.meta.campaignMilestone == CampaignMilestone::ArkDiscovered, "Ark discovery should advance the campaign milestone");
+    require(state.meta.ark.condition == ArkCondition::DerelictOperable, "discovered Ark should be derelict but operable");
+    require(!navigationAvailable(state), "navigation should not become the main loop before the gravity-well disaster");
+
+    require(performArkJump(state, catalog), "first Ark jump should resolve");
+    require(state.meta.ark.firstJumpComplete, "first Ark jump should be recorded");
+    require(state.meta.campaignMilestone == CampaignMilestone::FirstArkJumpComplete, "first Ark jump should have its own milestone");
+    require(state.meta.ark.condition == ArkCondition::DerelictOperable, "first Ark jump should not strand the Ark");
+
+    require(performArkJump(state, catalog), "second Ark jump should resolve into the scripted disaster");
+    require(hostileSystemActive(state), "second Ark jump should activate the hostile system loop");
+    require(navigationAvailable(state), "navigation should become available after the disaster");
+    require(state.meta.ark.gravityWellDisaster, "gravity-well disaster should be recorded");
+    require(state.meta.ark.condition == ArkCondition::DamagedStranded, "Ark should be damaged and stranded after the scripted disaster");
+    require(hasUnlock(state.meta, content::unlock::deepSpace), "hostile system should unlock deep-space destinations");
+    require(hasUnlock(state.meta, content::unlock::perimeterDrones), "hostile system should unlock combat-drone tech timing");
+    require(state.screen == Screen::Navigation, "gravity-well disaster should land the player on Navigation");
+}
+
+void hostileNavigationSelectsShuttleSortie()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 62002);
+    discoverArk(state, catalog);
+    performArkJump(state, catalog);
+    performArkJump(state, catalog);
+
+    const std::vector<const Destination*> destinations = navigationDestinations(state, catalog);
+    require(destinations.size() >= 2, "hostile navigation should expose multiple mapped destinations");
+    require(destinations.front()->id == content::destination::nearbyStar, "Nearby Star should be the first hostile-system sortie target");
+
+    require(selectNavigationDestination(state, catalog, 0), "selecting a navigation destination should succeed");
+    require(state.screen == Screen::Hangar, "selecting a destination should open shuttle prep in the Hangar");
+    require(state.launchConfig.destinationId == content::destination::nearbyStar, "navigation should sync launch destination");
+    require(state.launchConfig.frontierTransfer, "hostile navigation sorties should use transfer burn tuning");
+
+    startSurfaceExpedition(state, catalog);
+    require(state.run.surfaceExpedition.enemyEncountersEnabled, "hostile-system surface expeditions should enable enemy contact");
+}
+
+void legacyDeepSpaceFrontierMigratesToArkFlow()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 62004);
+    auto destinationIndex = [&](std::string_view id) {
+        for (int index = 0; index < static_cast<int>(catalog.destinations.size()); ++index) {
+            if (catalog.destinations[static_cast<std::size_t>(index)].id == id) {
+                return index;
+            }
+        }
+        return -1;
+    };
+    const int outerIndex = destinationIndex(content::destination::outerPlanets);
+    const int legacyStarIndex = destinationIndex(content::destination::nearbyStar);
+    require(outerIndex >= 0, "Outer Planets should resolve");
+    require(legacyStarIndex > outerIndex, "legacy deep-space destination should still exist for save compatibility");
+
+    state.run.destinationIndex = legacyStarIndex;
+    state.meta.furthestTier = catalog.destinations[static_cast<std::size_t>(legacyStarIndex)].tier;
+    state.launchConfig.frontierTransfer = true;
+    state.launchConfig.destinationId = content::destination::nearbyStar;
+    state.screen = Screen::Launch;
+
+    require(migrateLegacyDeepSpaceFrontier(state, catalog), "legacy direct star launch should migrate");
+    require(arkDiscovered(state), "migration should discover the Ark instead of preserving the retired ladder");
+    require(!hostileSystemActive(state), "migration should not skip the scripted Ark jumps");
+    require(state.screen == Screen::Hangar, "migration should return stale launch saves to the Hangar");
+    require(state.run.destinationIndex == outerIndex, "migration should put the frontier back at Outer Planets");
+    require(nextDestination(state, catalog) == nullptr, "Solar System ladder should stop at Outer Planets once Ark flow begins");
+}
+
+void arkCampaignStateRoundTripsThroughSave()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 62003);
+    discoverArk(state, catalog);
+    performArkJump(state, catalog);
+    performArkJump(state, catalog);
+    selectNavigationDestination(state, catalog, 1);
+
+    const SaveData save = captureSaveData(state);
+    const std::string serialized = serializeSaveData(save);
+    const std::optional<SaveData> parsed = deserializeSaveData(serialized);
+    require(parsed.has_value(), "Ark campaign save should deserialize");
+
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *parsed);
+    require(restored.meta.campaignMilestone == CampaignMilestone::HostileSystemStranded, "campaign milestone should round trip");
+    require(restored.meta.ark.condition == ArkCondition::DamagedStranded, "Ark condition should round trip");
+    require(restored.meta.ark.gravityWellDisaster, "gravity-well flag should round trip");
+    require(restored.meta.navigation.currentSystemId == "hostile_system", "navigation system id should round trip");
+    require(restored.meta.navigation.selectedDestinationId == content::destination::nearbyGalaxy, "selected navigation target should round trip");
+}
+
 void uiActionsUseStableSchemaIds()
 {
     require(ui::actions::prepareLaunch == "prepare_launch", "prepare launch action should use a stable schema id");
@@ -3242,8 +3618,14 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
     require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
     require(ui::actions::skipArrivalFanfare == "skip_arrival_fanfare", "arrival fanfare skip action should use a stable schema id");
+    require(ui::actions::openNavigation == "open_navigation", "navigation action should use a stable schema id");
+    require(ui::actions::arkJump == "ark_jump", "Ark jump action should use a stable schema id");
+    require(ui::actions::selectNavigationDestination(2) == "select_navigation:2", "indexed navigation actions should share one action family");
     require(ui::actions::researchProject(2) == "research_project:2", "indexed research actions should share one action family");
     require(ui::actions::surfaceUpgrade(2) == "surface_upgrade:2", "indexed surface upgrade actions should share one action family");
+    require(ui::actions::droneOps == "drone_ops", "Drone Ops action should use a stable schema id");
+    require(ui::actions::equipDrone(2) == "equip_drone:2", "indexed drone equipment actions should share one action family");
+    require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
     require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
@@ -3262,6 +3644,8 @@ void panelLayoutModeIsPortablePresentationData()
     require(panelLayoutMode(Screen::Results) == PanelLayoutMode::PhaseBoard, "results should use the management board layout");
     require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::PhaseBoard, "surface expedition should use the management board layout");
+    require(panelLayoutMode(Screen::DroneOps) == PanelLayoutMode::PhaseBoard, "drone ops should use the management board layout");
+    require(panelLayoutMode(Screen::Navigation) == PanelLayoutMode::PhaseBoard, "navigation should use the management board layout");
     require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::PhaseBoard, "refit should use the management board layout");
     require(usesPhaseBoard(Screen::Research), "phase-board checks should go through a shared helper");
 }
@@ -3282,9 +3666,18 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(catalog.findResearchProject(content::research::fieldProbeNetwork) != nullptr, "field probe research id should resolve");
     require(catalog.findResearchProject(content::research::regolithDrillRig) != nullptr, "drill research id should resolve");
     require(catalog.findResearchProject(content::research::cargoReturnRig) != nullptr, "cargo research id should resolve");
+    require(catalog.findResearchProject(content::research::droneBayProgram) != nullptr, "drone bay research id should resolve");
     require(catalog.findResearchProject(content::research::perimeterDroneNetwork) != nullptr, "perimeter drone research id should resolve");
+    const ResearchProject* arkProject = catalog.findResearchProject(content::research::arkScaffoldProgram);
+    require(arkProject != nullptr, "ark scaffold research id should resolve");
+    require(arkProject->requiredDestinationTier == 3, "ark scaffold should start at the outer-planets phase");
+    require(arkProject->rewardUnlockKey == content::unlock::arkScaffold, "ark scaffold should unlock the future home-base hook");
     require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets) != nullptr, "surface upgrade ids should resolve");
     require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::widebandPulse) != nullptr, "scanner surface upgrade id should resolve");
+    require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::surveyDrone) != nullptr, "survey drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::stabilizerDrone) != nullptr, "stabilizer drone id should resolve");
 
     MetaProgress meta;
     require(hasUnlock(meta, content::unlock::starter), "starter unlock should stay implicit");
@@ -3336,8 +3729,10 @@ int main()
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
+    shipModuleProgressSurvivesDestroyedVehicles();
     crewUpgradeOffersInstallAndModifyCrewOps();
     hangarOpsStartCheapAndEscalate();
+    medicalRestEscalationResetsAfterSurvivedMission();
     hangarOperationPreviewMatchesCoreMath();
     hangarOperationCardsComeFromSharedPreview();
     totaledShipCanAlwaysReachSalvageRepair();
@@ -3360,7 +3755,9 @@ int main()
     animalCrewClassesModifySurfaceExpeditions();
     surfaceUpgradeOffersAreDistinctAndSelectable();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
-    surfaceUpgradesClearAfterExtractionAndRoundTripSave();
+    surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
+    droneBayUnlocksSlotsLoadoutsAndMiningEffects();
+    droneOpsPresentationExposesPersistentLoadout();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();
     surfaceEventsCreateSmallRunVariation();
@@ -3370,6 +3767,7 @@ int main()
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
     miningDrillBreaksCellsAndMarksChunks();
+    miningDrillFootprintCapsWearToWorstContact();
     miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
     miningDrillTargetsFirstSolidCellOnRay();
     miningCompletionFeedsSurfacePayload();
@@ -3404,6 +3802,10 @@ int main()
     frontierReadinessGatesProgression();
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();
+    arkDiscoveryAndScriptedJumpProgression();
+    hostileNavigationSelectsShuttleSortie();
+    legacyDeepSpaceFrontierMigratesToArkFlow();
+    arkCampaignStateRoundTripsThroughSave();
     uiActionsUseStableSchemaIds();
     panelLayoutModeIsPortablePresentationData();
     contentIdsResolveAgainstDefaultCatalog();

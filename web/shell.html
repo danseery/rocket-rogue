@@ -165,7 +165,7 @@
     }
 
     .actions.primary-actions {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .actions.system-actions {
@@ -222,7 +222,18 @@
     }
 
     .cockpit-hud .primary-actions {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .cockpit-hud .primary-actions button {
+      min-height: 56px;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .cockpit-hud .primary-actions button:only-child {
+      grid-column: 1 / -1;
     }
 
     .cockpit-hud .system-actions {
@@ -253,19 +264,23 @@
       min-width: 190px;
       min-height: 70px;
       padding: 0 28px;
-      border-color: rgba(114, 224, 168, 0.72);
+      border-color: rgba(114, 224, 168, 0.82);
       border-radius: 10px;
       background:
-        radial-gradient(circle at 50% 20%, rgba(255, 255, 255, 0.22), transparent 28%),
-        linear-gradient(180deg, rgba(114, 224, 168, 0.34), rgba(39, 119, 82, 0.58));
+        radial-gradient(circle at 50% 16%, rgba(255, 255, 255, 0.18), transparent 26%),
+        linear-gradient(180deg, rgba(42, 112, 82, 0.96), rgba(13, 62, 48, 0.98));
       box-shadow:
-        0 0 28px rgba(114, 224, 168, 0.24),
-        0 20px 60px rgba(0, 0, 0, 0.44);
+        inset 0 1px 0 rgba(255, 255, 255, 0.16),
+        0 0 28px rgba(114, 224, 168, 0.28),
+        0 20px 60px rgba(0, 0, 0, 0.58);
       color: var(--text);
       font-size: 20px;
       font-weight: 900;
       text-transform: uppercase;
       letter-spacing: 0;
+      text-shadow:
+        0 2px 0 rgba(0, 0, 0, 0.52),
+        0 0 12px rgba(255, 255, 255, 0.22);
     }
 
     .scene-launch-control.is-visible {
@@ -397,13 +412,15 @@
     @keyframes launch-ready-pulse {
       from {
         box-shadow:
-          0 0 18px rgba(114, 224, 168, 0.18),
-          0 20px 60px rgba(0, 0, 0, 0.44);
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 0 18px rgba(114, 224, 168, 0.20),
+          0 20px 60px rgba(0, 0, 0, 0.58);
       }
       to {
         box-shadow:
-          0 0 42px rgba(114, 224, 168, 0.36),
-          0 20px 60px rgba(0, 0, 0, 0.44);
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          0 0 42px rgba(114, 224, 168, 0.40),
+          0 20px 60px rgba(0, 0, 0, 0.58);
       }
     }
 
@@ -1255,16 +1272,16 @@
       align-items: center;
       max-width: 980px;
       padding: 16px;
-      border: 1px solid rgba(114, 224, 168, 0.42);
+      border: 1px solid rgba(255, 92, 194, 0.52);
       border-radius: 10px;
       background:
-        linear-gradient(135deg, rgba(114, 224, 168, 0.14), rgba(103, 210, 255, 0.06)),
+        linear-gradient(135deg, rgba(255, 92, 194, 0.18), rgba(190, 82, 255, 0.10)),
         rgba(255, 255, 255, 0.04);
-      box-shadow: inset 0 0 28px rgba(114, 224, 168, 0.04);
+      box-shadow: inset 0 0 28px rgba(255, 92, 194, 0.08), 0 0 22px rgba(255, 92, 194, 0.08);
     }
 
     .surface-primary-action span {
-      color: var(--warn);
+      color: #ffb3df;
       font-size: 11px;
       font-weight: 800;
       text-transform: uppercase;
@@ -1286,8 +1303,9 @@
       min-height: 54px;
       font-size: 15px;
       font-weight: 800;
-      background: rgba(114, 224, 168, 0.20);
-      border-color: rgba(114, 224, 168, 0.50);
+      background: rgba(255, 92, 194, 0.24);
+      border-color: rgba(255, 143, 216, 0.64);
+      box-shadow: inset 0 0 18px rgba(255, 143, 216, 0.08);
     }
 
     .surface-kpi {
@@ -1740,7 +1758,7 @@
     .toast-root {
       position: fixed;
       left: 50%;
-      bottom: 24px;
+      top: 24px;
       z-index: 18;
       display: grid;
       gap: 8px;
@@ -1852,7 +1870,7 @@
 
       .toast-root {
         left: 50%;
-        bottom: 12px;
+        top: 12px;
         width: calc(100vw - 24px);
       }
     }
@@ -2193,6 +2211,9 @@
       jettisonCargo: () => rrCall("rr_jettison_cargo"),
       next: () => rrCall("rr_next"),
       attemptFrontier: () => rrCall("rr_attempt_frontier"),
+      openNavigation: () => rrCall("rr_open_navigation"),
+      arkJump: () => rrCall("rr_ark_jump"),
+      selectNavigationDestination: (index) => rrCall("rr_select_navigation", [index], ["number"]),
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
       rerollOffers: () => rrCall("rr_reroll_offers"),
       arrivalFlyby: () => rrCall("rr_arrival_flyby"),
@@ -2205,6 +2226,10 @@
       pushSurface: () => rrCall("rr_push_surface"),
       extractSurface: () => rrCall("rr_extract_surface"),
       surfaceUpgrade: (index) => rrCall("rr_surface_upgrade", [index], ["number"]),
+      droneOps: () => rrCall("rr_drone_ops"),
+      surfaceOps: () => rrCall("rr_surface_ops"),
+      equipDrone: (index) => rrCall("rr_equip_drone", [index], ["number"]),
+      upgradeDroneSlot: () => rrCall("rr_upgrade_drone_slot"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
@@ -2236,9 +2261,16 @@
       jettisonCargo: "jettison_cargo",
       next: "next",
       attemptFrontier: "attempt_frontier",
+      openNavigation: "open_navigation",
+      arkJump: "ark_jump",
+      selectNavigationDestinationPrefix: "select_navigation:",
       buyOfferPrefix: "buy_offer:",
       researchProjectPrefix: "research_project:",
       surfaceUpgradePrefix: "surface_upgrade:",
+      droneOps: "drone_ops",
+      surfaceOps: "back_to_surface_ops",
+      equipDronePrefix: "equip_drone:",
+      upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
       arrivalFlyby: "arrival_flyby",
       arrivalOrbit: "arrival_orbit",
@@ -2274,6 +2306,8 @@
       [rrActionIds.jettisonCargo]: () => rr.jettisonCargo(),
       [rrActionIds.next]: () => rr.next(),
       [rrActionIds.attemptFrontier]: () => rr.attemptFrontier(),
+      [rrActionIds.openNavigation]: () => rr.openNavigation(),
+      [rrActionIds.arkJump]: () => rr.arkJump(),
       [rrActionIds.rerollOffers]: () => rr.rerollOffers(),
       [rrActionIds.arrivalFlyby]: () => rr.arrivalFlyby(),
       [rrActionIds.arrivalOrbit]: () => rr.arrivalOrbit(),
@@ -2283,6 +2317,9 @@
       [rrActionIds.mineSurface]: () => rr.mineSurface(),
       [rrActionIds.pushSurface]: () => rr.pushSurface(),
       [rrActionIds.extractSurface]: () => rr.extractSurface(),
+      [rrActionIds.droneOps]: () => rr.droneOps(),
+      [rrActionIds.surfaceOps]: () => rr.surfaceOps(),
+      [rrActionIds.upgradeDroneSlot]: () => rr.upgradeDroneSlot(),
       [rrActionIds.miningScanner]: () => rr.miningScanner(),
       [rrActionIds.miningStow]: () => rr.miningStow(),
       [rrActionIds.miningAbort]: () => rr.miningAbort(),
@@ -2369,6 +2406,36 @@
           lastPanelAction = action;
           lastPanelActionAt = performance.now();
           rr.surfaceUpgrade(index);
+          return true;
+        }
+        return false;
+      }
+
+      if (action.startsWith(rrActionIds.equipDronePrefix)) {
+        const rawIndex = action.slice(rrActionIds.equipDronePrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.equipDrone(index);
+          return true;
+        }
+        return false;
+      }
+
+      if (action.startsWith(rrActionIds.selectNavigationDestinationPrefix)) {
+        const rawIndex = action.slice(rrActionIds.selectNavigationDestinationPrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.selectNavigationDestination(index);
           return true;
         }
         return false;
@@ -2619,8 +2686,14 @@
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.key.toLowerCase() === "r") {
+      if (event.key === " " && sceneLaunchControl.classList.contains("is-visible") && !sceneLaunchControl.hidden) {
+        rr.startLaunch();
+        event.preventDefault();
+        return;
+      }
+      if (event.key === " " || event.key.toLowerCase() === "r") {
         rr.returnHome();
+        event.preventDefault();
       } else if (event.key.toLowerCase() === "e") {
         rr.ejectNow();
       }

@@ -77,6 +77,10 @@ std::string phaseTitle(Screen screen)
         return "Surface Ops";
     case Screen::Mining:
         return "Mining";
+    case Screen::DroneOps:
+        return "Drone Ops";
+    case Screen::Navigation:
+        return "Navigation";
     case Screen::Upgrade:
         return "Refit";
     case Screen::Hangar:
@@ -291,6 +295,21 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
     return out.str();
 }
 
+std::string miniDroneCard(const MiniDroneCardPresentation& drone)
+{
+    std::ostringstream out;
+    out << "<article class=\"ops-card drone-card\">";
+    out << "<div class=\"card-topline\"><span>" << htmlEscape(drone.role) << "</span><span>"
+        << htmlEscape(drone.rarity) << "</span></div>";
+    out << "<div class=\"module-art\"><span>" << htmlEscape(drone.title.empty() ? "D" : std::string(1, drone.title.front())) << "</span></div>";
+    out << "<h3>" << htmlEscape(drone.title) << "</h3>";
+    out << "<p>" << htmlEscape(drone.detail) << "</p>";
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(drone.effectChips) << "</div>";
+    out << "<div class=\"card-footer\"><span>" << htmlEscape(drone.status)
+        << "</span>" << panelButton(drone.action) << "</div></article>";
+    return out.str();
+}
+
 std::string primarySurfaceActionCard(const SurfaceActionPreviewPresentation& action)
 {
     std::ostringstream out;
@@ -502,6 +521,59 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
+    if (state.screen == Screen::Navigation) {
+        const std::vector<const Destination*> destinations = navigationDestinations(state, catalog);
+        out << phaseBoardOpen("phase-board-navigation", state.statusLine);
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape("Solar System Navigation")
+            << "</h2><p>" << htmlEscape(hostileSystemActive(state)
+                ? "The Ark is stranded. Pick the next shuttle sortie, then prep the crew and vehicle."
+                : "Plot the next route through known space.") << "</p></div></div>";
+        out << "<section class=\"resource-bank ark-status\"><div><h2>" << htmlEscape("Ark status")
+            << "</h2><p>" << htmlEscape(std::string(toString(state.meta.ark.condition))) << "</p></div>"
+            << "<div class=\"stat-grid\">"
+            << resourceChipGrid({
+                panelMetric("Campaign", std::string(toString(state.meta.campaignMilestone))),
+                panelMetric("System", state.meta.navigation.currentSystemId.empty() ? "Solar system" : state.meta.navigation.currentSystemId),
+                panelMetric("Ark hull", display::percent(static_cast<double>(state.meta.ark.hullDamage) / 100.0)),
+                panelMetric("Ark fuel", std::to_string(state.meta.ark.fuelReserve))
+            })
+            << "</div></section>";
+
+        if (destinations.empty()) {
+            out << boardNote("No mapped destinations yet. Continue the frontier ladder to discover the Ark.");
+        } else {
+            out << "<section class=\"board-primary navigation-map\"><h2>" << htmlEscape("Choose sortie") << "</h2><div class=\"ops-grid nav-grid\">";
+            for (int index = 0; index < static_cast<int>(destinations.size()); ++index) {
+                const Destination& destination = *destinations[static_cast<std::size_t>(index)];
+                const bool selected = state.meta.navigation.selectedDestinationId == destination.id;
+                const int fuelCost = 2 + destination.tier;
+                const int danger = static_cast<int>(std::round(destination.hazard * 24.0));
+                const int value = static_cast<int>(std::round(destination.baseReward));
+                const int durability = 35 + destination.tier * 12;
+                out << "<article class=\"ops-card nav-card " << (selected ? "selected" : "") << "\">";
+                out << "<div class=\"card-kicker\"><span>" << htmlEscape("Fuel " + std::to_string(fuelCost))
+                    << "</span><span>" << htmlEscape("Danger " + display::percent(static_cast<double>(danger) / 100.0)) << "</span></div>";
+                out << "<h3>" << htmlEscape(destination.name) << "</h3>";
+                out << "<p>" << htmlEscape(destination.tier >= 4
+                    ? "Hostile-system sortie. Rich resources, artifact leads, and enemy pressure."
+                    : "Known solar-system route.") << "</p>";
+                out << "<div class=\"stat-grid\">";
+                out << resourceChip(panelMetric("Value", std::to_string(value)));
+                out << resourceChip(panelMetric("Terrain", display::percent(static_cast<double>(durability) / 100.0)));
+                out << resourceChip(panelMetric("Artifacts", destination.tier >= 4 ? "Possible" : "None"));
+                out << resourceChip(panelMetric("Enemies", destination.tier >= 4 ? "Detected" : "None"));
+                out << "</div>";
+                out << "<div class=\"card-footer\"><span>" << htmlEscape(selected ? "Selected" : "Mapped")
+                    << "</span>" << button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn")
+                    << "</div></article>";
+            }
+            out << "</div></section>";
+        }
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
     if (state.screen == Screen::ArrivalFanfare) {
         const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId);
         const std::string destinationName = arrivalDestination == nullptr ? currentFrontier.name : arrivalDestination->name;
@@ -551,10 +623,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
         out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
+        const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         out << tutorialCard(
             "launch-controls",
-            "Press your luck, then get home",
-            "Return home banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs.");
+            "Press your luck, then return to Earth",
+            hasAdvancedFlightControls
+                ? "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs."
+                : "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. Learn the burn, bank flight data, and unlock the Moon route.");
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
@@ -568,11 +643,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             }
             out << "</div>";
 
-            out << "<div class=\"actions system-actions\">";
-            for (const FlightActionButtonPresentation& action : launchPanel.systemActions) {
-                out << panelButton(action);
+            if (hasAdvancedFlightControls) {
+                out << "<div class=\"actions system-actions\">";
+                for (const FlightActionButtonPresentation& action : launchPanel.systemActions) {
+                    out << panelButton(action);
+                }
+                out << "</div>";
             }
-            out << "</div>";
         }
         out << "</section>";
         out << modalTemplate(ui::modals::telemetry, text::panel::modals::telemetryDetails, detailStack(launchPanel.telemetryDetails));
@@ -761,6 +838,35 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         return out.str();
     }
 
+    if (state.screen == Screen::DroneOps) {
+        const DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
+        out << phaseBoardOpen("phase-board-drone-ops", state.statusLine);
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape("Drone Ops")
+            << "</h2><p>" << htmlEscape("Assign persistent helper drones before committing the mining rig.") << "</p></div>"
+            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+            << "</div></div>";
+        out << "<div class=\"metric-grid focus-metrics\">";
+        for (const PanelMetricPresentation& metricItem : dronePanel.metrics) {
+            out << metric(metricItem.label, metricItem.value);
+        }
+        out << "</div>";
+        const std::vector<PanelMetricPresentation> droneSlotChips {panelMetric("Next slot", dronePanel.nextSlotCost)};
+        out << "<section class=\"resource-bank\"><div><h2>" << htmlEscape("Drone Bay")
+            << "</h2><p>" << htmlEscape("Slots persist across expeditions. Equipped drones support the next mining run.") << "</p></div>"
+            << "<div class=\"stat-grid\">" << resourceChipGrid(droneSlotChips) << "</div>"
+            << panelButton(dronePanel.upgradeSlotAction) << "</section>";
+        out << "<section class=\"board-primary drone-roster\"><h2>" << htmlEscape("Drone roster") << "</h2><div class=\"ops-grid\">";
+        for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
+            out << miniDroneCard(drone);
+        }
+        out << "</div></section>";
+        out << "<div class=\"actions\">" << panelButton(dronePanel.backAction) << "</div>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::surface, "Drone Ops Details", detailStack(dronePanel.details));
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        return out.str();
+    }
+
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
@@ -784,6 +890,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 out << surfaceUpgradeCard(upgrade);
             }
             out << "</div></section>";
+        }
+        if (surfacePanel.droneOpsAction.enabled) {
+            out << "<section class=\"resource-bank drone-ops-callout\"><div><h2>" << htmlEscape("Drone Ops")
+                << "</h2><p>" << htmlEscape("Equip persistent helper drones before you launch the mining run.") << "</p></div>"
+                << panelButton(surfacePanel.droneOpsAction) << "</section>";
         }
         const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
             return action.action.actionId == ui::actions::mineSurface;
@@ -885,10 +996,16 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << "</div>";
 
     out << "<div class=\"actions\">";
+    if (navigationAvailable(state)) {
+        out << button("Open Navigation", ui::actions::openNavigation, "warn");
+    }
+    if (arkDiscovered(state) && !hostileSystemActive(state)) {
+        out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
+    }
     out << (launchReadiness.blocked
         ? modalButton(text::buttons::launchProvingFlight, ui::modals::launchBlocked, "ok")
         : button(text::buttons::launchProvingFlight, ui::actions::prepareLaunch, "ok"));
-    if (next != nullptr) {
+    if (next != nullptr && !navigationAvailable(state)) {
         if (canCommitToNextFrontier(state, catalog)) {
             out << (launchReadiness.blocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")

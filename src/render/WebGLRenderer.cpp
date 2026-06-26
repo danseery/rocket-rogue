@@ -51,6 +51,12 @@ RouteCurve routeCurve(const RenderSnapshot& snapshot)
     if (snapshot.destinationTier == 1) {
         return {{-0.18F, -0.70F}, {0.10F, 0.08F}, {0.72F, 0.54F}};
     }
+    if (snapshot.destinationTier == 2) {
+        return {{-0.30F, -0.72F}, {0.12F, 0.16F}, {0.76F, 0.56F}};
+    }
+    if (snapshot.destinationTier == 3) {
+        return {{-0.42F, -0.78F}, {-0.10F, 0.08F}, {0.78F, 0.58F}};
+    }
     return {{-0.24F, -0.62F}, {0.16F, 0.18F}, {0.76F, 0.56F}};
 }
 
@@ -1075,9 +1081,73 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawCircle(earthX - 0.04F, earthY + 0.04F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.58F}, 14);
                 drawCircle(earthX + 0.05F, earthY + 0.07F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.48F}, 14);
             }
+        } else if (snapshot.destinationTier == 3) {
+            const float earthX = -0.42F;
+            const float earthY = -0.91F;
+            const float earthR = 0.105F;
+            const Vec2 moon {-0.22F, -0.68F};
+            const Vec2 mars = routePoint(snapshot, 0.34F);
+            if (textureReady(EarthAsset)) {
+                drawSprite(earthX, earthY, earthR * 2.35F, earthR * 2.35F, {1.0F, 1.0F, 1.0F, 0.72F}, EarthAsset);
+            } else {
+                drawCircle(earthX, earthY, earthR * 1.18F, {0.24F, 0.62F, 0.96F, 0.06F}, 40);
+                drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.52F}, 40);
+                drawCircle(earthX - 0.03F, earthY + 0.03F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.50F}, 12);
+            }
+            drawEllipseLine(earthX, earthY, 0.44F, 0.25F, {0.40F, 0.62F, 0.78F, 0.16F}, 76, 0.08F * kPi, 0.84F * kPi);
+            if (textureReady(MoonAsset)) {
+                drawSprite(moon.x, moon.y, 0.060F, 0.060F, {1.0F, 1.0F, 1.0F, 0.54F}, MoonAsset);
+            } else {
+                drawCircle(moon.x, moon.y, 0.016F, {0.72F, 0.74F, 0.72F, 0.42F}, 22);
+            }
+            if (textureReady(MarsAsset)) {
+                drawSprite(mars.x, mars.y, 0.095F, 0.095F, {1.0F, 1.0F, 1.0F, 0.58F}, MarsAsset);
+            } else {
+                drawCircle(mars.x, mars.y, 0.026F, {0.78F, 0.28F, 0.16F, 0.42F}, 32);
+            }
         }
         if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
             drawSprite(endpoint.x, endpoint.y, radius * 2.55F, radius * 2.55F, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
+        } else if (snapshot.destinationTier == 3) {
+            const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
+                ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
+                : 0.0F;
+            const float bodyPulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.08F : 1.0F;
+            const float bodyRadius = radius * 1.12F * bodyPulse;
+            if (snapshot.screen == Screen::ArrivalFanfare) {
+                drawCircle(endpoint.x, endpoint.y, radius * (1.72F + arrivalBeat * 0.28F), {1.0F, 0.78F, 0.24F, 0.12F}, 72);
+            }
+            drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.78F, 0.58F, 0.30F, 0.64F}, 64);
+            drawCircle(endpoint.x + radius * 0.25F, endpoint.y + radius * 0.15F, radius * 0.62F * bodyPulse, {0.92F, 0.75F, 0.42F, 0.54F}, 48);
+            drawEllipseLine(endpoint.x, endpoint.y, radius * 2.35F * bodyPulse, radius * 0.55F * bodyPulse, {0.52F, 0.78F, 0.92F, 0.32F}, 84, -0.08F * kPi, 1.08F * kPi);
+            drawCircle(endpoint.x - radius * 1.72F, endpoint.y + radius * 0.42F, radius * 0.18F, {0.68F, 0.72F, 0.78F, 0.42F}, 18);
+            drawCircle(endpoint.x + radius * 1.78F, endpoint.y - radius * 0.36F, radius * 0.14F, {0.76F, 0.64F, 0.46F, 0.38F}, 18);
+        } else if (snapshot.destinationTier == 4) {
+            const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
+                ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
+                : 0.0F;
+            const float pulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.07F : 1.0F;
+            const float bodyRadius = radius * 1.18F * pulse;
+            if (snapshot.screen == Screen::ArrivalFanfare) {
+                drawCircle(endpoint.x, endpoint.y, radius * (2.05F + arrivalBeat * 0.36F), {0.42F, 0.90F, 1.0F, 0.12F}, 72);
+            }
+            drawCircle(endpoint.x, endpoint.y, bodyRadius * 1.62F, {0.28F, 0.90F, 1.0F, 0.10F}, 72);
+            drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.20F, 0.34F, 0.48F, 0.78F}, 72);
+            drawCircle(endpoint.x + bodyRadius * 0.22F, endpoint.y + bodyRadius * 0.15F, bodyRadius * 0.70F, {0.48F, 0.72F, 0.76F, 0.34F}, 48);
+            drawCircle(endpoint.x - bodyRadius * 0.32F, endpoint.y - bodyRadius * 0.22F, bodyRadius * 0.22F, {0.82F, 0.36F, 0.30F, 0.38F}, 24);
+            drawEllipseLine(endpoint.x, endpoint.y, bodyRadius * 2.60F, bodyRadius * 0.58F, {0.38F, 0.84F, 1.0F, 0.30F}, 96, -0.12F * kPi, 1.12F * kPi);
+            drawCircle(endpoint.x + bodyRadius * 1.90F, endpoint.y - bodyRadius * 0.22F, bodyRadius * 0.16F, {0.66F, 0.74F, 0.82F, 0.46F}, 18);
+        } else if (snapshot.destinationTier >= 5) {
+            const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
+                ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
+                : 0.0F;
+            const float ringAlpha = snapshot.screen == Screen::ArrivalFanfare ? 0.36F + arrivalBeat * 0.08F : 0.28F;
+            drawCircle(endpoint.x, endpoint.y, radius * 0.82F, {0.54F, 0.42F, 0.72F, 0.60F}, 64);
+            drawCircle(endpoint.x + radius * 0.20F, endpoint.y + radius * 0.14F, radius * 0.46F, {0.78F, 0.60F, 0.88F, 0.34F}, 36);
+            drawEllipseLine(endpoint.x, endpoint.y, radius * 3.30F, radius * 0.74F, {0.95F, 0.74F, 0.38F, ringAlpha}, 110, -0.16F * kPi, 1.18F * kPi);
+            drawEllipseLine(endpoint.x, endpoint.y, radius * 2.35F, radius * 0.48F, {0.48F, 0.86F, 1.0F, 0.18F}, 90, -0.08F * kPi, 1.08F * kPi);
+            drawCircle(endpoint.x - radius * 2.40F, endpoint.y + radius * 0.48F, radius * 0.15F, {0.76F, 0.72F, 0.64F, 0.48F}, 16);
+            drawCircle(endpoint.x + radius * 2.36F, endpoint.y - radius * 0.42F, radius * 0.13F, {0.58F, 0.68F, 0.80F, 0.42F}, 16);
         } else {
             drawCircle(endpoint.x, endpoint.y, radius, destination, 56);
             drawCircle(endpoint.x, endpoint.y, radius * 1.65F, {destination.r, destination.g, destination.b, 0.09F}, 64);

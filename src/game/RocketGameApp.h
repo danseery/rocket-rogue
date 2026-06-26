@@ -28,6 +28,9 @@ public:
     void ejectNow();
     void next();
     void attemptFrontierTransfer();
+    void openNavigation();
+    void arkJump();
+    void selectNavigationDestination(int index);
     void buyOffer(int index);
     void rerollOffers();
     void runArrivalFlyby();
@@ -40,6 +43,10 @@ public:
     void pushSurface();
     void extractSurface();
     void selectSurfaceUpgrade(int index);
+    void openDroneOps();
+    void backToSurfaceOps();
+    void equipDrone(int index);
+    void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);
     void miningDrill(bool active);

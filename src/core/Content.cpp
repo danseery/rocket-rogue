@@ -57,6 +57,28 @@ SurfaceUpgrade surfaceUpgrade(
     return result;
 }
 
+MiniDrone miniDrone(
+    std::string id,
+    std::string name,
+    std::string description,
+    Rarity rarity,
+    MiniDroneRole role,
+    MiniDroneStats stats,
+    std::string unlockKey,
+    std::vector<std::string> tags)
+{
+    MiniDrone result;
+    result.id = std::move(id);
+    result.name = std::move(name);
+    result.description = std::move(description);
+    result.rarity = rarity;
+    result.role = role;
+    result.stats = stats;
+    result.unlockKey = std::move(unlockKey);
+    result.tags = std::move(tags);
+    return result;
+}
+
 ResearchProject researchProject(
     std::string id,
     std::string name,
@@ -107,6 +129,14 @@ const SurfaceUpgrade* ContentCatalog::findSurfaceUpgrade(std::string_view id) co
         return upgrade.id == id;
     });
     return found == surfaceUpgrades.end() ? nullptr : &*found;
+}
+
+const MiniDrone* ContentCatalog::findMiniDrone(std::string_view id) const
+{
+    const auto found = std::find_if(miniDrones.begin(), miniDrones.end(), [id](const MiniDrone& drone) {
+        return drone.id == id;
+    });
+    return found == miniDrones.end() ? nullptr : &*found;
 }
 
 const ResearchProject* ContentCatalog::findResearchProject(std::string_view id) const
@@ -190,20 +220,30 @@ ContentCatalog createDefaultContent()
         surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4}, {"drill", "cooling"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams and bad pockets.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.0, .hazardRelief = 0.02}, {"scanner", "reveal"}),
         surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids keep loaded canisters from turning extraction into drama.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.03}, {"drone", "cargo"}),
-        surfaceUpgrade(content::surfaceUpgrade::microDroneBay, "Micro-Drone Bay", "Tiny outriders clear grit and keep the main drone moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.25, .oxygenSeconds = 12.0}, {"drone", "speed"}),
-        surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.0, .hazardRelief = 0.015}, {"drill", "durability"}),
+        surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.0, .hardRockBounceRelief = 0.18, .hazardRelief = 0.015}, {"drill", "durability", "recoil"}),
         surfaceUpgrade(content::surfaceUpgrade::oreScentArray, "Ore-Scent Array", "Spectral sniffers help the crew sort richer pockets from plain dust.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.12, .scannerRadius = 1.0}, {"scanner", "yield"})
+    };
+
+    catalog.miniDrones = {
+        miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
+        miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables for longer surface runs.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneBay, {"logistics", "endurance"}),
+        miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines deeper silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneBay, {"exploration", "navigation"}),
+        miniDrone(content::drone::stabilizerDrone, "Stabilizer Drone", "Counter-thrusts hard-rock chatter so the drill loses less bite.", Rarity::Uncommon, MiniDroneRole::Stabilizer, {.drillIntegrityRelief = 0.12, .hardRockBounceRelief = 0.28}, content::unlock::droneBay, {"engineering", "resilience"}),
+        miniDrone(content::drone::attackDrone, "Attack Drone", "Passive sentry fire for hostile worlds beyond the solar system.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
+        miniDrone(content::drone::defenseDrone, "Defense Drone", "Projects a short-range shield around the mining drone under attack.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
 
     catalog.researchProjects = {
         researchProject(content::research::blueprintSurvey, "Blueprint Survey", "Map Mars strata for recoverable ship schematics.", Rarity::Common, 2, 2, {}, content::unlock::starter, "", {"blueprint", "survey"}),
-        researchProject(content::research::fieldProbeNetwork, "Field Probe Network", "Seed landing zones with small probes before the crew commits supply.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "survey"}),
+        researchProject(content::research::fieldProbeNetwork, "Field Probe Network", "Seed landing zones with small probes before the crew commits action kits.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "survey"}),
         researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
         researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner blueprints.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
         researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
+        researchProject(content::research::droneBayProgram, "Drone Bay Program", "Build a persistent bay for helper drones that support mining, scouting, logistics, and later defense.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneBay, {"surface", "drone", "logistics"}),
         researchProject(content::research::cargoReturnRig, "Cargo Return Rig", "Prototype restraint frames that make heavier payloads less terrifying to extract.", Rarity::Uncommon, 2, 3, {.common = 3}, content::unlock::recovery, content::unlock::cargoRigs, {"surface", "extraction"}),
         researchProject(content::research::prototypeSchematic, "Prototype Schematic", "Use rare samples to unlock experimental ship components.", Rarity::Rare, 2, 4, {.common = 1, .rare = 1}, content::unlock::starter, content::unlock::thermal, {"prototype", "ship"}),
         researchProject(content::research::xenogeologyProgram, "Xenogeology Program", "Study outer-system deposits for deep-space unlocks.", Rarity::Rare, 3, 5, {.rare = 2}, content::unlock::deepSpace, content::unlock::ai, {"materials", "deep_space"}),
+        researchProject(content::research::arkScaffoldProgram, "Ark Keel Program", "Lay the first orbital keel sections for a future deep-space home base.", Rarity::Prototype, 3, 6, {.common = 4, .rare = 2}, content::unlock::deepSpace, content::unlock::arkScaffold, {"ark", "home_base", "deep_space"}),
         researchProject(content::research::perimeterDroneNetwork, "Perimeter Drone Network", "Deploy autonomous sentries so field teams can keep working under hostile contact.", Rarity::Rare, 4, 5, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::perimeterDrones, {"surface", "defense"}),
         researchProject(content::research::artifactDecoding, "Artifact Decoding", "Decode recovered signals into exotic research threads.", Rarity::Prototype, 4, 7, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::exotic, {"artifact", "story"})
     };
@@ -228,8 +268,8 @@ ContentCatalog createDefaultContent()
         {content::destination::moon, "Moon", 1, 1.95, 1.10, 3.10, 20.0, 0.95, content::unlock::starter},
         {content::destination::mars, "Mars", 2, 2.65, 1.15, 4.15, 34.0, 1.35, content::unlock::starter},
         {content::destination::outerPlanets, "Outer Planets", 3, 3.55, 1.20, 5.55, 54.0, 1.85, content::unlock::deepSpace},
-        {content::destination::nearbyStar, "Nearby Star", 4, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace},
-        {content::destination::nearbyGalaxy, "Nearby Galaxy", 5, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic}
+        {content::destination::nearbyStar, "Khepri Prime", 4, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace},
+        {content::destination::nearbyGalaxy, "Rift Belt", 5, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic}
     };
 
     return catalog;
@@ -276,6 +316,9 @@ std::string unlockDisplayName(std::string_view key)
     if (key == content::unlock::perimeterDrones) {
         return "Perimeter drones";
     }
+    if (key == content::unlock::droneBay) {
+        return "Drone bay";
+    }
     return {};
 }
 
@@ -287,6 +330,11 @@ bool isModuleUnlocked(const MetaProgress& meta, const ShipModule& module)
 bool isCrewUpgradeUnlocked(const MetaProgress& meta, const CrewUpgrade& upgrade)
 {
     return hasUnlock(meta, upgrade.unlockKey);
+}
+
+bool isMiniDroneUnlocked(const MetaProgress& meta, const MiniDrone& drone)
+{
+    return hasUnlock(meta, drone.unlockKey);
 }
 
 std::vector<const ShipModule*> unlockedModules(const ContentCatalog& catalog, const MetaProgress& meta)
@@ -306,6 +354,17 @@ std::vector<const CrewUpgrade*> unlockedCrewUpgrades(const ContentCatalog& catal
     for (const auto& upgrade : catalog.crewUpgrades) {
         if (isCrewUpgradeUnlocked(meta, upgrade)) {
             result.push_back(&upgrade);
+        }
+    }
+    return result;
+}
+
+std::vector<const MiniDrone*> unlockedMiniDrones(const ContentCatalog& catalog, const MetaProgress& meta)
+{
+    std::vector<const MiniDrone*> result;
+    for (const auto& drone : catalog.miniDrones) {
+        if (isMiniDroneUnlocked(meta, drone)) {
+            result.push_back(&drone);
         }
     }
     return result;
@@ -358,6 +417,25 @@ std::string_view toString(SurfaceUpgradeCategory category)
     return text::enums::unknown;
 }
 
+std::string_view toString(MiniDroneRole role)
+{
+    switch (role) {
+    case MiniDroneRole::Mining:
+        return "Mining";
+    case MiniDroneRole::Resource:
+        return "Resource";
+    case MiniDroneRole::Survey:
+        return "Survey";
+    case MiniDroneRole::Stabilizer:
+        return "Stabilizer";
+    case MiniDroneRole::Attack:
+        return "Attack";
+    case MiniDroneRole::Defense:
+        return "Defense";
+    }
+    return text::enums::unknown;
+}
+
 std::string_view toString(CrewStatus status)
 {
     switch (status) {
@@ -397,6 +475,44 @@ std::string_view toString(RecoveryMethod method)
         return text::enums::recovery::manualEject;
     case RecoveryMethod::TransferArrival:
         return text::enums::recovery::transferArrival;
+    }
+    return text::enums::unknown;
+}
+
+std::string_view toString(CampaignMilestone milestone)
+{
+    switch (milestone) {
+    case CampaignMilestone::SolarTutorial:
+        return "Solar tutorial";
+    case CampaignMilestone::ArkDiscovered:
+        return "Ark discovered";
+    case CampaignMilestone::FirstArkJumpReady:
+        return "First Ark jump ready";
+    case CampaignMilestone::FirstArkJumpComplete:
+        return "First Ark jump complete";
+    case CampaignMilestone::GravityWellDisaster:
+        return "Gravity-well disaster";
+    case CampaignMilestone::HostileSystemStranded:
+        return "Hostile system stranded";
+    case CampaignMilestone::ArkRepairing:
+        return "Ark repairing";
+    }
+    return text::enums::unknown;
+}
+
+std::string_view toString(ArkCondition condition)
+{
+    switch (condition) {
+    case ArkCondition::NotFound:
+        return "Not found";
+    case ArkCondition::DerelictOperable:
+        return "Derelict but operable";
+    case ArkCondition::InFlight:
+        return "In flight";
+    case ArkCondition::DamagedStranded:
+        return "Damaged and stranded";
+    case ArkCondition::Repairing:
+        return "Repairing";
     }
     return text::enums::unknown;
 }

@@ -5,6 +5,7 @@
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
@@ -572,7 +573,7 @@ SurfaceCrewEffects surfaceCrewEffects(const GameState& state)
         effects.supplyBonus = 1;
         effects.hazardRelief = std::min(0.08, 0.025 + trainedRiskRelief);
         effects.extractionRiskRelief = std::min(0.10, 0.035 + static_cast<double>(training) * 0.004);
-        effects.summary = "Capybara survival: extra supply, lower hazard, and safer extraction.";
+        effects.summary = "Capybara survival: extra action kits, lower hazard, and safer extraction.";
     } else if (astronaut->trait == tuning::traits::hardReboot) {
         effects.hazardRelief = std::min(0.09, 0.040 + static_cast<double>(training) * 0.004);
         effects.summary = "Beaver resilience: fewer equipment scares and steadier surface operations.";
@@ -626,8 +627,7 @@ SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile)
 SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog)
 {
     SurfaceUpgradeEffects effects;
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    for (const std::string& upgradeId : expedition.surfaceUpgradeIds) {
+    for (const std::string& upgradeId : state.run.surfaceUpgradeIds) {
         const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
         if (upgrade == nullptr) {
             continue;
@@ -635,6 +635,7 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
         effects.drillPower += upgrade->stats.drillPower;
         effects.drillCooling += upgrade->stats.drillCooling;
         effects.drillDurability += upgrade->stats.drillDurability;
+        effects.hardRockBounceRelief += upgrade->stats.hardRockBounceRelief;
         effects.oreYieldChance += upgrade->stats.oreYieldChance;
         effects.scannerRadius += upgrade->stats.scannerRadius;
         effects.hazardRelief += upgrade->stats.hazardRelief;
@@ -643,6 +644,172 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
         effects.extractionRiskRelief += upgrade->stats.extractionRiskRelief;
         effects.names.push_back(upgrade->name);
     }
+    effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.35);
+    return effects;
+}
+
+bool droneBayUnlocked(const GameState& state)
+{
+    return hasUnlock(state.meta, content::unlock::droneBay);
+}
+
+MaterialInventory droneSlotUpgradeCost(int nextSlot)
+{
+    switch (nextSlot) {
+    case 2:
+        return {.common = 4};
+    case 3:
+        return {.common = 6, .rare = 2};
+    case 4:
+        return {.rare = 5};
+    case 5:
+        return {.rare = 7, .exotic = 2};
+    case 6:
+        return {.rare = 10, .exotic = 4};
+    default:
+        return {};
+    }
+}
+
+void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
+{
+    if (!droneBayUnlocked(state)) {
+        state.meta.droneBaySlots = 0;
+        state.meta.ownedDroneIds.clear();
+        state.meta.equippedDroneIds.clear();
+        return;
+    }
+
+    state.meta.droneBaySlots = std::clamp(state.meta.droneBaySlots <= 0 ? 1 : state.meta.droneBaySlots, 1, 6);
+
+    const std::array<std::string_view, 4> starterDrones {
+        content::drone::miningDrone,
+        content::drone::resourceDrone,
+        content::drone::surveyDrone,
+        content::drone::stabilizerDrone
+    };
+    for (std::string_view droneId : starterDrones) {
+        if (catalog.findMiniDrone(droneId) != nullptr
+            && std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), droneId) == state.meta.ownedDroneIds.end()) {
+            state.meta.ownedDroneIds.emplace_back(droneId);
+        }
+    }
+    for (const MiniDrone& drone : catalog.miniDrones) {
+        if (isMiniDroneUnlocked(state.meta, drone)
+            && std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) == state.meta.ownedDroneIds.end()) {
+            state.meta.ownedDroneIds.push_back(drone.id);
+        }
+    }
+
+    state.meta.ownedDroneIds.erase(
+        std::remove_if(
+            state.meta.ownedDroneIds.begin(),
+            state.meta.ownedDroneIds.end(),
+            [&](const std::string& id) {
+                const MiniDrone* drone = catalog.findMiniDrone(id);
+                return drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone);
+            }),
+        state.meta.ownedDroneIds.end());
+
+    state.meta.equippedDroneIds.erase(
+        std::remove_if(
+            state.meta.equippedDroneIds.begin(),
+            state.meta.equippedDroneIds.end(),
+            [&](const std::string& id) {
+                return std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), id) == state.meta.ownedDroneIds.end();
+            }),
+        state.meta.equippedDroneIds.end());
+    if (state.meta.equippedDroneIds.size() > static_cast<std::size_t>(state.meta.droneBaySlots)) {
+        state.meta.equippedDroneIds.resize(static_cast<std::size_t>(state.meta.droneBaySlots));
+    }
+}
+
+bool canUpgradeDroneSlot(const GameState& state)
+{
+    if (!droneBayUnlocked(state) || state.meta.droneBaySlots >= 6) {
+        return false;
+    }
+    return canAffordMaterials(state.meta.materials, droneSlotUpgradeCost(state.meta.droneBaySlots + 1));
+}
+
+bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog)
+{
+    ensureDroneBayState(state, catalog);
+    if (!droneBayUnlocked(state) || state.meta.droneBaySlots >= 6) {
+        state.statusLine = "Drone Bay is already at maximum capacity.";
+        return false;
+    }
+
+    const MaterialInventory cost = droneSlotUpgradeCost(state.meta.droneBaySlots + 1);
+    if (!spendMaterials(state.meta.materials, cost)) {
+        state.statusLine = "Recovered materials are short for the next Drone Bay slot.";
+        return false;
+    }
+
+    state.meta.droneBaySlots += 1;
+    state.statusLine = "Drone Bay expanded to " + std::to_string(state.meta.droneBaySlots) + " slots.";
+    return true;
+}
+
+bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
+{
+    ensureDroneBayState(state, catalog);
+    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size())) {
+        return false;
+    }
+
+    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
+    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
+    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
+        state.statusLine = drone.name + " is still locked.";
+        return false;
+    }
+
+    auto equipped = std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id);
+    if (equipped != state.meta.equippedDroneIds.end()) {
+        state.meta.equippedDroneIds.erase(equipped);
+        state.statusLine = drone.name + " returned to standby.";
+        return true;
+    }
+
+    if (state.meta.equippedDroneIds.size() >= static_cast<std::size_t>(state.meta.droneBaySlots)) {
+        state.statusLine = "Drone slots full. Unequip a drone or expand the bay.";
+        return false;
+    }
+
+    state.meta.equippedDroneIds.push_back(drone.id);
+    state.statusLine = drone.name + " assigned to the next mining run.";
+    return true;
+}
+
+MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog)
+{
+    MiniDroneLoadoutEffects effects;
+    if (!droneBayUnlocked(state)) {
+        return effects;
+    }
+
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone)) {
+            continue;
+        }
+        effects.passiveMiningRate += drone->stats.passiveMiningRate;
+        effects.oxygenSeconds += drone->stats.oxygenSeconds;
+        effects.scannerRadius += drone->stats.scannerRadius;
+        effects.drillIntegrityRelief += drone->stats.drillIntegrityRelief;
+        effects.hardRockBounceRelief += drone->stats.hardRockBounceRelief;
+        effects.extractionRiskRelief += drone->stats.extractionRiskRelief;
+        effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief;
+        effects.names.push_back(drone->name);
+    }
+
+    effects.passiveMiningRate = std::clamp(effects.passiveMiningRate, 0.0, 0.40);
+    effects.scannerRadius = std::clamp(effects.scannerRadius, 0.0, 5.0);
+    effects.drillIntegrityRelief = std::clamp(effects.drillIntegrityRelief, 0.0, 0.35);
+    effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.55);
+    effects.extractionRiskRelief = std::clamp(effects.extractionRiskRelief, 0.0, 0.08);
+    effects.enemyEncounterRelief = std::clamp(effects.enemyEncounterRelief, 0.0, 0.18);
     return effects;
 }
 
@@ -756,6 +923,7 @@ ResearchOutcome completeResearchProject(GameState& state, const ContentCatalog& 
     outcome.materialCost = project->materialCost;
     outcome.rewardUnlockKey = project->rewardUnlockKey;
     outcome.unlockedReward = rewardUnlockAvailable;
+    ensureDroneBayState(state, catalog);
     return outcome;
 }
 
@@ -793,7 +961,7 @@ void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalo
 
     std::vector<const SurfaceUpgrade*> available;
     for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
-        if (std::find(expedition.surfaceUpgradeIds.begin(), expedition.surfaceUpgradeIds.end(), upgrade.id) == expedition.surfaceUpgradeIds.end()) {
+        if (std::find(state.run.surfaceUpgradeIds.begin(), state.run.surfaceUpgradeIds.end(), upgrade.id) == state.run.surfaceUpgradeIds.end()) {
             available.push_back(&upgrade);
         }
     }
@@ -829,7 +997,7 @@ bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int i
         return false;
     }
 
-    expedition.surfaceUpgradeIds.push_back(upgrade->id);
+    state.run.surfaceUpgradeIds.push_back(upgrade->id);
     expedition.surfaceUpgradeOfferIds = {};
     expedition.surfaceUpgradeOfferAvailable = false;
     appendSurfaceLog(expedition, "Field upgrade installed: " + upgrade->name + ".");
@@ -848,12 +1016,14 @@ double surfaceExtractionRisk(const GameState& state)
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, createDefaultContent());
     double risk = tuning::research::extractionRiskBase
         + expedition.hazard * tuning::research::extractionRiskHazardScale
         + static_cast<double>(std::max(0, expedition.cargo)) * std::max(0.0, tuning::research::extractionRiskCargoScale - tools.cargoRiskRelief)
         - tools.extractionRiskRelief
         - crew.extractionRiskRelief
         - upgrades.extractionRiskRelief
+        - drones.extractionRiskRelief
         + site.extractionRiskDelta;
     if (expedition.supply <= 0) {
         risk += tuning::research::extractionRiskLowSupplyPenalty;
@@ -869,10 +1039,12 @@ double surfaceEnemyEncounterChance(const GameState& state)
     }
 
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, createDefaultContent());
     return std::clamp(
         tuning::research::surfaceEnemyChanceBase
             + expedition.hazard * tuning::research::surfaceEnemyChanceHazardScale
-            - tools.enemyEncounterRelief,
+            - tools.enemyEncounterRelief
+            - drones.enemyEncounterRelief,
         0.0,
         tuning::research::surfaceEnemyChanceMaximum);
 }

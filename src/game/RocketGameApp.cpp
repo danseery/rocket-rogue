@@ -137,6 +137,8 @@ bool RocketGameApp::initialize()
         state_.statusLine = std::string(text::status::saveRestored);
     }
 
+    ensureDroneBayState(state_, catalog_);
+    migrateLegacyDeepSpaceFrontier(state_, catalog_);
     syncLaunchConfig(state_, catalog_);
 
     if (!renderer_.initialize()) {
@@ -256,8 +258,11 @@ void RocketGameApp::prepareForLaunch()
 
     state_.run.active = true;
     syncLaunchConfig(state_, catalog_);
-    state_.launchConfig.frontierTransfer = false;
+    state_.launchConfig.frontierTransfer = hostileSystemActive(state_);
     state_.launchConfig.destinationId = currentDestination(state_, catalog_).id;
+    state_.launchConfig.burnGoalMultiplier = state_.launchConfig.frontierTransfer
+        ? currentDestination(state_, catalog_).targetMultiplier
+        : defaultProvingTarget(currentDestination(state_, catalog_));
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     state_.screen = Screen::Launch;
     state_.statusLine = std::string(text::status::preflightReady);
@@ -446,7 +451,7 @@ void RocketGameApp::next()
     } else if (state_.screen == Screen::Upgrade) {
         state_.run.offerModuleIds = {};
         state_.run.offerCrewUpgradeIds = {};
-        state_.screen = Screen::Hangar;
+        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         state_.statusLine = std::string(text::status::refitWindowClosed);
         syncLaunchConfig(state_, catalog_);
         save();
@@ -611,6 +616,56 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
     panelDirty_ = true;
 }
 
+void RocketGameApp::openDroneOps()
+{
+    if (state_.screen != Screen::SurfaceExpedition || !state_.run.surfaceExpedition.active || !droneBayUnlocked(state_)) {
+        state_.statusLine = "Research Drone Bay before assigning helper drones.";
+        panelDirty_ = true;
+        return;
+    }
+
+    ensureDroneBayState(state_, catalog_);
+    state_.screen = Screen::DroneOps;
+    state_.statusLine = "Choose helper drones for the next mining run.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::backToSurfaceOps()
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    state_.screen = state_.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::equipDrone(int index)
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    if (equipMiniDrone(state_, catalog_, index)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::upgradeDroneSlot()
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    if (::rocket::upgradeDroneSlot(state_, catalog_)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
 void RocketGameApp::miningMove(double xAxis, double yAxis)
 {
     setMiningMove(state_, xAxis, yAxis);
@@ -703,27 +758,27 @@ void RocketGameApp::attemptFrontierTransfer()
 
     if (state_.run.shipDamage >= tuning::damage::destroyedShipDamage) {
         state_.statusLine = std::string(text::status::launchHullBlocked);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
     if (activeAstronaut(state_) == nullptr) {
         state_.statusLine = std::string(text::status::launchCrewBlocked);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
     if (!canCommitToNextFrontier(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next == nullptr ? std::string(text::status::noFartherFrontier) : std::string(text::status::moreProvingDataBeforeTransfer);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
     const Destination* next = nextDestination(state_, catalog_);
     if (next == nullptr) {
         state_.statusLine = std::string(text::status::noFartherFrontier);
-        panelDirty_ = true;
+        refreshPanel();
         return;
     }
 
@@ -733,7 +788,47 @@ void RocketGameApp::attemptFrontierTransfer()
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     state_.screen = Screen::Launch;
     state_.statusLine = std::string(text::status::preflightReady);
-    panelDirty_ = true;
+    refreshPanel();
+}
+
+void RocketGameApp::openNavigation()
+{
+    if (!navigationAvailable(state_)) {
+        state_.statusLine = "Navigation opens once the Ark is stranded in a new system.";
+        refreshPanel();
+        return;
+    }
+
+    state_.screen = Screen::Navigation;
+    state_.statusLine = "Choose the next shuttle sortie from the Ark.";
+    save();
+    refreshPanel();
+}
+
+void RocketGameApp::arkJump()
+{
+    if (!arkDiscovered(state_) || hostileSystemActive(state_)) {
+        state_.statusLine = "The Ark cannot jump right now.";
+        refreshPanel();
+        return;
+    }
+
+    if (performArkJump(state_, catalog_)) {
+        save();
+    }
+    refreshPanel();
+}
+
+void RocketGameApp::selectNavigationDestination(int index)
+{
+    if (state_.screen != Screen::Navigation) {
+        return;
+    }
+
+    if (rocket::selectNavigationDestination(state_, catalog_, index)) {
+        save();
+    }
+    refreshPanel();
 }
 
 void RocketGameApp::buyOffer(int index)
@@ -742,7 +837,7 @@ void RocketGameApp::buyOffer(int index)
         return;
     }
     if (rocket::buyOffer(state_, catalog_, index)) {
-        state_.screen = Screen::Hangar;
+        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         save();
     }
     panelDirty_ = true;
@@ -977,16 +1072,25 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.heat = event.heat;
         result.warning = event.warning;
         const int sampleCapacity = static_cast<int>(result.telemetry.size());
-        const double plotProgress = std::clamp(result.travelProgress, 0.0, 1.0);
+        double plotProgress = std::clamp(result.travelProgress, 0.0, 1.0);
+        double sampleCeiling = std::max(session_.currentMultiplier, result.targetMultiplier);
+        if (session_.controls.actions.returningHome) {
+            const double outboundProgress = std::clamp(session_.returnTrip.startTravelProgress, 0.0, 1.0);
+            const double returnProgress = flight_progress::returnCompletion(
+                session_.returnTrip.elapsed,
+                session_.returnTrip.duration);
+            plotProgress = std::clamp(
+                outboundProgress + (1.0 - outboundProgress) * returnProgress,
+                0.0,
+                1.0);
+            sampleCeiling = std::max(session_.returnTrip.burnMultiplier, result.targetMultiplier);
+        }
         const int liveSampleCount = std::clamp(
             static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
             2,
             sampleCapacity);
         for (int i = 0; i < liveSampleCount; ++i) {
             const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
-            const double sampleCeiling = session_.controls.actions.returningHome
-                ? displayedMultiplier
-                : std::max(session_.currentMultiplier, result.targetMultiplier);
             const double sampleMultiplier = 1.0 + (sampleCeiling - 1.0) * t;
             const TelemetryEvent sample = telemetryAt(flightModel, sampleMultiplier);
             result.telemetry[static_cast<std::size_t>(i)] = sample.warning;

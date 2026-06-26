@@ -17,6 +17,9 @@ inline constexpr std::string_view closeReliefValve = "close_relief_valve";
 inline constexpr std::string_view jettisonCargo = "jettison_cargo";
 inline constexpr std::string_view next = "next";
 inline constexpr std::string_view attemptFrontier = "attempt_frontier";
+inline constexpr std::string_view openNavigation = "open_navigation";
+inline constexpr std::string_view arkJump = "ark_jump";
+inline constexpr std::string_view selectNavigationDestinationPrefix = "select_navigation:";
 inline constexpr std::string_view rerollOffers = "reroll_offers";
 inline constexpr std::string_view arrivalFlyby = "arrival_flyby";
 inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
@@ -31,6 +34,10 @@ inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
+inline constexpr std::string_view droneOps = "drone_ops";
+inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
+inline constexpr std::string_view equipDronePrefix = "equip_drone:";
+inline constexpr std::string_view upgradeDroneSlot = "upgrade_drone_slot";
 inline constexpr std::string_view skipResearch = "skip_research";
 inline constexpr std::string_view surveySurface = "survey_surface";
 inline constexpr std::string_view mineSurface = "mine_surface";
@@ -56,9 +63,19 @@ inline std::string recruitCandidate(int index)
     return std::string(recruitCandidatePrefix) + std::to_string(index);
 }
 
+inline std::string selectNavigationDestination(int index)
+{
+    return std::string(selectNavigationDestinationPrefix) + std::to_string(index);
+}
+
 inline std::string surfaceUpgrade(int index)
 {
     return std::string(surfaceUpgradePrefix) + std::to_string(index);
+}
+
+inline std::string equipDrone(int index)
+{
+    return std::string(equipDronePrefix) + std::to_string(index);
 }
 } // namespace actions
 

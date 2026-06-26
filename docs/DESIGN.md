@@ -1,5 +1,7 @@
 # Rocket Rogue Design Notes
 
+For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the extracted PDF sources and marks `docs/reference/USG_NOTES.md` as the highest-priority direction.
+
 ## Pillars
 
 - Hidden-risk launch tension with no real-money gambling mechanics.
@@ -24,6 +26,7 @@
 Research and surface expeditions start at Mars. Earth Orbit and Moon remain about proving the rocket program; Mars is the first destination where the agency can land, investigate, and turn discoveries into better long-term capability.
 
 See `docs/POST_ARRIVAL_PHASES.md` for the detailed phase breakdown and Unity prototype takeaways.
+See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay / helper-drone layer.
 
 The first implemented phase model is:
 

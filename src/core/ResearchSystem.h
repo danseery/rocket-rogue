@@ -64,12 +64,24 @@ struct SurfaceUpgradeEffects {
     double drillPower = 0.0;
     double drillCooling = 0.0;
     double drillDurability = 0.0;
+    double hardRockBounceRelief = 0.0;
     double oreYieldChance = 0.0;
     double scannerRadius = 0.0;
     double hazardRelief = 0.0;
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
     double extractionRiskRelief = 0.0;
+    std::vector<std::string> names;
+};
+
+struct MiniDroneLoadoutEffects {
+    double passiveMiningRate = 0.0;
+    double oxygenSeconds = 0.0;
+    double scannerRadius = 0.0;
+    double drillIntegrityRelief = 0.0;
+    double hardRockBounceRelief = 0.0;
+    double extractionRiskRelief = 0.0;
+    double enemyEncounterRelief = 0.0;
     std::vector<std::string> names;
 };
 
@@ -118,6 +130,13 @@ SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta);
 SurfaceCrewEffects surfaceCrewEffects(const GameState& state);
 SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile);
 SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog);
+bool droneBayUnlocked(const GameState& state);
+MaterialInventory droneSlotUpgradeCost(int nextSlot);
+void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
+bool canUpgradeDroneSlot(const GameState& state);
+bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog);
+bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
+MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);
 std::string researchOutcomeSummary(const ResearchOutcome& outcome);

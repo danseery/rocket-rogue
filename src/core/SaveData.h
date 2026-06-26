@@ -21,8 +21,12 @@ struct SaveData {
     int shallowRecoveryStreak = 0;
     int cleanShallowRecoveryStreak = 0;
     Screen screen = Screen::Hangar;
+    CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
+    ArkState ark;
+    NavigationState navigation;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
+    std::vector<std::string> surfaceUpgradeIds;
     std::vector<std::string> crewUpgradeIds;
     std::vector<std::string> researchProjectIds;
     ArrivalOpsState arrivalOps;
@@ -31,6 +35,11 @@ struct SaveData {
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
     MaterialInventory materials;
+    std::vector<std::string> ownedModuleIds;
+    std::vector<std::string> defaultEquippedModuleIds;
+    int droneBaySlots = 0;
+    std::vector<std::string> ownedDroneIds;
+    std::vector<std::string> equippedDroneIds;
     std::vector<ArtifactRecord> artifacts;
     int furthestTier = 0;
     int shipsLost = 0;

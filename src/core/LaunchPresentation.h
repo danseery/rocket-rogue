@@ -113,6 +113,19 @@ inline const Destination& launchDisplayDestination(const GameState& state, const
     return currentDestination(state, catalog);
 }
 
+inline bool advancedFlightControlsUnlocked(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel)
+{
+    const Destination& destination = launchDisplayDestination(state, catalog, flightModel);
+    if (destination.tier >= 1 || flightModel.config.frontierTransfer) {
+        return true;
+    }
+
+    const Destination* next = nextDestination(state, catalog);
+    return next != nullptr &&
+        next->id == content::destination::moon &&
+        canCommitToNextFrontier(state, catalog);
+}
+
 inline LaunchPanelPresentation launchPanelPresentation(
     const GameState& state,
     const ContentCatalog& catalog,
@@ -150,7 +163,9 @@ inline LaunchPanelPresentation launchPanelPresentation(
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(flightModel.pressureModifier)));
     presentation.primaryActions = primaryFlightActions(actions);
-    presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
+    if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
+        presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
+    }
     return presentation;
 }
 

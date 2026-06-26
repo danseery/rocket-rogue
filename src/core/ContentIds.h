@@ -14,6 +14,8 @@ inline constexpr const char* surfaceDrills = "surface_drills";
 inline constexpr const char* cargoRigs = "cargo_rigs";
 inline constexpr const char* analysisLab = "analysis_lab";
 inline constexpr const char* perimeterDrones = "perimeter_drones";
+inline constexpr const char* arkScaffold = "ark_scaffold";
+inline constexpr const char* droneBay = "drone_bay";
 } // namespace unlock
 
 namespace module {
@@ -62,6 +64,8 @@ inline constexpr const char* regolithDrillRig = "regolith_drill_rig";
 inline constexpr const char* cargoReturnRig = "cargo_return_rig";
 inline constexpr const char* missionAnalysisLab = "mission_analysis_lab";
 inline constexpr const char* perimeterDroneNetwork = "perimeter_drone_network";
+inline constexpr const char* arkScaffoldProgram = "ark_scaffold_program";
+inline constexpr const char* droneBayProgram = "drone_bay_program";
 } // namespace research
 
 namespace surfaceUpgrade {
@@ -72,6 +76,15 @@ inline constexpr const char* microDroneBay = "micro_drone_bay";
 inline constexpr const char* shockMounts = "shock_mounts";
 inline constexpr const char* oreScentArray = "ore_scent_array";
 } // namespace surfaceUpgrade
+
+namespace drone {
+inline constexpr const char* miningDrone = "mining_drone";
+inline constexpr const char* resourceDrone = "resource_drone";
+inline constexpr const char* surveyDrone = "survey_drone";
+inline constexpr const char* stabilizerDrone = "stabilizer_drone";
+inline constexpr const char* attackDrone = "attack_drone";
+inline constexpr const char* defenseDrone = "defense_drone";
+} // namespace drone
 
 namespace frame {
 inline constexpr const char* pathfinder = "pathfinder";

@@ -68,6 +68,14 @@ std::vector<const Astronaut*> recruitCandidateTemplates(const GameState& state, 
 bool recruitCrew(GameState& state, const ContentCatalog& catalog);
 bool recruitCrew(GameState& state, const ContentCatalog& catalog, int candidateIndex);
 bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog);
+bool arkDiscovered(const GameState& state);
+bool hostileSystemActive(const GameState& state);
+bool navigationAvailable(const GameState& state);
+bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog);
+std::vector<const Destination*> navigationDestinations(const GameState& state, const ContentCatalog& catalog);
+void discoverArk(GameState& state, const ContentCatalog& catalog);
+bool performArkJump(GameState& state, const ContentCatalog& catalog);
+bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog, int index);
 double defaultProvingTarget(const Destination& destination);
 void unlockFromBlueprints(GameState& state);
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& outcome);

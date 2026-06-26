@@ -50,7 +50,7 @@ for (const token of ["rocket_core", "rocket_core_tests", "rocket_rogue", "EMSCRI
 }
 
 const content = existsSync("src/core/Content.cpp") ? readFileSync("src/core/Content.cpp", "utf8") : "";
-for (const token of ["Earth Orbit", "Nearby Galaxy", "Abort Tower", "Predictive Guidance"]) {
+for (const token of ["Earth Orbit", "Rift Belt", "Abort Tower", "Predictive Guidance"]) {
   if (!content.includes(token)) {
     console.error(`content missing token: ${token}`);
     failed = true;

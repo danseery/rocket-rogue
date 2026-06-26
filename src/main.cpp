@@ -172,6 +172,36 @@ void rr_attempt_frontier()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_open_navigation()
+{
+    if (g_app) {
+        g_app->openNavigation();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_ark_jump()
+{
+    if (g_app) {
+        g_app->arkJump();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_select_navigation(int index)
+{
+    if (g_app) {
+        g_app->selectNavigationDestination(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_buy_offer(int index)
 {
     if (g_app) {
@@ -286,6 +316,46 @@ void rr_surface_upgrade(int index)
 {
     if (g_app) {
         g_app->selectSurfaceUpgrade(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_drone_ops()
+{
+    if (g_app) {
+        g_app->openDroneOps();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_ops()
+{
+    if (g_app) {
+        g_app->backToSurfaceOps();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_equip_drone(int index)
+{
+    if (g_app) {
+        g_app->equipDrone(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_upgrade_drone_slot()
+{
+    if (g_app) {
+        g_app->upgradeDroneSlot();
     }
 }
 

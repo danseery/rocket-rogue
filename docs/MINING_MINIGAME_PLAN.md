@@ -1,5 +1,9 @@
 # Mining Mini-Game Plan
 
+See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current mining direction should follow `docs/reference/USG_NOTES.md` first: chunky/mobile, Straylight-inspired, fog-of-war, destructible terrain, excavation/logistics/endurance roles, and passive defense only after the solar system.
+
+See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay layer that modifies mining, scanner, logistics, and later passive-defense behavior.
+
 This plan layers a playable mining phase onto the current post-arrival flow without replacing the existing launch, arrival, research, or surface-expedition architecture.
 
 ## Design Goal
