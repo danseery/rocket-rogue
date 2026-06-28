@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -347,6 +348,282 @@ std::string surfaceDeltaSummary(const SurfaceActionOutcome& outcome)
     return joinParts(parts);
 }
 
+struct FlybyPathSample {
+    double distance = 0.0;
+    double progress = 0.0;
+};
+
+struct FlybyTravelSample {
+    double progress = 0.0;
+    int bestZone = 0;
+    int worstZone = 2;
+    bool finished = false;
+};
+
+struct FlybyFinishHit {
+    bool hit = false;
+    double t = 1.0;
+};
+
+double cubic(double a, double b, double c, double d, double t)
+{
+    const double u = 1.0 - t;
+    return u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
+}
+
+FlybyPathSample nearestFlybyPathSample(double shipX, double shipY)
+{
+    constexpr int sampleCount = 240;
+    double bestDistanceSq = std::numeric_limits<double>::max();
+    double bestProgress = 0.0;
+    double previousX = tuning::flyby::startX;
+    double previousY = tuning::flyby::startY;
+
+    for (int i = 1; i <= sampleCount; ++i) {
+        const double t = static_cast<double>(i) / static_cast<double>(sampleCount);
+        const double currentX = cubic(tuning::flyby::startX, tuning::flyby::control1X, tuning::flyby::control2X, tuning::flyby::endX, t);
+        const double currentY = cubic(tuning::flyby::startY, tuning::flyby::control1Y, tuning::flyby::control2Y, tuning::flyby::endY, t);
+        const double segmentX = currentX - previousX;
+        const double segmentY = currentY - previousY;
+        const double segmentLengthSq = segmentX * segmentX + segmentY * segmentY;
+        double segmentShare = 0.0;
+        if (segmentLengthSq > 0.000001) {
+            segmentShare = std::clamp(((shipX - previousX) * segmentX + (shipY - previousY) * segmentY) / segmentLengthSq, 0.0, 1.0);
+        }
+        const double projectedX = previousX + segmentX * segmentShare;
+        const double projectedY = previousY + segmentY * segmentShare;
+        const double dx = shipX - projectedX;
+        const double dy = shipY - projectedY;
+        const double distanceSq = dx * dx + dy * dy;
+        if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestProgress = (static_cast<double>(i - 1) + segmentShare) / static_cast<double>(sampleCount);
+        }
+        previousX = currentX;
+        previousY = currentY;
+    }
+
+    return {std::sqrt(bestDistanceSq), bestProgress};
+}
+
+std::pair<double, double> flybyEndTangent()
+{
+    const double dx = 3.0 * (tuning::flyby::endX - tuning::flyby::control2X);
+    const double dy = 3.0 * (tuning::flyby::endY - tuning::flyby::control2Y);
+    const double length = std::max(0.001, std::hypot(dx, dy));
+    return {dx / length, dy / length};
+}
+
+double flybyFinishPlaneValue(double shipX, double shipY)
+{
+    const auto [tangentX, tangentY] = flybyEndTangent();
+    return (shipX - tuning::flyby::endX) * tangentX + (shipY - tuning::flyby::endY) * tangentY;
+}
+
+int flybyZoneForDistance(double distance)
+{
+    if (distance <= tuning::flyby::perfectBand) {
+        return 2;
+    }
+    if (distance <= tuning::flyby::goodBand) {
+        return 1;
+    }
+    return 0;
+}
+
+int flybyZoneAt(double shipX, double shipY)
+{
+    return flybyZoneForDistance(nearestFlybyPathSample(shipX, shipY).distance);
+}
+
+void addFlybyTravelSample(FlybyTravelSample& result, const FlybyPathSample& sample)
+{
+    const int zone = flybyZoneForDistance(sample.distance);
+    result.progress = std::max(result.progress, sample.progress);
+    result.bestZone = std::max(result.bestZone, zone);
+    result.worstZone = std::min(result.worstZone, zone);
+}
+
+FlybyFinishHit flybyFinishLineHit(double startX, double startY, double endX, double endY)
+{
+    const double startValue = flybyFinishPlaneValue(startX, startY);
+    const double endValue = flybyFinishPlaneValue(endX, endY);
+    if (startValue >= 0.0) {
+        return {true, 0.0};
+    }
+    if (endValue >= 0.0 && endValue > startValue) {
+        return {true, std::clamp(startValue / (startValue - endValue), 0.0, 1.0)};
+    }
+    return {};
+}
+
+FlybyTravelSample sampleFlybyTravel(double startX, double startY, double endX, double endY)
+{
+    const double distance = std::hypot(endX - startX, endY - startY);
+    const int sampleCount = std::clamp(
+        static_cast<int>(std::ceil(distance / std::max(0.001, tuning::flyby::perfectBand * 0.15))),
+        2,
+        96);
+
+    FlybyTravelSample result;
+    addFlybyTravelSample(result, nearestFlybyPathSample(startX, startY));
+    const FlybyFinishHit finishHit = flybyFinishLineHit(startX, startY, endX, endY);
+    if (finishHit.hit && finishHit.t <= 0.0) {
+        result.progress = std::max(result.progress, tuning::flyby::finishProgress);
+        result.finished = true;
+        return result;
+    }
+
+    const double sampleEndT = finishHit.hit ? std::clamp(finishHit.t, 0.0, 1.0) : 1.0;
+
+    for (int i = 0; i <= sampleCount; ++i) {
+        const double t = std::min(sampleEndT, static_cast<double>(i) / static_cast<double>(sampleCount));
+        if (t <= 0.0) {
+            continue;
+        }
+        const double x = startX + (endX - startX) * t;
+        const double y = startY + (endY - startY) * t;
+        const FlybyPathSample sample = nearestFlybyPathSample(x, y);
+
+        addFlybyTravelSample(result, sample);
+        if (t >= sampleEndT) {
+            break;
+        }
+    }
+
+    if (finishHit.hit) {
+        result.progress = std::max(result.progress, tuning::flyby::finishProgress);
+        result.finished = true;
+    }
+    return result;
+}
+
+double flybyGravityForDestination(const Destination& destination)
+{
+    if (destination.tier <= 2) {
+        return tuning::flyby::gravityEasy;
+    }
+    if (destination.tier == 3) {
+        return tuning::flyby::gravityMedium;
+    }
+    if (destination.tier == 4) {
+        return tuning::flyby::gravityLarge;
+    }
+    return tuning::flyby::gravityDeep;
+}
+
+double flybyPlanetColliderRadius(const Destination& destination)
+{
+    return tuning::flyby::planetColliderBaseRadius
+        + static_cast<double>(std::min(4, destination.tier)) * tuning::flyby::planetColliderTierRadius
+        + tuning::flyby::planetColliderPadding;
+}
+
+bool flybyShipIntersectsPlanet(const FlybyRunState& flyby)
+{
+    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    const double forwardX = speed > 0.001 ? flyby.velocityX / speed : 1.0;
+    const double forwardY = speed > 0.001 ? flyby.velocityY / speed : 0.0;
+    const double rightX = forwardY;
+    const double rightY = -forwardX;
+    const double dx = tuning::flyby::destinationX - flyby.shipX;
+    const double dy = tuning::flyby::destinationY - flyby.shipY;
+    const double localX = std::clamp(dx * forwardX + dy * forwardY, -tuning::flyby::shipColliderHalfLength, tuning::flyby::shipColliderHalfLength);
+    const double localY = std::clamp(dx * rightX + dy * rightY, -tuning::flyby::shipColliderHalfWidth, tuning::flyby::shipColliderHalfWidth);
+    const double closestX = flyby.shipX + forwardX * localX + rightX * localY;
+    const double closestY = flyby.shipY + forwardY * localX + rightY * localY;
+    return std::hypot(tuning::flyby::destinationX - closestX, tuning::flyby::destinationY - closestY) <= flyby.planetColliderRadius;
+}
+
+std::pair<double, double> flybyShipNosePoint(double shipX, double shipY, double velocityX, double velocityY)
+{
+    const double speed = std::hypot(velocityX, velocityY);
+    if (speed <= 0.001) {
+        return {shipX, shipY};
+    }
+    return {
+        shipX + (velocityX / speed) * tuning::flyby::shipColliderHalfLength,
+        shipY + (velocityY / speed) * tuning::flyby::shipColliderHalfLength
+    };
+}
+
+double flybyBaseReward(const Destination& destination)
+{
+    return std::max(tuning::flyby::goodRewardFloor, destination.baseReward * tuning::flyby::goodRewardFactor);
+}
+
+double flybySpeedScale(const FlybyRunState& flyby)
+{
+    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    const double baselineSpeed = std::hypot(tuning::flyby::startVelocityX, tuning::flyby::startVelocityY);
+    const double range = std::max(0.001, tuning::flyby::maxSpeed - baselineSpeed);
+    const double fastShare = std::clamp((speed - baselineSpeed) / range, 0.0, 1.0);
+    return 1.0 + fastShare * (tuning::flyby::slingshotMaxSpeedScale - 1.0);
+}
+
+double flybyCompletionBonusScale(const FlybyRunState& flyby)
+{
+    const double completionWindow = std::max(0.01, flyby.durationSeconds - tuning::flyby::minimumFinishSeconds);
+    const double remainingWindow = std::clamp(flyby.durationSeconds - flyby.elapsedSeconds, 0.0, completionWindow);
+    const double fastShare = std::clamp(remainingWindow / completionWindow, 0.0, 1.0);
+    return 1.0 + fastShare * (tuning::flyby::completionRewardMaxScale - 1.0);
+}
+
+void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destination)
+{
+    const bool existingSlingshotAwarded = flyby.slingshotAwarded;
+    const double existingFuelBoost = flyby.slingshotFuelBoost;
+    const double existingSpeedBoost = flyby.slingshotSpeedBoost;
+    const double existingSpeedScale = flyby.slingshotSpeedScale;
+
+    flyby.rewardCredits = 0.0;
+    flyby.blueprintGain = 0;
+    flyby.rewardBonusScale = 1.0;
+    flyby.slingshotAwarded = false;
+    flyby.slingshotFuelBoost = 0.0;
+    flyby.slingshotSpeedBoost = 0.0;
+    flyby.slingshotSpeedScale = 1.0;
+
+    if (flyby.result == FlybyGrade::Perfect) {
+        flyby.slingshotAwarded = true;
+        if (existingSlingshotAwarded) {
+            flyby.slingshotSpeedScale = existingSpeedScale;
+            flyby.slingshotFuelBoost = existingFuelBoost;
+            flyby.slingshotSpeedBoost = existingSpeedBoost;
+        } else {
+            flyby.slingshotSpeedScale = flybySpeedScale(flyby);
+            flyby.slingshotFuelBoost = tuning::flyby::slingshotFuelBoost * flyby.slingshotSpeedScale;
+            flyby.slingshotSpeedBoost = tuning::flyby::slingshotSpeedBoost * flyby.slingshotSpeedScale;
+        }
+    }
+
+    if (flyby.result == FlybyGrade::Miss || flyby.result == FlybyGrade::Active || destination == nullptr) {
+        return;
+    }
+
+    const double baseReward = flybyBaseReward(*destination);
+    flyby.rewardBonusScale = flybyCompletionBonusScale(flyby);
+    flyby.rewardCredits = (flyby.result == FlybyGrade::Perfect
+        ? baseReward * tuning::flyby::perfectRewardMultiplier
+        : baseReward) * flyby.rewardBonusScale;
+    flyby.blueprintGain = tuning::flyby::goodBlueprintGain;
+}
+
+void pushFlybyTrailPoint(FlybyRunState& flyby, double x, double y)
+{
+    constexpr std::size_t maxTrailPoints = 96;
+    if (!flyby.trailPoints.empty()) {
+        const FlybyTrailPoint& last = flyby.trailPoints.back();
+        if (std::hypot(last.x - x, last.y - y) < 0.012) {
+            return;
+        }
+    }
+    flyby.trailPoints.push_back({x, y});
+    if (flyby.trailPoints.size() > maxTrailPoints) {
+        flyby.trailPoints.erase(flyby.trailPoints.begin());
+    }
+}
+
 } // namespace
 
 bool destinationSupportsResearch(const Destination& destination)
@@ -449,6 +726,7 @@ void clearResearchAndExpeditionState(GameState& state)
 {
     state.run.researchProjectIds = {};
     state.run.arrivalOps = {};
+    state.run.flyby = {};
     state.run.surfaceExpedition = {};
 }
 
@@ -459,15 +737,294 @@ void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
 
 void completeArrivalFlyby(GameState& state, const ContentCatalog& catalog)
 {
+    applyFlybyReward(state, catalog, FlybyGrade::Good);
+    state.run.arrivalOps = {};
+}
+
+void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
+{
     const Destination* destination = currentResearchDestination(state, catalog);
+    if (destination == nullptr || !canRunArrivalFlyby(state, catalog)) {
+        return;
+    }
+
+    FlybyRunState flyby;
+    flyby.active = true;
+    flyby.destinationId = destination->id;
+    flyby.durationSeconds = tuning::flyby::durationSeconds;
+    flyby.shipX = tuning::flyby::startX;
+    flyby.shipY = tuning::flyby::startY;
+    flyby.velocityX = tuning::flyby::startVelocityX;
+    flyby.velocityY = tuning::flyby::startVelocityY;
+    flyby.gravityStrength = flybyGravityForDestination(*destination);
+    flyby.planetColliderRadius = flybyPlanetColliderRadius(*destination);
+    const auto [scoreX, scoreY] = flybyShipNosePoint(flyby.shipX, flyby.shipY, flyby.velocityX, flyby.velocityY);
+    flyby.pathProgress = nearestFlybyPathSample(scoreX, scoreY).progress;
+    flyby.currentZone = flybyZoneAt(scoreX, scoreY);
+    flyby.worstZone = flyby.currentZone;
+    pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
+    state.run.flyby = flyby;
+    state.run.arrivalOps = {true, destination->id};
+    state.screen = Screen::Flyby;
+}
+
+void setFlybyMove(GameState& state, double xAxis, double yAxis)
+{
+    if (!state.run.flyby.active || state.run.flyby.completed) {
+        return;
+    }
+    state.run.flyby.inputX = std::clamp(xAxis, -1.0, 1.0);
+    state.run.flyby.inputY = std::clamp(yAxis, -1.0, 1.0);
+}
+
+FlybyGrade flybyGrade(const FlybyRunState& flyby)
+{
+    if (!flyby.completed) {
+        return FlybyGrade::Active;
+    }
+    if (flyby.collidedWithBody) {
+        return FlybyGrade::Miss;
+    }
+    if (flyby.worstZone <= 0) {
+        return FlybyGrade::Miss;
+    }
+    if (flyby.pathProgress < tuning::flyby::finishProgress) {
+        return FlybyGrade::Miss;
+    }
+    if (flyby.worstZone >= 2) {
+        return FlybyGrade::Perfect;
+    }
+    if (flyby.worstZone >= 1) {
+        return FlybyGrade::Good;
+    }
+    return FlybyGrade::Miss;
+}
+
+void updateFlybyRun(GameState& state, double deltaSeconds)
+{
+    FlybyRunState& flyby = state.run.flyby;
+    if (!flyby.active || flyby.completed) {
+        return;
+    }
+
+    const auto concludeFlybyImpact = [&]() {
+        flyby.collidedWithBody = true;
+        flyby.completed = true;
+        flyby.result = FlybyGrade::Miss;
+        flyby.velocityX = 0.0;
+        flyby.velocityY = 0.0;
+        flyby.inputX = 0.0;
+        flyby.inputY = 0.0;
+        state.run.shipDamage = std::clamp(
+            state.run.shipDamage + tuning::flyby::impactHullDamage,
+            0,
+            tuning::damage::destroyedShipDamage);
+    };
+    if (flybyShipIntersectsPlanet(flyby)) {
+        concludeFlybyImpact();
+        return;
+    }
+
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    const double previousX = flyby.shipX;
+    const double previousY = flyby.shipY;
+    const double previousVelocityX = flyby.velocityX;
+    const double previousVelocityY = flyby.velocityY;
+    double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    double headingX = speed > 0.001 ? flyby.velocityX / speed : 1.0;
+    double headingY = speed > 0.001 ? flyby.velocityY / speed : 0.0;
+
+    const double turnRadians = std::clamp(flyby.inputX, -1.0, 1.0) * tuning::flyby::turnRateRadians * dt;
+    if (std::abs(turnRadians) > 0.000001) {
+        const double c = std::cos(turnRadians);
+        const double s = std::sin(turnRadians);
+        const double rotatedX = headingX * c - headingY * s;
+        const double rotatedY = headingX * s + headingY * c;
+        headingX = rotatedX;
+        headingY = rotatedY;
+    }
+
+    const double throttle = std::clamp(flyby.inputY, -1.0, 1.0);
+    if (throttle > 0.0) {
+        speed += throttle * tuning::flyby::thrustAcceleration * dt;
+    } else if (throttle < 0.0) {
+        speed += throttle * tuning::flyby::brakeAcceleration * dt;
+    }
+    speed = std::clamp(speed, tuning::flyby::minSpeed, tuning::flyby::maxSpeed);
+    flyby.velocityX = headingX * speed;
+    flyby.velocityY = headingY * speed;
+
+    const double gravityDx = tuning::flyby::destinationX - flyby.shipX;
+    const double gravityDy = tuning::flyby::destinationY - flyby.shipY;
+    const double gravityDistance = std::max(0.001, std::hypot(gravityDx, gravityDy));
+    const double gravityAcceleration = std::min(
+        tuning::flyby::maxGravityAcceleration,
+        flyby.gravityStrength / (gravityDistance * gravityDistance + tuning::flyby::gravitySoftening));
+    flyby.velocityX += (gravityDx / gravityDistance) * gravityAcceleration * dt;
+    flyby.velocityY += (gravityDy / gravityDistance) * gravityAcceleration * dt;
+
+    const double drag = std::max(0.0, 1.0 - tuning::flyby::driftDrag * dt);
+    flyby.velocityX *= drag;
+    flyby.velocityY *= drag;
+    const double postGravitySpeed = std::hypot(flyby.velocityX, flyby.velocityY);
+    if (postGravitySpeed > tuning::flyby::maxSpeed) {
+        const double limit = tuning::flyby::maxSpeed / postGravitySpeed;
+        flyby.velocityX *= limit;
+        flyby.velocityY *= limit;
+    }
+
+    flyby.shipX += flyby.velocityX * dt;
+    flyby.shipY += flyby.velocityY * dt;
+    pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
+
+    const auto [previousScoreX, previousScoreY] = flybyShipNosePoint(previousX, previousY, previousVelocityX, previousVelocityY);
+    const auto [currentScoreX, currentScoreY] = flybyShipNosePoint(flyby.shipX, flyby.shipY, flyby.velocityX, flyby.velocityY);
+    const FlybyTravelSample travelSample = sampleFlybyTravel(previousScoreX, previousScoreY, currentScoreX, currentScoreY);
+    flyby.pathProgress = std::max(flyby.pathProgress, travelSample.progress);
+    flyby.worstZone = std::min(flyby.worstZone, travelSample.worstZone);
+    flyby.currentZone = travelSample.worstZone;
+    if (flyby.currentZone >= 2) {
+        flyby.perfectSeconds += dt;
+        flyby.currentMissStreak = 0.0;
+    } else if (flyby.currentZone == 1) {
+        flyby.goodSeconds += dt;
+        flyby.currentMissStreak = 0.0;
+    } else {
+        flyby.missSeconds += dt;
+        flyby.currentMissStreak += dt;
+        flyby.longestMissStreak = std::max(flyby.longestMissStreak, flyby.currentMissStreak);
+    }
+
+    flyby.elapsedSeconds += dt;
+    if (flybyShipIntersectsPlanet(flyby)) {
+        concludeFlybyImpact();
+        flyby.missSeconds += dt;
+        return;
+    }
+
+    if (flyby.currentZone <= 0) {
+        flyby.completed = true;
+        flyby.result = FlybyGrade::Miss;
+        flyby.velocityX = 0.0;
+        flyby.velocityY = 0.0;
+        flyby.inputX = 0.0;
+        flyby.inputY = 0.0;
+        return;
+    }
+
+    if (travelSample.finished) {
+        flyby.elapsedSeconds = std::min(flyby.elapsedSeconds, flyby.durationSeconds);
+        flyby.completed = true;
+        flyby.result = flybyGrade(flyby);
+        populateFlybyRewardPreview(flyby, nullptr);
+        flyby.velocityX = 0.0;
+        flyby.velocityY = 0.0;
+        flyby.inputX = 0.0;
+        flyby.inputY = 0.0;
+        return;
+    }
+
+    const double maxX = std::max(0.35, 1.0 + tuning::flyby::boundaryPadding);
+    const double maxY = std::max(0.35, 1.0 + tuning::flyby::boundaryPadding);
+    if (flyby.shipX < -maxX || flyby.shipX > maxX || flyby.shipY < -maxY || flyby.shipY > maxY) {
+        flyby.shipX = std::clamp(flyby.shipX, -maxX, maxX);
+        flyby.shipY = std::clamp(flyby.shipY, -maxY, maxY);
+        flyby.completed = true;
+        flyby.result = FlybyGrade::Miss;
+        flyby.worstZone = 0;
+        flyby.currentZone = 0;
+        flyby.velocityX = 0.0;
+        flyby.velocityY = 0.0;
+        flyby.inputX = 0.0;
+        flyby.inputY = 0.0;
+        flyby.missSeconds += dt;
+        return;
+    }
+
+    if (flyby.elapsedSeconds >= flyby.durationSeconds) {
+        flyby.elapsedSeconds = flyby.durationSeconds;
+        flyby.completed = true;
+        flyby.result = FlybyGrade::Miss;
+        flyby.velocityX = 0.0;
+        flyby.velocityY = 0.0;
+        flyby.inputX = 0.0;
+        flyby.inputY = 0.0;
+    }
+}
+
+void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrade grade)
+{
+    if (grade == FlybyGrade::Active || grade == FlybyGrade::Miss) {
+        return;
+    }
+
+    const Destination* destination = currentResearchDestination(state, catalog);
+    if (destination == nullptr && !state.run.flyby.destinationId.empty()) {
+        destination = catalog.findDestination(state.run.flyby.destinationId);
+    }
     if (destination == nullptr) {
         return;
     }
+
     addDestinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id);
-    state.meta.blueprintProgress += 1;
-    state.run.credits += std::max(12.0, destination->baseReward * 0.35);
+    populateFlybyRewardPreview(state.run.flyby, destination);
+    const int blueprintGain = state.run.flyby.blueprintGain;
+    const double reward = state.run.flyby.rewardCredits;
+    state.meta.blueprintProgress += blueprintGain;
+    state.run.credits += reward;
+    if (grade == FlybyGrade::Perfect) {
+        state.run.nextLaunchFuelBoost = std::max(state.run.nextLaunchFuelBoost, state.run.flyby.slingshotFuelBoost);
+        state.run.nextLaunchSpeedBoost = std::max(state.run.nextLaunchSpeedBoost, state.run.flyby.slingshotSpeedBoost);
+    }
     unlockFromBlueprints(state);
-    state.run.arrivalOps = {};
+}
+
+void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
+{
+    if (!state.run.flyby.active || !state.run.flyby.completed) {
+        return;
+    }
+
+    FlybyRunState flyby = state.run.flyby;
+    const FlybyGrade grade = flyby.result == FlybyGrade::Active ? flybyGrade(flyby) : flyby.result;
+    switch (grade) {
+    case FlybyGrade::Miss:
+        state.meta.totalFlybyMisses += 1;
+        break;
+    case FlybyGrade::Good:
+        state.meta.totalFlybyGoods += 1;
+        break;
+    case FlybyGrade::Perfect:
+        state.meta.totalFlybyPerfects += 1;
+        break;
+    case FlybyGrade::Active:
+        break;
+    }
+    applyFlybyReward(state, catalog, grade);
+    const Destination* destination = catalog.findDestination(flyby.destinationId);
+    state.run.arrivalOps = {true, destination == nullptr ? flyby.destinationId : destination->id};
+    state.run.flyby = {};
+    state.screen = Screen::ArrivalOps;
+}
+
+void abortFlybyRun(GameState& state)
+{
+    if (!state.run.flyby.active || state.run.flyby.completed) {
+        return;
+    }
+
+    const std::string destinationId = state.run.flyby.destinationId;
+    state.run.arrivalOps = {true, destinationId};
+    state.run.flyby = {};
+    state.screen = Screen::ArrivalOps;
+}
+
+void acknowledgeFlybyResult(GameState& state)
+{
+    if (!state.run.flyby.active || !state.run.flyby.completed) {
+        return;
+    }
+    state.run.arrivalOps = {true, state.run.flyby.destinationId};
 }
 
 void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog)
@@ -982,6 +1539,50 @@ void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalo
     if (expedition.surfaceUpgradeOfferAvailable) {
         expedition.surfaceUpgradeOffersSeen += 1;
     }
+}
+
+bool rerollSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active || !expedition.surfaceUpgradeOfferAvailable) {
+        return false;
+    }
+
+    const double cost = offerRerollCost(state);
+    if (state.run.credits < cost) {
+        state.statusLine = "Not enough mission credits to reroll the field-upgrade board.";
+        return false;
+    }
+
+    std::vector<const SurfaceUpgrade*> available;
+    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
+        if (std::find(state.run.surfaceUpgradeIds.begin(), state.run.surfaceUpgradeIds.end(), upgrade.id) == state.run.surfaceUpgradeIds.end()) {
+            available.push_back(&upgrade);
+        }
+    }
+    if (available.empty()) {
+        return false;
+    }
+
+    state.run.credits -= cost;
+    state.run.offerRerollsThisExpedition += 1;
+
+    expedition.surfaceUpgradeOfferIds = {};
+    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && !available.empty(); ++slot) {
+        const int picked = rng.rangeInt(0, static_cast<int>(available.size()) - 1);
+        expedition.surfaceUpgradeOfferIds[slot] = available[static_cast<std::size_t>(picked)]->id;
+        available.erase(available.begin() + picked);
+    }
+
+    expedition.surfaceUpgradeOfferAvailable = std::any_of(
+        expedition.surfaceUpgradeOfferIds.begin(),
+        expedition.surfaceUpgradeOfferIds.end(),
+        [](const std::string& id) {
+            return !id.empty();
+        });
+
+    state.statusLine = "Field upgrade board rerolled. Next reroll costs " + std::to_string(static_cast<int>(offerRerollCost(state))) + " credits.";
+    return expedition.surfaceUpgradeOfferAvailable;
 }
 
 bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index)

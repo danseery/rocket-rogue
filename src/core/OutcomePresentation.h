@@ -29,9 +29,18 @@ struct AchievementPresentation {
     std::string detail;
 };
 
+struct CrewFatePresentation {
+    bool active = false;
+    std::string_view cssClass;
+    std::string_view label;
+    std::string_view title;
+    std::string_view detail;
+};
+
 struct LaunchOutcomePresentation {
     std::string_view label;
     std::string_view nextActionLabel;
+    CrewFatePresentation crewFate;
     std::vector<LaunchOutcomeMetricGroupPresentation> metricGroups;
     std::vector<std::string> notes;
     std::vector<AchievementPresentation> achievements;
@@ -100,10 +109,37 @@ inline std::vector<AchievementPresentation> launchOutcomeAchievements(const Laun
         achievements.push_back({
             content::achievement::skinOfYourTeeth,
             text::panel::achievements::skinOfYourTeethTitle,
-            text::panel::achievements::skinOfYourTeethDetail(display::multiplier(survivalMargin))
+            text::panel::achievements::skinOfYourTeethDetail(
+                display::multiplier(survivalMargin),
+                display::signedPercent(tuning::records::skinOfYourTeethCreditBonus))
         });
     }
     return achievements;
+}
+
+inline CrewFatePresentation launchOutcomeCrewFate(const LaunchOutcome& outcome)
+{
+    if (outcome.crewKilled) {
+        return {
+            true,
+            "lost",
+            text::panel::crewFate::label,
+            text::panel::crewFate::lostTitle,
+            text::panel::crewFate::lostDetail
+        };
+    }
+
+    if (outcome.type == LaunchResultType::Destroyed) {
+        return {
+            true,
+            "recovered",
+            text::panel::crewFate::label,
+            text::panel::crewFate::recoveredTitle,
+            outcome.crewInjured ? text::panel::crewFate::recoveredInjuredDetail : text::panel::crewFate::recoveredDetail
+        };
+    }
+
+    return {};
 }
 
 inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGroups(const LaunchOutcome& outcome)
@@ -142,6 +178,7 @@ inline LaunchOutcomePresentation launchOutcomePresentation(const LaunchOutcome& 
     return {
         launchOutcomeLabel(outcome),
         launchOutcomeNextActionLabel(outcome, opensPostArrivalPhases),
+        launchOutcomeCrewFate(outcome),
         launchOutcomeMetricGroups(outcome),
         launchOutcomeNotes(outcome, opensPostArrivalPhases),
         launchOutcomeAchievements(outcome)

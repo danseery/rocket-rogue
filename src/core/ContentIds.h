@@ -75,6 +75,11 @@ inline constexpr const char* cargoSkids = "cargo_skids";
 inline constexpr const char* microDroneBay = "micro_drone_bay";
 inline constexpr const char* shockMounts = "shock_mounts";
 inline constexpr const char* oreScentArray = "ore_scent_array";
+inline constexpr const char* coolantMist = "coolant_mist";
+inline constexpr const char* recoilBraces = "recoil_braces";
+inline constexpr const char* oreHopper = "ore_hopper";
+inline constexpr const char* emergencyWinch = "emergency_winch";
+inline constexpr const char* deepEchoMapper = "deep_echo_mapper";
 } // namespace surfaceUpgrade
 
 namespace drone {

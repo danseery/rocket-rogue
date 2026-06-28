@@ -3,6 +3,7 @@
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/HangarPresentation.h"
+#include "core/InventoryPresentation.h"
 #include "core/LaunchPresentation.h"
 #include "core/LaunchReadinessPresentation.h"
 #include "core/MiningPresentation.h"
@@ -16,6 +17,8 @@
 #include "core/GameUi.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -71,10 +74,14 @@ std::string phaseTitle(Screen screen)
         return "Arrival";
     case Screen::ArrivalOps:
         return "Approach";
+    case Screen::Flyby:
+        return "Flyby";
     case Screen::Research:
         return "Science";
     case Screen::SurfaceExpedition:
         return "Surface Ops";
+    case Screen::SurfaceUpgrade:
+        return "Field Upgrade";
     case Screen::Mining:
         return "Mining";
     case Screen::DroneOps:
@@ -224,6 +231,11 @@ std::string pilotCandidateCard(const Astronaut& candidate, int index, bool avail
     return out.str();
 }
 
+std::string draftInitial(std::string_view text, std::string_view fallback)
+{
+    return text.empty() ? std::string(fallback) : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(text.front()))));
+}
+
 std::string panelButton(const PanelButtonPresentation& action)
 {
     if (!action.enabled) {
@@ -232,19 +244,69 @@ std::string panelButton(const PanelButtonPresentation& action)
     return button(action.label, action.actionId, action.cssClass);
 }
 
+std::string flybyZoneLabel(int zone)
+{
+    if (zone >= 2) {
+        return "PERFECT";
+    }
+    if (zone == 1) {
+        return "GOOD";
+    }
+    return "MISS";
+}
+
+std::string flybyGradeLabel(FlybyGrade grade)
+{
+    switch (grade) {
+    case FlybyGrade::Perfect:
+        return "PERFECT SLINGSHOT";
+    case FlybyGrade::Good:
+        return "CLEAN FLYBY";
+    case FlybyGrade::Miss:
+        return "MISSED WINDOW";
+    case FlybyGrade::Active:
+    default:
+        return "FLYBY ACTIVE";
+    }
+}
+
+std::string flybyResultBody(FlybyGrade grade)
+{
+    switch (grade) {
+    case FlybyGrade::Perfect:
+        return "Bonus recon secured. Gate speed multiplies the next launch's fuel margin and travel speed.";
+    case FlybyGrade::Good:
+        return "Recon data secured. Approach options update now.";
+    case FlybyGrade::Miss:
+        return "No flyby data banked. Try again or choose another unlocked approach.";
+    case FlybyGrade::Active:
+    default:
+        return "Hold the corridor until the timer expires.";
+    }
+}
+
+double flybySlingshotScale(const FlybyRunState& flyby)
+{
+    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    const double baselineSpeed = std::hypot(tuning::flyby::startVelocityX, tuning::flyby::startVelocityY);
+    const double range = std::max(0.001, tuning::flyby::maxSpeed - baselineSpeed);
+    const double fastShare = std::clamp((speed - baselineSpeed) / range, 0.0, 1.0);
+    return 1.0 + fastShare * (tuning::flyby::slingshotMaxSpeedScale - 1.0);
+}
+
 std::string refitOfferCard(const RefitOfferPresentation& offer)
 {
     const RefitPresentation& presentation = offer.card;
     std::ostringstream out;
-    out << "<article class=\"upgrade-card slot-" << htmlEscape(presentation.slotClass) << "\">";
-    out << "<div class=\"card-topline\"><span>" << htmlEscape(presentation.category) << "</span><span>"
-        << htmlEscape(presentation.rarity) << "</span></div>";
-    out << "<div class=\"module-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
+    out << "<article class=\"pilot-card upgrade-draft-card slot-" << htmlEscape(presentation.slotClass) << "\">";
+    out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(presentation.category) << "</span><strong>"
+        << htmlEscape(presentation.rarity) << " refit</strong></div>";
+    out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
     out << "<h3>" << htmlEscape(presentation.title) << "</h3>";
-    out << "<p class=\"module-threat\">" << htmlEscape(presentation.detail) << "</p>";
+    out << "<p>" << htmlEscape(presentation.detail) << "</p>";
     out << "<strong class=\"module-impact\">" << htmlEscape(presentation.primaryImpact) << "</strong>";
     out << "<div class=\"stat-grid\">" << statChipGrid(presentation.statChips) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape(offer.costSummary) << "</span>"
+    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape(offer.costSummary) << "</span>"
         << panelButton(offer.action) << "</div></article>";
     return out.str();
 }
@@ -284,13 +346,14 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
 std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
 {
     std::ostringstream out;
-    out << "<article class=\"ops-card surface-upgrade-card\">";
-    out << "<div class=\"card-topline\"><span>" << htmlEscape(upgrade.category) << "</span><span>"
-        << htmlEscape(upgrade.rarity) << "</span></div>";
+    out << "<article class=\"pilot-card upgrade-draft-card surface-upgrade-card\">";
+    out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(upgrade.category) << "</span><strong>"
+        << htmlEscape(upgrade.rarity) << " field mod</strong></div>";
+    out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(draftInitial(upgrade.category, "F")) << "</span></div>";
     out << "<h3>" << htmlEscape(upgrade.title) << "</h3>";
     out << "<p>" << htmlEscape(upgrade.detail) << "</p>";
     out << "<div class=\"stat-grid\">" << resourceChipGrid(upgrade.effectChips) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape("Temporary") << "</span>"
+    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape("This landing only") << "</span>"
         << panelButton(upgrade.action) << "</div></article>";
     return out.str();
 }
@@ -369,6 +432,65 @@ std::string missionLog(const std::vector<std::string>& entries)
     }
     body += "</div>";
     return body;
+}
+
+std::string inventoryItemCard(const InventoryItemPresentation& item)
+{
+    std::ostringstream out;
+    out << "<article class=\"inventory-item " << htmlEscape(item.cssClass) << "\">";
+    out << "<div class=\"inventory-art\"><span>" << htmlEscape(item.glyph) << "</span></div>";
+    out << "<div><h3>" << htmlEscape(item.title) << "</h3><p>" << htmlEscape(item.detail) << "</p></div>";
+    out << "<strong>" << htmlEscape(item.count) << "</strong>";
+    out << "</article>";
+    return out.str();
+}
+
+std::string inventorySection(const InventorySectionPresentation& section)
+{
+    std::ostringstream out;
+    out << "<section class=\"inventory-section\"><div class=\"inventory-section-head\"><h3>"
+        << htmlEscape(section.title) << "</h3><p>" << htmlEscape(section.detail) << "</p></div>";
+    out << "<div class=\"inventory-grid\">";
+    for (const InventoryItemPresentation& item : section.items) {
+        out << inventoryItemCard(item);
+    }
+    out << "</div></section>";
+    return out.str();
+}
+
+std::string inventoryBody(const InventoryPresentation& inventory)
+{
+    std::ostringstream out;
+    out << "<div class=\"inventory-modal\">";
+    out << "<div class=\"metric-grid inventory-summary\">";
+    for (const PanelMetricPresentation& metricItem : inventory.summary) {
+        out << metric(metricItem.label, metricItem.value);
+    }
+    out << "</div>";
+    for (const InventorySectionPresentation& section : inventory.sections) {
+        out << inventorySection(section);
+    }
+    out << "</div>";
+    return out.str();
+}
+
+std::string inventoryTemplate(const GameState& state, const ContentCatalog& catalog)
+{
+    return modalTemplate(ui::modals::inventory, "Inventory", inventoryBody(inventoryPresentation(state, catalog)));
+}
+
+std::string inventoryBank(const GameState& state, const ContentCatalog& catalog)
+{
+    const InventoryPresentation inventory = inventoryPresentation(state, catalog);
+    std::ostringstream out;
+    out << "<section class=\"resource-bank inventory-bank\"><div><h2>" << htmlEscape("Inventory")
+        << "</h2><p>" << htmlEscape("Recovered stock available for upgrades, research, and field work.") << "</p></div>";
+    out << "<div class=\"stat-grid\">";
+    for (const PanelMetricPresentation& metricItem : inventory.summary) {
+        out << resourceChip(metricItem);
+    }
+    out << "</div>" << modalButton("Open inventory", ui::modals::inventory, "ghost") << "</section>";
+    return out.str();
 }
 
 std::string phaseBoardOpen(std::string_view cssClass, std::string_view status, bool fullPanel = true)
@@ -462,6 +584,17 @@ std::string achievementCard(const AchievementPresentation& achievement)
         "</strong><p>" + htmlEscape(achievement.detail) + "</p></article>";
 }
 
+std::string crewFateCard(const CrewFatePresentation& fate)
+{
+    if (!fate.active) {
+        return "";
+    }
+    return "<article class=\"crew-fate-card " + htmlEscape(fate.cssClass) + "\" data-crew-fate=\"" +
+        htmlEscape(fate.cssClass) + "\"><div><span>" + htmlEscape(fate.label) +
+        "</span><strong>" + htmlEscape(fate.title) + "</strong><p>" + htmlEscape(fate.detail) +
+        "</p></div><div class=\"crew-fate-signal\" aria-hidden=\"true\"><i></i><i></i><i></i></div></article>";
+}
+
 std::string tutorialCard(std::string_view topic, std::string_view title, std::string_view detail)
 {
     return "<aside class=\"tutorial-card\" data-help-topic=\"" + htmlEscape(topic) + "\"><div><span>Mission help</span><strong>" +
@@ -486,7 +619,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     std::ostringstream out;
     out << "<div class=\"panel-head\"><div><span class=\"game-mark\">" << htmlEscape(text::panel::title)
         << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
-        << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div>";
+        << "<div class=\"panel-head-actions\">"
+        << modalButton("Inventory", ui::modals::inventory, "ghost")
+        << modalButton(text::buttons::settings, ui::modals::settings, "ghost")
+        << "</div></div>";
     out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
 
     std::ostringstream settingsBody;
@@ -571,6 +707,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -590,6 +727,81 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         out << "</section>";
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
+        return out.str();
+    }
+
+    if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Flyby) {
+        const FlybyRunState& flyby = state.run.flyby;
+        const Destination* flybyDestination = catalog.findDestination(flyby.destinationId);
+        const std::string destinationName = flybyDestination == nullptr ? currentFrontier.name : flybyDestination->name;
+        const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
+        const double activeSeconds = std::max(0.01, flyby.missSeconds + flyby.goodSeconds + flyby.perfectSeconds);
+        const double goodShare = (flyby.goodSeconds + flyby.perfectSeconds) / activeSeconds;
+        const double perfectShare = flyby.perfectSeconds / activeSeconds;
+        const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
+
+        out << "<div data-flyby-run=\"1\" data-flyby-completed=\"" << (flyby.completed ? "1" : "0") << "\" hidden></div>";
+        out << "<h2>" << htmlEscape("Manual Flyby") << "</h2>";
+        out << "<p class=\"phase-copy\">" << htmlEscape("Steer through " + destinationName + "'s approach corridor. Perfect timing creates a slingshot window for the next launch.") << "</p>";
+        const std::string zoneValue = flyby.collidedWithBody
+            ? "Impact"
+            : (flyby.completed ? flybyGradeLabel(grade) : flybyZoneLabel(flyby.currentZone));
+
+        out << "<div class=\"metric-grid flight-readout\">"
+            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << metric("Zone", zoneValue)
+            << metric("Good hold", display::percent(goodShare))
+            << metric("Perfect hold", display::percent(perfectShare))
+            << metric("Reward", "x" + display::fixed(flyby.rewardBonusScale, 1))
+            << metric("Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1))
+            << "</div>";
+
+        if (flyby.completed) {
+            const std::string resultTitle = flyby.collidedWithBody ? "IMPACT RECORDED" : flybyGradeLabel(grade);
+            const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
+            const double flybyFuelBoost = flyby.slingshotAwarded ? flyby.slingshotFuelBoost : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
+            const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
+            const std::string resultBody = flyby.collidedWithBody
+                ? "The ship clipped the destination body. Hull damage added and no flyby data was recovered."
+                : (grade == FlybyGrade::Perfect
+                    ? "Perfect corridor exit. Fast completion amplified the payout, and exit speed amplified the next-launch slingshot."
+                    : flybyResultBody(grade));
+            const std::string tagOne = flyby.collidedWithBody
+                ? "Hull +" + std::to_string(tuning::flyby::impactHullDamage) + "%"
+                : (grade == FlybyGrade::Miss ? "No flyby data" : "Flyby data secured");
+            const std::string tagTwo = flyby.collidedWithBody
+                ? "No recon recovered"
+                : (grade == FlybyGrade::Perfect
+                    ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1)
+                    : (grade == FlybyGrade::Good ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1) : "No slingshot"));
+            const std::string tagThree = flyby.collidedWithBody
+                ? "Hull damage logged"
+                : (grade == FlybyGrade::Perfect
+                    ? "+" + display::fixed(flybyFuelBoost, 1) + " fuel, +" + display::fixed(flybySpeedBoost, 2) + " speed"
+                    : (grade == FlybyGrade::Good ? "Clean exit gate" : "Retry from approach"));
+            out << "<div data-flyby-stamp=\"1\" data-flyby-title=\"" << htmlEscape(resultTitle)
+                << "\" data-flyby-body=\"" << htmlEscape(resultBody)
+                << "\" data-flyby-tag-one=\"" << htmlEscape(tagOne)
+                << "\" data-flyby-tag-two=\"" << htmlEscape(tagTwo)
+                << "\" data-flyby-tag-three=\"" << htmlEscape(tagThree)
+                << "\" hidden></div>";
+        }
+
+        out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
+            << htmlEscape("Flyby controls") << "</span><strong>"
+            << htmlEscape(flyby.completed ? "Confirm the result" : "W/S speed, A/D rotate") << "</strong></div>";
+        if (flyby.completed) {
+            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Result locked. Click the mission stamp or press Space to continue.") << "</p>";
+        } else {
+            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("W/Up faster, S/Down slower. A/Left rotates counter-clockwise; D/Right rotates clockwise. Escape aborts as a Miss.") << "</p>";
+            out << "<div class=\"actions primary-actions\">"
+                << panelButton(panelActionButton("Abort flyby", ui::actions::flybyAbort, "danger"))
+                << "</div>";
+        }
+        out << "</section>";
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -654,6 +866,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</section>";
         out << modalTemplate(ui::modals::telemetry, text::panel::modals::telemetryDetails, detailStack(launchPanel.telemetryDetails));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -670,6 +883,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div>";
             out << modalTemplate(ui::modals::phaseBriefing, arrivalBriefing.title, detailStack(arrivalBriefing.rows));
         }
+        out << crewFateCard(presentation.crewFate);
         out << "<div class=\"result-grid\">";
         for (const LaunchOutcomeMetricGroupPresentation& group : presentation.metricGroups) {
             out << resultMetricGroup(group);
@@ -691,6 +905,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -710,6 +925,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "</h2><p>" << htmlEscape("You made it. Choose how boldly to engage the destination.") << "</p></div></div>";
         const LaunchOutcomePresentation arrivalResult = launchOutcomePresentation(state.lastOutcome);
         out << "<h2>" << htmlEscape("Arrival summary") << "</h2>";
+        out << crewFateCard(arrivalResult.crewFate);
         out << "<div class=\"result-grid\">";
         for (const LaunchOutcomeMetricGroupPresentation& group : arrivalResult.metricGroups) {
             out << resultMetricGroup(group);
@@ -765,6 +981,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -793,6 +1010,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << modalTemplate(ui::modals::phaseBriefing, researchPanel.briefing.title, detailStack(researchPanel.briefing.rows));
         out << modalTemplate(ui::modals::research, text::panel::modals::researchDetails, detailStack(researchPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -802,6 +1020,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
             << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, and stow payload before oxygen or extraction risk turns ugly.") << "</p></div>"
             << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+            << modalButton("Inventory", ui::modals::inventory, "ghost")
             << "</div></div>";
         out << tutorialCard(
             "mining-basics",
@@ -835,6 +1054,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(miningPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -864,6 +1084,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, "Drone Ops Details", detailStack(dronePanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -882,15 +1103,6 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div></div>";
         out << surfaceCommandSummary(surfacePanel);
         out << surfaceKpiGrid(expedition, extractionRisk);
-        if (!surfacePanel.upgradeOffers.empty()) {
-            out << "<section class=\"board-primary surface-upgrades\">";
-            out << "<h2>" << htmlEscape("Choose field upgrade") << "</h2>";
-            out << "<div class=\"ops-grid\">";
-            for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
-                out << surfaceUpgradeCard(upgrade);
-            }
-            out << "</div></section>";
-        }
         if (surfacePanel.droneOpsAction.enabled) {
             out << "<section class=\"resource-bank drone-ops-callout\"><div><h2>" << htmlEscape("Drone Ops")
                 << "</h2><p>" << htmlEscape("Equip persistent helper drones before you launch the mining run.") << "</p></div>"
@@ -917,29 +1129,70 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
         out << modalTemplate(ui::modals::missionLog, text::panel::sections::missionLog, missionLog(surfacePanel.logEntries));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
+        return out.str();
+    }
+
+    if (state.screen == Screen::SurfaceUpgrade) {
+        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
+        out << phaseBoardOpen("phase-board-surface-upgrade phase-board-draft-room", state.statusLine);
+        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Surface draft")
+            << "</span><h2>" << htmlEscape("Pick your field edge") << "</h2><p>"
+            << htmlEscape("Choose one temporary upgrade for this landing. The rest leave with the cargo shuttle.") << "</p></div>";
+        std::vector<PanelMetricPresentation> fieldContext;
+        if (!surfacePanel.metrics.empty()) {
+            fieldContext.push_back(surfacePanel.metrics[0]);
+        }
+        for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
+            if (metricItem.label == text::labels::supply || metricItem.label == text::labels::cargo ||
+                metricItem.label == text::labels::extractionRisk || metricItem.label == text::labels::rareMaterials) {
+                fieldContext.push_back(metricItem);
+            }
+        }
+        out << "<div class=\"stat-grid draft-context\">" << resourceChipGrid(fieldContext) << "</div></section>";
+        out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
+            << htmlEscape("Choose one field mod") << "</h2><p>"
+            << htmlEscape("Scanner, drill, and drone tech change how the next dig feels. Take one, reroll the draft, or walk away.") << "</p></div></div>";
+        out << "<div class=\"pilot-card-grid draft-card-grid\">";
+        for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
+            out << surfaceUpgradeCard(upgrade);
+        }
+        out << "</div><div class=\"actions draft-actions\">";
+        const double rerollCost = offerRerollCost(state);
+        out << panelButton(state.run.credits >= rerollCost
+            ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
+            : disabledPanelButton(display::needCredits(rerollCost)));
+        out << panelButton(panelActionButton("Skip field pick", ui::actions::next));
+        out << "</div></section>";
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
     if (state.screen == Screen::Upgrade) {
         const RefitWindowPresentation refitWindow = refitWindowPresentation(state, catalog);
-        out << phaseBoardOpen("phase-board-refit", state.statusLine);
-        out << "<h2>" << htmlEscape(text::panel::sections::refitWindow) << "</h2>";
-        out << "<p>" << htmlEscape(text::panel::messages::chooseOneRefit) << "</p>";
-        if (!refitWindow.resourceChips.empty() || !refitWindow.recoveryDetail.empty()) {
-            out << "<section class=\"resource-bank\"><div><h2>" << htmlEscape(text::panel::sections::recoveredResources)
-                << "</h2><p>" << htmlEscape(refitWindow.recoveryDetail) << "</p></div>";
-            out << "<div class=\"stat-grid\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
+        out << phaseBoardOpen("phase-board-refit phase-board-draft-room", state.statusLine);
+        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Hangar draft")
+            << "</span><h2>" << htmlEscape("Choose the next refit") << "</h2><p>"
+            << htmlEscape("Install one ship or crew upgrade before the next launch window closes.") << "</p></div>";
+        out << "<div class=\"stat-grid draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
+        if (!refitWindow.recoveryDetail.empty()) {
+            out << "<p class=\"draft-recovery-note\">" << htmlEscape(refitWindow.recoveryDetail) << "</p>";
         }
-        out << "<div class=\"upgrade-grid\">";
+        out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
+            << htmlEscape("Choose one permanent upgrade") << "</h2><p>"
+            << htmlEscape("These improvements carry forward into future vehicles. Pick the build direction, reroll, or save resources.") << "</p></div></div><div class=\"pilot-card-grid draft-card-grid\">";
         for (const RefitOfferPresentation& offer : refitWindow.offers) {
             out << refitOfferCard(offer);
         }
-        out << "</div><div class=\"actions\">";
+        out << "</div><div class=\"actions draft-actions\">";
         out << panelButton(refitWindow.rerollAction);
         out << panelButton(refitWindow.skipAction);
-        out << "</div>";
+        out << "</div></section>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
@@ -1029,6 +1282,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << modalTemplate(ui::modals::pilotIntake, text::panel::modals::pilotIntake, pilotIntakeBody.str());
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+    out << inventoryTemplate(state, catalog);
 
     return out.str();
 }

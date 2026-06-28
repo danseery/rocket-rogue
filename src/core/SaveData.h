@@ -20,6 +20,8 @@ struct SaveData {
     int restOpsThisExpedition = 0;
     int shallowRecoveryStreak = 0;
     int cleanShallowRecoveryStreak = 0;
+    double nextLaunchFuelBoost = 0.0;
+    double nextLaunchSpeedBoost = 0.0;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     ArkState ark;
@@ -52,6 +54,9 @@ struct SaveData {
     double maxPeakAbortRisk = 0.0;
     double bestCreditDelta = 0.0;
     double worstCreditDelta = 0.0;
+    int totalFlybyMisses = 0;
+    int totalFlybyGoods = 0;
+    int totalFlybyPerfects = 0;
     std::vector<int> destinationAttempts;
     std::vector<int> destinationSuccesses;
     std::vector<int> destinationFlybys;

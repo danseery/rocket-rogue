@@ -232,6 +232,36 @@ void rr_arrival_flyby()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_flyby_move(double xAxis, double yAxis)
+{
+    if (g_app) {
+        g_app->flybyMove(xAxis, yAxis);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_flyby_abort()
+{
+    if (g_app) {
+        g_app->flybyAbort();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_flyby_continue()
+{
+    if (g_app) {
+        g_app->flybyContinue();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_orbit()
 {
     if (g_app) {

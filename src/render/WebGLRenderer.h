@@ -23,6 +23,11 @@ struct MiningCellSnapshot {
     bool hazard = false;
 };
 
+struct FlybyTrailPointSnapshot {
+    double x = 0.0;
+    double y = 0.0;
+};
+
 struct RenderSnapshot {
     Screen screen = Screen::Hangar;
     LaunchResultType lastResult = LaunchResultType::None;
@@ -62,6 +67,24 @@ struct RenderSnapshot {
     bool miningTargetDrillable = false;
     bool miningDrilling = false;
     std::vector<MiningCellSnapshot> miningCells;
+    bool flybyActive = false;
+    bool flybyCompleted = false;
+    int flybyZone = 0;
+    int flybyResult = 0;
+    double flybyElapsed = 0.0;
+    double flybyDuration = 1.0;
+    double flybyShipX = 0.0;
+    double flybyShipY = 0.0;
+    double flybyVelocityX = 0.0;
+    double flybyVelocityY = 0.0;
+    double flybyInputX = 0.0;
+    double flybyInputY = 0.0;
+    double flybyDestinationX = 0.0;
+    double flybyDestinationY = 0.0;
+    double flybyIdealRadius = 0.0;
+    double flybyGoodBand = 0.0;
+    double flybyPerfectBand = 0.0;
+    std::vector<FlybyTrailPointSnapshot> flybyTrailPoints;
 };
 
 class WebGLRenderer {
@@ -85,6 +108,7 @@ private:
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
+    void drawFlyby(const RenderSnapshot& snapshot);
     void drawMining(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha);
     void drawRoute(const RenderSnapshot& snapshot);

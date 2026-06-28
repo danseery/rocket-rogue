@@ -165,12 +165,14 @@ int screenToInt(Screen screen)
         return 3;
     case Screen::SurfaceExpedition:
         return 4;
-    case Screen::Mining:
+    case Screen::SurfaceUpgrade:
         return 5;
-    case Screen::DroneOps:
+    case Screen::Mining:
         return 6;
-    case Screen::Navigation:
+    case Screen::DroneOps:
         return 7;
+    case Screen::Navigation:
+        return 8;
     default:
         return 0;
     }
@@ -186,10 +188,12 @@ Screen screenFromInt(int value)
     case 4:
         return Screen::SurfaceExpedition;
     case 5:
-        return Screen::Mining;
+        return Screen::SurfaceUpgrade;
     case 6:
-        return Screen::DroneOps;
+        return Screen::Mining;
     case 7:
+        return Screen::DroneOps;
+    case 8:
         return Screen::Navigation;
     default:
         return Screen::Hangar;
@@ -526,10 +530,12 @@ SaveData captureSaveData(const GameState& state)
     save.restOpsThisExpedition = state.run.restOpsThisExpedition;
     save.shallowRecoveryStreak = state.run.shallowRecoveryStreak;
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
-    if (state.screen == Screen::ArrivalFanfare && state.run.arrivalOps.active) {
+    save.nextLaunchFuelBoost = state.run.nextLaunchFuelBoost;
+    save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
+    if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
     } else {
-        save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
+        save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
     }
     save.campaignMilestone = state.meta.campaignMilestone;
     save.ark = state.meta.ark;
@@ -562,6 +568,9 @@ SaveData captureSaveData(const GameState& state)
     save.maxPeakAbortRisk = state.meta.maxPeakAbortRisk;
     save.bestCreditDelta = state.meta.bestCreditDelta;
     save.worstCreditDelta = state.meta.worstCreditDelta;
+    save.totalFlybyMisses = state.meta.totalFlybyMisses;
+    save.totalFlybyGoods = state.meta.totalFlybyGoods;
+    save.totalFlybyPerfects = state.meta.totalFlybyPerfects;
     save.destinationAttempts = state.meta.destinationAttempts;
     save.destinationSuccesses = state.meta.destinationSuccesses;
     save.destinationFlybys = state.meta.destinationFlybys;
@@ -587,6 +596,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.restOpsThisExpedition = std::max(0, save.restOpsThisExpedition);
     state.run.shallowRecoveryStreak = std::max(0, save.shallowRecoveryStreak);
     state.run.cleanShallowRecoveryStreak = std::max(0, save.cleanShallowRecoveryStreak);
+    state.run.nextLaunchFuelBoost = std::max(0.0, save.nextLaunchFuelBoost);
+    state.run.nextLaunchSpeedBoost = std::max(0.0, save.nextLaunchSpeedBoost);
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.surfaceUpgradeIds = save.surfaceUpgradeIds;
@@ -609,6 +620,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     if (state.screen == Screen::SurfaceExpedition && !state.run.surfaceExpedition.active) {
         state.screen = Screen::Hangar;
+    }
+    if (state.screen == Screen::SurfaceUpgrade && (!state.run.surfaceExpedition.active || !state.run.surfaceExpedition.surfaceUpgradeOfferAvailable)) {
+        state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
     }
     if (state.screen == Screen::Mining && (!state.run.surfaceExpedition.active || !state.run.mining.active)) {
         state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
@@ -653,6 +667,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.maxPeakAbortRisk = std::max(0.0, save.maxPeakAbortRisk);
     state.meta.bestCreditDelta = save.bestCreditDelta;
     state.meta.worstCreditDelta = save.worstCreditDelta;
+    state.meta.totalFlybyMisses = std::max(0, save.totalFlybyMisses);
+    state.meta.totalFlybyGoods = std::max(0, save.totalFlybyGoods);
+    state.meta.totalFlybyPerfects = std::max(0, save.totalFlybyPerfects);
     state.meta.destinationAttempts = save.destinationAttempts;
     state.meta.destinationSuccesses = save.destinationSuccesses;
     state.meta.destinationFlybys = save.destinationFlybys;
@@ -705,6 +722,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::restOps, save.restOpsThisExpedition);
     writeField(out, save_schema::field::shallowRecoveryStreak, save.shallowRecoveryStreak);
     writeField(out, save_schema::field::cleanShallowRecoveryStreak, save.cleanShallowRecoveryStreak);
+    writeField(out, save_schema::field::nextLaunchFuelBoost, save.nextLaunchFuelBoost);
+    writeField(out, save_schema::field::nextLaunchSpeedBoost, save.nextLaunchSpeedBoost);
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::arkCondition, arkConditionToInt(save.ark.condition));
@@ -775,6 +794,9 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::maxPeakAbortRisk, save.maxPeakAbortRisk);
     writeField(out, save_schema::field::bestCreditDelta, save.bestCreditDelta);
     writeField(out, save_schema::field::worstCreditDelta, save.worstCreditDelta);
+    writeField(out, save_schema::field::totalFlybyMisses, save.totalFlybyMisses);
+    writeField(out, save_schema::field::totalFlybyGoods, save.totalFlybyGoods);
+    writeField(out, save_schema::field::totalFlybyPerfects, save.totalFlybyPerfects);
     writeField(out, save_schema::field::destinationAttempts, joinInts(save.destinationAttempts, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationSuccesses, joinInts(save.destinationSuccesses, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationFlybys, joinInts(save.destinationFlybys, save_schema::listDelimiter));
@@ -830,6 +852,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.shallowRecoveryStreak = parseInt(value, save.shallowRecoveryStreak);
         } else if (key == save_schema::field::cleanShallowRecoveryStreak) {
             save.cleanShallowRecoveryStreak = parseInt(value, save.cleanShallowRecoveryStreak);
+        } else if (key == save_schema::field::nextLaunchFuelBoost) {
+            save.nextLaunchFuelBoost = parseDouble(value, save.nextLaunchFuelBoost);
+        } else if (key == save_schema::field::nextLaunchSpeedBoost) {
+            save.nextLaunchSpeedBoost = parseDouble(value, save.nextLaunchSpeedBoost);
         } else if (key == save_schema::field::screen) {
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::campaignMilestone) {
@@ -977,6 +1003,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.bestCreditDelta = parseDouble(value, save.bestCreditDelta);
         } else if (key == save_schema::field::worstCreditDelta) {
             save.worstCreditDelta = parseDouble(value, save.worstCreditDelta);
+        } else if (key == save_schema::field::totalFlybyMisses) {
+            save.totalFlybyMisses = parseInt(value, save.totalFlybyMisses);
+        } else if (key == save_schema::field::totalFlybyGoods) {
+            save.totalFlybyGoods = parseInt(value, save.totalFlybyGoods);
+        } else if (key == save_schema::field::totalFlybyPerfects) {
+            save.totalFlybyPerfects = parseInt(value, save.totalFlybyPerfects);
         } else if (key == save_schema::field::destinationAttempts) {
             save.destinationAttempts = parseInts(value);
         } else if (key == save_schema::field::destinationSuccesses) {

@@ -853,6 +853,7 @@ bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& cata
         state.screen == Screen::Results ||
         state.screen == Screen::ArrivalFanfare ||
         state.screen == Screen::ArrivalOps ||
+        state.screen == Screen::Flyby ||
         state.screen == Screen::Research ||
         state.screen == Screen::SurfaceExpedition ||
         state.screen == Screen::Mining) {
@@ -1082,8 +1083,21 @@ void updateLegacyRecords(MetaProgress& meta, const LaunchOutcome& outcome)
     }
 }
 
-void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& outcome)
+bool isSkinOfYourTeethOutcome(const LaunchOutcome& outcome)
 {
+    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    return outcome.type != LaunchResultType::Destroyed &&
+        survivalMargin > 0.0 &&
+        survivalMargin <= tuning::records::closeCallSurvivalMargin;
+}
+
+void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& rawOutcome)
+{
+    LaunchOutcome outcome = rawOutcome;
+    if (isSkinOfYourTeethOutcome(outcome)) {
+        outcome.payout *= 1.0 + tuning::records::skinOfYourTeethCreditBonus;
+    }
+
     ensureDestinationHistory(state, catalog);
     state.lastOutcome = outcome;
     updateLegacyRecords(state.meta, outcome);
@@ -1120,6 +1134,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         const CrewUpgradeStats upgrades = aggregateCrewUpgradeStats(state, catalog);
         astronaut->stress = std::min(tuning::crew::maxStress, astronaut->stress + postLaunchCrewStressGain(outcome, upgrades));
         if (outcome.crewKilled) {
+            astronaut->training = 0;
             astronaut->status = CrewStatus::Dead;
             state.meta.astronautsLost += 1;
             state.meta.memorials.push_back(astronaut->name + " lost during " + outcome.destinationId);

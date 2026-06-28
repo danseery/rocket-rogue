@@ -24,6 +24,7 @@ inline constexpr double statChipMinimumMagnitude = 0.05;
 
 namespace records {
 inline constexpr double closeCallSurvivalMargin = 0.05;
+inline constexpr double skinOfYourTeethCreditBonus = 0.10;
 } // namespace records
 
 inline int moduleOfferCost(Rarity rarity)
@@ -453,6 +454,57 @@ inline constexpr double decompressionHullScale = 0.0035;
 inline constexpr double decompressionMinimum = 0.004;
 inline constexpr double decompressionMaximum = 0.08;
 } // namespace session
+
+namespace flyby {
+inline constexpr double durationSeconds = 14.0;
+inline constexpr double startX = -0.70;
+inline constexpr double startY = -0.30;
+inline constexpr double startVelocityX = 0.38;
+inline constexpr double startVelocityY = 0.04;
+inline constexpr double control1X = -0.18;
+inline constexpr double control1Y = -0.38;
+inline constexpr double control2X = 0.30;
+inline constexpr double control2Y = 0.90;
+inline constexpr double endX = 0.92;
+inline constexpr double endY = 0.48;
+inline constexpr double destinationX = 0.50;
+inline constexpr double destinationY = 0.05;
+inline constexpr double idealRadius = 0.50;
+inline constexpr double perfectBand = 0.050;
+inline constexpr double goodBand = 0.145;
+inline constexpr double planetColliderBaseRadius = 0.13;
+inline constexpr double planetColliderTierRadius = 0.012;
+inline constexpr double planetColliderPadding = 0.012;
+inline constexpr double shipColliderHalfLength = 0.055;
+inline constexpr double shipColliderHalfWidth = 0.025;
+inline constexpr double thrustAcceleration = 0.66;
+inline constexpr double brakeAcceleration = 0.52;
+inline constexpr double turnRateRadians = 1.45;
+inline constexpr double driftDrag = 0.16;
+inline constexpr double minSpeed = 0.16;
+inline constexpr double maxSpeed = 0.82;
+inline constexpr double boundaryPadding = 0.08;
+inline constexpr double finishProgress = 0.985;
+inline constexpr double minimumFinishSeconds = 4.0;
+inline constexpr double gravityEasy = 0.006;
+inline constexpr double gravityMedium = 0.014;
+inline constexpr double gravityLarge = 0.030;
+inline constexpr double gravityDeep = 0.046;
+inline constexpr double gravitySoftening = 0.12;
+inline constexpr double maxGravityAcceleration = 0.18;
+inline constexpr double perfectTimeShare = 0.55;
+inline constexpr double goodTimeShare = 0.45;
+inline constexpr double perfectMaxMissStreak = 2.20;
+inline constexpr double goodRewardFactor = 0.35;
+inline constexpr double goodRewardFloor = 12.0;
+inline constexpr double perfectRewardMultiplier = 1.25;
+inline constexpr double completionRewardMaxScale = 1.60;
+inline constexpr int goodBlueprintGain = 1;
+inline constexpr double slingshotFuelBoost = 1.5;
+inline constexpr double slingshotSpeedBoost = 0.20;
+inline constexpr double slingshotMaxSpeedScale = 2.0;
+inline constexpr int impactHullDamage = 18;
+} // namespace flyby
 
 namespace rewards {
 inline constexpr double provingPayoutPerExtraData = 0.20;

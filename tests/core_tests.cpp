@@ -6,6 +6,7 @@
 #include "core/GameMath.h"
 #include "core/GameState.h"
 #include "core/HangarPresentation.h"
+#include "core/InventoryPresentation.h"
 #include "core/LaunchBalance.h"
 #include "core/LaunchPresentation.h"
 #include "core/LaunchReadinessPresentation.h"
@@ -557,6 +558,37 @@ void specialShipComponentsRequireRecoveredMaterials()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::deepReservoir) != state.meta.ownedModuleIds.end(), "bought special component should enter permanent shipyard inventory");
 }
 
+void inventoryPresentationSummarizesResourcesAndPayload()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 516);
+    state.run.credits = 321.0;
+    state.meta.blueprintProgress = 7;
+    state.meta.materials = {.common = 5, .rare = 2, .exotic = 1};
+    state.meta.artifacts.push_back({"mars_artifact_1", content::destination::mars, true});
+    state.meta.ownedModuleIds.push_back(content::module::cryoLoop);
+    state.meta.ownedDroneIds.push_back(content::drone::miningDrone);
+    state.meta.equippedDroneIds.push_back(content::drone::miningDrone);
+    state.run.mining.active = true;
+    state.run.mining.temporaryMaterials = {.common = 3, .rare = 1};
+    state.run.mining.temporaryArtifacts.push_back({"moon_artifact_1", content::destination::moon, false});
+
+    const InventoryPresentation inventory = inventoryPresentation(state, catalog);
+    require(!inventory.summary.empty(), "inventory should expose a summary strip");
+    require(inventory.summary[0].value == "321 credits", "inventory should summarize mission credits");
+
+    const auto hasSection = [&](std::string_view title) {
+        return std::find_if(inventory.sections.begin(), inventory.sections.end(), [&](const InventorySectionPresentation& section) {
+            return section.title == title;
+        }) != inventory.sections.end();
+    };
+    require(hasSection("Current payload"), "active mining should expose temporary payload inventory");
+    require(hasSection("Recovered resources"), "inventory should expose banked materials");
+    require(hasSection("Artifacts"), "inventory should expose artifacts");
+    require(hasSection("Ship tech"), "inventory should expose permanent ship tech");
+    require(hasSection("Drone bay"), "inventory should expose drone bay hardware");
+}
+
 void shipModuleProgressSurvivesDestroyedVehicles()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -581,6 +613,26 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship destruction should not erase permanent shipyard tech");
     require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::cryoLoop) != state.run.inventoryModuleIds.end(), "replacement ships should inherit permanent shipyard inventory");
     require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
+}
+
+void deadCrewLosesTraining()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 457);
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "starter pilot should exist");
+    pilot->training = 7;
+
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.destinationId = currentDestination(state, catalog).id;
+    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
+    destroyed.crewKilled = true;
+    applyLaunchOutcome(state, catalog, destroyed);
+
+    require(!state.run.crew.empty(), "dead pilot should remain in the memorial roster");
+    require(state.run.crew.front().status == CrewStatus::Dead, "pilot should be marked dead");
+    require(state.run.crew.front().training == 0, "dead pilot training should reset");
 }
 
 void crewUpgradeOffersInstallAndModifyCrewOps()
@@ -1167,6 +1219,250 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     require(mars.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001, "YOLO landing should carry extra surface hazard");
 }
 
+void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+
+    GameState miss = createNewGame(catalog, 701);
+    startArrivalOps(miss, moonArrival);
+    startArrivalFlybyRun(miss, catalog);
+    require(miss.screen == Screen::Flyby && miss.run.flyby.active, "starting arrival flyby should open the flyby minigame");
+    require(miss.run.flyby.currentZone >= 1, "flyby should begin inside the single-pass corridor");
+    require(miss.run.flyby.gravityStrength <= tuning::flyby::gravityEasy + 0.001, "Moon flyby should use easy gravity");
+    const int missFlybysBefore = destinationHistoryValue(miss.meta.destinationFlybys, catalog, content::destination::moon);
+    const int missBlueprintsBefore = miss.meta.blueprintProgress;
+    const double missCreditsBefore = miss.run.credits;
+    miss.run.flyby.completed = true;
+    miss.run.flyby.result = FlybyGrade::Miss;
+    completeFlybyRun(miss, catalog);
+    require(miss.screen == Screen::ArrivalOps, "missed flyby should return to approach options");
+    require(destinationHistoryValue(miss.meta.destinationFlybys, catalog, content::destination::moon) == missFlybysBefore, "missed flyby should not unlock Moon flyby history");
+    require(miss.meta.blueprintProgress == missBlueprintsBefore, "missed flyby should not grant blueprint progress");
+    require(std::abs(miss.run.credits - missCreditsBefore) < 0.001, "missed flyby should not grant credits");
+    require(miss.meta.totalFlybyMisses == 1, "missed flyby should be counted for future achievement stats");
+
+    GameState good = createNewGame(catalog, 702);
+    startArrivalOps(good, moonArrival);
+    startArrivalFlybyRun(good, catalog);
+    const int goodFlybysBefore = destinationHistoryValue(good.meta.destinationFlybys, catalog, content::destination::moon);
+    const int goodBlueprintsBefore = good.meta.blueprintProgress;
+    const double goodCreditsBefore = good.run.credits;
+    good.run.flyby.completed = true;
+    good.run.flyby.result = FlybyGrade::Good;
+    good.run.flyby.elapsedSeconds = tuning::flyby::durationSeconds - 1.0;
+    completeFlybyRun(good, catalog);
+    require(destinationHistoryValue(good.meta.destinationFlybys, catalog, content::destination::moon) == goodFlybysBefore + 1, "good flyby should bank destination flyby history");
+    require(good.meta.blueprintProgress == goodBlueprintsBefore + tuning::flyby::goodBlueprintGain, "good flyby should grant blueprint progress");
+    require(good.run.credits > goodCreditsBefore, "good flyby should grant credits");
+    require(good.run.nextLaunchFuelBoost == 0.0 && good.run.nextLaunchSpeedBoost == 0.0, "good flyby should not grant slingshot boosts");
+    require(good.meta.totalFlybyGoods == 1, "good flyby should be counted for future achievement stats");
+
+    GameState perfect = createNewGame(catalog, 703);
+    startArrivalOps(perfect, moonArrival);
+    startArrivalFlybyRun(perfect, catalog);
+    perfect.run.flyby.completed = true;
+    perfect.run.flyby.result = FlybyGrade::Perfect;
+    perfect.run.flyby.elapsedSeconds = tuning::flyby::durationSeconds - 1.0;
+    completeFlybyRun(perfect, catalog);
+    require(perfect.run.nextLaunchFuelBoost >= tuning::flyby::slingshotFuelBoost - 0.001, "perfect flyby should grant next-launch fuel boost");
+    require(perfect.run.nextLaunchSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "perfect flyby should grant next-launch speed boost");
+    require(perfect.meta.totalFlybyPerfects == 1, "perfect flyby should be counted for future achievement stats");
+    const double baselineFuelBoost = perfect.run.nextLaunchFuelBoost;
+    const double baselineSpeedBoost = perfect.run.nextLaunchSpeedBoost;
+    const double baselinePerfectReward = perfect.run.credits;
+    Random rng(704);
+    const PreparedLaunch launch = prepareLaunch(perfect, catalog, rng);
+    require(launch.slingshotFuelBoost >= tuning::flyby::slingshotFuelBoost - 0.001, "prepared launch should include pending slingshot fuel");
+    require(launch.slingshotSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "prepared launch should include pending slingshot speed");
+
+    GameState fastPerfect = createNewGame(catalog, 711);
+    startArrivalOps(fastPerfect, moonArrival);
+    startArrivalFlybyRun(fastPerfect, catalog);
+    fastPerfect.run.flyby.completed = true;
+    fastPerfect.run.flyby.result = FlybyGrade::Perfect;
+    fastPerfect.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    fastPerfect.run.flyby.velocityX = tuning::flyby::maxSpeed;
+    fastPerfect.run.flyby.velocityY = 0.0;
+    completeFlybyRun(fastPerfect, catalog);
+    require(fastPerfect.run.nextLaunchFuelBoost > baselineFuelBoost, "faster perfect flyby should grant a larger fuel slingshot bonus");
+    require(fastPerfect.run.nextLaunchSpeedBoost > baselineSpeedBoost, "faster perfect flyby should grant a larger speed slingshot bonus");
+    require(fastPerfect.run.credits > baselinePerfectReward, "faster perfect flyby should also amplify the credit reward");
+
+    SaveData save = captureSaveData(fastPerfect);
+    const std::optional<SaveData> restoredSave = deserializeSaveData(serializeSaveData(save));
+    require(restoredSave.has_value(), "flyby stat counters should serialize");
+    GameState restored = createNewGame(catalog, 717);
+    restoreSaveData(restored, catalog, *restoredSave);
+    require(restored.meta.totalFlybyPerfects == fastPerfect.meta.totalFlybyPerfects, "perfect flyby totals should survive save roundtrip");
+
+    GameState fastGate = createNewGame(catalog, 712);
+    startArrivalOps(fastGate, moonArrival);
+    startArrivalFlybyRun(fastGate, catalog);
+    const auto cubicPoint = [](double a, double b, double c, double d, double t) {
+        const double u = 1.0 - t;
+        return u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
+    };
+    fastGate.run.flyby.gravityStrength = 0.0;
+    fastGate.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    fastGate.run.flyby.shipX = cubicPoint(tuning::flyby::startX, tuning::flyby::control1X, tuning::flyby::control2X, tuning::flyby::endX, 0.96);
+    fastGate.run.flyby.shipY = cubicPoint(tuning::flyby::startY, tuning::flyby::control1Y, tuning::flyby::control2Y, tuning::flyby::endY, 0.96);
+    const double gateDx = tuning::flyby::endX - fastGate.run.flyby.shipX;
+    const double gateDy = tuning::flyby::endY - fastGate.run.flyby.shipY;
+    const double gateDistance = std::hypot(gateDx, gateDy);
+    fastGate.run.flyby.velocityX = gateDx / gateDistance * tuning::flyby::maxSpeed;
+    fastGate.run.flyby.velocityY = gateDy / gateDistance * tuning::flyby::maxSpeed;
+    updateFlybyRun(fastGate, tuning::launch::maxFrameStepSeconds);
+    require(fastGate.run.flyby.completed, "fast flyby crossing the exit gate should complete in the crossing frame");
+    require(fastGate.run.flyby.result == FlybyGrade::Perfect, "fast flyby should score the swept exit gate instead of missing after overshooting the sample");
+    require(std::hypot(fastGate.run.flyby.velocityX, fastGate.run.flyby.velocityY) < 0.001, "flyby should physically stop the shuttle when the exit gate is reached");
+
+    GameState fastOvershoot = createNewGame(catalog, 713);
+    startArrivalOps(fastOvershoot, moonArrival);
+    startArrivalFlybyRun(fastOvershoot, catalog);
+    fastOvershoot.run.flyby.gravityStrength = 0.0;
+    fastOvershoot.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    fastOvershoot.run.flyby.shipX = cubicPoint(tuning::flyby::startX, tuning::flyby::control1X, tuning::flyby::control2X, tuning::flyby::endX, 0.98);
+    fastOvershoot.run.flyby.shipY = cubicPoint(tuning::flyby::startY, tuning::flyby::control1Y, tuning::flyby::control2Y, tuning::flyby::endY, 0.98);
+    const double overshootDx = tuning::flyby::endX - fastOvershoot.run.flyby.shipX;
+    const double overshootDy = tuning::flyby::endY - fastOvershoot.run.flyby.shipY;
+    const double overshootDistance = std::hypot(overshootDx, overshootDy);
+    fastOvershoot.run.flyby.velocityX = overshootDx / overshootDistance * tuning::flyby::maxSpeed;
+    fastOvershoot.run.flyby.velocityY = overshootDy / overshootDistance * tuning::flyby::maxSpeed;
+    updateFlybyRun(fastOvershoot, tuning::launch::maxFrameStepSeconds);
+    require(fastOvershoot.run.flyby.completed, "max-speed flyby should complete even when it overshoots beyond the exit gate in one frame");
+    require(fastOvershoot.run.flyby.result == FlybyGrade::Perfect, "max-speed flyby should grade the gate crossing, not post-finish overshoot");
+    require(fastOvershoot.run.flyby.worstZone >= 2, "post-finish overshoot should not degrade a perfect gate crossing");
+
+    GameState visibleGate = createNewGame(catalog, 715);
+    startArrivalOps(visibleGate, moonArrival);
+    startArrivalFlybyRun(visibleGate, catalog);
+    visibleGate.run.flyby.gravityStrength = 0.0;
+    visibleGate.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    const double finishDx = 3.0 * (tuning::flyby::endX - tuning::flyby::control2X);
+    const double finishDy = 3.0 * (tuning::flyby::endY - tuning::flyby::control2Y);
+    const double finishLength = std::hypot(finishDx, finishDy);
+    const double finishTangentX = finishDx / finishLength;
+    const double finishTangentY = finishDy / finishLength;
+    visibleGate.run.flyby.shipX = tuning::flyby::endX - finishTangentX * (tuning::flyby::shipColliderHalfLength + 0.02);
+    visibleGate.run.flyby.shipY = tuning::flyby::endY - finishTangentY * (tuning::flyby::shipColliderHalfLength + 0.02);
+    visibleGate.run.flyby.velocityX = finishTangentX * tuning::flyby::maxSpeed;
+    visibleGate.run.flyby.velocityY = finishTangentY * tuning::flyby::maxSpeed;
+    visibleGate.run.flyby.pathProgress = tuning::flyby::finishProgress - 0.02;
+    visibleGate.run.flyby.currentZone = 2;
+    visibleGate.run.flyby.worstZone = 2;
+    updateFlybyRun(visibleGate, tuning::launch::maxFrameStepSeconds);
+    require(visibleGate.run.flyby.completed, "crossing the visible finish line at max speed should finish the flyby");
+    require(visibleGate.run.flyby.result == FlybyGrade::Perfect, "crossing the finish line while still perfect should award perfect");
+
+    FlybyRunState strictMiss = fastGate.run.flyby;
+    strictMiss.result = FlybyGrade::Active;
+    strictMiss.worstZone = 0;
+    require(flybyGrade(strictMiss) == FlybyGrade::Miss, "touching the miss zone should make the whole flyby a miss");
+
+    GameState instantMiss = createNewGame(catalog, 716);
+    startArrivalOps(instantMiss, moonArrival);
+    startArrivalFlybyRun(instantMiss, catalog);
+    instantMiss.run.flyby.gravityStrength = 0.0;
+    instantMiss.run.flyby.shipX = tuning::flyby::startX - tuning::flyby::goodBand * 2.8;
+    instantMiss.run.flyby.shipY = tuning::flyby::startY + tuning::flyby::goodBand * 3.0;
+    instantMiss.run.flyby.velocityX = tuning::flyby::startVelocityX;
+    instantMiss.run.flyby.velocityY = tuning::flyby::startVelocityY;
+    updateFlybyRun(instantMiss, 0.05);
+    require(instantMiss.run.flyby.completed, "leaving the good corridor should end the flyby immediately");
+    require(instantMiss.run.flyby.result == FlybyGrade::Miss, "leaving the good corridor should immediately grade as a miss");
+
+    FlybyRunState strictGood = fastGate.run.flyby;
+    strictGood.result = FlybyGrade::Active;
+    strictGood.worstZone = 1;
+    require(flybyGrade(strictGood) == FlybyGrade::Good, "leaving perfect but staying inside the good corridor should grade as good");
+
+    FlybyRunState unfinished = fastGate.run.flyby;
+    unfinished.result = FlybyGrade::Active;
+    unfinished.pathProgress = tuning::flyby::finishProgress - 0.01;
+    unfinished.worstZone = 2;
+    require(flybyGrade(unfinished) == FlybyGrade::Miss, "a flyby should not score until the finish line is reached");
+
+    LaunchOutcome outerArrival;
+    outerArrival.type = LaunchResultType::MissionComplete;
+    outerArrival.frontierTransfer = true;
+    outerArrival.destinationId = content::destination::outerPlanets;
+    GameState outer = createNewGame(catalog, 707);
+    startArrivalOps(outer, outerArrival);
+    startArrivalFlybyRun(outer, catalog);
+    require(outer.run.flyby.gravityStrength > miss.run.flyby.gravityStrength, "large-planet flyby should apply stronger gravity than Moon/Mars");
+    const double initialProgress = outer.run.flyby.pathProgress;
+    updateFlybyRun(outer, 0.5);
+    require(outer.run.flyby.pathProgress >= initialProgress, "single-pass flyby should advance along the corridor over time");
+
+    GameState impact = createNewGame(catalog, 708);
+    startArrivalOps(impact, moonArrival);
+    startArrivalFlybyRun(impact, catalog);
+    impact.run.shipDamage = 7;
+    impact.run.flyby.shipX = tuning::flyby::destinationX;
+    impact.run.flyby.shipY = tuning::flyby::destinationY;
+    updateFlybyRun(impact, 0.1);
+    require(impact.run.flyby.completed && impact.run.flyby.collidedWithBody, "flyby should end immediately when the ship intersects the destination body");
+    require(impact.run.flyby.result == FlybyGrade::Miss, "planet impact should grade as a missed flyby");
+    require(impact.run.shipDamage == 7 + tuning::flyby::impactHullDamage, "planet impact should add hull damage to the ship");
+
+    GameState outOfBounds = createNewGame(catalog, 714);
+    startArrivalOps(outOfBounds, moonArrival);
+    startArrivalFlybyRun(outOfBounds, catalog);
+    outOfBounds.run.flyby.shipX = 1.05;
+    outOfBounds.run.flyby.velocityX = tuning::flyby::maxSpeed;
+    updateFlybyRun(outOfBounds, 0.2);
+    require(outOfBounds.run.flyby.completed, "leaving the flyby playfield should end the run");
+    require(outOfBounds.run.flyby.result == FlybyGrade::Miss, "leaving the flyby playfield should be a missed flyby");
+
+    GameState controls = createNewGame(catalog, 709);
+    startArrivalOps(controls, moonArrival);
+    startArrivalFlybyRun(controls, catalog);
+    controls.run.flyby.gravityStrength = 0.0;
+    const double baseSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
+    setFlybyMove(controls, 0.0, 1.0);
+    updateFlybyRun(controls, 0.2);
+    const double fasterSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
+    require(fasterSpeed > baseSpeed, "flyby throttle input should increase speed");
+    setFlybyMove(controls, 0.0, -1.0);
+    updateFlybyRun(controls, 0.2);
+    const double slowerSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
+    require(slowerSpeed < fasterSpeed, "flyby brake input should reduce speed");
+
+    GameState turn = createNewGame(catalog, 710);
+    startArrivalOps(turn, moonArrival);
+    startArrivalFlybyRun(turn, catalog);
+    turn.run.flyby.gravityStrength = 0.0;
+    const double headingBefore = std::atan2(turn.run.flyby.velocityY, turn.run.flyby.velocityX);
+    setFlybyMove(turn, 1.0, 0.0);
+    updateFlybyRun(turn, 0.2);
+    const double headingAfter = std::atan2(turn.run.flyby.velocityY, turn.run.flyby.velocityX);
+    require(headingAfter > headingBefore, "positive flyby turn input should rotate counter-clockwise");
+}
+
+void activeFlybySaveResumesAtApproach()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 705);
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+    startArrivalOps(state, moonArrival);
+    startArrivalFlybyRun(state, catalog);
+
+    const SaveData save = captureSaveData(state);
+    require(save.screen == Screen::ArrivalOps, "saving during flyby should persist the safe approach screen");
+    GameState restored = createNewGame(catalog, 706);
+    restoreSaveData(restored, catalog, save);
+    require(restored.screen == Screen::ArrivalOps, "loading during flyby should resume at approach options");
+    require(!restored.run.flyby.active, "loading during flyby should not restore transient flyby state");
+    require(restored.run.arrivalOps.active && restored.run.arrivalOps.destinationId == content::destination::moon, "approach destination should survive flyby save/load");
+}
+
 void researchProjectsGenerateAndCompleteFromSharedRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1419,6 +1715,27 @@ void surfaceUpgradeOffersAreDistinctAndSelectable()
     require(!state.run.surfaceExpedition.logEntries.empty() && state.run.surfaceExpedition.logEntries.back().find("Field upgrade installed") != std::string::npos, "surface upgrade selection should be logged");
 }
 
+void surfaceUpgradeOffersCanRerollAndKeepDraftState()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 6431);
+    state.run.destinationIndex = 2;
+    state.screen = Screen::SurfaceUpgrade;
+    state.run.credits = 200.0;
+    startSurfaceExpedition(state, catalog);
+
+    Random rng(6432);
+    generateSurfaceUpgradeOffers(state, catalog, rng);
+    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade draft should start with offers available");
+    const auto originalOffers = state.run.surfaceExpedition.surfaceUpgradeOfferIds;
+    const double originalCredits = state.run.credits;
+
+    require(rerollSurfaceUpgradeOffers(state, catalog, rng), "affordable surface upgrade reroll should succeed");
+    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "rerolling should keep the draft active");
+    require(state.run.credits < originalCredits, "field-upgrade reroll should spend credits");
+    require(state.run.surfaceExpedition.surfaceUpgradeOfferIds != originalOffers, "rerolling should refresh the field-upgrade board when options remain");
+}
+
 void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1455,7 +1772,7 @@ void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 645);
     state.run.destinationIndex = 2;
-    state.screen = Screen::SurfaceExpedition;
+    state.screen = Screen::SurfaceUpgrade;
     startSurfaceExpedition(state, catalog);
     state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids};
     state.run.surfaceExpedition.surfaceUpgradeOfferIds = {
@@ -1472,6 +1789,7 @@ void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
 
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *save);
+    require(restored.screen == Screen::SurfaceUpgrade, "active field-upgrade draft should round trip through save data");
     require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "selected surface upgrades should round trip");
     require(restored.run.surfaceExpedition.surfaceUpgradeOfferIds == state.run.surfaceExpedition.surfaceUpgradeOfferIds, "surface upgrade offers should round trip");
     require(restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offer availability should round trip");
@@ -2600,7 +2918,8 @@ void legacyRecordsTrackAchievementStats()
     require(std::abs(state.meta.maxBurnDepth - 2.78) < 0.001, "max burn should track launch depth");
     require(std::abs(state.meta.maxPeakWarning - 1.0) < 0.001, "max warning should track peak telemetry");
     require(std::abs(state.meta.maxPeakAbortRisk - 0.99) < 0.001, "max abort should track peak abort");
-    require(std::abs(state.meta.bestCreditDelta - 524.0) < 0.001, "best credit delta should track launch rewards");
+    require(std::abs(state.meta.bestCreditDelta - 584.0) < 0.001, "best credit delta should include close-call bonus rewards");
+    require(std::abs(state.lastOutcome.payout - 660.0) < 0.001, "skin-of-your-teeth outcomes should add a ten percent mission credit bonus");
 
     LaunchOutcome later = first;
     later.ejectMultiplier = 3.20;
@@ -2635,6 +2954,15 @@ void launchOutcomePresentationIsShared()
     require(presentation.notes.size() == 2, "destroyed outcomes should include module and crew notes");
     require(presentation.notes[0] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
     require(presentation.notes[1] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
+    require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("lost"), "crew death should create a major memorial result beat");
+    require(presentation.crewFate.title == text::panel::crewFate::lostTitle, "crew death result beat should use memorial copy");
+
+    LaunchOutcome recoveredFailure;
+    recoveredFailure.type = LaunchResultType::Destroyed;
+    recoveredFailure.recoveryMethod = RecoveryMethod::ManualEject;
+    presentation = launchOutcomePresentation(recoveredFailure);
+    require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("recovered"), "surviving a vehicle loss should create a major rescue result beat");
+    require(presentation.crewFate.title == text::panel::crewFate::recoveredTitle, "survived failure result beat should use rescue copy");
 
     LaunchOutcome transfer;
     transfer.type = LaunchResultType::MissionComplete;
@@ -2668,6 +2996,7 @@ void launchOutcomePresentationIsShared()
     require(presentation.achievements[0].id == content::achievement::skinOfYourTeeth, "close-call achievement should use a stable content id");
     require(presentation.achievements[0].title == text::panel::achievements::skinOfYourTeethTitle, "close-call achievement should expose a clear title");
     require(presentation.achievements[0].detail.find("x0.04") != std::string::npos, "close-call achievement should explain the survival margin");
+    require(presentation.achievements[0].detail.find("+10% mission credits") != std::string::npos, "close-call achievement should explain the credit bonus");
 }
 
 void enumDisplayLabelsComeFromSharedText()
@@ -3644,6 +3973,7 @@ void panelLayoutModeIsPortablePresentationData()
     require(panelLayoutMode(Screen::Results) == PanelLayoutMode::PhaseBoard, "results should use the management board layout");
     require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::PhaseBoard, "surface expedition should use the management board layout");
+    require(panelLayoutMode(Screen::SurfaceUpgrade) == PanelLayoutMode::PhaseBoard, "field upgrade draft should use the management board layout");
     require(panelLayoutMode(Screen::DroneOps) == PanelLayoutMode::PhaseBoard, "drone ops should use the management board layout");
     require(panelLayoutMode(Screen::Navigation) == PanelLayoutMode::PhaseBoard, "navigation should use the management board layout");
     require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::PhaseBoard, "refit should use the management board layout");
@@ -3729,7 +4059,9 @@ int main()
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
+    inventoryPresentationSummarizesResourcesAndPayload();
     shipModuleProgressSurvivesDestroyedVehicles();
+    deadCrewLosesTraining();
     crewUpgradeOffersInstallAndModifyCrewOps();
     hangarOpsStartCheapAndEscalate();
     medicalRestEscalationResetsAfterSurvivedMission();
@@ -3745,6 +4077,8 @@ int main()
     returnHomeRewardShelvesMatchRefitCosts();
     researchPhasesUnlockOnlyAfterMarsArrival();
     arrivalOperationsGateMoonButAllowMarsRisk();
+    arrivalFlybyMinigameRewardsProgressionAndSlingshot();
+    activeFlybySaveResumesAtApproach();
     researchProjectsGenerateAndCompleteFromSharedRules();
     materialResearchUnlocksModuleFamilies();
     artifactInsightImprovesFutureResearch();
@@ -3754,6 +4088,7 @@ int main()
     surfaceToolResearchImprovesExpeditions();
     animalCrewClassesModifySurfaceExpeditions();
     surfaceUpgradeOffersAreDistinctAndSelectable();
+    surfaceUpgradeOffersCanRerollAndKeepDraftState();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
     surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();

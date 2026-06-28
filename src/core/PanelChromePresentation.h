@@ -28,9 +28,14 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
             return *activeDestination;
         }
     }
-    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps) {
+    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps || state.screen == Screen::Flyby) {
         if (const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId)) {
             return *arrivalDestination;
+        }
+        if (state.screen == Screen::Flyby && !state.run.flyby.destinationId.empty()) {
+            if (const Destination* flybyDestination = catalog.findDestination(state.run.flyby.destinationId)) {
+                return *flybyDestination;
+            }
         }
     }
     return currentDestination(state, catalog);
@@ -61,6 +66,11 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
             ? flightModel.pressureModifier
             : missionPressureModifier(state, catalog, displayDestination))));
     metrics.push_back(panelMetric(text::labels::crewStress, crewStressSummary(astronaut)));
+    const double pendingFuelBoost = state.screen == Screen::Launch ? activeLaunch.slingshotFuelBoost : state.run.nextLaunchFuelBoost;
+    const double pendingSpeedBoost = state.screen == Screen::Launch ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;
+    if (pendingFuelBoost > 0.0 || pendingSpeedBoost > 0.0) {
+        metrics.push_back(panelMetric("Slingshot window", "+" + display::fixed(pendingFuelBoost, 1) + " fuel / +" + display::fixed(pendingSpeedBoost, 2) + " speed"));
+    }
     return metrics;
 }
 

@@ -113,6 +113,12 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.arrivalFanfare = {};
 }
 
+void RocketGameApp::consumeNextLaunchBoost()
+{
+    state_.run.nextLaunchFuelBoost = 0.0;
+    state_.run.nextLaunchSpeedBoost = 0.0;
+}
+
 double RocketGameApp::liveBurnMultiplier() const
 {
     if (!session_.controls.actions.returningHome) {
@@ -220,6 +226,25 @@ void RocketGameApp::tick(double deltaSeconds)
             save();
         }
         panelDirty_ = true;
+    } else if (state_.screen == Screen::Flyby) {
+        const bool wasCompleted = state_.run.flyby.completed;
+        updateFlybyRun(state_, deltaSeconds);
+        if (!wasCompleted && state_.run.flyby.completed) {
+            switch (state_.run.flyby.result) {
+            case FlybyGrade::Perfect:
+                state_.statusLine = "Perfect slingshot. Next launch gets fuel margin and speed.";
+                break;
+            case FlybyGrade::Good:
+                state_.statusLine = "Clean flyby. Recon data secured.";
+                break;
+            case FlybyGrade::Miss:
+            default:
+                state_.statusLine = "Missed flyby window. Approach options remain open.";
+                break;
+            }
+            save();
+        }
+        panelDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
     } else if (state_.screen == Screen::ArrivalFanfare) {
@@ -264,6 +289,7 @@ void RocketGameApp::prepareForLaunch()
         ? currentDestination(state_, catalog_).targetMultiplier
         : defaultProvingTarget(currentDestination(state_, catalog_));
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+    consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
     state_.statusLine = std::string(text::status::preflightReady);
     refreshPanel();
@@ -448,6 +474,12 @@ void RocketGameApp::next()
         state_.statusLine = std::string(text::status::refitWindowOpened);
         syncLaunchConfig(state_, catalog_);
         save();
+    } else if (state_.screen == Screen::SurfaceUpgrade) {
+        state_.run.surfaceExpedition.surfaceUpgradeOfferIds = {};
+        state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable = false;
+        state_.screen = Screen::SurfaceExpedition;
+        state_.statusLine = "Field upgrade skipped. Keep digging or extract while the window holds.";
+        save();
     } else if (state_.screen == Screen::Upgrade) {
         state_.run.offerModuleIds = {};
         state_.run.offerCrewUpgradeIds = {};
@@ -465,10 +497,52 @@ void RocketGameApp::runArrivalFlyby()
         return;
     }
 
-    completeArrivalFlyby(state_, catalog_);
-    generateModuleOffers(state_, catalog_, rng_);
-    state_.screen = Screen::Upgrade;
-    state_.statusLine = std::string(text::status::flybyCompleted);
+    startArrivalFlybyRun(state_, catalog_);
+    state_.statusLine = "Manual flyby started. Stay in the approach corridor.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::flybyMove(double xAxis, double yAxis)
+{
+    if (state_.screen != Screen::Flyby) {
+        return;
+    }
+    setFlybyMove(state_, xAxis, yAxis);
+}
+
+void RocketGameApp::flybyAbort()
+{
+    if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
+        return;
+    }
+    abortFlybyRun(state_);
+    state_.statusLine = "Flyby aborted. No recon reward earned.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::flybyContinue()
+{
+    if (state_.screen != Screen::Flyby || !state_.run.flyby.completed) {
+        return;
+    }
+
+    const FlybyGrade grade = state_.run.flyby.result;
+    completeFlybyRun(state_, catalog_);
+    switch (grade) {
+    case FlybyGrade::Perfect:
+        state_.statusLine = "Perfect slingshot banked. Choose the next approach.";
+        break;
+    case FlybyGrade::Good:
+        state_.statusLine = "Flyby data banked. Choose the next approach.";
+        break;
+    case FlybyGrade::Miss:
+    default:
+        state_.statusLine = "Missed window. Choose another approach or try again.";
+        break;
+    }
     syncLaunchConfig(state_, catalog_);
     save();
     panelDirty_ = true;
@@ -552,6 +626,9 @@ void RocketGameApp::surveySurface()
     const SurfaceActionOutcome outcome = surveySurfaceSite(state_, rng_);
     if (outcome.applied) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
     }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
@@ -579,6 +656,9 @@ void RocketGameApp::pushSurface()
     const SurfaceActionOutcome outcome = pushSurfaceDeeper(state_, rng_);
     if (outcome.applied) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
     }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
@@ -606,11 +686,12 @@ void RocketGameApp::extractSurface()
 
 void RocketGameApp::selectSurfaceUpgrade(int index)
 {
-    if (state_.screen != Screen::SurfaceExpedition) {
+    if (state_.screen != Screen::SurfaceUpgrade) {
         return;
     }
 
     if (chooseSurfaceUpgrade(state_, catalog_, index)) {
+        state_.screen = Screen::SurfaceExpedition;
         save();
     }
     panelDirty_ = true;
@@ -701,6 +782,9 @@ void RocketGameApp::miningStow()
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
     if (outcome.applied) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
     }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningStowed);
     save();
@@ -729,6 +813,9 @@ void RocketGameApp::miningAbort()
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
     if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
     }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
@@ -744,6 +831,9 @@ void RocketGameApp::miningFailureAck()
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
     if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
     }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
@@ -786,6 +876,7 @@ void RocketGameApp::attemptFrontierTransfer()
     state_.launchConfig.destinationId = next->id;
     state_.launchConfig.burnGoalMultiplier = next->targetMultiplier;
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+    consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
     state_.statusLine = std::string(text::status::preflightReady);
     refreshPanel();
@@ -845,12 +936,18 @@ void RocketGameApp::buyOffer(int index)
 
 void RocketGameApp::rerollOffers()
 {
-    if (state_.screen != Screen::Upgrade) {
+    if (state_.screen == Screen::Upgrade) {
+        if (rocket::rerollOffers(state_, catalog_, rng_)) {
+            save();
+        }
+        panelDirty_ = true;
         return;
     }
 
-    if (rocket::rerollOffers(state_, catalog_, rng_)) {
-        save();
+    if (state_.screen == Screen::SurfaceUpgrade) {
+        if (rocket::rerollSurfaceUpgradeOffers(state_, catalog_, rng_)) {
+            save();
+        }
     }
     panelDirty_ = true;
 }
@@ -975,7 +1072,8 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.animationTime = state_.screen == Screen::Launch
         ? session_.elapsed
         : (state_.screen == Screen::Mining ? state_.run.mining.elapsedSeconds :
-            (state_.screen == Screen::ArrivalFanfare ? session_.arrivalFanfare.elapsed : session_.result.elapsed));
+            (state_.screen == Screen::Flyby ? state_.run.flyby.elapsedSeconds :
+                (state_.screen == Screen::ArrivalFanfare ? session_.arrivalFanfare.elapsed : session_.result.elapsed)));
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
     if (state_.screen == Screen::Launch) {
@@ -983,9 +1081,14 @@ RenderSnapshot RocketGameApp::snapshot() const
             visualDestination = activeDestination;
         }
         result.frontierTransfer = session_.preparedLaunch.config.frontierTransfer;
-    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps) {
+    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby) {
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
+        }
+        if (state_.screen == Screen::Flyby && !state_.run.flyby.destinationId.empty()) {
+            if (const Destination* flybyDestination = catalog_.findDestination(state_.run.flyby.destinationId)) {
+                visualDestination = flybyDestination;
+            }
         }
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
     }
@@ -999,7 +1102,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             session_.returnTrip.duration);
         result.returningHome = true;
         result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
-    } else if (state_.screen == Screen::ArrivalFanfare) {
+    } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby) {
         result.travelProgress = 0.985;
     } else if (state_.screen == Screen::ArrivalOps) {
         result.travelProgress = 1.0;
@@ -1056,6 +1159,31 @@ RenderSnapshot RocketGameApp::snapshot() const
                     cell.hazard
                 });
             }
+        }
+    }
+
+    if (state_.screen == Screen::Flyby && state_.run.flyby.active) {
+        const FlybyRunState& flyby = state_.run.flyby;
+        result.flybyActive = true;
+        result.flybyCompleted = flyby.completed;
+        result.flybyZone = flyby.currentZone;
+        result.flybyResult = static_cast<int>(flyby.result);
+        result.flybyElapsed = flyby.elapsedSeconds;
+        result.flybyDuration = flyby.durationSeconds;
+        result.flybyShipX = flyby.shipX;
+        result.flybyShipY = flyby.shipY;
+        result.flybyVelocityX = flyby.velocityX;
+        result.flybyVelocityY = flyby.velocityY;
+        result.flybyInputX = flyby.inputX;
+        result.flybyInputY = flyby.inputY;
+        result.flybyDestinationX = tuning::flyby::destinationX;
+        result.flybyDestinationY = tuning::flyby::destinationY;
+        result.flybyIdealRadius = tuning::flyby::idealRadius;
+        result.flybyGoodBand = tuning::flyby::goodBand;
+        result.flybyPerfectBand = tuning::flyby::perfectBand;
+        result.flybyTrailPoints.reserve(flyby.trailPoints.size());
+        for (const FlybyTrailPoint& point : flyby.trailPoints) {
+            result.flybyTrailPoints.push_back({point.x, point.y});
         }
     }
 

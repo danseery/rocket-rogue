@@ -231,6 +231,9 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     PreparedLaunch launch;
     launch.config = state.launchConfig;
     launch.stats = aggregateShipStats(state, catalog);
+    launch.slingshotFuelBoost = std::max(0.0, state.run.nextLaunchFuelBoost);
+    launch.slingshotSpeedBoost = std::max(0.0, state.run.nextLaunchSpeedBoost);
+    launch.stats.fuel += launch.slingshotFuelBoost;
 
     const Destination* configuredDestination = catalog.findDestination(launch.config.destinationId);
     const Destination& destination = configuredDestination == nullptr ? currentDestination(state, catalog) : *configuredDestination;
@@ -402,7 +405,8 @@ double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& dest
         static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
     const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
     const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * tuning::launch::baseTravelSpeedMultiplier;
+    const double speedMultiplier = std::max(0.0, tuning::launch::baseTravelSpeedMultiplier + launch.slingshotSpeedBoost);
+    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * speedMultiplier;
 }
 
 double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)

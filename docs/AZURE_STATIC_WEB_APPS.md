@@ -65,6 +65,8 @@ The deploy package contains:
 
 From an activated dev shell:
 
+> Codex desktop note: on Windows, the sandbox can block Ninja when running `cmake --build --preset web-release`. Codex agents should request escalated execution for that build command immediately instead of first attempting the sandboxed command.
+
 ```bash
 cmake --preset web-release
 cmake --build --preset web-release

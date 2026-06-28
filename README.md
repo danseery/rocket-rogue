@@ -58,6 +58,14 @@ cmake --preset web-release
 cmake --build --preset web-release
 ```
 
+### Codex desktop sandbox note
+
+In the Codex desktop sandbox on Windows, `cmake --build --preset web-release` may fail with `operation not permitted` when CMake launches Ninja. When a Codex agent needs to run this build, request escalated execution for the build command up front instead of trying the sandboxed command first. The working command is still:
+
+```powershell
+cmake --build --preset web-release
+```
+
 Serve the generated build directory:
 
 ```powershell

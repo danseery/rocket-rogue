@@ -358,11 +358,20 @@ inline constexpr std::string_view fractureFieldDetail = "Broken terrain improves
 namespace achievements {
 inline constexpr std::string_view skinOfYourTeethTitle = "Skin of your teeth";
 
-inline std::string skinOfYourTeethDetail(std::string_view margin)
+inline std::string skinOfYourTeethDetail(std::string_view margin, std::string_view bonus)
 {
-    return "Survived within " + std::string(margin) + " of the failure point.";
+    return "Survived within " + std::string(margin) + " of the failure point. " + std::string(bonus) + " mission credits.";
 }
 } // namespace achievements
+
+namespace crewFate {
+inline constexpr std::string_view label = "Crew status";
+inline constexpr std::string_view recoveredTitle = "Crew Recovered";
+inline constexpr std::string_view recoveredDetail = "Rescue beacon locked. The vehicle is gone, but the crew made it back.";
+inline constexpr std::string_view recoveredInjuredDetail = "Capsule recovered under fire. The crew survived, but medical rest is not optional.";
+inline constexpr std::string_view lostTitle = "Crew Lost";
+inline constexpr std::string_view lostDetail = "Memorial record opened. The next specialist carries the mission forward.";
+} // namespace crewFate
 
 namespace modals {
 inline constexpr std::string_view telemetryDetails = "Telemetry Details";

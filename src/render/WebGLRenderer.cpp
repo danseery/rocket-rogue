@@ -405,6 +405,10 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
         drawMining(snapshot);
         return;
     }
+    if (snapshot.screen == Screen::Flyby) {
+        drawFlyby(snapshot);
+        return;
+    }
     drawBackdrop(snapshot);
     drawRocket(snapshot);
     drawTelemetry(snapshot);
@@ -621,6 +625,201 @@ void WebGLRenderer::drawSpriteRotated(float cx, float cy, float w, float h, floa
     pushVertex(vertices, tr.x, tr.y, tint, u1, 0.0F);
     pushVertex(vertices, tl.x, tl.y, tint, u0, 0.0F);
     submit(vertices, 0x0004, true, asset.texture, worldSpace);
+}
+
+void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
+{
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.012F, 0.017F, 0.027F, 1.0F}, false);
+    drawSolarBackground(snapshot, 0.72F);
+
+    const float destX = static_cast<float>(snapshot.flybyDestinationX);
+    const float destY = static_cast<float>(snapshot.flybyDestinationY);
+    const float goodBand = static_cast<float>(snapshot.flybyGoodBand);
+    const float perfectBand = static_cast<float>(snapshot.flybyPerfectBand);
+    const float pulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.6F);
+
+    auto pathPoint = [](float t) {
+        const float u = 1.0F - t;
+        return Vec2 {
+            u * u * u * static_cast<float>(tuning::flyby::startX)
+                + 3.0F * u * u * t * static_cast<float>(tuning::flyby::control1X)
+                + 3.0F * u * t * t * static_cast<float>(tuning::flyby::control2X)
+                + t * t * t * static_cast<float>(tuning::flyby::endX),
+            u * u * u * static_cast<float>(tuning::flyby::startY)
+                + 3.0F * u * u * t * static_cast<float>(tuning::flyby::control1Y)
+                + 3.0F * u * t * t * static_cast<float>(tuning::flyby::control2Y)
+                + t * t * t * static_cast<float>(tuning::flyby::endY)
+        };
+    };
+    auto pathDerivative = [](float t) {
+        const float u = 1.0F - t;
+        return Vec2 {
+            3.0F * u * u * (static_cast<float>(tuning::flyby::control1X) - static_cast<float>(tuning::flyby::startX))
+                + 6.0F * u * t * (static_cast<float>(tuning::flyby::control2X) - static_cast<float>(tuning::flyby::control1X))
+                + 3.0F * t * t * (static_cast<float>(tuning::flyby::endX) - static_cast<float>(tuning::flyby::control2X)),
+            3.0F * u * u * (static_cast<float>(tuning::flyby::control1Y) - static_cast<float>(tuning::flyby::startY))
+                + 6.0F * u * t * (static_cast<float>(tuning::flyby::control2Y) - static_cast<float>(tuning::flyby::control1Y))
+                + 3.0F * t * t * (static_cast<float>(tuning::flyby::endY) - static_cast<float>(tuning::flyby::control2Y))
+        };
+    };
+    auto offsetPoint = [&](float t, float offset) {
+        const Vec2 p = pathPoint(t);
+        const Vec2 tangent = normalize(pathDerivative(t));
+        const Vec2 normal {-tangent.y, tangent.x};
+        return Vec2 {p.x + normal.x * offset, p.y + normal.y * offset};
+    };
+    auto drawCurveOffset = [&](float offset, Color color, float width) {
+        std::vector<float>& vertices = scratchVertices(96 * 12);
+        constexpr int segments = 96;
+        Vec2 previous = offsetPoint(0.0F, offset);
+        for (int i = 1; i <= segments; ++i) {
+            const float t = static_cast<float>(i) / static_cast<float>(segments);
+            const Vec2 current = offsetPoint(t, offset);
+            appendLine(vertices, previous.x, previous.y, current.x, current.y, color);
+            previous = current;
+        }
+        submitLines(vertices, width);
+    };
+
+    for (int i = -5; i <= 5; ++i) {
+        drawCurveOffset(goodBand * static_cast<float>(i) / 5.0F, {0.10F, 0.46F, 0.62F, 0.020F}, 1.0F);
+    }
+    drawCurveOffset(-goodBand, {0.20F, 0.72F, 1.0F, 0.28F}, 2.0F);
+    drawCurveOffset(goodBand, {0.20F, 0.72F, 1.0F, 0.28F}, 2.0F);
+    drawCurveOffset(-perfectBand, {1.0F, 0.82F, 0.28F, 0.42F + pulse * 0.08F}, 3.0F);
+    drawCurveOffset(perfectBand, {1.0F, 0.82F, 0.28F, 0.42F + pulse * 0.08F}, 3.0F);
+    drawCurveOffset(0.0F, {0.86F, 0.96F, 1.0F, 0.30F}, 1.2F);
+
+    const Vec2 startGate = pathPoint(0.0F);
+    const Vec2 endGate = pathPoint(1.0F);
+    const Vec2 endTangent = normalize(pathDerivative(1.0F));
+    const Vec2 endNormal {-endTangent.y, endTangent.x};
+    auto drawFinishLine = [&](float halfWidth, Color color, float width) {
+        std::vector<float>& finishVertices = scratchVertices(12);
+        appendLine(
+            finishVertices,
+            endGate.x - endNormal.x * halfWidth,
+            endGate.y - endNormal.y * halfWidth,
+            endGate.x + endNormal.x * halfWidth,
+            endGate.y + endNormal.y * halfWidth,
+            color);
+        submitLines(finishVertices, width);
+    };
+    drawCircle(startGate.x, startGate.y, 0.032F, {0.34F, 0.90F, 1.0F, 0.22F}, 24);
+    drawFinishLine(goodBand, {0.28F, 0.88F, 1.0F, 0.38F}, 3.0F);
+    drawFinishLine(perfectBand, {1.0F, 0.82F, 0.28F, 0.66F + pulse * 0.12F}, 5.0F);
+    drawCircle(endGate.x, endGate.y, 0.024F + pulse * 0.004F, {1.0F, 0.82F, 0.28F, 0.32F}, 24);
+
+    const float planetRadius = 0.13F + std::min(4.0F, static_cast<float>(snapshot.destinationTier)) * 0.012F;
+    if (snapshot.destinationTier == 1 && textureReady(MoonAsset)) {
+        drawSprite(destX, destY, planetRadius * 2.40F, planetRadius * 2.40F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
+    } else if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
+        drawSprite(destX, destY, planetRadius * 2.55F, planetRadius * 2.55F, {1.0F, 1.0F, 1.0F, 1.0F}, MarsAsset);
+    } else {
+        const Color body = snapshot.destinationTier >= 3
+            ? Color{0.72F, 0.56F, 0.34F, 0.90F}
+            : Color{0.58F, 0.68F, 0.74F, 0.90F};
+        drawCircle(destX, destY, planetRadius, body, 72);
+        drawCircle(destX + planetRadius * 0.22F, destY + planetRadius * 0.16F, planetRadius * 0.62F, {0.92F, 0.78F, 0.46F, 0.36F}, 48);
+        if (snapshot.destinationTier >= 3) {
+            drawEllipseLine(destX, destY, planetRadius * 2.36F, planetRadius * 0.54F, {0.54F, 0.80F, 0.94F, 0.30F}, 88, -0.10F * kPi, 1.10F * kPi);
+        }
+    }
+    drawCircle(destX, destY, planetRadius * (1.55F + pulse * 0.10F), {0.30F, 0.86F, 1.0F, 0.08F}, 72);
+
+    const float shipX = static_cast<float>(snapshot.flybyShipX);
+    const float shipY = static_cast<float>(snapshot.flybyShipY);
+    Vec2 velocity = normalize({static_cast<float>(snapshot.flybyVelocityX), static_cast<float>(snapshot.flybyVelocityY)});
+    if (std::abs(velocity.x) + std::abs(velocity.y) < 0.001F) {
+        velocity = normalize({destX - shipX, destY - shipY});
+    }
+
+    if (snapshot.flybyTrailPoints.size() >= 2) {
+        std::vector<float>& pathVertices = scratchVertices(snapshot.flybyTrailPoints.size() * 12);
+        for (std::size_t i = 1; i < snapshot.flybyTrailPoints.size(); ++i) {
+            const FlybyTrailPointSnapshot& previous = snapshot.flybyTrailPoints[i - 1];
+            const FlybyTrailPointSnapshot& current = snapshot.flybyTrailPoints[i];
+            const float alpha = 0.18F + 0.34F * (static_cast<float>(i) / static_cast<float>(snapshot.flybyTrailPoints.size() - 1));
+            appendLine(
+                pathVertices,
+                static_cast<float>(previous.x),
+                static_cast<float>(previous.y),
+                static_cast<float>(current.x),
+                static_cast<float>(current.y),
+                {1.0F, 0.18F, 0.16F, alpha});
+        }
+        submitLines(pathVertices, 2.4F);
+    }
+
+    std::vector<float>& trailVertices = scratchVertices(8 * 16);
+    for (int i = 1; i <= 8; ++i) {
+        const float a = static_cast<float>(i - 1) / 8.0F;
+        const float b = static_cast<float>(i) / 8.0F;
+        const float tailA = 0.18F * a;
+        const float tailB = 0.18F * b;
+        appendLine(
+            trailVertices,
+            shipX - velocity.x * tailA,
+            shipY - velocity.y * tailA,
+            shipX - velocity.x * tailB,
+            shipY - velocity.y * tailB,
+            {0.42F, 0.88F, 1.0F, 0.28F * (1.0F - b)});
+    }
+    submitLines(trailVertices, 1.6F);
+
+    const int zone = snapshot.flybyCompleted ? snapshot.flybyResult : snapshot.flybyZone;
+    const bool perfectZone = snapshot.flybyCompleted ? zone >= 3 : zone >= 2;
+    const bool goodZone = snapshot.flybyCompleted ? zone >= 2 : zone >= 1;
+    const Color zoneGlow = perfectZone
+        ? Color{1.0F, 0.78F, 0.22F, 0.18F}
+        : (goodZone ? Color{0.34F, 0.90F, 1.0F, 0.15F} : Color{1.0F, 0.28F, 0.20F, 0.10F});
+    drawCircle(shipX, shipY, 0.090F + pulse * 0.010F, zoneGlow, 42);
+
+    const float throttleInput = static_cast<float>(snapshot.flybyInputY);
+    if (!snapshot.flybyCompleted && throttleInput > 0.05F) {
+        const Vec2 thrust {-velocity.x, -velocity.y};
+        const Vec2 tail {
+            shipX + thrust.x * 0.072F,
+            shipY + thrust.y * 0.072F
+        };
+        drawCircle(tail.x, tail.y, 0.026F + pulse * 0.006F, {1.0F, 0.62F, 0.16F, 0.58F}, 18);
+        drawCircle(tail.x + thrust.x * 0.030F, tail.y + thrust.y * 0.030F, 0.014F, {1.0F, 0.92F, 0.36F, 0.64F}, 14);
+    }
+
+    if (textureReady(RocketAsset)) {
+        if (!snapshot.flybyCompleted && throttleInput > 0.05F && textureReady(ThrustAsset)) {
+            const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+            drawSpriteRotated(
+                shipX - velocity.x * 0.030F,
+                shipY - velocity.y * 0.030F,
+                0.040F,
+                0.070F,
+                velocity.x,
+                velocity.y,
+                {1.0F, 1.0F, 1.0F, 0.88F},
+                ThrustAsset,
+                thrustFrame,
+                6);
+        }
+        drawSpriteRotated(shipX, shipY, 0.12F, 0.12F, velocity.x, velocity.y, {1.0F, 1.0F, 1.0F, 1.0F}, RocketAsset);
+    } else {
+        const Vec2 right {velocity.y, -velocity.x};
+        drawTriangle(
+            shipX + velocity.x * 0.050F,
+            shipY + velocity.y * 0.050F,
+            shipX - velocity.x * 0.048F + right.x * 0.030F,
+            shipY - velocity.y * 0.048F + right.y * 0.030F,
+            shipX - velocity.x * 0.048F - right.x * 0.030F,
+            shipY - velocity.y * 0.048F - right.y * 0.030F,
+            {0.86F, 0.94F, 0.98F, 1.0F});
+    }
+
+    if (snapshot.flybyCompleted) {
+        const Color resultColor = snapshot.flybyResult >= 3
+            ? Color{1.0F, 0.78F, 0.22F, 0.18F}
+            : (snapshot.flybyResult >= 2 ? Color{0.34F, 0.90F, 1.0F, 0.14F} : Color{1.0F, 0.22F, 0.18F, 0.12F});
+        drawCircle(shipX, shipY, 0.16F + pulse * 0.025F, resultColor, 64);
+    }
 }
 
 void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)

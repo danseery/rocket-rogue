@@ -34,6 +34,9 @@ public:
     void buyOffer(int index);
     void rerollOffers();
     void runArrivalFlyby();
+    void flybyMove(double xAxis, double yAxis);
+    void flybyAbort();
+    void flybyContinue();
     void enterArrivalOrbit();
     void attemptArrivalLanding();
     void selectResearchProject(int index);
@@ -108,6 +111,7 @@ private:
     PreparedLaunch currentFlightModel() const;
     void recordTelemetryPeak(const TelemetryEvent& event);
     void beginLaunchSession(PreparedLaunch preparedLaunch);
+    void consumeNextLaunchBoost();
     void clearFlightControls();
     void clearResultView();
     void beginSurfaceExpeditionOrRefit();

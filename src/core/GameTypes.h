@@ -17,8 +17,10 @@ enum class Screen {
     Results,
     ArrivalFanfare,
     ArrivalOps,
+    Flyby,
     Research,
     SurfaceExpedition,
+    SurfaceUpgrade,
     Mining,
     Upgrade,
     Legacy,
@@ -97,6 +99,13 @@ enum class MiningCellMaterial {
     ArtifactCache,
     HazardPocket,
     Bedrock
+};
+
+enum class FlybyGrade {
+    Active,
+    Miss,
+    Good,
+    Perfect
 };
 
 enum class LaunchResultType {
@@ -343,6 +352,9 @@ struct MetaProgress {
     double maxPeakAbortRisk = 0.0;
     double bestCreditDelta = 0.0;
     double worstCreditDelta = 0.0;
+    int totalFlybyMisses = 0;
+    int totalFlybyGoods = 0;
+    int totalFlybyPerfects = 0;
     std::vector<int> destinationAttempts;
     std::vector<int> destinationSuccesses;
     std::vector<int> destinationFlybys;
@@ -355,6 +367,45 @@ struct MetaProgress {
 struct ArrivalOpsState {
     bool active = false;
     std::string destinationId;
+};
+
+struct FlybyTrailPoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+struct FlybyRunState {
+    bool active = false;
+    std::string destinationId;
+    double elapsedSeconds = 0.0;
+    double durationSeconds = 18.0;
+    double shipX = -0.68;
+    double shipY = -0.24;
+    double velocityX = 0.26;
+    double velocityY = 0.13;
+    double inputX = 0.0;
+    double inputY = 0.0;
+    double gravityStrength = 0.0;
+    double pathProgress = 0.0;
+    int worstZone = 2;
+    double planetColliderRadius = 0.15;
+    double missSeconds = 0.0;
+    double goodSeconds = 0.0;
+    double perfectSeconds = 0.0;
+    double currentMissStreak = 0.0;
+    double longestMissStreak = 0.0;
+    int currentZone = 0;
+    bool completed = false;
+    bool collidedWithBody = false;
+    FlybyGrade result = FlybyGrade::Active;
+    double rewardCredits = 0.0;
+    int blueprintGain = 0;
+    double rewardBonusScale = 1.0;
+    bool slingshotAwarded = false;
+    double slingshotFuelBoost = 0.0;
+    double slingshotSpeedBoost = 0.0;
+    double slingshotSpeedScale = 1.0;
+    std::vector<FlybyTrailPoint> trailPoints;
 };
 
 struct SurfaceExpeditionState {
@@ -450,8 +501,11 @@ struct RunState {
     std::array<std::string, 3> offerCrewUpgradeIds {};
     std::array<std::string, 3> researchProjectIds {};
     ArrivalOpsState arrivalOps;
+    FlybyRunState flyby;
     SurfaceExpeditionState surfaceExpedition;
     MiningRunState mining;
+    double nextLaunchFuelBoost = 0.0;
+    double nextLaunchSpeedBoost = 0.0;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;
