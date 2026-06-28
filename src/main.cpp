@@ -272,6 +272,36 @@ void rr_arrival_orbit()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_orbit_move(double xAxis, double yAxis)
+{
+    if (g_app) {
+        g_app->orbitMove(xAxis, yAxis);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_orbit_abort()
+{
+    if (g_app) {
+        g_app->orbitAbort();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_orbit_continue()
+{
+    if (g_app) {
+        g_app->orbitContinue();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_landing()
 {
     if (g_app) {

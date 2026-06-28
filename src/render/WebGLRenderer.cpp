@@ -409,6 +409,10 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
         drawFlyby(snapshot);
         return;
     }
+    if (snapshot.screen == Screen::Orbit) {
+        drawOrbit(snapshot);
+        return;
+    }
     drawBackdrop(snapshot);
     drawRocket(snapshot);
     drawTelemetry(snapshot);
@@ -819,6 +823,116 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
             ? Color{1.0F, 0.78F, 0.22F, 0.18F}
             : (snapshot.flybyResult >= 2 ? Color{0.34F, 0.90F, 1.0F, 0.14F} : Color{1.0F, 0.22F, 0.18F, 0.12F});
         drawCircle(shipX, shipY, 0.16F + pulse * 0.025F, resultColor, 64);
+    }
+}
+
+void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
+{
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.010F, 0.015F, 0.024F, 1.0F}, false);
+    drawSolarBackground(snapshot, 0.68F);
+
+    const float pulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 4.7F);
+    const float planetRadius = static_cast<float>(snapshot.orbitPlanetRadius);
+    const float targetRadius = static_cast<float>(snapshot.orbitTargetRadius);
+    const float goodBand = static_cast<float>(snapshot.orbitGoodBand);
+    const float perfectBand = static_cast<float>(snapshot.orbitPerfectBand);
+
+    for (int i = -4; i <= 4; ++i) {
+        const float offset = goodBand * static_cast<float>(i) / 4.0F;
+        drawEllipseLine(0.0F, 0.0F, targetRadius + offset, targetRadius + offset, {0.14F, 0.54F, 0.68F, 0.035F}, 128, 0.0F, 2.0F * kPi);
+    }
+    drawEllipseLine(0.0F, 0.0F, targetRadius - goodBand, targetRadius - goodBand, {0.24F, 0.82F, 1.0F, 0.28F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + goodBand, targetRadius + goodBand, {0.24F, 0.82F, 1.0F, 0.28F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius - perfectBand, targetRadius - perfectBand, {1.0F, 0.80F, 0.24F, 0.44F + pulse * 0.10F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + perfectBand, targetRadius + perfectBand, {1.0F, 0.80F, 0.24F, 0.44F + pulse * 0.10F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.86F, 0.96F, 1.0F, 0.24F}, 128, 0.0F, 2.0F * kPi);
+
+    const float progress = static_cast<float>(std::clamp(snapshot.orbitProgress, 0.0, 1.0));
+    if (progress > 0.0F) {
+        const float startAngle = static_cast<float>(tuning::orbit::startAngleRadians);
+        drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.98F, 0.96F, 0.82F, 0.74F}, 128, startAngle, startAngle + progress * 2.0F * kPi);
+    }
+
+    if (snapshot.destinationTier == 1 && textureReady(MoonAsset)) {
+        drawSprite(0.0F, 0.0F, planetRadius * 2.44F, planetRadius * 2.44F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
+    } else if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
+        drawSprite(0.0F, 0.0F, planetRadius * 2.55F, planetRadius * 2.55F, {1.0F, 1.0F, 1.0F, 1.0F}, MarsAsset);
+    } else {
+        const Color body = snapshot.destinationTier >= 3
+            ? Color{0.70F, 0.56F, 0.36F, 0.94F}
+            : Color{0.56F, 0.66F, 0.74F, 0.92F};
+        drawCircle(0.0F, 0.0F, planetRadius, body, 88);
+        drawCircle(planetRadius * 0.22F, planetRadius * 0.16F, planetRadius * 0.62F, {0.92F, 0.78F, 0.46F, 0.34F}, 56);
+        if (snapshot.destinationTier >= 3) {
+            drawEllipseLine(0.0F, 0.0F, planetRadius * 2.30F, planetRadius * 0.52F, {0.54F, 0.80F, 0.94F, 0.30F}, 96, -0.10F * kPi, 1.10F * kPi);
+        }
+    }
+    drawCircle(0.0F, 0.0F, planetRadius * (1.55F + pulse * 0.08F), {0.30F, 0.86F, 1.0F, 0.065F}, 88);
+
+    if (snapshot.orbitTrailPoints.size() >= 2) {
+        std::vector<float>& pathVertices = scratchVertices(snapshot.orbitTrailPoints.size() * 12);
+        for (std::size_t i = 1; i < snapshot.orbitTrailPoints.size(); ++i) {
+            const FlybyTrailPointSnapshot& previous = snapshot.orbitTrailPoints[i - 1];
+            const FlybyTrailPointSnapshot& current = snapshot.orbitTrailPoints[i];
+            const float alpha = 0.12F + 0.40F * (static_cast<float>(i) / static_cast<float>(snapshot.orbitTrailPoints.size() - 1));
+            appendLine(
+                pathVertices,
+                static_cast<float>(previous.x),
+                static_cast<float>(previous.y),
+                static_cast<float>(current.x),
+                static_cast<float>(current.y),
+                {0.58F, 0.92F, 1.0F, alpha});
+        }
+        submitLines(pathVertices, 2.2F);
+    }
+
+    const float shipX = static_cast<float>(snapshot.orbitShipX);
+    const float shipY = static_cast<float>(snapshot.orbitShipY);
+    Vec2 velocity = normalize({static_cast<float>(snapshot.orbitVelocityX), static_cast<float>(snapshot.orbitVelocityY)});
+    if (std::abs(velocity.x) + std::abs(velocity.y) < 0.001F) {
+        velocity = normalize({-shipY, shipX});
+    }
+
+    const int zone = snapshot.orbitCompleted ? snapshot.orbitResult : snapshot.orbitZone;
+    const bool perfectZone = snapshot.orbitCompleted ? zone >= 3 : zone >= 2;
+    const bool goodZone = snapshot.orbitCompleted ? zone >= 2 : zone >= 1;
+    const Color zoneGlow = perfectZone
+        ? Color{1.0F, 0.78F, 0.22F, 0.18F}
+        : (goodZone ? Color{0.34F, 0.90F, 1.0F, 0.15F} : Color{1.0F, 0.28F, 0.20F, 0.10F});
+    drawCircle(shipX, shipY, 0.082F + pulse * 0.010F, zoneGlow, 42);
+
+    const float inputMagnitude = std::hypot(static_cast<float>(snapshot.orbitInputX), static_cast<float>(snapshot.orbitInputY));
+    if (!snapshot.orbitCompleted && inputMagnitude > 0.05F) {
+        const Vec2 radial = normalize({shipX, shipY});
+        const Vec2 tangent {-radial.y, radial.x};
+        const Vec2 input = normalize({
+            radial.x * static_cast<float>(snapshot.orbitInputX) + tangent.x * static_cast<float>(snapshot.orbitInputY),
+            radial.y * static_cast<float>(snapshot.orbitInputX) + tangent.y * static_cast<float>(snapshot.orbitInputY)
+        });
+        const Vec2 tail {shipX - input.x * 0.066F, shipY - input.y * 0.066F};
+        drawCircle(tail.x, tail.y, 0.024F + pulse * 0.005F, {1.0F, 0.62F, 0.16F, 0.52F}, 18);
+        drawCircle(tail.x - input.x * 0.026F, tail.y - input.y * 0.026F, 0.012F, {1.0F, 0.92F, 0.36F, 0.58F}, 14);
+    }
+
+    if (textureReady(RocketAsset)) {
+        drawSpriteRotated(shipX, shipY, 0.11F, 0.11F, velocity.x, velocity.y, {1.0F, 1.0F, 1.0F, 1.0F}, RocketAsset);
+    } else {
+        const Vec2 right {velocity.y, -velocity.x};
+        drawTriangle(
+            shipX + velocity.x * 0.048F,
+            shipY + velocity.y * 0.048F,
+            shipX - velocity.x * 0.044F + right.x * 0.028F,
+            shipY - velocity.y * 0.044F + right.y * 0.028F,
+            shipX - velocity.x * 0.044F - right.x * 0.028F,
+            shipY - velocity.y * 0.044F - right.y * 0.028F,
+            {0.86F, 0.94F, 0.98F, 1.0F});
+    }
+
+    if (snapshot.orbitCompleted) {
+        const Color resultColor = snapshot.orbitResult >= 3
+            ? Color{1.0F, 0.78F, 0.22F, 0.18F}
+            : (snapshot.orbitResult >= 2 ? Color{0.34F, 0.90F, 1.0F, 0.14F} : Color{1.0F, 0.22F, 0.18F, 0.12F});
+        drawCircle(shipX, shipY, 0.15F + pulse * 0.024F, resultColor, 64);
     }
 }
 

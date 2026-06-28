@@ -245,6 +245,25 @@ void RocketGameApp::tick(double deltaSeconds)
             save();
         }
         panelDirty_ = true;
+    } else if (state_.screen == Screen::Orbit) {
+        const bool wasCompleted = state_.run.orbit.completed;
+        updateOrbitRun(state_, deltaSeconds);
+        if (!wasCompleted && state_.run.orbit.completed) {
+            switch (state_.run.orbit.result) {
+            case OrbitGrade::Perfect:
+                state_.statusLine = "Perfect orbit plotted. Research run ready to stamp.";
+                break;
+            case OrbitGrade::Good:
+                state_.statusLine = "Stable orbit completed. Research data ready to stamp.";
+                break;
+            case OrbitGrade::Miss:
+            default:
+                state_.statusLine = "Orbit window missed. Fuel and time spent, no research banked.";
+                break;
+            }
+            save();
+        }
+        panelDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
     } else if (state_.screen == Screen::ArrivalFanfare) {
@@ -556,15 +575,51 @@ void RocketGameApp::enterArrivalOrbit()
         return;
     }
 
-    completeArrivalOrbit(state_, catalog_);
-    if (shouldOpenPostArrivalPhases(state_.lastOutcome, catalog_)) {
-        generateResearchProjects(state_, catalog_, rng_);
-        state_.screen = Screen::Research;
-        state_.statusLine = std::string(text::status::researchWindowOpened);
-    } else {
-        generateModuleOffers(state_, catalog_, rng_);
-        state_.screen = Screen::Upgrade;
-        state_.statusLine = std::string(text::status::orbitCompleted);
+    startArrivalOrbitRun(state_, catalog_);
+    state_.statusLine = "Orbital insertion started. Use prograde and radial corrections to stay in the research band.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::orbitMove(double xAxis, double yAxis)
+{
+    if (state_.screen != Screen::Orbit) {
+        return;
+    }
+    setOrbitMove(state_, xAxis, yAxis);
+}
+
+void RocketGameApp::orbitAbort()
+{
+    if (state_.screen != Screen::Orbit || state_.run.orbit.completed) {
+        return;
+    }
+    abortOrbitRun(state_);
+    state_.statusLine = "Orbit insertion aborted. No research reward earned.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::orbitContinue()
+{
+    if (state_.screen != Screen::Orbit || !state_.run.orbit.completed) {
+        return;
+    }
+
+    const OrbitGrade grade = state_.run.orbit.result;
+    completeOrbitRun(state_, catalog_);
+    switch (grade) {
+    case OrbitGrade::Perfect:
+        state_.statusLine = "Perfect orbit research banked. Choose the next approach.";
+        break;
+    case OrbitGrade::Good:
+        state_.statusLine = "Orbit research banked. Choose the next approach.";
+        break;
+    case OrbitGrade::Miss:
+    default:
+        state_.statusLine = "Missed orbit. Choose another approach or try again.";
+        break;
     }
     syncLaunchConfig(state_, catalog_);
     save();
@@ -1069,11 +1124,18 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.screen = state_.screen;
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
     result.currentMultiplier = session_.currentMultiplier;
-    result.animationTime = state_.screen == Screen::Launch
-        ? session_.elapsed
-        : (state_.screen == Screen::Mining ? state_.run.mining.elapsedSeconds :
-            (state_.screen == Screen::Flyby ? state_.run.flyby.elapsedSeconds :
-                (state_.screen == Screen::ArrivalFanfare ? session_.arrivalFanfare.elapsed : session_.result.elapsed)));
+    result.animationTime = session_.result.elapsed;
+    if (state_.screen == Screen::Launch) {
+        result.animationTime = session_.elapsed;
+    } else if (state_.screen == Screen::Mining) {
+        result.animationTime = state_.run.mining.elapsedSeconds;
+    } else if (state_.screen == Screen::Flyby) {
+        result.animationTime = state_.run.flyby.elapsedSeconds;
+    } else if (state_.screen == Screen::Orbit) {
+        result.animationTime = state_.run.orbit.elapsedSeconds;
+    } else if (state_.screen == Screen::ArrivalFanfare) {
+        result.animationTime = session_.arrivalFanfare.elapsed;
+    }
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
     if (state_.screen == Screen::Launch) {
@@ -1081,13 +1143,18 @@ RenderSnapshot RocketGameApp::snapshot() const
             visualDestination = activeDestination;
         }
         result.frontierTransfer = session_.preparedLaunch.config.frontierTransfer;
-    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby) {
+    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit) {
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
         }
         if (state_.screen == Screen::Flyby && !state_.run.flyby.destinationId.empty()) {
             if (const Destination* flybyDestination = catalog_.findDestination(state_.run.flyby.destinationId)) {
                 visualDestination = flybyDestination;
+            }
+        }
+        if (state_.screen == Screen::Orbit && !state_.run.orbit.destinationId.empty()) {
+            if (const Destination* orbitDestination = catalog_.findDestination(state_.run.orbit.destinationId)) {
+                visualDestination = orbitDestination;
             }
         }
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
@@ -1102,7 +1169,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             session_.returnTrip.duration);
         result.returningHome = true;
         result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
-    } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby) {
+    } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit) {
         result.travelProgress = 0.985;
     } else if (state_.screen == Screen::ArrivalOps) {
         result.travelProgress = 1.0;
@@ -1184,6 +1251,31 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.flybyTrailPoints.reserve(flyby.trailPoints.size());
         for (const FlybyTrailPoint& point : flyby.trailPoints) {
             result.flybyTrailPoints.push_back({point.x, point.y});
+        }
+    }
+
+    if (state_.screen == Screen::Orbit && state_.run.orbit.active) {
+        const OrbitRunState& orbit = state_.run.orbit;
+        result.orbitActive = true;
+        result.orbitCompleted = orbit.completed;
+        result.orbitZone = orbit.currentZone;
+        result.orbitResult = static_cast<int>(orbit.result);
+        result.orbitElapsed = orbit.elapsedSeconds;
+        result.orbitDuration = orbit.durationSeconds;
+        result.orbitProgress = orbit.orbitProgress;
+        result.orbitShipX = orbit.shipX;
+        result.orbitShipY = orbit.shipY;
+        result.orbitVelocityX = orbit.velocityX;
+        result.orbitVelocityY = orbit.velocityY;
+        result.orbitInputX = orbit.inputX;
+        result.orbitInputY = orbit.inputY;
+        result.orbitPlanetRadius = orbit.planetRadius;
+        result.orbitTargetRadius = orbit.targetRadius;
+        result.orbitGoodBand = orbit.goodBand;
+        result.orbitPerfectBand = orbit.perfectBand;
+        result.orbitTrailPoints.reserve(orbit.trailPoints.size());
+        for (const FlybyTrailPoint& point : orbit.trailPoints) {
+            result.orbitTrailPoints.push_back({point.x, point.y});
         }
     }
 

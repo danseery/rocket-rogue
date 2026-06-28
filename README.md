@@ -66,6 +66,19 @@ In the Codex desktop sandbox on Windows, `cmake --build --preset web-release` ma
 cmake --build --preset web-release
 ```
 
+Codex agents must also use the known-good Windows command forms below instead of first trying commands that are known to fail in this workspace:
+
+```powershell
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame status --short --branch
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame add --all
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame commit -m "Commit message"
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame push origin main
+npm.cmd run sanity
+npm.cmd run prepare:azure
+```
+
+The `safe.directory` override avoids Git's dubious-ownership error in the Codex sandbox without changing global Git config. `npm.cmd` avoids PowerShell's blocked `npm.ps1` shim.
+
 Serve the generated build directory:
 
 ```powershell
@@ -75,7 +88,7 @@ node tools/serve.mjs build/web-release 8080
 Prepare the clean static package used by Azure Static Web Apps:
 
 ```powershell
-npm run prepare:azure
+npm.cmd run prepare:azure
 ```
 
 This writes only deployable game files to `dist/azure-static-web-app`.
@@ -103,7 +116,7 @@ ctest --preset native-debug
 This workspace currently does not include a compiler or Emscripten on PATH, so the repository also includes a Node sanity check:
 
 ```powershell
-node tools/sanity-check.mjs
+npm.cmd run sanity
 ```
 
 ## Windows notes
@@ -171,7 +184,7 @@ This repo includes a GitHub Actions workflow for Azure Static Web Apps Free:
 
 - Workflow: `.github/workflows/azure-static-web-app.yml`
 - Static app config: `staticwebapp.config.json`
-- Deploy package script: `npm run prepare:azure`
+- Deploy package script: `npm.cmd run prepare:azure` on Windows, `npm run prepare:azure` elsewhere
 - Full setup notes: `docs/AZURE_STATIC_WEB_APPS.md`
 
 The workflow expects a GitHub Actions secret named `AZURE_STATIC_WEB_APPS_API_TOKEN`.

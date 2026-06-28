@@ -1463,6 +1463,86 @@ void activeFlybySaveResumesAtApproach()
     require(restored.run.arrivalOps.active && restored.run.arrivalOps.destinationId == content::destination::moon, "approach destination should survive flyby save/load");
 }
 
+void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+
+    GameState miss = createNewGame(catalog, 721);
+    startArrivalOps(miss, moonArrival);
+    completeArrivalFlyby(miss, catalog);
+    startArrivalOps(miss, moonArrival);
+    startArrivalOrbitRun(miss, catalog);
+    require(miss.screen == Screen::Orbit && miss.run.orbit.active, "starting arrival orbit should open the orbit minigame");
+    require(miss.run.orbit.currentZone >= 1, "orbit should begin inside the scalable orbital band");
+    require(miss.run.orbit.durationSeconds == tuning::orbit::durationSeconds, "orbit should use the tuned insertion timer");
+    const int missOrbitsBefore = destinationHistoryValue(miss.meta.destinationOrbits, catalog, content::destination::moon);
+    const int missBlueprintsBefore = miss.meta.blueprintProgress;
+    const double missCreditsBefore = miss.run.credits;
+    miss.run.orbit.completed = true;
+    miss.run.orbit.result = OrbitGrade::Miss;
+    completeOrbitRun(miss, catalog);
+    require(miss.screen == Screen::ArrivalOps, "missed orbit should return to approach options");
+    require(destinationHistoryValue(miss.meta.destinationOrbits, catalog, content::destination::moon) == missOrbitsBefore, "missed orbit should not bank orbit history");
+    require(miss.meta.blueprintProgress == missBlueprintsBefore, "missed orbit should not grant science");
+    require(std::abs(miss.run.credits - missCreditsBefore) < 0.001, "missed orbit should not grant credits");
+
+    GameState good = createNewGame(catalog, 722);
+    startArrivalOps(good, moonArrival);
+    completeArrivalFlyby(good, catalog);
+    startArrivalOps(good, moonArrival);
+    startArrivalOrbitRun(good, catalog);
+    const int goodOrbitsBefore = destinationHistoryValue(good.meta.destinationOrbits, catalog, content::destination::moon);
+    const int goodBlueprintsBefore = good.meta.blueprintProgress;
+    const double goodCreditsBefore = good.run.credits;
+    good.run.orbit.completed = true;
+    good.run.orbit.result = OrbitGrade::Good;
+    completeOrbitRun(good, catalog);
+    require(destinationHistoryValue(good.meta.destinationOrbits, catalog, content::destination::moon) == goodOrbitsBefore + 1, "good orbit should bank destination orbit history");
+    require(good.meta.blueprintProgress == goodBlueprintsBefore + tuning::orbit::goodBlueprintGain, "good orbit should grant science");
+    require(good.run.credits > goodCreditsBefore, "good orbit should grant credits");
+    require(good.run.nextLaunchFuelBoost == 0.0 && good.run.nextLaunchSpeedBoost == 0.0, "good orbit should not grant launch boosts");
+
+    GameState perfect = createNewGame(catalog, 723);
+    startArrivalOps(perfect, moonArrival);
+    completeArrivalFlyby(perfect, catalog);
+    startArrivalOps(perfect, moonArrival);
+    startArrivalOrbitRun(perfect, catalog);
+    const int perfectBlueprintsBefore = perfect.meta.blueprintProgress;
+    const double perfectCreditsBefore = perfect.run.credits;
+    perfect.run.orbit.completed = true;
+    perfect.run.orbit.result = OrbitGrade::Perfect;
+    completeOrbitRun(perfect, catalog);
+    require(perfect.meta.blueprintProgress == perfectBlueprintsBefore + tuning::orbit::perfectBlueprintGain, "perfect orbit should grant stronger science");
+    require(perfect.run.credits > perfectCreditsBefore, "perfect orbit should grant credits");
+    require(perfect.run.nextLaunchFuelBoost == 0.0 && perfect.run.nextLaunchSpeedBoost == 0.0, "perfect orbit should still avoid launch boosts");
+}
+
+void activeOrbitSaveResumesAtApproach()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 724);
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+    startArrivalOps(state, moonArrival);
+    completeArrivalFlyby(state, catalog);
+    startArrivalOps(state, moonArrival);
+    startArrivalOrbitRun(state, catalog);
+
+    const SaveData save = captureSaveData(state);
+    require(save.screen == Screen::ArrivalOps, "saving during orbit should persist the safe approach screen");
+    GameState restored = createNewGame(catalog, 725);
+    restoreSaveData(restored, catalog, save);
+    require(restored.screen == Screen::ArrivalOps, "loading during orbit should resume at approach options");
+    require(!restored.run.orbit.active, "loading during orbit should not restore transient orbit state");
+    require(restored.run.arrivalOps.active && restored.run.arrivalOps.destinationId == content::destination::moon, "approach destination should survive orbit save/load");
+}
+
 void researchProjectsGenerateAndCompleteFromSharedRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -3969,6 +4049,7 @@ void panelLayoutModeIsPortablePresentationData()
 {
     require(panelLayoutMode(Screen::Launch) == PanelLayoutMode::ControlPanel, "launch should remain a compact action control panel");
     require(panelLayoutMode(Screen::ArrivalFanfare) == PanelLayoutMode::ControlPanel, "arrival fanfare should keep the scene open for the celebration overlay");
+    require(panelLayoutMode(Screen::Orbit) == PanelLayoutMode::ControlPanel, "orbit should keep the scene open for the orbital minigame");
     require(panelLayoutMode(Screen::Hangar) == PanelLayoutMode::PhaseBoard, "hangar should use the management board layout");
     require(panelLayoutMode(Screen::Results) == PanelLayoutMode::PhaseBoard, "results should use the management board layout");
     require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
@@ -4079,6 +4160,8 @@ int main()
     arrivalOperationsGateMoonButAllowMarsRisk();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
     activeFlybySaveResumesAtApproach();
+    arrivalOrbitMinigameRewardsProgressionOnlyResearch();
+    activeOrbitSaveResumesAtApproach();
     researchProjectsGenerateAndCompleteFromSharedRules();
     materialResearchUnlocksModuleFamilies();
     artifactInsightImprovesFutureResearch();

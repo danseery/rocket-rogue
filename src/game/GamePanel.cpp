@@ -76,6 +76,8 @@ std::string phaseTitle(Screen screen)
         return "Approach";
     case Screen::Flyby:
         return "Flyby";
+    case Screen::Orbit:
+        return "Orbit";
     case Screen::Research:
         return "Science";
     case Screen::SurfaceExpedition:
@@ -267,6 +269,47 @@ std::string flybyGradeLabel(FlybyGrade grade)
     case FlybyGrade::Active:
     default:
         return "FLYBY ACTIVE";
+    }
+}
+
+std::string orbitZoneLabel(int zone)
+{
+    if (zone >= 2) {
+        return "PERFECT";
+    }
+    if (zone == 1) {
+        return "GOOD";
+    }
+    return "MISS";
+}
+
+std::string orbitGradeLabel(OrbitGrade grade)
+{
+    switch (grade) {
+    case OrbitGrade::Perfect:
+        return "PERFECT ORBIT";
+    case OrbitGrade::Good:
+        return "STABLE ORBIT";
+    case OrbitGrade::Miss:
+        return "MISSED ORBIT";
+    case OrbitGrade::Active:
+    default:
+        return "ORBIT ACTIVE";
+    }
+}
+
+std::string orbitResultBody(OrbitGrade grade)
+{
+    switch (grade) {
+    case OrbitGrade::Perfect:
+        return "Full loop completed inside the perfect research band. Bonus science and funding secured.";
+    case OrbitGrade::Good:
+        return "Full loop completed inside the orbital research band. Science and funding secured.";
+    case OrbitGrade::Miss:
+        return "The orbital track fell outside the research band before a loop was completed. No orbit data banked.";
+    case OrbitGrade::Active:
+    default:
+        return "Complete one full loop before the insertion timer expires.";
     }
 }
 
@@ -805,6 +848,90 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         return out.str();
     }
 
+    if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Orbit) {
+        const OrbitRunState& orbit = state.run.orbit;
+        const Destination* orbitDestination = catalog.findDestination(orbit.destinationId);
+        const std::string destinationName = orbitDestination == nullptr ? currentFrontier.name : orbitDestination->name;
+        const double remaining = std::max(0.0, orbit.durationSeconds - orbit.elapsedSeconds);
+        const double activeSeconds = std::max(0.01, orbit.missSeconds + orbit.goodSeconds + orbit.perfectSeconds);
+        const double goodShare = (orbit.goodSeconds + orbit.perfectSeconds) / activeSeconds;
+        const double perfectShare = orbit.perfectSeconds / activeSeconds;
+        const OrbitGrade grade = orbit.completed ? orbit.result : OrbitGrade::Active;
+        const double progress = std::clamp(orbit.orbitProgress, 0.0, 1.0);
+        const double baseOrbitReward = orbitDestination == nullptr
+            ? tuning::orbit::goodRewardFloor
+            : std::max(tuning::orbit::goodRewardFloor, orbitDestination->baseReward * tuning::orbit::goodRewardFactor);
+        const double rewardCredits = grade == OrbitGrade::Perfect
+            ? baseOrbitReward * tuning::orbit::perfectRewardMultiplier
+            : (grade == OrbitGrade::Good ? baseOrbitReward : 0.0);
+        const int blueprintGain = grade == OrbitGrade::Perfect
+            ? tuning::orbit::perfectBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0)
+            : (grade == OrbitGrade::Good ? tuning::orbit::goodBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0) : 0);
+
+        out << "<div data-orbit-run=\"1\" data-orbit-completed=\"" << (orbit.completed ? "1" : "0") << "\" hidden></div>";
+        out << "<h2>" << htmlEscape("Orbital Research") << "</h2>";
+        out << "<p class=\"phase-copy\">" << htmlEscape("Nudge the ship around " + destinationName + ". Complete one full loop inside the orbital research band before the timer closes.") << "</p>";
+        const std::string zoneValue = orbit.completed ? orbitGradeLabel(grade) : orbitZoneLabel(orbit.currentZone);
+
+        out << "<div class=\"metric-grid flight-readout\">"
+            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << metric("Zone", zoneValue)
+            << metric("Loop", display::percent(progress))
+            << metric("Good hold", display::percent(goodShare))
+            << metric("Perfect hold", display::percent(perfectShare))
+            << metric("Reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits))
+            << "</div>";
+
+        if (orbit.completed) {
+            const std::string resultTitle = orbitGradeLabel(grade);
+            const std::string resultBody = orbitResultBody(grade);
+            const std::string tagOne = grade == OrbitGrade::Miss ? "No orbit data" : "Orbit data secured";
+            const std::string tagTwo = grade == OrbitGrade::Miss ? "No science bonus" : "+" + std::to_string(blueprintGain) + " science";
+            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits);
+            out << "<div data-orbit-stamp=\"1\" data-orbit-title=\"" << htmlEscape(resultTitle)
+                << "\" data-orbit-body=\"" << htmlEscape(resultBody)
+                << "\" data-orbit-tag-one=\"" << htmlEscape(tagOne)
+                << "\" data-orbit-tag-two=\"" << htmlEscape(tagTwo)
+                << "\" data-orbit-tag-three=\"" << htmlEscape(tagThree)
+                << "\" hidden></div>";
+        }
+
+        out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
+            << htmlEscape("Orbit controls") << "</span><strong>"
+            << htmlEscape(orbit.completed ? "Confirm the result" : "Small WASD corrections") << "</strong></div>";
+        if (orbit.completed) {
+            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Result locked. Click the mission stamp or press Space to continue.") << "</p>";
+        } else {
+            const auto orbitControlCard = [&](std::string_view className, std::string_view key, std::string_view title, std::string_view detail) {
+                out << "<div class=\"orbit-control-card " << className << "\">"
+                    << "<div class=\"orbit-keycap\">" << htmlEscape(std::string(key)) << "</div>"
+                    << "<div><strong>" << htmlEscape(std::string(title)) << "</strong>"
+                    << "<span>" << htmlEscape(std::string(detail)) << "</span></div>"
+                    << "</div>";
+            };
+            out << "<div class=\"orbit-control-panel\">"
+                << "<div class=\"orbit-trim-scope\" aria-hidden=\"true\">"
+                << "<div class=\"orbit-trim-axis\"></div>"
+                << "<div class=\"orbit-trim-ship\"></div>"
+                << "<div class=\"orbit-trim-label\">" << htmlEscape("Trim scope") << "</div>"
+                << "</div>"
+                << "<div class=\"orbit-key-grid\">";
+            orbitControlCard("prograde", "W", "Prograde", "Up arrow");
+            orbitControlCard("retrograde", "S", "Retrograde", "Down arrow");
+            orbitControlCard("widen", "D", "Widen", "Right arrow");
+            orbitControlCard("tighten", "A", "Tighten", "Left arrow");
+            out << "</div></div>";
+            out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Escape aborts as a Miss.") << "</p>";
+            out << "<div class=\"actions primary-actions\">"
+                << panelButton(panelActionButton("Abort orbit", ui::actions::orbitAbort, "danger"))
+                << "</div>";
+        }
+        out << "</section>";
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
+        return out.str();
+    }
+
     if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Launch) {
         const LaunchPanelPresentation launchPanel = launchPanelPresentation(
             state,
@@ -1136,9 +1263,9 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     if (state.screen == Screen::SurfaceUpgrade) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         out << phaseBoardOpen("phase-board-surface-upgrade phase-board-draft-room", state.statusLine);
-        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Surface draft")
-            << "</span><h2>" << htmlEscape("Pick your field edge") << "</h2><p>"
-            << htmlEscape("Choose one temporary upgrade for this landing. The rest leave with the cargo shuttle.") << "</p></div>";
+        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Drone Upgrade")
+            << "</span><h2>" << htmlEscape("Pick your Field Research") << "</h2><p>"
+            << htmlEscape("Choose one temporary upgrade. It stays active as long as your shuttle and drone survive.") << "</p></div>";
         std::vector<PanelMetricPresentation> fieldContext;
         if (!surfacePanel.metrics.empty()) {
             fieldContext.push_back(surfacePanel.metrics[0]);
@@ -1151,8 +1278,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "<div class=\"stat-grid draft-context\">" << resourceChipGrid(fieldContext) << "</div></section>";
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
-            << htmlEscape("Choose one field mod") << "</h2><p>"
-            << htmlEscape("Scanner, drill, and drone tech change how the next dig feels. Take one, reroll the draft, or walk away.") << "</p></div></div>";
+            << htmlEscape("Choose one drone upgrade") << "</h2><p>"
+            << htmlEscape("Scanner, drill, and drone tech change how the next dig feels. Take one, reroll the field research, or walk away.") << "</p></div></div>";
         out << "<div class=\"pilot-card-grid draft-card-grid\">";
         for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
             out << surfaceUpgradeCard(upgrade);
@@ -1162,7 +1289,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << panelButton(state.run.credits >= rerollCost
             ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
             : disabledPanelButton(display::needCredits(rerollCost)));
-        out << panelButton(panelActionButton("Skip field pick", ui::actions::next));
+        out << panelButton(panelActionButton("Skip field research", ui::actions::next));
         out << "</div></section>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());

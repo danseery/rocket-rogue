@@ -854,6 +854,7 @@ bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& cata
         state.screen == Screen::ArrivalFanfare ||
         state.screen == Screen::ArrivalOps ||
         state.screen == Screen::Flyby ||
+        state.screen == Screen::Orbit ||
         state.screen == Screen::Research ||
         state.screen == Screen::SurfaceExpedition ||
         state.screen == Screen::Mining) {

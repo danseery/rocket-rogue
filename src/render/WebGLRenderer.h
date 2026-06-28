@@ -85,6 +85,24 @@ struct RenderSnapshot {
     double flybyGoodBand = 0.0;
     double flybyPerfectBand = 0.0;
     std::vector<FlybyTrailPointSnapshot> flybyTrailPoints;
+    bool orbitActive = false;
+    bool orbitCompleted = false;
+    int orbitZone = 0;
+    int orbitResult = 0;
+    double orbitElapsed = 0.0;
+    double orbitDuration = 1.0;
+    double orbitProgress = 0.0;
+    double orbitShipX = 0.0;
+    double orbitShipY = 0.0;
+    double orbitVelocityX = 0.0;
+    double orbitVelocityY = 0.0;
+    double orbitInputX = 0.0;
+    double orbitInputY = 0.0;
+    double orbitPlanetRadius = 0.0;
+    double orbitTargetRadius = 0.0;
+    double orbitGoodBand = 0.0;
+    double orbitPerfectBand = 0.0;
+    std::vector<FlybyTrailPointSnapshot> orbitTrailPoints;
 };
 
 class WebGLRenderer {
@@ -109,6 +127,7 @@ private:
     void drawRocket(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
     void drawFlyby(const RenderSnapshot& snapshot);
+    void drawOrbit(const RenderSnapshot& snapshot);
     void drawMining(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha);
     void drawRoute(const RenderSnapshot& snapshot);

@@ -265,6 +265,162 @@
       min-height: 42px;
     }
 
+    .orbit-control-panel {
+      display: grid;
+      grid-template-columns: 146px minmax(0, 1fr);
+      gap: 12px;
+      margin-top: 10px;
+      align-items: start;
+    }
+
+    .orbit-trim-scope {
+      position: relative;
+      width: 146px;
+      min-height: 0;
+      aspect-ratio: 1;
+      overflow: hidden;
+      border: 1px solid rgba(96, 188, 218, 0.28);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(96, 188, 218, 0.16) 0 16%, transparent 17%),
+        linear-gradient(180deg, rgba(13, 28, 37, 0.72), rgba(7, 12, 18, 0.86));
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        inset 0 0 34px rgba(96, 188, 218, 0.08);
+    }
+
+    .orbit-trim-scope::before,
+    .orbit-trim-scope::after {
+      content: "";
+      position: absolute;
+      inset: 18%;
+      border: 1px solid rgba(245, 199, 83, 0.44);
+      border-radius: 50%;
+    }
+
+    .orbit-trim-scope::after {
+      inset: 31%;
+      border-color: rgba(96, 188, 218, 0.36);
+    }
+
+    .orbit-trim-axis {
+      position: absolute;
+      inset: 12px;
+      border-radius: 50%;
+      background:
+        linear-gradient(90deg, transparent calc(50% - 1px), rgba(137, 178, 211, 0.2) 50%, transparent calc(50% + 1px)),
+        linear-gradient(0deg, transparent calc(50% - 1px), rgba(137, 178, 211, 0.2) 50%, transparent calc(50% + 1px));
+    }
+
+    .orbit-trim-ship {
+      position: absolute;
+      left: calc(50% - 5px);
+      top: 18%;
+      width: 10px;
+      height: 24px;
+      border-radius: 999px 999px 4px 4px;
+      background: linear-gradient(180deg, #f6fbff, #8fd9ee 58%, #f36f4a);
+      box-shadow:
+        0 0 14px rgba(143, 217, 238, 0.52),
+        0 8px 18px rgba(243, 111, 74, 0.28);
+      transform: rotate(14deg);
+    }
+
+    .orbit-trim-label {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      bottom: 8px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .orbit-key-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .orbit-control-card {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 9px;
+      align-items: center;
+      min-height: 42px;
+      padding: 6px 8px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background: rgba(18, 27, 38, 0.68);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .orbit-control-card.prograde {
+      border-color: rgba(114, 224, 168, 0.28);
+    }
+
+    .orbit-control-card.retrograde {
+      border-color: rgba(255, 122, 122, 0.25);
+    }
+
+    .orbit-control-card.widen {
+      border-color: rgba(96, 188, 218, 0.28);
+    }
+
+    .orbit-control-card.tighten {
+      border-color: rgba(245, 199, 83, 0.26);
+    }
+
+    .orbit-keycap {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      min-width: 34px;
+      height: 32px;
+      border: 1px solid rgba(225, 238, 247, 0.24);
+      border-radius: 7px;
+      background:
+        linear-gradient(180deg, rgba(225, 238, 247, 0.13), rgba(225, 238, 247, 0.04)),
+        rgba(5, 9, 14, 0.62);
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1;
+      text-transform: uppercase;
+      box-shadow: 0 2px 0 rgba(0, 0, 0, 0.34);
+    }
+
+    .orbit-control-card strong,
+    .orbit-control-card span {
+      display: block;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .orbit-control-card strong {
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.15;
+    }
+
+    .orbit-control-card span {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.25;
+    }
+
+    .orbit-control-note {
+      min-height: 0;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
     .scene-launch-control {
       position: fixed;
       z-index: 9;
@@ -2161,6 +2317,19 @@
       .pilot-card {
         min-height: 0;
       }
+
+      .orbit-control-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .orbit-trim-scope {
+        width: min(180px, 100%);
+        justify-self: center;
+      }
+
+      .orbit-key-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     .toast-root {
@@ -2479,10 +2648,12 @@
       const preflight = Boolean(panel.querySelector("[data-preflight-launch]"));
       const arrivalMarker = panel.querySelector("[data-arrival-fanfare]");
       const flybyStampMarker = panel.querySelector("[data-flyby-stamp]");
-      const fanfareMarker = arrivalMarker || flybyStampMarker;
+      const orbitStampMarker = panel.querySelector("[data-orbit-stamp]");
+      const fanfareMarker = arrivalMarker || flybyStampMarker || orbitStampMarker;
       const fanfare = Boolean(fanfareMarker);
       const flight = Boolean(panel.querySelector(".flight-hud"));
       const flyby = Boolean(panel.querySelector("[data-flyby-run]"));
+      const orbit = Boolean(panel.querySelector("[data-orbit-run]"));
       const phaseBoard = panel.classList.contains("phase-board-panel");
 
       sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard);
@@ -2499,6 +2670,7 @@
       if (fanfare) {
         const scene = sceneMetrics();
         const isFlybyStamp = Boolean(flybyStampMarker);
+        const isOrbitStamp = Boolean(orbitStampMarker);
         if (isFlybyStamp) {
           arrivalFanfareKicker.textContent = "Flyby stamp";
           arrivalFanfareTitle.textContent = fanfareMarker.dataset.flybyTitle || "Flyby complete";
@@ -2506,6 +2678,14 @@
           arrivalFanfareTagOne.textContent = fanfareMarker.dataset.flybyTagOne || "Result logged";
           arrivalFanfareTagTwo.textContent = fanfareMarker.dataset.flybyTagTwo || "Approach options ready";
           arrivalCloseCall.textContent = fanfareMarker.dataset.flybyTagThree || "Click or press Space to continue";
+          arrivalCloseCall.hidden = false;
+        } else if (isOrbitStamp) {
+          arrivalFanfareKicker.textContent = "Orbit stamp";
+          arrivalFanfareTitle.textContent = fanfareMarker.dataset.orbitTitle || "Orbit complete";
+          arrivalFanfareDestination.textContent = fanfareMarker.dataset.orbitBody || "Orbit result locked.";
+          arrivalFanfareTagOne.textContent = fanfareMarker.dataset.orbitTagOne || "Result logged";
+          arrivalFanfareTagTwo.textContent = fanfareMarker.dataset.orbitTagTwo || "Research accounted";
+          arrivalCloseCall.textContent = fanfareMarker.dataset.orbitTagThree || "Click or press Space to continue";
           arrivalCloseCall.hidden = false;
         } else {
           const destination = fanfareMarker.dataset.arrivalDestination || "Destination";
@@ -2521,7 +2701,7 @@
         arrivalFanfare.style.top = `${Math.round(scene.centerY - scene.unit * 0.28)}px`;
       }
 
-      const showLegend = flight && !flyby && !preflight && !phaseBoard;
+      const showLegend = flight && !flyby && !orbit && !preflight && !phaseBoard;
       telemetryChartLegend.classList.toggle("is-visible", showLegend);
       telemetryChartLegend.hidden = !showLegend;
       if (showLegend) {
@@ -2608,6 +2788,8 @@
       event.preventDefault();
       if (panel.querySelector("[data-flyby-stamp]")) {
         rr.flybyContinue();
+      } else if (panel.querySelector("[data-orbit-stamp]")) {
+        rr.orbitContinue();
       } else {
         rr.skipArrivalFanfare();
       }
@@ -2656,6 +2838,9 @@
       flybyAbort: () => rrCall("rr_flyby_abort"),
       flybyContinue: () => rrCall("rr_flyby_continue"),
       arrivalOrbit: () => rrCall("rr_arrival_orbit"),
+      orbitMove: (xAxis, yAxis) => rrCall("rr_orbit_move", [xAxis, yAxis], ["number", "number"]),
+      orbitAbort: () => rrCall("rr_orbit_abort"),
+      orbitContinue: () => rrCall("rr_orbit_continue"),
       arrivalLanding: () => rrCall("rr_arrival_landing"),
       researchProject: (index) => rrCall("rr_research_project", [index], ["number"]),
       skipResearch: () => rrCall("rr_skip_research"),
@@ -2714,6 +2899,8 @@
       flybyAbort: "flyby_abort",
       flybyContinue: "flyby_continue",
       arrivalOrbit: "arrival_orbit",
+      orbitAbort: "orbit_abort",
+      orbitContinue: "orbit_continue",
       arrivalLanding: "arrival_landing",
       skipArrivalFanfare: "skip_arrival_fanfare",
       skipResearch: "skip_research",
@@ -2753,6 +2940,8 @@
       [rrActionIds.flybyAbort]: () => rr.flybyAbort(),
       [rrActionIds.flybyContinue]: () => rr.flybyContinue(),
       [rrActionIds.arrivalOrbit]: () => rr.arrivalOrbit(),
+      [rrActionIds.orbitAbort]: () => rr.orbitAbort(),
+      [rrActionIds.orbitContinue]: () => rr.orbitContinue(),
       [rrActionIds.arrivalLanding]: () => rr.arrivalLanding(),
       [rrActionIds.skipResearch]: () => rr.skipResearch(),
       [rrActionIds.surveySurface]: () => rr.surveySurface(),
@@ -3018,6 +3207,7 @@
     }, true);
 
     const flybyKeys = new Set();
+    const orbitKeys = new Set();
     const miningKeys = new Set();
     let miningPointerDown = false;
 
@@ -3073,6 +3263,62 @@
       const key = event.key.toLowerCase();
       if (flybyKeys.delete(key)) {
         updateFlybyMove();
+        event.preventDefault();
+      }
+    }
+
+    function orbitMarker() {
+      return panel.querySelector("[data-orbit-run]");
+    }
+
+    function isOrbitActive() {
+      return Boolean(orbitMarker());
+    }
+
+    function isOrbitCompleted() {
+      const marker = orbitMarker();
+      return Boolean(marker && marker.dataset.orbitCompleted === "1");
+    }
+
+    function updateOrbitMove() {
+      const left = orbitKeys.has("a") || orbitKeys.has("arrowleft");
+      const right = orbitKeys.has("d") || orbitKeys.has("arrowright");
+      const up = orbitKeys.has("w") || orbitKeys.has("arrowup");
+      const down = orbitKeys.has("s") || orbitKeys.has("arrowdown");
+      rr.orbitMove((right ? 1 : 0) - (left ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
+    }
+
+    function handleOrbitKeyDown(event) {
+      if (!isOrbitActive() || event.ctrlKey || event.metaKey || event.altKey) {
+        return false;
+      }
+      const key = event.key.toLowerCase();
+      if (isOrbitCompleted()) {
+        if (key === " " || key === "enter") {
+          rr.orbitContinue();
+          event.preventDefault();
+          return true;
+        }
+        return false;
+      }
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) {
+        orbitKeys.add(key);
+        updateOrbitMove();
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && key === "escape") {
+        rr.orbitAbort();
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
+    function handleOrbitKeyUp(event) {
+      const key = event.key.toLowerCase();
+      if (orbitKeys.delete(key)) {
+        updateOrbitMove();
         event.preventDefault();
       }
     }
@@ -3151,6 +3397,8 @@
       if (!arrivalFanfare.hidden) {
         if (panel.querySelector("[data-flyby-stamp]")) {
           rr.flybyContinue();
+        } else if (panel.querySelector("[data-orbit-stamp]")) {
+          rr.orbitContinue();
         } else {
           rr.skipArrivalFanfare();
         }
@@ -3159,6 +3407,11 @@
       }
       if (isFlybyCompleted()) {
         rr.flybyContinue();
+        event.preventDefault();
+        return;
+      }
+      if (isOrbitCompleted()) {
+        rr.orbitContinue();
         event.preventDefault();
         return;
       }
@@ -3197,6 +3450,8 @@
       if (!arrivalFanfare.hidden && (event.key === " " || event.key === "Enter")) {
         if (panel.querySelector("[data-flyby-stamp]")) {
           rr.flybyContinue();
+        } else if (panel.querySelector("[data-orbit-stamp]")) {
+          rr.orbitContinue();
         } else {
           rr.skipArrivalFanfare();
         }
@@ -3207,6 +3462,9 @@
         return;
       }
       if (handleFlybyKeyDown(event)) {
+        return;
+      }
+      if (handleOrbitKeyDown(event)) {
         return;
       }
       if (handleMiningKeyDown(event)) {
@@ -3230,6 +3488,7 @@
 
     window.addEventListener("keyup", (event) => {
       handleFlybyKeyUp(event);
+      handleOrbitKeyUp(event);
       handleMiningKeyUp(event);
     });
 

@@ -609,6 +609,70 @@ void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destina
     flyby.blueprintGain = tuning::flyby::goodBlueprintGain;
 }
 
+double orbitPlanetRadius(const Destination& destination)
+{
+    return tuning::orbit::planetBaseRadius
+        + static_cast<double>(std::min(5, std::max(0, destination.tier))) * tuning::orbit::planetTierRadius;
+}
+
+double orbitTargetRadius(double planetRadius)
+{
+    return planetRadius * tuning::orbit::targetRadiusScale;
+}
+
+int orbitZoneAt(const OrbitRunState& orbit, double x, double y)
+{
+    const double distance = std::hypot(x, y);
+    if (distance <= orbit.planetRadius + tuning::orbit::collisionPadding) {
+        return 0;
+    }
+    const double radialError = std::abs(distance - orbit.targetRadius);
+    if (radialError <= orbit.perfectBand) {
+        return 2;
+    }
+    if (radialError <= orbit.goodBand) {
+        return 1;
+    }
+    return 0;
+}
+
+double normalizedAngleDelta(double previous, double current)
+{
+    double delta = current - previous;
+    while (delta > 3.14159265358979323846) {
+        delta -= 2.0 * 3.14159265358979323846;
+    }
+    while (delta < -3.14159265358979323846) {
+        delta += 2.0 * 3.14159265358979323846;
+    }
+    return delta;
+}
+
+double orbitBaseReward(const Destination& destination)
+{
+    return std::max(tuning::orbit::goodRewardFloor, destination.baseReward * tuning::orbit::goodRewardFactor);
+}
+
+void populateOrbitRewardPreview(OrbitRunState& orbit, const Destination* destination)
+{
+    orbit.rewardCredits = 0.0;
+    orbit.blueprintGain = 0;
+    if (orbit.result == OrbitGrade::Active || orbit.result == OrbitGrade::Miss || destination == nullptr) {
+        return;
+    }
+
+    const double baseReward = orbitBaseReward(*destination);
+    orbit.rewardCredits = orbit.result == OrbitGrade::Perfect
+        ? baseReward * tuning::orbit::perfectRewardMultiplier
+        : baseReward;
+    orbit.blueprintGain = orbit.result == OrbitGrade::Perfect
+        ? tuning::orbit::perfectBlueprintGain
+        : tuning::orbit::goodBlueprintGain;
+    if (destinationSupportsResearch(*destination)) {
+        orbit.blueprintGain += 1;
+    }
+}
+
 void pushFlybyTrailPoint(FlybyRunState& flyby, double x, double y)
 {
     constexpr std::size_t maxTrailPoints = 96;
@@ -621,6 +685,21 @@ void pushFlybyTrailPoint(FlybyRunState& flyby, double x, double y)
     flyby.trailPoints.push_back({x, y});
     if (flyby.trailPoints.size() > maxTrailPoints) {
         flyby.trailPoints.erase(flyby.trailPoints.begin());
+    }
+}
+
+void pushOrbitTrailPoint(OrbitRunState& orbit, double x, double y)
+{
+    constexpr std::size_t maxTrailPoints = 144;
+    if (!orbit.trailPoints.empty()) {
+        const FlybyTrailPoint& last = orbit.trailPoints.back();
+        if (std::hypot(last.x - x, last.y - y) < 0.010) {
+            return;
+        }
+    }
+    orbit.trailPoints.push_back({x, y});
+    if (orbit.trailPoints.size() > maxTrailPoints) {
+        orbit.trailPoints.erase(orbit.trailPoints.begin());
     }
 }
 
@@ -727,6 +806,7 @@ void clearResearchAndExpeditionState(GameState& state)
     state.run.researchProjectIds = {};
     state.run.arrivalOps = {};
     state.run.flyby = {};
+    state.run.orbit = {};
     state.run.surfaceExpedition = {};
 }
 
@@ -1038,6 +1118,190 @@ void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog)
     state.run.credits += std::max(18.0, destination->baseReward * 0.55);
     unlockFromBlueprints(state);
     state.run.arrivalOps = {};
+}
+
+void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
+{
+    const Destination* destination = currentResearchDestination(state, catalog);
+    if (destination == nullptr || !canEnterArrivalOrbit(state, catalog)) {
+        return;
+    }
+
+    OrbitRunState orbit;
+    orbit.active = true;
+    orbit.destinationId = destination->id;
+    orbit.durationSeconds = tuning::orbit::durationSeconds;
+    orbit.planetRadius = orbitPlanetRadius(*destination);
+    orbit.targetRadius = orbitTargetRadius(orbit.planetRadius);
+    orbit.goodBand = orbit.planetRadius * tuning::orbit::goodBandScale;
+    orbit.perfectBand = orbit.planetRadius * tuning::orbit::perfectBandScale;
+    orbit.gravityStrength = orbit.targetRadius * orbit.targetRadius * tuning::orbit::gravityScale;
+
+    const double angle = tuning::orbit::startAngleRadians;
+    orbit.shipX = std::cos(angle) * orbit.targetRadius;
+    orbit.shipY = std::sin(angle) * orbit.targetRadius;
+    orbit.velocityX = -std::sin(angle) * tuning::orbit::startTangentialSpeed;
+    orbit.velocityY = std::cos(angle) * tuning::orbit::startTangentialSpeed;
+    orbit.angleRadians = std::atan2(orbit.shipY, orbit.shipX);
+    orbit.currentZone = orbitZoneAt(orbit, orbit.shipX, orbit.shipY);
+    orbit.worstZone = orbit.currentZone;
+    pushOrbitTrailPoint(orbit, orbit.shipX, orbit.shipY);
+
+    state.run.orbit = orbit;
+    state.run.arrivalOps = {true, destination->id};
+    state.screen = Screen::Orbit;
+}
+
+void setOrbitMove(GameState& state, double xAxis, double yAxis)
+{
+    if (!state.run.orbit.active || state.run.orbit.completed) {
+        return;
+    }
+    state.run.orbit.inputX = std::clamp(xAxis, -1.0, 1.0);
+    state.run.orbit.inputY = std::clamp(yAxis, -1.0, 1.0);
+}
+
+OrbitGrade orbitGrade(const OrbitRunState& orbit)
+{
+    if (!orbit.completed) {
+        return OrbitGrade::Active;
+    }
+    if (orbit.orbitProgress < 1.0) {
+        return OrbitGrade::Miss;
+    }
+    if (orbit.worstZone >= 2) {
+        return OrbitGrade::Perfect;
+    }
+    if (orbit.worstZone >= 1) {
+        return OrbitGrade::Good;
+    }
+    return OrbitGrade::Miss;
+}
+
+void updateOrbitRun(GameState& state, double deltaSeconds)
+{
+    OrbitRunState& orbit = state.run.orbit;
+    if (!orbit.active || orbit.completed) {
+        return;
+    }
+
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    const double previousAngle = orbit.angleRadians;
+    const double distance = std::max(0.001, std::hypot(orbit.shipX, orbit.shipY));
+    const double radialX = orbit.shipX / distance;
+    const double radialY = orbit.shipY / distance;
+    const double tangentX = -radialY;
+    const double tangentY = radialX;
+    const double gravityAcceleration = orbit.gravityStrength / (distance * distance + tuning::orbit::gravitySoftening);
+    orbit.velocityX += -radialX * gravityAcceleration * dt;
+    orbit.velocityY += -radialY * gravityAcceleration * dt;
+
+    const double radialInput = std::clamp(orbit.inputX, -1.0, 1.0);
+    const double tangentialInput = std::clamp(orbit.inputY, -1.0, 1.0);
+    orbit.velocityX += (radialX * radialInput + tangentX * tangentialInput) * tuning::orbit::thrustAcceleration * dt;
+    orbit.velocityY += (radialY * radialInput + tangentY * tangentialInput) * tuning::orbit::thrustAcceleration * dt;
+
+    const double drag = std::max(0.0, 1.0 - tuning::orbit::driftDrag * dt);
+    orbit.velocityX *= drag;
+    orbit.velocityY *= drag;
+
+    const double speed = std::hypot(orbit.velocityX, orbit.velocityY);
+    if (speed > tuning::orbit::maxSpeed) {
+        const double scale = tuning::orbit::maxSpeed / speed;
+        orbit.velocityX *= scale;
+        orbit.velocityY *= scale;
+    } else if (speed < tuning::orbit::minSpeed) {
+        const double scale = tuning::orbit::minSpeed / std::max(0.001, speed);
+        orbit.velocityX *= scale;
+        orbit.velocityY *= scale;
+    }
+
+    orbit.shipX += orbit.velocityX * dt;
+    orbit.shipY += orbit.velocityY * dt;
+    orbit.angleRadians = std::atan2(orbit.shipY, orbit.shipX);
+    orbit.orbitProgress += std::abs(normalizedAngleDelta(previousAngle, orbit.angleRadians)) / (2.0 * 3.14159265358979323846);
+    pushOrbitTrailPoint(orbit, orbit.shipX, orbit.shipY);
+
+    orbit.currentZone = orbitZoneAt(orbit, orbit.shipX, orbit.shipY);
+    orbit.worstZone = std::min(orbit.worstZone, orbit.currentZone);
+    if (orbit.currentZone >= 2) {
+        orbit.perfectSeconds += dt;
+    } else if (orbit.currentZone == 1) {
+        orbit.goodSeconds += dt;
+    } else {
+        orbit.missSeconds += dt;
+    }
+
+    orbit.elapsedSeconds += dt;
+    const double currentDistance = std::hypot(orbit.shipX, orbit.shipY);
+    const double escapeRadius = orbit.targetRadius + orbit.goodBand * tuning::orbit::escapeRadiusScale;
+    if (currentDistance <= orbit.planetRadius + tuning::orbit::collisionPadding || currentDistance >= escapeRadius) {
+        orbit.completed = true;
+        orbit.result = OrbitGrade::Miss;
+    } else if (orbit.orbitProgress >= 1.0) {
+        orbit.completed = true;
+        orbit.result = orbitGrade(orbit);
+    } else if (orbit.elapsedSeconds >= orbit.durationSeconds) {
+        orbit.elapsedSeconds = orbit.durationSeconds;
+        orbit.completed = true;
+        orbit.result = OrbitGrade::Miss;
+    }
+
+    if (orbit.completed) {
+        populateOrbitRewardPreview(orbit, nullptr);
+        orbit.velocityX = 0.0;
+        orbit.velocityY = 0.0;
+        orbit.inputX = 0.0;
+        orbit.inputY = 0.0;
+    }
+}
+
+void applyOrbitReward(GameState& state, const ContentCatalog& catalog, OrbitGrade grade)
+{
+    if (grade == OrbitGrade::Active || grade == OrbitGrade::Miss) {
+        return;
+    }
+
+    const Destination* destination = currentResearchDestination(state, catalog);
+    if (destination == nullptr && !state.run.orbit.destinationId.empty()) {
+        destination = catalog.findDestination(state.run.orbit.destinationId);
+    }
+    if (destination == nullptr) {
+        return;
+    }
+
+    addDestinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id);
+    populateOrbitRewardPreview(state.run.orbit, destination);
+    state.meta.blueprintProgress += state.run.orbit.blueprintGain;
+    state.run.credits += state.run.orbit.rewardCredits;
+    unlockFromBlueprints(state);
+}
+
+void completeOrbitRun(GameState& state, const ContentCatalog& catalog)
+{
+    if (!state.run.orbit.active || !state.run.orbit.completed) {
+        return;
+    }
+
+    const OrbitRunState orbit = state.run.orbit;
+    const OrbitGrade grade = orbit.result == OrbitGrade::Active ? orbitGrade(orbit) : orbit.result;
+    applyOrbitReward(state, catalog, grade);
+    const Destination* destination = catalog.findDestination(orbit.destinationId);
+    state.run.arrivalOps = {true, destination == nullptr ? orbit.destinationId : destination->id};
+    state.run.orbit = {};
+    state.screen = Screen::ArrivalOps;
+}
+
+void abortOrbitRun(GameState& state)
+{
+    if (!state.run.orbit.active || state.run.orbit.completed) {
+        return;
+    }
+
+    const std::string destinationId = state.run.orbit.destinationId;
+    state.run.arrivalOps = {true, destinationId};
+    state.run.orbit = {};
+    state.screen = Screen::ArrivalOps;
 }
 
 void generateResearchProjects(GameState& state, const ContentCatalog& catalog, Random& rng)

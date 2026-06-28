@@ -18,6 +18,7 @@ enum class Screen {
     ArrivalFanfare,
     ArrivalOps,
     Flyby,
+    Orbit,
     Research,
     SurfaceExpedition,
     SurfaceUpgrade,
@@ -102,6 +103,13 @@ enum class MiningCellMaterial {
 };
 
 enum class FlybyGrade {
+    Active,
+    Miss,
+    Good,
+    Perfect
+};
+
+enum class OrbitGrade {
     Active,
     Miss,
     Good,
@@ -408,6 +416,36 @@ struct FlybyRunState {
     std::vector<FlybyTrailPoint> trailPoints;
 };
 
+struct OrbitRunState {
+    bool active = false;
+    std::string destinationId;
+    double elapsedSeconds = 0.0;
+    double durationSeconds = 15.0;
+    double planetRadius = 0.16;
+    double targetRadius = 0.44;
+    double goodBand = 0.070;
+    double perfectBand = 0.030;
+    double shipX = -0.44;
+    double shipY = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.30;
+    double inputX = 0.0;
+    double inputY = 0.0;
+    double gravityStrength = 0.040;
+    double orbitProgress = 0.0;
+    double angleRadians = 0.0;
+    int worstZone = 2;
+    int currentZone = 0;
+    double missSeconds = 0.0;
+    double goodSeconds = 0.0;
+    double perfectSeconds = 0.0;
+    bool completed = false;
+    OrbitGrade result = OrbitGrade::Active;
+    double rewardCredits = 0.0;
+    int blueprintGain = 0;
+    std::vector<FlybyTrailPoint> trailPoints;
+};
+
 struct SurfaceExpeditionState {
     bool active = false;
     std::string destinationId;
@@ -502,6 +540,7 @@ struct RunState {
     std::array<std::string, 3> researchProjectIds {};
     ArrivalOpsState arrivalOps;
     FlybyRunState flyby;
+    OrbitRunState orbit;
     SurfaceExpeditionState surfaceExpedition;
     MiningRunState mining;
     double nextLaunchFuelBoost = 0.0;

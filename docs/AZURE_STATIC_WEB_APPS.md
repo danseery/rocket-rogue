@@ -66,13 +66,29 @@ The deploy package contains:
 From an activated dev shell:
 
 > Codex desktop note: on Windows, the sandbox can block Ninja when running `cmake --build --preset web-release`. Codex agents should request escalated execution for that build command immediately instead of first attempting the sandboxed command.
+>
+> Codex desktop note: on Windows, use `npm.cmd` for npm scripts. Do not try `npm run ...` first; PowerShell can block the `npm.ps1` shim.
+>
+> Codex desktop note: for every Git command in this repo, use `git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame ...`. Do not try plain `git ...` first; the sandbox user can trigger Git's dubious-ownership protection.
 
-```bash
+```powershell
 cmake --preset web-release
 cmake --build --preset web-release
 ctest --preset web-release
-node tools/sanity-check.mjs
-npm run prepare:azure
+npm.cmd run sanity
+npm.cmd run prepare:azure
+```
+
+Known-good Codex commit, push, and deploy trigger flow:
+
+```powershell
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame status --short --branch
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame diff --check
+npm.cmd run sanity
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame add --all
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame commit -m "Commit message"
+git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame push origin main
+gh run list --repo danseery/rocket-rogue --branch main --limit 3
 ```
 
 Serve the deploy package locally:

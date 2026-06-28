@@ -532,7 +532,7 @@ SaveData captureSaveData(const GameState& state)
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
     save.nextLaunchFuelBoost = state.run.nextLaunchFuelBoost;
     save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
-    if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby) && state.run.arrivalOps.active) {
+    if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
     } else {
         save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;

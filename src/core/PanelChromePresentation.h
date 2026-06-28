@@ -28,13 +28,18 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
             return *activeDestination;
         }
     }
-    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps || state.screen == Screen::Flyby) {
+    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps || state.screen == Screen::Flyby || state.screen == Screen::Orbit) {
         if (const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId)) {
             return *arrivalDestination;
         }
         if (state.screen == Screen::Flyby && !state.run.flyby.destinationId.empty()) {
             if (const Destination* flybyDestination = catalog.findDestination(state.run.flyby.destinationId)) {
                 return *flybyDestination;
+            }
+        }
+        if (state.screen == Screen::Orbit && !state.run.orbit.destinationId.empty()) {
+            if (const Destination* orbitDestination = catalog.findDestination(state.run.orbit.destinationId)) {
+                return *orbitDestination;
             }
         }
     }

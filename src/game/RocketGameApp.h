@@ -38,6 +38,9 @@ public:
     void flybyAbort();
     void flybyContinue();
     void enterArrivalOrbit();
+    void orbitMove(double xAxis, double yAxis);
+    void orbitAbort();
+    void orbitContinue();
     void attemptArrivalLanding();
     void selectResearchProject(int index);
     void skipResearch();

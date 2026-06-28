@@ -42,7 +42,9 @@ inline PanelButtonPresentation disabledPanelButton(std::string_view label)
 
 inline PanelLayoutMode panelLayoutMode(Screen screen)
 {
-    return screen == Screen::Launch || screen == Screen::ArrivalFanfare || screen == Screen::Flyby ? PanelLayoutMode::ControlPanel : PanelLayoutMode::PhaseBoard;
+    return screen == Screen::Launch || screen == Screen::ArrivalFanfare || screen == Screen::Flyby || screen == Screen::Orbit
+        ? PanelLayoutMode::ControlPanel
+        : PanelLayoutMode::PhaseBoard;
 }
 
 inline bool usesPhaseBoard(Screen screen)

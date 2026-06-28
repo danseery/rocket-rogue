@@ -506,6 +506,30 @@ inline constexpr double slingshotMaxSpeedScale = 2.0;
 inline constexpr int impactHullDamage = 18;
 } // namespace flyby
 
+namespace orbit {
+inline constexpr double durationSeconds = 15.0;
+inline constexpr double planetBaseRadius = 0.145;
+inline constexpr double planetTierRadius = 0.016;
+inline constexpr double targetRadiusScale = 2.95;
+inline constexpr double goodBandScale = 0.55;
+inline constexpr double perfectBandScale = 0.24;
+inline constexpr double startAngleRadians = -2.70;
+inline constexpr double startTangentialSpeed = 0.36;
+inline constexpr double thrustAcceleration = 0.075;
+inline constexpr double gravitySoftening = 0.120;
+inline constexpr double gravityScale = 0.42;
+inline constexpr double driftDrag = 0.008;
+inline constexpr double minSpeed = 0.18;
+inline constexpr double maxSpeed = 0.48;
+inline constexpr double escapeRadiusScale = 2.40;
+inline constexpr double collisionPadding = 0.018;
+inline constexpr int goodBlueprintGain = 1;
+inline constexpr int perfectBlueprintGain = 2;
+inline constexpr double goodRewardFactor = 0.55;
+inline constexpr double goodRewardFloor = 18.0;
+inline constexpr double perfectRewardMultiplier = 1.45;
+} // namespace orbit
+
 namespace rewards {
 inline constexpr double provingPayoutPerExtraData = 0.20;
 inline constexpr double provingPayoutBonusMaximum = 0.60;
