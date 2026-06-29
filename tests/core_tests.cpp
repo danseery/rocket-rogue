@@ -60,6 +60,11 @@ void activateOnlyCrew(GameState& state, std::string_view id)
     }
 }
 
+void prepareMiningSiteForTest(GameState& state)
+{
+    state.run.surfaceExpedition.miningSitePrepared = true;
+}
+
 GameState configuredState(const ContentCatalog& catalog, int destinationIndex, double targetMultiplier)
 {
     GameState state = createNewGame(catalog, 12345);
@@ -1904,6 +1909,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
 
     GameState state = createNewGame(catalog, 648);
     state.run.destinationIndex = 2;
+    activateOnlyCrew(state, content::astronaut::marco);
     startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.materials.common = 4;
@@ -1916,6 +1922,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(catalog.findMiniDrone(content::drone::stabilizerDrone) != nullptr, "stabilizer drone id should resolve");
 
     const MiningDrillStats baseline = miningDrillStats(state, catalog);
+    require(std::abs(baseline.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "baseline mining oxygen should use the short starter tank");
     require(equipMiniDrone(state, catalog, 0), "first equipped drone should fit in the starter slot");
     require(!equipMiniDrone(state, catalog, 1), "equipped drones should not exceed slot count");
     const MiningDrillStats miningSupported = miningDrillStats(state, catalog);
@@ -2217,6 +2224,7 @@ void surfaceExpeditionRoundTripsThroughSave()
     state.run.destinationIndex = 2;
     state.screen = Screen::SurfaceExpedition;
     startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.sharedFuel = 2;
     Random rng(9091);
     require(surveySurfaceSite(state, rng).applied, "test setup should gather a surface payload");
 
@@ -2231,8 +2239,43 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.active, "active surface expedition state should round trip");
     require(restored.run.surfaceExpedition.destinationId == content::destination::mars, "surface destination should round trip");
     require(restored.run.surfaceExpedition.siteProfile == state.run.surfaceExpedition.siteProfile, "surface site profile should round trip");
+    require(restored.run.surfaceExpedition.sharedFuel == 2, "surface shared fuel should round trip");
+    require(restored.run.surfaceExpedition.sharedFuelCapacity == tuning::research::sharedFuelCapacity, "surface shared fuel capacity should round trip");
+    require(restored.run.surfaceExpedition.miningSitePrepared, "surface mining preparation should round trip");
+    require(!restored.run.surfaceExpedition.miningRunUsed, "unused surface mining run should round trip");
     require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
     require(restored.run.surfaceExpedition.logEntries == state.run.surfaceExpedition.logEntries, "surface mission log should round trip");
+}
+
+void surfaceMiningUsesSharedFuelAndRunsOnce()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92928);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+
+    const int supplyBeforeMining = state.run.surfaceExpedition.supply;
+    const int fuelBeforeMining = state.run.surfaceExpedition.sharedFuel;
+    const SurfaceActionOutcome started = startMiningRun(state, catalog);
+    require(started.applied, "fresh surface mining should start when shared fuel is available");
+    require(state.run.surfaceExpedition.supply == supplyBeforeMining, "starting mining should not spend action kits");
+    require(state.run.surfaceExpedition.sharedFuel == fuelBeforeMining - 1, "starting mining should spend one shared fuel");
+    require(state.run.surfaceExpedition.miningRunUsed, "starting mining should consume the one mining run for this loop");
+
+    state.screen = Screen::SurfaceExpedition;
+    state.run.mining.active = false;
+    const int supplyAfterMining = state.run.surfaceExpedition.supply;
+    const int depthAfterMining = state.run.surfaceExpedition.depth;
+    Random rng(92928);
+    const SurfaceActionOutcome pushAfterMining = pushSurfaceDeeper(state, rng);
+    require(!pushAfterMining.applied, "pushing deeper should be blocked after the mining run is used");
+    require(state.run.surfaceExpedition.supply == supplyAfterMining, "blocked post-mining push should not spend action kits");
+    require(state.run.surfaceExpedition.depth == depthAfterMining, "blocked post-mining push should not increase depth");
+    require(surfaceActionSummary(pushAfterMining).find("Extract before pushing deeper") != std::string::npos, "blocked post-mining push should explain extraction");
+
+    const SurfaceActionOutcome repeated = startMiningRun(state, catalog);
+    require(!repeated.applied, "mining should only start once per surface loop");
+    require(surfaceActionSummary(repeated).find("already used") != std::string::npos, "repeat mining should explain the one-run limit");
 }
 
 void surfaceMissionLogIsBounded()
@@ -2275,14 +2318,21 @@ void miningDrillBreaksCellsAndMarksChunks()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 92929);
     state.run.destinationIndex = 2;
+    activateOnlyCrew(state, content::astronaut::marco);
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     const int supplyBefore = state.run.surfaceExpedition.supply;
+    const int fuelBefore = state.run.surfaceExpedition.sharedFuel;
     const SurfaceActionOutcome started = startMiningRun(state, catalog);
-    require(started.applied, "mining should start when supply is available");
+    require(started.applied, "mining should start when the site is prepared");
     require(state.screen == Screen::Mining, "starting mining should move to the mining screen");
-    require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::mineSupplyCost, "starting mining should spend the mine supply cost");
+    require(state.run.surfaceExpedition.supply == supplyBefore, "starting mining should not spend action kits");
+    require(started.fuelDelta == -1, "starting mining should report shared fuel spent");
+    require(state.run.surfaceExpedition.sharedFuel == fuelBefore - 1, "starting mining should spend one shared fuel");
 
     MiningRunState& mining = state.run.mining;
+    require(std::abs(mining.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "starter mining run should begin with 15 seconds of oxygen");
+    require(mining.fuelSpent == 1, "active mining run should track the deployment fuel spend");
     MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
     require(ore != nullptr, "test ore cell should exist");
     *ore = {MiningCellMaterial::CommonOre, 0.25, 0.25, true, false};
@@ -2307,6 +2357,36 @@ void miningDrillBreaksCellsAndMarksChunks()
         "drilling should mark the changed chunk dirty");
 }
 
+void miningUsesSharedFuelReserve()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState blocked = createNewGame(catalog, 92933);
+    blocked.run.destinationIndex = 2;
+    startSurfaceExpedition(blocked, catalog);
+    prepareMiningSiteForTest(blocked);
+    blocked.run.surfaceExpedition.sharedFuel = 0;
+    const SurfaceActionOutcome blockedStart = startMiningRun(blocked, catalog);
+    require(!blockedStart.applied, "mining should not start without shared fuel");
+    require(surfaceActionSummary(blockedStart).find("Shared fuel is empty") != std::string::npos, "blocked mining should explain the shared fuel requirement");
+
+    GameState state = createNewGame(catalog, 92934);
+    state.run.destinationIndex = 2;
+    state.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::emergencyWinch);
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    state.run.surfaceExpedition.sharedFuel = 1;
+    require(startMiningRun(state, catalog).applied, "mining should start with one shared fuel");
+    require(state.run.surfaceExpedition.sharedFuel == 0, "deployment should spend the available shared fuel");
+    require(state.run.mining.oxygenSeconds > tuning::mining::fuelSecondsPerUnit, "oxygen upgrades should allow runs long enough to need another fuel draw");
+
+    for (int i = 0; i < 190 && !state.run.mining.failurePending; ++i) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+
+    require(state.run.mining.failurePending, "mining should recall when upgraded oxygen outlasts shared fuel");
+    require(state.run.mining.failureMessage.find("Shared fuel is dry") != std::string::npos, "fuel recall should explain the shared reserve");
+}
+
 void miningDrillFootprintCapsWearToWorstContact()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2314,6 +2394,7 @@ void miningDrillFootprintCapsWearToWorstContact()
         GameState state = createNewGame(catalog, 92932);
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "mining should start for footprint wear test");
 
         MiningRunState& mining = state.run.mining;
@@ -2358,6 +2439,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     GameState state = createNewGame(catalog, 92931);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start for movement feel test");
 
     MiningRunState& mining = state.run.mining;
@@ -2421,6 +2503,7 @@ void miningDrillTargetsFirstSolidCellOnRay()
     GameState state = createNewGame(catalog, 92930);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start for targeting test");
 
     MiningRunState& mining = state.run.mining;
@@ -2444,6 +2527,7 @@ void miningCompletionFeedsSurfacePayload()
     GameState state = createNewGame(catalog, 93939);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start for completion test");
     state.run.mining.temporaryMaterials.common = 2;
     state.run.mining.temporaryMaterials.rare = 1;
@@ -2466,6 +2550,7 @@ void miningDrillFailureShowsRecallBeatBeforeReturning()
     GameState state = createNewGame(catalog, 94949);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start for drill failure test");
 
     state.run.mining.drillIntegrity = 0.0;
@@ -2527,6 +2612,7 @@ void miningRefitModulesImproveDrillProfileIncrementally()
 
     upgraded.run.destinationIndex = 2;
     startSurfaceExpedition(upgraded, catalog);
+    prepareMiningSiteForTest(upgraded);
     require(startMiningRun(upgraded, catalog).applied, "upgraded mining state should start mining");
     require(upgraded.run.mining.terrain.width == upgradedStats.terrainWidth, "mining terrain should use upgraded width");
     require(upgraded.run.mining.terrain.height == upgradedStats.terrainHeight, "mining terrain should use upgraded depth");
@@ -2543,10 +2629,13 @@ void activeMiningRoundTripsThroughSave()
     GameState state = createNewGame(catalog, 94949);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start before save");
     state.statusLine = std::string(text::status::miningStarted);
     state.run.mining.droneX = 21.5;
     state.run.mining.droneY = 9.25;
+    state.run.mining.fuelBurnSeconds = 4.5;
+    state.run.mining.fuelSpent = 2;
     state.run.mining.temporaryMaterials.exotic = 1;
     if (MiningCell* cell = miningCellAt(state.run.mining.terrain, 20, 10)) {
         cell->material = MiningCellMaterial::RareOre;
@@ -2562,8 +2651,11 @@ void activeMiningRoundTripsThroughSave()
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *save);
     require(restored.screen == Screen::Mining, "active mining screen should round trip");
+    require(restored.run.surfaceExpedition.miningSitePrepared && restored.run.surfaceExpedition.miningRunUsed, "active mining restore should preserve the one-run surface state");
     require(restored.run.mining.active, "active mining state should round trip");
     require(std::abs(restored.run.mining.droneX - 21.5) < 0.000001, "mining drone x should round trip");
+    require(std::abs(restored.run.mining.fuelBurnSeconds - 4.5) < 0.000001, "mining fuel timer should round trip");
+    require(restored.run.mining.fuelSpent == 2, "mining fuel spend should round trip");
     require(restored.run.mining.temporaryMaterials.exotic == 1, "mining temporary materials should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
     require(restoredCell != nullptr && restoredCell->material == MiningCellMaterial::RareOre, "mining terrain material should round trip");
@@ -2576,6 +2668,7 @@ void surfaceActionSummaryShowsResourceDeltas()
     outcome.applied = true;
     outcome.message = std::string(text::status::surfaceSurveyed);
     outcome.supplyDelta = -2;
+    outcome.fuelDelta = -1;
     outcome.materialDelta = {.common = 2, .rare = 1, .exotic = 1};
     outcome.materialLost = {.common = 1, .rare = 1};
     outcome.cargoDelta = 8;
@@ -2588,6 +2681,7 @@ void surfaceActionSummaryShowsResourceDeltas()
 
     const std::string summary = surfaceActionSummary(outcome);
     require(summary.find("-2 Action kits") != std::string::npos, "surface action summary should include action-kit deltas");
+    require(summary.find("-1 Shared fuel") != std::string::npos, "surface action summary should include shared fuel deltas");
     require(summary.find("+2 Common mats") != std::string::npos, "surface action summary should include common material deltas");
     require(summary.find("+1 Rare mats") != std::string::npos, "surface action summary should include rare material deltas");
     require(summary.find("+1 Exotic mats") != std::string::npos, "surface action summary should include exotic material deltas");
@@ -2724,7 +2818,7 @@ void surfacePresentationComesFromSharedHelper()
     state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_surface", content::destination::mars, false});
 
     SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state);
-    require(surface.metrics.size() == 11, "surface presentation should expose site, field kit, hazard, action kits, cargo, depth, risk, materials, and artifacts");
+    require(surface.metrics.size() == 12, "surface presentation should expose site, field kit, hazard, action kits, shared fuel, cargo, depth, risk, materials, and artifacts");
     require(surface.phaseSteps.size() == 4, "surface presentation should expose post-arrival phase steps");
     require(surface.phaseSteps[0].stateLabel == "Done" && surface.phaseSteps[0].stateClass == "done", "surface phase track should mark arrival complete");
     require(surface.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "surface phase track should include research");
@@ -2762,13 +2856,14 @@ void surfacePresentationComesFromSharedHelper()
         return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
     }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose projected extraction-risk impact");
     require(surface.actions[0].action.actionId == std::string(ui::actions::surveySurface), "surface survey should use shared action id");
-    require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "surface mine should use shared action id");
+    require(surface.actions[1].action.enabled, "fresh surface mine should be available when shared fuel is available");
+    require(surface.actions[1].cost == "1 " + std::string(text::fuel::reserveLabel(false)), "surface mine preview should expose fuel-only cost");
     require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::commonMaterials);
-    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose material payoff chips");
+        return chip.label == std::string(text::labels::oxygen);
+    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose oxygen runtime");
     require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
-    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose projected extraction-risk impact");
+        return chip.label == std::string(text::labels::sharedFuel) && chip.value == "-1 deploy";
+    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose deployment fuel spend");
     require(surface.actions[2].action.cssClass == "danger", "push deeper should expose danger styling");
     require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::depth) && chip.value == "+1";
@@ -2782,6 +2877,22 @@ void surfacePresentationComesFromSharedHelper()
         return chip.label == std::string(text::labels::artifacts) && chip.value == "+1";
     }) != surface.actions[3].payoffChips.end(), "surface extraction preview should expose loaded artifact payoff");
 
+    surface = surfaceExpeditionPresentation(state);
+    require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "fresh surface mine should use shared action id");
+    require(surface.actions[1].availability == text::fuel::availability(false), "fresh surface mine should report fuel readiness");
+    state.run.surfaceExpedition.sharedFuel = 0;
+    surface = surfaceExpeditionPresentation(state);
+    require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "fuel-starved mine should report the unified offline state");
+    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "fuel-starved mine button should use the neutral unavailable label");
+    state.run.surfaceExpedition.sharedFuel = 1;
+    state.run.surfaceExpedition.miningRunUsed = true;
+    surface = surfaceExpeditionPresentation(state);
+    require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "used mining run should disable the mine action with the unified offline state");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::fuel::offline), "used mining run should disable pushing deeper with the unified offline state");
+    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "used mining run mine button should use the neutral unavailable label");
+    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "post-mining push button should use the neutral unavailable label");
+    require(surface.actions[0].action.enabled, "used mining run should still allow surveying the current site");
+
     state.run.surfaceExpedition.supply = 0;
     surface = surfaceExpeditionPresentation(state);
     require(surface.postureTitle == std::string(text::panel::messages::surfacePostureExtract), "zero-supply surface payload should tell the player to extract");
@@ -2793,7 +2904,7 @@ void surfacePresentationComesFromSharedHelper()
     empty.run.destinationIndex = 2;
     startSurfaceExpedition(empty, catalog);
     const SurfaceExpeditionPresentation emptySurface = surfaceExpeditionPresentation(empty);
-    require(emptySurface.postureTitle == std::string(text::panel::messages::surfacePostureScout), "empty surface payload should encourage scouting");
+    require(emptySurface.postureTitle == "Recommended: mine deposit", "empty fueled surface payload should recommend the drone mining choice");
     require(emptySurface.postureClass == "neutral", "empty surface posture should use neutral styling");
 
     GameState risky = state;
@@ -2810,7 +2921,7 @@ void surfacePresentationComesFromSharedHelper()
     deepSpace.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     startSurfaceExpedition(deepSpace, catalog);
     const SurfaceExpeditionPresentation deepSurface = surfaceExpeditionPresentation(deepSpace);
-    require(deepSurface.metrics.size() == 12, "post-solar surface presentation should expose contact risk");
+    require(deepSurface.metrics.size() == 13, "post-solar surface presentation should expose contact risk");
     require(std::find_if(deepSurface.metrics.begin(), deepSurface.metrics.end(), [](const PanelMetricPresentation& metric) {
         return metric.label == std::string(text::labels::contactRisk);
     }) != deepSurface.metrics.end(), "post-solar surface presentation should label contact risk");
@@ -3676,6 +3787,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     GameState miningState = createNewGame(catalog, 713);
     miningState.run.destinationIndex = 2;
     startSurfaceExpedition(miningState, catalog);
+    prepareMiningSiteForTest(miningState);
     require(startMiningRun(miningState, catalog).applied, "test mining run should start");
     Random miningRng(713);
     const PreparedLaunch miningLaunch = prepareLaunch(miningState, catalog, miningRng);
@@ -3693,6 +3805,7 @@ void surfaceHtmlPromotesMiningAction()
     GameState state = createNewGame(catalog, 714);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
     state.screen = Screen::SurfaceExpedition;
 
     Random rng(714);
@@ -3957,10 +4070,18 @@ void hostileNavigationSelectsShuttleSortie()
     require(destinations.size() >= 2, "hostile navigation should expose multiple mapped destinations");
     require(destinations.front()->id == content::destination::nearbyStar, "Nearby Star should be the first hostile-system sortie target");
 
+    const int fuelBefore = state.meta.ark.fuelReserve;
+    const int expectedFuelCost = 2 + destinations.front()->tier;
     require(selectNavigationDestination(state, catalog, 0), "selecting a navigation destination should succeed");
     require(state.screen == Screen::Hangar, "selecting a destination should open shuttle prep in the Hangar");
     require(state.launchConfig.destinationId == content::destination::nearbyStar, "navigation should sync launch destination");
     require(state.launchConfig.frontierTransfer, "hostile navigation sorties should use transfer burn tuning");
+    require(state.meta.ark.fuelReserve == fuelBefore - expectedFuelCost, "navigation sorties should spend shared fuel");
+
+    state.screen = Screen::Navigation;
+    state.meta.ark.fuelReserve = 0;
+    require(!selectNavigationDestination(state, catalog, 0), "navigation should reject destinations the shared fuel reserve cannot afford");
+    require(state.statusLine.find("Ark fuel reserve is short") != std::string::npos, "navigation fuel block should explain the shared reserve");
 
     startSurfaceExpedition(state, catalog);
     require(state.run.surfaceExpedition.enemyEncountersEnabled, "hostile-system surface expeditions should enable enemy contact");
@@ -4182,9 +4303,11 @@ int main()
     enemyContactStartsBeyondSolarSystemAndCanBeMitigated();
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
+    surfaceMiningUsesSharedFuelAndRunsOnce();
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
     miningDrillBreaksCellsAndMarksChunks();
+    miningUsesSharedFuelReserve();
     miningDrillFootprintCapsWearToWorstContact();
     miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
     miningDrillTargetsFirstSolidCellOnRay();

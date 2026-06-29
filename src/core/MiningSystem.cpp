@@ -631,6 +631,20 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     refreshTargetCell(mining);
 }
 
+void triggerMiningFailure(GameState& state, std::string message)
+{
+    MiningRunState& mining = state.run.mining;
+    mining.failurePending = true;
+    mining.failureSeconds = 0.0;
+    mining.drilling = false;
+    mining.drillIntegrity = std::max(0.0, mining.drillIntegrity);
+    mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds);
+    mining.contactIntensity = 1.0;
+    mining.scannerPulseSeconds = 0.9;
+    mining.failureMessage = std::move(message);
+    state.statusLine = mining.failureMessage;
+}
+
 } // namespace
 
 std::string_view miningMaterialName(MiningCellMaterial material)
@@ -815,7 +829,16 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
 {
     SurfaceActionOutcome outcome;
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    if (!expedition.active || expedition.supply < tuning::research::mineSupplyCost) {
+    if (!expedition.active) {
+        return outcome;
+    }
+    if (expedition.miningRunUsed) {
+        outcome.message = "Mining run already used for this surface loop.";
+        return outcome;
+    }
+    const bool arkKnown = arkDiscovered(state);
+    if (expedition.sharedFuel <= 0) {
+        outcome.message = text::fuel::miningBlockedStatus(arkKnown);
         return outcome;
     }
     const Destination* destination = catalog.findDestination(expedition.destinationId);
@@ -823,10 +846,11 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
         return outcome;
     }
 
-    expedition.supply -= tuning::research::mineSupplyCost;
+    expedition.sharedFuel = std::max(0, expedition.sharedFuel - 1);
+    expedition.miningRunUsed = true;
     outcome.applied = true;
-    outcome.supplyDelta = -tuning::research::mineSupplyCost;
-    outcome.message = "Mining drone deployed.";
+    outcome.fuelDelta = -1;
+    outcome.message = text::fuel::miningStartedStatus(arkKnown);
 
     MiningRunState mining;
     mining.active = true;
@@ -835,6 +859,8 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.depthZone = expedition.depth;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.oxygenSeconds = stats.oxygenSeconds;
+    mining.fuelBurnSeconds = 0.0;
+    mining.fuelSpent = 1;
     mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
@@ -846,7 +872,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     refreshTargetCell(mining);
     state.run.mining = std::move(mining);
     state.screen = Screen::Mining;
-    appendSurfaceLog(expedition, "Mining drone deployed: -2 action kits.");
+    appendSurfaceLog(expedition, text::fuel::miningLog(arkKnown));
     return outcome;
 }
 
@@ -912,6 +938,18 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.elapsedSeconds += dt;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
+    mining.fuelBurnSeconds += dt;
+    if (mining.oxygenSeconds > 0.0) {
+        while (mining.fuelBurnSeconds >= tuning::mining::fuelSecondsPerUnit) {
+            if (state.run.surfaceExpedition.sharedFuel <= 0) {
+                triggerMiningFailure(state, text::fuel::miningFailedStatus(arkDiscovered(state)));
+                return;
+            }
+            state.run.surfaceExpedition.sharedFuel = std::max(0, state.run.surfaceExpedition.sharedFuel - 1);
+            mining.fuelSpent += 1;
+            mining.fuelBurnSeconds -= tuning::mining::fuelSecondsPerUnit;
+        }
+    }
     const int passiveTarget = static_cast<int>(std::floor(mining.elapsedSeconds * stats.passiveDroneMiningRate));
     while (mining.passiveDroneYield < passiveTarget) {
         mining.temporaryMaterials.common += 1;
@@ -998,17 +1036,11 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     refreshTargetCell(mining);
 
     if (mining.oxygenSeconds <= 0.0 || mining.drillIntegrity <= 0.0) {
-        mining.failurePending = true;
-        mining.failureSeconds = 0.0;
-        mining.drilling = false;
-        mining.drillIntegrity = std::max(0.0, mining.drillIntegrity);
-        mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds);
-        mining.contactIntensity = 1.0;
-        mining.scannerPulseSeconds = 0.9;
-        mining.failureMessage = mining.drillIntegrity <= 0.0
-            ? std::string(text::status::miningDrillFailed)
-            : std::string(text::status::miningOxygenFailed);
-        state.statusLine = mining.failureMessage;
+        triggerMiningFailure(
+            state,
+            mining.drillIntegrity <= 0.0
+                ? std::string(text::status::miningDrillFailed)
+                : std::string(text::status::miningOxygenFailed));
     }
 }
 

@@ -130,6 +130,11 @@ inline constexpr int readinessOverCap = 3;
 inline constexpr double destroyedCreditPenalty = 30.0;
 } // namespace mission
 
+namespace ark {
+inline constexpr int startingFuelReserve = 4;
+inline constexpr int hostileSystemFuelReserve = 8;
+} // namespace ark
+
 namespace unlocks {
 struct BlueprintUnlock {
     int threshold;
@@ -552,6 +557,7 @@ inline constexpr int enemyEncounterTier = 4;
 inline constexpr int offerCount = 3;
 inline constexpr int baseSupply = 7;
 inline constexpr int supplyPerTier = 1;
+inline constexpr int sharedFuelCapacity = 3;
 inline constexpr int surveySupplyCost = 1;
 inline constexpr int mineSupplyCost = 2;
 inline constexpr int pushSupplyCost = 2;
@@ -626,7 +632,8 @@ namespace mining {
 inline constexpr int terrainWidth = 64;
 inline constexpr int terrainHeight = 40;
 inline constexpr int chunkSize = 8;
-inline constexpr double oxygenSeconds = 180.0;
+inline constexpr double oxygenSeconds = 15.0;
+inline constexpr double fuelSecondsPerUnit = 15.0;
 inline constexpr double targetRunSeconds = 120.0;
 inline constexpr double droneSpeedCellsPerSecond = 7.2;
 inline constexpr double softTerrainMoveScale = 0.42;

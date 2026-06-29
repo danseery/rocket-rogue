@@ -54,6 +54,8 @@ inline constexpr std::string_view miningStowed = "Mining payload stowed for surf
 inline constexpr std::string_view miningAborted = "Mining drone recalled. Payload is partial, but the crew is back on plan.";
 inline constexpr std::string_view miningDrillFailed = "Drill head sheared off. Mining drone is being recalled with whatever payload survived.";
 inline constexpr std::string_view miningOxygenFailed = "Oxygen timer expired. Mining drone is being recalled before the field team loses the rig.";
+inline constexpr std::string_view miningFuelFailed = "Ark fuel reserve is dry. Mining drone is being recalled so the shuttle still has a route home.";
+inline constexpr std::string_view miningFuelBlocked = "Ark fuel reserve is empty. Recover fuel before deploying the mining drone.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
 inline constexpr std::string_view launchCrewBlocked = "Choose a pilot before launch.";
 inline constexpr std::string_view preflightReady = "Pre-flight checks are holding. Review the gauges, then launch when ready.";
@@ -145,6 +147,8 @@ inline constexpr std::string_view depth = "Depth";
 inline constexpr std::string_view extractionRisk = "Extraction risk";
 inline constexpr std::string_view contactRisk = "Contact risk";
 inline constexpr std::string_view oxygen = "Oxygen";
+inline constexpr std::string_view arkFuel = "Ark fuel";
+inline constexpr std::string_view sharedFuel = "Shared fuel";
 inline constexpr std::string_view drillHeat = "Drill heat";
 inline constexpr std::string_view drillIntegrity = "Drill integrity";
 inline constexpr std::string_view targetMaterial = "Target";
@@ -156,6 +160,87 @@ inline constexpr std::string_view nav = "NAV";
 inline constexpr std::string_view mix = "MIX";
 inline constexpr std::string_view abort = "ABORT";
 } // namespace labels
+
+namespace fuel {
+inline std::string_view reserveLabel(bool arkKnown)
+{
+    return arkKnown ? labels::arkFuel : labels::sharedFuel;
+}
+
+inline std::string reserveDetail(bool arkKnown, int reserve)
+{
+    if (arkKnown) {
+        return std::to_string(reserve) + " in Ark reserves for shuttle routes and mining drone deployments";
+    }
+    return std::to_string(reserve) + " shared by the shuttle and mining drone; returning to base replenishes both";
+}
+
+inline std::string deployDetail(bool arkKnown)
+{
+    if (arkKnown) {
+        return " Deploying the drone spends the same Ark reserve used for shuttle routes.";
+    }
+    return " Deploying the drone uses the same shared fuel supply as the shuttle.";
+}
+
+inline std::string blocked(bool arkKnown)
+{
+    return arkKnown ? "Need Ark fuel" : "Need shared fuel";
+}
+
+inline std::string availability(bool arkKnown)
+{
+    return arkKnown ? "Ark fuel ready" : "Shared fuel ready";
+}
+
+inline constexpr std::string_view offline = "Mining drone offline";
+
+inline std::string drawDetail(bool arkKnown, int seconds)
+{
+    const std::string cadence = "1 " + std::string(reserveLabel(arkKnown)) + " on deploy, then 1 per " + std::to_string(seconds) + "s while oxygen remains.";
+    if (arkKnown) {
+        return cadence + " Returning to the Ark replenishes the shuttle and drone from Ark reserves.";
+    }
+    return cadence + " Returning to base replenishes the shuttle and drone.";
+}
+
+inline std::string miningRunTarget(bool arkKnown)
+{
+    if (arkKnown) {
+        return "Bank useful payload before oxygen or Ark reserves make the next route too expensive.";
+    }
+    return "Bank useful payload before oxygen or shared fuel makes the next route too expensive.";
+}
+
+inline std::string miningBlockedStatus(bool arkKnown)
+{
+    if (arkKnown) {
+        return "Ark fuel reserve is empty. Recover fuel before deploying the mining drone.";
+    }
+    return "Shared fuel is empty. Return to base before deploying the mining drone.";
+}
+
+inline std::string miningFailedStatus(bool arkKnown)
+{
+    if (arkKnown) {
+        return "Ark fuel reserve is dry. Mining drone is being recalled so the shuttle still has a route home.";
+    }
+    return "Shared fuel is dry. Mining drone is being recalled so the shuttle still has a route home.";
+}
+
+inline std::string miningStartedStatus(bool arkKnown)
+{
+    if (arkKnown) {
+        return "Mining drone deployed from Ark reserves.";
+    }
+    return "Mining drone deployed from shared shuttle fuel.";
+}
+
+inline std::string miningLog(bool arkKnown)
+{
+    return "Mining drone deployed: -1 " + std::string(reserveLabel(arkKnown)) + ".";
+}
+} // namespace fuel
 
 namespace units {
 inline constexpr std::string_view damage = "damage";
@@ -536,7 +621,7 @@ inline constexpr std::string_view researchAdvisoryEmpty = "No active projects";
 inline constexpr std::string_view researchAdvisoryEmptyDetail = "The lab has no viable project queued for this arrival. Send the field team down and keep the expedition moving.";
 inline constexpr std::string_view surfaceExpeditionBrief = "Choose one field action, then extract the payload when the risk is no longer worth the next dig.";
 inline constexpr std::string_view surfacePostureScout = "Recommended: gather data";
-inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Survey or mine before spending action kits on deeper terrain.";
+inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Mine now to spend shared fuel, or survey and push deeper to save it.";
 inline constexpr std::string_view surfacePostureStable = "Recommended: one more action is reasonable";
 inline constexpr std::string_view surfacePostureStableDetail = "You have recoverable cargo and enough action-kit margin to keep working.";
 inline constexpr std::string_view surfacePostureNarrowing = "Recommended: extract soon";
@@ -546,7 +631,7 @@ inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is v
 inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
 inline constexpr std::string_view surfaceSurveyDetail = "Recover common samples; probes improve yield and reduce dust trouble.";
-inline constexpr std::string_view surfaceMineDetail = "Fill cargo canisters; drills improve yield and rare-material odds.";
+inline constexpr std::string_view surfaceMineDetail = "Deploy the mining drone once for this surface loop; mining spends fuel, not action kits.";
 inline constexpr std::string_view surfacePushDetail = "Increase depth for artifacts and richer deposits; terrain gets less forgiving.";
 inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to Earth. Cargo rigs reduce extraction risk.";
 

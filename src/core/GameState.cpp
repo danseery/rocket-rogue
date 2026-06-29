@@ -130,6 +130,11 @@ bool isCleanShallowRecoveryOutcome(const Destination& destination, const LaunchO
         && outcome.peakWarning < tuning::rewards::cleanShallowRecoveryWarningThreshold;
 }
 
+int navigationFuelCost(const Destination& destination)
+{
+    return 2 + destination.tier;
+}
+
 } // namespace
 
 int moduleOfferCost(Rarity rarity)
@@ -240,6 +245,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
     GameState state;
     state.seed = seed;
     state.meta.unlockKeys = {content::unlock::starter};
+    state.meta.ark.fuelReserve = tuning::ark::startingFuelReserve;
     state.run.credits = tuning::hangar::startingCredits;
     state.run.crew = catalog.astronauts;
     ensureDestinationHistory(state, catalog);
@@ -923,6 +929,7 @@ bool performArkJump(GameState& state, const ContentCatalog& catalog)
         state.meta.navigation.arkLocationId = "gravity_well";
         state.meta.navigation.discoveredDestinationIds = {content::destination::nearbyStar, content::destination::nearbyGalaxy};
         state.meta.navigation.selectedDestinationId = content::destination::nearbyStar;
+        state.meta.ark.fuelReserve = std::max(state.meta.ark.fuelReserve, tuning::ark::hostileSystemFuelReserve);
         addUniqueId(state.meta.unlockKeys, content::unlock::deepSpace);
         addUniqueId(state.meta.unlockKeys, content::unlock::perimeterDrones);
         const int hostileIndex = destinationIndexForId(catalog, content::destination::nearbyStar);
@@ -950,6 +957,11 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
     }
 
     const Destination& destination = *destinations[static_cast<std::size_t>(index)];
+    const int fuelCost = navigationFuelCost(destination);
+    if (state.meta.ark.fuelReserve < fuelCost) {
+        state.statusLine = "Ark fuel reserve is short for " + destination.name + ". Recover fuel or choose a closer sortie.";
+        return false;
+    }
     const int destinationIndex = destinationIndexForId(catalog, destination.id);
     if (destinationIndex < 0) {
         state.statusLine = "Navigation target is not in the catalog.";
@@ -957,6 +969,7 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
     }
 
     state.meta.navigation.selectedDestinationId = destination.id;
+    state.meta.ark.fuelReserve = std::max(0, state.meta.ark.fuelReserve - fuelCost);
     addUniqueId(state.meta.navigation.discoveredDestinationIds, destination.id);
     state.run.destinationIndex = destinationIndex;
     state.launchConfig.frontierTransfer = true;
@@ -964,7 +977,7 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
     state.launchConfig.burnGoalMultiplier = destination.targetMultiplier;
     syncLaunchConfig(state, catalog);
     state.screen = Screen::Hangar;
-    state.statusLine = "Course plotted from the Ark to " + destination.name + ". Prep the shuttle, then launch.";
+    state.statusLine = "Course plotted from the Ark to " + destination.name + ". Shared fuel spent: -" + std::to_string(fuelCost) + ". Prep the shuttle, then launch.";
     return true;
 }
 

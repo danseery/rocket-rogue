@@ -5,6 +5,12 @@
 - `earth.png` - Earth sprite with alpha.
 - `moon.png` - Moon sprite with alpha.
 - `mars.png` - Mars sprite with alpha.
+- `mercury.png` - Mercury sprite with alpha, packed on a 512x512 square.
+- `venus.png` - Venus sprite with alpha, packed on a 512x512 square.
+- `jupiter.png` - Jupiter sprite with alpha, packed on a 512x512 square.
+- `saturn.png` - Saturn sprite with alpha, packed on a 512x512 square.
+- `uranus.png` - Uranus sprite with alpha, packed on a 512x512 square.
+- `neptune.png` - Neptune sprite with alpha, packed on a 512x512 square.
 - `rocket.png` - Player rocket sprite with alpha and no active thrust.
 - `thrust-sheet.png` - 6-frame horizontal thrust animation sheet with alpha, extracted from the original rocket flame.
 - `explosion-sheet.png` - 8-frame horizontal explosion sprite sheet with alpha.

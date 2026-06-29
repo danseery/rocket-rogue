@@ -89,6 +89,7 @@ struct SurfaceActionOutcome {
     bool applied = false;
     std::string message;
     int supplyDelta = 0;
+    int fuelDelta = 0;
     int cargoDelta = 0;
     MaterialInventory materialDelta;
     MaterialInventory materialLost;

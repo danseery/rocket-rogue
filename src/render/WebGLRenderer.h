@@ -149,7 +149,7 @@ private:
         bool requested = false;
         bool ready = false;
     };
-    std::array<TextureAsset, 9> assets_ {};
+    std::array<TextureAsset, 15> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
     float sceneCssWidth_ = 1280.0F;

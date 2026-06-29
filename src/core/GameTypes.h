@@ -451,6 +451,8 @@ struct SurfaceExpeditionState {
     std::string destinationId;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     int supply = 0;
+    int sharedFuel = 0;
+    int sharedFuelCapacity = 0;
     int cargo = 0;
     double hazard = 0.0;
     int depth = 0;
@@ -458,6 +460,8 @@ struct SurfaceExpeditionState {
     std::vector<ArtifactRecord> temporaryArtifacts;
     std::vector<std::string> logEntries;
     bool enemyEncountersEnabled = false;
+    bool miningSitePrepared = false;
+    bool miningRunUsed = false;
     std::array<std::string, 3> surfaceUpgradeOfferIds {};
     bool surfaceUpgradeOfferAvailable = false;
     int surfaceUpgradeOffersSeen = 0;
@@ -484,7 +488,9 @@ struct MiningRunState {
     std::string destinationId;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
-    double oxygenSeconds = 180.0;
+    double oxygenSeconds = 15.0;
+    double fuelBurnSeconds = 0.0;
+    int fuelSpent = 0;
     double droneX = 32.0;
     double droneY = 4.0;
     double moveX = 0.0;

@@ -592,6 +592,7 @@ std::string surfaceKpiGrid(const SurfaceExpeditionState& expedition, double extr
     std::ostringstream out;
     out << "<div class=\"surface-kpi-grid\">";
     out << compactMetric(text::labels::supply, std::to_string(expedition.supply));
+    out << compactMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
     out << compactMetric(text::labels::cargo, std::to_string(expedition.cargo));
     out << compactMetric(text::labels::hazard, display::percent(expedition.hazard));
     out << compactMetric(text::labels::extractionRisk, display::percent(extractionRisk));
@@ -714,7 +715,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 panelMetric("Campaign", std::string(toString(state.meta.campaignMilestone))),
                 panelMetric("System", state.meta.navigation.currentSystemId.empty() ? "Solar system" : state.meta.navigation.currentSystemId),
                 panelMetric("Ark hull", display::percent(static_cast<double>(state.meta.ark.hullDamage) / 100.0)),
-                panelMetric("Ark fuel", std::to_string(state.meta.ark.fuelReserve))
+                panelMetric(text::labels::arkFuel, std::to_string(state.meta.ark.fuelReserve))
             })
             << "</div></section>";
 
@@ -726,11 +727,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 const Destination& destination = *destinations[static_cast<std::size_t>(index)];
                 const bool selected = state.meta.navigation.selectedDestinationId == destination.id;
                 const int fuelCost = 2 + destination.tier;
+                const bool fuelAvailable = state.meta.ark.fuelReserve >= fuelCost;
                 const int danger = static_cast<int>(std::round(destination.hazard * 24.0));
                 const int value = static_cast<int>(std::round(destination.baseReward));
                 const int durability = 35 + destination.tier * 12;
                 out << "<article class=\"ops-card nav-card " << (selected ? "selected" : "") << "\">";
-                out << "<div class=\"card-kicker\"><span>" << htmlEscape("Fuel " + std::to_string(fuelCost))
+                out << "<div class=\"card-kicker\"><span>" << htmlEscape("Fuel " + std::to_string(fuelCost) + " / reserve " + std::to_string(state.meta.ark.fuelReserve))
                     << "</span><span>" << htmlEscape("Danger " + display::percent(static_cast<double>(danger) / 100.0)) << "</span></div>";
                 out << "<h3>" << htmlEscape(destination.name) << "</h3>";
                 out << "<p>" << htmlEscape(destination.tier >= 4
@@ -742,8 +744,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 out << resourceChip(panelMetric("Artifacts", destination.tier >= 4 ? "Possible" : "None"));
                 out << resourceChip(panelMetric("Enemies", destination.tier >= 4 ? "Detected" : "None"));
                 out << "</div>";
-                out << "<div class=\"card-footer\"><span>" << htmlEscape(selected ? "Selected" : "Mapped")
-                    << "</span>" << button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn")
+                out << "<div class=\"card-footer\"><span>" << htmlEscape(selected ? "Selected" : (fuelAvailable ? "Mapped" : "Need fuel"))
+                    << "</span>" << (fuelAvailable
+                        ? button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn")
+                        : disabledButton("Need fuel"))
                     << "</div></article>";
             }
             out << "</div></section>";
@@ -1143,20 +1147,27 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     if (state.screen == Screen::Mining) {
         const MiningRunPresentation miningPanel = miningRunPresentation(state, catalog);
+        const bool arkKnown = arkDiscovered(state);
         out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
-            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, and stow payload before oxygen or extraction risk turns ugly.") << "</p></div>"
+            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, and stow payload before oxygen, shared fuel, or extraction risk turns ugly.") << "</p></div>"
             << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << modalButton("Inventory", ui::modals::inventory, "ghost")
             << "</div></div>";
+        const std::string miningFuelHelp = arkKnown
+            ? "Mining uses the same fuel reserve as Ark shuttle routes. Returning to the Ark replenishes the shuttle and drone from Ark reserves; recover fuel or extract it from materials to keep sorties moving."
+            : "Mining uses the same shared fuel supply as the shuttle. Return to base to replenish the shuttle and drone, then bring back materials and artifacts before oxygen, fuel, or extraction risk gets ugly.";
         out << tutorialCard(
             "mining-basics",
             "Dig, scan, stow",
-            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. Bring back materials and artifacts before oxygen or extraction risk gets ugly.");
+            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. " + miningFuelHelp);
         if (miningPanel.failurePending) {
             out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
         }
+        out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Current payload")
+            << "</h2><p>" << htmlEscape("Materials and artifacts recovered during this dig. Stow payload to carry it back to surface extraction.") << "</p></div>"
+            << "<div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
             out << metric(metricItem.label, metricItem.value);

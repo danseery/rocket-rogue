@@ -49,11 +49,31 @@ Both installers keep project-local development state in ignored folders:
 Use `EMSDK_VERSION` or the script option to install a specific SDK version instead of `latest`.
 Node dependencies are managed through `package-lock.json`; the installers use `npm ci` when the lockfile exists. The repo standard is Node 24, recorded in `.node-version` and `package.json`.
 
+## Verify local toolchains
+
+Before running CMake builds in a fresh terminal or Codex desktop session, run the toolchain doctor:
+
+```powershell
+node tools\verify-toolchain.mjs
+```
+
+It checks CMake, Ninja, Node, npm, a native C++ compiler, the project-local Emscripten checkout, the Emscripten CMake toolchain file, and `emcc`. If it reports missing native support, install Visual Studio Build Tools with the C++ workload or build from WSL/Ubuntu with `build-essential`. If it reports missing web support while `.deps\emsdk` exists, rerun:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\scripts\install-windows.ps1
+. .\scripts\env-windows.ps1
+```
+
+PowerShell may block the `npm.ps1` shim on locked-down machines. Use `npm.cmd run ...` from PowerShell, or call Node scripts directly, for example `node tools\sanity-check.mjs`.
+
 ## Build for the browser with presets
 
 Install the Emscripten SDK, then open a terminal with the Emscripten environment activated:
 
 ```powershell
+. .\scripts\env-windows.ps1
+node tools\verify-toolchain.mjs
 cmake --preset web-release
 cmake --build --preset web-release
 ```
@@ -113,11 +133,19 @@ cmake --build --preset native-debug
 ctest --preset native-debug
 ```
 
-This workspace currently does not include a compiler or Emscripten on PATH, so the repository also includes a Node sanity check:
+The Windows npm scripts import the Visual Studio developer environment automatically before running the native preset. If you call CMake directly in a fresh PowerShell session, dot-source the repo environment first:
+
+```powershell
+. .\scripts\env-windows.ps1
+```
+
+The repository also includes a lightweight Node sanity check:
 
 ```powershell
 npm.cmd run sanity
 ```
+
+If CMake reports `No CMAKE_CXX_COMPILER could be found`, the native compiler is missing from the active shell environment, not necessarily from the machine. Run `npm.cmd run doctor` first; on Windows it checks Visual Studio Build Tools through `VsDevCmd.bat`. If the web preset reports that Emscripten paths or `emcc` are missing, rerun `scripts\install-windows.ps1`; a checked-out `.deps\emsdk` folder by itself is not enough until `emsdk install` and `emsdk activate` have completed.
 
 ## Windows notes
 

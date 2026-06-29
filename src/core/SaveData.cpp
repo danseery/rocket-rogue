@@ -606,6 +606,16 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
     state.run.mining = save.mining;
+    if (state.run.mining.active) {
+        state.run.surfaceExpedition.miningSitePrepared = true;
+        state.run.surfaceExpedition.miningRunUsed = true;
+    }
+    if (state.run.surfaceExpedition.active && state.run.surfaceExpedition.sharedFuelCapacity <= 0) {
+        state.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+        state.run.surfaceExpedition.sharedFuel = state.run.mining.active
+            ? std::max(0, state.run.surfaceExpedition.sharedFuelCapacity - std::max(0, state.run.mining.fuelSpent))
+            : state.run.surfaceExpedition.sharedFuelCapacity;
+    }
     if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
         state.run.surfaceExpedition.logEntries.erase(
             state.run.surfaceExpedition.logEntries.begin(),
@@ -748,12 +758,16 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
     writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
     writeField(out, save_schema::field::surfaceSupply, save.surfaceExpedition.supply);
+    writeField(out, save_schema::field::surfaceSharedFuel, save.surfaceExpedition.sharedFuel);
+    writeField(out, save_schema::field::surfaceSharedFuelCapacity, save.surfaceExpedition.sharedFuelCapacity);
     writeField(out, save_schema::field::surfaceCargo, save.surfaceExpedition.cargo);
     writeField(out, save_schema::field::surfaceHazard, save.surfaceExpedition.hazard);
     writeField(out, save_schema::field::surfaceDepth, save.surfaceExpedition.depth);
     writeField(out, save_schema::field::surfaceMaterials, serializeMaterials(save.surfaceExpedition.temporaryMaterials));
     writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
+    writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
+    writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
     writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
     writeField(out, save_schema::field::surfaceUpgrades, join(save.surfaceUpgradeIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::surfaceUpgradeOffers, join(arrayToVector(save.surfaceExpedition.surfaceUpgradeOfferIds), save_schema::listDelimiter));
@@ -764,6 +778,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
     writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
+    writeField(out, save_schema::field::miningFuelBurn, save.mining.fuelBurnSeconds);
+    writeField(out, save_schema::field::miningFuelSpent, save.mining.fuelSpent);
     writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
     writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
     writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
@@ -904,6 +920,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile)));
         } else if (key == save_schema::field::surfaceSupply) {
             save.surfaceExpedition.supply = parseInt(value, save.surfaceExpedition.supply);
+        } else if (key == save_schema::field::surfaceSharedFuel) {
+            save.surfaceExpedition.sharedFuel = parseInt(value, save.surfaceExpedition.sharedFuel);
+        } else if (key == save_schema::field::surfaceSharedFuelCapacity) {
+            save.surfaceExpedition.sharedFuelCapacity = parseInt(value, save.surfaceExpedition.sharedFuelCapacity);
         } else if (key == save_schema::field::surfaceCargo) {
             save.surfaceExpedition.cargo = parseInt(value, save.surfaceExpedition.cargo);
         } else if (key == save_schema::field::surfaceHazard) {
@@ -916,6 +936,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.temporaryArtifacts = parseArtifacts(value);
         } else if (key == save_schema::field::surfaceEnemies) {
             save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfaceMiningPrepared) {
+            save.surfaceExpedition.miningSitePrepared = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfaceMiningUsed) {
+            save.surfaceExpedition.miningRunUsed = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceLog) {
             save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
         } else if (key == save_schema::field::surfaceUpgrades) {
@@ -936,6 +960,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);
         } else if (key == save_schema::field::miningOxygen) {
             save.mining.oxygenSeconds = parseDouble(value, save.mining.oxygenSeconds);
+        } else if (key == save_schema::field::miningFuelBurn) {
+            save.mining.fuelBurnSeconds = parseDouble(value, save.mining.fuelBurnSeconds);
+        } else if (key == save_schema::field::miningFuelSpent) {
+            save.mining.fuelSpent = parseInt(value, save.mining.fuelSpent);
         } else if (key == save_schema::field::miningDrone) {
             parsePair(value, save.mining.droneX, save.mining.droneY);
         } else if (key == save_schema::field::miningAim) {

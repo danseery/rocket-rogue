@@ -29,7 +29,13 @@ enum ArtAsset {
     ThrustAsset = 5,
     MiningDroneAsset = 6,
     DrillBitAsset = 7,
-    LocalSolarBgAsset = 8
+    LocalSolarBgAsset = 8,
+    MercuryAsset = 9,
+    VenusAsset = 10,
+    JupiterAsset = 11,
+    SaturnAsset = 12,
+    UranusAsset = 13,
+    NeptuneAsset = 14
 };
 
 struct Vec2 {
@@ -273,6 +279,31 @@ Color mix(Color a, Color b, float t)
     };
 }
 
+int destinationBodyAsset(int destinationTier)
+{
+    if (destinationTier == 1) {
+        return MoonAsset;
+    }
+    if (destinationTier == 2) {
+        return MarsAsset;
+    }
+    if (destinationTier == 3) {
+        return JupiterAsset;
+    }
+    return -1;
+}
+
+float bodySpriteScale(int assetIndex)
+{
+    if (assetIndex == MoonAsset) {
+        return 2.40F;
+    }
+    if (assetIndex == MarsAsset || assetIndex == JupiterAsset) {
+        return 2.55F;
+    }
+    return 2.40F;
+}
+
 Color miningMaterialColor(int material, float integrity, bool revealed, bool hazard, int destinationTier, float light)
 {
     Color color {0.025F, 0.035F, 0.040F, 1.0F};
@@ -340,6 +371,12 @@ bool WebGLRenderer::initialize()
     assets_[MiningDroneAsset] = {"mining_drone", "assets/art/mining-drone.png"};
     assets_[DrillBitAsset] = {"drill_bit", "assets/art/drill-bit-sheet.png"};
     assets_[LocalSolarBgAsset] = {"local_solar_bg", "assets/art/local-solar-bg-sheet.png"};
+    assets_[MercuryAsset] = {"mercury", "assets/art/mercury.png"};
+    assets_[VenusAsset] = {"venus", "assets/art/venus.png"};
+    assets_[JupiterAsset] = {"jupiter", "assets/art/jupiter.png"};
+    assets_[SaturnAsset] = {"saturn", "assets/art/saturn.png"};
+    assets_[UranusAsset] = {"uranus", "assets/art/uranus.png"};
+    assets_[NeptuneAsset] = {"neptune", "assets/art/neptune.png"};
 
 #ifdef __EMSCRIPTEN__
     EmscriptenWebGLContextAttributes attributes;
@@ -374,7 +411,7 @@ bool WebGLRenderer::initialize()
     glUniform1i(samplerUniform_, 0);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    std::array<GLuint, 9> textureIds {};
+    std::array<GLuint, 15> textureIds {};
     glGenTextures(static_cast<GLsizei>(textureIds.size()), textureIds.data());
     for (std::size_t i = 0; i < assets_.size(); ++i) {
         assets_[i].texture = textureIds[i];
@@ -715,10 +752,10 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
     drawCircle(endGate.x, endGate.y, 0.024F + pulse * 0.004F, {1.0F, 0.82F, 0.28F, 0.32F}, 24);
 
     const float planetRadius = 0.13F + std::min(4.0F, static_cast<float>(snapshot.destinationTier)) * 0.012F;
-    if (snapshot.destinationTier == 1 && textureReady(MoonAsset)) {
-        drawSprite(destX, destY, planetRadius * 2.40F, planetRadius * 2.40F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
-    } else if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
-        drawSprite(destX, destY, planetRadius * 2.55F, planetRadius * 2.55F, {1.0F, 1.0F, 1.0F, 1.0F}, MarsAsset);
+    const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
+    if (destinationAsset >= 0 && textureReady(destinationAsset)) {
+        const float scale = bodySpriteScale(destinationAsset);
+        drawSprite(destX, destY, planetRadius * scale, planetRadius * scale, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
     } else {
         const Color body = snapshot.destinationTier >= 3
             ? Color{0.72F, 0.56F, 0.34F, 0.90F}
@@ -853,10 +890,10 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
         drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.98F, 0.96F, 0.82F, 0.74F}, 128, startAngle, startAngle + progress * 2.0F * kPi);
     }
 
-    if (snapshot.destinationTier == 1 && textureReady(MoonAsset)) {
-        drawSprite(0.0F, 0.0F, planetRadius * 2.44F, planetRadius * 2.44F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
-    } else if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
-        drawSprite(0.0F, 0.0F, planetRadius * 2.55F, planetRadius * 2.55F, {1.0F, 1.0F, 1.0F, 1.0F}, MarsAsset);
+    const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
+    if (destinationAsset >= 0 && textureReady(destinationAsset)) {
+        const float scale = bodySpriteScale(destinationAsset);
+        drawSprite(0.0F, 0.0F, planetRadius * scale, planetRadius * scale, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
     } else {
         const Color body = snapshot.destinationTier >= 3
             ? Color{0.70F, 0.56F, 0.36F, 0.94F}
@@ -1015,17 +1052,33 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drillDirection = normalize({target.x - drone.x, target.y - drone.y});
     }
     const Vec2 drillOrigin {
-        drone.x + drillDirection.x * droneSize * 0.40F,
-        drone.y + drillDirection.y * droneSize * 0.40F
+        drone.x + drillDirection.x * droneSize * 0.18F,
+        drone.y + drillDirection.y * droneSize * 0.18F
     };
     Vec2 particleAnchor = target;
+
+    if (textureReady(MiningDroneAsset)) {
+        drawSpriteRotated(
+            drone.x,
+            drone.y,
+            droneSize,
+            droneSize,
+            -drillDirection.x,
+            -drillDirection.y,
+            {1.0F, 1.0F, 1.0F, 1.0F},
+            MiningDroneAsset);
+    } else {
+        drawCircle(drone.x, drone.y, cellW * 1.15F, {0.10F, 0.14F, 0.18F, 1.0F}, 24);
+        drawCircle(drone.x, drone.y, cellW * 0.72F, {0.28F, 0.82F, 0.98F, 1.0F}, 20);
+        drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F, 0.88F, 0.92F, 1.0F});
+    }
 
     if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable) {
         const float dx = target.x - drillOrigin.x;
         const float dy = target.y - drillOrigin.y;
         const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
-        const float drillH = std::clamp(contactDistance + cellSize * 0.95F, cellSize * 3.10F, cellSize * 4.85F);
-        const float drillW = drillH * 0.92F;
+        const float drillH = std::clamp(contactDistance + cellSize * 0.55F, cellSize * 2.30F, cellSize * 3.75F);
+        const float drillW = drillH * 0.88F;
         const Vec2 bitCenter {
             drillOrigin.x + drillDirection.x * drillH * 0.5F,
             drillOrigin.y + drillDirection.y * drillH * 0.5F
@@ -1046,14 +1099,6 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             DrillBitAsset,
             drillFrame,
             6);
-    }
-
-    if (textureReady(MiningDroneAsset)) {
-        drawSprite(drone.x, drone.y, droneSize, droneSize, {1.0F, 1.0F, 1.0F, 1.0F}, MiningDroneAsset);
-    } else {
-        drawCircle(drone.x, drone.y, cellW * 1.15F, {0.10F, 0.14F, 0.18F, 1.0F}, 24);
-        drawCircle(drone.x, drone.y, cellW * 0.72F, {0.28F, 0.82F, 0.98F, 1.0F}, 20);
-        drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F, 0.88F, 0.92F, 1.0F});
     }
 
     if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0) {
@@ -1337,6 +1382,12 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F);
 
+    auto drawBodySprite = [&](int assetIndex, Vec2 center, float size, float alpha) {
+        if (textureReady(assetIndex)) {
+            drawSprite(center.x, center.y, size, size, {1.0F, 1.0F, 1.0F, alpha}, assetIndex);
+        }
+    };
+
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;
         const float earthY = -1.10F;
@@ -1398,6 +1449,8 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             const float earthX = -0.42F;
             const float earthY = -0.91F;
             const float earthR = 0.105F;
+            const Vec2 mercury {-0.48F, -0.56F};
+            const Vec2 venus {-0.34F, -0.60F};
             const Vec2 moon {-0.22F, -0.68F};
             const Vec2 mars = routePoint(snapshot, 0.34F);
             if (textureReady(EarthAsset)) {
@@ -1408,6 +1461,8 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawCircle(earthX - 0.03F, earthY + 0.03F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.50F}, 12);
             }
             drawEllipseLine(earthX, earthY, 0.44F, 0.25F, {0.40F, 0.62F, 0.78F, 0.16F}, 76, 0.08F * kPi, 0.84F * kPi);
+            drawBodySprite(MercuryAsset, mercury, 0.047F, 0.46F);
+            drawBodySprite(VenusAsset, venus, 0.064F, 0.48F);
             if (textureReady(MoonAsset)) {
                 drawSprite(moon.x, moon.y, 0.060F, 0.060F, {1.0F, 1.0F, 1.0F, 0.54F}, MoonAsset);
             } else {
@@ -1430,11 +1485,16 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             if (snapshot.screen == Screen::ArrivalFanfare) {
                 drawCircle(endpoint.x, endpoint.y, radius * (1.72F + arrivalBeat * 0.28F), {1.0F, 0.78F, 0.24F, 0.12F}, 72);
             }
-            drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.78F, 0.58F, 0.30F, 0.64F}, 64);
-            drawCircle(endpoint.x + radius * 0.25F, endpoint.y + radius * 0.15F, radius * 0.62F * bodyPulse, {0.92F, 0.75F, 0.42F, 0.54F}, 48);
-            drawEllipseLine(endpoint.x, endpoint.y, radius * 2.35F * bodyPulse, radius * 0.55F * bodyPulse, {0.52F, 0.78F, 0.92F, 0.32F}, 84, -0.08F * kPi, 1.08F * kPi);
-            drawCircle(endpoint.x - radius * 1.72F, endpoint.y + radius * 0.42F, radius * 0.18F, {0.68F, 0.72F, 0.78F, 0.42F}, 18);
-            drawCircle(endpoint.x + radius * 1.78F, endpoint.y - radius * 0.36F, radius * 0.14F, {0.76F, 0.64F, 0.46F, 0.38F}, 18);
+            if (textureReady(JupiterAsset)) {
+                drawCircle(endpoint.x, endpoint.y, bodyRadius * 1.55F, {1.0F, 0.72F, 0.28F, 0.10F}, 72);
+                drawSprite(endpoint.x, endpoint.y, bodyRadius * 2.58F, bodyRadius * 2.58F, {1.0F, 1.0F, 1.0F, 0.92F}, JupiterAsset);
+            } else {
+                drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.78F, 0.58F, 0.30F, 0.64F}, 64);
+                drawCircle(endpoint.x + radius * 0.25F, endpoint.y + radius * 0.15F, radius * 0.62F * bodyPulse, {0.92F, 0.75F, 0.42F, 0.54F}, 48);
+            }
+            drawBodySprite(SaturnAsset, {endpoint.x - radius * 2.35F, endpoint.y + radius * 1.18F}, radius * 2.45F, 0.62F);
+            drawBodySprite(UranusAsset, {endpoint.x + radius * 1.94F, endpoint.y + radius * 0.90F}, radius * 1.10F, 0.58F);
+            drawBodySprite(NeptuneAsset, {endpoint.x + radius * 2.40F, endpoint.y - radius * 0.70F}, radius * 1.00F, 0.52F);
         } else if (snapshot.destinationTier == 4) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)

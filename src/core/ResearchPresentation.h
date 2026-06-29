@@ -5,6 +5,7 @@
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/GameUi.h"
+#include "core/MiningSystem.h"
 #include "core/PanelPresentation.h"
 #include "core/ResearchSystem.h"
 #include "core/Tuning.h"
@@ -459,9 +460,47 @@ inline PanelButtonPresentation surfaceActionButton(std::string_view label, std::
         : disabledPanelButton(text::panel::messages::needSupply(cost));
 }
 
+inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return disabledPanelButton(text::buttons::unavailable);
+    }
+    if (state.run.surfaceExpedition.sharedFuel <= 0) {
+        return disabledPanelButton(text::buttons::unavailable);
+    }
+    return panelActionButton(text::buttons::mineDeposit, ui::actions::mineSurface);
+}
+
 inline std::string surfaceActionAvailability(int supply, int cost)
 {
     return supply >= cost ? std::string(text::panel::ready) : text::panel::messages::needSupply(cost);
+}
+
+inline std::string miningSurfaceActionAvailability(const GameState& state)
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return std::string(text::fuel::offline);
+    }
+    if (state.run.surfaceExpedition.sharedFuel <= 0) {
+        return std::string(text::fuel::offline);
+    }
+    return text::fuel::availability(arkDiscovered(state));
+}
+
+inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return disabledPanelButton(text::buttons::unavailable);
+    }
+    return surfaceActionButton(text::buttons::pushDeeper, ui::actions::pushSurface, state.run.surfaceExpedition.supply, tuning::research::pushSupplyCost, "danger");
+}
+
+inline std::string pushSurfaceActionAvailability(const GameState& state)
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return std::string(text::fuel::offline);
+    }
+    return surfaceActionAvailability(state.run.surfaceExpedition.supply, tuning::research::pushSupplyCost);
 }
 
 inline std::string surfaceHazardRisk(double hazard, double scale, double relief)
@@ -585,7 +624,14 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExp
 {
     SurfaceExpeditionPresentation presentation;
     const bool payloadLoaded = hasSurfacePayload(expedition);
-    if (expedition.supply <= 0) {
+    const bool miningWindowOpen = expedition.sharedFuel > 0 && !expedition.miningRunUsed;
+    if (!payloadLoaded && miningWindowOpen) {
+        presentation.postureTitle = "Recommended: mine deposit";
+        presentation.postureDetail = "The site is opened. Mining uses fuel instead of action kits, and only runs once this loop.";
+        presentation.postureClass = "neutral";
+        return presentation;
+    }
+    if (expedition.supply <= 0 && !miningWindowOpen) {
         presentation.postureTitle = std::string(text::panel::messages::surfacePostureExtract);
         presentation.postureDetail = std::string(text::panel::messages::surfacePostureExtractDetail);
         presentation.postureClass = "danger";
@@ -662,7 +708,8 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     const MetaProgress& meta,
     const SurfaceCrewEffects& crew,
     const SurfaceUpgradeEffects& upgrades,
-    double extractionRisk)
+    double extractionRisk,
+    bool arkKnown)
 {
     const SurfaceToolEffects tools = surfaceToolEffects(meta);
     std::vector<DetailPresentationRow> rows {
@@ -673,11 +720,12 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
             : std::string("Research Drone Bay to assign persistent mining helpers.")),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
+        detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and drone operations"),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
         detailPresentationRow(text::panel::details::surveyRisk, std::string("Dust can burn extra action kits; field probes improve yield and reduce survey trouble.")),
-        detailPresentationRow(text::panel::details::miningRisk, std::string("Drill chatter can damage cargo; drill rigs improve yield and reduce mining trouble.")),
+        detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only drone run for this surface loop; pushing deeper closes once the run is used.")),
         detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper raises hazard, artifact odds, and extraction pressure.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),
         detailPresentationRow(
@@ -704,7 +752,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
-    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk);
+    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkDiscovered(state));
     presentation.logEntries = expedition.logEntries;
     presentation.selectedUpgradeNames = upgrades.names;
     if (expedition.surfaceUpgradeOfferAvailable) {
@@ -719,6 +767,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::fieldKit, surfaceFieldKitSummary(state.meta)),
         panelMetric(text::labels::hazard, display::percent(expedition.hazard)),
         panelMetric(text::labels::supply, std::to_string(expedition.supply)),
+        panelMetric(text::fuel::reserveLabel(arkDiscovered(state)), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
         panelMetric(text::labels::depth, std::to_string(expedition.depth)),
         panelMetric(text::labels::extractionRisk, display::percent(extractionRisk)),
@@ -733,44 +782,52 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     presentation.droneOpsAction = droneBayUnlocked(state)
         ? panelActionButton("Drone Ops", ui::actions::droneOps, "warn")
         : disabledPanelButton("Research Drone Bay");
-    presentation.actions = {
-        surfaceActionPreview(
-            text::buttons::surveySite,
-            std::string(text::panel::messages::surfaceSurveyDetail),
-            expedition.supply,
-            tuning::research::surveySupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
-            std::string(text::labels::hazard),
-            surveyPayoffChips(state, tools, crew, site),
-            surfaceActionButton(text::buttons::surveySite, ui::actions::surveySurface, expedition.supply, tuning::research::surveySupplyCost)),
-        surfaceActionPreview(
-            text::buttons::mineDeposit,
-            std::string(text::panel::messages::surfaceMineDetail),
-            expedition.supply,
-            tuning::research::mineSupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::mineHazardChanceScale, (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
-            std::string(text::labels::hazard),
-            minePayoffChips(state, tools, crew, site, upgrades),
-            surfaceActionButton(text::buttons::mineDeposit, ui::actions::mineSurface, expedition.supply, tuning::research::mineSupplyCost)),
-        surfaceActionPreview(
-            text::buttons::pushDeeper,
-            std::string(text::panel::messages::surfacePushDetail),
-            expedition.supply,
-            tuning::research::pushSupplyCost,
-            surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, (tools.extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
-            std::string(text::labels::hazard),
-            pushPayoffChips(state, crew, site),
-            surfaceActionButton(text::buttons::pushDeeper, ui::actions::pushSurface, expedition.supply, tuning::research::pushSupplyCost, "danger")),
-        surfaceActionPreview(
-            text::buttons::returnHome,
-            std::string(text::panel::messages::surfaceExtractDetail),
-            expedition.supply,
-            0,
-            display::percent(extractionRisk),
-            std::string(text::labels::extractionRisk),
-            extractPayoffChips(expedition),
-            panelActionButton(text::buttons::returnHome, ui::actions::extractSurface, "ok"))
-    };
+    presentation.actions.push_back(surfaceActionPreview(
+        text::buttons::surveySite,
+        std::string(text::panel::messages::surfaceSurveyDetail),
+        expedition.supply,
+        tuning::research::surveySupplyCost,
+        surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
+        std::string(text::labels::hazard),
+        surveyPayoffChips(state, tools, crew, site),
+        surfaceActionButton(text::buttons::surveySite, ui::actions::surveySurface, expedition.supply, tuning::research::surveySupplyCost)));
+
+    SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(
+        text::buttons::mineDeposit,
+        std::string(text::panel::messages::surfaceMineDetail) + text::fuel::deployDetail(arkDiscovered(state)),
+        expedition.supply,
+        0,
+        std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s",
+        std::string(text::labels::oxygen),
+        {},
+        miningSurfaceActionButton(state));
+    miningPreview.cost = "1 " + std::string(text::fuel::reserveLabel(arkDiscovered(state)));
+    miningPreview.availability = miningSurfaceActionAvailability(state);
+    miningPreview.payoffChips.push_back(panelMetric(text::labels::oxygen, std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s"));
+    miningPreview.payoffChips.push_back(panelMetric(text::fuel::reserveLabel(arkDiscovered(state)), "-1 deploy"));
+    presentation.actions.push_back(std::move(miningPreview));
+
+    SurfaceActionPreviewPresentation pushPreview = surfaceActionPreview(
+        text::buttons::pushDeeper,
+        std::string(text::panel::messages::surfacePushDetail),
+        expedition.supply,
+        tuning::research::pushSupplyCost,
+        surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, (tools.extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
+        std::string(text::labels::hazard),
+        pushPayoffChips(state, crew, site),
+        pushSurfaceActionButton(state));
+    pushPreview.availability = pushSurfaceActionAvailability(state);
+    presentation.actions.push_back(std::move(pushPreview));
+
+    presentation.actions.push_back(surfaceActionPreview(
+        text::buttons::returnHome,
+        std::string(text::panel::messages::surfaceExtractDetail),
+        expedition.supply,
+        0,
+        display::percent(extractionRisk),
+        std::string(text::labels::extractionRisk),
+        extractPayoffChips(expedition),
+        panelActionButton(text::buttons::returnHome, ui::actions::extractSurface, "ok")));
     return presentation;
 }
 

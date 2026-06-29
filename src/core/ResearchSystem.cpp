@@ -323,6 +323,7 @@ std::string surfaceDeltaSummary(const SurfaceActionOutcome& outcome)
 {
     std::vector<std::string> parts;
     addDelta(parts, outcome.supplyDelta, text::labels::supply);
+    addDelta(parts, outcome.fuelDelta, text::labels::sharedFuel);
     addDelta(parts, outcome.materialDelta.common, text::labels::commonMaterials);
     addDelta(parts, outcome.materialDelta.rare, text::labels::rareMaterials);
     addDelta(parts, outcome.materialDelta.exotic, text::labels::exoticMaterials);
@@ -1689,7 +1690,7 @@ std::string researchOutcomeSummary(const ResearchOutcome& outcome)
 std::string surfaceActionSummary(const SurfaceActionOutcome& outcome)
 {
     if (!outcome.applied) {
-        return std::string(text::status::surfaceSupplyBlocked);
+        return outcome.message.empty() ? std::string(text::status::surfaceSupplyBlocked) : outcome.message;
     }
     std::string status = outcome.message;
     if (outcome.hazardTriggered && !outcome.hazardMessage.empty()) {
@@ -1765,11 +1766,18 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
     const double reconPenalty = landingReconHazardPenalty(state, catalog, *destination);
     expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
+    expedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    expedition.sharedFuel = expedition.sharedFuelCapacity;
+    if (arkDiscovered(state)) {
+        expedition.sharedFuel = std::min(expedition.sharedFuelCapacity, state.meta.ark.fuelReserve);
+        state.meta.ark.fuelReserve = std::max(0, state.meta.ark.fuelReserve - expedition.sharedFuel);
+    }
     expedition.hazard = std::max(baseHazard + reconPenalty, baseHazard + site.hazardDelta + reconPenalty - crew.hazardRelief);
     expedition.enemyEncountersEnabled = destinationAllowsEnemyEncounters(*destination);
     addDestinationHistoryValue(state.meta.destinationLandings, catalog, destination->id);
     state.run.arrivalOps = {};
     appendSurfaceLog(expedition, std::string(surfaceSiteProfileName(expedition.siteProfile)) + ": " + std::string(surfaceSiteProfileDetail(expedition.siteProfile)));
+    appendSurfaceLog(expedition, "Shared fuel loaded: " + std::to_string(expedition.sharedFuel) + "/" + std::to_string(expedition.sharedFuelCapacity) + ".");
     state.run.surfaceExpedition = expedition;
 }
 
@@ -1929,6 +1937,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
     const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
     addMaterials(expedition.temporaryMaterials, gain);
+    expedition.miningSitePrepared = true;
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
     outcome.cargoDelta = materialCargo(gain);
@@ -1987,12 +1996,18 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
 SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (expedition.miningRunUsed) {
+        outcome.message = "Mining run is complete. Extract before pushing deeper.";
+        return outcome;
+    }
     const double extractionRiskBefore = surfaceExtractionRisk(state);
-    SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
+    outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
         return outcome;
     }
 
+    expedition.miningSitePrepared = true;
     expedition.depth += 1;
     expedition.hazard += tuning::research::hazardPerDepth;
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
