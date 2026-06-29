@@ -891,7 +891,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             const std::string resultBody = orbitResultBody(grade);
             const std::string tagOne = grade == OrbitGrade::Miss ? "No orbit data" : "Orbit data secured";
             const std::string tagTwo = grade == OrbitGrade::Miss ? "No science bonus" : "+" + std::to_string(blueprintGain) + " science";
-            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits);
+            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits) + " credits";
             out << "<div data-orbit-stamp=\"1\" data-orbit-title=\"" << htmlEscape(resultTitle)
                 << "\" data-orbit-body=\"" << htmlEscape(resultBody)
                 << "\" data-orbit-tag-one=\"" << htmlEscape(tagOne)

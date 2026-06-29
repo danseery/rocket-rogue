@@ -12,8 +12,8 @@ Drone choices should be readable and chunky:
 - Resource Drone: carries reserve oxygen/fuel and lowers extraction strain.
 - Survey Drone: widens scanner pulses and helps identify silhouettes through fog of war.
 - Stabilizer Drone: reduces hard-rock bounce, drill chatter, and drill integrity loss.
-- Attack Drone: post-solar passive fire against hostile creatures.
-- Defense Drone: post-solar shielding/armor for hostile and environmental damage.
+- Attack Drone: post-solar passive fire, area control, and enemy slowdown.
+- Defense Drone: post-solar shielding, reactive armor, and hostile/environmental damage relief.
 
 ## Slot Progression
 
@@ -33,12 +33,12 @@ The current implementation keeps the first pass intentionally modest:
 
 - Drone Bay Program research unlocks Drone Ops.
 - Unlocking Drone Bay seeds the four environmental drones: Mining, Resource, Survey, Stabilizer.
-- Attack and Defense drones remain locked behind the post-solar Perimeter Drone unlock.
+- Attack and Defense drones remain locked behind the post-solar Perimeter Drone Network unlock.
 - Mining HUD summarizes active drone support.
-- Equipped drones affect mining stats and surface extraction/contact risk.
+- Equipped drones affect mining stats, surface extraction/contact risk, oxygen, scanner reach, passive ore trickle, drill stability, and hostile-system passive defense.
 
 No new art is required yet. Card and icon placeholders are acceptable until dedicated drone sprites exist.
 
 ## Future Hooks
 
-Future passes can add drone rarity, drone upgrades, drone repair, mini-drone visuals in the mining scene, and enemy-facing behavior once planets beyond the solar system introduce hostile encounters.
+Future passes can add drone rarity, drone upgrades, drone repair, and mini-drone visuals in the mining scene. Enemy-facing behavior exists as passive attack/defense math now; later work should make that behavior more visible without turning solar-system mining into combat.

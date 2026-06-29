@@ -1521,6 +1521,11 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     const double perfectCreditsBefore = perfect.run.credits;
     perfect.run.orbit.completed = true;
     perfect.run.orbit.result = OrbitGrade::Perfect;
+    Random perfectRng(723);
+    const PreparedLaunch perfectLaunch = prepareLaunch(perfect, catalog, perfectRng);
+    const std::string perfectOrbitHtml = buildGamePanelHtml({perfect, catalog, perfectLaunch, perfectLaunch});
+    require(perfectOrbitHtml.find("data-orbit-tag-three=\"+") != std::string::npos, "perfect orbit stamp should expose the credit reward chip");
+    require(perfectOrbitHtml.find(" credits\" hidden") != std::string::npos, "perfect orbit credit reward chip should label mission credits");
     completeOrbitRun(perfect, catalog);
     require(perfect.meta.blueprintProgress == perfectBlueprintsBefore + tuning::orbit::perfectBlueprintGain, "perfect orbit should grant stronger science");
     require(perfect.run.credits > perfectCreditsBefore, "perfect orbit should grant credits");

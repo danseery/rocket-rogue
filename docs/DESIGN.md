@@ -32,11 +32,13 @@ The first implemented phase model is:
 
 1. Complete a frontier-transfer arrival at Mars or beyond.
 2. Choose from generated research projects that convert blueprints and recovered materials into unlock variety.
-3. Start a surface expedition with a limited supply clock.
-4. Survey, mine, or push deeper for better returns.
-5. Extract the payload before supply and hazard make recovery too risky.
+3. Start a surface expedition with action kits, shared fuel, a rolled site profile, and a short mission log.
+4. Survey, push deeper, or deploy the mining drone for one fuel-gated mining run.
+5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
 
 Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" Early solar-system expeditions do not have enemies. Enemy encounters should stay disabled until the Nearby Star tier, when the game leaves familiar planetary exploration and starts introducing hostile unknowns.
+
+Shared fuel is intentional friction in the surface loop. The shuttle and mining drone draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. The current mining baseline is 15 seconds of oxygen. Oxygen tank improvements can come from crew class, Drone Bay loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the drone is offline and `Push deeper` is unavailable.
 
 Research rewards should primarily widen the roguelite possibility space: module families, research facilities, special components, artifact threads, and story leads. Material-funded projects can directly unlock new module or facility families. Artifact-tagged projects identify one recovered artifact when possible; the identified record is tracked now, while its specific story payload remains a later content pass. Raw permanent stat inflation should remain secondary.
 
@@ -117,7 +119,9 @@ Flight controls that modify the launch model should flow through `FlightActionSt
 
 Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
 
-Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface supply/cargo, extraction risk, and the solar-system enemy gate. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
+Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface action kits, shared fuel, cargo, extraction risk, surface upgrades, Drone Bay state, and the solar-system enemy gate. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
+
+Mining mini-game rules should flow through `src/core/MiningSystem.*`: terrain generation, oxygen/fuel/drill timers, scanner pulses, ore/artifact recovery, hostile tunnel networks, passive drone effects, failure/stow/abort outcomes, and conversion back into `SurfaceActionOutcome`. Browser input should call `RocketGameApp` mining methods; rendering should consume snapshots rather than deciding mining outcomes.
 
 Shared game constants and player-facing copy should have one owner:
 
@@ -136,6 +140,7 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
 - `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, slot classes, glyphs, threat copy, primary impact, stat chips, prices, affordability, install actions, reroll action, and skip action. Panels should render this returned data instead of rebuilding offer rules inline.
 - `src/core/ResearchPresentation.h` owns research and surface-expedition presentation: blueprint/material metrics, research project cards, surface supply/cargo/risk metrics, and field action availability. Panels should render this returned data instead of rebuilding research/resource rules inline.
+- `src/core/MiningPresentation.h` owns mining HUD and detail presentation: oxygen, shared fuel, drill integrity, scanner/fuel cadence, drone support, hostile tunnel summaries, action buttons, and controls copy.
 - `src/core/CrewPresentation.h` owns Crew Details rows and facility-effect value wording. Panels should render detail rows and headers from this helper instead of recomputing training, stress, facility, and trait modifier strings.
 - `src/core/ShipPresentation.h` owns Ship Details rows, equipped/stored module summaries, and inventory fallback wording. Panels should render those rows instead of recomputing ship stats and module inventory display.
 - `src/core/ProgramPresentation.h` owns Frontier and Legacy detail rows: readiness, mission difficulty, next transfer target, blueprint progress, losses, and furthest tier. Panels should render these rows instead of rebuilding program-progress detail modals inline.

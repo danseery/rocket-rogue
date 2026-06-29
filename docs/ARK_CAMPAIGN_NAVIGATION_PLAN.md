@@ -9,6 +9,7 @@ USG Notes remain the primary design direction. This implementation adds the firs
 - The first Ark jump succeeds and teaches that the Ark is a larger version of the press-your-luck shuttle loop.
 - The second Ark jump is scripted to hit a gravity well, damaging and stranding the Ark in a hostile system.
 - After the disaster, the Navigation screen becomes the mission-selection layer.
+- Surface `Shared fuel` becomes `Ark fuel`, preserving the shuttle/mining-drone tradeoff while changing the fiction from Earth-return reserves to Ark sortie reserves.
 - Current hostile-system destinations reuse the existing deep-space destinations:
   - Nearby Star: first hostile-system sortie target.
   - Nearby Galaxy: high-risk placeholder for later deep route content.
@@ -24,7 +25,7 @@ Post-disaster loop:
 3. Prep shuttle launch from the Ark.
 4. Fly the press-your-luck transfer.
 5. Choose flyby, orbit, or landing.
-6. Mine fuel/materials and recover alien artifacts.
+6. Mine fuel/materials and recover alien artifacts while deciding how much Ark fuel to spend on the drone versus keeping a route home.
 7. Extract payload and return to the Ark.
 8. Spend resources on Ark repair, fuel systems, drone tech, shuttle upgrades, and artifact research.
 

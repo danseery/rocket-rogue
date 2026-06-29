@@ -1,19 +1,19 @@
-# Mining Mini-Game Plan
+# Mining Mini-Game
 
 See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current mining direction should follow `docs/reference/USG_NOTES.md` first: chunky/mobile, Straylight-inspired, fog-of-war, destructible terrain, excavation/logistics/endurance roles, and passive defense only after the solar system.
 
-See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay layer that modifies mining, scanner, logistics, and later passive-defense behavior.
+See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay layer that modifies mining, scanner, logistics, oxygen, extraction, and later passive-defense behavior.
 
-This plan layers a playable mining phase onto the current post-arrival flow without replacing the existing launch, arrival, research, or surface-expedition architecture.
+This note describes the current playable mining phase layered onto the post-arrival Surface Ops flow. Mining does not replace launch, arrival, research, or surface-expedition architecture; it resolves back into the same `SurfaceActionOutcome` path so cargo, materials, hazards, artifacts, field upgrades, and log entries stay consistent.
 
 ## Design Goal
 
-Mining should be the landed version of the rocket launch loop:
+Mining is the landed version of the rocket launch loop:
 
-- The player chooses how deep to dig, how much cargo to load, and when to extract.
-- Better crew, tools, and research make risk more readable and controllable, but never remove it.
-- Early solar-system mining is environmental: dust, drill chatter, pressure pockets, unstable terrain, low supply, and extraction risk.
-- Enemies stay out of the Moon and Mars loop. Hostile encounters begin after the agency leaves the solar system.
+- The player chooses whether to spend shared fuel, how much cargo to load, and when to stow or abort.
+- Better crew, tools, drones, and surface upgrades make risk more readable and controllable, but never remove it.
+- Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and extraction risk.
+- Hostile terrain and enemies stay out of Moon and Mars mining. Enemy pressure begins after the solar-system tutorial when the agency is stranded in a hostile system.
 
 ## Entry Point
 
@@ -21,89 +21,115 @@ Current flow:
 
 1. Reach a destination.
 2. Choose Flyby, Orbit, or Landing.
-3. Landing opens Surface Expedition.
-4. Press Mine deposit.
+3. Landing opens Research, then Surface Ops.
+4. Surface Ops shows Survey, Mine deposit, Push deeper, Return, and Drone Ops when unlocked.
+5. Pressing `Mine deposit` spends 1 shared fuel and opens the direct-control Mining screen.
 
-Next playable step:
+Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` and disabled buttons should say `Unavailable`. `Push deeper` is also disabled after mining because digging commits the field team to the current extraction window. Survey can technically remain available when action kits remain, but UX copy should guide the player toward extracting once payload is loaded or the drone is offline.
 
-- Pressing Mine deposit can open a compact Mining Mini-Game instead of instantly resolving the mine action.
-- Survey, Push deeper, and Extract can remain menu actions during the first pass.
-- The mini-game resolves back into the existing `SurfaceActionOutcome`: materials gained, cargo gained/lost, hazard changes, supply spent, artifacts found, and log entries.
+## Shared Fuel And Oxygen
 
-This keeps save data, research unlocks, surface actions, and refit rewards intact.
+Mining exists to make surface greed compete with route-home safety:
 
-## Core Loop
+- Surface expeditions start with shared fuel capacity from `tuning::research::sharedFuelCapacity`.
+- Mining spends 1 fuel on deployment.
+- While oxygen remains, mining spends another fuel every `tuning::mining::fuelSecondsPerUnit`, currently 15 seconds.
+- The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 15 seconds.
+- Oxygen can improve through crew class, Resource Drone support, and surface upgrades such as Emergency Winch.
+- If fuel runs dry mid-dig, the mining drone is recalled so the shuttle still has a route home.
 
-The first version should be quick, readable, and button-driven:
+Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, the same mechanic is framed as `Ark fuel`.
 
-1. Scan seam: reveal 2-3 ore pockets with danger/value hints.
-2. Drill seam: hold or tap to extract material while TEMP/VIB/PRESS-style gauges climb.
-3. Stabilize: choose one mitigation when a gauge spikes.
-4. Stow cargo: bank part of the payload, increasing extraction risk.
-5. Continue or extract: push for rare material/artifact odds or leave before the field team loses the payload.
+## Current Core Loop
 
-Target duration: 20-45 seconds per mining attempt.
+The first playable version is direct and short:
+
+1. Move the drone through chunked terrain.
+2. Aim and drill into regolith, hard rock, ore, exotic veins, or artifact caches.
+3. Pulse the scanner to reveal fog-of-war and hidden seams.
+4. Manage oxygen, fuel cadence, drill heat, drill integrity, cargo, and extraction risk.
+5. Stow payload to bank the run, or abort/lose the run when oxygen, fuel, or drill integrity fails.
+
+Controls:
+
+- WASD/arrows: move.
+- Mouse: aim.
+- Space or mouse hold: drill.
+- `E`: pulse scanner.
+- `R`: stow payload.
+- Esc: abort.
 
 ## Mining Resources
 
-- Supply: shared expedition timer. Mining spends supply up front and can burn more through hazards.
-- Drill integrity: mini-game durability. Low integrity raises cargo loss and equipment failure.
-- Oxygen/time: survival pressure during deeper digs.
+- Shared fuel: the shuttle/drone reserve. This is the central tradeoff and must stay visible in Surface Ops and Mining.
+- Oxygen: short-run timer, currently 15 seconds before upgrades.
+- Drill integrity: durability. Low integrity raises failure pressure; zero integrity aborts the run.
+- Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
 - Cargo load: reward now, extraction risk later.
-- Seam instability: mining-specific hazard that feeds back into surface hazard.
+- Hazard delta: mining-specific danger that feeds back into surface hazard and extraction risk.
+- Scanner cooldown: limits how often the player can reveal hidden terrain.
 
-## Player Actions
+## Terrain And Rewards
 
-- Drill: extracts common material and slowly raises VIB/heat.
-- Feather drill: slower extraction, lower VIB.
-- Brace rig: lowers VIB, slightly raises drill wear.
-- Vent pocket: lowers PRESS, can knock NAV/extraction alignment off course.
-- Pulse scanner: reveals rare pockets or hidden instability, costs time/supply.
-- Stow sample: banks cargo but raises extraction risk.
-- Abort mine: leaves the mini-game with current cargo and no extra push.
+Mining terrain is generated from the destination, surface site profile, and depth:
 
-## Failure Modes
+- Regolith and hard rock define tunneling speed and bounce.
+- Common ore, rare ore, exotic veins, and artifact caches produce payload.
+- Hazard pockets add integrity damage and extraction risk.
+- Bedrock blocks excavation.
+- Deeper or post-solar terrain can add rooms, vaults, hives, miniboss lairs, and boss chambers.
 
-- Drill chatter: cargo loss, hazard increase.
-- Pressure pocket: emergency vent choice; failed vent can cause rapid decompression.
-- Cave-in: supply loss and forced extraction check.
-- Tool jam: drill integrity loss or action lockout.
-- Toxic/radiation seam: post-Mars environmental modifier, mitigated by research gear.
-- Hostile contact: only after Nearby Star and beyond.
+The mining run converts recovered payload back into surface expedition state: temporary materials, cargo, artifacts, hazard delta, extraction-risk pressure, and log entries.
 
 ## Crew Classes
 
-Training still levels the active crewmember. Class traits give the player a reason to care who is cleared for the surface sortie.
+Training still levels the active crewmember. Animal class traits affect both menu-side surface odds and direct mining stats.
 
-| Class | Focus | Mini-game role |
+| Class | Focus | Current mining role |
 | --- | --- | --- |
-| Capybara Tank | Survival | More supply margin, lower cave-in and extraction injury risk. |
-| Beaver Engineer | Resilience | Better drill integrity, fewer tool jams, stronger repair actions. |
-| Fox Ace | Navigation | Safer extraction paths and better abort windows. |
-| Prairie Dog Scout | Digging | Better seam scans, faster discovery of ore pockets and artifacts. |
-| Squirrel Hoarder | Resource Gathering | Better rare-material odds and cargo handling. |
-| Chipmunk Speedster | Exploration | Faster actions, better anomaly/shortcut discovery, lower field hazard exposure. |
+| Capybara Tank | Survival | Extra oxygen and safer endurance windows. |
+| Beaver Engineer | Resilience | Better drill integrity and fewer hard failures. |
+| Fox Ace | Navigation | Cleaner extraction risk and abort safety. |
+| Prairie Dog Scout | Digging | Better survey/digging and stronger drilling role. |
+| Squirrel Hoarder | Resource Gathering | Better rare-material odds and cargo payoff. |
+| Chipmunk Speedster | Exploration | Faster drone movement and traversal. |
 
-## Research Hooks
+## Research, Drones, And Field Upgrades
 
-Research should improve the mini-game through specific tools:
+Research improves mining through specific tools:
 
-- Field Probe Network: better seam previews and fewer false positives.
-- Regolith Drill Rig: faster drilling and lower chatter chance.
+- Field Probe Network: more action-kit margin and better survey support.
+- Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
-- Applied Materials Lab: turns common samples into practical fabrication unlocks.
-- Mission Analysis Lab: converts field notes into extra blueprint progress.
-- Perimeter Drone Network: passive defense for post-solar-system mining.
+- Mission Analysis Lab: extra blueprint progress from recovered field notes.
+- Drone Bay Program: persistent helper drones and Drone Ops loadout.
+- Perimeter Drone Network: post-solar attack/defense drones and hostile-contact mitigation.
 
-## First Playable Slice
+Surface field upgrades are temporary ship-loop upgrades selected during surface play. Current examples include:
 
-Keep the first implementation small:
+- Thermal Drill Jackets and Coolant Mist for heat control.
+- Wideband Pulse and Deep Echo Mapper for scanner reach.
+- Shock Mounts and Recoil Braces for hard-rock bounce and durability.
+- Ore Hopper and Ore-Scent Array for ore yield.
+- Cargo Skids and Emergency Winch for extraction/oxygen safety.
 
-- One mining screen opened from Mine deposit.
-- Three ore pockets: safe/common, unstable/common+rare chance, deep/rare+artifact chance.
-- Three mitigation buttons: Feather drill, Brace rig, Vent pocket.
-- One extraction decision.
-- No enemies.
-- No new art requirement; use the existing card/UI language and telemetry-style gauges.
+## Hostile-System Layer
 
-The goal is to prove whether landing turns into an interesting second press-your-luck moment before building terrain, movement, or combat.
+Solar-system mining should remain enemy-free. After the Ark gravity-well disaster and hostile-system transition, mining can include passive-defense combat pressure:
+
+- Ant, flying, beetle, mammal, and elemental enemy types.
+- Elemental affinity effects such as thermal, radiation, toxic, and cryo pressure.
+- Hostile tunnel networks, encounter rooms, hives, miniboss lairs, and boss chambers.
+- Passive base defense plus Attack/Defense Drone effects.
+
+The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Attack and Defense drones are passive support.
+
+## Implementation Boundaries
+
+- `src/core/MiningSystem.*` owns terrain, drill stats, oxygen/fuel cadence, scanner pulses, mining enemies, stow/abort/failure outcomes, and payload conversion.
+- `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, metrics, and detail rows.
+- `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
+- `src/game/RocketGameApp.*` owns screen transitions and browser input callbacks.
+- `src/render/WebGLRenderer.*` draws mining snapshots but must not decide gameplay outcomes.
+
+When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

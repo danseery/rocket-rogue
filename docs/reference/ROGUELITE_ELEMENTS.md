@@ -1,8 +1,8 @@
 # Supporting Source: Roguelite Elements
 
-Source PDF: docs/reference/source-pdfs/Roguelite Elements.pdf
+Source PDF: removed from the repository because the original export contained account-specific URLs.
 
-This is an agent-readable text extract generated from the source PDF. Preserve the PDF as source of truth when the extract loses layout nuance.
+This is the maintained agent-readable reference extract.
 
 ## Page 1
 
@@ -541,6 +541,6 @@ Feedback
 ## Page 9
 
 Repo/Game 
-GitHub: https://github.com/danseery/rocket-rogue Playable Web Version: https://wonderful-island-08d5ecb0f.7.azurestaticapps.net/rocket_rogue.html 
+GitHub: https://github.com/<owner>/rocket-rogue Playable Web Version: https://<app-name>.azurestaticapps.net/rocket_rogue.html
 Feedback 
  Game Speed multiplier for testing

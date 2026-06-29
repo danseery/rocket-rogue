@@ -6,8 +6,8 @@ Rocket Rogue is deployed as a static WebAssembly/WebGL app. Azure should receive
 
 - Service: Azure Static Web Apps
 - Plan: Free
-- Subscription ID: `ced09ae9-74a6-4f40-936f-d2eef2b577b9`
-- Tenant ID: `98983dd6-f1f1-40e3-91f8-2bbf22020202`
+- Subscription ID: `<azure-subscription-id>`
+- Tenant ID: `<azure-tenant-id>`
 - Recommended resource group: `rg-rocket-rogue`
 - Recommended app name: `rocket-rogue`
 - Recommended region: `eastus2`
@@ -19,7 +19,7 @@ Create an Azure Static Web App in the Azure Portal or with Azure CLI. If using t
 
 - Hosting plan: Free
 - Deployment source: GitHub
-- Repository: `danseery/rocket-rogue`
+- Repository: `<owner>/rocket-rogue`
 - Branch: `main`
 - Build presets/framework: Custom
 - App location: `dist/azure-static-web-app`
@@ -69,7 +69,7 @@ From an activated dev shell:
 >
 > Codex desktop note: on Windows, use `npm.cmd` for npm scripts. Do not try `npm run ...` first; PowerShell can block the `npm.ps1` shim.
 >
-> Codex desktop note: for every Git command in this repo, use `git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame ...`. Do not try plain `git ...` first; the sandbox user can trigger Git's dubious-ownership protection.
+> Codex desktop note: for every Git command in this repo, set `$repo = (Get-Location).Path` and use `git -c safe.directory="$repo" ...`. Do not try plain `git ...` first; the sandbox user can trigger Git's dubious-ownership protection.
 
 ```powershell
 cmake --preset web-release
@@ -82,13 +82,14 @@ npm.cmd run prepare:azure
 Known-good Codex commit, push, and deploy trigger flow:
 
 ```powershell
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame status --short --branch
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame diff --check
+$repo = (Get-Location).Path
+git -c safe.directory="$repo" status --short --branch
+git -c safe.directory="$repo" diff --check
 npm.cmd run sanity
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame add --all
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame commit -m "Commit message"
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame push origin main
-gh run list --repo danseery/rocket-rogue --branch main --limit 3
+git -c safe.directory="$repo" add --all
+git -c safe.directory="$repo" commit -m "Commit message"
+git -c safe.directory="$repo" push origin main
+gh run list --repo <owner>/rocket-rogue --branch main --limit 3
 ```
 
 Serve the deploy package locally:

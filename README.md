@@ -8,6 +8,12 @@ Rocket Rogue is a C++20/WebGL2 proof of concept for a fictional-stakes rocket la
 - Web-first Emscripten app shell with WebGL2 rendering and browser localStorage persistence.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
 - Frontier ladder: prove Earth Orbit repeatedly, commit to Moon, then continue outward through Mars, Outer Planets, Nearby Star, and Nearby Galaxy.
+- Arrival operations: flyby, orbit, and landing gates. Perfect orbit rewards show both science and mission credits.
+- Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
+- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, and stow/abort decisions.
+- Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 15 seconds; crew, drones, and field upgrades can extend it.
+- Drone Bay progression with mining, resource, survey, stabilizer, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
+- Ark campaign spine: Outer Planets discovery, scripted Ark jump/disaster beats, Navigation after the hostile-system stranding, and Ark fuel framing for later sorties.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
 
 ## Quick prerequisites
@@ -89,10 +95,11 @@ cmake --build --preset web-release
 Codex agents must also use the known-good Windows command forms below instead of first trying commands that are known to fail in this workspace:
 
 ```powershell
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame status --short --branch
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame add --all
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame commit -m "Commit message"
-git -c safe.directory=C:/Users/danie/OneDrive/Documents/RocketGame push origin main
+$repo = (Get-Location).Path
+git -c safe.directory="$repo" status --short --branch
+git -c safe.directory="$repo" add --all
+git -c safe.directory="$repo" commit -m "Commit message"
+git -c safe.directory="$repo" push origin main
 npm.cmd run sanity
 npm.cmd run prepare:azure
 ```
@@ -157,7 +164,7 @@ cd C:\dev\emsdk
 .\emsdk install latest
 .\emsdk activate latest
 .\emsdk_env.ps1
-cd C:\Users\danie\OneDrive\Documents\RocketGame
+cd <repo-path>
 cmake --preset web-release
 cmake --build --preset web-release
 node tools/serve.mjs build/web-release 8080
@@ -205,6 +212,9 @@ Use the on-screen mission-control buttons:
 - After each mission summary, choose one of three refit cards or skip the refit window.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
 - Push deeper through the frontier ladder only after enough proving data is banked.
+- Successful arrivals can open flyby/orbit/landing operations. Flyby can grant next-launch slingshot boosts; orbit grants science and credit rewards; landing opens post-arrival research and Surface Ops.
+- Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
+- Mining controls: WASD/arrows move, mouse aims, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
 
 ## Deploy to Azure Static Web Apps
 
@@ -224,7 +234,7 @@ The web app is Emscripten-first, but game logic is isolated in `rocket_core`. A 
 Current boundaries:
 
 - `src/core`: deterministic content, progression, save data, flight tuning, launch resolution, and tests.
-- `src/game`: browser game-state orchestration, live launch controls, panel HTML generation, and render snapshots. `RocketGameApp` owns session flow; `GamePanel` owns mission-control HTML.
+- `src/game`: browser game-state orchestration, live launch/mining controls, panel HTML generation, and render snapshots. `RocketGameApp` owns session flow; `GamePanel` owns mission-control HTML.
 - `src/render`: WebGL2 renderer and texture upload for procedural shapes plus sprite assets.
 - `src/platform`: tiny browser bridge for localStorage and panel updates.
 - `web`: HTML/CSS/JS shell that forwards UI actions into exported C++ functions.
