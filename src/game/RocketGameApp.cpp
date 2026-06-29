@@ -1236,8 +1236,10 @@ RenderSnapshot RocketGameApp::snapshot() const
                 enemy.x,
                 enemy.y,
                 static_cast<int>(enemy.type),
+                static_cast<int>(enemy.affinity),
                 enemy.health,
                 enemy.maxHealth,
+                enemy.effectRadius,
                 enemy.active
             });
         }

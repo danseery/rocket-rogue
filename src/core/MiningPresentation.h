@@ -65,7 +65,7 @@ inline std::string hostileTunnelSummary(const MiningTerrain& terrain)
         if (cell.feature != MiningCellFeature::None) {
             structures += 1;
         }
-        if (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest) {
+        if (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest || cell.feature == MiningCellFeature::BossChamber) {
             rooms += 1;
         }
         if (firstEnemy == MiningEnemyType::None && cell.enemy != MiningEnemyType::None) {
@@ -90,6 +90,74 @@ inline int activeMiningEnemyCount(const MiningRunState& mining)
     return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
         return enemy.active;
     }));
+}
+
+inline std::string activeElementalSummary(const MiningRunState& mining)
+{
+    for (const MiningEnemy& enemy : mining.enemies) {
+        if (enemy.active && enemy.type == MiningEnemyType::Elemental && enemy.affinity != MiningElementalAffinity::None) {
+            return std::string(miningElementalAffinityName(enemy.affinity)) + " elemental";
+        }
+    }
+    return "None";
+}
+
+inline std::string activeThreatSummary(const MiningRunState& mining)
+{
+    int ants = 0;
+    int flying = 0;
+    int beetles = 0;
+    int elementals = 0;
+    int mammals = 0;
+    int bosses = 0;
+    for (const MiningEnemy& enemy : mining.enemies) {
+        if (!enemy.active) {
+            continue;
+        }
+        switch (enemy.type) {
+        case MiningEnemyType::Ant:
+            ants += 1;
+            break;
+        case MiningEnemyType::Flying:
+            flying += 1;
+            break;
+        case MiningEnemyType::Beetle:
+            beetles += 1;
+            break;
+        case MiningEnemyType::Elemental:
+            elementals += 1;
+            break;
+        case MiningEnemyType::Mammal:
+            mammals += 1;
+            break;
+        case MiningEnemyType::None:
+            break;
+        }
+        if (enemy.sourceFeature == MiningCellFeature::MinibossLair || enemy.sourceFeature == MiningCellFeature::BossChamber) {
+            bosses += 1;
+        }
+    }
+
+    std::vector<std::string> parts;
+    auto addPart = [&parts](std::string label, int count) {
+        if (count > 0) {
+            parts.push_back(std::move(label) + " x" + std::to_string(count));
+        }
+    };
+    addPart("Ant", ants);
+    addPart("Flying", flying);
+    addPart("Beetle", beetles);
+    addPart("Elemental", elementals);
+    addPart("Mammal", mammals);
+    addPart("Boss", bosses);
+    if (parts.empty()) {
+        return "None";
+    }
+    std::string summary = parts.front();
+    for (std::size_t i = 1; i < parts.size(); ++i) {
+        summary += ", " + parts[i];
+    }
+    return summary;
 }
 
 inline MiningRunPresentation miningRunPresentation(const GameState& state, const ContentCatalog& catalog)
@@ -139,10 +207,16 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown, static_cast<int>(std::round(tuning::mining::fuelSecondsPerUnit)))),
         detailPresentationRow("Drone loadout", miningDroneSummary(drones)),
         detailPresentationRow("Drone auto-mining", drones.passiveMiningRate > 0.0 ? ("+" + display::fixed(drones.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
-        detailPresentationRow("Passive defense", display::fixed(tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond, 1) + " DPS; " + display::percent(drones.enemyDamageRelief) + " shield relief"),
+        detailPresentationRow("Passive defense", display::fixed(tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond, 1) + " DPS; " + display::percent(std::clamp(drones.enemyDamageRelief + drones.environmentalShieldRelief, 0.0, 1.0)) + " shield relief"),
+        detailPresentationRow("Area control", drones.areaControlDamagePerSecond > 0.0 ? (display::fixed(drones.areaControlDamagePerSecond, 1) + " DPS field; " + display::percent(drones.enemySlow) + " slow") : "None"),
+        detailPresentationRow("Reactive armor", drones.reactiveArmorDamagePerSecond > 0.0 ? (display::fixed(drones.reactiveArmorDamagePerSecond, 1) + " DPS on contact") : "None"),
+        detailPresentationRow("Elemental contact", activeElementalSummary(mining)),
+        detailPresentationRow("Elemental exposure", mining.elementalExposureSeconds > 0.0 ? (display::fixed(mining.elementalExposureSeconds, 1) + "s") : "None"),
+        detailPresentationRow("Cryo slow", mining.movementSlowSeconds > 0.0 ? (display::percent(1.0 - mining.movementSlowScale) + " for " + display::fixed(mining.movementSlowSeconds, 1) + "s") : "None"),
         detailPresentationRow("Drone oxygen reserve", drones.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(drones.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Drone stability", drones.hardRockBounceRelief > 0.0 ? display::percent(drones.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
         detailPresentationRow("Hostile tunnels", hostileTunnelSummary(mining.terrain)),
+        detailPresentationRow("Active threats", activeThreatSummary(mining)),
         detailPresentationRow("Enemies defeated", std::to_string(mining.enemiesDefeated)),
         detailPresentationRow("Ore efficiency", display::signedPercent(stats.oreYieldChance)),
         detailPresentationRow("Heat control", display::fixed(stats.heatCoolingPerSecond, 2)),

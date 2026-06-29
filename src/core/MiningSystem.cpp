@@ -130,6 +130,10 @@ int featurePriority(MiningCellFeature feature)
         return 5;
     case MiningCellFeature::MinibossLair:
         return 6;
+    case MiningCellFeature::OrganicBurrow:
+        return 7;
+    case MiningCellFeature::BossChamber:
+        return 8;
     }
     return 0;
 }
@@ -148,6 +152,32 @@ MiningEnemyType hostileEnemyTypeForLane(const Destination& destination, int lane
         return MiningEnemyType::Beetle;
     default:
         return MiningEnemyType::Elemental;
+    }
+}
+
+MiningElementalAffinity elementalAffinityForLane(const Destination& destination, SurfaceSiteProfile profile, int depthZone, int lane)
+{
+    if (destination.id == content::destination::outerPlanets) {
+        return MiningElementalAffinity::Cryo;
+    }
+    if (destination.id == content::destination::nearbyStar) {
+        if (profile == SurfaceSiteProfile::FractureField) {
+            return MiningElementalAffinity::Toxic;
+        }
+        return depthZone % 2 == 0 ? MiningElementalAffinity::Thermal : MiningElementalAffinity::Radiation;
+    }
+    if (destination.id == content::destination::nearbyGalaxy) {
+        return lane % 2 == 0 ? MiningElementalAffinity::Radiation : MiningElementalAffinity::Toxic;
+    }
+    switch ((destination.tier + depthZone + lane + static_cast<int>(profile)) % 4) {
+    case 0:
+        return MiningElementalAffinity::Thermal;
+    case 1:
+        return MiningElementalAffinity::Cryo;
+    case 2:
+        return MiningElementalAffinity::Radiation;
+    default:
+        return MiningElementalAffinity::Toxic;
     }
 }
 
@@ -272,16 +302,22 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
         const int endX = std::clamp(startX + side * length, 4, terrain.width - 5);
         const int endY = std::clamp(branchY + static_cast<int>(std::round((unitHash(seed, branch, branchY, terrain.depthZone, 151) - 0.45) * 8.0)), 6, terrain.height - 6);
         const MiningEnemyType enemy = hostileEnemyTypeForLane(destination, branch + terrain.depthZone);
-        carveLine(terrain, startX, branchY, endX, branchY, 1, terrain.depthZone, MiningCellFeature::BranchTunnel);
-        carveLine(terrain, endX, branchY, endX, endY, 1, terrain.depthZone, MiningCellFeature::BranchTunnel);
+        const bool mammalBurrow = enemy == MiningEnemyType::Mammal;
+        const MiningCellFeature branchFeature = mammalBurrow ? MiningCellFeature::OrganicBurrow : MiningCellFeature::BranchTunnel;
+        const int branchRadius = mammalBurrow ? 2 : 1;
+        carveLine(terrain, startX, branchY, endX, branchY, branchRadius, terrain.depthZone, branchFeature, mammalBurrow ? enemy : MiningEnemyType::None);
+        carveLine(terrain, endX, branchY, endX, endY, branchRadius, terrain.depthZone, branchFeature, mammalBurrow ? enemy : MiningEnemyType::None);
 
         const int encounterX = std::clamp((startX + endX) / 2, 3, terrain.width - 4);
-        carveTunnelDisk(terrain, encounterX, branchY, 2, terrain.depthZone, MiningCellFeature::EncounterZone, enemy);
+        carveTunnelDisk(terrain, encounterX, branchY, mammalBurrow ? 3 : 2, terrain.depthZone, mammalBurrow ? MiningCellFeature::OrganicBurrow : MiningCellFeature::EncounterZone, enemy);
 
         const double roomRoll = unitHash(seed, branch, endY, terrain.depthZone, 173);
         MiningCellFeature room = MiningCellFeature::TreasureVault;
         MiningCellMaterial reward = MiningCellMaterial::RareOre;
-        if (roomRoll > 0.72) {
+        if (mammalBurrow) {
+            room = MiningCellFeature::BossChamber;
+            reward = terrain.depthZone >= 1 || destination.tier >= 5 ? MiningCellMaterial::ArtifactCache : MiningCellMaterial::ExoticVein;
+        } else if (roomRoll > 0.72) {
             room = MiningCellFeature::MinibossLair;
             reward = terrain.depthZone >= 2 || destination.tier >= 5 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
         } else if (roomRoll < 0.26 || profile == SurfaceSiteProfile::FractureField) {
@@ -290,7 +326,9 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
         } else if (profile == SurfaceSiteProfile::OreShelf) {
             reward = MiningCellMaterial::RareOre;
         }
-        carveRoom(terrain, endX, endY, 3 + (room == MiningCellFeature::MinibossLair ? 1 : 0), 2, terrain.depthZone, room, enemy, reward);
+        const int roomHalfWidth = room == MiningCellFeature::BossChamber ? 5 : 3 + (room == MiningCellFeature::MinibossLair ? 1 : 0);
+        const int roomHalfHeight = room == MiningCellFeature::BossChamber ? 3 : 2;
+        carveRoom(terrain, endX, endY, roomHalfWidth, roomHalfHeight, terrain.depthZone, room, enemy, reward);
     }
 }
 
@@ -715,11 +753,12 @@ void addBrokenCellReward(GameState& state, const MiningDrillStats& stats, Mining
     mining.cargo += materialCargo(gain);
 }
 
-MiningEnemy makeMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeature, double x, double y)
+MiningEnemy makeMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeature, MiningElementalAffinity affinity, double x, double y)
 {
     MiningEnemy enemy;
     enemy.type = type;
     enemy.sourceFeature = sourceFeature;
+    enemy.affinity = type == MiningEnemyType::Elemental ? affinity : MiningElementalAffinity::None;
     enemy.x = x;
     enemy.y = y;
     switch (type) {
@@ -759,7 +798,33 @@ MiningEnemy makeMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeatur
         break;
     }
 
-    if (sourceFeature == MiningCellFeature::MinibossLair) {
+    if (enemy.type == MiningEnemyType::Elemental) {
+        switch (enemy.affinity) {
+        case MiningElementalAffinity::Thermal:
+            enemy.damagePerSecond += 0.14;
+            break;
+        case MiningElementalAffinity::Cryo:
+            enemy.speed *= 0.82;
+            enemy.effectRadius += 0.35;
+            break;
+        case MiningElementalAffinity::Radiation:
+            enemy.effectRadius += 0.25;
+            enemy.armor = std::max(0.0, enemy.armor - 0.06);
+            break;
+        case MiningElementalAffinity::Toxic:
+            enemy.damagePerSecond += 0.08;
+            enemy.armor += 0.08;
+            break;
+        case MiningElementalAffinity::None:
+            break;
+        }
+    }
+
+    if (sourceFeature == MiningCellFeature::BossChamber) {
+        enemy.maxHealth *= tuning::mining::bossHealthScale;
+        enemy.damagePerSecond *= 1.35;
+        enemy.armor += 0.10;
+    } else if (sourceFeature == MiningCellFeature::MinibossLair) {
         enemy.maxHealth *= tuning::mining::minibossHealthScale;
         enemy.damagePerSecond *= 1.25;
     } else if (sourceFeature == MiningCellFeature::TreasureVault || sourceFeature == MiningCellFeature::HiveNest) {
@@ -779,14 +844,19 @@ bool shouldSpawnEnemyAt(const MiningTerrain& terrain, int x, int y, MiningCellFe
         return ((x * 5 + y * 7 + terrain.depthZone) % 19) == 0;
     case MiningCellFeature::MinibossLair:
         return ((x + y + terrain.depthZone) % 11) == 0;
+    case MiningCellFeature::OrganicBurrow:
+        return ((x * 7 + y * 3 + terrain.depthZone) % 23) == 0;
+    case MiningCellFeature::BossChamber:
+        return ((x + y + terrain.depthZone) % 7) == 0;
     default:
         return false;
     }
 }
 
-void spawnMiningEnemies(MiningRunState& mining)
+void spawnMiningEnemies(MiningRunState& mining, const Destination& destination)
 {
     bool minibossSpawned = false;
+    bool bossSpawned = false;
     for (int y = 0; y < mining.terrain.height && static_cast<int>(mining.enemies.size()) < tuning::mining::maxActiveEnemies; ++y) {
         for (int x = 0; x < mining.terrain.width && static_cast<int>(mining.enemies.size()) < tuning::mining::maxActiveEnemies; ++x) {
             const MiningCell* cell = miningCellAt(mining.terrain, x, y);
@@ -796,11 +866,18 @@ void spawnMiningEnemies(MiningRunState& mining)
             if (cell->feature == MiningCellFeature::MinibossLair && minibossSpawned) {
                 continue;
             }
+            if (cell->feature == MiningCellFeature::BossChamber && bossSpawned) {
+                continue;
+            }
             if (!shouldSpawnEnemyAt(mining.terrain, x, y, cell->feature)) {
                 continue;
             }
-            mining.enemies.push_back(makeMiningEnemy(cell->enemy, cell->feature, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5));
+            const MiningElementalAffinity affinity = cell->enemy == MiningEnemyType::Elemental
+                ? elementalAffinityForLane(destination, mining.siteProfile, mining.depthZone, x + y)
+                : MiningElementalAffinity::None;
+            mining.enemies.push_back(makeMiningEnemy(cell->enemy, cell->feature, affinity, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5));
             minibossSpawned = minibossSpawned || cell->feature == MiningCellFeature::MinibossLair;
+            bossSpawned = bossSpawned || cell->feature == MiningCellFeature::BossChamber;
         }
     }
 }
@@ -808,6 +885,45 @@ void spawnMiningEnemies(MiningRunState& mining)
 bool enemyIgnoresTerrain(MiningEnemyType type)
 {
     return type == MiningEnemyType::Flying;
+}
+
+std::pair<double, double> enemyMoveDirection(const MiningRunState& mining, const MiningEnemy& enemy, double dirX, double dirY)
+{
+    if (enemy.type != MiningEnemyType::Flying) {
+        return {dirX, dirY};
+    }
+    const double wave = std::sin(
+        mining.elapsedSeconds * tuning::mining::flyingDartFrequency +
+        enemy.x * 1.73 +
+        enemy.y * 0.91);
+    const double dartX = dirX - dirY * wave * tuning::mining::flyingDartStrength;
+    const double dartY = dirY + dirX * wave * tuning::mining::flyingDartStrength;
+    const double length = std::max(0.001, std::sqrt(dartX * dartX + dartY * dartY));
+    return {dartX / length, dartY / length};
+}
+
+bool applyMammalBurrow(MiningRunState& mining, int x, int y, double dt)
+{
+    MiningCell* target = miningCellAt(mining.terrain, x, y);
+    if (!drillableCell(target)) {
+        return false;
+    }
+
+    target->revealed = true;
+    target->feature = MiningCellFeature::OrganicBurrow;
+    target->enemy = MiningEnemyType::Mammal;
+    target->remainingToughness = std::max(0.0, target->remainingToughness - tuning::mining::mammalBurrowPower * dt);
+    markDirty(mining.terrain, x, y);
+    if (target->remainingToughness > 0.0) {
+        return false;
+    }
+
+    *target = makeCell(MiningCellMaterial::Empty, mining.depthZone);
+    target->feature = MiningCellFeature::OrganicBurrow;
+    target->enemy = MiningEnemyType::Mammal;
+    target->revealed = true;
+    markDirty(mining.terrain, x, y);
+    return true;
 }
 
 void addEnemyDefeatReward(GameState& state, const MiningEnemy& enemy)
@@ -843,14 +959,67 @@ void addEnemyDefeatReward(GameState& state, const MiningEnemy& enemy)
         gain.exotic += 1;
     } else if (enemy.sourceFeature == MiningCellFeature::HiveNest) {
         gain.common += 2;
+    } else if (enemy.sourceFeature == MiningCellFeature::BossChamber) {
+        gain.rare += 3;
+        gain.exotic += 2;
+        state.meta.blueprintProgress += 2;
     }
     addMiningMaterials(mining.temporaryMaterials, gain);
     mining.cargo += materialCargo(gain);
 }
 
+double applyDefenseDamage(GameState& state, MiningEnemy& enemy, double rawDamage)
+{
+    if (!enemy.active || rawDamage <= 0.0) {
+        return 0.0;
+    }
+    const double appliedDamage = rawDamage * std::clamp(1.0 - enemy.armor, 0.20, 1.0);
+    enemy.health = std::max(0.0, enemy.health - appliedDamage);
+    if (enemy.health <= 0.0 && enemy.active) {
+        enemy.active = false;
+        state.run.mining.enemiesDefeated += 1;
+        addEnemyDefeatReward(state, enemy);
+    }
+    return appliedDamage;
+}
+
+void applyElementalContact(GameState& state, const MiningEnemy& enemy, double shieldRelief, double dt)
+{
+    MiningRunState& mining = state.run.mining;
+    if (enemy.type != MiningEnemyType::Elemental || enemy.affinity == MiningElementalAffinity::None) {
+        return;
+    }
+    const double exposureScale = std::clamp(1.0 - shieldRelief, 0.20, 1.0);
+    mining.elementalExposureSeconds += dt;
+    switch (enemy.affinity) {
+    case MiningElementalAffinity::Thermal:
+        mining.drillHeat = std::min(1.0, mining.drillHeat + tuning::mining::elementalHeatRisePerSecond * exposureScale * dt);
+        break;
+    case MiningElementalAffinity::Cryo:
+        mining.movementSlowSeconds = std::max(mining.movementSlowSeconds, tuning::mining::elementalCryoSlowDurationSeconds * exposureScale);
+        mining.movementSlowScale = std::min(mining.movementSlowScale, tuning::mining::elementalCryoSlowScale + shieldRelief * 0.24);
+        break;
+    case MiningElementalAffinity::Radiation:
+        mining.hazardDelta += tuning::mining::elementalRadiationHazardPerSecond * exposureScale * dt;
+        break;
+    case MiningElementalAffinity::Toxic: {
+        const double toxicDamage = tuning::mining::elementalToxicIntegrityDamagePerSecond * exposureScale * dt;
+        mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - toxicDamage);
+        mining.enemyDamageTaken += toxicDamage;
+        break;
+    }
+    case MiningElementalAffinity::None:
+        break;
+    }
+}
+
 void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, double dt)
 {
     MiningRunState& mining = state.run.mining;
+    mining.movementSlowSeconds = std::max(0.0, mining.movementSlowSeconds - dt);
+    if (mining.movementSlowSeconds <= 0.0) {
+        mining.movementSlowScale = 1.0;
+    }
     if (mining.enemies.empty()) {
         return;
     }
@@ -858,6 +1027,8 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
     const double defenseDamage = tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond;
     const double incomingRelief = std::clamp(drones.enemyDamageRelief + drones.enemyEncounterRelief * 0.75, 0.0, 0.70);
+    const double shieldRelief = std::clamp(incomingRelief + drones.environmentalShieldRelief, 0.0, 0.82);
+    const double areaRangeSq = tuning::mining::areaControlRangeCells * tuning::mining::areaControlRangeCells;
     int nearestIndex = -1;
     double nearestDistanceSq = tuning::mining::defenseRangeCells * tuning::mining::defenseRangeCells;
 
@@ -877,14 +1048,23 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
 
     if (nearestIndex >= 0 && defenseDamage > 0.0) {
         MiningEnemy& target = mining.enemies[static_cast<std::size_t>(nearestIndex)];
-        const double rawDamage = defenseDamage * dt;
-        const double appliedDamage = rawDamage * std::clamp(1.0 - target.armor, 0.20, 1.0);
-        target.health = std::max(0.0, target.health - appliedDamage);
+        const double appliedDamage = applyDefenseDamage(state, target, defenseDamage * dt);
         mining.defenseDamageDealt += appliedDamage;
-        if (target.health <= 0.0 && target.active) {
-            target.active = false;
-            mining.enemiesDefeated += 1;
-            addEnemyDefeatReward(state, target);
+    }
+
+    if (drones.areaControlDamagePerSecond > 0.0) {
+        for (MiningEnemy& enemy : mining.enemies) {
+            if (!enemy.active) {
+                continue;
+            }
+            const double dx = mining.droneX - enemy.x;
+            const double dy = mining.droneY - enemy.y;
+            if (dx * dx + dy * dy > areaRangeSq) {
+                continue;
+            }
+            const double appliedDamage = applyDefenseDamage(state, enemy, drones.areaControlDamagePerSecond * dt);
+            mining.defenseDamageDealt += appliedDamage;
+            mining.areaControlDamageDealt += appliedDamage;
         }
     }
 
@@ -897,25 +1077,61 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
         const double distance = std::max(0.001, std::sqrt(dx * dx + dy * dy));
         const double dirX = dx / distance;
         const double dirY = dy / distance;
-        enemy.velocityX = dirX * enemy.speed;
-        enemy.velocityY = dirY * enemy.speed;
+        const auto [moveDirX, moveDirY] = enemyMoveDirection(mining, enemy, dirX, dirY);
+        const double areaSlow = distance * distance <= areaRangeSq ? drones.enemySlow : 0.0;
+        const double speedScale = std::clamp(1.0 - areaSlow, 0.40, 1.0);
+        enemy.velocityX = moveDirX * enemy.speed * speedScale;
+        enemy.velocityY = moveDirY * enemy.speed * speedScale;
         const double nextX = enemy.x + enemy.velocityX * dt;
         const double nextY = enemy.y + enemy.velocityY * dt;
         if (enemyIgnoresTerrain(enemy.type) || canOccupy(mining.terrain, nextX, nextY)) {
             enemy.x = std::clamp(nextX, 1.0, static_cast<double>(mining.terrain.width - 2));
             enemy.y = std::clamp(nextY, 1.0, static_cast<double>(mining.terrain.height - 2));
+        } else if (enemy.type == MiningEnemyType::Mammal &&
+            applyMammalBurrow(
+                mining,
+                std::clamp(static_cast<int>(std::floor(nextX)), 0, mining.terrain.width - 1),
+                std::clamp(static_cast<int>(std::floor(nextY)), 0, mining.terrain.height - 1),
+                dt) &&
+            canOccupy(mining.terrain, nextX, nextY)) {
+            enemy.x = std::clamp(nextX, 1.0, static_cast<double>(mining.terrain.width - 2));
+            enemy.y = std::clamp(nextY, 1.0, static_cast<double>(mining.terrain.height - 2));
         } else if (enemyIgnoresTerrain(enemy.type) || canOccupy(mining.terrain, nextX, enemy.y)) {
             enemy.x = std::clamp(nextX, 1.0, static_cast<double>(mining.terrain.width - 2));
+        } else if (enemy.type == MiningEnemyType::Mammal &&
+            applyMammalBurrow(
+                mining,
+                std::clamp(static_cast<int>(std::floor(nextX)), 0, mining.terrain.width - 1),
+                std::clamp(static_cast<int>(std::floor(enemy.y)), 0, mining.terrain.height - 1),
+                dt) &&
+            canOccupy(mining.terrain, nextX, enemy.y)) {
+            enemy.x = std::clamp(nextX, 1.0, static_cast<double>(mining.terrain.width - 2));
         } else if (enemyIgnoresTerrain(enemy.type) || canOccupy(mining.terrain, enemy.x, nextY)) {
+            enemy.y = std::clamp(nextY, 1.0, static_cast<double>(mining.terrain.height - 2));
+        } else if (enemy.type == MiningEnemyType::Mammal &&
+            applyMammalBurrow(
+                mining,
+                std::clamp(static_cast<int>(std::floor(enemy.x)), 0, mining.terrain.width - 1),
+                std::clamp(static_cast<int>(std::floor(nextY)), 0, mining.terrain.height - 1),
+                dt) &&
+            canOccupy(mining.terrain, enemy.x, nextY)) {
             enemy.y = std::clamp(nextY, 1.0, static_cast<double>(mining.terrain.height - 2));
         }
 
         const double attackRadius = std::max(tuning::mining::enemyContactRadiusCells, enemy.effectRadius);
         if (distance <= attackRadius) {
-            const double damage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * (1.0 - incomingRelief) * dt;
+            const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * dt;
+            const double damage = rawDamage * (1.0 - shieldRelief);
             mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - damage);
             mining.enemyDamageTaken += damage;
+            mining.environmentalShieldAbsorbed += rawDamage - damage;
             mining.contactIntensity = std::max(mining.contactIntensity, 0.65);
+            applyElementalContact(state, enemy, shieldRelief, dt);
+            if (drones.reactiveArmorDamagePerSecond > 0.0) {
+                const double appliedDamage = applyDefenseDamage(state, enemy, drones.reactiveArmorDamagePerSecond * dt);
+                mining.defenseDamageDealt += appliedDamage;
+                mining.reactiveArmorDamageDealt += appliedDamage;
+            }
         }
     }
 }
@@ -1007,6 +1223,8 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     mining.hazardDelta += tuning::mining::depthHazardRisk;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.terrain = generateMiningTerrain(state, *destination, mining.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
+    mining.enemies.clear();
+    spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.aimX = mining.droneX;
@@ -1075,6 +1293,10 @@ std::string_view miningCellFeatureName(MiningCellFeature feature)
         return "Miniboss lair";
     case MiningCellFeature::HiveNest:
         return "Hive nest";
+    case MiningCellFeature::OrganicBurrow:
+        return "Organic burrow";
+    case MiningCellFeature::BossChamber:
+        return "Boss chamber";
     }
     return "Unknown feature";
 }
@@ -1096,6 +1318,23 @@ std::string_view miningEnemyTypeName(MiningEnemyType enemy)
         return "Burrowing mammals";
     }
     return "Unknown enemy";
+}
+
+std::string_view miningElementalAffinityName(MiningElementalAffinity affinity)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::None:
+        return "No affinity";
+    case MiningElementalAffinity::Thermal:
+        return "Thermal";
+    case MiningElementalAffinity::Cryo:
+        return "Cryo";
+    case MiningElementalAffinity::Radiation:
+        return "Radiation";
+    case MiningElementalAffinity::Toxic:
+        return "Toxic";
+    }
+    return "Unknown affinity";
 }
 
 bool miningMaterialSolid(MiningCellMaterial material)
@@ -1289,7 +1528,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.fuelBurnSeconds = 0.0;
     mining.fuelSpent = 1;
     mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
-    spawnMiningEnemies(mining);
+    spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.aimX = mining.droneX;
@@ -1391,7 +1630,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
 
     const double moveLength = std::sqrt(mining.moveX * mining.moveX + mining.moveY * mining.moveY);
     if (moveLength > 0.01) {
-        const double step = stats.speed * dt;
+        const double step = stats.speed * std::clamp(mining.movementSlowScale, 0.40, 1.0) * dt;
         const double dirX = mining.moveX / std::max(1.0, moveLength);
         const double dirY = mining.moveY / std::max(1.0, moveLength);
         const double dx = dirX * step;

@@ -30,6 +30,7 @@ struct MiningDrillStats {
 std::string_view miningMaterialName(MiningCellMaterial material);
 std::string_view miningCellFeatureName(MiningCellFeature feature);
 std::string_view miningEnemyTypeName(MiningEnemyType enemy);
+std::string_view miningElementalAffinityName(MiningElementalAffinity affinity);
 bool miningMaterialSolid(MiningCellMaterial material);
 double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);

@@ -1625,6 +1625,10 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief;
         effects.sentryDamagePerSecond += drone->stats.sentryDamagePerSecond;
         effects.enemyDamageRelief += drone->stats.enemyDamageRelief;
+        effects.areaControlDamagePerSecond += drone->stats.areaControlDamagePerSecond;
+        effects.enemySlow += drone->stats.enemySlow;
+        effects.reactiveArmorDamagePerSecond += drone->stats.reactiveArmorDamagePerSecond;
+        effects.environmentalShieldRelief += drone->stats.environmentalShieldRelief;
         effects.names.push_back(drone->name);
     }
 
@@ -1636,6 +1640,10 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     effects.enemyEncounterRelief = std::clamp(effects.enemyEncounterRelief, 0.0, 0.18);
     effects.sentryDamagePerSecond = std::clamp(effects.sentryDamagePerSecond, 0.0, 8.0);
     effects.enemyDamageRelief = std::clamp(effects.enemyDamageRelief, 0.0, 0.55);
+    effects.areaControlDamagePerSecond = std::clamp(effects.areaControlDamagePerSecond, 0.0, 3.0);
+    effects.enemySlow = std::clamp(effects.enemySlow, 0.0, 0.45);
+    effects.reactiveArmorDamagePerSecond = std::clamp(effects.reactiveArmorDamagePerSecond, 0.0, 4.0);
+    effects.environmentalShieldRelief = std::clamp(effects.environmentalShieldRelief, 0.0, 0.35);
     return effects;
 }
 

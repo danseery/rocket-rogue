@@ -689,7 +689,17 @@ inline constexpr double defenseRangeCells = 8.0;
 inline constexpr double enemyContactRadiusCells = 0.82;
 inline constexpr double enemyElementalRadiusCells = 1.85;
 inline constexpr double enemyDamageScale = 0.030;
+inline constexpr double areaControlRangeCells = 5.4;
+inline constexpr double flyingDartStrength = 0.62;
+inline constexpr double flyingDartFrequency = 8.5;
+inline constexpr double mammalBurrowPower = 9.5;
+inline constexpr double elementalHeatRisePerSecond = 0.32;
+inline constexpr double elementalRadiationHazardPerSecond = 0.010;
+inline constexpr double elementalToxicIntegrityDamagePerSecond = 0.010;
+inline constexpr double elementalCryoSlowDurationSeconds = 0.55;
+inline constexpr double elementalCryoSlowScale = 0.58;
 inline constexpr double minibossHealthScale = 1.85;
+inline constexpr double bossHealthScale = 2.65;
 inline constexpr double roomEnemyHealthScale = 1.25;
 } // namespace mining
 

@@ -13,6 +13,7 @@
 #include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
 #include "core/MiningSystem.h"
+#include "core/MiningPresentation.h"
 #include "core/OutcomePresentation.h"
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
@@ -2322,17 +2323,21 @@ void hostileMiningTerrainGeneratesPreDugEnemyStructures()
     GameState state = createNewGame(catalog, 91920);
     state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     state.meta.ark.condition = ArkCondition::DamagedStranded;
-    const Destination& nearbyStar = catalog.destinations[4];
+    const Destination& nearbyGalaxy = catalog.destinations[5];
 
-    const MiningTerrain terrain = generateMiningTerrain(state, nearbyStar, SurfaceSiteProfile::OreShelf, 1);
-    const MiningTerrain repeat = generateMiningTerrain(state, nearbyStar, SurfaceSiteProfile::OreShelf, 1);
+    const MiningTerrain terrain = generateMiningTerrain(state, nearbyGalaxy, SurfaceSiteProfile::OreShelf, 1);
+    const MiningTerrain repeat = generateMiningTerrain(state, nearbyGalaxy, SurfaceSiteProfile::OreShelf, 1);
 
     int mainTunnel = 0;
     int branchTunnel = 0;
     int encounterZones = 0;
     int rooms = 0;
+    int organicBurrows = 0;
+    int bossChambers = 0;
     int enemyCells = 0;
+    int mammalCells = 0;
     int rewardCells = 0;
+    int bossRewardCells = 0;
     for (std::size_t i = 0; i < terrain.cells.size(); ++i) {
         const MiningCell& cell = terrain.cells[i];
         const MiningCell& repeated = repeat.cells[i];
@@ -2342,18 +2347,27 @@ void hostileMiningTerrainGeneratesPreDugEnemyStructures()
         mainTunnel += cell.feature == MiningCellFeature::MainTunnel ? 1 : 0;
         branchTunnel += cell.feature == MiningCellFeature::BranchTunnel ? 1 : 0;
         encounterZones += cell.feature == MiningCellFeature::EncounterZone ? 1 : 0;
-        rooms += cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest ? 1 : 0;
+        rooms += cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest || cell.feature == MiningCellFeature::BossChamber ? 1 : 0;
+        organicBurrows += cell.feature == MiningCellFeature::OrganicBurrow ? 1 : 0;
+        bossChambers += cell.feature == MiningCellFeature::BossChamber ? 1 : 0;
         enemyCells += cell.enemy != MiningEnemyType::None ? 1 : 0;
-        rewardCells += (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest) && miningMaterialSolid(cell.material) ? 1 : 0;
+        mammalCells += cell.enemy == MiningEnemyType::Mammal ? 1 : 0;
+        rewardCells += (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest || cell.feature == MiningCellFeature::BossChamber) && miningMaterialSolid(cell.material) ? 1 : 0;
+        bossRewardCells += cell.feature == MiningCellFeature::BossChamber && miningMaterialSolid(cell.material) ? 1 : 0;
     }
 
     require(mainTunnel > 10, "hostile mining terrain should include pre-dug main tunnels");
     require(branchTunnel > 10, "hostile mining terrain should include branching tunnels");
     require(encounterZones > 0, "hostile mining terrain should include enemy encounter zones");
     require(rooms > 0, "hostile mining terrain should include specialized rooms");
+    require(organicBurrows > 0, "hostile mammal lanes should carve organic burrows");
+    require(bossChambers > 0, "hostile mammal lanes should create larger boss chambers");
     require(enemyCells > 0, "hostile mining terrain should assign enemy families to encounter structures");
+    require(mammalCells > 0, "hostile boss chambers should assign mammal enemies");
     require(rewardCells > 0, "hostile specialized rooms should seed rich deposits");
+    require(bossRewardCells > 0, "hostile boss chambers should seed advanced-tech deposits");
     require(miningCellFeatureName(MiningCellFeature::TreasureVault) == std::string_view("Treasure vault"), "mining feature names should describe special rooms");
+    require(miningCellFeatureName(MiningCellFeature::OrganicBurrow) == std::string_view("Organic burrow"), "mining feature names should describe mammal burrows");
     require(miningEnemyTypeName(MiningEnemyType::Elemental) == std::string_view("Elemental monsters"), "mining enemy names should cover elemental threats");
 }
 
@@ -2407,6 +2421,186 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     require(defended.run.mining.enemiesDefeated == 1, "passive sentry defenses should defeat weakened enemies");
     require(defended.run.mining.defenseDamageDealt > 0.0, "passive sentry defenses should report damage dealt");
     require(defended.run.mining.temporaryMaterials.rare > 0 || defended.run.mining.temporaryMaterials.exotic > 0, "miniboss defeats should grant upgrade-grade rewards");
+}
+
+void elementalMiningCombatAppliesAffinityAndAreaDefenses()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91923);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "elemental mining run should start");
+    state.run.mining.drillHeat = 0.0;
+    state.run.mining.enemies = {
+        {MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, state.run.mining.droneX + 0.2, state.run.mining.droneY, 0.0, 0.0, 40.0, 40.0, 0.0, 0.0, 1.0, tuning::mining::enemyElementalRadiusCells, true, MiningElementalAffinity::Thermal}
+    };
+    const double heatBefore = state.run.mining.drillHeat;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.elementalExposureSeconds > 0.0, "elemental contact should track exposure time");
+    require(state.run.mining.drillHeat > heatBefore, "thermal elementals should heat the drill while in their area");
+    require(state.run.mining.enemyDamageTaken > 0.0, "elemental contact should still damage the mining rig");
+    require(miningElementalAffinityName(MiningElementalAffinity::Thermal) == std::string_view("Thermal"), "elemental affinity names should describe thermal threats");
+
+    GameState cryo = createNewGame(catalog, 91924);
+    cryo.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    cryo.meta.ark.condition = ArkCondition::DamagedStranded;
+    cryo.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    cryo.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    cryo.run.destinationIndex = 4;
+    startSurfaceExpedition(cryo, catalog);
+    prepareMiningSiteForTest(cryo);
+    require(startMiningRun(cryo, catalog).applied, "cryo elemental mining run should start");
+    cryo.run.mining.moveX = 1.0;
+    cryo.run.mining.enemies = {
+        {MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, cryo.run.mining.droneX + 0.2, cryo.run.mining.droneY, 0.0, 0.0, 40.0, 40.0, 0.0, 0.0, 0.0, tuning::mining::enemyElementalRadiusCells, true, MiningElementalAffinity::Cryo}
+    };
+    updateMiningRun(cryo, catalog, 0.08);
+    require(cryo.run.mining.movementSlowSeconds > 0.0, "cryo elementals should apply a movement slow timer");
+    require(cryo.run.mining.movementSlowScale < 1.0, "cryo elementals should reduce movement scale");
+
+    GameState defended = createNewGame(catalog, 91925);
+    defended.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    defended.meta.ark.condition = ArkCondition::DamagedStranded;
+    defended.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    defended.meta.unlockKeys.push_back(content::unlock::droneBay);
+    defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(defended, catalog);
+    defended.meta.droneBaySlots = 2;
+    defended.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    defended.run.destinationIndex = 4;
+    startSurfaceExpedition(defended, catalog);
+    prepareMiningSiteForTest(defended);
+    require(startMiningRun(defended, catalog).applied, "area-control mining run should start");
+    defended.run.mining.enemies = {
+        {MiningEnemyType::Ant, MiningCellFeature::EncounterZone, defended.run.mining.droneX + 0.2, defended.run.mining.droneY, 0.0, 0.0, 20.0, 20.0, 0.0, 0.0, 1.0, 0.0, true},
+        {MiningEnemyType::Ant, MiningCellFeature::EncounterZone, defended.run.mining.droneX + 3.0, defended.run.mining.droneY, 0.0, 0.0, 20.0, 20.0, 0.0, 0.0, 0.0, 0.0, true}
+    };
+    updateMiningRun(defended, catalog, 0.08);
+    require(defended.run.mining.areaControlDamageDealt > 0.0, "attack drones should apply area-control damage around the rig");
+    require(defended.run.mining.reactiveArmorDamageDealt > 0.0, "defense drones should retaliate against contact enemies");
+    require(defended.run.mining.environmentalShieldAbsorbed > 0.0, "environmental shields should absorb incoming enemy damage");
+    require(defended.run.mining.enemies[1].health < defended.run.mining.enemies[1].maxHealth, "area-control fields should damage non-targeted nearby enemies");
+}
+
+void mammalBossChambersGrantAdvancedRewards()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91926);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::attackDrone};
+    state.run.destinationIndex = 5;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "mammal boss mining run should start");
+    const int blueprintBefore = state.meta.blueprintProgress;
+    state.run.mining.enemies = {
+        {MiningEnemyType::Mammal, MiningCellFeature::BossChamber, state.run.mining.droneX + 2.0, state.run.mining.droneY, 0.0, 0.0, 0.5, 35.0, 0.20, 0.0, 0.0, 0.0, true}
+    };
+    for (int tick = 0; tick < 10 && state.run.mining.enemiesDefeated == 0; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.enemiesDefeated == 1, "passive defenses should defeat weakened mammal boss test enemies");
+    require(state.run.mining.temporaryMaterials.rare >= 5, "mammal boss chambers should grant significant rare materials");
+    require(state.run.mining.temporaryMaterials.exotic >= 3, "mammal boss chambers should grant significant exotic materials");
+    require(state.meta.blueprintProgress >= blueprintBefore + 2, "mammal boss chambers should recover advanced tech progress");
+}
+
+void enemyMovementTypesHaveDistinctBehavior()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState flying = createNewGame(catalog, 91927);
+    flying.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    flying.meta.ark.condition = ArkCondition::DamagedStranded;
+    flying.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    flying.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    flying.run.destinationIndex = 4;
+    startSurfaceExpedition(flying, catalog);
+    prepareMiningSiteForTest(flying);
+    require(startMiningRun(flying, catalog).applied, "flying behavior mining run should start");
+    flying.run.mining.enemies = {
+        {MiningEnemyType::Flying, MiningCellFeature::EncounterZone, flying.run.mining.droneX + 4.0, flying.run.mining.droneY, 0.0, 0.0, 40.0, 40.0, 0.0, 3.1, 0.0, 0.0, true}
+    };
+    updateMiningRun(flying, catalog, 0.08);
+    require(flying.run.mining.enemies.front().velocityX < 0.0, "flying enemies should still home toward the drone");
+    require(std::abs(flying.run.mining.enemies.front().velocityY) > 0.05, "flying enemies should dart laterally while pursuing");
+
+    GameState mammal = createNewGame(catalog, 91928);
+    mammal.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    mammal.meta.ark.condition = ArkCondition::DamagedStranded;
+    mammal.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    mammal.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    mammal.run.destinationIndex = 5;
+    startSurfaceExpedition(mammal, catalog);
+    prepareMiningSiteForTest(mammal);
+    require(startMiningRun(mammal, catalog).applied, "mammal burrow behavior mining run should start");
+    const int burrowX = static_cast<int>(std::floor(mammal.run.mining.droneX + 1.0));
+    const int burrowY = static_cast<int>(std::floor(mammal.run.mining.droneY));
+    if (MiningCell* current = miningCellAt(mammal.run.mining.terrain, burrowX + 1, burrowY)) {
+        current->material = MiningCellMaterial::Empty;
+        current->remainingToughness = 0.0;
+        current->maxToughness = 0.0;
+        current->revealed = true;
+    }
+    if (MiningCell* blocked = miningCellAt(mammal.run.mining.terrain, burrowX, burrowY)) {
+        blocked->material = MiningCellMaterial::Regolith;
+        blocked->remainingToughness = 0.2;
+        blocked->maxToughness = 0.2;
+        blocked->revealed = false;
+        blocked->feature = MiningCellFeature::None;
+        blocked->enemy = MiningEnemyType::None;
+    }
+    mammal.run.mining.enemies = {
+        {MiningEnemyType::Mammal, MiningCellFeature::OrganicBurrow, static_cast<double>(burrowX) + 1.02, static_cast<double>(burrowY) + 0.5, 0.0, 0.0, 40.0, 40.0, 0.0, 1.45, 0.0, 0.0, true}
+    };
+    updateMiningRun(mammal, catalog, 0.08);
+    const MiningCell* burrow = miningCellAt(mammal.run.mining.terrain, burrowX, burrowY);
+    require(burrow != nullptr && burrow->material == MiningCellMaterial::Empty, "mammal enemies should burrow through weak non-bedrock cells");
+    require(burrow != nullptr && burrow->feature == MiningCellFeature::OrganicBurrow, "mammal burrowing should mark organic tunnel tiles");
+    require(burrow != nullptr && burrow->enemy == MiningEnemyType::Mammal, "mammal burrowing should seed mammal tunnel metadata");
+}
+
+void miningPresentationShowsActiveThreatMix()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91929);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.run.destinationIndex = 5;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "active threat presentation mining run should start");
+    state.run.mining.enemies = {
+        {MiningEnemyType::Ant, MiningCellFeature::EncounterZone, state.run.mining.droneX + 1.0, state.run.mining.droneY, 0.0, 0.0, 5.0, 5.0, 0.0, 2.0, 0.62, 0.0, true},
+        {MiningEnemyType::Flying, MiningCellFeature::EncounterZone, state.run.mining.droneX + 2.0, state.run.mining.droneY, 0.0, 0.0, 4.0, 4.0, 0.0, 3.1, 0.48, 0.0, true},
+        {MiningEnemyType::Beetle, MiningCellFeature::MinibossLair, state.run.mining.droneX + 3.0, state.run.mining.droneY, 0.0, 0.0, 10.0, 10.0, 0.45, 1.15, 0.82, 0.0, true},
+        {MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, state.run.mining.droneX + 4.0, state.run.mining.droneY, 0.0, 0.0, 8.0, 8.0, 0.18, 1.65, 0.58, tuning::mining::enemyElementalRadiusCells, true, MiningElementalAffinity::Toxic},
+        {MiningEnemyType::Mammal, MiningCellFeature::BossChamber, state.run.mining.droneX + 5.0, state.run.mining.droneY, 0.0, 0.0, 15.0, 15.0, 0.28, 1.45, 0.95, 0.0, true}
+    };
+
+    const MiningRunPresentation presentation = miningRunPresentation(state, catalog);
+    const DetailPresentationRow* threats = findDetailPresentationRow(presentation.details, "Active threats");
+    require(threats != nullptr, "mining presentation should expose active threat composition");
+    require(threats->value.find("Ant x1") != std::string::npos, "active threat summary should include ant threats");
+    require(threats->value.find("Flying x1") != std::string::npos, "active threat summary should include flying threats");
+    require(threats->value.find("Beetle x1") != std::string::npos, "active threat summary should include beetle threats");
+    require(threats->value.find("Elemental x1") != std::string::npos, "active threat summary should include elemental threats");
+    require(threats->value.find("Mammal x1") != std::string::npos, "active threat summary should include mammal threats");
+    require(threats->value.find("Boss x2") != std::string::npos, "active threat summary should flag miniboss and boss-room enemies");
 }
 
 void miningDrillBreaksCellsAndMarksChunks()
@@ -2736,16 +2930,22 @@ void activeMiningRoundTripsThroughSave()
     state.run.mining.enemiesDefeated = 3;
     state.run.mining.defenseDamageDealt = 4.25;
     state.run.mining.enemyDamageTaken = 0.125;
+    state.run.mining.areaControlDamageDealt = 1.5;
+    state.run.mining.reactiveArmorDamageDealt = 0.75;
+    state.run.mining.environmentalShieldAbsorbed = 0.25;
+    state.run.mining.elementalExposureSeconds = 2.5;
+    state.run.mining.movementSlowSeconds = 0.4;
+    state.run.mining.movementSlowScale = 0.62;
     state.run.mining.enemies = {
-        {MiningEnemyType::Flying, MiningCellFeature::EncounterZone, 22.5, 10.5, 1.0, -0.5, 2.5, 4.0, 0.0, 3.1, 0.48, 0.0, true}
+        {MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, 22.5, 10.5, 1.0, -0.5, 2.5, 4.0, 0.0, 3.1, 0.48, 1.8, true, MiningElementalAffinity::Radiation}
     };
     if (MiningCell* cell = miningCellAt(state.run.mining.terrain, 20, 10)) {
         cell->material = MiningCellMaterial::RareOre;
         cell->maxToughness = 7.0;
         cell->remainingToughness = 3.5;
         cell->revealed = true;
-        cell->feature = MiningCellFeature::TreasureVault;
-        cell->enemy = MiningEnemyType::Beetle;
+        cell->feature = MiningCellFeature::BossChamber;
+        cell->enemy = MiningEnemyType::Mammal;
     }
 
     const std::string serialized = serializeSaveData(captureSaveData(state));
@@ -2764,15 +2964,22 @@ void activeMiningRoundTripsThroughSave()
     require(restored.run.mining.enemiesDefeated == 3, "mining defeated enemy count should round trip");
     require(std::abs(restored.run.mining.defenseDamageDealt - 4.25) < 0.000001, "mining defense damage should round trip");
     require(std::abs(restored.run.mining.enemyDamageTaken - 0.125) < 0.000001, "mining enemy damage should round trip");
+    require(std::abs(restored.run.mining.areaControlDamageDealt - 1.5) < 0.000001, "mining area-control damage should round trip");
+    require(std::abs(restored.run.mining.reactiveArmorDamageDealt - 0.75) < 0.000001, "mining reactive armor damage should round trip");
+    require(std::abs(restored.run.mining.environmentalShieldAbsorbed - 0.25) < 0.000001, "mining shield absorption should round trip");
+    require(std::abs(restored.run.mining.elementalExposureSeconds - 2.5) < 0.000001, "mining elemental exposure should round trip");
+    require(std::abs(restored.run.mining.movementSlowSeconds - 0.4) < 0.000001, "mining slow timer should round trip");
+    require(std::abs(restored.run.mining.movementSlowScale - 0.62) < 0.000001, "mining slow scale should round trip");
     require(restored.run.mining.enemies.size() == 1, "active mining enemies should round trip");
-    require(restored.run.mining.enemies.front().type == MiningEnemyType::Flying, "active mining enemy type should round trip");
+    require(restored.run.mining.enemies.front().type == MiningEnemyType::Elemental, "active mining enemy type should round trip");
     require(restored.run.mining.enemies.front().sourceFeature == MiningCellFeature::EncounterZone, "active mining enemy source feature should round trip");
+    require(restored.run.mining.enemies.front().affinity == MiningElementalAffinity::Radiation, "active mining enemy affinity should round trip");
     require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
     require(restoredCell != nullptr && restoredCell->material == MiningCellMaterial::RareOre, "mining terrain material should round trip");
     require(restoredCell != nullptr && std::abs(restoredCell->remainingToughness - 3.5) < 0.000001, "mining terrain toughness should round trip");
-    require(restoredCell != nullptr && restoredCell->feature == MiningCellFeature::TreasureVault, "mining terrain feature metadata should round trip");
-    require(restoredCell != nullptr && restoredCell->enemy == MiningEnemyType::Beetle, "mining terrain enemy metadata should round trip");
+    require(restoredCell != nullptr && restoredCell->feature == MiningCellFeature::BossChamber, "mining terrain feature metadata should round trip");
+    require(restoredCell != nullptr && restoredCell->enemy == MiningEnemyType::Mammal, "mining terrain enemy metadata should round trip");
 }
 
 void surfaceActionSummaryShowsResourceDeltas()
@@ -4421,6 +4628,10 @@ int main()
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();
     hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
+    elementalMiningCombatAppliesAffinityAndAreaDefenses();
+    mammalBossChambersGrantAdvancedRewards();
+    enemyMovementTypesHaveDistinctBehavior();
+    miningPresentationShowsActiveThreatMix();
     miningDrillBreaksCellsAndMarksChunks();
     miningUsesSharedFuelReserve();
     miningDrillFootprintCapsWearToWorstContact();

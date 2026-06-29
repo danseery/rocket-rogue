@@ -84,6 +84,10 @@ struct MiniDroneLoadoutEffects {
     double enemyEncounterRelief = 0.0;
     double sentryDamagePerSecond = 0.0;
     double enemyDamageRelief = 0.0;
+    double areaControlDamagePerSecond = 0.0;
+    double enemySlow = 0.0;
+    double reactiveArmorDamagePerSecond = 0.0;
+    double environmentalShieldRelief = 0.0;
     std::vector<std::string> names;
 };
 

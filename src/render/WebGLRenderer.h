@@ -27,8 +27,10 @@ struct MiningEnemySnapshot {
     double x = 0.0;
     double y = 0.0;
     int type = 0;
+    int affinity = 0;
     double health = 1.0;
     double maxHealth = 1.0;
+    double effectRadius = 0.0;
     bool active = true;
 };
 

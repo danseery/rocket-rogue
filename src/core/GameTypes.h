@@ -109,7 +109,9 @@ enum class MiningCellFeature {
     EncounterZone,
     TreasureVault,
     MinibossLair,
-    HiveNest
+    HiveNest,
+    OrganicBurrow,
+    BossChamber
 };
 
 enum class MiningEnemyType {
@@ -119,6 +121,14 @@ enum class MiningEnemyType {
     Beetle,
     Elemental,
     Mammal
+};
+
+enum class MiningElementalAffinity {
+    None,
+    Thermal,
+    Cryo,
+    Radiation,
+    Toxic
 };
 
 enum class FlybyGrade {
@@ -199,6 +209,10 @@ struct MiniDroneStats {
     double enemyEncounterRelief = 0.0;
     double sentryDamagePerSecond = 0.0;
     double enemyDamageRelief = 0.0;
+    double areaControlDamagePerSecond = 0.0;
+    double enemySlow = 0.0;
+    double reactiveArmorDamagePerSecond = 0.0;
+    double environmentalShieldRelief = 0.0;
 };
 
 struct MaterialInventory {
@@ -520,6 +534,7 @@ struct MiningEnemy {
     double damagePerSecond = 0.0;
     double effectRadius = 0.0;
     bool active = true;
+    MiningElementalAffinity affinity = MiningElementalAffinity::None;
 };
 
 struct MiningRunState {
@@ -561,6 +576,12 @@ struct MiningRunState {
     int enemiesDefeated = 0;
     double defenseDamageDealt = 0.0;
     double enemyDamageTaken = 0.0;
+    double areaControlDamageDealt = 0.0;
+    double reactiveArmorDamageDealt = 0.0;
+    double environmentalShieldAbsorbed = 0.0;
+    double elementalExposureSeconds = 0.0;
+    double movementSlowSeconds = 0.0;
+    double movementSlowScale = 1.0;
     int targetCellX = -1;
     int targetCellY = -1;
     double targetTipX = 32.0;

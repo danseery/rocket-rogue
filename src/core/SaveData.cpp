@@ -173,6 +173,10 @@ int miningCellFeatureToInt(MiningCellFeature feature)
         return 5;
     case MiningCellFeature::HiveNest:
         return 6;
+    case MiningCellFeature::OrganicBurrow:
+        return 7;
+    case MiningCellFeature::BossChamber:
+        return 8;
     }
     return 0;
 }
@@ -192,6 +196,10 @@ MiningCellFeature miningCellFeatureFromInt(int value)
         return MiningCellFeature::MinibossLair;
     case 6:
         return MiningCellFeature::HiveNest;
+    case 7:
+        return MiningCellFeature::OrganicBurrow;
+    case 8:
+        return MiningCellFeature::BossChamber;
     default:
         return MiningCellFeature::None;
     }
@@ -231,6 +239,39 @@ MiningEnemyType miningEnemyTypeFromInt(int value)
         return MiningEnemyType::Mammal;
     default:
         return MiningEnemyType::None;
+    }
+}
+
+int miningElementalAffinityToInt(MiningElementalAffinity affinity)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::None:
+        return 0;
+    case MiningElementalAffinity::Thermal:
+        return 1;
+    case MiningElementalAffinity::Cryo:
+        return 2;
+    case MiningElementalAffinity::Radiation:
+        return 3;
+    case MiningElementalAffinity::Toxic:
+        return 4;
+    }
+    return 0;
+}
+
+MiningElementalAffinity miningElementalAffinityFromInt(int value)
+{
+    switch (value) {
+    case 1:
+        return MiningElementalAffinity::Thermal;
+    case 2:
+        return MiningElementalAffinity::Cryo;
+    case 3:
+        return MiningElementalAffinity::Radiation;
+    case 4:
+        return MiningElementalAffinity::Toxic;
+    default:
+        return MiningElementalAffinity::None;
     }
 }
 
@@ -562,7 +603,8 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.speed
             << save_schema::crewFieldDelimiter << enemy.damagePerSecond
             << save_schema::crewFieldDelimiter << enemy.effectRadius
-            << save_schema::crewFieldDelimiter << (enemy.active ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (enemy.active ? 1 : 0)
+            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(enemy.affinity);
     }
     return out.str();
 }
@@ -615,6 +657,9 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         }
         if (fields.size() > 12) {
             enemy.active = parseInt(fields[12], 1) != 0;
+        }
+        if (fields.size() > 13) {
+            enemy.affinity = miningElementalAffinityFromInt(parseInt(fields[13], 0));
         }
         enemies.push_back(enemy);
     }
@@ -962,7 +1007,13 @@ std::string serializeSaveData(const SaveData& save)
         save_schema::field::miningCombat,
         std::to_string(save.mining.enemiesDefeated) + std::string(1, save_schema::crewFieldDelimiter) +
             std::to_string(save.mining.defenseDamageDealt) + std::string(1, save_schema::crewFieldDelimiter) +
-            std::to_string(save.mining.enemyDamageTaken));
+            std::to_string(save.mining.enemyDamageTaken) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.areaControlDamageDealt) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.reactiveArmorDamageDealt) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.environmentalShieldAbsorbed) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.elementalExposureSeconds) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.movementSlowSeconds) + std::string(1, save_schema::crewFieldDelimiter) +
+            std::to_string(save.mining.movementSlowScale));
     writeField(out, save_schema::field::miningTerrainSize, serializeMiningTerrainSize(save.mining.terrain));
     writeField(out, save_schema::field::miningTerrainCells, serializeMiningCells(save.mining.terrain));
     writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
@@ -1176,6 +1227,24 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             }
             if (fields.size() > 2) {
                 save.mining.enemyDamageTaken = parseDouble(fields[2], save.mining.enemyDamageTaken);
+            }
+            if (fields.size() > 3) {
+                save.mining.areaControlDamageDealt = parseDouble(fields[3], save.mining.areaControlDamageDealt);
+            }
+            if (fields.size() > 4) {
+                save.mining.reactiveArmorDamageDealt = parseDouble(fields[4], save.mining.reactiveArmorDamageDealt);
+            }
+            if (fields.size() > 5) {
+                save.mining.environmentalShieldAbsorbed = parseDouble(fields[5], save.mining.environmentalShieldAbsorbed);
+            }
+            if (fields.size() > 6) {
+                save.mining.elementalExposureSeconds = parseDouble(fields[6], save.mining.elementalExposureSeconds);
+            }
+            if (fields.size() > 7) {
+                save.mining.movementSlowSeconds = parseDouble(fields[7], save.mining.movementSlowSeconds);
+            }
+            if (fields.size() > 8) {
+                save.mining.movementSlowScale = parseDouble(fields[8], save.mining.movementSlowScale);
             }
         } else if (key == save_schema::field::miningTerrainSize) {
             parseMiningTerrainSize(value, save.mining.terrain);
