@@ -683,6 +683,14 @@ inline constexpr int commonCargo = 1;
 inline constexpr int rareCargo = 2;
 inline constexpr int exoticCargo = 4;
 inline constexpr int artifactCargo = 3;
+inline constexpr int maxActiveEnemies = 14;
+inline constexpr double baseDefenseDamagePerSecond = 0.75;
+inline constexpr double defenseRangeCells = 8.0;
+inline constexpr double enemyContactRadiusCells = 0.82;
+inline constexpr double enemyElementalRadiusCells = 1.85;
+inline constexpr double enemyDamageScale = 0.030;
+inline constexpr double minibossHealthScale = 1.85;
+inline constexpr double roomEnemyHealthScale = 1.25;
 } // namespace mining
 
 namespace outcomes {

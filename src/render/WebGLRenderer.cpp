@@ -358,6 +358,24 @@ Color miningMaterialColor(int material, float integrity, bool revealed, bool haz
     return color;
 }
 
+Color miningEnemyColor(int type)
+{
+    switch (type) {
+    case static_cast<int>(MiningEnemyType::Ant):
+        return {0.92F, 0.34F, 0.22F, 0.94F};
+    case static_cast<int>(MiningEnemyType::Flying):
+        return {0.86F, 0.52F, 1.0F, 0.90F};
+    case static_cast<int>(MiningEnemyType::Beetle):
+        return {0.42F, 0.72F, 0.34F, 0.96F};
+    case static_cast<int>(MiningEnemyType::Elemental):
+        return {0.24F, 0.86F, 1.0F, 0.92F};
+    case static_cast<int>(MiningEnemyType::Mammal):
+        return {0.86F, 0.70F, 0.42F, 0.96F};
+    default:
+        return {1.0F, 0.28F, 0.18F, 0.90F};
+    }
+}
+
 } // namespace
 
 bool WebGLRenderer::initialize()
@@ -1020,6 +1038,18 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         appendRect(terrainVertices, center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
     }
     submit(terrainVertices, 0x0004);
+
+    for (const MiningEnemySnapshot& enemy : snapshot.miningEnemies) {
+        if (!enemy.active) {
+            continue;
+        }
+        const Vec2 enemyCenter = cellCenter(enemy.x, enemy.y);
+        const float health = static_cast<float>(std::clamp(enemy.maxHealth <= 0.0 ? 1.0 : enemy.health / enemy.maxHealth, 0.0, 1.0));
+        const Color base = miningEnemyColor(enemy.type);
+        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * 1.42F, {base.r, base.g, base.b, 0.18F}, 18);
+        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * (0.56F + health * 0.34F), base, 16);
+        drawRect(enemyCenter.x, enemyCenter.y - cellH * 0.72F, cellW * 1.18F * health, cellH * 0.10F, {1.0F, 0.18F, 0.12F, 0.82F});
+    }
 
     Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
     if (snapshot.miningBounce > 0.0) {

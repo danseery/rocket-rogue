@@ -82,6 +82,8 @@ struct MiniDroneLoadoutEffects {
     double hardRockBounceRelief = 0.0;
     double extractionRiskRelief = 0.0;
     double enemyEncounterRelief = 0.0;
+    double sentryDamagePerSecond = 0.0;
+    double enemyDamageRelief = 0.0;
     std::vector<std::string> names;
 };
 

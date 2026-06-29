@@ -1227,6 +1227,20 @@ RenderSnapshot RocketGameApp::snapshot() const
                 });
             }
         }
+        result.miningEnemies.reserve(mining.enemies.size());
+        for (const MiningEnemy& enemy : mining.enemies) {
+            if (!enemy.active) {
+                continue;
+            }
+            result.miningEnemies.push_back({
+                enemy.x,
+                enemy.y,
+                static_cast<int>(enemy.type),
+                enemy.health,
+                enemy.maxHealth,
+                enemy.active
+            });
+        }
     }
 
     if (state_.screen == Screen::Flyby && state_.run.flyby.active) {

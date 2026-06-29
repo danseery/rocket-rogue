@@ -2311,6 +2311,102 @@ void miningTerrainIsDeterministicAndDepthScales()
     require(
         miningMaterialToughness(MiningCellMaterial::CommonOre, 2) > miningMaterialToughness(MiningCellMaterial::CommonOre, 0),
         "deeper mining zones should increase terrain toughness");
+    require(std::none_of(a.cells.begin(), a.cells.end(), [](const MiningCell& cell) {
+        return cell.feature != MiningCellFeature::None || cell.enemy != MiningEnemyType::None;
+    }), "solar-system mining terrain should not seed hostile tunnel metadata");
+}
+
+void hostileMiningTerrainGeneratesPreDugEnemyStructures()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91920);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    const Destination& nearbyStar = catalog.destinations[4];
+
+    const MiningTerrain terrain = generateMiningTerrain(state, nearbyStar, SurfaceSiteProfile::OreShelf, 1);
+    const MiningTerrain repeat = generateMiningTerrain(state, nearbyStar, SurfaceSiteProfile::OreShelf, 1);
+
+    int mainTunnel = 0;
+    int branchTunnel = 0;
+    int encounterZones = 0;
+    int rooms = 0;
+    int enemyCells = 0;
+    int rewardCells = 0;
+    for (std::size_t i = 0; i < terrain.cells.size(); ++i) {
+        const MiningCell& cell = terrain.cells[i];
+        const MiningCell& repeated = repeat.cells[i];
+        require(cell.material == repeated.material, "hostile terrain material generation should be deterministic");
+        require(cell.feature == repeated.feature, "hostile tunnel features should be deterministic");
+        require(cell.enemy == repeated.enemy, "hostile enemy zones should be deterministic");
+        mainTunnel += cell.feature == MiningCellFeature::MainTunnel ? 1 : 0;
+        branchTunnel += cell.feature == MiningCellFeature::BranchTunnel ? 1 : 0;
+        encounterZones += cell.feature == MiningCellFeature::EncounterZone ? 1 : 0;
+        rooms += cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest ? 1 : 0;
+        enemyCells += cell.enemy != MiningEnemyType::None ? 1 : 0;
+        rewardCells += (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest) && miningMaterialSolid(cell.material) ? 1 : 0;
+    }
+
+    require(mainTunnel > 10, "hostile mining terrain should include pre-dug main tunnels");
+    require(branchTunnel > 10, "hostile mining terrain should include branching tunnels");
+    require(encounterZones > 0, "hostile mining terrain should include enemy encounter zones");
+    require(rooms > 0, "hostile mining terrain should include specialized rooms");
+    require(enemyCells > 0, "hostile mining terrain should assign enemy families to encounter structures");
+    require(rewardCells > 0, "hostile specialized rooms should seed rich deposits");
+    require(miningCellFeatureName(MiningCellFeature::TreasureVault) == std::string_view("Treasure vault"), "mining feature names should describe special rooms");
+    require(miningEnemyTypeName(MiningEnemyType::Elemental) == std::string_view("Elemental monsters"), "mining enemy names should cover elemental threats");
+}
+
+void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91921);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "hostile mining run should start");
+    require(!state.run.mining.enemies.empty(), "hostile mining run should spawn enemies from encounter structures");
+
+    MiningEnemy& attacker = state.run.mining.enemies.front();
+    attacker.type = MiningEnemyType::Ant;
+    attacker.x = state.run.mining.droneX + 0.2;
+    attacker.y = state.run.mining.droneY;
+    attacker.health = 100.0;
+    attacker.maxHealth = 100.0;
+    attacker.damagePerSecond = 1.0;
+    attacker.speed = 0.0;
+    const double integrityBefore = state.run.mining.drillIntegrity;
+    updateMiningRun(state, catalog, 1.0);
+    require(state.run.mining.enemyDamageTaken > 0.0, "nearby enemies should damage the mining drill");
+    require(state.run.mining.drillIntegrity < integrityBefore, "enemy contact should reduce drill integrity");
+
+    GameState defended = createNewGame(catalog, 91922);
+    defended.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    defended.meta.ark.condition = ArkCondition::DamagedStranded;
+    defended.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    defended.meta.unlockKeys.push_back(content::unlock::droneBay);
+    defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(defended, catalog);
+    defended.meta.droneBaySlots = 2;
+    defended.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    defended.run.destinationIndex = 4;
+    startSurfaceExpedition(defended, catalog);
+    prepareMiningSiteForTest(defended);
+    require(startMiningRun(defended, catalog).applied, "defended hostile mining run should start");
+    defended.run.mining.enemies = {
+        {MiningEnemyType::Beetle, MiningCellFeature::MinibossLair, defended.run.mining.droneX + 2.0, defended.run.mining.droneY, 0.0, 0.0, 0.5, 10.0, 0.20, 0.0, 0.0, 0.0, true}
+    };
+    for (int tick = 0; tick < 10 && defended.run.mining.enemiesDefeated == 0; ++tick) {
+        updateMiningRun(defended, catalog, 0.08);
+    }
+    require(defended.run.mining.enemiesDefeated == 1, "passive sentry defenses should defeat weakened enemies");
+    require(defended.run.mining.defenseDamageDealt > 0.0, "passive sentry defenses should report damage dealt");
+    require(defended.run.mining.temporaryMaterials.rare > 0 || defended.run.mining.temporaryMaterials.exotic > 0, "miniboss defeats should grant upgrade-grade rewards");
 }
 
 void miningDrillBreaksCellsAndMarksChunks()
@@ -2637,11 +2733,19 @@ void activeMiningRoundTripsThroughSave()
     state.run.mining.fuelBurnSeconds = 4.5;
     state.run.mining.fuelSpent = 2;
     state.run.mining.temporaryMaterials.exotic = 1;
+    state.run.mining.enemiesDefeated = 3;
+    state.run.mining.defenseDamageDealt = 4.25;
+    state.run.mining.enemyDamageTaken = 0.125;
+    state.run.mining.enemies = {
+        {MiningEnemyType::Flying, MiningCellFeature::EncounterZone, 22.5, 10.5, 1.0, -0.5, 2.5, 4.0, 0.0, 3.1, 0.48, 0.0, true}
+    };
     if (MiningCell* cell = miningCellAt(state.run.mining.terrain, 20, 10)) {
         cell->material = MiningCellMaterial::RareOre;
         cell->maxToughness = 7.0;
         cell->remainingToughness = 3.5;
         cell->revealed = true;
+        cell->feature = MiningCellFeature::TreasureVault;
+        cell->enemy = MiningEnemyType::Beetle;
     }
 
     const std::string serialized = serializeSaveData(captureSaveData(state));
@@ -2657,9 +2761,18 @@ void activeMiningRoundTripsThroughSave()
     require(std::abs(restored.run.mining.fuelBurnSeconds - 4.5) < 0.000001, "mining fuel timer should round trip");
     require(restored.run.mining.fuelSpent == 2, "mining fuel spend should round trip");
     require(restored.run.mining.temporaryMaterials.exotic == 1, "mining temporary materials should round trip");
+    require(restored.run.mining.enemiesDefeated == 3, "mining defeated enemy count should round trip");
+    require(std::abs(restored.run.mining.defenseDamageDealt - 4.25) < 0.000001, "mining defense damage should round trip");
+    require(std::abs(restored.run.mining.enemyDamageTaken - 0.125) < 0.000001, "mining enemy damage should round trip");
+    require(restored.run.mining.enemies.size() == 1, "active mining enemies should round trip");
+    require(restored.run.mining.enemies.front().type == MiningEnemyType::Flying, "active mining enemy type should round trip");
+    require(restored.run.mining.enemies.front().sourceFeature == MiningCellFeature::EncounterZone, "active mining enemy source feature should round trip");
+    require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
     require(restoredCell != nullptr && restoredCell->material == MiningCellMaterial::RareOre, "mining terrain material should round trip");
     require(restoredCell != nullptr && std::abs(restoredCell->remainingToughness - 3.5) < 0.000001, "mining terrain toughness should round trip");
+    require(restoredCell != nullptr && restoredCell->feature == MiningCellFeature::TreasureVault, "mining terrain feature metadata should round trip");
+    require(restoredCell != nullptr && restoredCell->enemy == MiningEnemyType::Beetle, "mining terrain enemy metadata should round trip");
 }
 
 void surfaceActionSummaryShowsResourceDeltas()
@@ -4306,6 +4419,8 @@ int main()
     surfaceMiningUsesSharedFuelAndRunsOnce();
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
+    hostileMiningTerrainGeneratesPreDugEnemyStructures();
+    hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
     miningDrillBreaksCellsAndMarksChunks();
     miningUsesSharedFuelReserve();
     miningDrillFootprintCapsWearToWorstContact();

@@ -23,6 +23,15 @@ struct MiningCellSnapshot {
     bool hazard = false;
 };
 
+struct MiningEnemySnapshot {
+    double x = 0.0;
+    double y = 0.0;
+    int type = 0;
+    double health = 1.0;
+    double maxHealth = 1.0;
+    bool active = true;
+};
+
 struct FlybyTrailPointSnapshot {
     double x = 0.0;
     double y = 0.0;
@@ -67,6 +76,7 @@ struct RenderSnapshot {
     bool miningTargetDrillable = false;
     bool miningDrilling = false;
     std::vector<MiningCellSnapshot> miningCells;
+    std::vector<MiningEnemySnapshot> miningEnemies;
     bool flybyActive = false;
     bool flybyCompleted = false;
     int flybyZone = 0;

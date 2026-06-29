@@ -1623,6 +1623,8 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.hardRockBounceRelief += drone->stats.hardRockBounceRelief;
         effects.extractionRiskRelief += drone->stats.extractionRiskRelief;
         effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief;
+        effects.sentryDamagePerSecond += drone->stats.sentryDamagePerSecond;
+        effects.enemyDamageRelief += drone->stats.enemyDamageRelief;
         effects.names.push_back(drone->name);
     }
 
@@ -1632,6 +1634,8 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.55);
     effects.extractionRiskRelief = std::clamp(effects.extractionRiskRelief, 0.0, 0.08);
     effects.enemyEncounterRelief = std::clamp(effects.enemyEncounterRelief, 0.0, 0.18);
+    effects.sentryDamagePerSecond = std::clamp(effects.sentryDamagePerSecond, 0.0, 8.0);
+    effects.enemyDamageRelief = std::clamp(effects.enemyDamageRelief, 0.0, 0.55);
     return effects;
 }
 

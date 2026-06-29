@@ -102,6 +102,25 @@ enum class MiningCellMaterial {
     Bedrock
 };
 
+enum class MiningCellFeature {
+    None,
+    MainTunnel,
+    BranchTunnel,
+    EncounterZone,
+    TreasureVault,
+    MinibossLair,
+    HiveNest
+};
+
+enum class MiningEnemyType {
+    None,
+    Ant,
+    Flying,
+    Beetle,
+    Elemental,
+    Mammal
+};
+
 enum class FlybyGrade {
     Active,
     Miss,
@@ -178,6 +197,8 @@ struct MiniDroneStats {
     double hardRockBounceRelief = 0.0;
     double extractionRiskRelief = 0.0;
     double enemyEncounterRelief = 0.0;
+    double sentryDamagePerSecond = 0.0;
+    double enemyDamageRelief = 0.0;
 };
 
 struct MaterialInventory {
@@ -473,6 +494,8 @@ struct MiningCell {
     double remainingToughness = 0.0;
     bool revealed = false;
     bool hazard = false;
+    MiningCellFeature feature = MiningCellFeature::None;
+    MiningEnemyType enemy = MiningEnemyType::None;
 };
 
 struct MiningTerrain {
@@ -481,6 +504,22 @@ struct MiningTerrain {
     int depthZone = 0;
     std::vector<MiningCell> cells;
     std::vector<std::uint8_t> dirtyChunks;
+};
+
+struct MiningEnemy {
+    MiningEnemyType type = MiningEnemyType::None;
+    MiningCellFeature sourceFeature = MiningCellFeature::None;
+    double x = 0.0;
+    double y = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
+    double health = 0.0;
+    double maxHealth = 0.0;
+    double armor = 0.0;
+    double speed = 0.0;
+    double damagePerSecond = 0.0;
+    double effectRadius = 0.0;
+    bool active = true;
 };
 
 struct MiningRunState {
@@ -519,6 +558,9 @@ struct MiningRunState {
     double hazardDelta = 0.0;
     int passiveDroneYield = 0;
     int cellsBroken = 0;
+    int enemiesDefeated = 0;
+    double defenseDamageDealt = 0.0;
+    double enemyDamageTaken = 0.0;
     int targetCellX = -1;
     int targetCellY = -1;
     double targetTipX = 32.0;
@@ -527,6 +569,7 @@ struct MiningRunState {
     double targetRemainingToughness = 0.0;
     double targetMaxToughness = 0.0;
     MiningTerrain terrain;
+    std::vector<MiningEnemy> enemies;
 };
 
 struct RunState {

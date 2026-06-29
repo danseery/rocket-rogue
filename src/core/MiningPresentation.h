@@ -56,6 +56,42 @@ inline std::string miningDroneSummary(const MiniDroneLoadoutEffects& drones)
     return summary;
 }
 
+inline std::string hostileTunnelSummary(const MiningTerrain& terrain)
+{
+    int structures = 0;
+    int rooms = 0;
+    MiningEnemyType firstEnemy = MiningEnemyType::None;
+    for (const MiningCell& cell : terrain.cells) {
+        if (cell.feature != MiningCellFeature::None) {
+            structures += 1;
+        }
+        if (cell.feature == MiningCellFeature::TreasureVault || cell.feature == MiningCellFeature::MinibossLair || cell.feature == MiningCellFeature::HiveNest) {
+            rooms += 1;
+        }
+        if (firstEnemy == MiningEnemyType::None && cell.enemy != MiningEnemyType::None) {
+            firstEnemy = cell.enemy;
+        }
+    }
+    if (structures <= 0) {
+        return "None";
+    }
+    std::string summary = std::to_string(structures) + " pre-dug cells";
+    if (rooms > 0) {
+        summary += ", " + std::to_string(rooms) + " room cells";
+    }
+    if (firstEnemy != MiningEnemyType::None) {
+        summary += ", " + std::string(miningEnemyTypeName(firstEnemy));
+    }
+    return summary;
+}
+
+inline int activeMiningEnemyCount(const MiningRunState& mining)
+{
+    return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active;
+    }));
+}
+
 inline MiningRunPresentation miningRunPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const MiningRunState& mining = state.run.mining;
@@ -81,6 +117,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::drillHeat, display::percent(mining.drillHeat)),
         panelMetric(text::labels::drillIntegrity, display::percent(mining.drillIntegrity)),
         panelMetric(text::labels::extractionRisk, display::signedPercent(extractionDelta)),
+        panelMetric("Enemies", std::to_string(activeMiningEnemyCount(mining))),
         panelMetric("Drones", drones.names.empty() ? "0" : std::to_string(static_cast<int>(drones.names.size()))),
         panelMetric(text::labels::targetMaterial, std::string(miningMaterialName(mining.targetMaterial))),
         panelMetric(text::labels::toughness, miningToughnessValue(mining))
@@ -102,8 +139,11 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown, static_cast<int>(std::round(tuning::mining::fuelSecondsPerUnit)))),
         detailPresentationRow("Drone loadout", miningDroneSummary(drones)),
         detailPresentationRow("Drone auto-mining", drones.passiveMiningRate > 0.0 ? ("+" + display::fixed(drones.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
+        detailPresentationRow("Passive defense", display::fixed(tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond, 1) + " DPS; " + display::percent(drones.enemyDamageRelief) + " shield relief"),
         detailPresentationRow("Drone oxygen reserve", drones.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(drones.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Drone stability", drones.hardRockBounceRelief > 0.0 ? display::percent(drones.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
+        detailPresentationRow("Hostile tunnels", hostileTunnelSummary(mining.terrain)),
+        detailPresentationRow("Enemies defeated", std::to_string(mining.enemiesDefeated)),
         detailPresentationRow("Ore efficiency", display::signedPercent(stats.oreYieldChance)),
         detailPresentationRow("Heat control", display::fixed(stats.heatCoolingPerSecond, 2)),
         detailPresentationRow("Drill protection", display::signedPercent(stats.integrityRelief)),
