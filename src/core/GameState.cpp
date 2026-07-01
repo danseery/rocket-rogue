@@ -22,6 +22,16 @@ struct RefitCandidate {
     int cost = 0;
 };
 
+bool hasMaterialCost(const MaterialInventory& cost)
+{
+    return cost.common > 0 || cost.rare > 0 || cost.exotic > 0;
+}
+
+bool materialRefitsAvailable(const GameState& state)
+{
+    return state.meta.furthestTier >= tuning::research::firstResearchTier;
+}
+
 std::vector<std::string> starterInventory()
 {
     return {
@@ -363,6 +373,9 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     std::vector<RefitCandidate> candidates;
     const auto addCandidates = [&](bool onlyUnowned) {
         for (const ShipModule* module : modulePool) {
+            if (!materialRefitsAvailable(state) && hasMaterialCost(module->materialCost)) {
+                continue;
+            }
             const bool alreadyOwned = std::find(
                 state.meta.ownedModuleIds.begin(),
                 state.meta.ownedModuleIds.end(),
@@ -1164,7 +1177,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (outcome.type == LaunchResultType::Destroyed) {
         state.meta.shipsLost += 1;
-        state.run.frontierReadiness = outcome.frontierTransfer ? 0 : std::max(0, state.run.frontierReadiness - 1);
+        state.run.frontierReadiness = std::max(0, state.run.frontierReadiness - 1);
         state.run.credits = std::max(tuning::hangar::minimumExpeditionCredits, state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.surfaceUpgradeIds.clear();
         state.run.active = false;

@@ -1,6 +1,7 @@
 #include "game/RocketGameApp.h"
 
 #include "core/FlightProgress.h"
+#include "core/GameUi.h"
 #include "core/GameText.h"
 #include "core/LaunchStatus.h"
 #include "core/MiningSystem.h"
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string_view>
 #include <vector>
 
 namespace rocket {
@@ -43,6 +45,29 @@ std::vector<TelemetryEvent> chartTelemetryForOutcome(
         telemetry.push_back(telemetryAt(launch, 1.0 + (sampleCeiling - 1.0) * t));
     }
     return telemetry;
+}
+
+bool consumeIndexedAction(std::string_view action, std::string_view prefix, int& index)
+{
+    if (action.substr(0, prefix.size()) != prefix) {
+        return false;
+    }
+
+    const std::string_view raw = action.substr(prefix.size());
+    if (raw.empty()) {
+        return false;
+    }
+
+    int value = 0;
+    for (const char c : raw) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        value = value * 10 + (c - '0');
+    }
+
+    index = value;
+    return true;
 }
 
 } // namespace
@@ -150,6 +175,9 @@ bool RocketGameApp::initialize()
     if (!renderer_.initialize()) {
         state_.statusLine = std::string(text::status::webglFailed);
     }
+    rmlUi_.initialize([this](const std::string& action) {
+        runUiAction(action);
+    });
 
     refreshPanel();
     return true;
@@ -280,6 +308,7 @@ void RocketGameApp::tick(double deltaSeconds)
 void RocketGameApp::render()
 {
     renderer_.render(snapshot());
+    rmlUi_.render();
 }
 
 void RocketGameApp::prepareForLaunch()
@@ -1057,6 +1086,31 @@ void RocketGameApp::resetSave()
     panelDirty_ = true;
 }
 
+bool RocketGameApp::uiMouseMove(int x, int y)
+{
+    return rmlUi_.mouseMove(x, y);
+}
+
+bool RocketGameApp::uiMouseDown(int x, int y, int button)
+{
+    return rmlUi_.mouseDown(x, y, button);
+}
+
+bool RocketGameApp::uiMouseUp(int x, int y, int button)
+{
+    return rmlUi_.mouseUp(x, y, button);
+}
+
+bool RocketGameApp::uiMouseWheel(int x, int y, double deltaY)
+{
+    return rmlUi_.mouseWheel(x, y, deltaY);
+}
+
+bool RocketGameApp::uiHitTest(int x, int y) const
+{
+    return rmlUi_.hitTest(x, y);
+}
+
 void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
 {
     const PreparedLaunch flightModel = currentFlightModel();
@@ -1101,7 +1155,7 @@ void RocketGameApp::save()
 void RocketGameApp::refreshPanel()
 {
     const PreparedLaunch flightModel = currentFlightModel();
-    setBrowserPanelHtml(buildGamePanelHtml({
+    const std::string panelHtml = buildGamePanelHtml({
         state_,
         catalog_,
         session_.preparedLaunch,
@@ -1113,8 +1167,106 @@ void RocketGameApp::refreshPanel()
         session_.controls.actions,
         session_.flightArmed,
         session_.controls.pressureReliefUsed,
-    }));
+    });
+    setBrowserPanelHtml(panelHtml);
+    rmlUi_.setPanelHtml(panelHtml);
     panelDirty_ = false;
+}
+
+void RocketGameApp::runUiAction(const std::string& action)
+{
+    int index = 0;
+    if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
+        buyOffer(index);
+    } else if (consumeIndexedAction(action, ui::actions::researchProjectPrefix, index)) {
+        selectResearchProject(index);
+    } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {
+        selectSurfaceUpgrade(index);
+    } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
+        equipDrone(index);
+    } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
+        selectNavigationDestination(index);
+    } else if (consumeIndexedAction(action, ui::actions::recruitCandidatePrefix, index)) {
+        recruitCrew(index);
+    } else if (action == ui::actions::prepareLaunch) {
+        prepareForLaunch();
+    } else if (action == ui::actions::startLaunch) {
+        startLaunch();
+    } else if (action == ui::actions::ejectNow) {
+        ejectNow();
+    } else if (action == ui::actions::returnHome) {
+        returnHome();
+    } else if (action == ui::actions::arrivalOps) {
+        arrivalOps();
+    } else if (action == ui::actions::skipArrivalFanfare) {
+        skipArrivalFanfare();
+    } else if (action == ui::actions::cutEngines) {
+        cutEngines();
+    } else if (action == ui::actions::pressureRelief) {
+        pressureReliefValve();
+    } else if (action == ui::actions::closeReliefValve) {
+        closePressureReliefValve();
+    } else if (action == ui::actions::jettisonCargo) {
+        jettisonCargo();
+    } else if (action == ui::actions::next) {
+        next();
+    } else if (action == ui::actions::attemptFrontier) {
+        attemptFrontierTransfer();
+    } else if (action == ui::actions::openNavigation) {
+        openNavigation();
+    } else if (action == ui::actions::arkJump) {
+        arkJump();
+    } else if (action == ui::actions::rerollOffers) {
+        rerollOffers();
+    } else if (action == ui::actions::arrivalFlyby) {
+        runArrivalFlyby();
+    } else if (action == ui::actions::flybyAbort) {
+        flybyAbort();
+    } else if (action == ui::actions::flybyContinue) {
+        flybyContinue();
+    } else if (action == ui::actions::arrivalOrbit) {
+        enterArrivalOrbit();
+    } else if (action == ui::actions::orbitAbort) {
+        orbitAbort();
+    } else if (action == ui::actions::orbitContinue) {
+        orbitContinue();
+    } else if (action == ui::actions::arrivalLanding) {
+        attemptArrivalLanding();
+    } else if (action == ui::actions::skipResearch) {
+        skipResearch();
+    } else if (action == ui::actions::surveySurface) {
+        surveySurface();
+    } else if (action == ui::actions::mineSurface) {
+        mineSurface();
+    } else if (action == ui::actions::pushSurface) {
+        pushSurface();
+    } else if (action == ui::actions::extractSurface) {
+        extractSurface();
+    } else if (action == ui::actions::droneOps) {
+        openDroneOps();
+    } else if (action == ui::actions::backToSurfaceOps) {
+        backToSurfaceOps();
+    } else if (action == ui::actions::upgradeDroneSlot) {
+        upgradeDroneSlot();
+    } else if (action == ui::actions::miningScanner) {
+        miningScanner();
+    } else if (action == ui::actions::miningStow) {
+        miningStow();
+    } else if (action == ui::actions::miningAbort) {
+        miningAbort();
+    } else if (action == ui::actions::miningFailureAck) {
+        miningFailureAck();
+    } else if (action == ui::actions::repairShip) {
+        repairShip();
+    } else if (action == ui::actions::recruitCrew) {
+        recruitCrew();
+    } else if (action == ui::actions::trainCrew) {
+        trainCrew();
+    } else if (action == ui::actions::restCrew) {
+        restCrew();
+    } else if (action == ui::actions::resetSave) {
+        resetSave();
+    }
 }
 
 RenderSnapshot RocketGameApp::snapshot() const

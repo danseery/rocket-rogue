@@ -186,6 +186,12 @@ EM_JS(void, rr_sync_canvas_to_visual_viewport, (), {
     const height = Math.max(1, Math.round((viewport && viewport.height) || globalThis.innerHeight || canvas.clientHeight || 1));
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
+    if (canvas.width !== width) {
+        canvas.width = width;
+    }
+    if (canvas.height !== height) {
+        canvas.height = height;
+    }
 });
 
 EM_JS(double, rr_scene_left_ndc, (), {
@@ -529,6 +535,7 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     const float arrivalGlow = snapshot.screen == Screen::ArrivalFanfare
         ? 0.018F * (1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0)))
         : 0.0F;
+    glDisable(GL_SCISSOR_TEST);
     glClearColor(0.02F + heat * 0.05F + arrivalGlow, 0.03F + arrivalGlow * 0.70F, 0.05F + heat * 0.02F + arrivalGlow * 0.35F, 1.0F);
     glClear(GL_COLOR_BUFFER_BIT);
 #else
@@ -568,6 +575,22 @@ void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, in
         pushVertex(vertices, cx, cy, color);
         pushVertex(vertices, cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, color);
         pushVertex(vertices, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, color);
+    }
+    submit(vertices, 0x0004, false, 0, worldSpace);
+}
+
+void WebGLRenderer::drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments, bool worldSpace)
+{
+    Color edgeColor = centerColor;
+    edgeColor.a = 0.0F;
+
+    std::vector<float>& vertices = scratchVertices(static_cast<std::size_t>(segments) * 24);
+    for (int i = 0; i < segments; ++i) {
+        const float a0 = (static_cast<float>(i) / static_cast<float>(segments)) * kPi * 2.0F;
+        const float a1 = (static_cast<float>(i + 1) / static_cast<float>(segments)) * kPi * 2.0F;
+        pushVertex(vertices, cx, cy, centerColor);
+        pushVertex(vertices, cx + std::cos(a0) * radius, cy + std::sin(a0) * radius, edgeColor);
+        pushVertex(vertices, cx + std::cos(a1) * radius, cy + std::sin(a1) * radius, edgeColor);
     }
     submit(vertices, 0x0004, false, 0, worldSpace);
 }
@@ -754,14 +777,11 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
         submitLines(vertices, width);
     };
 
-    for (int i = -5; i <= 5; ++i) {
-        drawCurveOffset(goodBand * static_cast<float>(i) / 5.0F, {0.10F, 0.46F, 0.62F, 0.020F}, 1.0F);
-    }
-    drawCurveOffset(-goodBand, {0.20F, 0.72F, 1.0F, 0.28F}, 2.0F);
-    drawCurveOffset(goodBand, {0.20F, 0.72F, 1.0F, 0.28F}, 2.0F);
-    drawCurveOffset(-perfectBand, {1.0F, 0.82F, 0.28F, 0.42F + pulse * 0.08F}, 3.0F);
-    drawCurveOffset(perfectBand, {1.0F, 0.82F, 0.28F, 0.42F + pulse * 0.08F}, 3.0F);
-    drawCurveOffset(0.0F, {0.86F, 0.96F, 1.0F, 0.30F}, 1.2F);
+    drawCurveOffset(0.0F, {0.74F, 0.86F, 0.92F, 0.18F}, 1.2F);
+    drawCurveOffset(-goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 2.0F);
+    drawCurveOffset(goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 2.0F);
+    drawCurveOffset(-perfectBand, {1.0F, 0.82F, 0.28F, 0.38F + pulse * 0.06F}, 2.4F);
+    drawCurveOffset(perfectBand, {1.0F, 0.82F, 0.28F, 0.38F + pulse * 0.06F}, 2.4F);
 
     const Vec2 startGate = pathPoint(0.0F);
     const Vec2 endGate = pathPoint(1.0F);
@@ -784,6 +804,9 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
     drawCircle(endGate.x, endGate.y, 0.024F + pulse * 0.004F, {1.0F, 0.82F, 0.28F, 0.32F}, 24);
 
     const float planetRadius = 0.13F + std::min(4.0F, static_cast<float>(snapshot.destinationTier)) * 0.012F;
+    drawRadialGlow(destX, destY, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.22F, 0.36F, 0.14F}, 72);
+    drawEllipseLine(destX, destY, planetRadius * (1.28F + pulse * 0.03F), planetRadius * (1.28F + pulse * 0.03F), {0.12F, 0.66F, 0.86F, 0.34F}, 72, 0.0F, 2.0F * kPi);
+
     const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
     if (destinationAsset >= 0 && textureReady(destinationAsset)) {
         const float scale = bodySpriteScale(destinationAsset);
@@ -798,7 +821,6 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
             drawEllipseLine(destX, destY, planetRadius * 2.36F, planetRadius * 0.54F, {0.54F, 0.80F, 0.94F, 0.30F}, 88, -0.10F * kPi, 1.10F * kPi);
         }
     }
-    drawCircle(destX, destY, planetRadius * (1.55F + pulse * 0.10F), {0.30F, 0.86F, 1.0F, 0.08F}, 72);
 
     const float shipX = static_cast<float>(snapshot.flybyShipX);
     const float shipY = static_cast<float>(snapshot.flybyShipY);
@@ -824,29 +846,17 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
         submitLines(pathVertices, 2.4F);
     }
 
-    std::vector<float>& trailVertices = scratchVertices(8 * 16);
-    for (int i = 1; i <= 8; ++i) {
-        const float a = static_cast<float>(i - 1) / 8.0F;
-        const float b = static_cast<float>(i) / 8.0F;
-        const float tailA = 0.18F * a;
-        const float tailB = 0.18F * b;
-        appendLine(
-            trailVertices,
-            shipX - velocity.x * tailA,
-            shipY - velocity.y * tailA,
-            shipX - velocity.x * tailB,
-            shipY - velocity.y * tailB,
-            {0.42F, 0.88F, 1.0F, 0.28F * (1.0F - b)});
-    }
-    submitLines(trailVertices, 1.6F);
-
     const int zone = snapshot.flybyCompleted ? snapshot.flybyResult : snapshot.flybyZone;
     const bool perfectZone = snapshot.flybyCompleted ? zone >= 3 : zone >= 2;
     const bool goodZone = snapshot.flybyCompleted ? zone >= 2 : zone >= 1;
     const Color zoneGlow = perfectZone
-        ? Color{1.0F, 0.78F, 0.22F, 0.18F}
-        : (goodZone ? Color{0.34F, 0.90F, 1.0F, 0.15F} : Color{1.0F, 0.28F, 0.20F, 0.10F});
-    drawCircle(shipX, shipY, 0.090F + pulse * 0.010F, zoneGlow, 42);
+        ? Color{0.92F, 0.42F, 0.04F, 0.18F}
+        : (goodZone ? Color{0.02F, 0.28F, 0.46F, 0.16F} : Color{0.32F, 0.0F, 0.035F, 0.24F});
+    const Color zoneRing = perfectZone
+        ? Color{1.0F, 0.76F, 0.22F, 0.54F}
+        : (goodZone ? Color{0.22F, 0.86F, 1.0F, 0.46F} : Color{0.78F, 0.04F, 0.04F, 0.52F});
+    drawRadialGlow(shipX, shipY, 0.078F + pulse * 0.008F, zoneGlow, 42);
+    drawEllipseLine(shipX, shipY, 0.052F + pulse * 0.005F, 0.052F + pulse * 0.005F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
     const float throttleInput = static_cast<float>(snapshot.flybyInputY);
     if (!snapshot.flybyCompleted && throttleInput > 0.05F) {
@@ -889,9 +899,13 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
 
     if (snapshot.flybyCompleted) {
         const Color resultColor = snapshot.flybyResult >= 3
-            ? Color{1.0F, 0.78F, 0.22F, 0.18F}
-            : (snapshot.flybyResult >= 2 ? Color{0.34F, 0.90F, 1.0F, 0.14F} : Color{1.0F, 0.22F, 0.18F, 0.12F});
-        drawCircle(shipX, shipY, 0.16F + pulse * 0.025F, resultColor, 64);
+            ? Color{0.92F, 0.44F, 0.04F, 0.18F}
+            : (snapshot.flybyResult >= 2 ? Color{0.02F, 0.28F, 0.46F, 0.16F} : Color{0.34F, 0.0F, 0.025F, 0.26F});
+        const Color resultRing = snapshot.flybyResult >= 3
+            ? Color{1.0F, 0.76F, 0.22F, 0.50F}
+            : (snapshot.flybyResult >= 2 ? Color{0.22F, 0.82F, 1.0F, 0.42F} : Color{0.82F, 0.04F, 0.035F, 0.54F});
+        drawRadialGlow(shipX, shipY, 0.128F + pulse * 0.012F, resultColor, 64);
+        drawEllipseLine(shipX, shipY, 0.092F + pulse * 0.008F, 0.092F + pulse * 0.008F, resultRing, 64, 0.0F, 2.0F * kPi);
     }
 }
 
@@ -906,21 +920,20 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
     const float goodBand = static_cast<float>(snapshot.orbitGoodBand);
     const float perfectBand = static_cast<float>(snapshot.orbitPerfectBand);
 
-    for (int i = -4; i <= 4; ++i) {
-        const float offset = goodBand * static_cast<float>(i) / 4.0F;
-        drawEllipseLine(0.0F, 0.0F, targetRadius + offset, targetRadius + offset, {0.14F, 0.54F, 0.68F, 0.035F}, 128, 0.0F, 2.0F * kPi);
-    }
-    drawEllipseLine(0.0F, 0.0F, targetRadius - goodBand, targetRadius - goodBand, {0.24F, 0.82F, 1.0F, 0.28F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius + goodBand, targetRadius + goodBand, {0.24F, 0.82F, 1.0F, 0.28F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius - perfectBand, targetRadius - perfectBand, {1.0F, 0.80F, 0.24F, 0.44F + pulse * 0.10F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius + perfectBand, targetRadius + perfectBand, {1.0F, 0.80F, 0.24F, 0.44F + pulse * 0.10F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.86F, 0.96F, 1.0F, 0.24F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.74F, 0.86F, 0.92F, 0.18F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius - goodBand, targetRadius - goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + goodBand, targetRadius + goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius - perfectBand, targetRadius - perfectBand, {1.0F, 0.80F, 0.24F, 0.38F + pulse * 0.08F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + perfectBand, targetRadius + perfectBand, {1.0F, 0.80F, 0.24F, 0.38F + pulse * 0.08F}, 128, 0.0F, 2.0F * kPi);
 
     const float progress = static_cast<float>(std::clamp(snapshot.orbitProgress, 0.0, 1.0));
     if (progress > 0.0F) {
         const float startAngle = static_cast<float>(tuning::orbit::startAngleRadians);
         drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.98F, 0.96F, 0.82F, 0.74F}, 128, startAngle, startAngle + progress * 2.0F * kPi);
     }
+
+    drawRadialGlow(0.0F, 0.0F, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.20F, 0.34F, 0.12F}, 88);
+    drawEllipseLine(0.0F, 0.0F, planetRadius * (1.26F + pulse * 0.03F), planetRadius * (1.26F + pulse * 0.03F), {0.12F, 0.64F, 0.84F, 0.30F}, 88, 0.0F, 2.0F * kPi);
 
     const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
     if (destinationAsset >= 0 && textureReady(destinationAsset)) {
@@ -936,7 +949,6 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
             drawEllipseLine(0.0F, 0.0F, planetRadius * 2.30F, planetRadius * 0.52F, {0.54F, 0.80F, 0.94F, 0.30F}, 96, -0.10F * kPi, 1.10F * kPi);
         }
     }
-    drawCircle(0.0F, 0.0F, planetRadius * (1.55F + pulse * 0.08F), {0.30F, 0.86F, 1.0F, 0.065F}, 88);
 
     if (snapshot.orbitTrailPoints.size() >= 2) {
         std::vector<float>& pathVertices = scratchVertices(snapshot.orbitTrailPoints.size() * 12);
@@ -966,9 +978,13 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
     const bool perfectZone = snapshot.orbitCompleted ? zone >= 3 : zone >= 2;
     const bool goodZone = snapshot.orbitCompleted ? zone >= 2 : zone >= 1;
     const Color zoneGlow = perfectZone
-        ? Color{1.0F, 0.78F, 0.22F, 0.18F}
-        : (goodZone ? Color{0.34F, 0.90F, 1.0F, 0.15F} : Color{1.0F, 0.28F, 0.20F, 0.10F});
-    drawCircle(shipX, shipY, 0.082F + pulse * 0.010F, zoneGlow, 42);
+        ? Color{0.92F, 0.42F, 0.04F, 0.17F}
+        : (goodZone ? Color{0.02F, 0.26F, 0.44F, 0.14F} : Color{0.32F, 0.0F, 0.035F, 0.22F});
+    const Color zoneRing = perfectZone
+        ? Color{1.0F, 0.76F, 0.22F, 0.50F}
+        : (goodZone ? Color{0.22F, 0.84F, 1.0F, 0.42F} : Color{0.78F, 0.04F, 0.04F, 0.50F});
+    drawRadialGlow(shipX, shipY, 0.074F + pulse * 0.008F, zoneGlow, 42);
+    drawEllipseLine(shipX, shipY, 0.050F + pulse * 0.004F, 0.050F + pulse * 0.004F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
     const float inputMagnitude = std::hypot(static_cast<float>(snapshot.orbitInputX), static_cast<float>(snapshot.orbitInputY));
     if (!snapshot.orbitCompleted && inputMagnitude > 0.05F) {
@@ -999,9 +1015,13 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
 
     if (snapshot.orbitCompleted) {
         const Color resultColor = snapshot.orbitResult >= 3
-            ? Color{1.0F, 0.78F, 0.22F, 0.18F}
-            : (snapshot.orbitResult >= 2 ? Color{0.34F, 0.90F, 1.0F, 0.14F} : Color{1.0F, 0.22F, 0.18F, 0.12F});
-        drawCircle(shipX, shipY, 0.15F + pulse * 0.024F, resultColor, 64);
+            ? Color{0.92F, 0.44F, 0.04F, 0.17F}
+            : (snapshot.orbitResult >= 2 ? Color{0.02F, 0.28F, 0.46F, 0.15F} : Color{0.34F, 0.0F, 0.025F, 0.24F});
+        const Color resultRing = snapshot.orbitResult >= 3
+            ? Color{1.0F, 0.76F, 0.22F, 0.48F}
+            : (snapshot.orbitResult >= 2 ? Color{0.22F, 0.82F, 1.0F, 0.40F} : Color{0.82F, 0.04F, 0.035F, 0.50F});
+        drawRadialGlow(shipX, shipY, 0.122F + pulse * 0.012F, resultColor, 64);
+        drawEllipseLine(shipX, shipY, 0.086F + pulse * 0.007F, 0.086F + pulse * 0.007F, resultRing, 64, 0.0F, 2.0F * kPi);
     }
 }
 
@@ -1040,12 +1060,12 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
         const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
-        float localLight = std::clamp(1.0F - distCells / kMiningLightRadiusCells, 0.0F, 1.0F);
+        float localLight = std::clamp(1.0F - distCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
         if (snapshot.miningScannerPulse > 0.0) {
             const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
-            const float ringRadius = 2.2F + (1.0F - pulse) * 4.9F;
-            const float ringWidth = 1.4F + pulse * 0.7F;
-            const float ring = std::clamp(1.0F - std::abs(distCells - ringRadius) / ringWidth, 0.0F, 1.0F) * 0.42F * pulse;
+            const float ringRadius = 2.0F + (1.0F - pulse) * 4.6F;
+            const float ringWidth = 1.0F + pulse * 0.45F;
+            const float ring = std::clamp(1.0F - std::abs(distCells - ringRadius) / ringWidth, 0.0F, 1.0F) * 0.032F * pulse;
             localLight = std::max(localLight, ring);
         }
         const Color color = miningMaterialColor(cell.material, static_cast<float>(cell.integrity), cell.revealed, cell.hazard && cell.revealed, snapshot.destinationTier, localLight);
@@ -1075,8 +1095,8 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drone.y -= static_cast<float>(snapshot.miningRecoilY) * cellH * bounce;
     }
     const float cellSize = std::min(cellW, cellH);
-    drawCircle(drone.x, drone.y, cellSize * 6.8F, {0.18F, 0.52F, 0.68F, 0.055F}, 40);
-    drawCircle(drone.x, drone.y, cellSize * 3.2F, {0.28F, 0.82F, 0.98F, 0.080F}, 32);
+    drawRadialGlow(drone.x, drone.y, cellSize * 5.9F, {0.88F, 0.58F, 0.24F, 0.0084F}, 40);
+    drawRadialGlow(drone.x, drone.y, cellSize * 2.7F, {1.0F, 0.78F, 0.36F, 0.0132F}, 32);
     if (snapshot.miningFailurePulse > 0.0) {
         const float pulse = static_cast<float>(std::clamp(snapshot.miningFailurePulse, 0.0, 1.0));
         const float beat = 0.55F + 0.45F * std::sin(static_cast<float>(snapshot.animationTime) * 34.0F);
@@ -1085,8 +1105,9 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     }
     if (snapshot.miningScannerPulse > 0.0) {
         const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
-        const float radius = cellSize * (5.2F + (1.0F - pulse) * 12.0F);
-        drawCircle(drone.x, drone.y, radius, {0.30F, 0.88F, 1.0F, 0.055F * pulse}, 48);
+        const float radius = cellSize * (4.8F + (1.0F - pulse) * 10.4F);
+        drawRadialGlow(drone.x, drone.y, radius, {1.0F, 0.72F, 0.32F, 0.0048F * pulse}, 48);
+        drawEllipseLine(drone.x, drone.y, radius, radius, {1.0F, 0.76F, 0.36F, 0.030F * pulse}, 48, 0.0F, 2.0F * kPi);
     }
 
     const Vec2 target = gridPoint(snapshot.miningTargetX, snapshot.miningTargetY);
@@ -1179,7 +1200,6 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     const float cautionY = bottom + height * 0.70F;
 
     drawRect((left + right) * 0.5F, (bottom + top) * 0.5F, width, height, {0.02F, 0.05F, 0.07F, 0.72F});
-    drawRect((left + right) * 0.5F, top - 0.03F, width, 0.02F, {0.18F, 0.30F, 0.42F, 0.10F});
     drawRect((left + right) * 0.5F, cautionY + height * 0.15F, width, height * 0.30F, {0.24F, 0.09F, 0.08F, 0.08F});
     drawLine(left, bottom, right, bottom, {0.36F, 0.55F, 0.68F, 0.55F});
     drawLine(left, bottom, left, top, {0.36F, 0.55F, 0.68F, 0.55F});
@@ -1188,6 +1208,9 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 
     for (int i = 1; i <= 3; ++i) {
         const float y = bottom + height * (static_cast<float>(i) / 4.0F);
+        if (y >= cautionY) {
+            continue;
+        }
         drawLine(left, y, right, y, {0.24F, 0.38F, 0.48F, 0.14F});
     }
 
@@ -1272,7 +1295,7 @@ void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
 {
     const bool arrivalFanfare = snapshot.screen == Screen::ArrivalFanfare;
     const float flash = arrivalFanfare
-        ? 0.55F + 0.45F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
+        ? 0.42F + 0.28F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
         : 0.0F;
     std::vector<float>& routeVertices = scratchVertices(28 * 16);
     Vec2 previous = routePoint(snapshot, 0.0F);
@@ -1295,10 +1318,10 @@ void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
             const float t = static_cast<float>(i) / 28.0F;
             const Vec2 next = routePoint(snapshot, t);
             const float tail = std::clamp(1.0F - std::abs(t - 0.78F - flash * 0.18F) / 0.22F, 0.0F, 1.0F);
-            appendLine(flashVertices, previous.x, previous.y, next.x, next.y, {0.95F, 0.96F, 1.0F, 0.22F * tail});
+            appendLine(flashVertices, previous.x, previous.y, next.x, next.y, {0.95F, 0.96F, 1.0F, 0.14F * tail});
             previous = next;
         }
-        submitLines(flashVertices, 3.0F);
+        submitLines(flashVertices, 2.0F);
     }
 
     if (snapshot.travelProgress <= 1.0) {
@@ -1587,9 +1610,11 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         const float life = 1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0));
         const float beat = 0.5F + 0.5F * std::sin(time * 15.0F);
         const float baseRadius = 0.13F + static_cast<float>(snapshot.destinationTier) * 0.015F;
-        drawCircle(endpoint.x, endpoint.y, baseRadius * (1.0F + beat * 0.22F), {0.30F, 0.88F, 1.0F, 0.12F + beat * 0.06F}, 64);
-        drawCircle(endpoint.x, endpoint.y, baseRadius * (1.58F + (1.0F - life) * 0.36F), {1.0F, 0.78F, 0.22F, 0.16F * life}, 72);
-        drawCircle(endpoint.x, endpoint.y, baseRadius * (2.10F + (1.0F - life) * 0.72F), {0.36F, 0.90F, 1.0F, 0.10F * life}, 72);
+        drawRadialGlow(endpoint.x, endpoint.y, baseRadius * (1.08F + beat * 0.12F), {0.04F, 0.36F, 0.54F, 0.055F + beat * 0.018F}, 64);
+        drawRadialGlow(endpoint.x, endpoint.y, baseRadius * (1.48F + (1.0F - life) * 0.24F), {0.92F, 0.44F, 0.04F, 0.055F * life}, 72);
+        drawRadialGlow(endpoint.x, endpoint.y, baseRadius * (1.92F + (1.0F - life) * 0.42F), {0.02F, 0.26F, 0.44F, 0.038F * life}, 72);
+        drawEllipseLine(endpoint.x, endpoint.y, baseRadius * (1.24F + beat * 0.08F), baseRadius * (1.24F + beat * 0.08F), {0.24F, 0.78F, 0.96F, 0.20F * life}, 80, 0.0F, 2.0F * kPi);
+        drawEllipseLine(endpoint.x, endpoint.y, baseRadius * (1.74F + (1.0F - life) * 0.22F), baseRadius * (1.74F + (1.0F - life) * 0.22F), {1.0F, 0.68F, 0.18F, 0.18F * life}, 88, 0.0F, 2.0F * kPi);
         for (int i = 0; i < 14; ++i) {
             const float seed = static_cast<float>(i) * 2.39996F;
             const float angle = seed + time * (0.15F + static_cast<float>(i % 3) * 0.025F);

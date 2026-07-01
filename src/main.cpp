@@ -549,6 +549,46 @@ void rr_reset_save()
     }
 }
 
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_rml_mouse_move(int x, int y)
+{
+    return g_app && g_app->uiMouseMove(x, y) ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_rml_mouse_down(int x, int y, int button)
+{
+    return g_app && g_app->uiMouseDown(x, y, button) ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_rml_mouse_up(int x, int y, int button)
+{
+    return g_app && g_app->uiMouseUp(x, y, button) ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_rml_wheel(int x, int y, double deltaY)
+{
+    return g_app && g_app->uiMouseWheel(x, y, deltaY) ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_rml_hit_test(int x, int y)
+{
+    return g_app && g_app->uiHitTest(x, y) ? 1 : 0;
+}
+
 } // extern "C"
 
 int main()

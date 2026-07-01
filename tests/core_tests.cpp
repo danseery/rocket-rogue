@@ -54,6 +54,17 @@ const DetailPresentationRow* findDetailPresentationRow(const std::vector<DetailP
 bool hasDetailPresentationHeader(const std::vector<DetailPresentationRow>& rows, std::string_view label);
 bool hasRefitChip(const RefitPresentation& presentation, std::string_view label, std::string_view value, bool positive);
 
+std::size_t countOccurrences(std::string_view text, std::string_view needle)
+{
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string_view::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
 void activateOnlyCrew(GameState& state, std::string_view id)
 {
     for (Astronaut& astronaut : state.run.crew) {
@@ -564,6 +575,47 @@ void specialShipComponentsRequireRecoveredMaterials()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::deepReservoir) != state.meta.ownedModuleIds.end(), "bought special component should enter permanent shipyard inventory");
 }
 
+void preMiningRefitOffersAvoidMaterialCosts()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 441);
+    state.run.credits = 400.0;
+    state.meta.furthestTier = 1;
+    state.meta.unlockKeys = {
+        content::unlock::starter,
+        content::unlock::thermal,
+        content::unlock::recovery,
+        content::unlock::deepSpace,
+        content::unlock::ai,
+        content::unlock::exotic
+    };
+    for (const ShipModule& module : catalog.modules) {
+        if (module.materialCost.common == 0 && module.materialCost.rare == 0 && module.materialCost.exotic == 0) {
+            state.meta.ownedModuleIds.push_back(module.id);
+        }
+    }
+
+    Random rng(4410);
+    generateModuleOffers(state, catalog, rng);
+
+    bool sawOffer = false;
+    for (const std::string& moduleId : state.run.offerModuleIds) {
+        if (moduleId.empty()) {
+            continue;
+        }
+        const ShipModule* module = catalog.findModule(moduleId);
+        require(module != nullptr, "generated module offer should resolve");
+        sawOffer = true;
+        require(module->materialCost.common == 0 && module->materialCost.rare == 0 && module->materialCost.exotic == 0, "pre-mining refit offers should not require materials");
+    }
+    for (const std::string& upgradeId : state.run.offerCrewUpgradeIds) {
+        if (!upgradeId.empty()) {
+            sawOffer = true;
+        }
+    }
+    require(sawOffer, "pre-mining refits should still offer an installable path");
+}
+
 void inventoryPresentationSummarizesResourcesAndPayload()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -619,6 +671,25 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship destruction should not erase permanent shipyard tech");
     require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::cryoLoop) != state.run.inventoryModuleIds.end(), "replacement ships should inherit permanent shipyard inventory");
     require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
+}
+
+void destroyedTransferAttemptCostsOneProvingFlight()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 468);
+    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    const Destination* next = nextDestination(state, catalog);
+    require(next != nullptr, "starter route should have a transfer target");
+
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.destinationId = next->id;
+    destroyed.frontierTransfer = true;
+    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
+
+    applyLaunchOutcome(state, catalog, destroyed);
+
+    require(state.run.frontierReadiness == frontierReadinessRequired(state, catalog) - 1, "destroyed transfer attempts should cost one proving flight, not all flight data");
 }
 
 void deadCrewLosesTraining()
@@ -1239,6 +1310,10 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(miss.screen == Screen::Flyby && miss.run.flyby.active, "starting arrival flyby should open the flyby minigame");
     require(miss.run.flyby.currentZone >= 1, "flyby should begin inside the single-pass corridor");
     require(miss.run.flyby.gravityStrength <= tuning::flyby::gravityEasy + 0.001, "Moon flyby should use easy gravity");
+    Random flybyPanelRng(701);
+    const PreparedLaunch flybyPanelLaunch = prepareLaunch(miss, catalog, flybyPanelRng);
+    const std::string flybyPanelHtml = buildGamePanelHtml({miss, catalog, flybyPanelLaunch, flybyPanelLaunch});
+    require(flybyPanelHtml.find("Speed") != std::string::npos && flybyPanelHtml.find(" m/s") != std::string::npos, "flyby panel should expose ship speed as a readout");
     const int missFlybysBefore = destinationHistoryValue(miss.meta.destinationFlybys, catalog, content::destination::moon);
     const int missBlueprintsBefore = miss.meta.blueprintProgress;
     const double missCreditsBefore = miss.run.credits;
@@ -4139,6 +4214,93 @@ void surfaceHtmlPromotesMiningAction()
     require(html.find("<h1>Surface Ops</h1>") != std::string::npos, "surface panel should title the surface phase");
     require(html.find("class=\"surface-primary-action\"") != std::string::npos, "surface panel should promote the mining action");
     require(html.find("Mine deposit") != std::string::npos, "surface panel should keep mining obvious");
+
+    state.run.surfaceExpedition.miningRunUsed = true;
+    const std::string usedHtml = buildGamePanelHtml({state, catalog, launch, launch});
+    const std::size_t usedMine = usedHtml.find("Mine deposit");
+    const std::size_t fieldActions = usedHtml.find("Field actions");
+    require(usedMine != std::string::npos, "used mining action should still be visible as the primary surface state");
+    require(fieldActions != std::string::npos, "surface panel should keep the field action section");
+    require(usedMine < fieldActions, "disabled mining action should not fall into the field action grid");
+    require(usedHtml.find("Mine deposit", fieldActions) == std::string::npos, "field action grid should not contain a fourth mining card");
+}
+
+void postArrivalPhaseHtmlUsesPolishedBoardStructure()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState arrivalState = createNewGame(catalog, 716);
+    LaunchOutcome arrival;
+    arrival.type = LaunchResultType::MissionComplete;
+    arrival.frontierTransfer = true;
+    arrival.destinationId = content::destination::moon;
+    arrival.recoveryMethod = RecoveryMethod::TransferArrival;
+    arrival.ejectMultiplier = 1.95;
+    arrival.crashMultiplier = 2.4;
+    arrival.payout = 120.0;
+    arrival.peakWarning = 0.42;
+    startArrivalOps(arrivalState, arrival);
+    arrivalState.lastOutcome = arrival;
+    arrivalState.screen = Screen::ArrivalOps;
+    Random arrivalRng(716);
+    const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
+    const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
+    require(arrivalHtml.find("phase-board phase-board-arrival") != std::string::npos, "approach should render inside the dedicated arrival board");
+    require(arrivalHtml.find("class=\"result-grid\"") != std::string::npos, "approach should keep arrival summary in the result grid");
+    require(countOccurrences(arrivalHtml, "ops-card arrival-card") == 3, "approach should render flyby, orbit, and landing as three action cards");
+    require(arrivalHtml.find("phase-status") == std::string::npos, "approach should not duplicate the yellow mission status inside the board");
+
+    GameState researchState = createNewGame(catalog, 717);
+    researchState.run.destinationIndex = 2;
+    researchState.meta.furthestTier = 2;
+    researchState.meta.materials = {.common = 6, .rare = 2};
+    researchState.screen = Screen::Research;
+    Random researchOfferRng(717);
+    generateResearchProjects(researchState, catalog, researchOfferRng);
+    Random researchRng(718);
+    const PreparedLaunch researchLaunch = prepareLaunch(researchState, catalog, researchRng);
+    const std::string researchHtml = buildGamePanelHtml({researchState, catalog, researchLaunch, researchLaunch});
+    require(researchHtml.find("phase-board phase-board-research") != std::string::npos, "research should render inside the dedicated research board");
+    require(researchHtml.find("Research options") != std::string::npos, "research should expose the project board");
+    require(researchHtml.find("class=\"ops-card\"") != std::string::npos, "research projects should render as styled cards");
+    require(researchHtml.find("class=\"phase-advisory") != std::string::npos, "research should include advisory styling");
+    require(researchHtml.find("phase-status") == std::string::npos, "research should not duplicate the yellow mission status inside the board");
+
+    GameState surfaceState = createNewGame(catalog, 719);
+    surfaceState.run.destinationIndex = 2;
+    surfaceState.meta.unlockKeys.push_back(content::unlock::droneBay);
+    startSurfaceExpedition(surfaceState, catalog);
+    prepareMiningSiteForTest(surfaceState);
+    surfaceState.screen = Screen::SurfaceExpedition;
+    Random surfaceRng(719);
+    const PreparedLaunch surfaceLaunch = prepareLaunch(surfaceState, catalog, surfaceRng);
+    const std::string surfaceHtml = buildGamePanelHtml({surfaceState, catalog, surfaceLaunch, surfaceLaunch});
+    require(surfaceHtml.find("phase-board phase-board-surface") != std::string::npos, "surface ops should render inside the dedicated surface board");
+    require(surfaceHtml.find("surface-command") != std::string::npos, "surface ops should expose command summary");
+    require(surfaceHtml.find("surface-primary-action") != std::string::npos, "surface ops should promote mining separately from the field grid");
+    require(surfaceHtml.find("surface-action-card") != std::string::npos, "surface ops should keep secondary actions in styled cards");
+    require(surfaceHtml.find("phase-status") == std::string::npos, "surface ops should not duplicate the yellow mission status inside the board");
+
+    GameState droneState = surfaceState;
+    droneState.screen = Screen::DroneOps;
+    Random droneRng(720);
+    const PreparedLaunch droneLaunch = prepareLaunch(droneState, catalog, droneRng);
+    const std::string droneHtml = buildGamePanelHtml({droneState, catalog, droneLaunch, droneLaunch});
+    require(droneHtml.find("phase-board phase-board-drone-ops") != std::string::npos, "drone ops should render inside the dedicated drone board");
+    require(droneHtml.find("module-art") != std::string::npos, "drone ops cards should reserve art/glyph space");
+    require(droneHtml.find("drone-card") != std::string::npos, "drone ops should use styled drone cards");
+
+    GameState upgradeState = surfaceState;
+    upgradeState.screen = Screen::SurfaceUpgrade;
+    Random upgradeRng(721);
+    generateSurfaceUpgradeOffers(upgradeState, catalog, upgradeRng);
+    const PreparedLaunch upgradeLaunch = prepareLaunch(upgradeState, catalog, upgradeRng);
+    const std::string upgradeHtml = buildGamePanelHtml({upgradeState, catalog, upgradeLaunch, upgradeLaunch});
+    require(upgradeHtml.find("phase-board-surface-upgrade") != std::string::npos, "surface upgrade should render inside the dedicated field-upgrade board");
+    require(upgradeHtml.find("draft-hero") != std::string::npos, "surface upgrade should use the same draft hero pattern as refit");
+    require(upgradeHtml.find("surface-upgrade-card") != std::string::npos, "surface upgrades should render as tactile draft cards");
+    require(upgradeHtml.find("draft-actions") != std::string::npos, "surface upgrade should keep reroll and skip actions centered as a draft row");
+    require(upgradeHtml.find("phase-status") == std::string::npos, "surface upgrade should not duplicate the yellow mission status inside the board");
 }
 
 void hangarHtmlShowsPilotIntakeModal()
@@ -4586,6 +4748,7 @@ int main()
     moduleOffersAreOneChoiceRefits();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
+    preMiningRefitOffersAvoidMaterialCosts();
     inventoryPresentationSummarizesResourcesAndPayload();
     shipModuleProgressSurvivesDestroyedVehicles();
     deadCrewLosesTraining();
@@ -4596,6 +4759,7 @@ int main()
     hangarOperationCardsComeFromSharedPreview();
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
+    destroyedTransferAttemptCostsOneProvingFlight();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
     pressureControlModulesReducePressureTelemetry();
@@ -4667,6 +4831,7 @@ int main()
     panelChromePresentationComesFromSharedHelper();
     panelHtmlIncludesContextualTutorialLayer();
     surfaceHtmlPromotesMiningAction();
+    postArrivalPhaseHtmlUsesPolishedBoardStructure();
     hangarHtmlShowsPilotIntakeModal();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();

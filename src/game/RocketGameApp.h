@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
 #include "core/Random.h"
+#include "game/GameRmlUi.h"
 #include "render/WebGLRenderer.h"
 
 #include <string>
@@ -66,6 +67,11 @@ public:
     void trainCrew();
     void restCrew();
     void resetSave();
+    bool uiMouseMove(int x, int y);
+    bool uiMouseDown(int x, int y, int button);
+    bool uiMouseUp(int x, int y, int button);
+    bool uiMouseWheel(int x, int y, double deltaY);
+    bool uiHitTest(int x, int y) const;
 
 private:
     struct ReturnTripState {
@@ -110,6 +116,7 @@ private:
     void finishArrivalFanfare();
     void save();
     void refreshPanel();
+    void runUiAction(const std::string& action);
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
     void recordTelemetryPeak(const TelemetryEvent& event);
@@ -124,6 +131,7 @@ private:
     GameState state_;
     Random rng_;
     WebGLRenderer renderer_;
+    GameRmlUi rmlUi_;
     LaunchSessionState session_;
     bool panelDirty_ = true;
 };

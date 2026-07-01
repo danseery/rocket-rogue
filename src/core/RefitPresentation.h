@@ -51,6 +51,7 @@ struct RefitOfferPresentation {
     int index = 0;
     int cost = 0;
     std::string costSummary;
+    std::string footerCostSummary;
     bool affordable = false;
     RefitPresentation card;
     PanelButtonPresentation action;
@@ -249,6 +250,24 @@ inline std::string refitCostSummary(int credits, const MaterialInventory& materi
     return text::panel::creditsAndMaterials(creditCost, text::panel::materialSummary(materials.common, materials.rare, materials.exotic));
 }
 
+inline std::string refitFooterCostSummary(int credits, const MaterialInventory& materials)
+{
+    if (materials.common == 0 && materials.rare == 0 && materials.exotic == 0) {
+        return display::credits(credits);
+    }
+    std::string summary = std::to_string(credits) + " cr";
+    if (materials.common > 0) {
+        summary += " + " + std::to_string(materials.common) + "C";
+    }
+    if (materials.rare > 0) {
+        summary += " " + std::to_string(materials.rare) + "R";
+    }
+    if (materials.exotic > 0) {
+        summary += " " + std::to_string(materials.exotic) + "X";
+    }
+    return summary;
+}
+
 inline std::string missingModuleCostLabel(const GameState& state, const ShipModule& module)
 {
     if (state.run.credits < static_cast<double>(moduleOfferCost(module))) {
@@ -301,6 +320,7 @@ inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, 
         index,
         cost,
         refitCostSummary(cost, module.materialCost),
+        refitFooterCostSummary(cost, module.materialCost),
         affordable,
         moduleRefitPresentation(module),
         affordable
@@ -317,6 +337,7 @@ inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& up
         RefitOfferPresentationKind::CrewUpgrade,
         index,
         cost,
+        display::credits(cost),
         display::credits(cost),
         affordable,
         crewUpgradeRefitPresentation(upgrade),
