@@ -22,6 +22,8 @@ enum class Screen {
     Research,
     SurfaceExpedition,
     SurfaceUpgrade,
+    SurfaceScan,
+    SurfacePush,
     Mining,
     Upgrade,
     Legacy,
@@ -493,6 +495,8 @@ struct SurfaceExpeditionState {
     int depth = 0;
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
+    MaterialInventory prospectMaterials;
+    int prospectArtifacts = 0;
     std::vector<std::string> logEntries;
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
@@ -500,6 +504,41 @@ struct SurfaceExpeditionState {
     std::array<std::string, 3> surfaceUpgradeOfferIds {};
     bool surfaceUpgradeOfferAvailable = false;
     int surfaceUpgradeOffersSeen = 0;
+};
+
+struct SurfaceScanRunState {
+    bool active = false;
+    bool completed = false;
+    bool busted = false;
+    std::string destinationId;
+    int pulses = 0;
+    int maxPulses = 6;
+    double signal = 0.0;
+    double interference = 0.0;
+    double bustRisk = 0.0;
+    double hazardDelta = 0.0;
+    int cargo = 0;
+    MaterialInventory temporaryMaterials;
+    std::vector<ArtifactRecord> temporaryArtifacts;
+    std::string message;
+};
+
+struct SurfacePushRunState {
+    bool active = false;
+    bool completed = false;
+    bool busted = false;
+    std::string destinationId;
+    int steps = 0;
+    int maxSteps = 4;
+    int depthGain = 0;
+    double pressure = 0.0;
+    double collapseRisk = 0.0;
+    double hazardDelta = 0.0;
+    int cargo = 0;
+    MaterialInventory temporaryMaterials;
+    std::vector<ArtifactRecord> temporaryArtifacts;
+    std::vector<MiningCellMaterial> rewardMarkers;
+    std::string message;
 };
 
 struct MiningCell {
@@ -612,6 +651,8 @@ struct RunState {
     FlybyRunState flyby;
     OrbitRunState orbit;
     SurfaceExpeditionState surfaceExpedition;
+    SurfaceScanRunState surfaceScan;
+    SurfacePushRunState surfacePush;
     MiningRunState mining;
     double nextLaunchFuelBoost = 0.0;
     double nextLaunchSpeedBoost = 0.0;

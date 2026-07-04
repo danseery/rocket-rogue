@@ -625,6 +625,11 @@ void inventoryPresentationSummarizesResourcesAndPayload()
     state.meta.materials = {.common = 5, .rare = 2, .exotic = 1};
     state.meta.artifacts.push_back({"mars_artifact_1", content::destination::mars, true});
     state.meta.ownedModuleIds.push_back(content::module::cryoLoop);
+    InventoryPresentation lockedInventory = inventoryPresentation(state, catalog);
+    require(lockedInventory.sideSections.empty(), "locked inventory should not expose the side drone bay");
+
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.droneBaySlots = 1;
     state.meta.ownedDroneIds.push_back(content::drone::miningDrone);
     state.meta.equippedDroneIds.push_back(content::drone::miningDrone);
     state.run.mining.active = true;
@@ -644,7 +649,9 @@ void inventoryPresentationSummarizesResourcesAndPayload()
     require(hasSection("Recovered resources"), "inventory should expose banked materials");
     require(hasSection("Artifacts"), "inventory should expose artifacts");
     require(hasSection("Ship tech"), "inventory should expose permanent ship tech");
-    require(hasSection("Drone bay"), "inventory should expose drone bay hardware");
+    require(!inventory.sideSections.empty(), "unlocked inventory should expose the side drone bay");
+    require(inventory.sideSections.front().title == "Drone bay", "side inventory should label the drone bay");
+    require(inventory.sideSections.front().items.size() == 6, "drone bay should show all six slot positions");
 }
 
 void shipModuleProgressSurvivesDestroyedVehicles()
@@ -1282,6 +1289,9 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     completeArrivalOrbit(state, catalog);
     startArrivalOps(state, moonArrival);
     require(canAttemptArrivalLanding(state, catalog), "Moon landing should unlock after flyby and orbit");
+    require(state.run.frontierReadiness == 0, "Moon frontier should start with no Mars flight data");
+    require(bankArrivalLandingFlightData(state, catalog), "first cleared Moon landing should bank one flight-data rep");
+    require(state.run.frontierReadiness == 1, "Moon landing should count as flight data toward Mars");
 
     LaunchOutcome marsArrival = moonArrival;
     marsArrival.destinationId = content::destination::mars;
@@ -1478,6 +1488,21 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     const double initialProgress = outer.run.flyby.pathProgress;
     updateFlybyRun(outer, 0.5);
     require(outer.run.flyby.pathProgress >= initialProgress, "single-pass flyby should advance along the corridor over time");
+
+    GameState longTrail = createNewGame(catalog, 718);
+    startArrivalOps(longTrail, moonArrival);
+    startArrivalFlybyRun(longTrail, catalog);
+    longTrail.run.flyby.gravityStrength = 0.0;
+    longTrail.run.flyby.trailPoints.clear();
+    for (int i = 0; i < 120; ++i) {
+        longTrail.run.flyby.trailPoints.push_back({-1.2 + static_cast<double>(i) * 0.001, -0.9});
+    }
+    const FlybyTrailPoint oldestTrailPoint = longTrail.run.flyby.trailPoints.front();
+    const std::size_t previousTrailSize = longTrail.run.flyby.trailPoints.size();
+    updateFlybyRun(longTrail, 0.05);
+    require(longTrail.run.flyby.trailPoints.size() > previousTrailSize, "flyby trail should keep growing instead of trimming older path points");
+    require(longTrail.run.flyby.trailPoints.front().x == oldestTrailPoint.x && longTrail.run.flyby.trailPoints.front().y == oldestTrailPoint.y,
+        "flyby trail should preserve the oldest path point through a long run");
 
     GameState impact = createNewGame(catalog, 708);
     startArrivalOps(impact, moonArrival);
@@ -1933,6 +1958,78 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     require(findDetailPresentationRow(presentation.details, "Field upgrades") != nullptr, "surface details should list field upgrades");
 }
 
+void surfaceUpgradesAndDronesModifyScanMiniGame()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 1933);
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    baseline.run.surfaceExpedition.hazard = 0.35;
+
+    GameState upgraded = baseline;
+    upgraded.run.surfaceUpgradeIds = {
+        content::surfaceUpgrade::widebandPulse,
+        content::surfaceUpgrade::oreScentArray,
+        content::surfaceUpgrade::deepEchoMapper
+    };
+    upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    upgraded.meta.droneBaySlots = 1;
+    upgraded.meta.equippedDroneIds = {content::drone::surveyDrone};
+
+    Random baselineRng(1934);
+    Random upgradedRng(1934);
+    require(startSurfaceScanRun(baseline, baselineRng).applied, "baseline scan should start");
+    require(startSurfaceScanRun(upgraded, upgradedRng).applied, "upgraded scan should start");
+    require(upgraded.run.surfaceScan.maxPulses > baseline.run.surfaceScan.maxPulses, "scanner support should add scan push-your-luck capacity");
+    require(upgraded.run.surfaceScan.signal > baseline.run.surfaceScan.signal, "scanner support should improve starting scan signal");
+    require(upgraded.run.surfaceScan.interference <= baseline.run.surfaceScan.interference, "scanner support should soften starting interference");
+    require(upgraded.run.surfaceScan.bustRisk < baseline.run.surfaceScan.bustRisk, "scanner support should reduce scan bust risk");
+
+    baseline.run.surfaceScan.bustRisk = 0.0;
+    upgraded.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(baseline, baselineRng).applied, "baseline scan pulse should resolve");
+    require(pulseSurfaceScan(upgraded, upgradedRng).applied, "upgraded scan pulse should resolve");
+    require(upgraded.run.surfaceScan.signal > baseline.run.surfaceScan.signal, "scanner support should continue improving signal after a pulse");
+    require(upgraded.run.surfaceScan.hazardDelta <= baseline.run.surfaceScan.hazardDelta, "hazard-relief scanner upgrades should reduce scan hazard creep");
+    require(upgraded.run.surfaceScan.bustRisk < baseline.run.surfaceScan.bustRisk, "scanner support should keep post-pulse bust risk lower");
+}
+
+void surfaceUpgradesAndDronesModifyDeepPushMiniGame()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 1935);
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    baseline.run.surfaceExpedition.hazard = 0.35;
+
+    GameState upgraded = baseline;
+    upgraded.run.surfaceUpgradeIds = {
+        content::surfaceUpgrade::thermalDrillJackets,
+        content::surfaceUpgrade::shockMounts,
+        content::surfaceUpgrade::recoilBraces,
+        content::surfaceUpgrade::oreHopper
+    };
+    upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    upgraded.meta.droneBaySlots = 1;
+    upgraded.meta.equippedDroneIds = {content::drone::stabilizerDrone};
+
+    Random baselineRng(1936);
+    Random upgradedRng(1936);
+    require(startSurfacePushRun(baseline, baselineRng).applied, "baseline deep push should start");
+    require(startSurfacePushRun(upgraded, upgradedRng).applied, "upgraded deep push should start");
+    require(upgraded.run.surfacePush.maxSteps > baseline.run.surfacePush.maxSteps, "structural support should add deep-push capacity");
+    require(upgraded.run.surfacePush.pressure <= baseline.run.surfacePush.pressure, "structural support should reduce starting deep-push pressure");
+    require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should reduce starting collapse risk");
+
+    baseline.run.surfacePush.collapseRisk = 0.0;
+    upgraded.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(baseline, baselineRng).applied, "baseline deep-push step should resolve");
+    require(pushSurfaceDepthStep(upgraded, upgradedRng).applied, "upgraded deep-push step should resolve");
+    require(upgraded.run.surfacePush.pressure < baseline.run.surfacePush.pressure, "structural support should slow pressure growth");
+    require(upgraded.run.surfacePush.hazardDelta <= baseline.run.surfacePush.hazardDelta, "field support should reduce deep-push hazard creep");
+    require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should keep post-step collapse risk lower");
+}
+
 void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2306,6 +2403,8 @@ void surfaceExpeditionRoundTripsThroughSave()
     state.screen = Screen::SurfaceExpedition;
     startSurfaceExpedition(state, catalog);
     state.run.surfaceExpedition.sharedFuel = 2;
+    state.run.surfaceExpedition.prospectMaterials = {.common = 1, .rare = 2, .exotic = 1};
+    state.run.surfaceExpedition.prospectArtifacts = 1;
     Random rng(9091);
     require(surveySurfaceSite(state, rng).applied, "test setup should gather a surface payload");
 
@@ -2325,6 +2424,8 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.miningSitePrepared, "surface mining preparation should round trip");
     require(!restored.run.surfaceExpedition.miningRunUsed, "unused surface mining run should round trip");
     require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
+    require(restored.run.surfaceExpedition.prospectMaterials.rare == 2, "surface material prospects should round trip");
+    require(restored.run.surfaceExpedition.prospectArtifacts == 1, "surface artifact prospects should round trip");
     require(restored.run.surfaceExpedition.logEntries == state.run.surfaceExpedition.logEntries, "surface mission log should round trip");
 }
 
@@ -2357,6 +2458,89 @@ void surfaceMiningUsesSharedFuelAndRunsOnce()
     const SurfaceActionOutcome repeated = startMiningRun(state, catalog);
     require(!repeated.applied, "mining should only start once per surface loop");
     require(surfaceActionSummary(repeated).find("already used") != std::string::npos, "repeat mining should explain the one-run limit");
+}
+
+void surfaceScanMiniGameBanksSurveyPayload()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94101);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    Random rng(94102);
+
+    const int supplyBefore = state.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome started = startSurfaceScanRun(state, rng);
+    require(started.applied, "surface scan mini-game should start from Surface Ops");
+    require(state.screen == Screen::SurfaceScan, "starting scan should move to the scan screen");
+    require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::surveySupplyCost, "starting scan should spend the survey action kit");
+
+    state.run.surfaceScan.bustRisk = 0.0;
+    const SurfaceActionOutcome pulse = pulseSurfaceScan(state, rng);
+    require(pulse.applied, "scan pulse should resolve while scan is active");
+    require(state.run.surfaceScan.temporaryMaterials.common > 0, "scan pulse should stage common materials");
+
+    const SurfaceActionOutcome banked = bankSurfaceScan(state);
+    require(banked.applied, "banking scan should resolve");
+    require(state.screen == Screen::SurfaceExpedition, "banking scan should return to Surface Ops");
+    require(state.run.surfaceExpedition.miningSitePrepared, "banked scan should open the mining site");
+    require(state.run.surfaceExpedition.temporaryMaterials.common == 0, "banked scan should not grant recovered materials before mining");
+    require(state.run.surfaceExpedition.prospectMaterials.common > 0, "banked scan should tag common material prospects");
+
+    require(startMiningRun(state, catalog).applied, "scan prospects should open the mining run");
+    const bool foundProspectedOre = std::any_of(
+        state.run.mining.terrain.cells.begin(),
+        state.run.mining.terrain.cells.end(),
+        [](const MiningCell& cell) {
+            return cell.material == MiningCellMaterial::CommonOre && cell.revealed;
+        });
+    require(foundProspectedOre, "scan prospects should appear as revealed ore in mining terrain");
+}
+
+void surfacePushMiniGameBanksDepthRoute()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94201);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    Random rng(94202);
+
+    const int supplyBefore = state.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome started = startSurfacePushRun(state, rng);
+    require(started.applied, "surface push mini-game should start from Surface Ops");
+    require(state.screen == Screen::SurfacePush, "starting push should move to the deep-push screen");
+    require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::pushSupplyCost, "starting push should spend push action kits");
+
+    state.run.surfacePush.collapseRisk = 0.0;
+    const SurfaceActionOutcome step = pushSurfaceDepthStep(state, rng);
+    require(step.applied, "deep-push step should resolve while push is active");
+    require(state.run.surfacePush.depthGain > 0, "deep-push step should stage a depth gain");
+    require(state.run.surfacePush.temporaryMaterials.rare > 0, "deep-push step should stage richer materials");
+    require(!state.run.surfacePush.rewardMarkers.empty(), "deep-push step should record stable visual reward markers");
+
+    const std::vector<MiningCellMaterial> markersAfterFirstStep = state.run.surfacePush.rewardMarkers;
+    state.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(state, rng).applied, "second deep-push step should resolve for marker stability");
+    require(
+        std::equal(markersAfterFirstStep.begin(), markersAfterFirstStep.end(), state.run.surfacePush.rewardMarkers.begin()),
+        "later deep-push rewards should not rewrite previously displayed marker types");
+
+    const int depthBeforeBank = state.run.surfaceExpedition.depth;
+    const SurfaceActionOutcome banked = bankSurfacePush(state);
+    require(banked.applied, "banking deep push should resolve");
+    require(state.screen == Screen::SurfaceExpedition, "banking deep push should return to Surface Ops");
+    require(state.run.surfaceExpedition.depth > depthBeforeBank, "banked deep push should increase expedition depth");
+    require(state.run.surfaceExpedition.miningSitePrepared, "banked deep push should keep the mining site open");
+    require(state.run.surfaceExpedition.temporaryMaterials.rare == 0, "banked deep push should not grant recovered materials before mining");
+    require(state.run.surfaceExpedition.prospectMaterials.rare > 0, "banked deep push should tag richer material prospects");
+
+    require(startMiningRun(state, catalog).applied, "deep-push prospects should open the mining run");
+    const bool foundDeepProspect = std::any_of(
+        state.run.mining.terrain.cells.begin(),
+        state.run.mining.terrain.cells.end(),
+        [](const MiningCell& cell) {
+            return (cell.material == MiningCellMaterial::RareOre || cell.material == MiningCellMaterial::ArtifactCache) && cell.revealed;
+        });
+    require(foundDeepProspect, "deep-push prospects should appear as revealed rich targets in mining terrain");
 }
 
 void surfaceMissionLogIsBounded()
@@ -3216,9 +3400,10 @@ void surfacePresentationComesFromSharedHelper()
     startSurfaceExpedition(state, catalog);
     state.run.surfaceExpedition.temporaryMaterials = {.common = 2, .rare = 1, .exotic = 1};
     state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_surface", content::destination::mars, false});
+    state.run.surfaceExpedition.prospectMaterials = {.common = 1, .rare = 1};
 
     SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state);
-    require(surface.metrics.size() == 12, "surface presentation should expose site, field kit, hazard, action kits, shared fuel, cargo, depth, risk, materials, and artifacts");
+    require(surface.metrics.size() == 13, "surface presentation should expose site, field kit, hazard, action kits, shared fuel, cargo, depth, risk, materials, artifacts, and prospects");
     require(surface.phaseSteps.size() == 4, "surface presentation should expose post-arrival phase steps");
     require(surface.phaseSteps[0].stateLabel == "Done" && surface.phaseSteps[0].stateClass == "done", "surface phase track should mark arrival complete");
     require(surface.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "surface phase track should include research");
@@ -3238,6 +3423,9 @@ void surfacePresentationComesFromSharedHelper()
     require(std::find_if(surface.metrics.begin(), surface.metrics.end(), [](const PanelMetricPresentation& metric) {
         return metric.label == std::string(text::labels::artifacts) && metric.value == "1";
     }) != surface.metrics.end(), "surface presentation should expose temporary artifact cargo");
+    require(std::find_if(surface.metrics.begin(), surface.metrics.end(), [](const PanelMetricPresentation& metric) {
+        return metric.label == "Prospects" && metric.value == "2";
+    }) != surface.metrics.end(), "surface presentation should expose tagged underground prospects");
     require(!surface.siteDetail.empty(), "surface presentation should expose active site detail");
     require(!surface.details.empty(), "surface presentation should expose field rule details");
     require(hasDetailPresentationHeader(surface.details, text::panel::details::fieldRules), "surface details should include field rules");
@@ -3280,6 +3468,13 @@ void surfacePresentationComesFromSharedHelper()
     surface = surfaceExpeditionPresentation(state);
     require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "fresh surface mine should use shared action id");
     require(surface.actions[1].availability == text::fuel::availability(false), "fresh surface mine should report fuel readiness");
+    state.run.surfaceExpedition.supply = 0;
+    surface = surfaceExpeditionPresentation(state);
+    require(!surface.actions[0].action.enabled && surface.actions[0].availability == text::panel::messages::needSupply(tuning::research::surveySupplyCost), "blocked surface survey should keep the detailed action-kit reason in status text");
+    require(surface.actions[0].action.label == std::string(text::buttons::unavailable), "blocked surface survey button should stay compact for card footers");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == text::panel::messages::needSupply(tuning::research::pushSupplyCost), "blocked deep push should keep the detailed action-kit reason in status text");
+    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "blocked deep push button should stay compact for card footers");
+    state.run.surfaceExpedition.supply = 8;
     state.run.surfaceExpedition.sharedFuel = 0;
     surface = surfaceExpeditionPresentation(state);
     require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "fuel-starved mine should report the unified offline state");
@@ -3321,7 +3516,7 @@ void surfacePresentationComesFromSharedHelper()
     deepSpace.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     startSurfaceExpedition(deepSpace, catalog);
     const SurfaceExpeditionPresentation deepSurface = surfaceExpeditionPresentation(deepSpace);
-    require(deepSurface.metrics.size() == 13, "post-solar surface presentation should expose contact risk");
+    require(deepSurface.metrics.size() == 14, "post-solar surface presentation should expose prospects and contact risk");
     require(std::find_if(deepSurface.metrics.begin(), deepSurface.metrics.end(), [](const PanelMetricPresentation& metric) {
         return metric.label == std::string(text::labels::contactRisk);
     }) != deepSurface.metrics.end(), "post-solar surface presentation should label contact risk");
@@ -4133,6 +4328,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(launchHtml.find("Return to Earth banks data") != std::string::npos, "launch help should mention returning to Earth");
     require(launchHtml.find("unlock the Moon route") != std::string::npos, "first launch help should keep the intro focused on return/eject");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+    require(launchHtml.find("data-debug-tools-toggle") != std::string::npos, "settings should expose a debug mini-games toggle");
 
     GameState moonLaunchState = createNewGame(catalog, 713);
     moonLaunchState.run.destinationIndex = 1;
@@ -4212,17 +4408,21 @@ void surfaceHtmlPromotesMiningAction()
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
     const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
     require(html.find("<h1>Surface Ops</h1>") != std::string::npos, "surface panel should title the surface phase");
-    require(html.find("class=\"surface-primary-action\"") != std::string::npos, "surface panel should promote the mining action");
+    require(html.find("surface-ops-screen") != std::string::npos, "surface panel should use the compact surface ops layout");
+    require(html.find("surface-quickbar") != std::string::npos, "surface panel should expose compact mission context above actions");
+    require(html.find("featured-action") != std::string::npos, "surface panel should promote the mining action in the action grid");
     require(html.find("Mine deposit") != std::string::npos, "surface panel should keep mining obvious");
+    require(html.find("Mine deposit") < html.find("Survey site"), "surface panel should put the mining action before secondary field actions");
 
     state.run.surfaceExpedition.miningRunUsed = true;
     const std::string usedHtml = buildGamePanelHtml({state, catalog, launch, launch});
     const std::size_t usedMine = usedHtml.find("Mine deposit");
-    const std::size_t fieldActions = usedHtml.find("Field actions");
-    require(usedMine != std::string::npos, "used mining action should still be visible as the primary surface state");
-    require(fieldActions != std::string::npos, "surface panel should keep the field action section");
-    require(usedMine < fieldActions, "disabled mining action should not fall into the field action grid");
-    require(usedHtml.find("Mine deposit", fieldActions) == std::string::npos, "field action grid should not contain a fourth mining card");
+    const std::size_t surveyAction = usedHtml.find("Survey site");
+    require(usedMine != std::string::npos, "used mining action should still be visible in the compact surface actions");
+    require(surveyAction != std::string::npos, "surface panel should keep field actions in the compact action grid");
+    require(usedMine < surveyAction, "disabled mining action should stay first in the compact action grid");
+    require(usedHtml.find("class=\"disabled\" disabled>Unavailable</button>") != std::string::npos,
+        "disabled unavailable buttons should carry the muted disabled style hook");
 }
 
 void postArrivalPhaseHtmlUsesPolishedBoardStructure()
@@ -4276,9 +4476,10 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const PreparedLaunch surfaceLaunch = prepareLaunch(surfaceState, catalog, surfaceRng);
     const std::string surfaceHtml = buildGamePanelHtml({surfaceState, catalog, surfaceLaunch, surfaceLaunch});
     require(surfaceHtml.find("phase-board phase-board-surface") != std::string::npos, "surface ops should render inside the dedicated surface board");
-    require(surfaceHtml.find("surface-command") != std::string::npos, "surface ops should expose command summary");
-    require(surfaceHtml.find("surface-primary-action") != std::string::npos, "surface ops should promote mining separately from the field grid");
-    require(surfaceHtml.find("surface-action-card") != std::string::npos, "surface ops should keep secondary actions in styled cards");
+    require(surfaceHtml.find("surface-ops-screen") != std::string::npos, "surface ops should use the compact first-screen action layout");
+    require(surfaceHtml.find("surface-quickbar") != std::string::npos, "surface ops should expose compact mission context");
+    require(surfaceHtml.find("featured-action") != std::string::npos, "surface ops should promote mining inside the action grid");
+    require(surfaceHtml.find("surface-action-card") != std::string::npos, "surface ops should keep actions in styled cards");
     require(surfaceHtml.find("phase-status") == std::string::npos, "surface ops should not duplicate the yellow mission status inside the board");
 
     GameState droneState = surfaceState;
@@ -4645,6 +4846,10 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
     require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
+    require(ui::actions::surfaceScanPulse == "surface_scan_pulse", "surface scan pulse action should use a stable schema id");
+    require(ui::actions::surfaceScanBank == "surface_scan_bank", "surface scan bank action should use a stable schema id");
+    require(ui::actions::surfacePushStep == "surface_push_step", "surface push step action should use a stable schema id");
+    require(ui::actions::surfacePushBank == "surface_push_bank", "surface push bank action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
 
@@ -4663,6 +4868,8 @@ void panelLayoutModeIsPortablePresentationData()
     require(panelLayoutMode(Screen::Research) == PanelLayoutMode::PhaseBoard, "research should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::PhaseBoard, "surface expedition should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceUpgrade) == PanelLayoutMode::PhaseBoard, "field upgrade draft should use the management board layout");
+    require(panelLayoutMode(Screen::SurfaceScan) == PanelLayoutMode::PhaseBoard, "surface scan should use the phase board layout");
+    require(panelLayoutMode(Screen::SurfacePush) == PanelLayoutMode::PhaseBoard, "deep push should use the phase board layout");
     require(panelLayoutMode(Screen::DroneOps) == PanelLayoutMode::PhaseBoard, "drone ops should use the management board layout");
     require(panelLayoutMode(Screen::Navigation) == PanelLayoutMode::PhaseBoard, "navigation should use the management board layout");
     require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::PhaseBoard, "refit should use the management board layout");
@@ -4783,6 +4990,8 @@ int main()
     surfaceUpgradeOffersAreDistinctAndSelectable();
     surfaceUpgradeOffersCanRerollAndKeepDraftState();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
+    surfaceUpgradesAndDronesModifyScanMiniGame();
+    surfaceUpgradesAndDronesModifyDeepPushMiniGame();
     surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     droneOpsPresentationExposesPersistentLoadout();
@@ -4793,6 +5002,8 @@ int main()
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
     surfaceMiningUsesSharedFuelAndRunsOnce();
+    surfaceScanMiniGameBanksSurveyPayload();
+    surfacePushMiniGameBanksDepthRoute();
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();

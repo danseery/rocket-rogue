@@ -1037,6 +1037,17 @@ bool canCommitToNextFrontier(const GameState& state, const ContentCatalog& catal
     return nextDestination(state, catalog) != nullptr && required > 0 && state.run.frontierReadiness >= required;
 }
 
+bool bankFrontierReadiness(GameState& state, const ContentCatalog& catalog)
+{
+    if (frontierReadinessRequired(state, catalog) <= 0) {
+        return false;
+    }
+
+    const int before = state.run.frontierReadiness;
+    state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
+    return state.run.frontierReadiness > before;
+}
+
 double missionPressureModifier(const GameState& state, const ContentCatalog& catalog, const Destination& destination)
 {
     const int index = destinationIndexForId(catalog, destination.id);

@@ -30,6 +30,7 @@ struct InventorySectionPresentation {
 struct InventoryPresentation {
     std::vector<PanelMetricPresentation> summary;
     std::vector<InventorySectionPresentation> sections;
+    std::vector<InventorySectionPresentation> sideSections;
 };
 
 inline void addInventoryItem(
@@ -47,6 +48,21 @@ inline void addInventoryItem(
         std::move(count),
         std::move(cssClass)
     });
+}
+
+inline std::string rarityCssClass(Rarity rarity)
+{
+    switch (rarity) {
+    case Rarity::Common:
+        return "rarity-common";
+    case Rarity::Uncommon:
+        return "rarity-uncommon";
+    case Rarity::Rare:
+        return "rarity-rare";
+    case Rarity::Prototype:
+        return "rarity-prototype";
+    }
+    return "rarity-common";
 }
 
 inline std::string artifactDisplayName(const ArtifactRecord& artifact)
@@ -89,10 +105,10 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
             "Cargo that must still be extracted before it joins the permanent inventory.",
             {}
         };
-        addInventoryItem(payload, "CM", text::labels::commonMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.common), "common");
-        addInventoryItem(payload, "RM", text::labels::rareMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.rare), "rare");
-        addInventoryItem(payload, "EX", text::labels::exoticMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.exotic), "exotic");
-        addInventoryItem(payload, "AR", text::labels::artifacts.data(), "Recovered this sortie", std::to_string(surfaceArtifacts.size()), "artifact");
+        addInventoryItem(payload, "CM", text::labels::commonMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.common), "common rarity-common");
+        addInventoryItem(payload, "RM", text::labels::rareMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.rare), "rare rarity-rare");
+        addInventoryItem(payload, "EX", text::labels::exoticMaterials.data(), "Recovered this sortie", std::to_string(surfaceMaterials.exotic), "exotic rarity-exotic");
+        addInventoryItem(payload, "AR", text::labels::artifacts.data(), "Recovered this sortie", std::to_string(surfaceArtifacts.size()), "artifact rarity-prototype");
         presentation.sections.push_back(std::move(payload));
     }
 
@@ -102,9 +118,9 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
         {}
     };
     addInventoryItem(resources, "BP", text::labels::blueprints.data(), "Research and unlock progress", std::to_string(state.meta.blueprintProgress), "blueprint");
-    addInventoryItem(resources, "CM", text::labels::commonMaterials.data(), "Bulk build stock", std::to_string(owned.common), "common");
-    addInventoryItem(resources, "RM", text::labels::rareMaterials.data(), "Refined specialty stock", std::to_string(owned.rare), "rare");
-    addInventoryItem(resources, "EX", text::labels::exoticMaterials.data(), "Deep-field material", std::to_string(owned.exotic), "exotic");
+    addInventoryItem(resources, "CM", text::labels::commonMaterials.data(), "Bulk build stock", std::to_string(owned.common), "common rarity-common");
+    addInventoryItem(resources, "RM", text::labels::rareMaterials.data(), "Refined specialty stock", std::to_string(owned.rare), "rare rarity-rare");
+    addInventoryItem(resources, "EX", text::labels::exoticMaterials.data(), "Deep-field material", std::to_string(owned.exotic), "exotic rarity-exotic");
     presentation.sections.push_back(std::move(resources));
 
     InventorySectionPresentation artifacts {
@@ -113,7 +129,7 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
         {}
     };
     if (state.meta.artifacts.empty()) {
-        addInventoryItem(artifacts, "AR", "No artifacts", "None recovered yet", "0", "artifact");
+        addInventoryItem(artifacts, "AR", "No artifacts", "None recovered yet", "0", "artifact rarity-prototype");
     } else {
         for (const ArtifactRecord& artifact : state.meta.artifacts) {
             const Destination* origin = catalog.findDestination(artifact.originDestinationId);
@@ -123,7 +139,7 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
                 artifact.identified ? artifactDisplayName(artifact) : "Unidentified artifact",
                 origin != nullptr ? origin->name : artifact.originDestinationId,
                 artifact.identified ? "Decoded" : "Sealed",
-                "artifact");
+                "artifact rarity-prototype");
         }
     }
     artifacts.detail += " " + std::to_string(identifiedArtifacts) + "/" + std::to_string(artifactCount) + " decoded.";
@@ -135,7 +151,7 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
         {}
     };
     if (state.meta.ownedModuleIds.empty()) {
-        addInventoryItem(modules, "ST", "Starter hardware", "Baseline shuttle parts", "Built in", "module");
+        addInventoryItem(modules, "ST", "Starter hardware", "Baseline shuttle parts", "Built in", "module rarity-common");
     } else {
         for (const std::string& moduleId : state.meta.ownedModuleIds) {
             const ShipModule* module = catalog.findModule(moduleId);
@@ -148,31 +164,54 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
                 module->name,
                 std::string(toString(module->slot)) + " - " + std::string(toString(module->rarity)),
                 std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end() ? "Equipped" : "Stored",
-                "module");
+                "module " + rarityCssClass(module->rarity));
         }
     }
     presentation.sections.push_back(std::move(modules));
 
-    InventorySectionPresentation drones {
-        "Drone bay",
-        "Persistent mining support hardware.",
-        {}
-    };
-    addInventoryItem(drones, "DB", "Drone slots", "Installed bay capacity", std::to_string(state.meta.droneBaySlots), "drone");
-    for (const std::string& droneId : state.meta.ownedDroneIds) {
-        const MiniDrone* drone = catalog.findMiniDrone(droneId);
-        if (drone == nullptr) {
-            continue;
+    if (hasUnlock(state.meta, content::unlock::droneBay)) {
+        InventorySectionPresentation drones {
+            "Drone bay",
+            std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "/" + std::to_string(std::max(0, state.meta.droneBaySlots)) + " active slots. Expand the bay to field up to 6 support drones.",
+            {}
+        };
+        constexpr int maxDroneSlots = 6;
+        for (int index = 0; index < maxDroneSlots; ++index) {
+            if (index < static_cast<int>(state.meta.equippedDroneIds.size())) {
+                const std::string& droneId = state.meta.equippedDroneIds[static_cast<std::size_t>(index)];
+                const MiniDrone* drone = catalog.findMiniDrone(droneId);
+                if (drone != nullptr) {
+                    addInventoryItem(
+                        drones,
+                        drone->name.empty() ? "DR" : std::string(1, drone->name.front()),
+                        "Slot " + std::to_string(index + 1),
+                        drone->name + " - " + std::string(toString(drone->role)),
+                        "Equipped",
+                        "drone drone-slot equipped " + rarityCssClass(drone->rarity));
+                    continue;
+                }
+            }
+
+            if (index < std::max(0, state.meta.droneBaySlots)) {
+                addInventoryItem(
+                    drones,
+                    "DB",
+                    "Slot " + std::to_string(index + 1),
+                    "Ready for assignment",
+                    "Open",
+                    "drone drone-slot open rarity-common");
+            } else {
+                addInventoryItem(
+                    drones,
+                    "DB",
+                    "Slot " + std::to_string(index + 1),
+                    "Expand Drone Bay",
+                    "Locked",
+                    "drone drone-slot locked rarity-common");
+            }
         }
-        addInventoryItem(
-            drones,
-            drone->name.empty() ? "DR" : std::string(1, drone->name.front()),
-            drone->name,
-            std::string(toString(drone->role)) + " - " + std::string(toString(drone->rarity)),
-            std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), droneId) != state.meta.equippedDroneIds.end() ? "Equipped" : "Owned",
-            "drone");
+        presentation.sideSections.push_back(std::move(drones));
     }
-    presentation.sections.push_back(std::move(drones));
 
     return presentation;
 }

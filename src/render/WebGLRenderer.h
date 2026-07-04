@@ -115,6 +115,29 @@ struct RenderSnapshot {
     double orbitGoodBand = 0.0;
     double orbitPerfectBand = 0.0;
     std::vector<FlybyTrailPointSnapshot> orbitTrailPoints;
+    bool surfaceScanActive = false;
+    bool surfaceScanCompleted = false;
+    bool surfaceScanBusted = false;
+    int surfaceScanPulses = 0;
+    int surfaceScanMaxPulses = 1;
+    double surfaceScanSignal = 0.0;
+    double surfaceScanInterference = 0.0;
+    double surfaceScanBustRisk = 0.0;
+    int surfaceScanCargo = 0;
+    MaterialInventory surfaceScanMaterials;
+    int surfaceScanArtifacts = 0;
+    bool surfacePushActive = false;
+    bool surfacePushCompleted = false;
+    bool surfacePushBusted = false;
+    int surfacePushSteps = 0;
+    int surfacePushMaxSteps = 1;
+    int surfacePushDepthGain = 0;
+    double surfacePushPressure = 0.0;
+    double surfacePushCollapseRisk = 0.0;
+    int surfacePushCargo = 0;
+    MaterialInventory surfacePushMaterials;
+    int surfacePushArtifacts = 0;
+    std::vector<MiningCellMaterial> surfacePushRewardMarkers;
 };
 
 class WebGLRenderer {
@@ -142,6 +165,8 @@ private:
     void drawFlyby(const RenderSnapshot& snapshot);
     void drawOrbit(const RenderSnapshot& snapshot);
     void drawMining(const RenderSnapshot& snapshot);
+    void drawSurfaceScan(const RenderSnapshot& snapshot);
+    void drawSurfacePush(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha);
     void drawRoute(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);

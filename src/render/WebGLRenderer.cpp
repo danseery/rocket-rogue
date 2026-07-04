@@ -198,13 +198,21 @@ EM_JS(double, rr_scene_left_ndc, (), {
     const canvas = document.getElementById("canvas");
     const panel = document.getElementById("panel");
     const width = (canvas && canvas.clientWidth) || globalThis.innerWidth || 1;
-    if (!panel || width <= 720) {
+    if (width <= 720) {
         return -1;
     }
 
-    const rect = panel.getBoundingClientRect();
+    const flybyVisible = panel && (
+        panel.querySelector("[data-flyby-run]") ||
+        panel.querySelector("[data-flyby-stamp]"));
     const gutter = 24;
-    const leftPx = Math.max(0, rect.right + gutter);
+    let leftPx = 0;
+    if (document.body.classList.contains("rmlui-enabled") && flybyVisible) {
+        leftPx = 16 + 482 + gutter;
+    } else if (panel) {
+        const rect = panel.getBoundingClientRect();
+        leftPx = Math.max(0, rect.right + gutter);
+    }
     if (width - leftPx < 520) {
         return -1;
     }
@@ -486,6 +494,14 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
     }
     if (snapshot.screen == Screen::Orbit) {
         drawOrbit(snapshot);
+        return;
+    }
+    if (snapshot.screen == Screen::SurfaceScan) {
+        drawSurfaceScan(snapshot);
+        return;
+    }
+    if (snapshot.screen == Screen::SurfacePush) {
+        drawSurfacePush(snapshot);
         return;
     }
     drawBackdrop(snapshot);
@@ -1186,6 +1202,140 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             appendRect(particleVertices, px, py, cellW * 0.22F, cellH * 0.22F, spark);
         }
         submit(particleVertices, 0x0004);
+    }
+}
+
+void WebGLRenderer::drawSurfaceScan(const RenderSnapshot& snapshot)
+{
+    drawBackdrop(snapshot);
+    const Vec2 destination = routePoint(snapshot, 1.0F);
+    const float time = static_cast<float>(snapshot.animationTime);
+    const float signal = static_cast<float>(std::clamp(snapshot.surfaceScanSignal, 0.0, 1.0));
+    const float interference = static_cast<float>(std::clamp(snapshot.surfaceScanInterference, 0.0, 1.0));
+    const float risk = static_cast<float>(std::clamp(snapshot.surfaceScanBustRisk, 0.0, 1.0));
+    const float baseRadius = 0.16F + static_cast<float>(snapshot.destinationTier) * 0.012F;
+    const float surfaceRadius = snapshot.destinationTier == 1
+        ? 0.104F
+        : std::min(baseRadius * 0.72F, 0.098F + static_cast<float>(snapshot.destinationTier) * 0.007F);
+    const float sweep = std::fmod(time * 0.38F + signal * 0.18F, 1.0F) * 2.0F * kPi;
+
+    drawRadialGlow(destination.x, destination.y, surfaceRadius * (1.18F + signal * 0.18F), {0.04F, 0.26F, 0.32F, 0.030F}, 48);
+    drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.42F, surfaceRadius * 0.30F, {0.18F, 0.78F, 0.94F, 0.42F}, 48, 0.0F, 2.0F * kPi);
+    drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.68F, surfaceRadius * 0.50F, {1.0F, 0.74F, 0.20F, 0.30F + signal * 0.14F}, 56, 0.0F, 2.0F * kPi);
+    drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.90F, surfaceRadius * 0.68F, {0.86F, 0.28F, 0.72F, 0.12F + risk * 0.16F}, 64, 0.0F, 2.0F * kPi);
+
+    for (int i = 0; i < 4; ++i) {
+        const float start = sweep + static_cast<float>(i) * 0.42F;
+        const float end = start + (0.22F + signal * 0.16F);
+        const float radiusX = surfaceRadius * (0.32F + static_cast<float>(i) * 0.15F);
+        const float radiusY = radiusX * 0.74F;
+        drawEllipseLine(destination.x, destination.y, radiusX, radiusY, {0.36F, 0.94F, 1.0F, 0.18F + signal * 0.08F}, 32, start, end);
+    }
+
+    const int totalFinds = snapshot.surfaceScanMaterials.common + snapshot.surfaceScanMaterials.rare * 2 + snapshot.surfaceScanMaterials.exotic * 3 + snapshot.surfaceScanArtifacts * 4;
+    const int pingCount = std::clamp(totalFinds, 0, 12);
+    for (int i = 0; i < pingCount; ++i) {
+        const float seed = static_cast<float>(i) * 2.39996F;
+        const float radius = surfaceRadius * (0.18F + 0.66F * std::fmod(0.37F * static_cast<float>(i) + signal, 1.0F));
+        const float angle = seed + time * 0.11F;
+        const float x = destination.x + std::cos(angle) * radius;
+        const float y = destination.y + std::sin(angle) * radius * 0.72F;
+        const Color ping = i < snapshot.surfaceScanMaterials.common
+            ? Color{0.48F, 0.92F, 0.68F, 0.72F}
+            : (i < snapshot.surfaceScanMaterials.common + snapshot.surfaceScanMaterials.rare * 2
+                ? Color{1.0F, 0.74F, 0.24F, 0.78F}
+                : (i < snapshot.surfaceScanMaterials.common + snapshot.surfaceScanMaterials.rare * 2 + snapshot.surfaceScanMaterials.exotic * 3
+                    ? Color{0.95F, 0.28F, 0.78F, 0.78F}
+                    : Color{0.72F, 0.46F, 1.0F, 0.82F}));
+        drawCircle(x, y, 0.005F + 0.002F * std::sin(time + seed), ping, 12);
+    }
+
+    if (snapshot.surfaceScanBusted) {
+        drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.98F, surfaceRadius * 0.74F, {1.0F, 0.24F, 0.12F, 0.45F}, 64, 0.0F, 2.0F * kPi);
+        drawRadialGlow(destination.x, destination.y, surfaceRadius * 1.05F, {0.95F, 0.12F, 0.08F, 0.040F}, 48);
+    }
+}
+
+void WebGLRenderer::drawSurfacePush(const RenderSnapshot& snapshot)
+{
+    drawBackdrop(snapshot);
+    const Vec2 destination = routePoint(snapshot, 1.0F);
+    const float pressure = static_cast<float>(std::clamp(snapshot.surfacePushPressure, 0.0, 1.0));
+    const float risk = static_cast<float>(std::clamp(snapshot.surfacePushCollapseRisk, 0.0, 1.0));
+    const float baseRadius = 0.16F + static_cast<float>(snapshot.destinationTier) * 0.012F;
+    const float shaftTop = destination.y - baseRadius * 1.25F;
+    const float shaftBottom = -0.82F;
+    const float shaftX = std::clamp(destination.x - 0.10F, -0.45F, 0.45F);
+
+    drawRadialGlow(destination.x, destination.y, baseRadius * 2.35F, {0.05F, 0.26F, 0.42F, 0.045F}, 64);
+    drawEllipseLine(destination.x, destination.y, baseRadius * 1.6F, baseRadius * 1.6F, {0.18F, 0.78F, 0.94F, 0.30F}, 72, 0.0F, 2.0F * kPi);
+    drawRect(shaftX, (shaftTop + shaftBottom) * 0.5F, 0.26F, std::abs(shaftTop - shaftBottom), {0.015F, 0.022F, 0.026F, 0.72F});
+
+    const int safeSteps = std::max(1, snapshot.surfacePushMaxSteps);
+    for (int i = 0; i <= safeSteps; ++i) {
+        const float t = static_cast<float>(i) / static_cast<float>(safeSteps);
+        const float y = shaftTop + (shaftBottom - shaftTop) * t;
+        const Color line = i <= snapshot.surfacePushSteps
+            ? Color{1.0F, 0.72F, 0.22F, 0.58F}
+            : Color{0.28F, 0.76F, 0.95F, 0.22F};
+        drawLine(shaftX - 0.16F, y, shaftX + 0.16F, y, line, 1.5F);
+    }
+
+    const float progress = static_cast<float>(std::clamp(
+        static_cast<double>(snapshot.surfacePushSteps) / static_cast<double>(safeSteps),
+        0.0,
+        1.0));
+    const float probeY = shaftTop + (shaftBottom - shaftTop) * progress;
+    drawLine(shaftX, shaftTop, shaftX, probeY, {0.90F, 0.62F, 0.22F, 0.70F}, 2.0F);
+    drawCircle(shaftX, probeY, 0.042F, {0.08F, 0.30F, 0.42F, 0.90F}, 22);
+    drawCircle(shaftX, probeY, 0.022F, {1.0F, 0.72F, 0.24F, 0.85F}, 18);
+
+    std::vector<MiningCellMaterial> pockets = snapshot.surfacePushRewardMarkers;
+    if (pockets.empty()) {
+        for (int i = 0; i < std::max(0, snapshot.surfacePushMaterials.common); ++i) {
+            pockets.push_back(MiningCellMaterial::CommonOre);
+        }
+        for (int i = 0; i < std::max(0, snapshot.surfacePushMaterials.rare); ++i) {
+            pockets.push_back(MiningCellMaterial::RareOre);
+        }
+        for (int i = 0; i < std::max(0, snapshot.surfacePushMaterials.exotic); ++i) {
+            pockets.push_back(MiningCellMaterial::ExoticVein);
+        }
+        for (int i = 0; i < std::max(0, snapshot.surfacePushArtifacts); ++i) {
+            pockets.push_back(MiningCellMaterial::ArtifactCache);
+        }
+    }
+
+    auto pocketColor = [](MiningCellMaterial material) {
+        switch (material) {
+        case MiningCellMaterial::CommonOre:
+            return Color{0.48F, 0.92F, 0.68F, 0.55F};
+        case MiningCellMaterial::RareOre:
+            return Color{1.0F, 0.74F, 0.24F, 0.65F};
+        case MiningCellMaterial::ExoticVein:
+            return Color{0.95F, 0.28F, 0.78F, 0.66F};
+        case MiningCellMaterial::ArtifactCache:
+            return Color{0.72F, 0.46F, 1.0F, 0.74F};
+        default:
+            return Color{0.48F, 0.92F, 0.68F, 0.48F};
+        }
+    };
+
+    const int pocketCount = std::min(static_cast<int>(pockets.size()), 10);
+    for (int i = 0; i < pocketCount; ++i) {
+        const float t = std::fmod(0.21F + static_cast<float>(i) * 0.17F, 1.0F);
+        const float y = shaftTop + (shaftBottom - shaftTop) * t;
+        const float x = shaftX + (i % 2 == 0 ? -0.10F : 0.10F);
+        const Color pocket = pocketColor(pockets[static_cast<std::size_t>(i)]);
+        drawCircle(x, y, 0.014F, pocket, 14);
+    }
+
+    if (pressure > 0.0F) {
+        drawRect(shaftX, shaftBottom + 0.06F, 0.30F, 0.018F + pressure * 0.045F, {1.0F, 0.36F, 0.12F, 0.14F + risk * 0.18F});
+    }
+    if (snapshot.surfacePushBusted) {
+        drawRadialGlow(shaftX, probeY, 0.28F, {1.0F, 0.22F, 0.10F, 0.070F}, 48);
+        drawEllipseLine(shaftX, probeY, 0.18F, 0.11F, {1.0F, 0.28F, 0.10F, 0.52F}, 48, 0.0F, 2.0F * kPi);
     }
 }
 

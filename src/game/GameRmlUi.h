@@ -16,6 +16,8 @@ struct RmlButtonBinding {
     std::string modal;
     std::string helpDismiss;
     bool close = false;
+    bool helpToggle = false;
+    bool debugToolsToggle = false;
 };
 
 class GameRmlUi {
@@ -35,6 +37,7 @@ public:
     void closeModal();
     void dismissHelp(const std::string& topic);
     void dispatchAction(const std::string& action);
+    void refresh();
     bool activateButtonLabel(const std::string& label);
 
 private:

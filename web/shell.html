@@ -456,6 +456,13 @@
       animation: launch-ready-pulse 1.2s ease-in-out infinite alternate;
     }
 
+    body.rmlui-modal-open .scene-launch-control {
+      display: none;
+      opacity: 0;
+      pointer-events: none;
+      animation: none;
+    }
+
     .arrival-fanfare {
       position: fixed;
       z-index: 10;
@@ -642,6 +649,32 @@
     button.ghost:hover {
       color: var(--text);
       background: rgba(103, 210, 255, 0.12);
+    }
+
+    button.settings-toggle {
+      min-width: 150px;
+      padding: 0 14px;
+      border-color: rgba(103, 210, 255, 0.36);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.16), transparent 34%),
+        linear-gradient(180deg, rgba(26, 56, 74, 0.96), rgba(17, 32, 45, 0.98));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    button.settings-toggle:hover {
+      border-color: rgba(103, 210, 255, 0.62);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.22), transparent 34%),
+        linear-gradient(180deg, rgba(31, 76, 100, 0.98), rgba(21, 42, 58, 0.98));
+    }
+
+    button.settings-toggle[aria-pressed="true"] {
+      border-color: rgba(114, 224, 168, 0.46);
+      background:
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.14), transparent 34%),
+        linear-gradient(180deg, rgba(28, 91, 68, 0.96), rgba(18, 55, 43, 0.98));
     }
 
     .warning-grid {
@@ -1647,6 +1680,70 @@
       box-shadow: inset 0 0 18px rgba(255, 143, 216, 0.08);
     }
 
+    .phase-board-surface-minigame .surface-minigame {
+      display: grid;
+      gap: 10px;
+      max-width: 980px;
+    }
+
+    .phase-board-surface-minigame .minigame-readout {
+      display: grid;
+      grid-template-columns: minmax(0, 456px) 210px;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .phase-board-surface-minigame .minigame-metrics {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .phase-board-surface-minigame .minigame-metric-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .phase-board-surface-minigame .minigame-rewards {
+      justify-content: end;
+      align-content: start;
+    }
+
+    .phase-board-surface-minigame .minigame-rewards .stat-chip {
+      min-width: 132px;
+      height: 28px;
+      min-height: 28px;
+      line-height: 28px;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .phase-board-surface-minigame .minigame-callout {
+      min-height: 78px;
+      border-color: rgba(255, 209, 102, 0.38);
+      background:
+        linear-gradient(135deg, rgba(255, 209, 102, 0.10), rgba(76, 211, 194, 0.05)),
+        rgba(255, 255, 255, 0.032);
+    }
+
+    .phase-board-surface-minigame .minigame-callout h2 {
+      color: var(--gold);
+    }
+
+    .phase-board-surface-minigame .minigame-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .phase-board-surface-minigame .minigame-actions button {
+      min-width: 176px;
+      min-height: 42px;
+    }
+
     .surface-kpi {
       min-width: 0;
       padding: 8px 10px;
@@ -1707,7 +1804,7 @@
     .surface-action-card {
       display: flex;
       flex-direction: column;
-      min-height: 172px;
+      min-height: 204px;
     }
 
     .surface-action-card.featured-action {
@@ -1716,16 +1813,27 @@
     }
 
     .surface-action-card p {
-      min-height: 42px;
+      min-height: 58px;
     }
 
     .surface-action-card .stat-grid {
-      min-height: 28px;
+      min-height: 48px;
       align-content: start;
     }
 
     .surface-action-card .card-footer {
       margin-top: auto;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .surface-action-card .card-footer span {
+      min-width: 78px;
+      max-width: 92px;
+    }
+
+    .surface-action-card .card-footer button {
+      min-width: 104px;
     }
 
     .ops-card.repair {
@@ -2200,32 +2308,108 @@
     }
 
     .modal-panel:has(.inventory-modal) {
-      width: min(860px, calc(100vw - 36px));
+      width: min(1160px, calc(100vw - 36px));
     }
 
     .inventory-modal {
       display: grid;
+      gap: 18px;
+    }
+
+    .inventory-layout {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
       gap: 16px;
+      align-items: start;
+    }
+
+    .inventory-layout:not(:has(.inventory-side-column)) {
+      grid-template-columns: 1fr;
+    }
+
+    .inventory-side-column {
+      align-self: start;
+      padding: 12px;
+      border: 1px solid rgba(103, 210, 255, 0.22);
+      border-radius: 8px;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(103, 210, 255, 0.11), transparent 34%),
+        linear-gradient(180deg, rgba(12, 24, 34, 0.88), rgba(8, 13, 20, 0.94));
+    }
+
+    .inventory-side-column .inventory-section {
+      gap: 10px;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .inventory-side-column .inventory-section-head {
+      max-width: none;
+    }
+
+    .inventory-side-column .inventory-grid {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .inventory-side-column .inventory-item {
+      min-height: 62px;
+      padding: 7px;
+    }
+
+    .inventory-side-column .inventory-art {
+      width: 30px;
+      height: 30px;
+    }
+
+    .inventory-side-column .inventory-item h3 {
+      font-size: 11px;
+    }
+
+    .inventory-side-column .inventory-item p {
+      margin-top: 2px;
+      font-size: 10px;
+      line-height: 1.14;
+    }
+
+    .inventory-side-column .inventory-count {
+      min-width: 56px;
+      padding: 3px 6px;
+      font-size: 10px;
     }
 
     .inventory-summary {
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
       margin: 0;
+      max-width: 760px;
+    }
+
+    .inventory-summary .metric {
+      min-height: 48px;
+      margin: 0;
+      padding: 8px 10px;
+      background:
+        linear-gradient(135deg, rgba(103, 210, 255, 0.08), transparent 58%),
+        rgba(13, 24, 34, 0.86);
+      border-color: rgba(137, 178, 211, 0.26);
     }
 
     .inventory-section {
       display: grid;
-      gap: 10px;
-      padding-top: 14px;
-      border-top: 1px solid rgba(137, 178, 211, 0.16);
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(137, 178, 211, 0.18);
     }
 
     .inventory-section-head {
       display: grid;
-      gap: 3px;
+      gap: 5px;
+      max-width: 760px;
     }
 
     .inventory-section-head h3 {
+      color: var(--text);
       font-size: 15px;
       line-height: 1.2;
     }
@@ -2233,54 +2417,92 @@
     .inventory-section-head p {
       color: var(--muted);
       font-size: 13px;
-      line-height: 1.35;
+      line-height: 1.4;
     }
 
     .inventory-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
       gap: 10px;
     }
 
+    .inventory-section-resources .inventory-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .inventory-section-payload .inventory-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .inventory-section-artifacts .inventory-grid,
+    .inventory-section-drones .inventory-grid {
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    }
+
     .inventory-item {
+      position: relative;
       display: grid;
-      grid-template-columns: 48px minmax(0, 1fr) auto;
+      grid-template-columns: 44px minmax(0, 1fr);
+      grid-template-rows: minmax(44px, auto) auto;
       align-items: center;
-      gap: 10px;
-      min-height: 72px;
-      padding: 10px;
+      gap: 9px 11px;
+      min-height: 94px;
+      margin: 0;
+      padding: 11px;
+      overflow: hidden;
       border: 1px solid rgba(137, 178, 211, 0.2);
       border-radius: 8px;
       background:
-        linear-gradient(135deg, rgba(103, 210, 255, 0.08), rgba(255, 255, 255, 0.02)),
-        rgba(255, 255, 255, 0.035);
+        radial-gradient(circle at 16% 10%, rgba(255, 255, 255, 0.08), transparent 30%),
+        linear-gradient(135deg, rgba(103, 210, 255, 0.06), rgba(255, 255, 255, 0.018)),
+        rgba(12, 20, 28, 0.94);
+    }
+
+    .inventory-item::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: rgba(103, 210, 255, 0.7);
+    }
+
+    .inventory-copy {
+      min-width: 0;
+      align-self: center;
     }
 
     .inventory-item h3 {
       overflow-wrap: anywhere;
       font-size: 14px;
-      line-height: 1.2;
+      line-height: 1.18;
     }
 
     .inventory-item p {
-      margin-top: 3px;
+      margin-top: 5px;
       color: var(--muted);
       font-size: 12px;
-      line-height: 1.25;
+      line-height: 1.3;
     }
 
-    .inventory-item > strong {
+    .inventory-count {
+      grid-column: 1 / -1;
       justify-self: end;
+      min-width: 52px;
+      padding: 5px 9px;
+      border: 1px solid rgba(137, 178, 211, 0.22);
+      border-radius: 6px;
+      background: rgba(8, 14, 20, 0.68);
       color: var(--text);
-      font-size: 13px;
-      text-align: right;
+      font-size: 12px;
+      line-height: 1.1;
+      text-align: center;
     }
 
     .inventory-art {
       display: grid;
       place-items: center;
-      width: 48px;
-      height: 48px;
+      width: 44px;
+      height: 44px;
       border: 1px solid rgba(137, 178, 211, 0.28);
       border-radius: 8px;
       background:
@@ -2291,23 +2513,257 @@
 
     .inventory-art span {
       color: #8de0ff;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 900;
     }
 
+    .inventory-item.common {
+      border-color: rgba(137, 178, 211, 0.28);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(137, 178, 211, 0.10), transparent 34%),
+        linear-gradient(135deg, rgba(92, 107, 121, 0.16), rgba(255, 255, 255, 0.018)),
+        rgba(14, 20, 27, 0.94);
+    }
+
+    .inventory-item.common::before {
+      background: #8a98a6;
+    }
+
+    .inventory-item.common .inventory-art span,
+    .inventory-item.common .inventory-count {
+      color: #c2cbd3;
+    }
+
+    .inventory-item.blueprint {
+      border-color: rgba(103, 210, 255, 0.38);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(103, 210, 255, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(28, 91, 128, 0.24), rgba(255, 255, 255, 0.018)),
+        rgba(10, 22, 32, 0.94);
+    }
+
+    .inventory-item.blueprint::before {
+      background: #67d2ff;
+    }
+
+    .inventory-item.blueprint .inventory-art span,
+    .inventory-item.blueprint .inventory-count {
+      color: #8de0ff;
+    }
+
+    .inventory-item.uncommon {
+      border-color: rgba(112, 224, 168, 0.36);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(112, 224, 168, 0.12), transparent 34%),
+        linear-gradient(135deg, rgba(45, 134, 105, 0.18), rgba(255, 255, 255, 0.018)),
+        rgba(12, 21, 25, 0.94);
+    }
+
+    .inventory-item.uncommon::before {
+      background: #72e0a8;
+    }
+
+    .inventory-item.uncommon .inventory-art span,
+    .inventory-item.uncommon .inventory-count {
+      color: #8bf0bd;
+    }
+
+    .inventory-item.rare {
+      border-color: rgba(255, 209, 102, 0.38);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(255, 209, 102, 0.14), transparent 34%),
+        linear-gradient(135deg, rgba(126, 96, 31, 0.2), rgba(255, 255, 255, 0.018)),
+        rgba(21, 19, 14, 0.94);
+    }
+
+    .inventory-item.rare::before {
+      background: #ffd166;
+    }
+
     .inventory-item.rare .inventory-art span,
-    .inventory-item.artifact .inventory-art span {
+    .inventory-item.rare .inventory-count {
       color: #ffd166;
+    }
+
+    .inventory-item.exotic {
+      border-color: rgba(255, 117, 205, 0.36);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(255, 117, 205, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(100, 58, 141, 0.22), rgba(255, 255, 255, 0.018)),
+        rgba(21, 15, 29, 0.94);
+    }
+
+    .inventory-item.exotic::before {
+      background: #ff88cf;
     }
 
     .inventory-item.exotic .inventory-art span {
       color: #ff88cf;
     }
 
-    .inventory-item.blueprint .inventory-art span,
-    .inventory-item.module .inventory-art span,
+    .inventory-item.exotic .inventory-count {
+      color: #ffaad9;
+    }
+
+    .inventory-item.artifact {
+      border-color: rgba(183, 132, 255, 0.36);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(183, 132, 255, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(76, 61, 132, 0.24), rgba(255, 209, 102, 0.05)),
+        rgba(17, 16, 28, 0.94);
+    }
+
+    .inventory-item.artifact::before {
+      background: #b784ff;
+    }
+
+    .inventory-item.artifact .inventory-art span,
+    .inventory-item.artifact .inventory-count {
+      color: #d2b7ff;
+    }
+
+    .inventory-item.module::before {
+      background: #67d2ff;
+    }
+
+    .inventory-item.drone::before {
+      background: #72e0a8;
+    }
+
+    .inventory-item.module .inventory-art span {
+      color: #8de0ff;
+    }
+
     .inventory-item.drone .inventory-art span {
       color: #72e0a8;
+    }
+
+    .rarity-common {
+      border-color: rgba(137, 178, 211, 0.30);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(137, 178, 211, 0.10), transparent 34%),
+        linear-gradient(135deg, rgba(92, 107, 121, 0.16), rgba(255, 255, 255, 0.018)),
+        rgba(14, 20, 27, 0.94);
+    }
+
+    .rarity-common::before {
+      background: #8a98a6;
+    }
+
+    .rarity-common .inventory-art span,
+    .rarity-common .inventory-count,
+    .rarity-common .draft-art span,
+    .rarity-common .module-art span {
+      color: #c2cbd3;
+    }
+
+    .rarity-uncommon {
+      border-color: rgba(112, 224, 168, 0.38);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(112, 224, 168, 0.12), transparent 34%),
+        linear-gradient(135deg, rgba(45, 134, 105, 0.18), rgba(255, 255, 255, 0.018)),
+        rgba(12, 21, 25, 0.94);
+    }
+
+    .rarity-uncommon::before {
+      background: #72e0a8;
+    }
+
+    .rarity-uncommon .inventory-art span,
+    .rarity-uncommon .inventory-count,
+    .rarity-uncommon .draft-art span,
+    .rarity-uncommon .module-art span {
+      color: #8bf0bd;
+    }
+
+    .rarity-rare {
+      border-color: rgba(255, 209, 102, 0.42);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(255, 209, 102, 0.14), transparent 34%),
+        linear-gradient(135deg, rgba(126, 96, 31, 0.2), rgba(255, 255, 255, 0.018)),
+        rgba(21, 19, 14, 0.94);
+    }
+
+    .rarity-rare::before {
+      background: #ffd166;
+    }
+
+    .rarity-rare .inventory-art span,
+    .rarity-rare .inventory-count,
+    .rarity-rare .draft-art span,
+    .rarity-rare .module-art span {
+      color: #ffd166;
+    }
+
+    .rarity-prototype {
+      border-color: rgba(183, 132, 255, 0.40);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(183, 132, 255, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(76, 61, 132, 0.24), rgba(255, 255, 255, 0.018)),
+        rgba(17, 16, 28, 0.94);
+    }
+
+    .rarity-prototype::before {
+      background: #b784ff;
+    }
+
+    .rarity-prototype .inventory-art span,
+    .rarity-prototype .inventory-count,
+    .rarity-prototype .draft-art span,
+    .rarity-prototype .module-art span {
+      color: #d2b7ff;
+    }
+
+    .rarity-exotic {
+      border-color: rgba(255, 117, 205, 0.42);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(255, 117, 205, 0.16), transparent 34%),
+        linear-gradient(135deg, rgba(100, 58, 141, 0.22), rgba(255, 255, 255, 0.018)),
+        rgba(21, 15, 29, 0.94);
+    }
+
+    .rarity-exotic::before {
+      background: #ff88cf;
+    }
+
+    .rarity-exotic .inventory-art span,
+    .rarity-exotic .inventory-count,
+    .rarity-exotic .draft-art span,
+    .rarity-exotic .module-art span {
+      color: #ffaad9;
+    }
+
+    .inventory-item.drone-slot.open {
+      border-color: rgba(103, 210, 255, 0.34);
+      background:
+        radial-gradient(circle at 18% 8%, rgba(103, 210, 255, 0.12), transparent 34%),
+        linear-gradient(135deg, rgba(28, 91, 128, 0.18), rgba(255, 255, 255, 0.018)),
+        rgba(10, 22, 32, 0.94);
+    }
+
+    .inventory-item.drone-slot.open::before {
+      background: #67d2ff;
+    }
+
+    .inventory-item.drone-slot.locked {
+      border-color: rgba(137, 178, 211, 0.18);
+      background:
+        linear-gradient(135deg, rgba(103, 210, 255, 0.025), rgba(255, 255, 255, 0.012)),
+        rgba(12, 20, 28, 0.88);
+    }
+
+    .inventory-item.drone-slot.locked::before {
+      background: rgba(137, 178, 211, 0.36);
+    }
+
+    .inventory-item.drone-slot.locked .inventory-art span,
+    .inventory-item.drone-slot.locked .inventory-count {
+      color: var(--muted);
+    }
+
+    .inventory-item.module .inventory-count,
+    .inventory-item.drone .inventory-count {
+      color: var(--text);
     }
 
     .inventory-bank .stat-grid {
@@ -2385,6 +2841,55 @@
       line-height: 1.35;
     }
 
+    .debug-tools {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 22;
+      display: none;
+      width: 260px;
+      padding: 12px;
+      border: 1px solid rgba(255, 209, 102, 0.42);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(17, 23, 33, 0.94), rgba(8, 12, 17, 0.96)),
+        rgba(13, 18, 25, 0.92);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(12px);
+    }
+
+    .debug-tools.is-visible {
+      display: block;
+    }
+
+    .debug-tools h2 {
+      margin: 0 0 6px;
+      color: var(--warn);
+      font-size: 12px;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .debug-tools p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .debug-tool-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .debug-tools button {
+      justify-content: center;
+      width: 100%;
+      min-height: 38px;
+      text-align: center;
+    }
+
     @keyframes toast-in {
       from {
         opacity: 0;
@@ -2458,10 +2963,36 @@
         justify-content: start;
       }
 
+      .inventory-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .inventory-section-resources .inventory-grid,
+      .inventory-section-payload .inventory-grid,
+      .inventory-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
       .toast-root {
         left: 50%;
         top: 12px;
         width: calc(100vw - 24px);
+      }
+
+      .debug-tools {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        width: auto;
+      }
+    }
+
+    @media (max-width: 460px) {
+      .inventory-summary,
+      .inventory-section-resources .inventory-grid,
+      .inventory-section-payload .inventory-grid,
+      .inventory-grid {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -2489,6 +3020,18 @@
     <div class="telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong><small>thermal buildup over the burn</small></div>
     <div class="telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong><small>where the burn starts feeling spicy</small></div>
   </div>
+  <aside id="debug-tools" class="debug-tools" aria-label="Debug mini-game tools">
+    <h2>Debug mini-games</h2>
+    <p>Sandbox launches use default settings and do not write save data.</p>
+    <div class="debug-tool-grid">
+      <button class="warn" type="button" data-debug-action="mining">Mining sandbox</button>
+      <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
+      <button class="danger" type="button" data-debug-action="push">Deep push sandbox</button>
+      <button type="button" data-debug-action="flyby">Flyby sandbox</button>
+      <button type="button" data-debug-action="orbit">Orbit sandbox</button>
+      <button class="ghost" type="button" data-debug-action="exit">Exit debug / reload save</button>
+    </div>
+  </aside>
   <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
   <div id="modal-root" class="modal-root" hidden>
     <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -2517,12 +3060,14 @@
     const arrivalFanfareTagTwo = document.getElementById("arrival-fanfare-tag-two");
     const arrivalCloseCall = document.getElementById("arrival-close-call");
     const telemetryChartLegend = document.getElementById("telemetry-chart-legend");
+    const debugTools = document.getElementById("debug-tools");
     let lastToastText = "";
     let lastToastAt = 0;
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
     const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
+    const debugToolsStorageKey = "rocket_rogue_debug_tools";
 
     function normalizedGameSpeed(value) {
       const numeric = Number(value);
@@ -2611,8 +3156,12 @@
     function syncHelpControls(root = document) {
       const disabled = helpDisabled();
       const dismissed = dismissedHelpTopics();
-      root.querySelectorAll("[data-help-toggle]").forEach((input) => {
-        input.checked = !disabled;
+      root.querySelectorAll("[data-help-toggle]").forEach((control) => {
+        if ("checked" in control) {
+          control.checked = !disabled;
+        }
+        control.textContent = disabled ? "Show mission help" : "Hide mission help";
+        control.setAttribute("aria-pressed", disabled ? "false" : "true");
       });
       root.querySelectorAll("[data-help-topic]").forEach((card) => {
         const topic = card.dataset.helpTopic || "";
@@ -2620,9 +3169,43 @@
       });
     }
 
+    function debugToolsVisible() {
+      try {
+        return window.localStorage.getItem(debugToolsStorageKey) === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function setDebugToolsVisible(visible) {
+      try {
+        if (visible) {
+          window.localStorage.setItem(debugToolsStorageKey, "1");
+        } else {
+          window.localStorage.removeItem(debugToolsStorageKey);
+        }
+      } catch (error) {
+        // Ignore storage failures. The visible state still updates for this session.
+      }
+      debugTools.classList.toggle("is-visible", visible);
+    }
+
+    function syncDebugToolsControls(root = document) {
+      const visible = debugTools.classList.contains("is-visible") || debugToolsVisible();
+      debugTools.classList.toggle("is-visible", visible);
+      root.querySelectorAll("[data-debug-tools-toggle]").forEach((control) => {
+        if ("checked" in control) {
+          control.checked = visible;
+        }
+        control.textContent = visible ? "Hide debug tools" : "Show debug tools";
+        control.setAttribute("aria-pressed", visible ? "true" : "false");
+      });
+    }
+
     function syncLocalControls(root = document) {
       syncGameSpeedControls(root);
       syncHelpControls(root);
+      syncDebugToolsControls(root);
     }
 
     function sceneMetrics() {
@@ -2764,6 +3347,15 @@
     }
 
     window.RocketBridge = {
+      syncSceneOverlays,
+      syncSettingsControls() {
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+      },
+      syncDebugToolsControls() {
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+      },
       setPanel(html) {
         panel.innerHTML = html;
         syncLocalControls(panel);
@@ -2861,6 +3453,12 @@
       mineSurface: () => rrCall("rr_mine_surface"),
       pushSurface: () => rrCall("rr_push_surface"),
       extractSurface: () => rrCall("rr_extract_surface"),
+      surfaceScanPulse: () => rrCall("rr_surface_scan_pulse"),
+      surfaceScanBank: () => rrCall("rr_surface_scan_bank"),
+      surfaceScanAbort: () => rrCall("rr_surface_scan_abort"),
+      surfacePushStep: () => rrCall("rr_surface_push_step"),
+      surfacePushBank: () => rrCall("rr_surface_push_bank"),
+      surfacePushAbort: () => rrCall("rr_surface_push_abort"),
       surfaceUpgrade: (index) => rrCall("rr_surface_upgrade", [index], ["number"]),
       droneOps: () => rrCall("rr_drone_ops"),
       surfaceOps: () => rrCall("rr_surface_ops"),
@@ -2873,6 +3471,12 @@
       miningStow: () => rrCall("rr_mining_stow"),
       miningAbort: () => rrCall("rr_mining_abort"),
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
+      debugMining: () => rrCall("rr_debug_mining"),
+      debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
+      debugSurfacePush: () => rrCall("rr_debug_surface_push"),
+      debugFlyby: () => rrCall("rr_debug_flyby"),
+      debugOrbit: () => rrCall("rr_debug_orbit"),
+      debugExit: () => rrCall("rr_debug_exit"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
       recruitCandidate: (index) => rrCall("rr_recruit_candidate", [index], ["number"]),
@@ -2926,6 +3530,12 @@
       mineSurface: "mine_surface",
       pushSurface: "push_surface",
       extractSurface: "extract_surface",
+      surfaceScanPulse: "surface_scan_pulse",
+      surfaceScanBank: "surface_scan_bank",
+      surfaceScanAbort: "surface_scan_abort",
+      surfacePushStep: "surface_push_step",
+      surfacePushBank: "surface_push_bank",
+      surfacePushAbort: "surface_push_abort",
       miningScanner: "mining_scanner",
       miningStow: "mining_stow",
       miningAbort: "mining_abort",
@@ -2966,6 +3576,12 @@
       [rrActionIds.mineSurface]: () => rr.mineSurface(),
       [rrActionIds.pushSurface]: () => rr.pushSurface(),
       [rrActionIds.extractSurface]: () => rr.extractSurface(),
+      [rrActionIds.surfaceScanPulse]: () => rr.surfaceScanPulse(),
+      [rrActionIds.surfaceScanBank]: () => rr.surfaceScanBank(),
+      [rrActionIds.surfaceScanAbort]: () => rr.surfaceScanAbort(),
+      [rrActionIds.surfacePushStep]: () => rr.surfacePushStep(),
+      [rrActionIds.surfacePushBank]: () => rr.surfacePushBank(),
+      [rrActionIds.surfacePushAbort]: () => rr.surfacePushAbort(),
       [rrActionIds.droneOps]: () => rr.droneOps(),
       [rrActionIds.surfaceOps]: () => rr.surfaceOps(),
       [rrActionIds.upgradeDroneSlot]: () => rr.upgradeDroneSlot(),
@@ -2979,6 +3595,36 @@
       [rrActionIds.restCrew]: () => rr.restCrew(),
       [rrActionIds.resetSave]: () => rr.resetSave()
     };
+
+    const debugActions = Object.freeze({
+      mining: () => rr.debugMining(),
+      scan: () => rr.debugSurfaceScan(),
+      push: () => rr.debugSurfacePush(),
+      flyby: () => rr.debugFlyby(),
+      orbit: () => rr.debugOrbit(),
+      exit: () => rr.debugExit()
+    });
+
+    const debugParams = new URLSearchParams(window.location.search);
+    const debugToolsEnabled = debugParams.has("debug_tools") || debugParams.has("debug_minigames");
+    if (debugToolsEnabled) {
+      setDebugToolsVisible(true);
+    } else {
+      setDebugToolsVisible(debugToolsVisible());
+    }
+
+    debugTools.addEventListener("click", (event) => {
+      const button = closestFromEvent(event, "button[data-debug-action]");
+      if (!button || !debugTools.contains(button)) {
+        return;
+      }
+      const action = debugActions[button.dataset.debugAction || ""];
+      if (!action) {
+        return;
+      }
+      event.preventDefault();
+      action();
+    });
 
     let lastPanelActionAt = 0;
     let lastPanelAction = "";
@@ -3178,10 +3824,44 @@
 
       const helpToggle = closestFromEvent(event, "[data-help-toggle]");
       if (helpToggle && (panel.contains(helpToggle) || modalRoot.contains(helpToggle))) {
-        setHelpDisabled(!helpToggle.checked);
+        const nextDisabled = "checked" in helpToggle ? !helpToggle.checked : !helpDisabled();
+        setHelpDisabled(nextDisabled);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        return;
+      }
+
+      const debugToggle = closestFromEvent(event, "[data-debug-tools-toggle]");
+      if (debugToggle && (panel.contains(debugToggle) || modalRoot.contains(debugToggle))) {
+        const nextVisible = "checked" in debugToggle ? debugToggle.checked : !debugTools.classList.contains("is-visible");
+        setDebugToolsVisible(nextVisible);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
       }
+    }
+
+    function handleHelpToggle(event) {
+      const button = closestFromEvent(event, "button[data-help-toggle]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setHelpDisabled(!helpDisabled());
+      syncLocalControls(panel);
+      syncLocalControls(modalRoot);
+    }
+
+    function handleDebugToolsToggle(event) {
+      const button = closestFromEvent(event, "button[data-debug-tools-toggle]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setDebugToolsVisible(!debugTools.classList.contains("is-visible"));
+      syncLocalControls(panel);
+      syncLocalControls(modalRoot);
     }
 
     function handleHelpDismiss(event) {
@@ -3200,6 +3880,8 @@
     document.addEventListener("click", handleModalTrigger, true);
     document.addEventListener("pointerdown", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpDismiss, true);
+    document.addEventListener("click", handleHelpToggle, true);
+    document.addEventListener("click", handleDebugToolsToggle, true);
     document.addEventListener("change", handleSettingsChange, true);
     document.addEventListener("pointerdown", handlePanelAction, true);
     document.addEventListener("click", handlePanelAction, true);

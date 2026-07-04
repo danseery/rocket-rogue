@@ -372,6 +372,66 @@ void rr_extract_surface()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_surface_scan_pulse()
+{
+    if (g_app) {
+        g_app->scanSurfacePulse();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_scan_bank()
+{
+    if (g_app) {
+        g_app->scanSurfaceBank();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_scan_abort()
+{
+    if (g_app) {
+        g_app->scanSurfaceAbort();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_push_step()
+{
+    if (g_app) {
+        g_app->pushSurfaceStep();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_push_bank()
+{
+    if (g_app) {
+        g_app->pushSurfaceBank();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_surface_push_abort()
+{
+    if (g_app) {
+        g_app->pushSurfaceAbort();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_surface_upgrade(int index)
 {
     if (g_app) {
@@ -486,6 +546,66 @@ void rr_mining_failure_ack()
 {
     if (g_app) {
         g_app->miningFailureAck();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_mining()
+{
+    if (g_app) {
+        g_app->debugStartMining();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_surface_scan()
+{
+    if (g_app) {
+        g_app->debugStartSurfaceScan();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_surface_push()
+{
+    if (g_app) {
+        g_app->debugStartSurfacePush();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_flyby()
+{
+    if (g_app) {
+        g_app->debugStartFlyby();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_orbit()
+{
+    if (g_app) {
+        g_app->debugStartOrbit();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_exit()
+{
+    if (g_app) {
+        g_app->debugExit();
     }
 }
 

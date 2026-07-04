@@ -626,6 +626,19 @@ inline constexpr int analysisLabBlueprintBonus = 1;
 inline constexpr int artifactInsightBlueprintPerIdentified = 1;
 inline constexpr int artifactInsightBlueprintMaximum = 3;
 inline constexpr int surfaceLogEntryLimit = 5;
+inline constexpr int scanMaxPulses = 6;
+inline constexpr double scanBaseBustRisk = 0.04;
+inline constexpr double scanBustRiskPerPulse = 0.055;
+inline constexpr double scanBustRiskHazardScale = 0.16;
+inline constexpr double scanSignalPerPulse = 0.18;
+inline constexpr double scanHazardPerPulse = 0.006;
+inline constexpr double scanBustHazardIncrease = 0.035;
+inline constexpr int pushMaxSteps = 4;
+inline constexpr double pushBaseCollapseRisk = 0.07;
+inline constexpr double pushRiskPerStep = 0.085;
+inline constexpr double pushRiskHazardScale = 0.18;
+inline constexpr double pushHazardPerStep = 0.030;
+inline constexpr double pushCollapseHazardIncrease = 0.060;
 } // namespace research
 
 namespace mining {

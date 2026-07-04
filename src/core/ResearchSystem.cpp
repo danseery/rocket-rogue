@@ -676,7 +676,6 @@ void populateOrbitRewardPreview(OrbitRunState& orbit, const Destination* destina
 
 void pushFlybyTrailPoint(FlybyRunState& flyby, double x, double y)
 {
-    constexpr std::size_t maxTrailPoints = 96;
     if (!flyby.trailPoints.empty()) {
         const FlybyTrailPoint& last = flyby.trailPoints.back();
         if (std::hypot(last.x - x, last.y - y) < 0.012) {
@@ -684,9 +683,6 @@ void pushFlybyTrailPoint(FlybyRunState& flyby, double x, double y)
         }
     }
     flyby.trailPoints.push_back({x, y});
-    if (flyby.trailPoints.size() > maxTrailPoints) {
-        flyby.trailPoints.erase(flyby.trailPoints.begin());
-    }
 }
 
 void pushOrbitTrailPoint(OrbitRunState& orbit, double x, double y)
@@ -782,6 +778,14 @@ bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& cata
     }
     return destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) > 0
         && destinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id) > 0;
+}
+
+bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog)
+{
+    if (!canAttemptArrivalLanding(state, catalog)) {
+        return false;
+    }
+    return bankFrontierReadiness(state, catalog);
 }
 
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation)
@@ -2043,6 +2047,418 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
         tuning::research::unstableTerrainHazardIncrease);
     outcome.message = std::string(text::status::surfacePushed);
     finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
+    return outcome;
+}
+
+bool hasPendingSurfacePayload(const MaterialInventory& materials, const std::vector<ArtifactRecord>& artifacts, int cargo)
+{
+    return cargo > 0 || materials.common > 0 || materials.rare > 0 || materials.exotic > 0 || !artifacts.empty();
+}
+
+struct SurfaceScanSupport {
+    double signalBonus = 0.0;
+    double riskRelief = 0.0;
+    double rareChanceBonus = 0.0;
+    double exoticChanceBonus = 0.0;
+    double artifactChanceBonus = 0.0;
+    double hazardRelief = 0.0;
+    int maxPulseBonus = 0;
+};
+
+SurfaceScanSupport surfaceScanSupport(const GameState& state)
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
+    const double scannerReach = std::max(0.0, upgrades.scannerRadius + drones.scannerRadius);
+
+    SurfaceScanSupport support;
+    support.signalBonus = std::clamp(scannerReach * 0.025 + upgrades.oreYieldChance * 0.25, 0.0, 0.16);
+    support.riskRelief = std::clamp(upgrades.hazardRelief + scannerReach * 0.015, 0.0, 0.18);
+    support.rareChanceBonus = std::clamp(upgrades.oreYieldChance + scannerReach * 0.012, 0.0, 0.24);
+    support.exoticChanceBonus = std::clamp(upgrades.oreYieldChance * 0.35 + scannerReach * 0.006, 0.0, 0.10);
+    support.artifactChanceBonus = std::clamp(scannerReach * 0.010, 0.0, 0.09);
+    support.hazardRelief = std::clamp(upgrades.hazardRelief, 0.0, 0.06);
+    support.maxPulseBonus = std::clamp(static_cast<int>(std::floor(scannerReach / 2.5)), 0, 2);
+    return support;
+}
+
+struct SurfacePushSupport {
+    double pressureRelief = 0.0;
+    double collapseRelief = 0.0;
+    double richChanceBonus = 0.0;
+    double artifactChanceBonus = 0.0;
+    double hazardRelief = 0.0;
+    int maxStepBonus = 0;
+};
+
+SurfacePushSupport surfacePushSupport(const GameState& state)
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
+    const double structureSupport =
+        upgrades.drillDurability * 0.025 +
+        upgrades.drillCooling * 0.010 +
+        upgrades.hardRockBounceRelief * 0.30 +
+        upgrades.droneSpeed * 0.045 +
+        drones.drillIntegrityRelief * 0.22 +
+        drones.hardRockBounceRelief * 0.24;
+
+    SurfacePushSupport support;
+    support.pressureRelief = std::clamp(structureSupport + upgrades.hazardRelief * 0.50, 0.0, 0.20);
+    support.collapseRelief = std::clamp(structureSupport + upgrades.hazardRelief, 0.0, 0.24);
+    support.richChanceBonus = std::clamp(upgrades.oreYieldChance + upgrades.hardRockBounceRelief * 0.15 + drones.hardRockBounceRelief * 0.10, 0.0, 0.22);
+    support.artifactChanceBonus = std::clamp(upgrades.hardRockBounceRelief * 0.10 + drones.drillIntegrityRelief * 0.12, 0.0, 0.08);
+    support.hazardRelief = std::clamp(upgrades.hazardRelief + structureSupport * 0.20, 0.0, 0.08);
+    support.maxStepBonus = std::clamp(static_cast<int>(std::floor((upgrades.drillDurability + upgrades.drillCooling + drones.hardRockBounceRelief * 5.0) / 4.0)), 0, 1);
+    return support;
+}
+
+MiningCellMaterial rollSurfacePushRichMarker(
+    const SurfaceExpeditionState& expedition,
+    int step,
+    const SurfacePushSupport& support,
+    Random& rng)
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const Destination* destination = catalog.findDestination(expedition.destinationId);
+    const double bodyRichness = destination == nullptr
+        ? 0.0
+        : std::clamp(static_cast<double>(destination->tier) * 0.045 + destination->hazard * 0.025, 0.0, 0.22);
+    const double depthRichness = std::clamp(static_cast<double>(std::max(0, expedition.depth + step)) * 0.055, 0.0, 0.30);
+    const double exoticChance = std::clamp(0.03 + bodyRichness * 0.34 + depthRichness * 0.22 + support.richChanceBonus * 0.20, 0.0, 0.26);
+
+    if (step >= 3 && rng.chance(exoticChance)) {
+        return MiningCellMaterial::ExoticVein;
+    }
+    return MiningCellMaterial::RareOre;
+}
+
+void appendSurfacePushMarkers(SurfacePushRunState& push, const MaterialInventory& gain, bool artifactFound)
+{
+    for (int i = 0; i < std::max(0, gain.common); ++i) {
+        push.rewardMarkers.push_back(MiningCellMaterial::CommonOre);
+    }
+    for (int i = 0; i < std::max(0, gain.rare); ++i) {
+        push.rewardMarkers.push_back(MiningCellMaterial::RareOre);
+    }
+    for (int i = 0; i < std::max(0, gain.exotic); ++i) {
+        push.rewardMarkers.push_back(MiningCellMaterial::ExoticVein);
+    }
+    if (artifactFound) {
+        push.rewardMarkers.push_back(MiningCellMaterial::ArtifactCache);
+    }
+}
+
+void resetSurfaceScan(GameState& state)
+{
+    state.run.surfaceScan = {};
+}
+
+void resetSurfacePush(GameState& state)
+{
+    state.run.surfacePush = {};
+}
+
+SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
+    if (!outcome.applied) {
+        outcome.message = "Need an action kit to run a surface scan.";
+        return outcome;
+    }
+
+    SurfaceScanRunState scan;
+    const SurfaceScanSupport support = surfaceScanSupport(state);
+    scan.active = true;
+    scan.destinationId = expedition.destinationId;
+    scan.maxPulses = tuning::research::scanMaxPulses + support.maxPulseBonus;
+    scan.signal = std::clamp(0.12 + support.signalBonus, 0.0, 0.42);
+    scan.interference = std::clamp(expedition.hazard * 0.25 - support.riskRelief * 0.35, 0.0, 0.30);
+    scan.bustRisk = std::clamp(
+        tuning::research::scanBaseBustRisk + expedition.hazard * tuning::research::scanBustRiskHazardScale - support.riskRelief,
+        0.02,
+        0.38);
+    scan.message = "Scanner lattice armed. Pulse for richer returns, or bank before interference spikes.";
+    state.run.surfaceScan = scan;
+    state.screen = Screen::SurfaceScan;
+    outcome.message = "Scanner lattice armed. Press your luck for materials and artifact traces.";
+    return outcome;
+}
+
+SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
+{
+    SurfaceScanRunState& scan = state.run.surfaceScan;
+    SurfaceActionOutcome outcome;
+    if (!scan.active || scan.completed) {
+        outcome.message = "Surface scan is not active.";
+        return outcome;
+    }
+
+    outcome.applied = true;
+    if (rng.chance(scan.bustRisk)) {
+        scan.completed = true;
+        scan.busted = true;
+        scan.active = false;
+        state.run.surfaceExpedition.hazard += tuning::research::scanBustHazardIncrease;
+        outcome.hazardTriggered = true;
+        outcome.hazardMessage = "Interference burned the survey window.";
+        outcome.hazardDelta = tuning::research::scanBustHazardIncrease;
+        outcome.message = "Scan busted. The crew pulled the array before it cooked the rig.";
+        scan.message = surfaceActionSummary(outcome);
+        appendSurfaceLog(state.run.surfaceExpedition, scan.message);
+        return outcome;
+    }
+
+    scan.pulses += 1;
+    const SurfaceScanSupport support = surfaceScanSupport(state);
+    scan.signal = std::clamp(scan.signal + tuning::research::scanSignalPerPulse + support.signalBonus * 0.35 + rng.range(0.02, 0.09), 0.0, 1.0);
+    scan.interference = std::clamp(scan.interference + std::max(0.06, 0.12 - support.riskRelief * 0.30) + rng.range(0.00, 0.05), 0.0, 1.0);
+    const double scanHazardDelta = std::max(0.0, tuning::research::scanHazardPerPulse - support.hazardRelief * 0.10);
+    scan.hazardDelta += scanHazardDelta;
+    scan.bustRisk = std::clamp(
+        tuning::research::scanBaseBustRisk +
+            state.run.surfaceExpedition.hazard * tuning::research::scanBustRiskHazardScale +
+            scan.pulses * tuning::research::scanBustRiskPerPulse +
+            scan.interference * 0.045 -
+            support.riskRelief,
+        0.02,
+        0.72);
+
+    MaterialInventory gain;
+    gain.common = 1 + (scan.signal > 0.62 ? 1 : 0);
+    if (rng.chance(0.12 + scan.signal * 0.30 + surfaceSiteProfileEffects(state.run.surfaceExpedition.siteProfile).mineRareChanceBonus + support.rareChanceBonus)) {
+        gain.rare += 1;
+    }
+    if (scan.pulses >= 4 && rng.chance(0.06 + scan.signal * 0.11 + support.exoticChanceBonus)) {
+        gain.exotic += 1;
+    }
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
+    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(state.run.surfaceExpedition.siteProfile);
+    if (scan.pulses >= 3 && scan.temporaryArtifacts.empty() &&
+        rng.chance(std::min(0.70, 0.05 + scan.signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+        scan.temporaryArtifacts.push_back({artifactId(state.run.surfaceExpedition), state.run.surfaceExpedition.destinationId, false});
+        outcome.artifactFound = true;
+        outcome.cargoDelta += 3;
+        scan.cargo += 3;
+    }
+
+    addMaterials(scan.temporaryMaterials, gain);
+    const int cargoGain = materialCargo(gain);
+    scan.cargo += cargoGain;
+    outcome.materialDelta = gain;
+    outcome.cargoDelta += cargoGain;
+    outcome.hazardDelta = scanHazardDelta;
+    outcome.message = scan.pulses >= scan.maxPulses
+        ? "Full spectrum scan complete. Bank the payload before the window collapses."
+        : "Scan pulse hit. Signal improved, but interference climbed.";
+    scan.message = surfaceActionSummary(outcome);
+    if (scan.pulses >= scan.maxPulses) {
+        scan.completed = true;
+    }
+    return outcome;
+}
+
+SurfaceActionOutcome bankSurfaceScan(GameState& state)
+{
+    SurfaceScanRunState& scan = state.run.surfaceScan;
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (!scan.completed && !scan.active) {
+        outcome.message = "No surface scan is ready to bank.";
+        return outcome;
+    }
+
+    outcome.applied = true;
+    if (scan.busted) {
+        outcome.message = "Scan window closed. No payload banked.";
+    } else {
+        addMaterials(expedition.prospectMaterials, scan.temporaryMaterials);
+        expedition.prospectArtifacts += static_cast<int>(scan.temporaryArtifacts.size());
+        expedition.hazard += scan.hazardDelta;
+        expedition.miningSitePrepared = true;
+        outcome.hazardDelta = scan.hazardDelta;
+        outcome.message = hasPendingSurfacePayload(scan.temporaryMaterials, scan.temporaryArtifacts, scan.cargo)
+            ? "Scan banked. Underground deposits are tagged for the mining drone."
+            : "Scan banked. The crew found a clean mining line, but no strong payload.";
+    }
+    appendSurfaceLog(expedition, surfaceActionSummary(outcome));
+    resetSurfaceScan(state);
+    state.screen = Screen::SurfaceExpedition;
+    return outcome;
+}
+
+SurfaceActionOutcome abortSurfaceScan(GameState& state)
+{
+    SurfaceActionOutcome outcome;
+    if (!state.run.surfaceScan.active && !state.run.surfaceScan.completed) {
+        outcome.message = "No surface scan is active.";
+        return outcome;
+    }
+    outcome.applied = true;
+    outcome.message = "Surface scan recalled. No scan payload banked.";
+    appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
+    resetSurfaceScan(state);
+    state.screen = Screen::SurfaceExpedition;
+    return outcome;
+}
+
+SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (expedition.miningRunUsed) {
+        outcome.message = "Mining run is complete. Extract before pushing deeper.";
+        return outcome;
+    }
+
+    outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
+    if (!outcome.applied) {
+        outcome.message = "Need two action kits to push deeper.";
+        return outcome;
+    }
+
+    SurfacePushRunState push;
+    const SurfacePushSupport support = surfacePushSupport(state);
+    push.active = true;
+    push.destinationId = expedition.destinationId;
+    push.maxSteps = tuning::research::pushMaxSteps + support.maxStepBonus;
+    push.pressure = std::clamp(expedition.hazard * 0.35 - support.pressureRelief, 0.0, 0.45);
+    push.collapseRisk = std::clamp(
+        tuning::research::pushBaseCollapseRisk + expedition.hazard * tuning::research::pushRiskHazardScale - support.collapseRelief,
+        0.04,
+        0.42);
+    push.message = "Descent lane armed. Each deeper mark improves payoff and raises collapse risk.";
+    state.run.surfacePush = push;
+    state.screen = Screen::SurfacePush;
+    outcome.message = "Deep route armed. Push for richer deposits, or bank before the terrain turns.";
+    return outcome;
+}
+
+SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
+{
+    SurfacePushRunState& push = state.run.surfacePush;
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (!push.active || push.completed) {
+        outcome.message = "Deep push is not active.";
+        return outcome;
+    }
+
+    outcome.applied = true;
+    if (rng.chance(push.collapseRisk)) {
+        push.completed = true;
+        push.busted = true;
+        push.active = false;
+        expedition.hazard += tuning::research::pushCollapseHazardIncrease;
+        outcome.hazardTriggered = true;
+        outcome.hazardMessage = "A shelf collapsed across the descent lane.";
+        outcome.hazardDelta = tuning::research::pushCollapseHazardIncrease;
+        outcome.message = "Deep push busted. The route collapsed before the crew could bank it.";
+        push.message = surfaceActionSummary(outcome);
+        appendSurfaceLog(expedition, push.message);
+        return outcome;
+    }
+
+    push.steps += 1;
+    const SurfacePushSupport support = surfacePushSupport(state);
+    push.depthGain = std::max(push.depthGain, push.steps);
+    push.pressure = std::clamp(push.pressure + std::max(0.08, 0.16 - support.pressureRelief * 0.35) + rng.range(0.00, 0.06), 0.0, 1.0);
+    const double pushHazardDelta = std::max(0.0, tuning::research::pushHazardPerStep - support.hazardRelief * 0.12);
+    push.hazardDelta += pushHazardDelta;
+    push.collapseRisk = std::clamp(
+        tuning::research::pushBaseCollapseRisk +
+            expedition.hazard * tuning::research::pushRiskHazardScale +
+            push.steps * tuning::research::pushRiskPerStep +
+            push.pressure * 0.045 -
+            support.collapseRelief,
+        0.04,
+        0.84);
+
+    MaterialInventory gain;
+    gain.common = push.steps == 1 ? 1 : 0;
+    gain.rare = 1;
+    if (push.steps >= 3 && rng.chance(0.35 + support.richChanceBonus)) {
+        const MiningCellMaterial richMarker = rollSurfacePushRichMarker(expedition, push.steps, support, rng);
+        if (richMarker == MiningCellMaterial::ExoticVein) {
+            gain.exotic += 1;
+        } else {
+            gain.rare += 1;
+        }
+    }
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
+    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    bool artifactFound = false;
+    if (push.steps >= 2 && push.temporaryArtifacts.empty() &&
+        rng.chance(std::min(0.82, tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+        push.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
+        outcome.artifactFound = true;
+        artifactFound = true;
+        outcome.cargoDelta += 3;
+        push.cargo += 3;
+    }
+
+    addMaterials(push.temporaryMaterials, gain);
+    const int cargoGain = materialCargo(gain);
+    push.cargo += cargoGain;
+    appendSurfacePushMarkers(push, gain, artifactFound);
+    outcome.materialDelta = gain;
+    outcome.cargoDelta += cargoGain;
+    outcome.hazardDelta = pushHazardDelta;
+    outcome.message = push.steps >= push.maxSteps
+        ? "Maximum safe depth reached. Bank the route before the floor gives out."
+        : "Deeper lane found. The payout climbed with the pressure.";
+    push.message = surfaceActionSummary(outcome);
+    if (push.steps >= push.maxSteps) {
+        push.completed = true;
+    }
+    return outcome;
+}
+
+SurfaceActionOutcome bankSurfacePush(GameState& state)
+{
+    SurfacePushRunState& push = state.run.surfacePush;
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (!push.completed && !push.active) {
+        outcome.message = "No deep route is ready to bank.";
+        return outcome;
+    }
+
+    outcome.applied = true;
+    if (push.busted) {
+        outcome.message = "Deep route lost. No new payload banked.";
+    } else {
+        addMaterials(expedition.prospectMaterials, push.temporaryMaterials);
+        expedition.prospectArtifacts += static_cast<int>(push.temporaryArtifacts.size());
+        expedition.depth += std::max(1, push.depthGain);
+        expedition.hazard += push.hazardDelta;
+        expedition.miningSitePrepared = true;
+        outcome.hazardDelta = push.hazardDelta;
+        outcome.message = hasPendingSurfacePayload(push.temporaryMaterials, push.temporaryArtifacts, push.cargo)
+            ? "Deep route banked. Richer deposits are marked in the mining lane."
+            : "Deep route banked. The next mining lane is open.";
+    }
+    appendSurfaceLog(expedition, surfaceActionSummary(outcome));
+    resetSurfacePush(state);
+    state.screen = Screen::SurfaceExpedition;
+    return outcome;
+}
+
+SurfaceActionOutcome abortSurfacePush(GameState& state)
+{
+    SurfaceActionOutcome outcome;
+    if (!state.run.surfacePush.active && !state.run.surfacePush.completed) {
+        outcome.message = "No deep push is active.";
+        return outcome;
+    }
+    outcome.applied = true;
+    outcome.message = "Deep push recalled. No route payload banked.";
+    appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
+    resetSurfacePush(state);
+    state.screen = Screen::SurfaceExpedition;
     return outcome;
 }
 

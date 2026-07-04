@@ -17,6 +17,6 @@
     "test:native": "node tools/run-cmake-preset.mjs test native-debug",
     "configure:web": "cmake --preset web-release",
     "build:web": "cmake --build --preset web-release",
-    "test:web": "ctest --preset web-release"
+    "test:web": "node tools/run-web-tests.mjs"
   }
 }

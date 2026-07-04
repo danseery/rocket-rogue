@@ -1,6 +1,7 @@
 #include "game/RocketGameApp.h"
 
 #include "core/FlightProgress.h"
+#include "core/ContentIds.h"
 #include "core/GameUi.h"
 #include "core/GameText.h"
 #include "core/LaunchStatus.h"
@@ -68,6 +69,32 @@ bool consumeIndexedAction(std::string_view action, std::string_view prefix, int&
 
     index = value;
     return true;
+}
+
+int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId)
+{
+    for (std::size_t i = 0; i < catalog.destinations.size(); ++i) {
+        if (catalog.destinations[i].id == destinationId) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+void setDestinationHistory(
+    std::vector<int>& values,
+    const ContentCatalog& catalog,
+    std::string_view destinationId,
+    int count)
+{
+    const int index = destinationIndexForId(catalog, destinationId);
+    if (index < 0) {
+        return;
+    }
+    if (values.size() < catalog.destinations.size()) {
+        values.resize(catalog.destinations.size(), 0);
+    }
+    values[static_cast<std::size_t>(index)] = count;
 }
 
 } // namespace
@@ -156,11 +183,12 @@ double RocketGameApp::liveBurnMultiplier() const
         session_.returnTrip.duration);
 }
 
-bool RocketGameApp::initialize()
+void RocketGameApp::loadSavedGameOrDefault()
 {
-    catalog_ = createDefaultContent();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
+    session_ = {};
+    panelDirty_ = true;
 
     if (const auto saveData = deserializeSaveData(loadBrowserSave())) {
         restoreSaveData(state_, catalog_, *saveData);
@@ -171,6 +199,24 @@ bool RocketGameApp::initialize()
     ensureDroneBayState(state_, catalog_);
     migrateLegacyDeepSpaceFrontier(state_, catalog_);
     syncLaunchConfig(state_, catalog_);
+}
+
+void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
+{
+    debugSessionActive_ = true;
+    state_ = createNewGame(catalog_, 0xD36B6D3BU);
+    rng_ = Random(state_.seed ^ 0x51A7E5ULL);
+    session_ = {};
+    ensureDroneBayState(state_, catalog_);
+    syncLaunchConfig(state_, catalog_);
+    clearResearchAndExpeditionState(state_);
+    state_.statusLine = statusLine;
+}
+
+bool RocketGameApp::initialize()
+{
+    catalog_ = createDefaultContent();
+    loadSavedGameOrDefault();
 
     if (!renderer_.initialize()) {
         state_.statusLine = std::string(text::status::webglFailed);
@@ -664,6 +710,7 @@ void RocketGameApp::attemptArrivalLanding()
     }
 
     state_.statusLine = std::string(text::status::landingCommitted);
+    bankArrivalLandingFlightData(state_, catalog_);
     beginSurfaceExpeditionOrRefit();
     syncLaunchConfig(state_, catalog_);
     save();
@@ -707,13 +754,7 @@ void RocketGameApp::surveySurface()
         return;
     }
 
-    const SurfaceActionOutcome outcome = surveySurfaceSite(state_, rng_);
-    if (outcome.applied) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
+    const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -737,13 +778,7 @@ void RocketGameApp::pushSurface()
         return;
     }
 
-    const SurfaceActionOutcome outcome = pushSurfaceDeeper(state_, rng_);
-    if (outcome.applied) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
+    const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -886,7 +921,100 @@ bool hasRecoveredSurfacePayload(const SurfaceExpeditionState& expedition)
         || !expedition.temporaryArtifacts.empty();
 }
 
+bool recoveredSurfacePayloadThisAction(const SurfaceActionOutcome& outcome)
+{
+    return outcome.cargoDelta > 0
+        || outcome.materialDelta.common > 0
+        || outcome.materialDelta.rare > 0
+        || outcome.materialDelta.exotic > 0
+        || outcome.artifactFound;
+}
+
 } // namespace
+
+void RocketGameApp::scanSurfacePulse()
+{
+    if (state_.screen != Screen::SurfaceScan) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = pulseSurfaceScan(state_, rng_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::scanSurfaceBank()
+{
+    if (state_.screen != Screen::SurfaceScan) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = bankSurfaceScan(state_);
+    if (outcome.applied && recoveredSurfacePayloadThisAction(outcome)) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
+    }
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::scanSurfaceAbort()
+{
+    if (state_.screen != Screen::SurfaceScan) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = abortSurfaceScan(state_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::pushSurfaceStep()
+{
+    if (state_.screen != Screen::SurfacePush) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = pushSurfaceDepthStep(state_, rng_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::pushSurfaceBank()
+{
+    if (state_.screen != Screen::SurfacePush) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = bankSurfacePush(state_);
+    if (outcome.applied && recoveredSurfacePayloadThisAction(outcome)) {
+        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
+            state_.screen = Screen::SurfaceUpgrade;
+        }
+    }
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::pushSurfaceAbort()
+{
+    if (state_.screen != Screen::SurfacePush) {
+        return;
+    }
+
+    const SurfaceActionOutcome outcome = abortSurfacePush(state_);
+    state_.statusLine = surfaceActionSummary(outcome);
+    save();
+    panelDirty_ = true;
+}
 
 void RocketGameApp::miningAbort()
 {
@@ -922,6 +1050,117 @@ void RocketGameApp::miningFailureAck()
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
+}
+
+void RocketGameApp::debugStartFlyby()
+{
+    beginDebugSandbox("Debug flyby sandbox. No progress, rewards, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
+    state_.run.arrivalOps = {true, content::destination::moon};
+    state_.lastOutcome.type = LaunchResultType::MissionComplete;
+    state_.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
+    state_.lastOutcome.destinationId = content::destination::moon;
+    state_.lastOutcome.frontierTransfer = true;
+    startArrivalFlybyRun(state_, catalog_);
+    state_.statusLine = "Debug flyby sandbox. Fly this approach without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugStartOrbit()
+{
+    beginDebugSandbox("Debug orbit sandbox. No progress, rewards, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
+    state_.run.arrivalOps = {true, content::destination::moon};
+    state_.lastOutcome.type = LaunchResultType::MissionComplete;
+    state_.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
+    state_.lastOutcome.destinationId = content::destination::moon;
+    state_.lastOutcome.frontierTransfer = true;
+    setDestinationHistory(state_.meta.destinationFlybys, catalog_, content::destination::moon, 1);
+    startArrivalOrbitRun(state_, catalog_);
+    state_.statusLine = "Debug orbit sandbox. Hold the research band without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugStartMining()
+{
+    beginDebugSandbox("Debug mining sandbox. No payload, materials, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
+    state_.run.surfaceExpedition = {};
+    state_.run.surfaceExpedition.active = true;
+    state_.run.surfaceExpedition.destinationId = content::destination::moon;
+    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
+    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
+    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard;
+    state_.run.surfaceExpedition.miningSitePrepared = true;
+    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
+        state_.meta.unlockKeys.push_back(content::unlock::droneBay);
+    }
+    state_.meta.droneBaySlots = 1;
+    state_.meta.ownedDroneIds = {content::drone::miningDrone};
+    state_.meta.equippedDroneIds = {content::drone::miningDrone};
+    ensureDroneBayState(state_, catalog_);
+
+    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
+    state_.statusLine = outcome.applied
+        ? "Debug mining sandbox. Drill, scan, and stow without touching your save."
+        : surfaceActionSummary(outcome);
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugStartSurfaceScan()
+{
+    beginDebugSandbox("Debug scanner sandbox. No materials, artifacts, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
+    state_.run.surfaceExpedition = {};
+    state_.run.surfaceExpedition.active = true;
+    state_.run.surfaceExpedition.destinationId = content::destination::moon;
+    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::FractureField;
+    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
+    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.05;
+    const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
+    state_.statusLine = outcome.applied
+        ? "Debug scanner sandbox. Pulse, bank, or bust without touching your save."
+        : surfaceActionSummary(outcome);
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugStartSurfacePush()
+{
+    beginDebugSandbox("Debug deep-push sandbox. No materials, artifacts, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
+    state_.run.surfaceExpedition = {};
+    state_.run.surfaceExpedition.active = true;
+    state_.run.surfaceExpedition.destinationId = content::destination::moon;
+    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::OreShelf;
+    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
+    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.08;
+    const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
+    state_.statusLine = outcome.applied
+        ? "Debug deep-push sandbox. Descend, bank, or collapse without touching your save."
+        : surfaceActionSummary(outcome);
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugExit()
+{
+    if (!debugSessionActive_) {
+        return;
+    }
+    debugSessionActive_ = false;
+    loadSavedGameOrDefault();
+    state_.statusLine = "Debug sandbox closed. Real save restored from local mission control.";
+    refreshPanel();
 }
 
 void RocketGameApp::attemptFrontierTransfer()
@@ -1078,6 +1317,11 @@ void RocketGameApp::restCrew()
 
 void RocketGameApp::resetSave()
 {
+    if (debugSessionActive_) {
+        state_.statusLine = "Debug sandbox is isolated. Exit debug before resetting the real save.";
+        panelDirty_ = true;
+        return;
+    }
     clearBrowserSave();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
@@ -1149,6 +1393,9 @@ void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
 
 void RocketGameApp::save()
 {
+    if (debugSessionActive_) {
+        return;
+    }
     storeBrowserSave(serializeSaveData(captureSaveData(state_)));
 }
 
@@ -1242,6 +1489,18 @@ void RocketGameApp::runUiAction(const std::string& action)
         pushSurface();
     } else if (action == ui::actions::extractSurface) {
         extractSurface();
+    } else if (action == ui::actions::surfaceScanPulse) {
+        scanSurfacePulse();
+    } else if (action == ui::actions::surfaceScanBank) {
+        scanSurfaceBank();
+    } else if (action == ui::actions::surfaceScanAbort) {
+        scanSurfaceAbort();
+    } else if (action == ui::actions::surfacePushStep) {
+        pushSurfaceStep();
+    } else if (action == ui::actions::surfacePushBank) {
+        pushSurfaceBank();
+    } else if (action == ui::actions::surfacePushAbort) {
+        pushSurfaceAbort();
     } else if (action == ui::actions::droneOps) {
         openDroneOps();
     } else if (action == ui::actions::backToSurfaceOps) {
@@ -1285,6 +1544,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.animationTime = state_.run.flyby.elapsedSeconds;
     } else if (state_.screen == Screen::Orbit) {
         result.animationTime = state_.run.orbit.elapsedSeconds;
+    } else if (state_.screen == Screen::SurfaceScan) {
+        result.animationTime = static_cast<double>(state_.run.surfaceScan.pulses);
+    } else if (state_.screen == Screen::SurfacePush) {
+        result.animationTime = static_cast<double>(state_.run.surfacePush.steps);
     } else if (state_.screen == Screen::ArrivalFanfare) {
         result.animationTime = session_.arrivalFanfare.elapsed;
     }
@@ -1295,7 +1558,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             visualDestination = activeDestination;
         }
         result.frontierTransfer = session_.preparedLaunch.config.frontierTransfer;
-    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit) {
+    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
         }
@@ -1307,6 +1570,16 @@ RenderSnapshot RocketGameApp::snapshot() const
         if (state_.screen == Screen::Orbit && !state_.run.orbit.destinationId.empty()) {
             if (const Destination* orbitDestination = catalog_.findDestination(state_.run.orbit.destinationId)) {
                 visualDestination = orbitDestination;
+            }
+        }
+        if (state_.screen == Screen::SurfaceScan && !state_.run.surfaceScan.destinationId.empty()) {
+            if (const Destination* scanDestination = catalog_.findDestination(state_.run.surfaceScan.destinationId)) {
+                visualDestination = scanDestination;
+            }
+        }
+        if (state_.screen == Screen::SurfacePush && !state_.run.surfacePush.destinationId.empty()) {
+            if (const Destination* pushDestination = catalog_.findDestination(state_.run.surfacePush.destinationId)) {
+                visualDestination = pushDestination;
             }
         }
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
@@ -1321,7 +1594,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             session_.returnTrip.duration);
         result.returningHome = true;
         result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
-    } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit) {
+    } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
         result.travelProgress = 0.985;
     } else if (state_.screen == Screen::ArrivalOps) {
         result.travelProgress = 1.0;
@@ -1445,6 +1718,37 @@ RenderSnapshot RocketGameApp::snapshot() const
         for (const FlybyTrailPoint& point : orbit.trailPoints) {
             result.orbitTrailPoints.push_back({point.x, point.y});
         }
+    }
+
+    if (state_.screen == Screen::SurfaceScan && (state_.run.surfaceScan.active || state_.run.surfaceScan.completed)) {
+        const SurfaceScanRunState& scan = state_.run.surfaceScan;
+        result.surfaceScanActive = scan.active;
+        result.surfaceScanCompleted = scan.completed;
+        result.surfaceScanBusted = scan.busted;
+        result.surfaceScanPulses = scan.pulses;
+        result.surfaceScanMaxPulses = std::max(1, scan.maxPulses);
+        result.surfaceScanSignal = scan.signal;
+        result.surfaceScanInterference = scan.interference;
+        result.surfaceScanBustRisk = scan.bustRisk;
+        result.surfaceScanCargo = scan.cargo;
+        result.surfaceScanMaterials = scan.temporaryMaterials;
+        result.surfaceScanArtifacts = static_cast<int>(scan.temporaryArtifacts.size());
+    }
+
+    if (state_.screen == Screen::SurfacePush && (state_.run.surfacePush.active || state_.run.surfacePush.completed)) {
+        const SurfacePushRunState& push = state_.run.surfacePush;
+        result.surfacePushActive = push.active;
+        result.surfacePushCompleted = push.completed;
+        result.surfacePushBusted = push.busted;
+        result.surfacePushSteps = push.steps;
+        result.surfacePushMaxSteps = std::max(1, push.maxSteps);
+        result.surfacePushDepthGain = push.depthGain;
+        result.surfacePushPressure = push.pressure;
+        result.surfacePushCollapseRisk = push.collapseRisk;
+        result.surfacePushCargo = push.cargo;
+        result.surfacePushMaterials = push.temporaryMaterials;
+        result.surfacePushArtifacts = static_cast<int>(push.temporaryArtifacts.size());
+        result.surfacePushRewardMarkers = push.rewardMarkers;
     }
 
     if (state_.screen == Screen::Launch) {

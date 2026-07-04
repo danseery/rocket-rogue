@@ -121,6 +121,7 @@ bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCata
 bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog);
 bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog);
 bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& catalog);
+bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog);
 int destinationHistoryValue(const std::vector<int>& values, const ContentCatalog& catalog, std::string_view destinationId);
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation);
 void clearResearchAndExpeditionState(GameState& state);
@@ -173,6 +174,14 @@ double surfaceEnemyEncounterChance(const GameState& state);
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng);
 SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng);
 SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng);
+SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random& rng);
+SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng);
+SurfaceActionOutcome bankSurfaceScan(GameState& state);
+SurfaceActionOutcome abortSurfaceScan(GameState& state);
+SurfaceActionOutcome startSurfacePushRun(GameState& state, Random& rng);
+SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng);
+SurfaceActionOutcome bankSurfacePush(GameState& state);
+SurfaceActionOutcome abortSurfacePush(GameState& state);
 SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng);
 
 } // namespace rocket

@@ -457,7 +457,7 @@ inline PanelButtonPresentation surfaceActionButton(std::string_view label, std::
 {
     return supply >= cost
         ? panelActionButton(label, actionId, std::move(cssClass))
-        : disabledPanelButton(text::panel::messages::needSupply(cost));
+        : disabledPanelButton(text::buttons::unavailable);
 }
 
 inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
@@ -774,7 +774,13 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common)),
         panelMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(expedition.temporaryMaterials.exotic)),
-        panelMetric(text::labels::artifacts, std::to_string(expedition.temporaryArtifacts.size()))
+        panelMetric(text::labels::artifacts, std::to_string(expedition.temporaryArtifacts.size())),
+        panelMetric("Prospects",
+            std::to_string(
+                std::max(0, expedition.prospectMaterials.common) +
+                std::max(0, expedition.prospectMaterials.rare) +
+                std::max(0, expedition.prospectMaterials.exotic) +
+                std::max(0, expedition.prospectArtifacts)))
     };
     if (expedition.enemyEncountersEnabled) {
         presentation.metrics.push_back(panelMetric(text::labels::contactRisk, display::percent(surfaceEnemyEncounterChance(state))));
@@ -805,6 +811,10 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     miningPreview.availability = miningSurfaceActionAvailability(state);
     miningPreview.payoffChips.push_back(panelMetric(text::labels::oxygen, std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s"));
     miningPreview.payoffChips.push_back(panelMetric(text::fuel::reserveLabel(arkDiscovered(state)), "-1 deploy"));
+    addPositiveChip(miningPreview.payoffChips, "Tagged CM", expedition.prospectMaterials.common);
+    addPositiveChip(miningPreview.payoffChips, "Tagged RM", expedition.prospectMaterials.rare);
+    addPositiveChip(miningPreview.payoffChips, "Tagged EX", expedition.prospectMaterials.exotic);
+    addPositiveChip(miningPreview.payoffChips, "Tagged AR", expedition.prospectArtifacts);
     presentation.actions.push_back(std::move(miningPreview));
 
     SurfaceActionPreviewPresentation pushPreview = surfaceActionPreview(

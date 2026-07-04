@@ -68,6 +68,7 @@ std::vector<const Astronaut*> recruitCandidateTemplates(const GameState& state, 
 bool recruitCrew(GameState& state, const ContentCatalog& catalog);
 bool recruitCrew(GameState& state, const ContentCatalog& catalog, int candidateIndex);
 bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog);
+bool bankFrontierReadiness(GameState& state, const ContentCatalog& catalog);
 bool arkDiscovered(const GameState& state);
 bool hostileSystemActive(const GameState& state);
 bool navigationAvailable(const GameState& state);

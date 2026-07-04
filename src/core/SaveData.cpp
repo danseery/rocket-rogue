@@ -283,6 +283,8 @@ int screenToInt(Screen screen)
     case Screen::Research:
         return 3;
     case Screen::SurfaceExpedition:
+    case Screen::SurfaceScan:
+    case Screen::SurfacePush:
         return 4;
     case Screen::SurfaceUpgrade:
         return 5;
@@ -745,6 +747,8 @@ SaveData captureSaveData(const GameState& state)
     save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
     if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
+    } else if ((state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) && state.run.surfaceExpedition.active) {
+        save.screen = Screen::SurfaceExpedition;
     } else {
         save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
     }
@@ -976,6 +980,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceDepth, save.surfaceExpedition.depth);
     writeField(out, save_schema::field::surfaceMaterials, serializeMaterials(save.surfaceExpedition.temporaryMaterials));
     writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
+    writeField(out, save_schema::field::surfaceProspectMaterials, serializeMaterials(save.surfaceExpedition.prospectMaterials));
+    writeField(out, save_schema::field::surfaceProspectArtifacts, save.surfaceExpedition.prospectArtifacts);
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
@@ -1158,6 +1164,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.temporaryMaterials = parseMaterials(value);
         } else if (key == save_schema::field::surfaceArtifacts) {
             save.surfaceExpedition.temporaryArtifacts = parseArtifacts(value);
+        } else if (key == save_schema::field::surfaceProspectMaterials) {
+            save.surfaceExpedition.prospectMaterials = parseMaterials(value);
+        } else if (key == save_schema::field::surfaceProspectArtifacts) {
+            save.surfaceExpedition.prospectArtifacts = parseInt(value, save.surfaceExpedition.prospectArtifacts);
         } else if (key == save_schema::field::surfaceEnemies) {
             save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceMiningPrepared) {

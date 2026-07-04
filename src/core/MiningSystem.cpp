@@ -1491,6 +1491,47 @@ MiningTerrain generateMiningTerrain(const GameState& state, const Destination& d
     return terrain;
 }
 
+void applySurfaceProspects(MiningTerrain& terrain, const SurfaceExpeditionState& expedition)
+{
+    std::vector<std::pair<int, int>> occupied;
+    auto alreadyOccupied = [&](int x, int y) {
+        return std::find(occupied.begin(), occupied.end(), std::pair<int, int> {x, y}) != occupied.end();
+    };
+    auto stampProspect = [&](MiningCellMaterial material, int count, int yBase, int yStride, MiningCellFeature feature) {
+        const int clampedCount = std::clamp(count, 0, 10);
+        int placed = 0;
+        for (int i = 0; i < clampedCount; ++i) {
+            for (int attempt = 0; attempt < 14; ++attempt) {
+                const int lane = i + attempt;
+                const int side = lane % 2 == 0 ? -1 : 1;
+                const int offset = side * (2 + (lane / 2) * 3);
+                const int x = std::clamp(terrain.width / 2 + offset, 2, terrain.width - 3);
+                const int y = std::clamp(yBase + (lane % 4) * yStride + (lane / 5), 5, terrain.height - 3);
+                if (alreadyOccupied(x, y)) {
+                    continue;
+                }
+                stampMiningCell(terrain, x, y, terrain.depthZone, feature, MiningEnemyType::None, material);
+                if (MiningCell* cell = miningCellAt(terrain, x, y)) {
+                    cell->revealed = true;
+                }
+                markDirty(terrain, x, y);
+                occupied.push_back({x, y});
+                ++placed;
+                break;
+            }
+        }
+        (void)placed;
+    };
+
+    const int shallowBand = std::max(7, terrain.height / 5);
+    const int midBand = std::max(10, terrain.height / 2);
+    const int deepBand = std::max(12, (terrain.height * 2) / 3);
+    stampProspect(MiningCellMaterial::CommonOre, expedition.prospectMaterials.common, shallowBand, 2, MiningCellFeature::BranchTunnel);
+    stampProspect(MiningCellMaterial::RareOre, expedition.prospectMaterials.rare, midBand, 2, MiningCellFeature::TreasureVault);
+    stampProspect(MiningCellMaterial::ExoticVein, expedition.prospectMaterials.exotic, deepBand, 2, MiningCellFeature::TreasureVault);
+    stampProspect(MiningCellMaterial::ArtifactCache, expedition.prospectArtifacts, deepBand + 2, 2, MiningCellFeature::TreasureVault);
+}
+
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog)
 {
     SurfaceActionOutcome outcome;
@@ -1528,6 +1569,9 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.fuelBurnSeconds = 0.0;
     mining.fuelSpent = 1;
     mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
+    applySurfaceProspects(mining.terrain, expedition);
+    expedition.prospectMaterials = {};
+    expedition.prospectArtifacts = 0;
     spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;

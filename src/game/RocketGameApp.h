@@ -48,6 +48,12 @@ public:
     void surveySurface();
     void mineSurface();
     void pushSurface();
+    void scanSurfacePulse();
+    void scanSurfaceBank();
+    void scanSurfaceAbort();
+    void pushSurfaceStep();
+    void pushSurfaceBank();
+    void pushSurfaceAbort();
     void extractSurface();
     void selectSurfaceUpgrade(int index);
     void openDroneOps();
@@ -61,6 +67,12 @@ public:
     void miningStow();
     void miningAbort();
     void miningFailureAck();
+    void debugStartMining();
+    void debugStartSurfaceScan();
+    void debugStartSurfacePush();
+    void debugStartFlyby();
+    void debugStartOrbit();
+    void debugExit();
     void repairShip();
     void recruitCrew();
     void recruitCrew(int candidateIndex);
@@ -114,6 +126,8 @@ private:
     void completeLaunch(double burnMultiplier, RecoveryMethod method);
     void beginArrivalFanfare();
     void finishArrivalFanfare();
+    void loadSavedGameOrDefault();
+    void beginDebugSandbox(const std::string& statusLine);
     void save();
     void refreshPanel();
     void runUiAction(const std::string& action);
@@ -134,6 +148,7 @@ private:
     GameRmlUi rmlUi_;
     LaunchSessionState session_;
     bool panelDirty_ = true;
+    bool debugSessionActive_ = false;
 };
 
 } // namespace rocket

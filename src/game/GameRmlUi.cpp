@@ -10,6 +10,7 @@
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
+#include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/EventListener.h>
 #include <RmlUi/Core/Log.h>
@@ -72,7 +73,21 @@ EM_JS(void, rr_rml_set_enabled, (int enabled), {
 });
 
 EM_JS(void, rr_rml_set_modal_open, (int enabled), {
-    document.body.classList.toggle("rmlui-modal-open", enabled !== 0);
+    const open = enabled !== 0;
+    document.body.classList.toggle("rmlui-modal-open", open);
+    const launchControl = document.getElementById("scene-launch-control");
+    if (launchControl) {
+        if (open) {
+            launchControl.classList.remove("is-visible");
+            launchControl.hidden = true;
+            launchControl.setAttribute("aria-hidden", "true");
+        } else {
+            launchControl.removeAttribute("aria-hidden");
+            if (window.RocketBridge && typeof window.RocketBridge.syncSceneOverlays === "function") {
+                window.RocketBridge.syncSceneOverlays();
+            }
+        }
+    }
 });
 
 EM_JS(double, rr_rml_game_speed_multiplier, (), {
@@ -100,6 +115,58 @@ EM_JS(void, rr_rml_set_game_speed_multiplier, (const char* value), {
         }
     } catch (error) {
         // Ignore storage failures. The game will fall back to 1x.
+    }
+});
+
+EM_JS(int, rr_rml_debug_tools_enabled, (), {
+    try {
+        const debugTools = document.getElementById("debug-tools");
+        return window.localStorage.getItem("rocket_rogue_debug_tools") === "1"
+            || (debugTools && debugTools.classList.contains("is-visible")) ? 1 : 0;
+    } catch (error) {
+        return 0;
+    }
+});
+
+EM_JS(void, rr_rml_set_debug_tools_enabled, (int enabled), {
+    try {
+        if (enabled) {
+            window.localStorage.setItem("rocket_rogue_debug_tools", "1");
+        } else {
+            window.localStorage.removeItem("rocket_rogue_debug_tools");
+        }
+    } catch (error) {
+        // Ignore storage failures. The overlay will just stay in its current session state.
+    }
+    const debugTools = document.getElementById("debug-tools");
+    if (debugTools) {
+        debugTools.classList.toggle("is-visible", !!enabled);
+    }
+    if (window.RocketBridge && typeof window.RocketBridge.syncDebugToolsControls === "function") {
+        window.RocketBridge.syncDebugToolsControls();
+    }
+});
+
+EM_JS(int, rr_rml_help_disabled, (), {
+    try {
+        return window.localStorage.getItem("rocket_rogue_help_disabled") === "1" ? 1 : 0;
+    } catch (error) {
+        return 0;
+    }
+});
+
+EM_JS(void, rr_rml_set_help_disabled, (int disabled), {
+    try {
+        if (disabled) {
+            window.localStorage.setItem("rocket_rogue_help_disabled", "1");
+        } else {
+            window.localStorage.removeItem("rocket_rogue_help_disabled");
+        }
+    } catch (error) {
+        // Ignore storage failures. The setting will return to its default next load.
+    }
+    if (window.RocketBridge && typeof window.RocketBridge.syncSettingsControls === "function") {
+        window.RocketBridge.syncSettingsControls();
     }
 });
 
@@ -646,7 +713,8 @@ std::string normalizeBooleanAttributes(std::string html)
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
         "data-flyby-run", "data-flyby-stamp", "data-orbit-run", "data-orbit-stamp",
-        "data-help-settings", "data-game-speed-settings", "data-game-speed-select"
+        "data-help-settings", "data-help-toggle", "data-game-speed-settings", "data-game-speed-select",
+        "data-debug-tools-settings", "data-debug-tools-toggle"
     };
 
     for (const std::string_view name : names) {
@@ -723,6 +791,54 @@ std::string selectCurrentGameSpeed(std::string html)
         html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
     }
     return html;
+}
+
+std::string syncCurrentDebugToolsToggle(std::string html)
+{
+    if (html.find("data-debug-tools-toggle") == std::string::npos) {
+        return html;
+    }
+
+    const std::string needle = "data-debug-tools-toggle";
+    const std::size_t attrStart = html.find(needle);
+    if (attrStart == std::string::npos) {
+        return html;
+    }
+    const std::size_t tagStart = html.rfind('<', attrStart);
+    const std::size_t tagEnd = html.find('>', attrStart);
+    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
+    if (tagStart != std::string::npos && tagEnd != std::string::npos && closeStart != std::string::npos) {
+        const bool enabled = rr_rml_debug_tools_enabled() != 0;
+        const std::string label = enabled ? "Hide debug tools" : "Show debug tools";
+        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
+    }
+    return html;
+}
+
+std::string syncCurrentHelpToggle(std::string html)
+{
+    if (html.find("data-help-toggle") == std::string::npos) {
+        return html;
+    }
+
+    const std::string needle = "data-help-toggle";
+    const std::size_t attrStart = html.find(needle);
+    if (attrStart == std::string::npos) {
+        return html;
+    }
+    const std::size_t tagEnd = html.find('>', attrStart);
+    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
+    if (tagEnd != std::string::npos && closeStart != std::string::npos) {
+        const bool enabled = rr_rml_help_disabled() == 0;
+        const std::string label = enabled ? "Hide mission help" : "Show mission help";
+        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
+    }
+    return html;
+}
+
+std::string syncSettingsControls(std::string html)
+{
+    return syncCurrentHelpToggle(syncCurrentDebugToolsToggle(selectCurrentGameSpeed(std::move(html))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -988,6 +1104,8 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
         binding.modal = attributeValue(tag, "data-ui-modal");
         binding.helpDismiss = attributeValue(tag, "data-help-dismiss");
         binding.close = !attributeValue(tag, "data-ui-close-modal").empty();
+        binding.helpToggle = !attributeValue(tag, "data-help-toggle").empty();
+        binding.debugToolsToggle = !attributeValue(tag, "data-debug-tools-toggle").empty();
         bindings.push_back(std::move(binding));
         pos = closeStart + std::string_view("</button>").size();
     }
@@ -997,6 +1115,11 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
 bool panelUsesPhaseBoard(std::string_view html)
 {
     return html.find("data-panel-mode=\"phase-board\"") != std::string_view::npos;
+}
+
+bool panelUsesSurfaceOps(std::string_view html)
+{
+    return html.find("surface-ops-screen") != std::string_view::npos;
 }
 
 Rml::Rectanglei panelBounds(bool phaseBoard)
@@ -1085,16 +1208,19 @@ scrollbarhorizontal sliderbar {
     border-color: #4e6b80;
     border-radius: 8px;
 }
+#rr-panel.surface-ops-panel {
+    height: 500px;
+}
 .panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .pilot-card-top, .card-topline, .card-kicker {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
 }
-.phase-board, .board-primary, .draft-hero, .draft-board, .surface-command, .cockpit-hud, .arrival-fanfare-panel {
+.phase-board, .board-primary, .draft-hero, .draft-board, .surface-command, .surface-quickbar, .cockpit-hud, .arrival-fanfare-panel {
     display: block;
     width: 100%;
 }
-.summary-grid, .metric-grid, .panel-kpis, .ops-grid, .pilot-card-grid, .inventory-grid, .stat-grid, .actions, .warning-grid, .surface-kpi-grid, .draft-context, .result-grid, .achievement-grid {
+.summary-grid, .metric-grid, .panel-kpis, .ops-grid, .pilot-card-grid, .inventory-grid, .stat-grid, .actions, .warning-grid, .surface-kpi-grid, .surface-quickbar, .draft-context, .result-grid, .achievement-grid {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1164,6 +1290,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-panel .panel-kpis .metric {
     width: 150px;
+}
+.phase-board-panel.surface-ops-panel .panel-kpis {
+    display: none;
 }
 .phase-board-panel .phase-titlebar {
     width: 704px;
@@ -1519,9 +1648,11 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface {
     width: 736px;
+    padding-bottom: 20px;
 }
 .phase-board-surface .phase-titlebar,
 .phase-board-surface .surface-command,
+.phase-board-surface .surface-quickbar,
 .phase-board-surface .surface-kpi-grid,
 .phase-board-surface .drone-ops-callout,
 .phase-board-surface .surface-primary-action,
@@ -1529,7 +1660,7 @@ scrollbarhorizontal sliderbar {
     width: 704px;
 }
 .phase-board-surface .phase-titlebar {
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 .phase-board-surface .phase-titlebar > div,
 .phase-board-surface .phase-titlebar p {
@@ -1586,14 +1717,40 @@ scrollbarhorizontal sliderbar {
     margin-top: 8px;
     margin-bottom: 6px;
 }
+.phase-board-surface .surface-quickbar {
+    flex-wrap: nowrap;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
 .phase-board-surface .surface-kpi {
     width: 128px;
     min-height: 40px;
     padding: 7px 8px;
 }
+.phase-board-surface .surface-quickbar .surface-kpi {
+    width: 74px;
+    min-height: 34px;
+    padding: 5px 6px;
+    margin-top: 0px;
+    margin-right: 6px;
+}
+.phase-board-surface .surface-quickbar .surface-quick-site {
+    width: 104px;
+}
+.phase-board-surface .surface-quickbar .surface-quick-next {
+    width: 184px;
+}
 .phase-board-surface .surface-kpi strong {
     font-size: 13px;
     margin-top: 3px;
+}
+.phase-board-surface .surface-quickbar .surface-kpi span {
+    font-size: 9px;
+}
+.phase-board-surface .surface-quickbar .surface-kpi strong {
+    font-size: 11px;
+    line-height: 1.15;
+    margin-top: 2px;
 }
 .phase-board-surface .resource-bank {
     display: flex;
@@ -1666,8 +1823,8 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
 }
 .phase-board-surface .board-primary {
-    padding: 6px 0px 0px 0px;
-    margin-top: 6px;
+    padding: 2px 0px 10px 0px;
+    margin-top: 4px;
 }
 .phase-board-surface .surface-actions .phase-titlebar {
     width: 704px;
@@ -1681,64 +1838,149 @@ scrollbarhorizontal sliderbar {
     width: 704px;
 }
 .phase-board-surface .surface-action-card {
-    width: 200px;
-    height: 224px;
-    padding: 10px;
-    margin-right: 8px;
+    width: 154px;
+    height: 174px;
+    padding: 7px;
+    margin-right: 6px;
+}
+.phase-board-surface .surface-action-card.featured-action {
+    border-color: #4c6d5a;
+    background-color: #111f22;
+}
+.phase-board-surface .surface-action-card h3 {
+    margin-top: 3px;
+    margin-bottom: 3px;
+    font-size: 12px;
 }
 .phase-board-surface .surface-action-card p {
-    width: 180px;
-    height: 60px;
+    width: 140px;
+    height: 36px;
     min-height: 0px;
-    margin-top: 5px;
-    margin-bottom: 6px;
-    line-height: 1.24;
+    margin-top: 3px;
+    margin-bottom: 5px;
+    font-size: 10px;
+    line-height: 1.18;
     overflow: hidden;
 }
 .phase-board-surface .surface-action-card .stat-grid {
-    width: 180px;
-    height: 48px;
+    width: 140px;
+    height: 42px;
     align-content: flex-start;
     align-items: flex-start;
 }
 .phase-board-surface .surface-action-card .stat-grid .stat-chip {
-    width: 64px;
-    height: 18px;
-    min-height: 18px;
+    width: 54px;
+    height: 17px;
+    min-height: 17px;
     margin-top: 0px;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     padding: 0px 4px;
     font-size: 9px;
-    line-height: 18px;
+    line-height: 17px;
     overflow: hidden;
 }
 .phase-board-surface .surface-action-card .stat-grid .stat-chip.wide {
-    width: 96px;
+    width: 72px;
 }
 .phase-board-surface .surface-action-card .card-footer {
-    width: 180px;
-    height: 42px;
-    margin-top: 7px;
-    padding-top: 7px;
+    width: 140px;
+    height: 43px;
+    margin-top: 5px;
+    padding-top: 6px;
     border-top-width: 1px;
     border-top-color: #263b4c;
     align-items: center;
 }
 .phase-board-surface .surface-action-card .card-footer span {
-    width: 72px;
+    width: 50px;
+    height: 32px;
     color: #d7c276;
-    font-size: 10px;
-    line-height: 1.15;
+    font-size: 9px;
+    line-height: 1.16;
 }
 .phase-board-surface .surface-action-card .card-footer button {
-    width: 96px;
+    width: 84px;
     height: 32px;
     line-height: 32px;
     margin-top: 0px;
     margin-right: 0px;
-    padding-left: 5px;
-    padding-right: 5px;
-    font-size: 10px;
+    padding-left: 3px;
+    padding-right: 3px;
+    font-size: 9px;
+}
+.phase-board-surface-minigame .surface-minigame,
+.phase-board-surface-minigame .minigame-readout,
+.phase-board-surface-minigame .minigame-callout,
+.phase-board-surface-minigame .minigame-actions {
+    width: 704px;
+}
+.phase-board-surface-minigame .surface-minigame {
+    margin-top: 6px;
+}
+.phase-board-surface-minigame .phase-titlebar {
+    margin-bottom: 6px;
+}
+.phase-board-surface-minigame .minigame-readout {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    margin-top: 2px;
+}
+.phase-board-surface-minigame .minigame-metrics {
+    width: 456px;
+    flex-shrink: 0;
+}
+.phase-board-surface-minigame .minigame-metric-row {
+    display: flex;
+    flex-direction: row;
+    width: 456px;
+}
+.phase-board-surface-minigame .minigame-metrics .metric {
+    width: 204px;
+    min-height: 52px;
+    margin-right: 8px;
+    margin-bottom: 8px;
+}
+.phase-board-surface-minigame .minigame-rewards {
+    width: 210px;
+    flex-shrink: 0;
+    margin-left: 16px;
+    justify-content: flex-end;
+    align-content: flex-start;
+}
+.phase-board-surface-minigame .minigame-rewards .stat-chip {
+    width: 132px;
+    height: 28px;
+    min-height: 28px;
+    margin-left: 6px;
+    margin-bottom: 6px;
+    line-height: 28px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.phase-board-surface-minigame .minigame-callout {
+    min-height: 78px;
+    border-color: #5a4e25;
+    background-color: #111c21;
+}
+.phase-board-surface-minigame .minigame-callout > div {
+    width: 650px;
+}
+.phase-board-surface-minigame .minigame-callout h2 {
+    color: #f2d15f;
+}
+.phase-board-surface-minigame .minigame-actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    margin-top: 10px;
+}
+.phase-board-surface-minigame .minigame-actions button {
+    width: 176px;
+    height: 38px;
+    line-height: 38px;
+    margin-right: 8px;
 }
 .phase-board-surface-upgrade {
     width: 736px;
@@ -2152,6 +2394,404 @@ scrollbarhorizontal sliderbar {
     border-color: #35495a;
     border-radius: 6px;
 }
+.inventory-modal {
+    width: 1016px;
+    margin-top: 12px;
+}
+.inventory-layout {
+    display: flex;
+    flex-direction: row;
+    width: 1016px;
+}
+.inventory-side-column {
+    width: 220px;
+    margin-right: 16px;
+}
+.inventory-main-column {
+    width: 780px;
+}
+.inventory-side-column .inventory-section {
+    width: 220px;
+    margin-top: 0px;
+    padding-top: 0px;
+    border-top-width: 0px;
+}
+.inventory-side-column .inventory-section-head {
+    width: 220px;
+}
+.inventory-side-column .inventory-section-head p {
+    width: 208px;
+}
+.inventory-side-column .inventory-grid {
+    width: 220px;
+}
+.inventory-summary {
+    width: 780px;
+    margin-top: 4px;
+    margin-bottom: 12px;
+}
+.inventory-summary .metric {
+    width: 230px;
+    height: 42px;
+    padding: 8px 10px;
+    margin-right: 10px;
+    margin-top: 8px;
+    background-color: #101c27;
+    border-color: #46677d;
+}
+.inventory-section {
+    width: 780px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top-width: 1px;
+    border-top-color: #26394a;
+}
+.inventory-section-head {
+    width: 780px;
+    margin-bottom: 8px;
+}
+.inventory-section-head h3 {
+    margin-top: 0px;
+    color: #edf4f8;
+    font-size: 14px;
+}
+.inventory-section-head p {
+    width: 750px;
+    margin-top: 4px;
+    line-height: 1.32;
+}
+.inventory-grid {
+    width: 780px;
+}
+.inventory-item {
+    width: 148px;
+    min-height: 112px;
+    padding: 12px;
+    margin-top: 8px;
+    margin-right: 10px;
+    background-color: #101923;
+    border-color: #46677d;
+}
+.inventory-art {
+    width: 42px;
+    height: 34px;
+    padding-top: 8px;
+    margin-bottom: 8px;
+    background-color: #0b131c;
+    border-width: 1px;
+    border-color: #40596d;
+    border-radius: 6px;
+}
+.inventory-art span {
+    color: #8de0ff;
+    font-size: 13px;
+    text-align: center;
+}
+.inventory-copy {
+    width: 148px;
+}
+.inventory-copy h3 {
+    margin-top: 0px;
+    color: #edf4f8;
+    font-size: 13px;
+    line-height: 1.18;
+}
+.inventory-copy p {
+    width: 142px;
+    margin-top: 5px;
+    color: #9eb0bf;
+    font-size: 11px;
+    line-height: 1.28;
+}
+.inventory-count {
+    width: 100px;
+    min-height: 20px;
+    margin-top: 9px;
+    padding: 5px 8px;
+    background-color: #0b131c;
+    border-width: 1px;
+    border-color: #40596d;
+    border-radius: 5px;
+    color: #edf4f8;
+    font-size: 11px;
+    text-align: center;
+}
+.inventory-section-resources .inventory-item {
+    width: 176px;
+    min-height: 112px;
+    padding: 12px;
+    margin-right: 8px;
+}
+.inventory-section-resources .inventory-copy {
+    width: 176px;
+}
+.inventory-section-resources .inventory-copy h3 {
+    font-size: 13px;
+}
+.inventory-section-resources .inventory-copy p {
+    width: 168px;
+    font-size: 11px;
+}
+.inventory-section-resources .inventory-art {
+    width: 42px;
+    height: 34px;
+    padding-top: 8px;
+}
+.inventory-section-resources .inventory-count {
+    width: 100px;
+}
+.inventory-side-column .inventory-item {
+    width: 190px;
+    height: 58px;
+    padding: 6px 8px;
+    margin-top: 5px;
+    margin-right: 0px;
+}
+.inventory-side-column .inventory-art {
+    width: 30px;
+    height: 24px;
+    padding-top: 5px;
+    margin-bottom: 4px;
+}
+.inventory-side-column .inventory-copy {
+    width: 184px;
+}
+.inventory-side-column .inventory-copy h3 {
+    font-size: 11px;
+}
+.inventory-side-column .inventory-copy p {
+    width: 178px;
+    margin-top: 2px;
+    font-size: 9px;
+    line-height: 1.1;
+}
+.inventory-side-column .inventory-count {
+    width: 70px;
+    min-height: 16px;
+    margin-top: 3px;
+    padding: 3px 5px;
+    font-size: 9px;
+}
+.inventory-item.drone-slot.equipped {
+    border-color: #5ed993;
+}
+.inventory-item.drone-slot.open {
+    background-color: #102432;
+    border-color: #4aa9d8;
+}
+.inventory-item.drone-slot.open .inventory-art,
+.inventory-item.drone-slot.open .inventory-count {
+    background-color: #153247;
+    border-color: #4aa9d8;
+    color: #8de0ff;
+}
+.inventory-item.drone-slot.locked {
+    background-color: #101923;
+    border-color: #35495a;
+}
+.inventory-item.drone-slot.locked .inventory-art,
+.inventory-item.drone-slot.locked .inventory-count {
+    background-color: #0b131c;
+    border-color: #35495a;
+    color: #8295a5;
+}
+.inventory-item.blueprint {
+    background-color: #112638;
+    border-color: #4aa9d8;
+}
+.inventory-item.blueprint .inventory-art,
+.inventory-item.blueprint .inventory-count {
+    background-color: #153247;
+    border-color: #4aa9d8;
+    color: #8de0ff;
+}
+.inventory-item.blueprint .inventory-art span {
+    color: #8de0ff;
+}
+.inventory-item.common {
+    background-color: #171d23;
+    border-color: #647382;
+}
+.inventory-item.common .inventory-art,
+.inventory-item.common .inventory-count {
+    background-color: #111820;
+    border-color: #647382;
+    color: #c2cbd3;
+}
+.inventory-item.common .inventory-art span {
+    color: #c2cbd3;
+}
+.inventory-item.uncommon {
+    background-color: #102b25;
+    border-color: #52d990;
+}
+.inventory-item.uncommon .inventory-art,
+.inventory-item.uncommon .inventory-count {
+    background-color: #163d31;
+    border-color: #52d990;
+    color: #8bf0bd;
+}
+.inventory-item.uncommon .inventory-art span {
+    color: #8bf0bd;
+}
+.inventory-item.rare {
+    background-color: #2b2412;
+    border-color: #d7aa3a;
+}
+.inventory-item.rare .inventory-art,
+.inventory-item.rare .inventory-count {
+    background-color: #3c3014;
+    border-color: #d7aa3a;
+    color: #ffd166;
+}
+.inventory-item.rare .inventory-art span {
+    color: #ffd166;
+}
+.inventory-item.exotic {
+    background-color: #2a1734;
+    border-color: #e05aaf;
+}
+.inventory-item.exotic .inventory-art,
+.inventory-item.exotic .inventory-count {
+    background-color: #3b1c47;
+    border-color: #e05aaf;
+    color: #ffaad9;
+}
+.inventory-item.exotic .inventory-art span {
+    color: #ffaad9;
+}
+.inventory-item.artifact {
+    background-color: #241b38;
+    border-color: #a974ff;
+}
+.inventory-item.artifact .inventory-art,
+.inventory-item.artifact .inventory-count {
+    background-color: #30224d;
+    border-color: #a974ff;
+    color: #d2b7ff;
+}
+.inventory-item.artifact .inventory-art span {
+    color: #d2b7ff;
+}
+.inventory-item.module {
+    background-color: #112638;
+    border-color: #4aa9d8;
+}
+.inventory-item.module .inventory-art,
+.inventory-item.module .inventory-count {
+    background-color: #153247;
+    border-color: #4aa9d8;
+}
+.inventory-item.module .inventory-art span {
+    color: #8de0ff;
+}
+.inventory-item.drone {
+    background-color: #123026;
+    border-color: #5ed993;
+}
+.inventory-item.drone .inventory-art,
+.inventory-item.drone .inventory-count {
+    background-color: #173d2f;
+    border-color: #5ed993;
+}
+.inventory-item.drone .inventory-art span {
+    color: #8bf0bd;
+}
+.upgrade-draft-card.rarity-common,
+.ops-card.rarity-common,
+.inventory-item.rarity-common {
+    background-color: #171d23;
+    border-color: #647382;
+}
+.upgrade-draft-card.rarity-common .draft-art,
+.ops-card.rarity-common .module-art,
+.inventory-item.rarity-common .inventory-art,
+.inventory-item.rarity-common .inventory-count {
+    background-color: #111820;
+    border-color: #647382;
+    color: #c2cbd3;
+}
+.upgrade-draft-card.rarity-common .draft-art span,
+.ops-card.rarity-common .module-art span,
+.inventory-item.rarity-common .inventory-art span {
+    color: #c2cbd3;
+}
+.upgrade-draft-card.rarity-uncommon,
+.ops-card.rarity-uncommon,
+.inventory-item.rarity-uncommon {
+    background-color: #102b25;
+    border-color: #52d990;
+}
+.upgrade-draft-card.rarity-uncommon .draft-art,
+.ops-card.rarity-uncommon .module-art,
+.inventory-item.rarity-uncommon .inventory-art,
+.inventory-item.rarity-uncommon .inventory-count {
+    background-color: #163d31;
+    border-color: #52d990;
+    color: #8bf0bd;
+}
+.upgrade-draft-card.rarity-uncommon .draft-art span,
+.ops-card.rarity-uncommon .module-art span,
+.inventory-item.rarity-uncommon .inventory-art span {
+    color: #8bf0bd;
+}
+.upgrade-draft-card.rarity-rare,
+.ops-card.rarity-rare,
+.inventory-item.rarity-rare {
+    background-color: #2b2412;
+    border-color: #d7aa3a;
+}
+.upgrade-draft-card.rarity-rare .draft-art,
+.ops-card.rarity-rare .module-art,
+.inventory-item.rarity-rare .inventory-art,
+.inventory-item.rarity-rare .inventory-count {
+    background-color: #3c3014;
+    border-color: #d7aa3a;
+    color: #ffd166;
+}
+.upgrade-draft-card.rarity-rare .draft-art span,
+.ops-card.rarity-rare .module-art span,
+.inventory-item.rarity-rare .inventory-art span {
+    color: #ffd166;
+}
+.upgrade-draft-card.rarity-prototype,
+.ops-card.rarity-prototype,
+.inventory-item.rarity-prototype {
+    background-color: #241b38;
+    border-color: #a974ff;
+}
+.upgrade-draft-card.rarity-prototype .draft-art,
+.ops-card.rarity-prototype .module-art,
+.inventory-item.rarity-prototype .inventory-art,
+.inventory-item.rarity-prototype .inventory-count {
+    background-color: #30224d;
+    border-color: #a974ff;
+    color: #d2b7ff;
+}
+.upgrade-draft-card.rarity-prototype .draft-art span,
+.ops-card.rarity-prototype .module-art span,
+.inventory-item.rarity-prototype .inventory-art span {
+    color: #d2b7ff;
+}
+.upgrade-draft-card.rarity-exotic,
+.ops-card.rarity-exotic,
+.inventory-item.rarity-exotic {
+    background-color: #2a1734;
+    border-color: #e05aaf;
+}
+.upgrade-draft-card.rarity-exotic .draft-art,
+.ops-card.rarity-exotic .module-art,
+.inventory-item.rarity-exotic .inventory-art,
+.inventory-item.rarity-exotic .inventory-count {
+    background-color: #3b1c47;
+    border-color: #e05aaf;
+    color: #ffaad9;
+}
+.upgrade-draft-card.rarity-exotic .draft-art span,
+.ops-card.rarity-exotic .module-art span,
+.inventory-item.rarity-exotic .inventory-art span {
+    color: #ffaad9;
+}
 .resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .tutorial-card, .draft-hero, .draft-board, .board-primary {
     width: 100%;
 }
@@ -2170,6 +2810,21 @@ scrollbarhorizontal sliderbar {
 .control-panel .metric-grid {
     width: 390px;
     justify-content: flex-start;
+}
+.control-panel .phase-board-surface-minigame .minigame-readout {
+    width: 704px;
+}
+.control-panel .phase-board-surface-minigame .minigame-metrics {
+    width: 456px;
+    flex-shrink: 0;
+}
+.control-panel .phase-board-surface-minigame .minigame-metric-row {
+    width: 456px;
+}
+.control-panel .phase-board-surface-minigame .minigame-rewards {
+    width: 210px;
+    flex-shrink: 0;
+    margin-left: 16px;
 }
 .control-panel .panel-kpis {
     width: 390px;
@@ -2464,9 +3119,9 @@ strong {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    width: 560px;
-    margin-top: 5px;
-    padding: 5px 7px;
+    width: 572px;
+    margin-top: 7px;
+    padding: 7px 8px;
     background-color: #111a24;
     border-width: 1px;
     border-color: #243749;
@@ -2476,7 +3131,12 @@ strong {
     display: inline-block;
 }
 .detail-row span {
+    width: 128px;
     color: #7f91a0;
+}
+.detail-row strong {
+    width: 408px;
+    line-height: 1.28;
 }
 .detail-section {
     margin-top: 10px;
@@ -2508,6 +3168,18 @@ button {
 button:hover {
     background-color: #1f4b62;
 }
+button.disabled,
+button:disabled {
+    color: #8a939c;
+    background-color: #252b31;
+    border-color: #47515a;
+}
+button.disabled:hover,
+button:disabled:hover {
+    color: #8a939c;
+    background-color: #252b31;
+    border-color: #47515a;
+}
 button.ok {
     background-color: #1d4a39;
     border-color: #5ba77f;
@@ -2524,14 +3196,61 @@ button.ghost {
     color: #99a9b8;
     background-color: #1a222d;
 }
+button.settings-toggle {
+    width: 184px;
+    min-height: 36px;
+    color: #edf4f8;
+    background-color: #173044;
+    border-color: #4aa9d8;
+}
+button.settings-toggle:hover {
+    color: #edf4f8;
+    background-color: #1f4b62;
+    border-color: #67d2ff;
+}
+.settings-control button.settings-toggle {
+    margin-top: 6px;
+}
 .settings-control {
     margin-top: 12px;
+}
+.settings-control h3 {
+    margin-bottom: 4px;
+}
+.settings-control p {
+    width: 560px;
 }
 .settings-control select {
     display: block;
     width: 184px;
     height: 36px;
     margin-top: 6px;
+}
+.settings-checkbox {
+    display: block;
+    width: 240px;
+    min-height: 26px;
+    margin-top: 6px;
+    color: #edf4f8;
+}
+.settings-checkbox input {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    margin-right: 8px;
+    background-color: #0c141d;
+    border-width: 1px;
+    border-color: #4e6b80;
+    border-radius: 4px;
+}
+.settings-checkbox input:checked {
+    background-color: #1d4a39;
+    border-color: #72e0a8;
+}
+.settings-checkbox span {
+    display: inline-block;
+    height: 22px;
+    line-height: 22px;
 }
 .settings-control select selectvalue {
     width: auto;
@@ -2611,10 +3330,31 @@ button.ghost {
     border-radius: 8px;
     overflow: auto;
 }
+#rr-modal.modal-inventory {
+    width: 1068px;
+    margin-left: -534px;
+    padding: 20px;
+}
+#rr-modal.modal-phase_briefing {
+    top: 14%;
+    height: 340px;
+    padding: 20px;
+}
+#rr-modal.modal-surface {
+    top: 8%;
+    height: 680px;
+    padding: 20px;
+}
+#rr-modal.modal-mission_log {
+    top: 12%;
+    height: 300px;
+    padding: 20px;
+}
 .modal-head {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
+    margin-bottom: 8px;
 }
 )";
 }
@@ -2633,19 +3373,24 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     }
 
     const bool phaseBoard = panelUsesPhaseBoard(panelHtml);
-    std::string body = selectCurrentGameSpeed(sanitizeRml(removeTemplates(panelHtml)));
+    const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
+    std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
 
     std::string document = "<rml><head><style>" + panelRcss(phaseBoard) + "</style></head><body>";
-    document += "<div id=\"rr-panel\" class=\"" + std::string(phaseBoard ? "phase-board-panel" : "control-panel") + "\">";
+    document += "<div id=\"rr-panel\" class=\"" + std::string(phaseBoard ? "phase-board-panel" : "control-panel");
+    if (surfaceOps) {
+        document += " surface-ops-panel";
+    }
+    document += "\">";
     document += body;
     document += "</div>";
 
     if (const ModalTemplate* modal = findModal(modals, activeModalId)) {
         document += "<div id=\"rr-modal-scrim\"></div>";
-        document += "<div id=\"rr-modal\"><div class=\"modal-head\"><h2>";
+        document += "<div id=\"rr-modal\" class=\"modal-" + activeModalId + "\"><div class=\"modal-head\"><h2>";
         document += modal->title;
         document += "</h2><button class=\"ghost\" data-ui-close-modal=\"1\">Close</button></div>";
-        document += selectCurrentGameSpeed(sanitizeRml(modal->body));
+        document += syncSettingsControls(sanitizeRml(modal->body));
         document += "</div>";
     }
 
@@ -2664,12 +3409,19 @@ public:
     void ProcessEvent(Rml::Event& event) override
     {
         Rml::Element* target = event.GetTargetElement();
-        auto* control = dynamic_cast<Rml::ElementFormControl*>(target);
-        if (!control || control->GetTagName() != "select" || !control->HasAttribute("data-game-speed-select")) {
-            return;
+        if (auto* control = dynamic_cast<Rml::ElementFormControl*>(target)) {
+            if (control->GetTagName() == "select" && control->HasAttribute("data-game-speed-select")) {
+                rr_rml_set_game_speed_multiplier(control->GetValue().c_str());
+                return;
+            }
         }
 
-        rr_rml_set_game_speed_multiplier(control->GetValue().c_str());
+        if (auto* input = dynamic_cast<Rml::ElementFormControlInput*>(target)) {
+            if (input->HasAttribute("data-debug-tools-toggle")) {
+                rr_rml_set_debug_tools_enabled(input->HasAttribute("checked") ? 1 : 0);
+                return;
+            }
+        }
     }
 };
 
@@ -2691,6 +3443,16 @@ bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
     }
     if (!binding.action.empty()) {
         owner.dispatchAction(binding.action);
+        return true;
+    }
+    if (binding.helpToggle) {
+        rr_rml_set_help_disabled(rr_rml_help_disabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
+    if (binding.debugToolsToggle) {
+        rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
+        owner.refresh();
         return true;
     }
     return false;
@@ -2983,6 +3745,11 @@ void GameRmlUi::dispatchAction(const std::string& action)
     }
 }
 
+void GameRmlUi::refresh()
+{
+    rebuildDocument();
+}
+
 bool GameRmlUi::activateButtonLabel(const std::string& label)
 {
     const std::string collapsed = collapsedText(label);
@@ -3007,6 +3774,16 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
     }
     if (!it->action.empty()) {
         dispatchAction(it->action);
+        return true;
+    }
+    if (it->helpToggle) {
+        rr_rml_set_help_disabled(rr_rml_help_disabled() == 0 ? 1 : 0);
+        refresh();
+        return true;
+    }
+    if (it->debugToolsToggle) {
+        rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
+        refresh();
         return true;
     }
     return false;

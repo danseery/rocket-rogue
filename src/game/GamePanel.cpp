@@ -63,6 +63,13 @@ std::string compactMetric(std::string_view label, std::string value)
     return "<div class=\"surface-kpi\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
 }
 
+std::string surfaceQuickMetric(std::string_view label, std::string value, std::string_view cssClass = "")
+{
+    const std::string classAttr = cssClass.empty() ? "" : " " + htmlEscape(cssClass);
+    return "<div class=\"surface-kpi surface-quick-item" + classAttr + "\"><span>" + htmlEscape(label) +
+        "</span><strong>" + htmlEscape(value) + "</strong></div>";
+}
+
 std::string phaseTitle(Screen screen)
 {
     switch (screen) {
@@ -84,6 +91,10 @@ std::string phaseTitle(Screen screen)
         return "Surface Ops";
     case Screen::SurfaceUpgrade:
         return "Field Upgrade";
+    case Screen::SurfaceScan:
+        return "Planet Scan";
+    case Screen::SurfacePush:
+        return "Deep Push";
     case Screen::Mining:
         return "Mining";
     case Screen::DroneOps:
@@ -122,7 +133,7 @@ std::string autoModalTemplate(std::string_view modalId, std::string_view title, 
 
 std::string disabledButton(std::string_view label)
 {
-    return "<button disabled>" + htmlEscape(label) + "</button>";
+    return "<button class=\"disabled\" disabled>" + htmlEscape(label) + "</button>";
 }
 
 std::string warningClass(double value)
@@ -233,6 +244,15 @@ bool isSurfaceMiningAction(const SurfaceActionPreviewPresentation& action)
 std::string surfaceActionDetail(const SurfaceActionPreviewPresentation& action)
 {
     return isSurfaceMiningAction(action) ? "Spend shared fuel for one mining run this loop." : action.detail;
+}
+
+PanelButtonPresentation surfaceActionFooterButton(const SurfaceActionPreviewPresentation& action)
+{
+    PanelButtonPresentation buttonPresentation = action.action;
+    if (!buttonPresentation.enabled && (buttonPresentation.label.rfind("Need ", 0) == 0 || buttonPresentation.label.size() > 14)) {
+        buttonPresentation.label = std::string(text::buttons::unavailable);
+    }
+    return buttonPresentation;
 }
 
 std::string operationCard(std::string title, std::string detail, std::string cost, std::string_view action, bool available, std::string cssClass = "")
@@ -405,11 +425,29 @@ std::string flybySpeedLabel(const FlybyRunState& flyby)
     return display::fixed(speed * 100.0, 0) + " m/s";
 }
 
+std::string rarityCardClass(std::string_view rarity)
+{
+    if (rarity == text::enums::rarity::common) {
+        return "rarity-common";
+    }
+    if (rarity == text::enums::rarity::uncommon) {
+        return "rarity-uncommon";
+    }
+    if (rarity == text::enums::rarity::rare) {
+        return "rarity-rare";
+    }
+    if (rarity == text::enums::rarity::prototype) {
+        return "rarity-prototype";
+    }
+    return "rarity-common";
+}
+
 std::string refitOfferCard(const RefitOfferPresentation& offer)
 {
     const RefitPresentation& presentation = offer.card;
     std::ostringstream out;
-    out << "<article class=\"pilot-card upgrade-draft-card slot-" << htmlEscape(presentation.slotClass) << "\">";
+    out << "<article class=\"pilot-card upgrade-draft-card slot-" << htmlEscape(presentation.slotClass) << " "
+        << rarityCardClass(presentation.rarity) << "\">";
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(presentation.category) << "</span><strong>"
         << htmlEscape(presentation.rarity) << " refit</strong></div>";
     out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
@@ -451,14 +489,14 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
     out << "<p class=\"ops-detail\">" << htmlEscape(detail) << "</p>";
     out << "<div class=\"stat-grid\">" << surfaceActionChipGrid(action.payoffChips) << "</div>";
     out << "<div class=\"card-footer\"><span class=\"surface-action-status\">" << htmlEscape(action.availability)
-        << "</span>" << panelButton(action.action) << "</div></article>";
+        << "</span>" << panelButton(surfaceActionFooterButton(action)) << "</div></article>";
     return out.str();
 }
 
 std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
 {
     std::ostringstream out;
-    out << "<article class=\"pilot-card upgrade-draft-card surface-upgrade-card\">";
+    out << "<article class=\"pilot-card upgrade-draft-card surface-upgrade-card " << rarityCardClass(upgrade.rarity) << "\">";
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(upgrade.category) << "</span><strong>"
         << htmlEscape(upgrade.rarity) << " field mod</strong></div>";
     out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(draftInitial(upgrade.category, "F")) << "</span></div>";
@@ -473,7 +511,7 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
 std::string miniDroneCard(const MiniDroneCardPresentation& drone)
 {
     std::ostringstream out;
-    out << "<article class=\"ops-card drone-card\">";
+    out << "<article class=\"ops-card drone-card " << rarityCardClass(drone.rarity) << "\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(drone.role) << "</span><span>"
         << htmlEscape(drone.rarity) << "</span></div>";
     out << "<div class=\"module-art\"><span>" << htmlEscape(drone.title.empty() ? "D" : std::string(1, drone.title.front())) << "</span></div>";
@@ -498,6 +536,66 @@ std::string primarySurfaceActionCard(const SurfaceActionPreviewPresentation& act
     out << panelButton(action.action);
     out << "</div>";
     out << "</article>";
+    return out.str();
+}
+
+std::vector<PanelMetricPresentation> materialRewardChips(const MaterialInventory& materials, int artifacts, int cargo)
+{
+    std::vector<PanelMetricPresentation> chips;
+    if (materials.common > 0) {
+        chips.push_back(panelMetric("Common", "+" + std::to_string(materials.common)));
+    }
+    if (materials.rare > 0) {
+        chips.push_back(panelMetric("Rare", "+" + std::to_string(materials.rare)));
+    }
+    if (materials.exotic > 0) {
+        chips.push_back(panelMetric("Exotic", "+" + std::to_string(materials.exotic)));
+    }
+    if (artifacts > 0) {
+        chips.push_back(panelMetric("Artifact", "+" + std::to_string(artifacts)));
+    }
+    if (cargo > 0) {
+        chips.push_back(panelMetric("Yield est", "+" + std::to_string(cargo)));
+    }
+    if (chips.empty()) {
+        chips.push_back(panelMetric("Prospects", "None"));
+    }
+    return chips;
+}
+
+std::string surfaceMiniGamePanel(
+    std::string_view cssClass,
+    std::string_view title,
+    std::string_view subtitle,
+    const std::vector<PanelMetricPresentation>& metrics,
+    const std::vector<PanelMetricPresentation>& rewards,
+    std::string_view statusTitle,
+    std::string_view statusDetail,
+    const std::vector<PanelButtonPresentation>& actions)
+{
+    std::ostringstream out;
+    out << "<section class=\"surface-minigame " << htmlEscape(cssClass) << "\">";
+    out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(title)
+        << "</h2><p>" << htmlEscape(subtitle) << "</p></div>"
+        << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+        << "</div></div>";
+    out << "<div class=\"minigame-readout\"><div class=\"minigame-metrics\">";
+    for (std::size_t index = 0; index < metrics.size(); index += 2) {
+        out << "<div class=\"minigame-metric-row\">";
+        out << metric(metrics[index].label, metrics[index].value);
+        if (index + 1 < metrics.size()) {
+            out << metric(metrics[index + 1].label, metrics[index + 1].value);
+        }
+        out << "</div>";
+    }
+    out << "</div><div class=\"stat-grid minigame-rewards\">" << resourceChipGrid(rewards) << "</div></div>";
+    out << "<article class=\"resource-bank minigame-callout\"><div><h2>" << htmlEscape(statusTitle)
+        << "</h2><p>" << htmlEscape(statusDetail) << "</p></div></article>";
+    out << "<div class=\"actions minigame-actions\">";
+    for (const PanelButtonPresentation& action : actions) {
+        out << panelButton(action);
+    }
+    out << "</div></section>";
     return out.str();
 }
 
@@ -553,16 +651,36 @@ std::string inventoryItemCard(const InventoryItemPresentation& item)
     std::ostringstream out;
     out << "<article class=\"inventory-item " << htmlEscape(item.cssClass) << "\">";
     out << "<div class=\"inventory-art\"><span>" << htmlEscape(item.glyph) << "</span></div>";
-    out << "<div><h3>" << htmlEscape(item.title) << "</h3><p>" << htmlEscape(item.detail) << "</p></div>";
-    out << "<strong>" << htmlEscape(item.count) << "</strong>";
+    out << "<div class=\"inventory-copy\"><h3>" << htmlEscape(item.title) << "</h3><p>" << htmlEscape(item.detail) << "</p></div>";
+    out << "<strong class=\"inventory-count\">" << htmlEscape(item.count) << "</strong>";
     out << "</article>";
     return out.str();
+}
+
+std::string inventorySectionClass(std::string_view title)
+{
+    if (title == "Current payload") {
+        return "payload";
+    }
+    if (title == "Recovered resources") {
+        return "resources";
+    }
+    if (title == "Artifacts") {
+        return "artifacts";
+    }
+    if (title == "Ship tech") {
+        return "modules";
+    }
+    if (title == "Drone bay") {
+        return "drones";
+    }
+    return "misc";
 }
 
 std::string inventorySection(const InventorySectionPresentation& section)
 {
     std::ostringstream out;
-    out << "<section class=\"inventory-section\"><div class=\"inventory-section-head\"><h3>"
+    out << "<section class=\"inventory-section inventory-section-" << inventorySectionClass(section.title) << "\"><div class=\"inventory-section-head\"><h3>"
         << htmlEscape(section.title) << "</h3><p>" << htmlEscape(section.detail) << "</p></div>";
     out << "<div class=\"inventory-grid\">";
     for (const InventoryItemPresentation& item : section.items) {
@@ -576,6 +694,15 @@ std::string inventoryBody(const InventoryPresentation& inventory)
 {
     std::ostringstream out;
     out << "<div class=\"inventory-modal\">";
+    out << "<div class=\"inventory-layout\">";
+    if (!inventory.sideSections.empty()) {
+        out << "<aside class=\"inventory-side-column\">";
+        for (const InventorySectionPresentation& section : inventory.sideSections) {
+            out << inventorySection(section);
+        }
+        out << "</aside>";
+    }
+    out << "<div class=\"inventory-main-column\">";
     out << "<div class=\"metric-grid inventory-summary\">";
     for (const PanelMetricPresentation& metricItem : inventory.summary) {
         out << metric(metricItem.label, metricItem.value);
@@ -584,7 +711,7 @@ std::string inventoryBody(const InventoryPresentation& inventory)
     for (const InventorySectionPresentation& section : inventory.sections) {
         out << inventorySection(section);
     }
-    out << "</div>";
+    out << "</div></div></div>";
     return out.str();
 }
 
@@ -656,6 +783,20 @@ std::string surfaceCommandSummary(const SurfaceExpeditionPresentation& surface)
     return out.str();
 }
 
+std::string surfaceQuickbar(const SurfaceExpeditionPresentation& surface, const SurfaceExpeditionState& expedition, double extractionRisk)
+{
+    std::ostringstream out;
+    out << "<section class=\"surface-quickbar\">";
+    out << surfaceQuickMetric(text::labels::site, surface.metrics.empty() ? "" : surface.metrics.front().value, "surface-quick-site");
+    out << surfaceQuickMetric("Next", surface.postureTitle, "surface-quick-next");
+    out << surfaceQuickMetric(text::labels::supply, std::to_string(expedition.supply));
+    out << surfaceQuickMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
+    out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
+    out << surfaceQuickMetric(text::labels::extractionRisk, display::percent(extractionRisk));
+    out << "</section>";
+    return out.str();
+}
+
 std::string surfaceKpiGrid(const SurfaceExpeditionState& expedition, double extractionRisk)
 {
     std::ostringstream out;
@@ -668,6 +809,12 @@ std::string surfaceKpiGrid(const SurfaceExpeditionState& expedition, double extr
     out << compactMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common));
     out << compactMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare));
     out << compactMetric(text::labels::artifacts, std::to_string(expedition.temporaryArtifacts.size()));
+    out << compactMetric("Prospects",
+        std::to_string(
+            std::max(0, expedition.prospectMaterials.common) +
+            std::max(0, expedition.prospectMaterials.rare) +
+            std::max(0, expedition.prospectMaterials.exotic) +
+            std::max(0, expedition.prospectArtifacts)));
     out << "</div>";
     return out.str();
 }
@@ -758,8 +905,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     settingsBody << "<section class=\"settings-control\" data-help-settings>"
         << "<div><h3>" << htmlEscape("Mission help") << "</h3>"
         << "<p>" << htmlEscape("Show light tips when new systems appear.") << "</p></div>"
-        << "<label class=\"settings-checkbox\"><input type=\"checkbox\" data-help-toggle checked><span>"
-        << htmlEscape("Show help") << "</span></label></section>";
+        << "<button class=\"settings-toggle\" data-help-toggle=\"1\">"
+        << htmlEscape("Hide mission help") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
+        << "<div><h3>" << htmlEscape("Debug mini-games") << "</h3>"
+        << "<p>" << htmlEscape("Show sandbox launch tools for mining, flyby, and orbit. These do not write save data.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\">"
+        << htmlEscape("Show debug tools") << "</button></section>";
     settingsBody << "<div class=\"modal-actions\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         settingsBody << panelButton(action);
@@ -1300,21 +1452,92 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         return out.str();
     }
 
+    if (state.screen == Screen::SurfaceScan) {
+        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
+        const SurfaceScanRunState& scan = state.run.surfaceScan;
+        out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-scan", state.statusLine);
+        const std::vector<PanelMetricPresentation> scanMetrics {
+            panelMetric("Pulses", std::to_string(scan.pulses) + "/" + std::to_string(std::max(1, scan.maxPulses))),
+            panelMetric("Signal", display::percent(scan.signal)),
+            panelMetric("Interference", display::percent(scan.interference)),
+            panelMetric("Bust risk", display::percent(scan.bustRisk))
+        };
+        std::vector<PanelButtonPresentation> actions;
+        if (scan.busted) {
+            actions.push_back(panelActionButton("Return to Surface Ops", ui::actions::surfaceScanBank, "danger"));
+        } else {
+            actions.push_back(scan.completed
+                ? disabledPanelButton("Pulse complete")
+                : panelActionButton("Pulse scanner", ui::actions::surfaceScanPulse, "warn"));
+            actions.push_back(panelActionButton(scan.pulses > 0 ? "Bank scan" : "Return to Surface Ops", ui::actions::surfaceScanBank, "ok"));
+            actions.push_back(panelActionButton("Abort scan", ui::actions::surfaceScanAbort, "danger"));
+        }
+        out << surfaceMiniGamePanel(
+            "scan-minigame",
+            "Planet Scan",
+            "Sweep for underground prospects. Pulse to raise payout; bank before bust risk climbs.",
+            scanMetrics,
+            materialRewardChips(scan.temporaryMaterials, static_cast<int>(scan.temporaryArtifacts.size()), scan.cargo),
+            scan.busted ? "Signal Burnout" : (scan.completed ? "Jackpot Window" : "Scanner Window"),
+            scan.message.empty() ? "Pulse for richer returns, then bank before interference burns the array." : scan.message,
+            actions);
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
+        return out.str();
+    }
+
+    if (state.screen == Screen::SurfacePush) {
+        const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
+        const SurfacePushRunState& push = state.run.surfacePush;
+        out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-push", state.statusLine);
+        const std::vector<PanelMetricPresentation> pushMetrics {
+            panelMetric("Steps", std::to_string(push.steps) + "/" + std::to_string(std::max(1, push.maxSteps))),
+            panelMetric("Depth gain", "+" + std::to_string(push.depthGain)),
+            panelMetric("Pressure", display::percent(push.pressure)),
+            panelMetric("Collapse risk", display::percent(push.collapseRisk))
+        };
+        std::vector<PanelButtonPresentation> actions;
+        if (push.busted) {
+            actions.push_back(panelActionButton("Return to Surface Ops", ui::actions::surfacePushBank, "danger"));
+        } else {
+            actions.push_back(push.completed
+                ? disabledPanelButton("Route limit reached")
+                : panelActionButton("Push deeper", ui::actions::surfacePushStep, "danger"));
+            actions.push_back(panelActionButton(push.steps > 0 ? "Bank route" : "Return to Surface Ops", ui::actions::surfacePushBank, "ok"));
+            actions.push_back(panelActionButton("Abort descent", ui::actions::surfacePushAbort, "danger"));
+        }
+        out << surfaceMiniGamePanel(
+            "push-minigame",
+            "Deep Push",
+            "Mark a deeper route for richer deposits. Every descent step sharpens the reward and the collapse odds.",
+            pushMetrics,
+            materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
+            push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
+            push.message.empty() ? "Push for a better route, then bank before the terrain turns." : push.message,
+            actions);
+        out << phaseBoardClose();
+        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << inventoryTemplate(state, catalog);
+        return out.str();
+    }
+
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
         const double extractionRisk = surfaceExtractionRisk(state);
-        out << phaseBoardOpen("phase-board-surface", state.statusLine);
+        out << phaseBoardOpen("phase-board-surface surface-ops-screen", state.statusLine);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
-            << "</h2><p>" << htmlEscape(text::panel::messages::surfaceExpeditionBrief) << "</p></div>";
+            << "</h2></div>";
         out << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
             << modalButton(text::buttons::details, ui::modals::surface, "ghost");
         if (!surfacePanel.logEntries.empty()) {
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
         out << "</div></div>";
-        out << surfaceCommandSummary(surfacePanel);
-        out << surfaceKpiGrid(expedition, extractionRisk);
+        out << surfaceQuickbar(surfacePanel, expedition, extractionRisk);
         if (surfacePanel.droneOpsAction.enabled) {
             out << "<section class=\"resource-bank drone-ops-callout\"><div><h2>" << htmlEscape("Drone Ops")
                 << "</h2><p>" << htmlEscape("Equip persistent helper drones before you launch the mining run.") << "</p></div>"
@@ -1323,12 +1546,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
             return isSurfaceMiningAction(action);
         });
-        if (mineAction != surfacePanel.actions.end()) {
-            out << primarySurfaceActionCard(*mineAction);
-        }
         out << "<section class=\"board-primary surface-actions\">";
-        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape("Field actions") << "</h2></div></div>";
         out << "<div class=\"ops-grid\">";
+        if (mineAction != surfacePanel.actions.end()) {
+            out << surfaceActionCard(*mineAction);
+        }
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             if (isSurfaceMiningAction(action)) {
                 continue;
