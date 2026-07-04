@@ -404,6 +404,86 @@ Color miningEnemyColor(int type, int affinity)
     }
 }
 
+bool miningRewardMaterial(int material)
+{
+    switch (static_cast<MiningCellMaterial>(material)) {
+    case MiningCellMaterial::CommonOre:
+    case MiningCellMaterial::RareOre:
+    case MiningCellMaterial::ExoticVein:
+    case MiningCellMaterial::ArtifactCache:
+        return true;
+    case MiningCellMaterial::Empty:
+    case MiningCellMaterial::Regolith:
+    case MiningCellMaterial::HardRock:
+    case MiningCellMaterial::HazardPocket:
+    case MiningCellMaterial::Bedrock:
+        return false;
+    }
+    return false;
+}
+
+bool miningScannerPingMaterial(int material)
+{
+    switch (static_cast<MiningCellMaterial>(material)) {
+    case MiningCellMaterial::Regolith:
+    case MiningCellMaterial::HardRock:
+    case MiningCellMaterial::CommonOre:
+    case MiningCellMaterial::RareOre:
+    case MiningCellMaterial::ExoticVein:
+    case MiningCellMaterial::ArtifactCache:
+    case MiningCellMaterial::HazardPocket:
+        return true;
+    case MiningCellMaterial::Empty:
+    case MiningCellMaterial::Bedrock:
+        return false;
+    }
+    return false;
+}
+
+Color miningRewardGlowColor(int material)
+{
+    switch (static_cast<MiningCellMaterial>(material)) {
+    case MiningCellMaterial::CommonOre:
+        return {0.98F, 0.68F, 0.22F, 1.0F};
+    case MiningCellMaterial::RareOre:
+        return {0.34F, 0.92F, 1.0F, 1.0F};
+    case MiningCellMaterial::ExoticVein:
+        return {0.78F, 0.42F, 1.0F, 1.0F};
+    case MiningCellMaterial::ArtifactCache:
+        return {1.0F, 0.86F, 0.30F, 1.0F};
+    case MiningCellMaterial::Empty:
+    case MiningCellMaterial::Regolith:
+    case MiningCellMaterial::HardRock:
+    case MiningCellMaterial::HazardPocket:
+    case MiningCellMaterial::Bedrock:
+        break;
+    }
+    return {1.0F, 0.82F, 0.28F, 1.0F};
+}
+
+Color miningScannerPingColor(int material)
+{
+    if (miningRewardMaterial(material)) {
+        return miningRewardGlowColor(material);
+    }
+    switch (static_cast<MiningCellMaterial>(material)) {
+    case MiningCellMaterial::HazardPocket:
+        return {1.0F, 0.28F, 0.16F, 1.0F};
+    case MiningCellMaterial::HardRock:
+        return {0.48F, 0.72F, 0.86F, 1.0F};
+    case MiningCellMaterial::Regolith:
+        return {0.86F, 0.70F, 0.46F, 1.0F};
+    case MiningCellMaterial::Empty:
+    case MiningCellMaterial::CommonOre:
+    case MiningCellMaterial::RareOre:
+    case MiningCellMaterial::ExoticVein:
+    case MiningCellMaterial::ArtifactCache:
+    case MiningCellMaterial::Bedrock:
+        break;
+    }
+    return {0.70F, 0.86F, 0.92F, 1.0F};
+}
+
 } // namespace
 
 bool WebGLRenderer::initialize()
@@ -1055,6 +1135,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     const float bottom = -0.86F;
     const float cellW = (right - left) / static_cast<float>(snapshot.miningWidth);
     const float cellH = (top - bottom) / static_cast<float>(snapshot.miningHeight);
+    const float cellSize = std::min(cellW, cellH);
     auto cellCenter = [&](double x, double y) {
         return Vec2 {
             left + static_cast<float>(x) * cellW + cellW * 0.5F,
@@ -1089,6 +1170,76 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     }
     submit(terrainVertices, 0x0004);
 
+    std::vector<float>& oreGlowVertices = scratchVertices(snapshot.miningCells.size() * 48U);
+    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+        if (!cell.revealed) {
+            continue;
+        }
+        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
+        float scannerBoost = 0.0F;
+        if (snapshot.miningScannerPulse > 0.0) {
+            const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
+            const float ringRadius = 2.0F + (1.0F - pulse) * 4.6F;
+            const float ringWidth = 0.9F + pulse * 0.55F;
+            scannerBoost = std::clamp(1.0F - std::abs(distCells - ringRadius) / ringWidth, 0.0F, 1.0F) * pulse;
+        }
+        const bool rewardCell = miningRewardMaterial(cell.material);
+        const bool scannerPing = scannerBoost > 0.04F && miningScannerPingMaterial(cell.material);
+        if (!rewardCell && !scannerPing) {
+            continue;
+        }
+        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material);
+        const float integrity = static_cast<float>(std::clamp(cell.integrity, 0.0, 1.0));
+        const float cracked = 1.0F - integrity;
+        const float shimmer = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.8F + static_cast<float>(cell.x * 13 + cell.y * 7));
+        const float baseSize = rewardCell ? 0.34F : 0.24F;
+        const float size = cellSize * (baseSize + cracked * 0.22F + scannerBoost * 0.42F);
+        const float baseAlpha = rewardCell ? 0.18F + shimmer * 0.18F : 0.04F;
+        const float alpha = baseAlpha + (rewardCell ? cracked * 0.16F : 0.0F) + scannerBoost * (rewardCell ? 0.34F : 0.42F);
+        appendRect(oreGlowVertices, center.x, center.y, size, size, {glow.r, glow.g, glow.b, std::min(alpha, 0.78F)});
+    }
+    submit(oreGlowVertices, 0x0004);
+
+    std::vector<float>& oreSparkVertices = scratchVertices(snapshot.miningCells.size() * 32U);
+    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+        if (!cell.revealed) {
+            continue;
+        }
+        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
+        float scannerBoost = 0.0F;
+        if (snapshot.miningScannerPulse > 0.0) {
+            const float pulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
+            const float ringRadius = 2.0F + (1.0F - pulse) * 4.6F;
+            const float ringWidth = 0.9F + pulse * 0.55F;
+            scannerBoost = std::clamp(1.0F - std::abs(distCells - ringRadius) / ringWidth, 0.0F, 1.0F) * pulse;
+        }
+        const bool rewardCell = miningRewardMaterial(cell.material);
+        const bool scannerPing = scannerBoost > 0.18F && miningScannerPingMaterial(cell.material);
+        if (!rewardCell && !scannerPing) {
+            continue;
+        }
+        const float phase = std::fmod(
+            static_cast<float>(snapshot.animationTime) * 1.35F + static_cast<float>(cell.x) * 0.17F + static_cast<float>(cell.y) * 0.11F,
+            1.0F);
+        const float activeWindow = scannerPing ? 0.72F : 0.42F;
+        if (phase > activeWindow) {
+            continue;
+        }
+        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material);
+        const float flare = std::max(1.0F - phase / activeWindow, scannerPing ? scannerBoost : 0.0F);
+        const float length = cellSize * ((rewardCell ? 0.34F : 0.24F) + flare * 0.44F);
+        const float alpha = (rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F);
+        appendLine(oreSparkVertices, center.x - length, center.y, center.x + length, center.y, {glow.r, glow.g, glow.b, alpha});
+        appendLine(oreSparkVertices, center.x, center.y - length, center.x, center.y + length, {glow.r, glow.g, glow.b, alpha});
+    }
+    submitLines(oreSparkVertices, 1.4F);
+
     for (const MiningEnemySnapshot& enemy : snapshot.miningEnemies) {
         if (!enemy.active) {
             continue;
@@ -1110,7 +1261,6 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drone.x += static_cast<float>(snapshot.miningRecoilX) * cellW * bounce;
         drone.y -= static_cast<float>(snapshot.miningRecoilY) * cellH * bounce;
     }
-    const float cellSize = std::min(cellW, cellH);
     drawRadialGlow(drone.x, drone.y, cellSize * 5.9F, {0.88F, 0.58F, 0.24F, 0.0084F}, 40);
     drawRadialGlow(drone.x, drone.y, cellSize * 2.7F, {1.0F, 0.78F, 0.36F, 0.0132F}, 32);
     if (snapshot.miningFailurePulse > 0.0) {
