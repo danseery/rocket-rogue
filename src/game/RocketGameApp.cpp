@@ -97,6 +97,23 @@ void setDestinationHistory(
     values[static_cast<std::size_t>(index)] = count;
 }
 
+void appendProspectMarkers(
+    std::vector<MiningCellMaterial>& markers,
+    std::vector<int>& depthOffsets,
+    const SurfaceDepthProspect& prospect)
+{
+    auto append = [&](MiningCellMaterial material, int count) {
+        for (int i = 0; i < std::max(0, count); ++i) {
+            markers.push_back(material);
+            depthOffsets.push_back(std::max(0, prospect.depthOffset));
+        }
+    };
+    append(MiningCellMaterial::CommonOre, prospect.possibleMaterials.common);
+    append(MiningCellMaterial::RareOre, prospect.possibleMaterials.rare);
+    append(MiningCellMaterial::ExoticVein, prospect.possibleMaterials.exotic);
+    append(MiningCellMaterial::ArtifactCache, prospect.possibleArtifacts);
+}
+
 } // namespace
 
 PreparedLaunch RocketGameApp::currentFlightModel() const
@@ -229,8 +246,15 @@ bool RocketGameApp::initialize()
     return true;
 }
 
+int RocketGameApp::currentScreen() const
+{
+    return static_cast<int>(state_.screen);
+}
+
 void RocketGameApp::tick(double deltaSeconds)
 {
+    visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
+
     if (state_.screen == Screen::Launch) {
         if (!session_.flightArmed) {
             return;
@@ -892,6 +916,29 @@ void RocketGameApp::miningScanner()
     panelDirty_ = true;
 }
 
+void RocketGameApp::miningTether()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+
+    const MiningArtifactObject before = state_.run.mining.artifact;
+    toggleMiningTether(state_);
+    const MiningArtifactObject& artifact = state_.run.mining.artifact;
+    if (!artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
+        state_.statusLine = "No recoverable artifact tether target.";
+    } else if (artifact.tethered) {
+        state_.statusLine = "Artifact tether locked. Pull it free and bring it to the ship bay.";
+    } else if (before.tethered) {
+        state_.statusLine = "Artifact tether released.";
+    } else if (!artifact.revealed && artifact.state == MiningArtifactState::Embedded) {
+        state_.statusLine = "Expose the artifact before tethering it.";
+    } else {
+        state_.statusLine = "Move closer to the exposed artifact to tether it.";
+    }
+    panelDirty_ = true;
+}
+
 void RocketGameApp::miningStow()
 {
     if (state_.screen != Screen::Mining) {
@@ -1096,6 +1143,7 @@ void RocketGameApp::debugStartMining()
     state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard;
     state_.run.surfaceExpedition.miningSitePrepared = true;
+    state_.run.surfaceExpedition.prospectArtifacts = 1;
     if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
         state_.meta.unlockKeys.push_back(content::unlock::droneBay);
     }
@@ -1106,7 +1154,7 @@ void RocketGameApp::debugStartMining()
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
     state_.statusLine = outcome.applied
-        ? "Debug mining sandbox. Drill, scan, and stow without touching your save."
+        ? "Debug mining sandbox. Drill, tether, and stow without touching your save."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -1509,6 +1557,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         upgradeDroneSlot();
     } else if (action == ui::actions::miningScanner) {
         miningScanner();
+    } else if (action == ui::actions::miningTether) {
+        miningTether();
     } else if (action == ui::actions::miningStow) {
         miningStow();
     } else if (action == ui::actions::miningAbort) {
@@ -1545,9 +1595,9 @@ RenderSnapshot RocketGameApp::snapshot() const
     } else if (state_.screen == Screen::Orbit) {
         result.animationTime = state_.run.orbit.elapsedSeconds;
     } else if (state_.screen == Screen::SurfaceScan) {
-        result.animationTime = static_cast<double>(state_.run.surfaceScan.pulses);
+        result.animationTime = visualTimeSeconds_;
     } else if (state_.screen == Screen::SurfacePush) {
-        result.animationTime = static_cast<double>(state_.run.surfacePush.steps);
+        result.animationTime = visualTimeSeconds_;
     } else if (state_.screen == Screen::ArrivalFanfare) {
         result.animationTime = session_.arrivalFanfare.elapsed;
     }
@@ -1618,8 +1668,13 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDrillDirX = mining.aimDirX;
         result.miningDrillDirY = mining.aimDirY;
         result.miningHeat = mining.drillHeat;
+        result.miningOxygenSeconds = mining.oxygenSeconds;
+        result.miningFuelBurnSeconds = mining.fuelBurnSeconds;
+        result.miningDrillIntegrity = mining.drillIntegrity;
+        result.miningHazardDelta = mining.hazardDelta;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
+        result.miningScannerRadius = miningDrillStats(state_, catalog_).scannerRadius;
         result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
@@ -1633,6 +1688,24 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningInputDrilling = mining.drilling;
         result.miningTargetDrillable = targetDrillable;
         result.miningDrilling = mining.drilling && targetDrillable;
+        result.miningSharedFuel = state_.run.surfaceExpedition.sharedFuel;
+        result.miningSharedFuelCapacity = state_.run.surfaceExpedition.sharedFuelCapacity;
+        result.miningCargo = mining.cargo;
+        result.miningMaterials = mining.temporaryMaterials;
+        if (mining.artifact.present) {
+            result.miningArtifact = {
+                true,
+                mining.artifact.x,
+                mining.artifact.y,
+                mining.artifact.health,
+                mining.artifact.maxHealth,
+                static_cast<int>(mining.artifact.kind),
+                static_cast<int>(mining.artifact.rewardType),
+                static_cast<int>(mining.artifact.state),
+                mining.artifact.tethered,
+                mining.artifact.revealed
+            };
+        }
         result.miningCells.reserve(mining.terrain.cells.size());
         for (int y = 0; y < mining.terrain.height; ++y) {
             for (int x = 0; x < mining.terrain.width; ++x) {
@@ -1733,6 +1806,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfaceScanCargo = scan.cargo;
         result.surfaceScanMaterials = scan.temporaryMaterials;
         result.surfaceScanArtifacts = static_cast<int>(scan.temporaryArtifacts.size());
+        for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
+            appendProspectMarkers(result.surfaceScanPreviewMarkers, result.surfaceScanPreviewDepthOffsets, prospect);
+        }
     }
 
     if (state_.screen == Screen::SurfacePush && (state_.run.surfacePush.active || state_.run.surfacePush.completed)) {
@@ -1749,6 +1825,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfacePushMaterials = push.temporaryMaterials;
         result.surfacePushArtifacts = static_cast<int>(push.temporaryArtifacts.size());
         result.surfacePushRewardMarkers = push.rewardMarkers;
+        result.surfacePushRewardDepthOffsets = push.rewardMarkerDepthOffsets;
+        for (const SurfaceDepthProspect& prospect : state_.run.surfaceExpedition.depthProspects) {
+            appendProspectMarkers(result.surfacePushForecastMarkers, result.surfacePushForecastDepthOffsets, prospect);
+        }
     }
 
     if (state_.screen == Screen::Launch) {

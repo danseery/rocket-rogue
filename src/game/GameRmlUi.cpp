@@ -170,6 +170,29 @@ EM_JS(void, rr_rml_set_help_disabled, (int disabled), {
     }
 });
 
+EM_JS(int, rr_rml_camera_shake_disabled, (), {
+    try {
+        return window.localStorage.getItem("rocket_rogue_camera_shake_disabled") === "1" ? 1 : 0;
+    } catch (error) {
+        return 0;
+    }
+});
+
+EM_JS(void, rr_rml_set_camera_shake_disabled, (int disabled), {
+    try {
+        if (disabled) {
+            window.localStorage.setItem("rocket_rogue_camera_shake_disabled", "1");
+        } else {
+            window.localStorage.removeItem("rocket_rogue_camera_shake_disabled");
+        }
+    } catch (error) {
+        // Ignore storage failures. The setting will return to its default next load.
+    }
+    if (window.RocketBridge && typeof window.RocketBridge.syncSettingsControls === "function") {
+        window.RocketBridge.syncSettingsControls();
+    }
+});
+
 EM_JS(int, rr_rml_help_topic_hidden, (const char* value), {
     const topic = UTF8ToString(value || 0);
     try {
@@ -713,7 +736,7 @@ std::string normalizeBooleanAttributes(std::string html)
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
         "data-flyby-run", "data-flyby-stamp", "data-orbit-run", "data-orbit-stamp",
-        "data-help-settings", "data-help-toggle", "data-game-speed-settings", "data-game-speed-select",
+        "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-game-speed-settings", "data-game-speed-select",
         "data-debug-tools-settings", "data-debug-tools-toggle"
     };
 
@@ -836,9 +859,30 @@ std::string syncCurrentHelpToggle(std::string html)
     return html;
 }
 
+std::string syncCurrentCameraShakeToggle(std::string html)
+{
+    if (html.find("data-camera-shake-toggle") == std::string::npos) {
+        return html;
+    }
+
+    const std::string needle = "data-camera-shake-toggle";
+    const std::size_t attrStart = html.find(needle);
+    if (attrStart == std::string::npos) {
+        return html;
+    }
+    const std::size_t tagEnd = html.find('>', attrStart);
+    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
+    if (tagEnd != std::string::npos && closeStart != std::string::npos) {
+        const bool disabled = rr_rml_camera_shake_disabled() != 0;
+        const std::string label = disabled ? "Enable camera shake" : "Disable camera shake";
+        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
+    }
+    return html;
+}
+
 std::string syncSettingsControls(std::string html)
 {
-    return syncCurrentHelpToggle(syncCurrentDebugToolsToggle(selectCurrentGameSpeed(std::move(html))));
+    return syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(selectCurrentGameSpeed(std::move(html)))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1105,6 +1149,7 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
         binding.helpDismiss = attributeValue(tag, "data-help-dismiss");
         binding.close = !attributeValue(tag, "data-ui-close-modal").empty();
         binding.helpToggle = !attributeValue(tag, "data-help-toggle").empty();
+        binding.cameraShakeToggle = !attributeValue(tag, "data-camera-shake-toggle").empty();
         binding.debugToolsToggle = !attributeValue(tag, "data-debug-tools-toggle").empty();
         bindings.push_back(std::move(binding));
         pos = closeStart + std::string_view("</button>").size();
@@ -1122,13 +1167,18 @@ bool panelUsesSurfaceOps(std::string_view html)
     return html.find("surface-ops-screen") != std::string_view::npos;
 }
 
+bool panelUsesDroneOps(std::string_view html)
+{
+    return html.find("phase-board-drone-ops") != std::string_view::npos;
+}
+
 Rml::Rectanglei panelBounds(bool phaseBoard)
 {
     const int viewportWidth = rr_rml_viewport_width();
     const int viewportHeight = rr_rml_viewport_height();
     const int left = phaseBoard ? 16 : kPanelInset;
     const int top = phaseBoard ? 16 : kPanelInset;
-    const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, 760) : kPanelWidth + 34;
+    const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, 736) : kPanelWidth + 34;
     const int height = phaseBoard
         ? std::clamp(viewportHeight - 64, 420, 960)
         : std::max(1, viewportHeight - 32);
@@ -1166,7 +1216,7 @@ body {
     overflow: hidden;
     color: #edf4f8;
     font-family: rmlui-debugger-font;
-    font-size: 12px;
+    font-size: 14px;
 }
 div, p, h1, h2, h3, aside {
     display: block;
@@ -1209,7 +1259,8 @@ scrollbarhorizontal sliderbar {
     border-radius: 8px;
 }
 #rr-panel.surface-ops-panel {
-    height: 500px;
+    height: 704px;
+    overflow: hidden;
 }
 .panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .pilot-card-top, .card-topline, .card-kicker {
     display: flex;
@@ -1274,7 +1325,7 @@ scrollbarhorizontal sliderbar {
 }
 .game-mark, .card-topline span, .card-kicker span, .pilot-card-top span {
     color: #7e90a0;
-    font-size: 10px;
+    font-size: 12px;
 }
 .panel-kpis {
     margin-top: 10px;
@@ -1292,6 +1343,18 @@ scrollbarhorizontal sliderbar {
     width: 150px;
 }
 .phase-board-panel.surface-ops-panel .panel-kpis {
+    display: none;
+}
+.phase-board-panel.surface-ops-panel .panel-head {
+    width: 720px;
+    margin-left: 8px;
+    margin-right: 0px;
+}
+.phase-board-panel.surface-ops-panel .panel-head-actions button {
+    margin-left: 8px;
+    margin-right: 0px;
+}
+.phase-board-panel.drone-ops-panel .panel-kpis {
     display: none;
 }
 .phase-board-panel .phase-titlebar {
@@ -1322,8 +1385,24 @@ scrollbarhorizontal sliderbar {
 .phase-board-drone-ops {
     width: 736px;
 }
+.phase-board-drone-ops {
+    padding-bottom: 12px;
+}
+.phase-board-panel.drone-ops-panel .panel-head {
+    margin-bottom: 8px;
+}
+.phase-board-panel.drone-ops-panel .status {
+    margin-bottom: 6px;
+}
+.phase-board-panel.drone-ops-panel .phase-titlebar {
+    margin-top: 4px;
+    margin-bottom: 6px;
+}
+.phase-board-panel.drone-ops-panel .phase-titlebar p {
+    width: 500px;
+}
 .phase-board-arrival {
-    padding-bottom: 30px;
+    padding-bottom: 18px;
 }
 .phase-board-arrival .result-grid,
 .phase-board-results .result-grid,
@@ -1397,7 +1476,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-results .result-row span {
     width: 126px;
     color: #8295a5;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-arrival .result-row strong,
 .phase-board-results .result-row strong {
@@ -1474,11 +1553,11 @@ scrollbarhorizontal sliderbar {
     padding: 7px 9px;
 }
 .phase-board-arrival .approach-metrics .surface-kpi span {
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1.1;
 }
 .phase-board-arrival .approach-metrics .surface-kpi strong {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.1;
 }
 .phase-board-arrival > .metric-grid .metric,
@@ -1490,32 +1569,50 @@ scrollbarhorizontal sliderbar {
 .phase-board-arrival .ops-grid,
 .phase-board-research .ops-grid,
 .phase-board-drone-ops .ops-grid {
-    width: 736px;
+    width: 704px;
     margin-top: 6px;
 }
 .phase-board-arrival .ops-grid {
     width: 704px;
     flex-wrap: nowrap;
     margin-top: 8px;
-    margin-bottom: 20px;
+    margin-bottom: 8px;
 }
 .phase-board-arrival .arrival-card,
 .phase-board-research .ops-card,
 .phase-board-drone-ops .drone-card {
-    width: 214px;
+    width: 204px;
     min-height: 172px;
     padding: 10px;
     margin-top: 8px;
     margin-right: 8px;
 }
+.phase-board-research .ops-card {
+    width: 204px;
+}
+.phase-board-research .ops-card {
+    height: 238px;
+}
+.phase-board-drone-ops .ops-grid {
+    width: 704px;
+    margin-top: 4px;
+}
+.phase-board-drone-ops .drone-card {
+    width: 205px;
+    min-height: 138px;
+    padding: 8px;
+    margin-top: 6px;
+    margin-right: 7px;
+}
 .phase-board-arrival .arrival-card {
     width: 209px;
-    min-height: 176px;
+    height: 206px;
     margin-right: 8px;
     padding: 10px 9px;
 }
 .phase-board-arrival .arrival-card h3 {
-    min-height: 18px;
+    height: 20px;
+    overflow: hidden;
 }
 .phase-board-arrival .arrival-card p,
 .phase-board-research .ops-card p,
@@ -1526,25 +1623,57 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 7px;
     line-height: 1.28;
 }
+.phase-board-research .ops-card p {
+    height: 54px;
+    overflow: hidden;
+}
+.phase-board-drone-ops .drone-card p {
+    width: 189px;
+    min-height: 36px;
+    margin-top: 3px;
+    margin-bottom: 4px;
+    line-height: 1.16;
+}
 .phase-board-arrival .arrival-card p {
     width: 191px;
-    min-height: 60px;
+    height: 66px;
+    overflow: hidden;
 }
 .phase-board-research .ops-card .module-impact {
     display: block;
     width: 194px;
-    min-height: 28px;
+    height: 30px;
     margin-top: 4px;
     margin-bottom: 4px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.25;
+    overflow: hidden;
 }
 .phase-board-research .ops-card .stat-grid,
 .phase-board-drone-ops .drone-card .stat-grid {
     width: 194px;
-    min-height: 42px;
+    min-height: 50px;
     margin-top: 4px;
     justify-content: center;
+}
+.phase-board-research .ops-card .card-footer {
+    height: 54px;
+    margin-top: 10px;
+}
+.phase-board-drone-ops .drone-card .stat-grid {
+    width: 189px;
+    min-height: 26px;
+    margin-top: 2px;
+}
+.phase-board-drone-ops .drone-card .stat-chip {
+    max-width: 92px;
+    min-height: 22px;
+    padding: 4px 6px;
+    font-size: 11px;
+    line-height: 1.15;
+}
+.phase-board-drone-ops .drone-card .stat-chip.wide {
+    max-width: 118px;
 }
 .phase-board-drone-ops .drone-card .module-art {
     width: 194px;
@@ -1556,12 +1685,26 @@ scrollbarhorizontal sliderbar {
     border-color: #3c596a;
     border-radius: 6px;
 }
+.phase-board-drone-ops .drone-card .module-art {
+    width: 189px;
+    height: 34px;
+    margin-top: 3px;
+    margin-bottom: 4px;
+}
 .phase-board-drone-ops .drone-card .module-art span {
     width: 100%;
     color: #8fd8f0;
     font-size: 22px;
     line-height: 44px;
     text-align: center;
+}
+.phase-board-drone-ops .drone-card .module-art span {
+    font-size: 19px;
+    line-height: 34px;
+}
+.phase-board-drone-ops .drone-card h3 {
+    margin-top: 2px;
+    margin-bottom: 0px;
 }
 .phase-board-arrival .arrival-card .card-footer,
 .phase-board-research .ops-card .card-footer,
@@ -1573,21 +1716,33 @@ scrollbarhorizontal sliderbar {
     border-top-color: #263b4c;
     align-items: center;
 }
+.phase-board-drone-ops .drone-card .card-footer {
+    width: 189px;
+    height: 34px;
+    margin-top: 5px;
+    padding-top: 6px;
+}
 .phase-board-arrival .arrival-card .card-footer {
     width: 191px;
     height: 48px;
-    margin-top: 8px;
+    margin-top: 10px;
 }
 .phase-board-arrival .arrival-card .card-footer span,
 .phase-board-research .ops-card .card-footer span,
 .phase-board-drone-ops .drone-card .card-footer span {
     width: 76px;
     color: #d7c276;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.15;
 }
+.phase-board-drone-ops .drone-card .card-footer span {
+    width: 64px;
+    font-size: 11px;
+}
 .phase-board-arrival .arrival-card .card-footer span {
-    width: 74px;
+    width: 54px;
+    height: 34px;
+    overflow: hidden;
 }
 .phase-board-arrival .arrival-card .card-footer button,
 .phase-board-research .ops-card .card-footer button,
@@ -1599,10 +1754,16 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
     padding-left: 5px;
     padding-right: 5px;
-    font-size: 10px;
+    font-size: 12px;
+}
+.phase-board-drone-ops .drone-card .card-footer button {
+    width: 86px;
+    height: 28px;
+    line-height: 28px;
+    font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer button {
-    width: 102px;
+    width: 126px;
 }
 .phase-board-research .phase-advisory,
 .phase-board-drone-ops .resource-bank {
@@ -1630,25 +1791,171 @@ scrollbarhorizontal sliderbar {
     height: 38px;
     line-height: 38px;
 }
-.phase-board-drone-ops .resource-bank {
+.phase-board-navigation {
+    width: 736px;
+    padding-bottom: 28px;
+}
+.phase-board-navigation .ark-status,
+.phase-board-navigation .navigation-map {
+    width: 704px;
+    margin-top: 10px;
+    margin-right: 0px;
+    padding: 10px 12px;
+}
+.phase-board-navigation .ark-status {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
-    padding: 12px;
-    margin-top: 10px;
+    align-items: center;
 }
-.phase-board-drone-ops .resource-bank > div {
-    width: 410px;
+.phase-board-navigation .ark-status > div {
+    width: 338px;
 }
-.phase-board-drone-ops .resource-bank .stat-grid {
-    width: 120px;
+.phase-board-navigation .ark-status .stat-grid {
+    width: 300px;
+    margin-top: 0px;
+    justify-content: flex-end;
 }
-.phase-board-drone-ops .resource-bank button {
+.phase-board-navigation .nav-grid {
+    width: 704px;
+    margin-top: 6px;
+}
+.phase-board-navigation .nav-card {
+    width: 334px;
+    height: 226px;
+    margin-top: 8px;
+    margin-right: 8px;
+    padding: 11px 12px;
+}
+.phase-board-navigation .nav-card.selected {
+    background-color: #10241f;
+    border-color: #72e0a8;
+}
+.phase-board-navigation .nav-card .card-kicker span {
+    width: 150px;
+    height: 16px;
+    overflow: hidden;
+}
+.phase-board-navigation .nav-card h3 {
+    height: 22px;
+    margin-top: 6px;
+    margin-bottom: 4px;
+    overflow: hidden;
+}
+.phase-board-navigation .nav-card p {
+    width: 310px;
+    height: 38px;
+    margin-top: 4px;
+    margin-bottom: 8px;
+    line-height: 1.24;
+    overflow: hidden;
+}
+.phase-board-navigation .nav-card .stat-grid {
+    width: 310px;
+    height: 58px;
+    margin-top: 0px;
+    align-content: flex-start;
+    align-items: flex-start;
+}
+.phase-board-navigation .nav-card .stat-chip {
     width: 132px;
+    height: 20px;
+    line-height: 20px;
+    margin-top: 0px;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    padding: 0px 5px;
+    font-size: 11px;
+}
+.phase-board-navigation .nav-card .stat-chip.wide {
+    width: 144px;
+}
+.phase-board-navigation .nav-card .card-footer {
+    width: 310px;
+    height: 48px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-top-color: #263b4c;
+    align-items: center;
+}
+.phase-board-navigation .nav-card .card-footer span {
+    width: 116px;
+    height: 34px;
+    color: #d7c276;
+    font-size: 12px;
+    line-height: 1.15;
+    overflow: hidden;
+}
+.phase-board-navigation .nav-card .card-footer button {
+    width: 150px;
+    height: 36px;
+    line-height: 36px;
+    margin-top: 0px;
+    margin-right: 0px;
+    padding-left: 6px;
+    padding-right: 6px;
+    font-size: 12px;
+}
+.phase-board-drone-ops .drone-bay-strip {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    margin-top: 6px;
+}
+.phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
+    width: 252px;
+}
+.phase-board-drone-ops .drone-bay-strip h2 {
+    margin-top: 0px;
+    margin-bottom: 2px;
+}
+.phase-board-drone-ops .drone-bay-strip p {
+    width: 244px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    line-height: 1.18;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-grid {
+    margin-top: 0px;
+}
+.phase-board-drone-ops .drone-bay-stats {
+    width: 174px;
+}
+.phase-board-drone-ops .drone-bay-materials {
+    width: 112px;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-chip {
+    max-width: 84px;
+    min-height: 22px;
+    padding: 4px 6px;
+    font-size: 11px;
+    line-height: 1.12;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-chip.wide {
+    max-width: 116px;
+}
+.phase-board-drone-ops .drone-bay-strip button {
+    width: 124px;
+    min-height: 34px;
+    height: auto;
+    line-height: 1.15;
+    padding-left: 6px;
+    padding-right: 6px;
+    white-space: normal;
+}
+.phase-board-drone-ops .drone-roster {
+    margin-top: 6px;
+    padding: 8px 10px;
+}
+.phase-board-drone-ops .board-primary h2 {
+    margin-bottom: 2px;
 }
 .phase-board-surface {
     width: 736px;
-    padding-bottom: 20px;
+    padding-bottom: 44px;
 }
 .phase-board-surface .phase-titlebar,
 .phase-board-surface .surface-command,
@@ -1658,6 +1965,8 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-primary-action,
 .phase-board-surface .board-primary {
     width: 704px;
+    margin-left: 16px;
+    margin-right: 16px;
 }
 .phase-board-surface .phase-titlebar {
     margin-bottom: 4px;
@@ -1667,12 +1976,17 @@ scrollbarhorizontal sliderbar {
     width: 330px;
 }
 .phase-board-surface .compact-tools {
-    width: 350px;
+    width: 374px;
     justify-content: flex-end;
 }
-.phase-board-surface .compact-tools button {
-    width: 112px;
+.phase-board-surface.surface-ops-screen .compact-tools {
+    width: 374px;
     margin-right: 6px;
+}
+.phase-board-surface .compact-tools button {
+    width: 96px;
+    margin-left: 6px;
+    margin-right: 0px;
 }
 .phase-board-surface .surface-command {
     display: flex;
@@ -1696,13 +2010,13 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface .surface-site-card span {
     color: #7f8f9f;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-surface .surface-site-card strong {
     display: block;
     margin-top: 4px;
     color: #dce6ee;
-    font-size: 13px;
+    font-size: 15px;
 }
 .phase-board-surface .surface-site-card p {
     margin-top: 6px;
@@ -1720,7 +2034,17 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-quickbar {
     flex-wrap: nowrap;
     margin-top: 4px;
-    margin-bottom: 4px;
+    margin-bottom: 10px;
+}
+.phase-board-surface.surface-ops-screen .phase-titlebar,
+.phase-board-surface.surface-ops-screen .surface-quickbar,
+.phase-board-surface.surface-ops-screen .surface-kpi-grid,
+.phase-board-surface.surface-ops-screen .drone-ops-callout,
+.phase-board-surface.surface-ops-screen .surface-primary-action,
+.phase-board-surface.surface-ops-screen .board-primary {
+    width: 720px;
+    margin-left: 8px;
+    margin-right: 0px;
 }
 .phase-board-surface .surface-kpi {
     width: 128px;
@@ -1740,15 +2064,18 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-quickbar .surface-quick-next {
     width: 184px;
 }
+.phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
+    width: 200px;
+}
 .phase-board-surface .surface-kpi strong {
-    font-size: 13px;
+    font-size: 15px;
     margin-top: 3px;
 }
 .phase-board-surface .surface-quickbar .surface-kpi span {
-    font-size: 9px;
+    font-size: 11px;
 }
 .phase-board-surface .surface-quickbar .surface-kpi strong {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.15;
     margin-top: 2px;
 }
@@ -1789,7 +2116,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-action-topline span {
     width: 188px;
     color: #d7c276;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.15;
 }
 .phase-board-surface .surface-primary-action p {
@@ -1812,7 +2139,7 @@ scrollbarhorizontal sliderbar {
     width: 132px;
     margin-bottom: 8px;
     color: #d7c276;
-    font-size: 10px;
+    font-size: 12px;
     text-align: center;
 }
 .phase-board-surface .surface-primary-action button {
@@ -1823,12 +2150,15 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
 }
 .phase-board-surface .board-primary {
-    padding: 2px 0px 10px 0px;
-    margin-top: 4px;
+    padding: 6px 0px 18px 0px;
+    margin-top: 8px;
 }
 .phase-board-surface .surface-actions .phase-titlebar {
     width: 704px;
     margin-bottom: 0px;
+}
+.phase-board-surface.surface-ops-screen .surface-actions .phase-titlebar {
+    width: 720px;
 }
 .phase-board-surface .surface-actions .phase-titlebar h2 {
     margin-top: 6px;
@@ -1837,11 +2167,17 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-actions .ops-grid {
     width: 704px;
 }
+.phase-board-surface.surface-ops-screen .surface-actions .ops-grid {
+    width: 720px;
+}
 .phase-board-surface .surface-action-card {
     width: 154px;
-    height: 174px;
+    height: 340px;
     padding: 7px;
     margin-right: 6px;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card {
+    width: 158px;
 }
 .phase-board-surface .surface-action-card.featured-action {
     border-color: #4c6d5a;
@@ -1850,63 +2186,83 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-action-card h3 {
     margin-top: 3px;
     margin-bottom: 3px;
-    font-size: 12px;
+    font-size: 14px;
 }
 .phase-board-surface .surface-action-card p {
     width: 140px;
-    height: 36px;
+    height: 88px;
     min-height: 0px;
-    margin-top: 3px;
-    margin-bottom: 5px;
-    font-size: 10px;
-    line-height: 1.18;
+    margin-top: 5px;
+    margin-bottom: 9px;
+    font-size: 12px;
+    line-height: 1.28;
     overflow: hidden;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card p {
+    width: 144px;
 }
 .phase-board-surface .surface-action-card .stat-grid {
     width: 140px;
-    height: 42px;
+    height: 120px;
     align-content: flex-start;
     align-items: flex-start;
 }
+.phase-board-surface.surface-ops-screen .surface-action-card .stat-grid {
+    width: 144px;
+}
 .phase-board-surface .surface-action-card .stat-grid .stat-chip {
-    width: 54px;
-    height: 17px;
-    min-height: 17px;
+    width: 62px;
+    height: 18px;
+    min-height: 18px;
     margin-top: 0px;
-    margin-bottom: 3px;
+    margin-bottom: 5px;
     padding: 0px 4px;
-    font-size: 9px;
-    line-height: 17px;
+    font-size: 11px;
+    line-height: 18px;
     overflow: hidden;
 }
 .phase-board-surface .surface-action-card .stat-grid .stat-chip.wide {
-    width: 72px;
+    width: 132px;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card .stat-grid .stat-chip.wide {
+    width: 136px;
 }
 .phase-board-surface .surface-action-card .card-footer {
     width: 140px;
-    height: 43px;
-    margin-top: 5px;
-    padding-top: 6px;
+    height: 60px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top-width: 1px;
     border-top-color: #263b4c;
-    align-items: center;
+    display: block;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card .card-footer {
+    width: 144px;
 }
 .phase-board-surface .surface-action-card .card-footer span {
-    width: 50px;
-    height: 32px;
+    width: 140px;
+    height: 16px;
     color: #d7c276;
-    font-size: 9px;
-    line-height: 1.16;
+    font-size: 11px;
+    line-height: 16px;
+    overflow: hidden;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card .card-footer span {
+    width: 144px;
 }
 .phase-board-surface .surface-action-card .card-footer button {
-    width: 84px;
-    height: 32px;
-    line-height: 32px;
-    margin-top: 0px;
+    width: 104px;
+    height: 30px;
+    line-height: 30px;
+    margin-top: 5px;
+    margin-left: 18px;
     margin-right: 0px;
     padding-left: 3px;
     padding-right: 3px;
     font-size: 9px;
+}
+.phase-board-surface.surface-ops-screen .surface-action-card .card-footer button {
+    margin-left: 20px;
 }
 .phase-board-surface-minigame .surface-minigame,
 .phase-board-surface-minigame .minigame-readout,
@@ -1990,7 +2346,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .upgrade-draft-card {
     width: 206px;
-    height: 360px;
+    height: 368px;
     padding: 10px;
     margin-top: 8px;
     margin-right: 8px;
@@ -2020,10 +2376,18 @@ scrollbarhorizontal sliderbar {
     line-height: 48px;
     text-align: center;
 }
+.phase-board-surface-upgrade .upgrade-draft-card h3,
+.phase-board-refit .upgrade-draft-card h3 {
+    height: 34px;
+    margin-bottom: 5px;
+    line-height: 1.16;
+    overflow: hidden;
+}
 .phase-board-surface-upgrade .upgrade-draft-card p {
     height: 48px;
     margin-bottom: 6px;
     line-height: 1.28;
+    overflow: hidden;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .stat-grid {
     width: 186px;
@@ -2032,6 +2396,21 @@ scrollbarhorizontal sliderbar {
     justify-content: center;
     align-content: flex-start;
     align-items: flex-start;
+}
+.phase-board-surface-upgrade .upgrade-draft-card .stat-chip {
+    width: 70px;
+    height: 20px;
+    line-height: 20px;
+    margin-top: 0px;
+    margin-right: 5px;
+    margin-bottom: 4px;
+    padding: 0px 4px;
+    font-size: 11px;
+    overflow: hidden;
+}
+.phase-board-surface-upgrade .upgrade-draft-card .stat-chip.wide {
+    width: 146px;
+    margin-right: 0px;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .draft-card-footer {
     height: 52px;
@@ -2044,7 +2423,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface-upgrade .upgrade-draft-card .draft-card-footer span {
     width: 78px;
     color: #d7c276;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 12px;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .draft-card-footer button {
@@ -2055,14 +2434,15 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
     padding-left: 6px;
     padding-right: 6px;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-surface-upgrade .draft-actions {
     flex-wrap: nowrap;
-    width: 456px;
-    margin-left: 140px;
+    width: 704px;
+    margin-left: 0px;
     margin-top: 12px;
     margin-bottom: 18px;
+    justify-content: center;
 }
 .phase-board-surface-upgrade .draft-actions button {
     width: 224px;
@@ -2070,15 +2450,20 @@ scrollbarhorizontal sliderbar {
     line-height: 38px;
     margin-right: 8px;
 }
-.phase-board-hangar .summary-card {
-    width: 190px;
+.phase-board-hangar {
+    width: 736px;
+    padding-bottom: 28px;
 }
+.phase-board-hangar .summary-grid,
 .phase-board-hangar .ops-grid {
-    width: 100%;
+    width: 704px;
+}
+.phase-board-hangar .summary-card {
+    width: 202px;
 }
 .phase-board-hangar .ops-card {
-    width: 214px;
-    height: 150px;
+    width: 202px;
+    height: 182px;
     padding: 10px;
     margin-top: 10px;
     margin-right: 8px;
@@ -2088,9 +2473,11 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-hangar .ops-card .ops-detail {
     color: #9aabba;
-    height: 60px;
+    height: 78px;
     margin-top: 0px;
     margin-bottom: 10px;
+    line-height: 1.28;
+    overflow: hidden;
 }
 .phase-board-hangar .ops-card .card-footer {
     display: flex;
@@ -2105,13 +2492,14 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-hangar .ops-card .ops-cost {
     color: #d7c276;
-    width: 74px;
+    width: 86px;
     padding: 0px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.2;
+    overflow: hidden;
 }
 .phase-board-hangar .ops-card .card-footer button {
-    width: 108px;
+    width: 92px;
     height: 36px;
     margin-top: 0px;
     margin-right: 0px;
@@ -2119,6 +2507,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-hangar .hangar-actions {
     width: 704px;
     margin-top: 12px;
+    margin-bottom: 18px;
     justify-content: center;
 }
 .phase-board-hangar .hangar-actions button {
@@ -2156,7 +2545,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-refit .upgrade-draft-card {
     width: 206px;
-    height: 382px;
+    height: 368px;
     padding: 10px;
     margin-top: 8px;
     margin-right: 8px;
@@ -2187,19 +2576,21 @@ scrollbarhorizontal sliderbar {
     text-align: center;
 }
 .phase-board-refit .upgrade-draft-card p {
-    height: 42px;
+    height: 46px;
     margin-bottom: 5px;
+    line-height: 1.25;
+    overflow: hidden;
 }
 .phase-board-refit .upgrade-draft-card .module-impact {
     color: #edf4f8;
-    font-size: 11px;
-    height: 28px;
+    font-size: 13px;
+    height: 30px;
     line-height: 14px;
     overflow: hidden;
 }
 .phase-board-refit .upgrade-draft-card .stat-grid {
     width: 186px;
-    height: 132px;
+    height: 108px;
     margin-top: 5px;
     justify-content: center;
     align-content: flex-start;
@@ -2213,7 +2604,7 @@ scrollbarhorizontal sliderbar {
     margin-right: 5px;
     margin-bottom: 4px;
     padding: 0px 4px;
-    font-size: 9px;
+    font-size: 11px;
     overflow: hidden;
 }
 .phase-board-refit .upgrade-draft-card .stat-chip.wide {
@@ -2231,7 +2622,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-refit .upgrade-draft-card .draft-card-footer span {
     width: 78px;
     height: 44px;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 12px;
     overflow: hidden;
 }
@@ -2243,14 +2634,15 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
     padding-left: 6px;
     padding-right: 6px;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-refit .draft-actions {
     flex-wrap: nowrap;
-    width: 456px;
-    margin-left: 140px;
-    margin-top: 12px;
-    margin-bottom: 18px;
+    width: 704px;
+    margin-left: 0px;
+    margin-top: 8px;
+    margin-bottom: 10px;
+    justify-content: center;
 }
 .phase-board-refit .draft-actions button {
     width: 224px;
@@ -2260,6 +2652,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-results {
     width: 736px;
+    padding-bottom: 28px;
 }
 .phase-board-results .debrief-hero {
     width: 704px;
@@ -2273,13 +2666,13 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-results .debrief-hero span {
     color: #d7c276;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-results .debrief-hero h2 {
     margin-top: 4px;
     margin-bottom: 6px;
     color: #edf4f8;
-    font-size: 18px;
+    font-size: 20px;
 }
 .phase-board-results .debrief-hero p {
     width: 672px;
@@ -2344,7 +2737,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-results .result-row span {
     width: 126px;
     color: #8295a5;
-    font-size: 10px;
+    font-size: 12px;
 }
 .phase-board-results .result-row strong {
     width: 160px;
@@ -2374,7 +2767,9 @@ scrollbarhorizontal sliderbar {
     width: 670px;
 }
 .phase-board-results .actions {
-    width: 736px;
+    width: 704px;
+    margin-left: 16px;
+    margin-right: 16px;
     margin-top: 16px;
     margin-bottom: 22px;
     justify-content: center;
@@ -2410,6 +2805,17 @@ scrollbarhorizontal sliderbar {
 .inventory-main-column {
     width: 780px;
 }
+.inventory-modal.inventory-main-only,
+.inventory-layout-main-only,
+.inventory-layout-main-only .inventory-main-column,
+.inventory-layout-main-only .inventory-section,
+.inventory-layout-main-only .inventory-section-head,
+.inventory-layout-main-only .inventory-grid {
+    width: 1016px;
+}
+.inventory-layout-main-only .inventory-section-head p {
+    width: 986px;
+}
 .inventory-side-column .inventory-section {
     width: 220px;
     margin-top: 0px;
@@ -2430,6 +2836,9 @@ scrollbarhorizontal sliderbar {
     margin-top: 4px;
     margin-bottom: 12px;
 }
+.inventory-layout-main-only .inventory-summary {
+    width: 1016px;
+}
 .inventory-summary .metric {
     width: 230px;
     height: 42px;
@@ -2438,6 +2847,16 @@ scrollbarhorizontal sliderbar {
     margin-top: 8px;
     background-color: #101c27;
     border-color: #46677d;
+}
+.inventory-layout-main-only .inventory-summary .metric {
+    width: 286px;
+}
+.inventory-summary .metric span {
+    width: 210px;
+    white-space: nowrap;
+}
+.inventory-layout-main-only .inventory-summary .metric span {
+    width: 266px;
 }
 .inventory-section {
     width: 780px;
@@ -2453,7 +2872,7 @@ scrollbarhorizontal sliderbar {
 .inventory-section-head h3 {
     margin-top: 0px;
     color: #edf4f8;
-    font-size: 14px;
+    font-size: 16px;
 }
 .inventory-section-head p {
     width: 750px;
@@ -2484,7 +2903,7 @@ scrollbarhorizontal sliderbar {
 }
 .inventory-art span {
     color: #8de0ff;
-    font-size: 13px;
+    font-size: 15px;
     text-align: center;
 }
 .inventory-copy {
@@ -2493,14 +2912,14 @@ scrollbarhorizontal sliderbar {
 .inventory-copy h3 {
     margin-top: 0px;
     color: #edf4f8;
-    font-size: 13px;
+    font-size: 15px;
     line-height: 1.18;
 }
 .inventory-copy p {
     width: 142px;
     margin-top: 5px;
     color: #9eb0bf;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.28;
 }
 .inventory-count {
@@ -2513,7 +2932,7 @@ scrollbarhorizontal sliderbar {
     border-color: #40596d;
     border-radius: 5px;
     color: #edf4f8;
-    font-size: 11px;
+    font-size: 13px;
     text-align: center;
 }
 .inventory-section-resources .inventory-item {
@@ -2522,15 +2941,26 @@ scrollbarhorizontal sliderbar {
     padding: 12px;
     margin-right: 8px;
 }
+.inventory-layout-main-only .inventory-section-resources .inventory-item {
+    width: 204px;
+}
 .inventory-section-resources .inventory-copy {
     width: 176px;
 }
+.inventory-layout-main-only .inventory-section-resources .inventory-copy {
+    width: 204px;
+}
 .inventory-section-resources .inventory-copy h3 {
-    font-size: 13px;
+    font-size: 15px;
+    overflow: hidden;
+    white-space: nowrap;
 }
 .inventory-section-resources .inventory-copy p {
     width: 168px;
-    font-size: 11px;
+    font-size: 13px;
+}
+.inventory-layout-main-only .inventory-section-resources .inventory-copy p {
+    width: 196px;
 }
 .inventory-section-resources .inventory-art {
     width: 42px;
@@ -2557,12 +2987,12 @@ scrollbarhorizontal sliderbar {
     width: 184px;
 }
 .inventory-side-column .inventory-copy h3 {
-    font-size: 11px;
+    font-size: 13px;
 }
 .inventory-side-column .inventory-copy p {
     width: 178px;
     margin-top: 2px;
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1.1;
 }
 .inventory-side-column .inventory-count {
@@ -2570,7 +3000,7 @@ scrollbarhorizontal sliderbar {
     min-height: 16px;
     margin-top: 3px;
     padding: 3px 5px;
-    font-size: 9px;
+    font-size: 11px;
 }
 .inventory-item.drone-slot.equipped {
     border-color: #5ed993;
@@ -2903,7 +3333,7 @@ scrollbarhorizontal sliderbar {
     padding: 4px 6px;
     margin-top: 4px;
     margin-right: 5px;
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1.12;
 }
 .control-panel .phase-board-mining .mining-metrics {
@@ -2920,11 +3350,11 @@ scrollbarhorizontal sliderbar {
     padding: 7px 8px;
 }
 .control-panel .phase-board-mining .mining-metrics .metric strong {
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.05;
 }
 .control-panel .phase-board-mining .mining-metrics .metric span {
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1.12;
 }
 .control-panel .phase-board-mining .mining-hud {
@@ -2940,14 +3370,16 @@ scrollbarhorizontal sliderbar {
 }
 .control-panel .phase-board-mining .mining-hud .system-actions button {
     min-width: 0px;
-    width: 122px;
-    height: 38px;
-    line-height: 38px;
+    width: 92px;
+    height: 48px;
+    line-height: 15px;
     margin-top: 0px;
     margin-right: 5px;
+    padding-top: 8px;
     padding-left: 4px;
     padding-right: 4px;
-    font-size: 10px;
+    padding-bottom: 6px;
+    font-size: 12px;
 }
 .control-panel h2 {
     margin-top: 10px;
@@ -2973,7 +3405,7 @@ scrollbarhorizontal sliderbar {
     display: block;
     width: 100%;
     color: #9eb0bd;
-    font-size: 9px;
+    font-size: 11px;
     text-align: center;
 }
 .control-panel .warning-button span {
@@ -3004,7 +3436,7 @@ scrollbarhorizontal sliderbar {
 }
 .control-panel .tutorial-card span {
     color: #7f91a0;
-    font-size: 10px;
+    font-size: 12px;
 }
 .control-panel .tutorial-card strong {
     margin-top: 2px;
@@ -3076,22 +3508,46 @@ scrollbarhorizontal sliderbar {
     border-width: 1px;
     border-color: #34566a;
     border-radius: 5px;
+    overflow: hidden;
+}
+.stat-chip, .telemetry-legend-chip {
+    white-space: nowrap;
 }
 .stat-grid .stat-chip {
     width: 108px;
+}
+.phase-board-drone-ops .drone-card .stat-grid .stat-chip {
+    width: 82px;
+    min-height: 20px;
+    padding: 4px 5px;
+    font-size: 11px;
+    line-height: 1.12;
+}
+.phase-board-drone-ops .drone-card .stat-grid .stat-chip.wide {
+    width: 112px;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-grid .stat-chip {
+    width: 76px;
+    min-height: 20px;
+    padding: 4px 5px;
+    font-size: 11px;
+    line-height: 1.12;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-grid .stat-chip.wide {
+    width: 106px;
 }
 h1 {
     font-size: 21px;
     margin-bottom: 4px;
 }
 h2 {
-    font-size: 15px;
+    font-size: 17px;
     color: #99a9b8;
     margin-top: 12px;
     margin-bottom: 6px;
 }
 h3 {
-    font-size: 13px;
+    font-size: 15px;
     margin-bottom: 4px;
 }
 p, span {
@@ -3102,7 +3558,7 @@ strong {
     color: #edf4f8;
 }
 .metric span, .stat-chip span, .summary-card span, .surface-kpi span {
-    font-size: 10px;
+    font-size: 12px;
 }
 .metric strong, .stat-chip strong, .summary-card strong, .surface-kpi strong {
     margin-top: 2px;
@@ -3187,6 +3643,11 @@ button.ok {
 button.warn {
     background-color: #4c3f1c;
     border-color: #b99a3f;
+}
+button.rare {
+    color: #ffd166;
+    background-color: #3c3014;
+    border-color: #d7aa3a;
 }
 button.danger {
     background-color: #4a2421;
@@ -3374,12 +3835,16 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
 
     const bool phaseBoard = panelUsesPhaseBoard(panelHtml);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
+    const bool droneOps = panelUsesDroneOps(panelHtml);
     std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
 
     std::string document = "<rml><head><style>" + panelRcss(phaseBoard) + "</style></head><body>";
     document += "<div id=\"rr-panel\" class=\"" + std::string(phaseBoard ? "phase-board-panel" : "control-panel");
     if (surfaceOps) {
         document += " surface-ops-panel";
+    }
+    if (droneOps) {
+        document += " drone-ops-panel";
     }
     document += "\">";
     document += body;
@@ -3417,6 +3882,10 @@ public:
         }
 
         if (auto* input = dynamic_cast<Rml::ElementFormControlInput*>(target)) {
+            if (input->HasAttribute("data-camera-shake-toggle")) {
+                rr_rml_set_camera_shake_disabled(input->HasAttribute("checked") ? 0 : 1);
+                return;
+            }
             if (input->HasAttribute("data-debug-tools-toggle")) {
                 rr_rml_set_debug_tools_enabled(input->HasAttribute("checked") ? 1 : 0);
                 return;
@@ -3447,6 +3916,11 @@ bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
     }
     if (binding.helpToggle) {
         rr_rml_set_help_disabled(rr_rml_help_disabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
+    if (binding.cameraShakeToggle) {
+        rr_rml_set_camera_shake_disabled(rr_rml_camera_shake_disabled() == 0 ? 1 : 0);
         owner.refresh();
         return true;
     }
@@ -3778,6 +4252,11 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
     }
     if (it->helpToggle) {
         rr_rml_set_help_disabled(rr_rml_help_disabled() == 0 ? 1 : 0);
+        refresh();
+        return true;
+    }
+    if (it->cameraShakeToggle) {
+        rr_rml_set_camera_shake_disabled(rr_rml_camera_shake_disabled() == 0 ? 1 : 0);
         refresh();
         return true;
     }

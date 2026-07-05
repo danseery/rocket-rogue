@@ -16,6 +16,7 @@ public:
     bool initialize();
     void tick(double deltaSeconds);
     void render();
+    int currentScreen() const;
 
     void prepareForLaunch();
     void startLaunch();
@@ -64,6 +65,7 @@ public:
     void miningAim(double normalizedX, double normalizedY);
     void miningDrill(bool active);
     void miningScanner();
+    void miningTether();
     void miningStow();
     void miningAbort();
     void miningFailureAck();
@@ -147,6 +149,7 @@ private:
     WebGLRenderer renderer_;
     GameRmlUi rmlUi_;
     LaunchSessionState session_;
+    double visualTimeSeconds_ = 0.0;
     bool panelDirty_ = true;
     bool debugSessionActive_ = false;
 };

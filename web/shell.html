@@ -64,6 +64,15 @@
       padding: 18px;
     }
 
+    #panel.phase-board-panel.surface-ops-panel {
+      inset: 16px auto 16px 16px;
+      width: min(784px, calc(100vw - 32px));
+      min-height: min(704px, calc(100dvh - 32px));
+      max-height: calc(100dvh - 32px);
+      overflow: hidden;
+      padding: 18px 24px 28px;
+    }
+
     .panel-head {
       display: flex;
       align-items: center;
@@ -83,7 +92,7 @@
       display: block;
       margin-bottom: 3px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
       line-height: 1;
       text-transform: uppercase;
@@ -102,7 +111,7 @@
 
     h2 {
       margin-top: 14px;
-      font-size: 14px;
+      font-size: 16px;
       text-transform: uppercase;
       color: var(--muted);
       letter-spacing: 0;
@@ -110,7 +119,7 @@
 
     p, li {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.45;
     }
 
@@ -154,13 +163,13 @@
     .metric strong {
       display: block;
       color: var(--text);
-      font-size: 16px;
+      font-size: 18px;
       line-height: 1.2;
     }
 
     .metric span {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0;
     }
@@ -213,14 +222,14 @@
 
     .cockpit-label span {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
       text-transform: uppercase;
     }
 
     .cockpit-label strong {
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.2;
     }
 
@@ -240,7 +249,7 @@
 
     .cockpit-hud .primary-actions button {
       min-height: 56px;
-      font-size: 14px;
+      font-size: 16px;
       font-weight: 800;
     }
 
@@ -252,13 +261,19 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
+    .cockpit-hud .system-actions button {
+      font-size: 13px;
+      line-height: 1.15;
+      white-space: nowrap;
+    }
+
     .cockpit-hud .launch-commit-actions {
       grid-template-columns: 1fr;
     }
 
     .cockpit-hud .launch-button {
       min-height: 58px;
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0;
@@ -336,7 +351,7 @@
       right: 8px;
       bottom: 8px;
       color: var(--muted);
-      font-size: 10px;
+      font-size: 12px;
       font-weight: 800;
       line-height: 1;
       text-align: center;
@@ -391,7 +406,7 @@
         linear-gradient(180deg, rgba(225, 238, 247, 0.13), rgba(225, 238, 247, 0.04)),
         rgba(5, 9, 14, 0.62);
       color: var(--text);
-      font-size: 16px;
+      font-size: 18px;
       font-weight: 900;
       line-height: 1;
       text-transform: uppercase;
@@ -407,21 +422,21 @@
 
     .orbit-control-card strong {
       color: var(--text);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.15;
     }
 
     .orbit-control-card span {
       margin-top: 2px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       line-height: 1.25;
     }
 
     .orbit-control-note {
       min-height: 0;
       margin-top: 8px;
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.35;
     }
 
@@ -506,7 +521,7 @@
     .arrival-kicker {
       display: block;
       color: var(--warn);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 900;
       line-height: 1;
       text-transform: uppercase;
@@ -544,7 +559,7 @@
       border-radius: 999px;
       background: rgba(103, 210, 255, 0.10);
       color: #dff7ff;
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 800;
       line-height: 1.2;
     }
@@ -559,7 +574,7 @@
       display: block;
       margin-top: 12px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 14px;
     }
 
     @keyframes arrival-card-in {
@@ -607,7 +622,7 @@
       background: rgba(103, 210, 255, 0.12);
       color: var(--text);
       font: inherit;
-      font-size: 13px;
+      font-size: 15px;
       cursor: pointer;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -637,6 +652,12 @@
     button.warn {
       background: rgba(255, 209, 102, 0.18);
       border-color: rgba(255, 209, 102, 0.48);
+    }
+
+    button.rare {
+      color: #ffd166;
+      background: rgba(215, 170, 58, 0.2);
+      border-color: rgba(215, 170, 58, 0.58);
     }
 
     button.ghost {
@@ -699,7 +720,7 @@
 
     .warning-button strong {
       display: block;
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.1;
       color: var(--text);
     }
@@ -708,7 +729,7 @@
       display: block;
       margin-top: 4px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.1;
     }
 
@@ -784,7 +805,7 @@
     }
 
     .telemetry-chart-legend .telemetry-legend-chip strong {
-      font-size: 10px;
+      font-size: 12px;
     }
 
     .telemetry-chart-legend .telemetry-legend-chip small {
@@ -822,7 +843,7 @@
     .telemetry-legend-chip strong {
       grid-area: title;
       color: var(--text);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.1;
       text-transform: uppercase;
     }
@@ -830,7 +851,7 @@
     .telemetry-legend-chip small {
       grid-area: detail;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       line-height: 1.2;
     }
 
@@ -896,7 +917,7 @@
       border-radius: 999px;
       padding: 3px 7px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       white-space: nowrap;
     }
 
@@ -907,7 +928,8 @@
     }
 
     .phase-board-hangar .summary-grid {
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      max-width: 704px;
     }
 
     .summary-card {
@@ -924,14 +946,14 @@
     .summary-card span {
       grid-column: 1 / -1;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
     }
 
     .summary-card strong {
       min-width: 0;
       color: var(--text);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.2;
     }
 
@@ -980,7 +1002,7 @@
       justify-content: space-between;
       gap: 8px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
     }
 
@@ -999,13 +1021,13 @@
         rgba(103, 210, 255, 0.10);
       color: var(--text);
       font-weight: 800;
-      font-size: 18px;
+      font-size: 20px;
     }
 
     .upgrade-card h3 {
       max-width: calc(100% - 56px);
       margin-top: 10px;
-      font-size: 16px;
+      font-size: 18px;
       line-height: 1.2;
     }
 
@@ -1018,7 +1040,7 @@
       display: block;
       margin-top: 8px;
       color: var(--text);
-      font-size: 14px;
+      font-size: 16px;
     }
 
     .stat-grid {
@@ -1034,7 +1056,9 @@
       padding: 3px 6px;
       color: var(--muted);
       background: rgba(255, 255, 255, 0.04);
-      font-size: 11px;
+      font-size: 13px;
+      overflow: hidden;
+      white-space: nowrap;
     }
 
     .stat-chip.up {
@@ -1057,7 +1081,7 @@
 
     .card-footer span {
       color: var(--warn);
-      font-size: 13px;
+      font-size: 15px;
     }
 
     .card-footer button {
@@ -1095,7 +1119,7 @@
     .phase-board > h2 {
       margin-top: 0;
       color: var(--text);
-      font-size: 18px;
+      font-size: 20px;
       text-transform: none;
     }
 
@@ -1114,7 +1138,7 @@
     .phase-titlebar h2 {
       margin: 0;
       color: var(--text);
-      font-size: 18px;
+      font-size: 20px;
       line-height: 1.2;
       text-transform: none;
     }
@@ -1186,7 +1210,7 @@
     .crew-fate-card span {
       display: block;
       color: var(--accent);
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 900;
       line-height: 1.2;
       text-transform: uppercase;
@@ -1210,7 +1234,7 @@
       max-width: 560px;
       margin-top: 10px;
       color: var(--muted);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.35;
     }
 
@@ -1321,7 +1345,7 @@
     .result-group h3 {
       margin: 0 0 8px;
       color: var(--text);
-      font-size: 14px;
+      font-size: 16px;
       line-height: 1.2;
     }
 
@@ -1344,14 +1368,14 @@
 
     .result-row span {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       line-height: 1.2;
       text-transform: uppercase;
     }
 
     .result-row strong {
       color: var(--text);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.2;
       text-align: right;
     }
@@ -1387,7 +1411,7 @@
     .achievement-card span {
       display: block;
       color: var(--warn);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: 0;
@@ -1397,7 +1421,7 @@
       display: block;
       margin-top: 5px;
       color: var(--text);
-      font-size: 16px;
+      font-size: 18px;
       line-height: 1.2;
     }
 
@@ -1435,7 +1459,7 @@
 
     .phase-track span {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0;
     }
@@ -1443,7 +1467,7 @@
     .phase-track strong {
       margin-top: 4px;
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
     }
 
     .phase-track .done {
@@ -1470,7 +1494,7 @@
 
     .resource-bank h2 {
       margin: 0;
-      font-size: 14px;
+      font-size: 16px;
       color: var(--text);
     }
 
@@ -1491,6 +1515,14 @@
       padding-top: 14px;
     }
 
+    .phase-board-results .actions {
+      grid-template-columns: minmax(180px, 240px);
+      width: min(704px, 100%);
+      justify-content: center;
+      margin-top: 16px;
+      margin-bottom: 24px;
+    }
+
     .phase-board-mining .mining-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr));
       max-width: 430px;
@@ -1508,6 +1540,12 @@
     .phase-board-mining .actions {
       grid-template-columns: 1fr;
       justify-content: stretch;
+    }
+
+    .phase-board-mining .actions button {
+      min-height: 48px;
+      line-height: 1.15;
+      white-space: normal;
     }
 
     .phase-board-mining {
@@ -1566,7 +1604,7 @@
     .surface-command > div span {
       display: block;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
     }
 
@@ -1574,7 +1612,7 @@
       display: block;
       margin-top: 4px;
       color: var(--text);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.2;
     }
 
@@ -1595,7 +1633,7 @@
     }
 
     .phase-advisory strong {
-      font-size: 14px;
+      font-size: 16px;
       color: var(--text);
     }
 
@@ -1654,7 +1692,7 @@
 
     .surface-primary-action span {
       color: #ffb3df;
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
       text-transform: uppercase;
     }
@@ -1673,7 +1711,7 @@
 
     .surface-primary-action button {
       min-height: 54px;
-      font-size: 15px;
+      font-size: 17px;
       font-weight: 800;
       background: rgba(255, 92, 194, 0.24);
       border-color: rgba(255, 143, 216, 0.64);
@@ -1755,7 +1793,7 @@
     .surface-kpi span {
       display: block;
       color: var(--muted);
-      font-size: 10px;
+      font-size: 12px;
       line-height: 1.15;
       text-transform: uppercase;
     }
@@ -1764,7 +1802,7 @@
       display: block;
       margin-top: 4px;
       color: var(--text);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.15;
     }
 
@@ -1793,7 +1831,7 @@
     }
 
     .ops-card h3 {
-      font-size: 14px;
+      font-size: 16px;
       line-height: 1.2;
     }
 
@@ -1801,10 +1839,140 @@
       margin-top: 4px;
     }
 
+    .phase-board-hangar .ops-card {
+      min-height: 192px;
+    }
+
+    .phase-board-hangar .ops-card .ops-detail {
+      min-height: 78px;
+      overflow: hidden;
+    }
+
+    .phase-board-hangar .ops-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      max-width: 704px;
+    }
+
+    .phase-board-research .ops-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      max-width: 704px;
+    }
+
+    .phase-board-hangar .hangar-actions {
+      width: min(704px, 100%);
+      justify-content: center;
+      margin-top: 12px;
+      margin-bottom: 18px;
+    }
+
+    .phase-board-hangar .ops-card .card-footer,
+    .phase-board-research .ops-card .card-footer {
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
+    .phase-board-hangar .ops-card .card-footer {
+      grid-template-columns: minmax(0, 1fr) 92px;
+      gap: 4px;
+    }
+
+    .phase-board-hangar .ops-card .ops-cost {
+      overflow: hidden;
+    }
+
+    .phase-board-hangar .ops-card .card-footer button {
+      width: 92px;
+      min-width: 92px;
+    }
+
+    .phase-board-research .ops-card {
+      min-height: 250px;
+    }
+
+    .phase-board-research .ops-card p {
+      min-height: 56px;
+      overflow: hidden;
+    }
+
+    .phase-board-research .ops-card .module-impact {
+      min-height: 30px;
+      overflow: hidden;
+    }
+
+    .phase-board-research .ops-card .stat-grid {
+      min-height: 54px;
+      align-content: start;
+    }
+
+    .phase-board-arrival .arrival-card {
+      min-height: 206px;
+    }
+
+    .phase-board-arrival .ops-grid {
+      margin-bottom: 8px;
+    }
+
+    .phase-board-arrival .arrival-card .card-footer {
+      grid-template-columns: 54px minmax(126px, 1fr);
+    }
+
+    .phase-board-arrival .arrival-card h3,
+    .phase-board-arrival .arrival-card p,
+    .phase-board-arrival .arrival-card .card-footer span {
+      overflow: hidden;
+    }
+
+    .phase-board-arrival .arrival-card p {
+      min-height: 66px;
+    }
+
+    .phase-board-arrival .arrival-card .card-footer button {
+      min-width: 126px;
+      white-space: nowrap;
+    }
+
+    .phase-board-navigation .ark-status,
+    .phase-board-navigation .navigation-map {
+      max-width: 704px;
+    }
+
+    .phase-board-navigation .nav-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      max-width: 704px;
+    }
+
+    .phase-board-navigation .nav-card {
+      min-height: 238px;
+    }
+
+    .phase-board-navigation .nav-card h3,
+    .phase-board-navigation .nav-card p,
+    .phase-board-navigation .nav-card .card-kicker span,
+    .phase-board-navigation .nav-card .card-footer span {
+      overflow: hidden;
+    }
+
+    .phase-board-navigation .nav-card p {
+      min-height: 44px;
+    }
+
+    .phase-board-navigation .nav-card .stat-grid {
+      min-height: 58px;
+      align-content: start;
+    }
+
+    .phase-board-navigation .nav-card .card-footer {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
     .surface-action-card {
       display: flex;
       flex-direction: column;
-      min-height: 204px;
+      min-height: 228px;
     }
 
     .surface-action-card.featured-action {
@@ -1813,7 +1981,7 @@
     }
 
     .surface-action-card p {
-      min-height: 58px;
+      min-height: 76px;
     }
 
     .surface-action-card .stat-grid {
@@ -1823,17 +1991,20 @@
 
     .surface-action-card .card-footer {
       margin-top: auto;
-      align-items: center;
-      gap: 10px;
+      grid-template-columns: 1fr;
+      align-items: start;
+      gap: 6px;
     }
 
     .surface-action-card .card-footer span {
-      min-width: 78px;
-      max-width: 92px;
+      min-width: 0;
+      max-width: none;
+      overflow: hidden;
     }
 
     .surface-action-card .card-footer button {
       min-width: 104px;
+      justify-self: center;
     }
 
     .ops-card.repair {
@@ -1881,7 +2052,7 @@
 
     .pilot-card-top span {
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
     }
 
@@ -1916,7 +2087,7 @@
     }
 
     .pilot-card h3 {
-      font-size: 17px;
+      font-size: 19px;
       line-height: 1.15;
     }
 
@@ -1940,14 +2111,14 @@
       border: 1px solid rgba(137, 178, 211, 0.18);
       border-radius: 6px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
       background: rgba(0, 0, 0, 0.16);
     }
 
     .pilot-stat-grid strong {
       color: var(--text);
-      font-size: 14px;
+      font-size: 16px;
       text-transform: none;
     }
 
@@ -1987,7 +2158,7 @@
 
     .phase-board-draft-room .draft-hero span {
       color: var(--accent);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 900;
       text-transform: uppercase;
     }
@@ -2031,6 +2202,15 @@
       border-color: rgba(255, 209, 102, 0.38);
     }
 
+    .phase-board-refit .upgrade-draft-card {
+      min-height: 406px;
+    }
+
+    .upgrade-draft-card h3 {
+      min-height: 40px;
+      overflow: hidden;
+    }
+
     .upgrade-draft-card .draft-art {
       min-height: 118px;
     }
@@ -2050,6 +2230,10 @@
       min-height: 56px;
     }
 
+    .phase-board-refit .upgrade-draft-card .stat-grid {
+      min-height: 48px;
+    }
+
     .draft-card-footer {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -2059,7 +2243,7 @@
 
     .draft-card-footer > span {
       color: var(--accent);
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 800;
     }
 
@@ -2075,8 +2259,13 @@
 
     .phase-board-draft-room .draft-actions {
       grid-template-columns: repeat(2, minmax(180px, 260px));
+      width: 100%;
       justify-content: center;
       margin-top: 2px;
+    }
+
+    .phase-board-refit .draft-actions {
+      margin-bottom: 8px;
     }
 
     .settings-footer {
@@ -2104,7 +2293,7 @@
     }
 
     .settings-control h3 {
-      font-size: 14px;
+      font-size: 16px;
       line-height: 1.2;
     }
 
@@ -2116,7 +2305,7 @@
       display: grid;
       gap: 5px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
     }
 
@@ -2141,7 +2330,7 @@
       justify-content: end;
       text-transform: none;
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
     }
 
     .settings-checkbox input {
@@ -2169,7 +2358,7 @@
     .tutorial-card span {
       display: block;
       color: var(--warn);
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
       text-transform: uppercase;
     }
@@ -2177,7 +2366,7 @@
     .tutorial-card strong {
       display: block;
       margin-top: 3px;
-      font-size: 14px;
+      font-size: 16px;
       line-height: 1.18;
     }
 
@@ -2208,12 +2397,16 @@
       justify-content: flex-end;
     }
 
+    .phase-board-surface .compact-tools {
+      padding-right: 6px;
+    }
+
     .compact-tools button {
       flex: 0 0 auto;
       min-width: 68px;
       min-height: 28px;
       padding-inline: 10px;
-      font-size: 12px;
+      font-size: 14px;
     }
 
     .bottom-tools {
@@ -2237,18 +2430,18 @@
 
     .detail-row span {
       color: var(--muted);
-      font-size: 12px;
+      font-size: 14px;
     }
 
     .detail-row strong {
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
       text-align: right;
     }
 
     .detail-section {
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
       font-weight: 800;
       letter-spacing: 0;
       margin-top: 14px;
@@ -2294,7 +2487,7 @@
       margin: 0;
       color: var(--text);
       text-transform: none;
-      font-size: 18px;
+      font-size: 20px;
     }
 
     .modal-close {
@@ -2311,6 +2504,10 @@
       width: min(1160px, calc(100vw - 36px));
     }
 
+    .modal-panel:has(.inventory-modal):not(:has(.inventory-side-column)) {
+      width: min(960px, calc(100vw - 36px));
+    }
+
     .inventory-modal {
       display: grid;
       gap: 18px;
@@ -2325,6 +2522,10 @@
 
     .inventory-layout:not(:has(.inventory-side-column)) {
       grid-template-columns: 1fr;
+    }
+
+    .inventory-layout:not(:has(.inventory-side-column)) .inventory-summary {
+      max-width: none;
     }
 
     .inventory-side-column {
@@ -2363,19 +2564,19 @@
     }
 
     .inventory-side-column .inventory-item h3 {
-      font-size: 11px;
+      font-size: 13px;
     }
 
     .inventory-side-column .inventory-item p {
       margin-top: 2px;
-      font-size: 10px;
+      font-size: 12px;
       line-height: 1.14;
     }
 
     .inventory-side-column .inventory-count {
       min-width: 56px;
       padding: 3px 6px;
-      font-size: 10px;
+      font-size: 12px;
     }
 
     .inventory-summary {
@@ -2395,6 +2596,10 @@
       border-color: rgba(137, 178, 211, 0.26);
     }
 
+    .inventory-summary .metric span {
+      white-space: nowrap;
+    }
+
     .inventory-section {
       display: grid;
       gap: 12px;
@@ -2410,13 +2615,13 @@
 
     .inventory-section-head h3 {
       color: var(--text);
-      font-size: 15px;
+      font-size: 17px;
       line-height: 1.2;
     }
 
     .inventory-section-head p {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.4;
     }
 
@@ -2473,14 +2678,14 @@
 
     .inventory-item h3 {
       overflow-wrap: anywhere;
-      font-size: 14px;
+      font-size: 16px;
       line-height: 1.18;
     }
 
     .inventory-item p {
       margin-top: 5px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.3;
     }
 
@@ -2493,7 +2698,7 @@
       border-radius: 6px;
       background: rgba(8, 14, 20, 0.68);
       color: var(--text);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.1;
       text-align: center;
     }
@@ -2513,7 +2718,7 @@
 
     .inventory-art span {
       color: #8de0ff;
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 900;
     }
 
@@ -2828,7 +3033,7 @@
     .toast strong {
       display: block;
       color: var(--warn);
-      font-size: 11px;
+      font-size: 13px;
       text-transform: uppercase;
       letter-spacing: 0;
     }
@@ -2837,7 +3042,7 @@
       display: block;
       margin-top: 4px;
       color: var(--text);
-      font-size: 13px;
+      font-size: 15px;
       line-height: 1.35;
     }
 
@@ -2845,7 +3050,7 @@
       position: fixed;
       right: 16px;
       bottom: 16px;
-      z-index: 22;
+      z-index: 16;
       display: none;
       width: 260px;
       padding: 12px;
@@ -2862,10 +3067,14 @@
       display: block;
     }
 
+    body.rmlui-modal-open .debug-tools {
+      display: none;
+    }
+
     .debug-tools h2 {
       margin: 0 0 6px;
       color: var(--warn);
-      font-size: 12px;
+      font-size: 14px;
       line-height: 1.2;
       text-transform: uppercase;
     }
@@ -2873,7 +3082,7 @@
     .debug-tools p {
       margin: 0 0 10px;
       color: var(--muted);
-      font-size: 11px;
+      font-size: 13px;
       line-height: 1.35;
     }
 
@@ -3067,6 +3276,7 @@
     const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
+    const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
 
     function normalizedGameSpeed(value) {
@@ -3169,6 +3379,37 @@
       });
     }
 
+    function cameraShakeDisabled() {
+      try {
+        return window.localStorage.getItem(cameraShakeDisabledStorageKey) === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function setCameraShakeDisabled(disabled) {
+      try {
+        if (disabled) {
+          window.localStorage.setItem(cameraShakeDisabledStorageKey, "1");
+        } else {
+          window.localStorage.removeItem(cameraShakeDisabledStorageKey);
+        }
+      } catch (error) {
+        return;
+      }
+    }
+
+    function syncCameraShakeControls(root = document) {
+      const disabled = cameraShakeDisabled();
+      root.querySelectorAll("[data-camera-shake-toggle]").forEach((control) => {
+        if ("checked" in control) {
+          control.checked = !disabled;
+        }
+        control.textContent = disabled ? "Enable camera shake" : "Disable camera shake";
+        control.setAttribute("aria-pressed", disabled ? "false" : "true");
+      });
+    }
+
     function debugToolsVisible() {
       try {
         return window.localStorage.getItem(debugToolsStorageKey) === "1";
@@ -3205,6 +3446,7 @@
     function syncLocalControls(root = document) {
       syncGameSpeedControls(root);
       syncHelpControls(root);
+      syncCameraShakeControls(root);
       syncDebugToolsControls(root);
     }
 
@@ -3362,6 +3604,8 @@
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
         panel.classList.toggle("phase-board-panel", phaseBoard);
+        panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
+        panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
         if (phaseBoard) {
           showToast(panel.querySelector(".phase-status")?.textContent || "");
         }
@@ -3422,6 +3666,7 @@
 
     window.rr = {
       prepareLaunch: () => rrCall("rr_prepare_launch"),
+      currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
       ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
@@ -3468,6 +3713,7 @@
       miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
+      miningTether: () => rrCall("rr_mining_tether"),
       miningStow: () => rrCall("rr_mining_stow"),
       miningAbort: () => rrCall("rr_mining_abort"),
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
@@ -3537,6 +3783,7 @@
       surfacePushBank: "surface_push_bank",
       surfacePushAbort: "surface_push_abort",
       miningScanner: "mining_scanner",
+      miningTether: "mining_tether",
       miningStow: "mining_stow",
       miningAbort: "mining_abort",
       miningFailureAck: "mining_failure_ack",
@@ -3586,6 +3833,7 @@
       [rrActionIds.surfaceOps]: () => rr.surfaceOps(),
       [rrActionIds.upgradeDroneSlot]: () => rr.upgradeDroneSlot(),
       [rrActionIds.miningScanner]: () => rr.miningScanner(),
+      [rrActionIds.miningTether]: () => rr.miningTether(),
       [rrActionIds.miningStow]: () => rr.miningStow(),
       [rrActionIds.miningAbort]: () => rr.miningAbort(),
       [rrActionIds.miningFailureAck]: () => rr.miningFailureAck(),
@@ -3831,6 +4079,15 @@
         return;
       }
 
+      const cameraShakeToggle = closestFromEvent(event, "[data-camera-shake-toggle]");
+      if (cameraShakeToggle && (panel.contains(cameraShakeToggle) || modalRoot.contains(cameraShakeToggle))) {
+        const nextDisabled = "checked" in cameraShakeToggle ? !cameraShakeToggle.checked : !cameraShakeDisabled();
+        setCameraShakeDisabled(nextDisabled);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        return;
+      }
+
       const debugToggle = closestFromEvent(event, "[data-debug-tools-toggle]");
       if (debugToggle && (panel.contains(debugToggle) || modalRoot.contains(debugToggle))) {
         const nextVisible = "checked" in debugToggle ? debugToggle.checked : !debugTools.classList.contains("is-visible");
@@ -3848,6 +4105,18 @@
       event.preventDefault();
       event.stopPropagation();
       setHelpDisabled(!helpDisabled());
+      syncLocalControls(panel);
+      syncLocalControls(modalRoot);
+    }
+
+    function handleCameraShakeToggle(event) {
+      const button = closestFromEvent(event, "button[data-camera-shake-toggle]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setCameraShakeDisabled(!cameraShakeDisabled());
       syncLocalControls(panel);
       syncLocalControls(modalRoot);
     }
@@ -3881,6 +4150,7 @@
     document.addEventListener("pointerdown", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpToggle, true);
+    document.addEventListener("click", handleCameraShakeToggle, true);
     document.addEventListener("click", handleDebugToolsToggle, true);
     document.addEventListener("change", handleSettingsChange, true);
     document.addEventListener("pointerdown", handlePanelAction, true);
@@ -4023,7 +4293,15 @@
       }
     }
 
+    const rrScreenIds = Object.freeze({
+      mining: 12
+    });
+
     function isMiningActive() {
+      const screen = rr.currentScreen();
+      if (screen >= 0) {
+        return screen === rrScreenIds.mining;
+      }
       return Boolean(panel.querySelector(".phase-board-mining"));
     }
 
@@ -4063,6 +4341,11 @@
       }
       if (!event.repeat && key === "e") {
         rr.miningScanner();
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && key === "t") {
+        rr.miningTether();
         event.preventDefault();
         return true;
       }

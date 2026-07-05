@@ -74,6 +74,42 @@ std::string artifactId(const SurfaceExpeditionState& expedition)
     return out.str();
 }
 
+void applyRecoveredArtifactRewards(GameState& state, std::vector<ArtifactRecord>& artifacts)
+{
+    for (ArtifactRecord& artifact : artifacts) {
+        if (artifact.rewardApplied) {
+            continue;
+        }
+        const double condition = std::clamp(artifact.condition, 0.0, 1.0);
+        if (artifact.kind == ArtifactKind::Story) {
+            state.meta.ark.repairProgress += tuning::mining::artifactStoryArkRepair;
+            if (state.meta.ark.condition == ArkCondition::DamagedStranded) {
+                state.meta.ark.hullDamage = std::max(0, state.meta.ark.hullDamage - static_cast<int>(std::ceil(tuning::mining::artifactStoryHullRepair * condition)));
+            }
+            artifact.rewardApplied = true;
+            continue;
+        }
+
+        switch (artifact.rewardType) {
+        case ArtifactRewardType::Credits:
+            state.run.credits += std::ceil(tuning::mining::artifactCreditReward * std::max(0.25, condition));
+            artifact.rewardApplied = true;
+            break;
+        case ArtifactRewardType::ArkFuel:
+            state.meta.ark.fuelReserve += std::max(1, static_cast<int>(std::ceil(static_cast<double>(tuning::mining::artifactFuelReward) * condition)));
+            artifact.rewardApplied = true;
+            break;
+        case ArtifactRewardType::BlueprintInsight:
+            state.meta.blueprintProgress += std::max(1, static_cast<int>(std::ceil(static_cast<double>(tuning::mining::artifactBlueprintReward) * condition)));
+            artifact.rewardApplied = true;
+            break;
+        case ArtifactRewardType::None:
+            artifact.rewardApplied = true;
+            break;
+        }
+    }
+}
+
 SurfaceActionOutcome spendSupply(SurfaceExpeditionState& expedition, int amount)
 {
     SurfaceActionOutcome outcome;
@@ -2135,19 +2171,149 @@ MiningCellMaterial rollSurfacePushRichMarker(
     return MiningCellMaterial::RareOre;
 }
 
-void appendSurfacePushMarkers(SurfacePushRunState& push, const MaterialInventory& gain, bool artifactFound)
+const SurfaceDepthProspect* findSurfaceDepthProspect(const SurfaceExpeditionState& expedition, int absoluteDepth)
+{
+    const auto found = std::find_if(expedition.depthProspects.begin(), expedition.depthProspects.end(), [&](const SurfaceDepthProspect& prospect) {
+        return prospect.absoluteDepth == absoluteDepth;
+    });
+    return found == expedition.depthProspects.end() ? nullptr : &(*found);
+}
+
+MaterialInventory maxMaterials(const MaterialInventory& left, const MaterialInventory& right)
+{
+    return {
+        std::max(left.common, right.common),
+        std::max(left.rare, right.rare),
+        std::max(left.exotic, right.exotic)
+    };
+}
+
+MaterialInventory materialDeltaAbove(const MaterialInventory& next, const MaterialInventory& previous)
+{
+    return {
+        std::max(0, next.common - previous.common),
+        std::max(0, next.rare - previous.rare),
+        std::max(0, next.exotic - previous.exotic)
+    };
+}
+
+void mergeSurfaceDepthProspect(SurfaceExpeditionState& expedition, const SurfaceDepthProspect& prospect)
+{
+    auto found = std::find_if(expedition.depthProspects.begin(), expedition.depthProspects.end(), [&](const SurfaceDepthProspect& existing) {
+        return existing.absoluteDepth == prospect.absoluteDepth;
+    });
+    if (found == expedition.depthProspects.end()) {
+        expedition.depthProspects.push_back(prospect);
+        return;
+    }
+
+    found->depthOffset = std::max(0, found->absoluteDepth - expedition.depth);
+    found->possibleMaterials = maxMaterials(found->possibleMaterials, prospect.possibleMaterials);
+    found->possibleArtifacts = std::max(found->possibleArtifacts, prospect.possibleArtifacts);
+}
+
+SurfaceDepthProspect rollSurfaceDepthProspect(
+    const GameState& state,
+    int depthOffset,
+    double signal,
+    const SurfaceScanSupport& support,
+    Random& rng)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
+    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
+    SurfaceDepthProspect prospect;
+    prospect.depthOffset = std::max(0, depthOffset);
+    prospect.absoluteDepth = std::max(0, expedition.depth + prospect.depthOffset);
+
+    prospect.possibleMaterials.common = prospect.depthOffset == 0 || rng.chance(0.62 + signal * 0.18) ? 1 : 0;
+    if (prospect.depthOffset > 0 || rng.chance(0.12 + signal * 0.30 + site.mineRareChanceBonus + support.rareChanceBonus)) {
+        prospect.possibleMaterials.rare += 1;
+    }
+    if (prospect.depthOffset >= 2 && rng.chance(0.12 + signal * 0.16 + support.exoticChanceBonus + static_cast<double>(prospect.depthOffset) * 0.035)) {
+        prospect.possibleMaterials.exotic += 1;
+    }
+    if (prospect.depthOffset >= 3 && rng.chance(0.08 + signal * 0.10 + support.exoticChanceBonus)) {
+        prospect.possibleMaterials.exotic += 1;
+    }
+    if (prospect.depthOffset >= 2 && rng.chance(std::min(0.70, 0.05 + signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+        prospect.possibleArtifacts = 1;
+    }
+    if (materialCargo(prospect.possibleMaterials) == 0 && prospect.possibleArtifacts == 0) {
+        prospect.possibleMaterials.common = 1;
+    }
+    return prospect;
+}
+
+MaterialInventory actualizePushMaterials(
+    const SurfaceExpeditionState& expedition,
+    int step,
+    const SurfaceDepthProspect* forecast,
+    const SurfacePushSupport& support,
+    Random& rng)
+{
+    MaterialInventory gain;
+    gain.common = step == 1 ? 1 : 0;
+    gain.rare = 1;
+    if (forecast != nullptr) {
+        gain.common = std::max(gain.common, forecast->possibleMaterials.common > 0 && rng.chance(0.78) ? 1 : 0);
+        gain.rare = std::max(gain.rare, forecast->possibleMaterials.rare);
+        if (forecast->possibleMaterials.exotic > 0) {
+            if (rng.chance(0.58 + support.richChanceBonus)) {
+                gain.exotic += 1;
+            } else {
+                gain.rare += 1;
+            }
+        }
+        return gain;
+    }
+
+    if (step >= 3 && rng.chance(0.35 + support.richChanceBonus)) {
+        const MiningCellMaterial richMarker = rollSurfacePushRichMarker(expedition, step, support, rng);
+        if (richMarker == MiningCellMaterial::ExoticVein) {
+            gain.exotic += 1;
+        } else {
+            gain.rare += 1;
+        }
+    }
+    return gain;
+}
+
+std::vector<MiningCellMaterial> depthProspectMarkers(const SurfaceDepthProspect& prospect)
+{
+    std::vector<MiningCellMaterial> markers;
+    for (int i = 0; i < std::max(0, prospect.possibleMaterials.common); ++i) {
+        markers.push_back(MiningCellMaterial::CommonOre);
+    }
+    for (int i = 0; i < std::max(0, prospect.possibleMaterials.rare); ++i) {
+        markers.push_back(MiningCellMaterial::RareOre);
+    }
+    for (int i = 0; i < std::max(0, prospect.possibleMaterials.exotic); ++i) {
+        markers.push_back(MiningCellMaterial::ExoticVein);
+    }
+    for (int i = 0; i < std::max(0, prospect.possibleArtifacts); ++i) {
+        markers.push_back(MiningCellMaterial::ArtifactCache);
+    }
+    return markers;
+}
+
+void appendSurfacePushMarkers(SurfacePushRunState& push, const MaterialInventory& gain, bool artifactFound, int depthOffset)
 {
     for (int i = 0; i < std::max(0, gain.common); ++i) {
         push.rewardMarkers.push_back(MiningCellMaterial::CommonOre);
+        push.rewardMarkerDepthOffsets.push_back(depthOffset);
     }
     for (int i = 0; i < std::max(0, gain.rare); ++i) {
         push.rewardMarkers.push_back(MiningCellMaterial::RareOre);
+        push.rewardMarkerDepthOffsets.push_back(depthOffset);
     }
     for (int i = 0; i < std::max(0, gain.exotic); ++i) {
         push.rewardMarkers.push_back(MiningCellMaterial::ExoticVein);
+        push.rewardMarkerDepthOffsets.push_back(depthOffset);
     }
     if (artifactFound) {
         push.rewardMarkers.push_back(MiningCellMaterial::ArtifactCache);
+        push.rewardMarkerDepthOffsets.push_back(depthOffset);
     }
 }
 
@@ -2181,10 +2347,10 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
         tuning::research::scanBaseBustRisk + expedition.hazard * tuning::research::scanBustRiskHazardScale - support.riskRelief,
         0.02,
         0.38);
-    scan.message = "Scanner lattice armed. Pulse for richer returns, or bank before interference spikes.";
+    scan.message = "Scanner lattice armed. Pulse 1 maps +0; later pulses preview deeper push layers.";
     state.run.surfaceScan = scan;
     state.screen = Screen::SurfaceScan;
-    outcome.message = "Scanner lattice armed. Press your luck for materials and artifact traces.";
+    outcome.message = "Scanner lattice armed. Map layers before deciding whether to push deeper.";
     return outcome;
 }
 
@@ -2227,33 +2393,25 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         0.02,
         0.72);
 
-    MaterialInventory gain;
-    gain.common = 1 + (scan.signal > 0.62 ? 1 : 0);
-    if (rng.chance(0.12 + scan.signal * 0.30 + surfaceSiteProfileEffects(state.run.surfaceExpedition.siteProfile).mineRareChanceBonus + support.rareChanceBonus)) {
-        gain.rare += 1;
-    }
-    if (scan.pulses >= 4 && rng.chance(0.06 + scan.signal * 0.11 + support.exoticChanceBonus)) {
-        gain.exotic += 1;
-    }
-    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
-    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(state.run.surfaceExpedition.siteProfile);
-    if (scan.pulses >= 3 && scan.temporaryArtifacts.empty() &&
-        rng.chance(std::min(0.70, 0.05 + scan.signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+    const int depthOffset = scan.pulses - 1;
+    const SurfaceDepthProspect prospect = rollSurfaceDepthProspect(state, depthOffset, scan.signal, support, rng);
+    scan.depthProspects.push_back(prospect);
+    if (prospect.possibleArtifacts > 0 && scan.temporaryArtifacts.empty()) {
         scan.temporaryArtifacts.push_back({artifactId(state.run.surfaceExpedition), state.run.surfaceExpedition.destinationId, false});
         outcome.artifactFound = true;
         outcome.cargoDelta += 3;
         scan.cargo += 3;
     }
 
-    addMaterials(scan.temporaryMaterials, gain);
-    const int cargoGain = materialCargo(gain);
+    addMaterials(scan.temporaryMaterials, prospect.possibleMaterials);
+    const int cargoGain = materialCargo(prospect.possibleMaterials);
     scan.cargo += cargoGain;
-    outcome.materialDelta = gain;
+    outcome.materialDelta = prospect.possibleMaterials;
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = scanHazardDelta;
     outcome.message = scan.pulses >= scan.maxPulses
         ? "Full spectrum scan complete. Bank the payload before the window collapses."
-        : "Scan pulse hit. Signal improved, but interference climbed.";
+        : "Scan mapped layer +" + std::to_string(depthOffset) + ". Push deeper to test that forecast.";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
         scan.completed = true;
@@ -2275,13 +2433,21 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
     if (scan.busted) {
         outcome.message = "Scan window closed. No payload banked.";
     } else {
-        addMaterials(expedition.prospectMaterials, scan.temporaryMaterials);
-        expedition.prospectArtifacts += static_cast<int>(scan.temporaryArtifacts.size());
+        for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
+            const SurfaceDepthProspect* existing = findSurfaceDepthProspect(expedition, prospect.absoluteDepth);
+            const MaterialInventory existingMaterials = existing == nullptr ? MaterialInventory{} : existing->possibleMaterials;
+            const int existingArtifacts = existing == nullptr ? 0 : existing->possibleArtifacts;
+            if (prospect.absoluteDepth == expedition.depth) {
+                addMaterials(expedition.prospectMaterials, materialDeltaAbove(maxMaterials(existingMaterials, prospect.possibleMaterials), existingMaterials));
+                expedition.prospectArtifacts += std::max(0, prospect.possibleArtifacts - existingArtifacts);
+            }
+            mergeSurfaceDepthProspect(expedition, prospect);
+        }
         expedition.hazard += scan.hazardDelta;
         expedition.miningSitePrepared = true;
         outcome.hazardDelta = scan.hazardDelta;
-        outcome.message = hasPendingSurfacePayload(scan.temporaryMaterials, scan.temporaryArtifacts, scan.cargo)
-            ? "Scan banked. Underground deposits are tagged for the mining drone."
+        outcome.message = !scan.depthProspects.empty()
+            ? "Scan banked. Layer forecasts now line up with Push Deeper."
             : "Scan banked. The crew found a clean mining line, but no strong payload.";
     }
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
@@ -2330,10 +2496,10 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
         tuning::research::pushBaseCollapseRisk + expedition.hazard * tuning::research::pushRiskHazardScale - support.collapseRelief,
         0.04,
         0.42);
-    push.message = "Descent lane armed. Each deeper mark improves payoff and raises collapse risk.";
+    push.message = "Descent lane armed. Each step commits a deeper layer and reveals actual finds.";
     state.run.surfacePush = push;
     state.screen = Screen::SurfacePush;
-    outcome.message = "Deep route armed. Push for richer deposits, or bank before the terrain turns.";
+    outcome.message = "Deep route armed. Push to turn layer forecasts into actual mining marks.";
     return outcome;
 }
 
@@ -2377,22 +2543,16 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
         0.04,
         0.84);
 
-    MaterialInventory gain;
-    gain.common = push.steps == 1 ? 1 : 0;
-    gain.rare = 1;
-    if (push.steps >= 3 && rng.chance(0.35 + support.richChanceBonus)) {
-        const MiningCellMaterial richMarker = rollSurfacePushRichMarker(expedition, push.steps, support, rng);
-        if (richMarker == MiningCellMaterial::ExoticVein) {
-            gain.exotic += 1;
-        } else {
-            gain.rare += 1;
-        }
-    }
+    const int targetDepth = expedition.depth + push.steps;
+    const SurfaceDepthProspect* forecast = findSurfaceDepthProspect(expedition, targetDepth);
+    MaterialInventory gain = actualizePushMaterials(expedition, push.steps, forecast, support, rng);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     bool artifactFound = false;
-    if (push.steps >= 2 && push.temporaryArtifacts.empty() &&
-        rng.chance(std::min(0.82, tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+    const double artifactChance = forecast != nullptr && forecast->possibleArtifacts > 0
+        ? 0.55 + support.artifactChanceBonus + crew.artifactChanceBonus * 0.50
+        : tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus;
+    if (push.steps >= 2 && push.temporaryArtifacts.empty() && rng.chance(std::min(0.82, artifactChance))) {
         push.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
         outcome.artifactFound = true;
         artifactFound = true;
@@ -2403,13 +2563,15 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     addMaterials(push.temporaryMaterials, gain);
     const int cargoGain = materialCargo(gain);
     push.cargo += cargoGain;
-    appendSurfacePushMarkers(push, gain, artifactFound);
+    appendSurfacePushMarkers(push, gain, artifactFound, push.steps);
     outcome.materialDelta = gain;
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = pushHazardDelta;
     outcome.message = push.steps >= push.maxSteps
         ? "Maximum safe depth reached. Bank the route before the floor gives out."
-        : "Deeper lane found. The payout climbed with the pressure.";
+        : (forecast != nullptr
+            ? "Layer +" + std::to_string(push.steps) + " confirmed. Actual finds are now marked for mining."
+            : "Blind push found a deeper lane. Scan first next time for a better read.");
     push.message = surfaceActionSummary(outcome);
     if (push.steps >= push.maxSteps) {
         push.completed = true;
@@ -2431,6 +2593,8 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
     if (push.busted) {
         outcome.message = "Deep route lost. No new payload banked.";
     } else {
+        expedition.prospectMaterials = {};
+        expedition.prospectArtifacts = 0;
         addMaterials(expedition.prospectMaterials, push.temporaryMaterials);
         expedition.prospectArtifacts += static_cast<int>(push.temporaryArtifacts.size());
         expedition.depth += std::max(1, push.depthGain);
@@ -2475,6 +2639,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
     outcome.cargoRecovered = !rng.chance(outcome.extractionRisk);
     if (outcome.cargoRecovered) {
         addMaterials(state.meta.materials, expedition.temporaryMaterials);
+        applyRecoveredArtifactRewards(state, expedition.temporaryArtifacts);
         state.meta.artifacts.insert(state.meta.artifacts.end(), expedition.temporaryArtifacts.begin(), expedition.temporaryArtifacts.end());
         outcome.materialDelta = expedition.temporaryMaterials;
         outcome.artifactFound = !expedition.temporaryArtifacts.empty();

@@ -34,6 +34,19 @@ struct MiningEnemySnapshot {
     bool active = true;
 };
 
+struct MiningArtifactSnapshot {
+    bool present = false;
+    double x = 0.0;
+    double y = 0.0;
+    double health = 0.0;
+    double maxHealth = 1.0;
+    int kind = 0;
+    int rewardType = 0;
+    int state = 0;
+    bool tethered = false;
+    bool revealed = false;
+};
+
 struct FlybyTrailPointSnapshot {
     double x = 0.0;
     double y = 0.0;
@@ -68,8 +81,13 @@ struct RenderSnapshot {
     double miningDrillDirX = 0.0;
     double miningDrillDirY = 1.0;
     double miningHeat = 0.0;
+    double miningOxygenSeconds = 15.0;
+    double miningFuelBurnSeconds = 0.0;
+    double miningDrillIntegrity = 1.0;
+    double miningHazardDelta = 0.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
+    double miningScannerRadius = 5.5;
     double miningFailurePulse = 0.0;
     double miningRecoilX = 0.0;
     double miningRecoilY = 0.0;
@@ -77,6 +95,11 @@ struct RenderSnapshot {
     bool miningInputDrilling = false;
     bool miningTargetDrillable = false;
     bool miningDrilling = false;
+    int miningSharedFuel = 0;
+    int miningSharedFuelCapacity = 0;
+    int miningCargo = 0;
+    MaterialInventory miningMaterials;
+    MiningArtifactSnapshot miningArtifact;
     std::vector<MiningCellSnapshot> miningCells;
     std::vector<MiningEnemySnapshot> miningEnemies;
     bool flybyActive = false;
@@ -126,6 +149,8 @@ struct RenderSnapshot {
     int surfaceScanCargo = 0;
     MaterialInventory surfaceScanMaterials;
     int surfaceScanArtifacts = 0;
+    std::vector<MiningCellMaterial> surfaceScanPreviewMarkers;
+    std::vector<int> surfaceScanPreviewDepthOffsets;
     bool surfacePushActive = false;
     bool surfacePushCompleted = false;
     bool surfacePushBusted = false;
@@ -138,6 +163,9 @@ struct RenderSnapshot {
     MaterialInventory surfacePushMaterials;
     int surfacePushArtifacts = 0;
     std::vector<MiningCellMaterial> surfacePushRewardMarkers;
+    std::vector<int> surfacePushRewardDepthOffsets;
+    std::vector<MiningCellMaterial> surfacePushForecastMarkers;
+    std::vector<int> surfacePushForecastDepthOffsets;
 };
 
 class WebGLRenderer {
@@ -152,6 +180,9 @@ private:
     void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace = true);
     void drawCircle(float cx, float cy, float radius, Color color, int segments = 36, bool worldSpace = true);
     void drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments = 48, bool worldSpace = true);
+    void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
+    void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
+    void drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<float>& scratchVertices(std::size_t reserveCount);
@@ -187,9 +218,26 @@ private:
         bool requested = false;
         bool ready = false;
     };
+
+    struct MiningPickupBurst {
+        float x = 0.0F;
+        float y = 0.0F;
+        int material = 0;
+        int amount = 0;
+        double startedAt = 0.0;
+        float textOffsetX = 0.0F;
+    };
+
     std::array<TextureAsset, 15> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
+    std::vector<int> previousMiningMaterials_;
+    MaterialInventory previousMiningInventory_;
+    int previousMiningCargo_ = 0;
+    std::vector<MiningPickupBurst> miningPickupBursts_;
+    int previousMiningWidth_ = 0;
+    int previousMiningHeight_ = 0;
+    bool previousMiningActive_ = false;
     float sceneCssWidth_ = 1280.0F;
     float sceneCssHeight_ = 720.0F;
     float scenePixelLeft_ = 0.0F;

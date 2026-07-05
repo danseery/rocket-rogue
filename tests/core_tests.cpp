@@ -2405,6 +2405,7 @@ void surfaceExpeditionRoundTripsThroughSave()
     state.run.surfaceExpedition.sharedFuel = 2;
     state.run.surfaceExpedition.prospectMaterials = {.common = 1, .rare = 2, .exotic = 1};
     state.run.surfaceExpedition.prospectArtifacts = 1;
+    state.run.surfaceExpedition.depthProspects.push_back({1, 1, {.common = 0, .rare = 1, .exotic = 1}, 1});
     Random rng(9091);
     require(surveySurfaceSite(state, rng).applied, "test setup should gather a surface payload");
 
@@ -2426,6 +2427,10 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
     require(restored.run.surfaceExpedition.prospectMaterials.rare == 2, "surface material prospects should round trip");
     require(restored.run.surfaceExpedition.prospectArtifacts == 1, "surface artifact prospects should round trip");
+    require(restored.run.surfaceExpedition.depthProspects.size() == 1, "surface depth prospects should round trip");
+    require(restored.run.surfaceExpedition.depthProspects.front().absoluteDepth == 1, "surface depth prospect layer should round trip");
+    require(restored.run.surfaceExpedition.depthProspects.front().possibleMaterials.exotic == 1, "surface depth prospect materials should round trip");
+    require(restored.run.surfaceExpedition.depthProspects.front().possibleArtifacts == 1, "surface depth prospect artifacts should round trip");
     require(restored.run.surfaceExpedition.logEntries == state.run.surfaceExpedition.logEntries, "surface mission log should round trip");
 }
 
@@ -2458,6 +2463,140 @@ void surfaceMiningUsesSharedFuelAndRunsOnce()
     const SurfaceActionOutcome repeated = startMiningRun(state, catalog);
     require(!repeated.applied, "mining should only start once per surface loop");
     require(surfaceActionSummary(repeated).find("already used") != std::string::npos, "repeat mining should explain the one-run limit");
+}
+
+void physicalMiningArtifactsAreSingleAndDeliveryGated()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92929);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    state.run.surfaceExpedition.prospectArtifacts = 3;
+
+    require(startMiningRun(state, catalog).applied, "prospected artifact should start a mining run");
+    require(state.run.mining.artifact.present, "prospected artifact should create one physical artifact object");
+    int artifactTiles = 0;
+    for (const MiningCell& cell : state.run.mining.terrain.cells) {
+        artifactTiles += cell.material == MiningCellMaterial::ArtifactCache ? 1 : 0;
+    }
+    require(artifactTiles <= 1, "mining terrain should contain at most one artifact cache tile");
+    require(state.run.mining.temporaryArtifacts.empty(), "artifact should not enter payload before delivery");
+
+    MiningArtifactObject& artifact = state.run.mining.artifact;
+    artifact.revealed = true;
+    state.run.mining.droneX = artifact.x;
+    state.run.mining.droneY = artifact.y - 2.0;
+    state.run.mining.aimDirX = 0.0;
+    state.run.mining.aimDirY = 1.0;
+    state.run.mining.drilling = true;
+    const double healthBeforeDrill = artifact.health;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.artifact.health < healthBeforeDrill, "drilling an artifact cache should damage the artifact");
+    require(state.run.mining.temporaryArtifacts.empty(), "drilling should still not recover the artifact directly");
+
+    state.run.mining.drilling = false;
+    state.run.mining.artifact.state = MiningArtifactState::Loose;
+    state.run.mining.artifact.tethered = true;
+    state.run.mining.artifact.x = static_cast<double>(state.run.mining.terrain.width) * 0.5;
+    state.run.mining.artifact.y = tuning::mining::artifactShipBayY;
+    state.run.mining.droneX = state.run.mining.artifact.x;
+    state.run.mining.droneY = state.run.mining.artifact.y;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.artifact.state == MiningArtifactState::Delivered, "tethered artifact should deliver at the ship bay");
+    require(state.run.mining.temporaryArtifacts.size() == 1, "delivered artifact should enter mining payload");
+    require(state.run.mining.cargo >= tuning::mining::artifactCargo, "delivered artifact should add cargo weight");
+}
+
+void miningArtifactTetherAndDestructionRules()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92930);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    state.run.surfaceExpedition.prospectArtifacts = 1;
+    require(startMiningRun(state, catalog).applied, "artifact tether test should start mining");
+
+    MiningArtifactObject& artifact = state.run.mining.artifact;
+    artifact.revealed = true;
+    state.run.mining.droneX = artifact.x;
+    state.run.mining.droneY = artifact.y - 1.0;
+    toggleMiningTether(state);
+    require(state.run.mining.artifact.tethered, "T should attach to a nearby exposed artifact");
+    toggleMiningTether(state);
+    require(!state.run.mining.artifact.tethered, "T should detach an attached artifact");
+
+    state.run.mining.artifact.state = MiningArtifactState::Destroyed;
+    state.run.mining.artifact.tethered = true;
+    state.run.mining.artifact.x = static_cast<double>(state.run.mining.terrain.width) * 0.5;
+    state.run.mining.artifact.y = tuning::mining::artifactShipBayY;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.temporaryArtifacts.empty(), "destroyed artifact should not deliver");
+}
+
+void miningArtifactRewardsResolveOnExtraction()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState story = createNewGame(catalog, 92931);
+    story.run.destinationIndex = 4;
+    startSurfaceExpedition(story, catalog);
+    story.run.surfaceExpedition.hazard = 0.0;
+    story.run.surfaceExpedition.cargo = 0;
+    story.run.surfaceExpedition.supply = 10;
+    story.run.surfaceExpedition.sharedFuel = story.run.surfaceExpedition.sharedFuelCapacity;
+    story.run.surfaceExpedition.temporaryArtifacts.push_back({"story_artifact", content::destination::nearbyStar, false, ArtifactKind::Story, ArtifactRewardType::None, 1.0, false});
+    story.meta.ark.condition = ArkCondition::DamagedStranded;
+    story.meta.ark.hullDamage = 72;
+    Random storyRng(1);
+    const SurfaceActionOutcome storyOutcome = extractSurfacePayload(story, storyRng);
+    require(storyOutcome.cargoRecovered, "story artifact test should recover cargo");
+    require(story.meta.ark.repairProgress == tuning::mining::artifactStoryArkRepair, "story artifact should add Ark repair progress");
+    require(story.meta.ark.hullDamage == 72 - tuning::mining::artifactStoryHullRepair, "story artifact should repair Ark hull damage");
+    require(!story.meta.artifacts.empty() && story.meta.artifacts.front().rewardApplied, "story artifact reward should be marked applied");
+
+    GameState boost = createNewGame(catalog, 92932);
+    boost.run.destinationIndex = 2;
+    startSurfaceExpedition(boost, catalog);
+    boost.run.surfaceExpedition.hazard = 0.0;
+    boost.run.surfaceExpedition.cargo = 0;
+    boost.run.surfaceExpedition.supply = 10;
+    boost.run.surfaceExpedition.sharedFuel = boost.run.surfaceExpedition.sharedFuelCapacity;
+    boost.run.surfaceExpedition.temporaryArtifacts.push_back({"boost_artifact", content::destination::mars, false, ArtifactKind::Boost, ArtifactRewardType::Credits, 1.0, false});
+    const double creditsBefore = boost.run.credits;
+    Random boostRng(2);
+    const SurfaceActionOutcome boostOutcome = extractSurfacePayload(boost, boostRng);
+    require(boostOutcome.cargoRecovered, "boost artifact test should recover cargo");
+    require(boost.run.credits > creditsBefore, "credit artifact should grant credits after extraction");
+    require(!boost.meta.artifacts.empty() && boost.meta.artifacts.front().rewardApplied, "boost artifact reward should be marked applied");
+}
+
+void miningArtifactSaveRoundTrips()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92933);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    state.run.surfaceExpedition.prospectArtifacts = 1;
+    require(startMiningRun(state, catalog).applied, "artifact save test should start mining");
+    state.run.mining.artifact.state = MiningArtifactState::Loose;
+    state.run.mining.artifact.tethered = true;
+    state.run.mining.artifact.health = 0.64;
+    state.run.mining.artifact.velocityX = 1.2;
+    state.run.mining.artifact.velocityY = -0.4;
+    state.meta.ark.repairProgress = 2;
+
+    const std::string saveText = serializeSaveData(captureSaveData(state));
+    const std::optional<SaveData> save = deserializeSaveData(saveText);
+    require(save.has_value(), "artifact save should deserialize");
+    GameState restored = createNewGame(catalog, 92934);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.run.mining.artifact.present, "active mining artifact should round trip");
+    require(restored.run.mining.artifact.state == MiningArtifactState::Loose, "artifact state should round trip");
+    require(restored.run.mining.artifact.tethered, "artifact tether state should round trip");
+    require(std::abs(restored.run.mining.artifact.health - 0.64) < 0.0001, "artifact health should round trip");
+    require(restored.meta.ark.repairProgress == 2, "Ark repair progress should round trip");
 }
 
 void surfaceScanMiniGameBanksSurveyPayload()
@@ -2541,6 +2680,50 @@ void surfacePushMiniGameBanksDepthRoute()
             return (cell.material == MiningCellMaterial::RareOre || cell.material == MiningCellMaterial::ArtifactCache) && cell.revealed;
         });
     require(foundDeepProspect, "deep-push prospects should appear as revealed rich targets in mining terrain");
+}
+
+void surfaceScanForecastsPushDepthLayers()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94301);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.supply = 10;
+    Random rng(94302);
+
+    require(startSurfaceScanRun(state, rng).applied, "scan forecast test should start scanning");
+    state.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(state, rng).applied, "first scan should map current layer");
+    state.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(state, rng).applied, "second scan should map first push layer");
+    require(state.run.surfaceScan.depthProspects.size() == 2, "scan should record one forecast per pulse");
+    require(state.run.surfaceScan.depthProspects[0].depthOffset == 0, "first scan forecast should describe the current mining layer");
+    require(state.run.surfaceScan.depthProspects[1].depthOffset == 1, "second scan forecast should describe the first pushed layer");
+
+    const SurfaceActionOutcome bankedScan = bankSurfaceScan(state);
+    require(bankedScan.applied, "banked scan should preserve layer forecasts");
+    require(state.run.surfaceExpedition.depthProspects.size() == 2, "banked scan should store mapped depth forecasts");
+    require(state.run.surfaceExpedition.prospectMaterials.common > 0, "current-layer scan forecast should tag current mining prospects");
+
+    const int startingDepth = state.run.surfaceExpedition.depth;
+    require(startSurfacePushRun(state, rng).applied, "push should start after banked scan");
+    state.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(state, rng).applied, "first push should resolve against the +1 forecast");
+    require(!state.run.surfacePush.rewardMarkers.empty(), "pushed layer should expose actual reward markers");
+    require(
+        std::all_of(state.run.surfacePush.rewardMarkerDepthOffsets.begin(), state.run.surfacePush.rewardMarkerDepthOffsets.end(), [](int offset) {
+            return offset == 1;
+        }),
+        "actual push reward markers should line up with the pushed layer");
+
+    const SurfaceActionOutcome bankedPush = bankSurfacePush(state);
+    require(bankedPush.applied, "banked push should commit the pushed layer");
+    require(state.run.surfaceExpedition.depth == startingDepth + 1, "banked push should move mining to the scanned +1 layer");
+    require(state.run.surfaceExpedition.prospectMaterials.rare > 0, "banked push should replace forecast-only tags with actual pushed finds");
+
+    require(startMiningRun(state, catalog).applied, "forecasted pushed layer should open mining");
+    require(state.run.mining.depthZone == startingDepth + 1, "mining should start at the pushed layer depth");
+    require(state.run.surfaceExpedition.depthProspects.empty(), "starting mining should consume banked layer forecasts");
 }
 
 void surfaceMissionLogIsBounded()
@@ -4328,6 +4511,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(launchHtml.find("Return to Earth banks data") != std::string::npos, "launch help should mention returning to Earth");
     require(launchHtml.find("unlock the Moon route") != std::string::npos, "first launch help should keep the intro focused on return/eject");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+    require(launchHtml.find("data-camera-shake-toggle") != std::string::npos, "settings should expose a camera shake toggle");
     require(launchHtml.find("data-debug-tools-toggle") != std::string::npos, "settings should expose a debug mini-games toggle");
 
     GameState moonLaunchState = createNewGame(catalog, 713);
@@ -4488,6 +4672,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const PreparedLaunch droneLaunch = prepareLaunch(droneState, catalog, droneRng);
     const std::string droneHtml = buildGamePanelHtml({droneState, catalog, droneLaunch, droneLaunch});
     require(droneHtml.find("phase-board phase-board-drone-ops") != std::string::npos, "drone ops should render inside the dedicated drone board");
+    require(droneHtml.find("drone-bay-strip") != std::string::npos, "drone ops should use the compact bay strip");
+    require(droneHtml.find("focus-metrics") == std::string::npos, "drone ops should avoid a separate metric block above the roster");
     require(droneHtml.find("module-art") != std::string::npos, "drone ops cards should reserve art/glyph space");
     require(droneHtml.find("drone-card") != std::string::npos, "drone ops should use styled drone cards");
 
@@ -4850,6 +5036,7 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::surfaceScanBank == "surface_scan_bank", "surface scan bank action should use a stable schema id");
     require(ui::actions::surfacePushStep == "surface_push_step", "surface push step action should use a stable schema id");
     require(ui::actions::surfacePushBank == "surface_push_bank", "surface push bank action should use a stable schema id");
+    require(ui::actions::miningTether == "mining_tether", "mining tether action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
 
@@ -5002,8 +5189,13 @@ int main()
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
     surfaceMiningUsesSharedFuelAndRunsOnce();
+    physicalMiningArtifactsAreSingleAndDeliveryGated();
+    miningArtifactTetherAndDestructionRules();
+    miningArtifactRewardsResolveOnExtraction();
+    miningArtifactSaveRoundTrips();
     surfaceScanMiniGameBanksSurveyPayload();
     surfacePushMiniGameBanksDepthRoute();
+    surfaceScanForecastsPushDepthLayers();
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();

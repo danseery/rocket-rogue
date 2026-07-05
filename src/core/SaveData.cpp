@@ -156,6 +156,78 @@ MiningCellMaterial miningMaterialFromInt(int value)
     }
 }
 
+int artifactKindToInt(ArtifactKind kind)
+{
+    return kind == ArtifactKind::Story ? 1 : 0;
+}
+
+ArtifactKind artifactKindFromInt(int value)
+{
+    return value == 1 ? ArtifactKind::Story : ArtifactKind::Boost;
+}
+
+int artifactRewardToInt(ArtifactRewardType reward)
+{
+    switch (reward) {
+    case ArtifactRewardType::None:
+        return 0;
+    case ArtifactRewardType::Credits:
+        return 1;
+    case ArtifactRewardType::ArkFuel:
+        return 2;
+    case ArtifactRewardType::BlueprintInsight:
+        return 3;
+    }
+    return 0;
+}
+
+ArtifactRewardType artifactRewardFromInt(int value)
+{
+    switch (value) {
+    case 1:
+        return ArtifactRewardType::Credits;
+    case 2:
+        return ArtifactRewardType::ArkFuel;
+    case 3:
+        return ArtifactRewardType::BlueprintInsight;
+    default:
+        return ArtifactRewardType::None;
+    }
+}
+
+int miningArtifactStateToInt(MiningArtifactState state)
+{
+    switch (state) {
+    case MiningArtifactState::None:
+        return 0;
+    case MiningArtifactState::Embedded:
+        return 1;
+    case MiningArtifactState::Loose:
+        return 2;
+    case MiningArtifactState::Delivered:
+        return 3;
+    case MiningArtifactState::Destroyed:
+        return 4;
+    }
+    return 0;
+}
+
+MiningArtifactState miningArtifactStateFromInt(int value)
+{
+    switch (value) {
+    case 1:
+        return MiningArtifactState::Embedded;
+    case 2:
+        return MiningArtifactState::Loose;
+    case 3:
+        return MiningArtifactState::Delivered;
+    case 4:
+        return MiningArtifactState::Destroyed;
+    default:
+        return MiningArtifactState::None;
+    }
+}
+
 int miningCellFeatureToInt(MiningCellFeature feature)
 {
     switch (feature) {
@@ -488,6 +560,52 @@ MaterialInventory parseMaterials(std::string_view text)
     return materials;
 }
 
+std::string serializeDepthProspects(const std::vector<SurfaceDepthProspect>& prospects)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < prospects.size(); ++i) {
+        if (i > 0) {
+            out << save_schema::listDelimiter;
+        }
+        const SurfaceDepthProspect& prospect = prospects[i];
+        out << prospect.depthOffset
+            << save_schema::crewFieldDelimiter << prospect.absoluteDepth
+            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.common
+            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.rare
+            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.exotic
+            << save_schema::crewFieldDelimiter << prospect.possibleArtifacts;
+    }
+    return out.str();
+}
+
+std::vector<SurfaceDepthProspect> parseDepthProspects(std::string_view text)
+{
+    std::vector<SurfaceDepthProspect> prospects;
+    for (const std::string& record : split(text, save_schema::listDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 2) {
+            continue;
+        }
+        SurfaceDepthProspect prospect;
+        prospect.depthOffset = std::max(0, parseInt(fields[0], prospect.depthOffset));
+        prospect.absoluteDepth = std::max(0, parseInt(fields[1], prospect.absoluteDepth));
+        if (fields.size() > 2) {
+            prospect.possibleMaterials.common = std::max(0, parseInt(fields[2], 0));
+        }
+        if (fields.size() > 3) {
+            prospect.possibleMaterials.rare = std::max(0, parseInt(fields[3], 0));
+        }
+        if (fields.size() > 4) {
+            prospect.possibleMaterials.exotic = std::max(0, parseInt(fields[4], 0));
+        }
+        if (fields.size() > 5) {
+            prospect.possibleArtifacts = std::max(0, parseInt(fields[5], 0));
+        }
+        prospects.push_back(prospect);
+    }
+    return prospects;
+}
+
 std::string serializePair(double x, double y)
 {
     std::ostringstream out;
@@ -677,7 +795,11 @@ std::string serializeArtifacts(const std::vector<ArtifactRecord>& artifacts)
         }
         out << artifacts[i].id
             << save_schema::artifactFieldDelimiter << artifacts[i].originDestinationId
-            << save_schema::artifactFieldDelimiter << (artifacts[i].identified ? 1 : 0);
+            << save_schema::artifactFieldDelimiter << (artifacts[i].identified ? 1 : 0)
+            << save_schema::artifactFieldDelimiter << artifactKindToInt(artifacts[i].kind)
+            << save_schema::artifactFieldDelimiter << artifactRewardToInt(artifacts[i].rewardType)
+            << save_schema::artifactFieldDelimiter << artifacts[i].condition
+            << save_schema::artifactFieldDelimiter << (artifacts[i].rewardApplied ? 1 : 0);
     }
     return out.str();
 }
@@ -697,9 +819,127 @@ std::vector<ArtifactRecord> parseArtifacts(std::string_view text)
         if (fields.size() > 2) {
             artifact.identified = parseInt(fields[2], 0) != 0;
         }
+        if (fields.size() > 3) {
+            artifact.kind = artifactKindFromInt(parseInt(fields[3], artifactKindToInt(artifact.kind)));
+        }
+        if (fields.size() > 4) {
+            artifact.rewardType = artifactRewardFromInt(parseInt(fields[4], artifactRewardToInt(artifact.rewardType)));
+        }
+        if (fields.size() > 5) {
+            artifact.condition = std::clamp(parseDouble(fields[5], artifact.condition), 0.0, 1.0);
+        }
+        if (fields.size() > 6) {
+            artifact.rewardApplied = parseInt(fields[6], artifact.rewardApplied ? 1 : 0) != 0;
+        }
         artifacts.push_back(artifact);
     }
     return artifacts;
+}
+
+std::string serializeMiningArtifact(const MiningArtifactObject& artifact)
+{
+    if (!artifact.present) {
+        return "";
+    }
+    std::ostringstream out;
+    out << artifact.id
+        << save_schema::crewFieldDelimiter << artifactKindToInt(artifact.kind)
+        << save_schema::crewFieldDelimiter << artifactRewardToInt(artifact.rewardType)
+        << save_schema::crewFieldDelimiter << miningArtifactStateToInt(artifact.state)
+        << save_schema::crewFieldDelimiter << artifact.x
+        << save_schema::crewFieldDelimiter << artifact.y
+        << save_schema::crewFieldDelimiter << artifact.velocityX
+        << save_schema::crewFieldDelimiter << artifact.velocityY
+        << save_schema::crewFieldDelimiter << artifact.health
+        << save_schema::crewFieldDelimiter << artifact.maxHealth
+        << save_schema::crewFieldDelimiter << artifact.embedStrength
+        << save_schema::crewFieldDelimiter << (artifact.tethered ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (artifact.revealed ? 1 : 0);
+    return out.str();
+}
+
+MiningArtifactObject parseMiningArtifact(std::string_view text)
+{
+    MiningArtifactObject artifact;
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (fields.size() < 4 || fields[0].empty()) {
+        return artifact;
+    }
+    artifact.present = true;
+    artifact.id = fields[0];
+    artifact.kind = artifactKindFromInt(parseInt(fields[1], 0));
+    artifact.rewardType = artifactRewardFromInt(parseInt(fields[2], 0));
+    artifact.state = miningArtifactStateFromInt(parseInt(fields[3], 0));
+    if (fields.size() > 4) {
+        artifact.x = parseDouble(fields[4], artifact.x);
+    }
+    if (fields.size() > 5) {
+        artifact.y = parseDouble(fields[5], artifact.y);
+    }
+    if (fields.size() > 6) {
+        artifact.velocityX = parseDouble(fields[6], artifact.velocityX);
+    }
+    if (fields.size() > 7) {
+        artifact.velocityY = parseDouble(fields[7], artifact.velocityY);
+    }
+    if (fields.size() > 8) {
+        artifact.health = parseDouble(fields[8], artifact.health);
+    }
+    if (fields.size() > 9) {
+        artifact.maxHealth = std::max(0.001, parseDouble(fields[9], artifact.maxHealth));
+    }
+    if (fields.size() > 10) {
+        artifact.embedStrength = std::clamp(parseDouble(fields[10], artifact.embedStrength), 0.0, 1.0);
+    }
+    if (fields.size() > 11) {
+        artifact.tethered = parseInt(fields[11], 0) != 0;
+    }
+    if (fields.size() > 12) {
+        artifact.revealed = parseInt(fields[12], 0) != 0;
+    }
+    artifact.health = std::clamp(artifact.health, 0.0, artifact.maxHealth);
+    if (artifact.state == MiningArtifactState::None) {
+        artifact.present = false;
+    }
+    return artifact;
+}
+
+void normalizeLegacyMiningArtifact(MiningRunState& mining)
+{
+    if (!mining.active) {
+        return;
+    }
+    bool foundArtifactTile = mining.artifact.present;
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        for (int x = 0; x < mining.terrain.width; ++x) {
+            const std::size_t index = static_cast<std::size_t>(y * mining.terrain.width + x);
+            if (index >= mining.terrain.cells.size()) {
+                continue;
+            }
+            MiningCell& cell = mining.terrain.cells[index];
+            if (cell.material != MiningCellMaterial::ArtifactCache) {
+                continue;
+            }
+            if (!foundArtifactTile) {
+                mining.artifact = {};
+                mining.artifact.present = true;
+                mining.artifact.id = mining.destinationId + "_mining_artifact_" + std::to_string(mining.depthZone) + "_legacy";
+                mining.artifact.kind = ArtifactKind::Boost;
+                mining.artifact.rewardType = ArtifactRewardType::BlueprintInsight;
+                mining.artifact.state = MiningArtifactState::Embedded;
+                mining.artifact.x = static_cast<double>(x) + 0.5;
+                mining.artifact.y = static_cast<double>(y) + 0.5;
+                mining.artifact.health = tuning::mining::artifactMaxHealth;
+                mining.artifact.maxHealth = tuning::mining::artifactMaxHealth;
+                mining.artifact.embedStrength = 1.0;
+                mining.artifact.revealed = cell.revealed;
+                foundArtifactTile = true;
+                continue;
+            }
+            cell.material = mining.depthZone >= 2 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
+            cell.hazard = false;
+        }
+    }
 }
 
 std::vector<int> parseInts(std::string_view text)
@@ -862,6 +1102,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
         }
     }
+    normalizeLegacyMiningArtifact(state.run.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;
@@ -954,6 +1195,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::arkCondition, arkConditionToInt(save.ark.condition));
     writeField(out, save_schema::field::arkFuelReserve, save.ark.fuelReserve);
     writeField(out, save_schema::field::arkHullDamage, save.ark.hullDamage);
+    writeField(out, save_schema::field::arkRepairProgress, save.ark.repairProgress);
     writeField(out, save_schema::field::arkRepairModules, join(save.ark.repairModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::arkFirstJumpComplete, save.ark.firstJumpComplete ? 1 : 0);
     writeField(out, save_schema::field::arkGravityWellDisaster, save.ark.gravityWellDisaster ? 1 : 0);
@@ -982,6 +1224,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
     writeField(out, save_schema::field::surfaceProspectMaterials, serializeMaterials(save.surfaceExpedition.prospectMaterials));
     writeField(out, save_schema::field::surfaceProspectArtifacts, save.surfaceExpedition.prospectArtifacts);
+    writeField(out, save_schema::field::surfaceDepthProspects, serializeDepthProspects(save.surfaceExpedition.depthProspects));
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
@@ -1020,6 +1263,7 @@ std::string serializeSaveData(const SaveData& save)
             std::to_string(save.mining.elementalExposureSeconds) + std::string(1, save_schema::crewFieldDelimiter) +
             std::to_string(save.mining.movementSlowSeconds) + std::string(1, save_schema::crewFieldDelimiter) +
             std::to_string(save.mining.movementSlowScale));
+    writeField(out, save_schema::field::miningArtifact, serializeMiningArtifact(save.mining.artifact));
     writeField(out, save_schema::field::miningTerrainSize, serializeMiningTerrainSize(save.mining.terrain));
     writeField(out, save_schema::field::miningTerrainCells, serializeMiningCells(save.mining.terrain));
     writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
@@ -1112,6 +1356,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.ark.fuelReserve = parseInt(value, save.ark.fuelReserve);
         } else if (key == save_schema::field::arkHullDamage) {
             save.ark.hullDamage = parseInt(value, save.ark.hullDamage);
+        } else if (key == save_schema::field::arkRepairProgress) {
+            save.ark.repairProgress = parseInt(value, save.ark.repairProgress);
         } else if (key == save_schema::field::arkRepairModules) {
             save.ark.repairModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::arkFirstJumpComplete) {
@@ -1168,6 +1414,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.prospectMaterials = parseMaterials(value);
         } else if (key == save_schema::field::surfaceProspectArtifacts) {
             save.surfaceExpedition.prospectArtifacts = parseInt(value, save.surfaceExpedition.prospectArtifacts);
+        } else if (key == save_schema::field::surfaceDepthProspects) {
+            save.surfaceExpedition.depthProspects = parseDepthProspects(value);
         } else if (key == save_schema::field::surfaceEnemies) {
             save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceMiningPrepared) {
@@ -1256,6 +1504,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             if (fields.size() > 8) {
                 save.mining.movementSlowScale = parseDouble(fields[8], save.mining.movementSlowScale);
             }
+        } else if (key == save_schema::field::miningArtifact) {
+            save.mining.artifact = parseMiningArtifact(value);
         } else if (key == save_schema::field::miningTerrainSize) {
             parseMiningTerrainSize(value, save.mining.terrain);
         } else if (key == save_schema::field::miningTerrainCells) {

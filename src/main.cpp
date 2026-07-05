@@ -92,6 +92,14 @@ void rr_return_home()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+int rr_current_screen()
+{
+    return g_app ? g_app->currentScreen() : -1;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_ops()
 {
     if (g_app) {
@@ -516,6 +524,16 @@ void rr_mining_scanner()
 {
     if (g_app) {
         g_app->miningScanner();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_tether()
+{
+    if (g_app) {
+        g_app->miningTether();
     }
 }
 

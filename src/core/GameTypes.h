@@ -133,6 +133,26 @@ enum class MiningElementalAffinity {
     Toxic
 };
 
+enum class ArtifactKind {
+    Boost,
+    Story
+};
+
+enum class ArtifactRewardType {
+    None,
+    Credits,
+    ArkFuel,
+    BlueprintInsight
+};
+
+enum class MiningArtifactState {
+    None,
+    Embedded,
+    Loose,
+    Delivered,
+    Destroyed
+};
+
 enum class FlybyGrade {
     Active,
     Miss,
@@ -223,6 +243,13 @@ struct MaterialInventory {
     int exotic = 0;
 };
 
+struct SurfaceDepthProspect {
+    int depthOffset = 0;
+    int absoluteDepth = 0;
+    MaterialInventory possibleMaterials;
+    int possibleArtifacts = 0;
+};
+
 struct ShipModule {
     std::string id;
     std::string name;
@@ -270,6 +297,10 @@ struct ArtifactRecord {
     std::string id;
     std::string originDestinationId;
     bool identified = false;
+    ArtifactKind kind = ArtifactKind::Boost;
+    ArtifactRewardType rewardType = ArtifactRewardType::BlueprintInsight;
+    double condition = 1.0;
+    bool rewardApplied = false;
 };
 
 struct ResearchProject {
@@ -361,6 +392,7 @@ struct ArkState {
     ArkCondition condition = ArkCondition::NotFound;
     int fuelReserve = 0;
     int hullDamage = 0;
+    int repairProgress = 0;
     std::vector<std::string> repairModuleIds;
     bool firstJumpComplete = false;
     bool gravityWellDisaster = false;
@@ -497,6 +529,7 @@ struct SurfaceExpeditionState {
     std::vector<ArtifactRecord> temporaryArtifacts;
     MaterialInventory prospectMaterials;
     int prospectArtifacts = 0;
+    std::vector<SurfaceDepthProspect> depthProspects;
     std::vector<std::string> logEntries;
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
@@ -520,6 +553,7 @@ struct SurfaceScanRunState {
     int cargo = 0;
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
+    std::vector<SurfaceDepthProspect> depthProspects;
     std::string message;
 };
 
@@ -538,6 +572,7 @@ struct SurfacePushRunState {
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
     std::vector<MiningCellMaterial> rewardMarkers;
+    std::vector<int> rewardMarkerDepthOffsets;
     std::string message;
 };
 
@@ -574,6 +609,23 @@ struct MiningEnemy {
     double effectRadius = 0.0;
     bool active = true;
     MiningElementalAffinity affinity = MiningElementalAffinity::None;
+};
+
+struct MiningArtifactObject {
+    bool present = false;
+    std::string id;
+    ArtifactKind kind = ArtifactKind::Boost;
+    ArtifactRewardType rewardType = ArtifactRewardType::BlueprintInsight;
+    MiningArtifactState state = MiningArtifactState::None;
+    double x = 0.0;
+    double y = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
+    double health = 1.0;
+    double maxHealth = 1.0;
+    double embedStrength = 1.0;
+    bool tethered = false;
+    bool revealed = false;
 };
 
 struct MiningRunState {
@@ -630,6 +682,7 @@ struct MiningRunState {
     double targetMaxToughness = 0.0;
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
+    MiningArtifactObject artifact;
 };
 
 struct RunState {

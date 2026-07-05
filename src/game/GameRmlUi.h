@@ -17,6 +17,7 @@ struct RmlButtonBinding {
     std::string helpDismiss;
     bool close = false;
     bool helpToggle = false;
+    bool cameraShakeToggle = false;
     bool debugToolsToggle = false;
 };
 

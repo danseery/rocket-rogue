@@ -41,6 +41,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
 void setMiningMove(GameState& state, double xAxis, double yAxis);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);
+void toggleMiningTether(GameState& state);
 void pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
 void updateMiningRun(GameState& state, const ContentCatalog& catalog, double deltaSeconds);
 SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& catalog, bool abort);

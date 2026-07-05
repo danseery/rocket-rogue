@@ -160,6 +160,23 @@ inline std::string activeThreatSummary(const MiningRunState& mining)
     return summary;
 }
 
+inline std::string miningArtifactStateLabel(MiningArtifactState state)
+{
+    switch (state) {
+    case MiningArtifactState::Embedded:
+        return "Embedded";
+    case MiningArtifactState::Loose:
+        return "Loose";
+    case MiningArtifactState::Delivered:
+        return "Delivered";
+    case MiningArtifactState::Destroyed:
+        return "Destroyed";
+    case MiningArtifactState::None:
+        break;
+    }
+    return "None";
+}
+
 inline MiningRunPresentation miningRunPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const MiningRunState& mining = state.run.mining;
@@ -190,6 +207,11 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::targetMaterial, std::string(miningMaterialName(mining.targetMaterial))),
         panelMetric(text::labels::toughness, miningToughnessValue(mining))
     };
+    if (mining.artifact.present) {
+        presentation.metrics.push_back(panelMetric("Artifact", miningArtifactStateLabel(mining.artifact.state)));
+        presentation.metrics.push_back(panelMetric("Tether", mining.artifact.tethered ? "Locked" : "Free"));
+        presentation.metrics.push_back(panelMetric("Artifact integrity", display::percent(mining.artifact.maxHealth <= 0.0 ? 0.0 : mining.artifact.health / mining.artifact.maxHealth)));
+    }
     presentation.payloadMetrics = {
         panelMetric(text::labels::cargo, std::to_string(mining.cargo)),
         panelMetric(text::labels::commonMaterials, std::to_string(mining.temporaryMaterials.common)),
@@ -198,7 +220,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::artifacts, std::to_string(mining.temporaryArtifacts.size()))
     };
     presentation.details = {
-        detailPresentationRow("Controls", std::string("WASD/arrows move; mouse or Space drills; E scans; R stows; Esc aborts.")),
+        detailPresentationRow("Controls", std::string("WASD/arrows move; mouse or Space drills; E scans; T tethers artifacts; R stows; Esc aborts.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
         detailPresentationRow("Drill power", display::fixed(stats.power, 1)),
         detailPresentationRow("Scanner radius", display::fixed(stats.scannerRadius, 1)),
@@ -225,6 +247,9 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Run target", text::fuel::miningRunTarget(arkKnown)),
         detailPresentationRow("Depth pressure", std::string("Deeper zones have tougher terrain, richer pockets, and more extraction risk."))
     };
+    if (mining.artifact.present) {
+        presentation.details.push_back(detailPresentationRow("Artifact recovery", std::string("Expose the object, press T nearby to tether, pull it to the ship bay, and avoid drilling or bouncing it.")));
+    }
     if (mining.failurePending) {
         presentation.actions = {
             disabledPanelButton("Drill disabled")
@@ -232,6 +257,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     } else {
         presentation.actions = {
             panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
+            panelActionButton(text::buttons::tetherArtifact, ui::actions::miningTether, "warn"),
             panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"),
             panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
         };

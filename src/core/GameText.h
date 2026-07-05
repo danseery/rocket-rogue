@@ -389,6 +389,7 @@ inline constexpr std::string_view mineDeposit = "Mine deposit";
 inline constexpr std::string_view pushDeeper = "Push deeper";
 inline constexpr std::string_view extractPayload = "Extract payload";
 inline constexpr std::string_view pulseScanner = "Pulse scanner";
+inline constexpr std::string_view tetherArtifact = "Tether artifact";
 inline constexpr std::string_view stowPayload = "Stow payload";
 inline constexpr std::string_view abortMining = "Abort mining";
 } // namespace buttons
@@ -621,7 +622,7 @@ inline constexpr std::string_view researchAdvisoryEmpty = "No active projects";
 inline constexpr std::string_view researchAdvisoryEmptyDetail = "The lab has no viable project queued for this arrival. Send the field team down and keep the expedition moving.";
 inline constexpr std::string_view surfaceExpeditionBrief = "Choose one field action, then extract the payload when the risk is no longer worth the next dig.";
 inline constexpr std::string_view surfacePostureScout = "Recommended: gather data";
-inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Mine now to spend shared fuel, or survey and push deeper to save it.";
+inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Scan layers, push if the read looks good, or mine now and gamble.";
 inline constexpr std::string_view surfacePostureStable = "Recommended: one more action is reasonable";
 inline constexpr std::string_view surfacePostureStableDetail = "You have recoverable cargo and enough action-kit margin to keep working.";
 inline constexpr std::string_view surfacePostureNarrowing = "Recommended: extract soon";
@@ -630,9 +631,9 @@ inline constexpr std::string_view surfacePostureGreedy = "Recommended: extract n
 inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is valuable, but recovery risk is climbing into expensive territory.";
 inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
-inline constexpr std::string_view surfaceSurveyDetail = "Recover common samples; probes improve yield and reduce dust trouble.";
+inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining layer first; extra pulses preview deeper Push Deeper layers.";
 inline constexpr std::string_view surfaceMineDetail = "Deploy the mining drone once for this surface loop; mining spends fuel, not action kits.";
-inline constexpr std::string_view surfacePushDetail = "Increase depth for artifacts and richer deposits; terrain gets less forgiving.";
+inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";
 inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to Earth. Cargo rigs reduce extraction risk.";
 
 inline std::string closeCallSurvival(std::string_view margin)

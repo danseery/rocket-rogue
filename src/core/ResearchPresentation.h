@@ -572,6 +572,8 @@ inline SurfaceExpeditionState projectedPushExpedition(const SurfaceExpeditionSta
 inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     std::vector<PanelMetricPresentation> chips;
+    chips.push_back(panelMetric("Layer read", "+0 first"));
+    chips.push_back(panelMetric("More pulses", "+1, +2..."));
     addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
     addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedSurveyExpedition(state.run.surfaceExpedition, tools, crew, site)));
     return chips;
@@ -595,6 +597,13 @@ inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& sta
 {
     std::vector<PanelMetricPresentation> chips;
     chips.push_back(panelMetric(text::labels::depth, "+1"));
+    const bool nextLayerScanned = std::any_of(
+        state.run.surfaceExpedition.depthProspects.begin(),
+        state.run.surfaceExpedition.depthProspects.end(),
+        [&](const SurfaceDepthProspect& prospect) {
+            return prospect.absoluteDepth == state.run.surfaceExpedition.depth + 1;
+        });
+    chips.push_back(panelMetric("Layer +1", nextLayerScanned ? "Scanned" : "Unknown"));
     addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus));
     chips.push_back(panelMetric(text::labels::hazard, display::signedPercent(tuning::research::hazardPerDepth)));
     addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedPushExpedition(state.run.surfaceExpedition)));
@@ -724,9 +733,9 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
-        detailPresentationRow(text::panel::details::surveyRisk, std::string("Dust can burn extra action kits; field probes improve yield and reduce survey trouble.")),
+        detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then the Push Deeper layers. Dust can still burn extra action kits.")),
         detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only drone run for this surface loop; pushing deeper closes once the run is used.")),
-        detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper raises hazard, artifact odds, and extraction pressure.")),
+        detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper commits the actual layer depth and marks what the mining drone should find there.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,

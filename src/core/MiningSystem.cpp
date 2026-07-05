@@ -316,7 +316,7 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
         MiningCellMaterial reward = MiningCellMaterial::RareOre;
         if (mammalBurrow) {
             room = MiningCellFeature::BossChamber;
-            reward = terrain.depthZone >= 1 || destination.tier >= 5 ? MiningCellMaterial::ArtifactCache : MiningCellMaterial::ExoticVein;
+            reward = MiningCellMaterial::ExoticVein;
         } else if (roomRoll > 0.72) {
             room = MiningCellFeature::MinibossLair;
             reward = terrain.depthZone >= 2 || destination.tier >= 5 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
@@ -364,7 +364,7 @@ MiningCellMaterial generatedMaterial(
     const double tierBonus = static_cast<double>(destination.tier) * 0.012;
 
     if (depthZone >= 1 && artifactRoll > 0.986 - fractureArtifactBonus - tierBonus && y > height / 2) {
-        return MiningCellMaterial::ArtifactCache;
+        return depthZone >= 2 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
     }
     if (hazardRoll > 0.978 - depth * 0.010 && y > 8) {
         return MiningCellMaterial::HazardPocket;
@@ -401,6 +401,13 @@ void revealAround(MiningRunState& mining, double centerX, double centerY, double
             if (MiningCell* cell = miningCellAt(mining.terrain, x, y)) {
                 cell->revealed = true;
             }
+        }
+    }
+    if (mining.artifact.present && (mining.artifact.state == MiningArtifactState::Embedded || mining.artifact.state == MiningArtifactState::Loose)) {
+        const double dx = mining.artifact.x - centerX;
+        const double dy = mining.artifact.y - centerY;
+        if (dx * dx + dy * dy <= radiusSq) {
+            mining.artifact.revealed = true;
         }
     }
 }
@@ -472,6 +479,8 @@ bool drillableCell(const MiningCell* cell)
 }
 
 void addBrokenCellReward(GameState& state, const MiningDrillStats& stats, MiningCellMaterial material);
+void damageMiningArtifact(MiningRunState& mining, double damage);
+void releaseEmbeddedArtifact(MiningRunState& mining);
 
 double drillHeatDelta(MiningCellMaterial material, const MiningDrillStats& stats, double dt)
 {
@@ -501,6 +510,9 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
     }
 
     const MiningCellMaterial material = target->material;
+    if (material == MiningCellMaterial::ArtifactCache) {
+        damageMiningArtifact(mining, tuning::mining::artifactDrillDamagePerSecond * dt);
+    }
     double drillPower = stats.power;
     if (!softMiningMaterial(material)) {
         drillPower *= tuning::mining::denseMaterialDrillPowerScale;
@@ -516,7 +528,11 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
         *target = makeCell(MiningCellMaterial::Empty, mining.depthZone);
         target->revealed = true;
         mining.cellsBroken += 1;
-        addBrokenCellReward(state, stats, brokenMaterial);
+        if (brokenMaterial == MiningCellMaterial::ArtifactCache) {
+            releaseEmbeddedArtifact(mining);
+        } else {
+            addBrokenCellReward(state, stats, brokenMaterial);
+        }
         revealAround(mining, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5, 1.35);
         markDirty(mining.terrain, x, y);
         return true;
@@ -705,6 +721,161 @@ std::string artifactId(const MiningRunState& mining)
     return out.str();
 }
 
+bool recoverableArtifactState(MiningArtifactState state)
+{
+    return state == MiningArtifactState::Embedded || state == MiningArtifactState::Loose;
+}
+
+ArtifactKind rollMiningArtifactKind(const GameState& state, const Destination& destination, int depthZone)
+{
+    if (state.meta.ark.condition == ArkCondition::DamagedStranded) {
+        const std::uint64_t seed = hashCombine(state.seed, hashString(destination.id));
+        if (unitHash(seed, destination.tier, depthZone, 0, 211) < 0.42) {
+            return ArtifactKind::Story;
+        }
+    }
+    return ArtifactKind::Boost;
+}
+
+ArtifactRewardType rollMiningArtifactReward(const GameState& state, const Destination& destination, ArtifactKind kind, int depthZone)
+{
+    if (kind == ArtifactKind::Story) {
+        return ArtifactRewardType::None;
+    }
+    const std::uint64_t seed = hashCombine(state.seed, hashString(destination.id));
+    const double roll = unitHash(seed, destination.tier, depthZone, 0, 223);
+    if (!arkDiscovered(state) && roll < 0.67) {
+        return ArtifactRewardType::Credits;
+    }
+    if (roll < 0.34) {
+        return ArtifactRewardType::Credits;
+    }
+    if (roll < 0.67) {
+        return ArtifactRewardType::ArkFuel;
+    }
+    return ArtifactRewardType::BlueprintInsight;
+}
+
+double miningArtifactSpawnChance(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone)
+{
+    (void)state;
+    const double depthBonus = std::clamp(static_cast<double>(std::max(0, depthZone)) * 0.035, 0.0, 0.10);
+    const double tierBonus = std::clamp(static_cast<double>(destination.tier) * 0.018, 0.0, 0.10);
+    const double siteBonus = profile == SurfaceSiteProfile::FractureField ? 0.08 : 0.0;
+    return std::min(tuning::mining::artifactMaxSpawnChance, tuning::mining::artifactBaseSpawnChance + depthBonus + tierBonus + siteBonus);
+}
+
+bool placeMiningArtifact(GameState& state, MiningRunState& mining, const Destination& destination, bool forced, bool revealed)
+{
+    if (mining.artifact.present) {
+        return true;
+    }
+    const std::uint64_t seed = hashCombine(state.seed, hashString(destination.id));
+    if (!forced && unitHash(seed, destination.tier, mining.depthZone, 0, 197) > miningArtifactSpawnChance(state, destination, mining.siteProfile, mining.depthZone)) {
+        return false;
+    }
+
+    const int minY = std::max(6, mining.terrain.height / 2);
+    const int maxY = std::max(minY, mining.terrain.height - 4);
+    auto stampArtifact = [&](int x, int y) {
+        MiningCell* cell = miningCellAt(mining.terrain, x, y);
+        if (cell == nullptr || cell->material == MiningCellMaterial::Bedrock || cell->material == MiningCellMaterial::Empty) {
+            return false;
+        }
+        *cell = makeCell(MiningCellMaterial::ArtifactCache, mining.depthZone);
+        cell->revealed = revealed;
+        cell->feature = MiningCellFeature::TreasureVault;
+        markDirty(mining.terrain, x, y);
+
+        const ArtifactKind kind = rollMiningArtifactKind(state, destination, mining.depthZone);
+        mining.artifact = {};
+        mining.artifact.present = true;
+        mining.artifact.id = artifactId(mining);
+        mining.artifact.kind = kind;
+        mining.artifact.rewardType = rollMiningArtifactReward(state, destination, kind, mining.depthZone);
+        mining.artifact.state = MiningArtifactState::Embedded;
+        mining.artifact.x = static_cast<double>(x) + 0.5;
+        mining.artifact.y = static_cast<double>(y) + 0.5;
+        mining.artifact.maxHealth = tuning::mining::artifactMaxHealth;
+        mining.artifact.health = mining.artifact.maxHealth;
+        mining.artifact.embedStrength = 1.0;
+        mining.artifact.revealed = revealed;
+        return true;
+    };
+
+    for (int attempt = 0; attempt < 180; ++attempt) {
+        const int x = std::clamp(
+            2 + static_cast<int>(unitHash(seed, attempt, mining.depthZone, 0, 229) * static_cast<double>(std::max(1, mining.terrain.width - 4))),
+            2,
+            std::max(2, mining.terrain.width - 3));
+        const int y = std::clamp(
+            minY + static_cast<int>(unitHash(seed, attempt, mining.depthZone, 1, 233) * static_cast<double>(std::max(1, maxY - minY + 1))),
+            minY,
+            maxY);
+        if (stampArtifact(x, y)) {
+            return true;
+        }
+    }
+
+    if (forced) {
+        for (int y = minY; y <= maxY; ++y) {
+            for (int x = 2; x <= std::max(2, mining.terrain.width - 3); ++x) {
+                if (stampArtifact(x, y)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void damageMiningArtifact(MiningRunState& mining, double damage)
+{
+    MiningArtifactObject& artifact = mining.artifact;
+    if (!artifact.present || !recoverableArtifactState(artifact.state) || damage <= 0.0) {
+        return;
+    }
+    artifact.health = std::max(0.0, artifact.health - damage);
+    artifact.revealed = true;
+    if (artifact.health <= 0.0) {
+        artifact.state = MiningArtifactState::Destroyed;
+        artifact.tethered = false;
+        artifact.velocityX = 0.0;
+        artifact.velocityY = 0.0;
+    }
+}
+
+void releaseEmbeddedArtifact(MiningRunState& mining)
+{
+    MiningArtifactObject& artifact = mining.artifact;
+    if (!artifact.present || artifact.state != MiningArtifactState::Embedded) {
+        return;
+    }
+    artifact.state = MiningArtifactState::Loose;
+    const int cellX = std::clamp(static_cast<int>(std::floor(artifact.x)), 0, mining.terrain.width - 1);
+    const int cellY = std::clamp(static_cast<int>(std::floor(artifact.y)), 0, mining.terrain.height - 1);
+    if (MiningCell* cell = miningCellAt(mining.terrain, cellX, cellY)) {
+        if (cell->material == MiningCellMaterial::ArtifactCache) {
+            *cell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
+            cell->revealed = true;
+            markDirty(mining.terrain, cellX, cellY);
+        }
+    }
+}
+
+ArtifactRecord artifactRecordForObject(const MiningArtifactObject& artifact, std::string_view destinationId)
+{
+    ArtifactRecord record;
+    record.id = artifact.id;
+    record.originDestinationId = std::string(destinationId);
+    record.identified = false;
+    record.kind = artifact.kind;
+    record.rewardType = artifact.rewardType;
+    record.condition = artifact.maxHealth <= 0.0 ? 0.0 : std::clamp(artifact.health / artifact.maxHealth, 0.0, 1.0);
+    record.rewardApplied = false;
+    return record;
+}
+
 void addBrokenCellReward(GameState& state, const MiningDrillStats& stats, MiningCellMaterial material)
 {
     MiningRunState& mining = state.run.mining;
@@ -728,8 +899,6 @@ void addBrokenCellReward(GameState& state, const MiningDrillStats& stats, Mining
         gain.exotic = 1;
         break;
     case MiningCellMaterial::ArtifactCache:
-        mining.temporaryArtifacts.push_back({artifactId(mining), mining.destinationId, false});
-        mining.cargo += tuning::mining::artifactCargo;
         break;
     case MiningCellMaterial::HazardPocket:
         mining.hazardDelta += tuning::mining::hazardPocketRisk;
@@ -1529,7 +1698,6 @@ void applySurfaceProspects(MiningTerrain& terrain, const SurfaceExpeditionState&
     stampProspect(MiningCellMaterial::CommonOre, expedition.prospectMaterials.common, shallowBand, 2, MiningCellFeature::BranchTunnel);
     stampProspect(MiningCellMaterial::RareOre, expedition.prospectMaterials.rare, midBand, 2, MiningCellFeature::TreasureVault);
     stampProspect(MiningCellMaterial::ExoticVein, expedition.prospectMaterials.exotic, deepBand, 2, MiningCellFeature::TreasureVault);
-    stampProspect(MiningCellMaterial::ArtifactCache, expedition.prospectArtifacts, deepBand + 2, 2, MiningCellFeature::TreasureVault);
 }
 
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog)
@@ -1570,8 +1738,11 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.fuelSpent = 1;
     mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
     applySurfaceProspects(mining.terrain, expedition);
+    const bool forcedArtifact = expedition.prospectArtifacts > 0;
+    placeMiningArtifact(state, mining, *destination, forcedArtifact, forcedArtifact);
     expedition.prospectMaterials = {};
     expedition.prospectArtifacts = 0;
+    expedition.depthProspects.clear();
     spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
@@ -1621,6 +1792,32 @@ void setMiningDrilling(GameState& state, bool drilling)
     }
 }
 
+void toggleMiningTether(GameState& state)
+{
+    MiningRunState& mining = state.run.mining;
+    MiningArtifactObject& artifact = mining.artifact;
+    if (!mining.active || !artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
+        return;
+    }
+    if (artifact.tethered) {
+        const double speed = std::sqrt(artifact.velocityX * artifact.velocityX + artifact.velocityY * artifact.velocityY);
+        if (speed > tuning::mining::artifactDropDamageThreshold) {
+            damageMiningArtifact(mining, (speed - tuning::mining::artifactDropDamageThreshold) * tuning::mining::artifactImpactDamageScale);
+        }
+        artifact.tethered = false;
+        return;
+    }
+
+    const double dx = artifact.x - mining.droneX;
+    const double dy = artifact.y - mining.droneY;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    const bool exposed = artifact.revealed || artifact.state == MiningArtifactState::Loose;
+    if (exposed && distance <= tuning::mining::artifactTetherRangeCells) {
+        artifact.tethered = true;
+        artifact.revealed = true;
+    }
+}
+
 void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
@@ -1629,6 +1826,89 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     }
     revealAround(mining, mining.droneX, mining.droneY, miningDrillStats(state, catalog).scannerRadius);
     mining.scannerPulseSeconds = 0.9;
+}
+
+void updateMiningArtifact(GameState& state, double dt)
+{
+    MiningRunState& mining = state.run.mining;
+    MiningArtifactObject& artifact = mining.artifact;
+    if (!artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
+        return;
+    }
+
+    const double dx = mining.droneX - artifact.x;
+    const double dy = mining.droneY - artifact.y;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    if (artifact.tethered && distance > tuning::mining::artifactTetherRangeCells * 1.75) {
+        artifact.tethered = false;
+    }
+
+    if (artifact.state == MiningArtifactState::Embedded) {
+        if (artifact.tethered) {
+            const double tension = std::max(0.0, distance - 0.85);
+            artifact.embedStrength = std::max(0.0, artifact.embedStrength - tension * tuning::mining::artifactTetherPullPerSecond * dt);
+            artifact.velocityX = dx / std::max(0.001, distance) * tension * 0.22;
+            artifact.velocityY = dy / std::max(0.001, distance) * tension * 0.22;
+            if (artifact.embedStrength <= 0.0) {
+                releaseEmbeddedArtifact(mining);
+            }
+        }
+        return;
+    }
+
+    if (artifact.state != MiningArtifactState::Loose) {
+        return;
+    }
+
+    if (artifact.tethered && distance > 0.001) {
+        artifact.velocityX += (dx * tuning::mining::artifactTetherSpring - artifact.velocityX * tuning::mining::artifactTetherDamping) * dt;
+        artifact.velocityY += (dy * tuning::mining::artifactTetherSpring - artifact.velocityY * tuning::mining::artifactTetherDamping) * dt;
+    } else {
+        artifact.velocityX *= std::max(0.0, 1.0 - dt * 1.8);
+        artifact.velocityY *= std::max(0.0, 1.0 - dt * 1.8);
+    }
+
+    auto solidAt = [&](double x, double y) {
+        const int cellX = std::clamp(static_cast<int>(std::floor(x)), 0, mining.terrain.width - 1);
+        const int cellY = std::clamp(static_cast<int>(std::floor(y)), 0, mining.terrain.height - 1);
+        const MiningCell* cell = miningCellAt(mining.terrain, cellX, cellY);
+        return cell != nullptr && miningMaterialSolid(cell->material);
+    };
+    auto impactDamage = [&]() {
+        const double speed = std::sqrt(artifact.velocityX * artifact.velocityX + artifact.velocityY * artifact.velocityY);
+        if (speed > tuning::mining::artifactImpactDamageThreshold) {
+            damageMiningArtifact(mining, (speed - tuning::mining::artifactImpactDamageThreshold) * tuning::mining::artifactImpactDamageScale);
+        }
+    };
+
+    const double nextX = std::clamp(artifact.x + artifact.velocityX * dt, 1.0, static_cast<double>(mining.terrain.width - 2));
+    if (!solidAt(nextX, artifact.y)) {
+        artifact.x = nextX;
+    } else {
+        impactDamage();
+        artifact.velocityX *= -0.46;
+    }
+
+    const double nextY = std::clamp(artifact.y + artifact.velocityY * dt, 1.0, static_cast<double>(mining.terrain.height - 2));
+    if (!solidAt(artifact.x, nextY)) {
+        artifact.y = nextY;
+    } else {
+        impactDamage();
+        artifact.velocityY *= -0.46;
+    }
+
+    const double bayX = static_cast<double>(mining.terrain.width) * 0.5;
+    const double bayY = tuning::mining::artifactShipBayY;
+    const double bayDx = artifact.x - bayX;
+    const double bayDy = artifact.y - bayY;
+    if (artifact.tethered && bayDx * bayDx + bayDy * bayDy <= tuning::mining::artifactDeliveryRadiusCells * tuning::mining::artifactDeliveryRadiusCells) {
+        artifact.state = MiningArtifactState::Delivered;
+        artifact.tethered = false;
+        artifact.velocityX = 0.0;
+        artifact.velocityY = 0.0;
+        mining.temporaryArtifacts.push_back(artifactRecordForObject(artifact, mining.destinationId));
+        mining.cargo += tuning::mining::artifactCargo;
+    }
 }
 
 void updateMiningRun(GameState& state, const ContentCatalog& catalog, double deltaSeconds)
@@ -1745,6 +2025,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
+    updateMiningArtifact(state, dt);
     refreshTargetCell(mining);
 
     if (mining.oxygenSeconds <= 0.0 || mining.drillIntegrity <= 0.0) {

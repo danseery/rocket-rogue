@@ -202,11 +202,12 @@ std::string surfaceActionChipLabel(std::string_view label)
 std::string surfaceActionChip(const PanelMetricPresentation& chip)
 {
     const std::string label = surfaceActionChipLabel(chip.label);
+    const std::string text = label + " " + chip.value;
     const bool positive = chip.value.empty() || chip.value.front() != '-';
-    const bool wideChip = label.size() > 8 || label.find(' ') != std::string::npos;
+    const bool wideChip = text.size() > 11 || label.find(' ') != std::string::npos;
     return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
         std::string(wideChip ? " wide" : "") + "\">" +
-        htmlEscape(label) + " " + htmlEscape(chip.value) + "</span>";
+        htmlEscape(text) + "</span>";
 }
 
 std::string statChipGrid(const std::vector<RefitStatChip>& chips)
@@ -249,6 +250,11 @@ std::string surfaceActionDetail(const SurfaceActionPreviewPresentation& action)
 PanelButtonPresentation surfaceActionFooterButton(const SurfaceActionPreviewPresentation& action)
 {
     PanelButtonPresentation buttonPresentation = action.action;
+    if (isSurfaceMiningAction(action) && buttonPresentation.enabled) {
+        buttonPresentation.cssClass = buttonPresentation.cssClass.empty()
+            ? "rare"
+            : buttonPresentation.cssClass + " rare";
+    }
     if (!buttonPresentation.enabled && (buttonPresentation.label.rfind("Need ", 0) == 0 || buttonPresentation.label.size() > 14)) {
         buttonPresentation.label = std::string(text::buttons::unavailable);
     }
@@ -693,9 +699,10 @@ std::string inventorySection(const InventorySectionPresentation& section)
 std::string inventoryBody(const InventoryPresentation& inventory)
 {
     std::ostringstream out;
-    out << "<div class=\"inventory-modal\">";
-    out << "<div class=\"inventory-layout\">";
-    if (!inventory.sideSections.empty()) {
+    const bool hasSideColumn = !inventory.sideSections.empty();
+    out << "<div class=\"inventory-modal " << (hasSideColumn ? "inventory-with-side" : "inventory-main-only") << "\">";
+    out << "<div class=\"inventory-layout " << (hasSideColumn ? "inventory-layout-with-side" : "inventory-layout-main-only") << "\">";
+    if (hasSideColumn) {
         out << "<aside class=\"inventory-side-column\">";
         for (const InventorySectionPresentation& section : inventory.sideSections) {
             out << inventorySection(section);
@@ -907,6 +914,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<p>" << htmlEscape("Show light tips when new systems appear.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-help-toggle=\"1\">"
         << htmlEscape("Hide mission help") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-camera-shake-settings>"
+        << "<div><h3>" << htmlEscape("Camera shake") << "</h3>"
+        << "<p>" << htmlEscape("Keep impact and drilling screen shake enabled, or disable it for comfort.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\">"
+        << htmlEscape("Disable camera shake") << "</button></section>";
     settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
         << "<div><h3>" << htmlEscape("Debug mini-games") << "</h3>"
         << "<p>" << htmlEscape("Show sandbox launch tools for mining, flyby, and orbit. These do not write save data.") << "</p></div>"
@@ -1377,7 +1389,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const bool arkKnown = arkDiscovered(state);
         out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
-            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, and stow payload before oxygen, shared fuel, or extraction risk turns ugly.") << "</p></div>"
+            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, tether fragile artifacts, and stow payload before oxygen, shared fuel, or extraction risk turns ugly.") << "</p></div>"
             << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << "</div></div>";
         const std::string miningFuelHelp = arkKnown
@@ -1385,14 +1397,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             : "Mining uses the same shared fuel supply as the shuttle. Return to base to replenish the shuttle and drone, then bring back materials and artifacts before oxygen, fuel, or extraction risk gets ugly.";
         out << tutorialCard(
             "mining-basics",
-            "Dig, scan, stow",
-            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, and R stows payload. " + miningFuelHelp);
+            "Dig, scan, tether, stow",
+            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, T tethers exposed artifacts, and R stows delivered payload. " + miningFuelHelp);
         if (miningPanel.failurePending) {
             out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
         }
         out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Current payload")
-            << "</h2><p>" << htmlEscape("Materials and artifacts recovered during this dig. Stow payload to carry it back to surface extraction.") << "</p></div>"
+            << "</h2><p>" << htmlEscape("Materials recovered during this dig and artifacts delivered to the ship bay. Stow payload to carry it back to surface extraction.") << "</p></div>"
             << "<div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
@@ -1429,15 +1441,20 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "</h2><p>" << htmlEscape("Assign persistent helper drones before committing the mining rig.") << "</p></div>"
             << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << "</div></div>";
-        out << "<div class=\"metric-grid focus-metrics\">";
-        for (const PanelMetricPresentation& metricItem : dronePanel.metrics) {
-            out << metric(metricItem.label, metricItem.value);
-        }
-        out << "</div>";
-        const std::vector<PanelMetricPresentation> droneSlotChips {panelMetric("Next slot", dronePanel.nextSlotCost)};
-        out << "<section class=\"resource-bank\"><div><h2>" << htmlEscape("Drone Bay")
+        const std::vector<PanelMetricPresentation> droneBayChips {
+            dronePanel.metrics.size() > 0 ? dronePanel.metrics[0] : panelMetric("Slots", "0/0"),
+            dronePanel.metrics.size() > 1 ? dronePanel.metrics[1] : panelMetric("Owned drones", "0"),
+            panelMetric("Next slot", dronePanel.nextSlotCost)
+        };
+        const std::vector<PanelMetricPresentation> droneMaterialChips {
+            dronePanel.metrics.size() > 2 ? dronePanel.metrics[2] : panelMetric(text::labels::commonMaterials, "0"),
+            dronePanel.metrics.size() > 3 ? dronePanel.metrics[3] : panelMetric(text::labels::rareMaterials, "0"),
+            dronePanel.metrics.size() > 4 ? dronePanel.metrics[4] : panelMetric(text::labels::exoticMaterials, "0")
+        };
+        out << "<section class=\"resource-bank drone-bay-strip\"><div class=\"drone-bay-copy\"><h2>" << htmlEscape("Drone Bay")
             << "</h2><p>" << htmlEscape("Slots persist across expeditions. Equipped drones support the next mining run.") << "</p></div>"
-            << "<div class=\"stat-grid\">" << resourceChipGrid(droneSlotChips) << "</div>"
+            << "<div class=\"stat-grid drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
+            << "<div class=\"stat-grid drone-bay-materials\">" << resourceChipGrid(droneMaterialChips) << "</div>"
             << panelButton(dronePanel.upgradeSlotAction) << "</section>";
         out << "<section class=\"board-primary drone-roster\"><h2>" << htmlEscape("Drone roster") << "</h2><div class=\"ops-grid\">";
         for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
@@ -1458,6 +1475,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-scan", state.statusLine);
         const std::vector<PanelMetricPresentation> scanMetrics {
             panelMetric("Pulses", std::to_string(scan.pulses) + "/" + std::to_string(std::max(1, scan.maxPulses))),
+            panelMetric("Next layer", "+" + std::to_string(scan.pulses)),
+            panelMetric("Mapped", std::to_string(scan.depthProspects.size())),
             panelMetric("Signal", display::percent(scan.signal)),
             panelMetric("Interference", display::percent(scan.interference)),
             panelMetric("Bust risk", display::percent(scan.bustRisk))
@@ -1475,11 +1494,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << surfaceMiniGamePanel(
             "scan-minigame",
             "Planet Scan",
-            "Sweep for underground prospects. Pulse to raise payout; bank before bust risk climbs.",
+            "Pulse 1 maps the current layer. Later pulses preview deeper Push Deeper layers.",
             scanMetrics,
             materialRewardChips(scan.temporaryMaterials, static_cast<int>(scan.temporaryArtifacts.size()), scan.cargo),
             scan.busted ? "Signal Burnout" : (scan.completed ? "Jackpot Window" : "Scanner Window"),
-            scan.message.empty() ? "Pulse for richer returns, then bank before interference burns the array." : scan.message,
+            scan.message.empty() ? "Pulse to forecast a layer, then bank the scan before interference burns the array." : scan.message,
             actions);
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
@@ -1492,9 +1511,18 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfacePushRunState& push = state.run.surfacePush;
         out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-push", state.statusLine);
+        const int nextDepthOffset = push.steps + 1;
+        const bool nextLayerScanned = std::any_of(
+            state.run.surfaceExpedition.depthProspects.begin(),
+            state.run.surfaceExpedition.depthProspects.end(),
+            [&](const SurfaceDepthProspect& prospect) {
+                return prospect.absoluteDepth == state.run.surfaceExpedition.depth + nextDepthOffset;
+            });
         const std::vector<PanelMetricPresentation> pushMetrics {
             panelMetric("Steps", std::to_string(push.steps) + "/" + std::to_string(std::max(1, push.maxSteps))),
             panelMetric("Depth gain", "+" + std::to_string(push.depthGain)),
+            panelMetric("Next layer", "+" + std::to_string(nextDepthOffset)),
+            panelMetric("Survey read", nextLayerScanned ? "Known" : "Unknown"),
             panelMetric("Pressure", display::percent(push.pressure)),
             panelMetric("Collapse risk", display::percent(push.collapseRisk))
         };
@@ -1511,11 +1539,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << surfaceMiniGamePanel(
             "push-minigame",
             "Deep Push",
-            "Mark a deeper route for richer deposits. Every descent step sharpens the reward and the collapse odds.",
+            "Press deeper to turn layer forecasts into actual marked finds for mining.",
             pushMetrics,
             materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
             push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
-            push.message.empty() ? "Push for a better route, then bank before the terrain turns." : push.message,
+            push.message.empty() ? "Push for the next layer, then bank before the terrain turns." : push.message,
             actions);
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
