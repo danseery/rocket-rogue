@@ -59,13 +59,13 @@ inline bool canCommitArrivalOps(const GameState& state, const ContentCatalog& ca
         && currentMultiplier >= destination.targetMultiplier;
 }
 
-inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions)
+inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions, bool arkKnown)
 {
     std::vector<FlightActionButtonPresentation> buttons;
     if (actions.returningHome) {
-        buttons.push_back(disabledFlightActionButton(text::buttons::returningHome));
+        buttons.push_back(disabledFlightActionButton(text::buttons::returningHomeLabel(arkKnown)));
     } else {
-        buttons.push_back(flightActionButton(text::buttons::returnHome, ui::actions::returnHome, "ok"));
+        buttons.push_back(flightActionButton(text::buttons::returnHomeLabel(arkKnown), ui::actions::returnHome, "ok"));
     }
     buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
     return buttons;
@@ -162,7 +162,7 @@ inline LaunchPanelPresentation launchPanelPresentation(
     }
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
     presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(flightModel.pressureModifier)));
-    presentation.primaryActions = primaryFlightActions(actions);
+    presentation.primaryActions = primaryFlightActions(actions, arkDiscovered(state));
     if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
         presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
     }

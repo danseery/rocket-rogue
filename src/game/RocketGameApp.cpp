@@ -281,6 +281,7 @@ void RocketGameApp::tick(double deltaSeconds)
                     event,
                     session_.controls.actions,
                     session_.preparedLaunch.config.frontierTransfer,
+                    arkDiscovered(state_),
                     session_.controls.returnDriftHome,
                     false,
                     returnProgress
@@ -308,6 +309,7 @@ void RocketGameApp::tick(double deltaSeconds)
                     event,
                     session_.controls.actions,
                     session_.preparedLaunch.config.frontierTransfer,
+                    arkDiscovered(state_),
                     session_.controls.returnDriftHome,
                     pastDataGoal,
                     0.0
@@ -427,7 +429,7 @@ void RocketGameApp::startLaunch()
     session_.flightArmed = true;
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
-        : std::string(text::status::provingBurnStarted);
+        : text::status::provingBurnStartedForHome(arkDiscovered(state_));
     refreshPanel();
 }
 
@@ -465,7 +467,7 @@ void RocketGameApp::returnHome()
     session_.controls.actions.returningHome = true;
     session_.controls.actions.cutEnginesActive = false;
     state_.statusLine = session_.controls.returnDriftHome
-        ? std::string(text::status::fuelReserveGone)
+        ? text::status::fuelReserveGoneForHome(arkDiscovered(state_))
         : std::string(text::status::returnBurnRotating);
     panelDirty_ = true;
 }
@@ -873,6 +875,18 @@ void RocketGameApp::equipDrone(int index)
     }
 
     if (equipMiniDrone(state_, catalog_, index)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::upgradeDrone(int index)
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    if (::rocket::upgradeMiniDrone(state_, catalog_, index)) {
         save();
     }
     panelDirty_ = true;
@@ -1454,7 +1468,7 @@ void RocketGameApp::resetSave()
     rng_ = Random(state_.seed);
     session_ = {};
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
-    panelDirty_ = true;
+    refreshPanel();
 }
 
 bool RocketGameApp::uiMouseMove(int x, int y)
@@ -1558,6 +1572,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectSurfaceUpgrade(index);
     } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
         equipDrone(index);
+    } else if (consumeIndexedAction(action, ui::actions::upgradeDronePrefix, index)) {
+        upgradeDrone(index);
     } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
         selectNavigationDestination(index);
     } else if (consumeIndexedAction(action, ui::actions::recruitCandidatePrefix, index)) {
@@ -1735,6 +1751,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
     result.currentFrontierTier = currentFrontier.tier;
+    result.arkCondition = state_.meta.ark.condition;
 
     if (state_.screen == Screen::Mining && state_.run.mining.active) {
         const MiningRunState& mining = state_.run.mining;
@@ -1770,6 +1787,28 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningSharedFuel = state_.run.surfaceExpedition.sharedFuel;
         result.miningSharedFuelCapacity = state_.run.surfaceExpedition.sharedFuelCapacity;
         result.miningCargo = mining.cargo;
+        const MiniDroneLoadoutEffects droneEffects = miniDroneLoadoutEffects(state_, catalog_);
+        result.miningSynergyCount = static_cast<int>(droneEffects.synergyNames.size());
+        result.miningSignatureTier = droneEffects.signatureTier;
+        result.miningSignatureStyle = static_cast<int>(droneEffects.signatureKind);
+        for (const std::string& droneId : state_.meta.equippedDroneIds) {
+            const MiniDrone* drone = catalog_.findMiniDrone(droneId);
+            if (drone == nullptr) {
+                continue;
+            }
+            result.miningSupportDroneCount += 1;
+            if (miniDroneUpgradeLevel(state_, droneId) > 1) {
+                result.miningTunedDroneCount += 1;
+            }
+            result.miningDroneRoles.push_back(static_cast<int>(drone->role));
+            result.miningDroneUpgradeLevels.push_back(miniDroneUpgradeLevel(state_, droneId));
+            if (drone->role == MiniDroneRole::Attack) {
+                result.miningAttackDroneCount += 1;
+            } else if (drone->role == MiniDroneRole::Defense) {
+                result.miningDefenseDroneCount += 1;
+            }
+        }
+        result.miningShieldActive = mining.environmentalShieldAbsorbed > 0.0 || result.miningDefenseDroneCount > 0;
         result.miningMaterials = mining.temporaryMaterials;
         if (mining.artifact.present) {
             result.miningArtifact = {
@@ -1817,7 +1856,37 @@ RenderSnapshot RocketGameApp::snapshot() const
                 enemy.health,
                 enemy.maxHealth,
                 enemy.effectRadius,
+                enemy.attackCooldownSeconds,
                 enemy.active
+            });
+        }
+        result.miningProjectiles.reserve(mining.combatProjectiles.size());
+        for (const MiningProjectileVisual& projectile : mining.combatProjectiles) {
+            result.miningProjectiles.push_back({
+                projectile.startX,
+                projectile.startY,
+                projectile.endX,
+                projectile.endY,
+                projectile.age,
+                projectile.lifetime,
+                static_cast<int>(projectile.team),
+                static_cast<int>(projectile.sourceType),
+                static_cast<int>(projectile.affinity),
+                projectile.critical
+            });
+        }
+        result.miningDamageNumbers.reserve(mining.damageNumbers.size());
+        for (const MiningDamageNumber& number : mining.damageNumbers) {
+            result.miningDamageNumbers.push_back({
+                number.x,
+                number.y,
+                number.amount,
+                number.age,
+                number.lifetime,
+                static_cast<int>(number.team),
+                static_cast<int>(number.kind),
+                number.critical,
+                number.rigDamage
             });
         }
     }

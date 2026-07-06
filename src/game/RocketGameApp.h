@@ -60,6 +60,7 @@ public:
     void openDroneOps();
     void backToSurfaceOps();
     void equipDrone(int index);
+    void upgradeDrone(int index);
     void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);

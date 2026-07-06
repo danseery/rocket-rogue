@@ -1,5 +1,6 @@
 #include "render/WebGLRenderer.h"
 
+#include "core/ResearchSystem.h"
 #include "core/Tuning.h"
 
 #ifdef __EMSCRIPTEN__
@@ -48,7 +49,9 @@ enum ArtAsset {
     JupiterAsset = 11,
     SaturnAsset = 12,
     UranusAsset = 13,
-    NeptuneAsset = 14
+    NeptuneAsset = 14,
+    ArkOperationalAsset = 15,
+    ArkDamagedAsset = 16
 };
 
 struct Vec2 {
@@ -320,6 +323,16 @@ int destinationBodyAsset(int destinationTier)
     return -1;
 }
 
+bool arkVisible(ArkCondition condition)
+{
+    return condition != ArkCondition::NotFound;
+}
+
+bool arkDamaged(ArkCondition condition)
+{
+    return condition == ArkCondition::DamagedStranded || condition == ArkCondition::Repairing;
+}
+
 float bodySpriteScale(int assetIndex)
 {
     if (assetIndex == MoonAsset) {
@@ -415,6 +428,108 @@ Color miningEnemyColor(int type, int affinity)
     default:
         return {1.0F, 0.28F, 0.18F, 0.90F};
     }
+}
+
+Color miningProjectileColor(int team, int sourceType, int affinity, bool critical)
+{
+    if (critical) {
+        return {1.0F, 0.84F, 0.22F, 0.96F};
+    }
+    if (team == static_cast<int>(MiningCombatTeam::Allied)) {
+        return {0.30F, 0.92F, 1.0F, 0.94F};
+    }
+    if (sourceType == static_cast<int>(MiningEnemyType::Elemental)) {
+        Color elemental = miningEnemyColor(sourceType, affinity);
+        elemental.a = 0.94F;
+        return elemental;
+    }
+    return {1.0F, 0.25F, 0.12F, 0.92F};
+}
+
+Color miningDamageTextColor(bool allied, bool critical, bool rigDamage)
+{
+    if (critical) {
+        return {1.0F, 0.82F, 0.18F, 0.96F};
+    }
+    if (allied) {
+        return {0.38F, 0.94F, 1.0F, 0.92F};
+    }
+    return rigDamage ? Color{1.0F, 0.34F, 0.16F, 0.94F} : Color{1.0F, 0.46F, 0.22F, 0.90F};
+}
+
+bool miningSignatureIs(int style, MiniDroneSignatureKind kind)
+{
+    return style == static_cast<int>(kind);
+}
+
+Color miningSignaturePrimaryColor(int style)
+{
+    if (miningSignatureIs(style, MiniDroneSignatureKind::ExcavationStorm)) {
+        return {0.80F, 1.0F, 0.38F, 0.96F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FortressRig)) {
+        return {0.78F, 1.0F, 0.96F, 0.96F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::RelicPathfinder)) {
+        return {0.78F, 0.56F, 1.0F, 0.96F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FullSpectrumSwarm)) {
+        return {1.0F, 0.82F, 0.28F, 0.96F};
+    }
+    return {0.42F, 0.95F, 1.0F, 0.96F};
+}
+
+Color miningSignatureSecondaryColor(int style)
+{
+    if (miningSignatureIs(style, MiniDroneSignatureKind::ExcavationStorm)) {
+        return {1.0F, 0.62F, 0.18F, 0.92F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FortressRig)) {
+        return {0.92F, 1.0F, 1.0F, 0.92F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::RelicPathfinder)) {
+        return {1.0F, 0.80F, 0.26F, 0.92F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FullSpectrumSwarm)) {
+        return {0.36F, 0.96F, 1.0F, 0.92F};
+    }
+    return {1.0F, 0.78F, 0.22F, 0.92F};
+}
+
+Color miningSignatureAccentColor(int style)
+{
+    if (miningSignatureIs(style, MiniDroneSignatureKind::ExcavationStorm)) {
+        return {0.38F, 1.0F, 0.56F, 0.88F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FortressRig)) {
+        return {0.66F, 0.88F, 1.0F, 0.88F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::RelicPathfinder)) {
+        return {0.36F, 0.96F, 1.0F, 0.88F};
+    }
+    if (miningSignatureIs(style, MiniDroneSignatureKind::FullSpectrumSwarm)) {
+        return {0.88F, 0.50F, 1.0F, 0.88F};
+    }
+    return {0.42F, 0.95F, 1.0F, 0.88F};
+}
+
+Color miningMiniDroneRoleColor(int role)
+{
+    switch (static_cast<MiniDroneRole>(role)) {
+    case MiniDroneRole::Attack:
+        return {0.24F, 0.92F, 1.0F, 0.94F};
+    case MiniDroneRole::Defense:
+        return {0.78F, 1.0F, 0.94F, 0.90F};
+    case MiniDroneRole::Mining:
+        return {0.48F, 1.0F, 0.56F, 0.86F};
+    case MiniDroneRole::Resource:
+        return {1.0F, 0.82F, 0.26F, 0.88F};
+    case MiniDroneRole::Survey:
+        return {0.72F, 0.58F, 1.0F, 0.88F};
+    case MiniDroneRole::Stabilizer:
+        return {0.70F, 0.82F, 0.92F, 0.86F};
+    }
+    return {0.62F, 0.94F, 0.66F, 0.82F};
 }
 
 bool miningRewardMaterial(int material)
@@ -663,6 +778,8 @@ bool WebGLRenderer::initialize()
     assets_[SaturnAsset] = {"saturn", "assets/art/saturn.png"};
     assets_[UranusAsset] = {"uranus", "assets/art/uranus.png"};
     assets_[NeptuneAsset] = {"neptune", "assets/art/neptune.png"};
+    assets_[ArkOperationalAsset] = {"ark_operational", "assets/art/ark-operational.png"};
+    assets_[ArkDamagedAsset] = {"ark_damaged", "assets/art/ark-damaged.png"};
 
 #ifdef __EMSCRIPTEN__
     EmscriptenWebGLContextAttributes attributes;
@@ -697,7 +814,7 @@ bool WebGLRenderer::initialize()
     glUniform1i(samplerUniform_, 0);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    std::array<GLuint, 15> textureIds {};
+    std::vector<GLuint> textureIds(assets_.size());
     glGenTextures(static_cast<GLsizei>(textureIds.size()), textureIds.data());
     for (std::size_t i = 0; i < assets_.size(); ++i) {
         assets_[i].texture = textureIds[i];
@@ -954,6 +1071,170 @@ void WebGLRenderer::drawMiningPickupText(float cx, float cy, float unitSize, int
         appendGlyph(textVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap), baseY - glyphH * 0.5F, color);
     }
     submitLines(textVertices, 2.0F);
+}
+
+void WebGLRenderer::drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind)
+{
+    if (amount <= 0 || age < 0.0F) {
+        return;
+    }
+
+    const bool defeatText = kind == static_cast<int>(MiningCombatTextKind::Defeat);
+    const bool rewardCommon = kind == static_cast<int>(MiningCombatTextKind::CommonReward);
+    const bool rewardRare = kind == static_cast<int>(MiningCombatTextKind::RareReward);
+    const bool rewardExotic = kind == static_cast<int>(MiningCombatTextKind::ExoticReward);
+    const bool rewardText = rewardCommon || rewardRare || rewardExotic;
+    const float textLifetime = static_cast<float>(tuning::mining::damageNumberLifetimeSeconds) * ((defeatText || rewardText) ? 1.15F : 1.0F);
+    if (age > textLifetime) {
+        return;
+    }
+    const float t = std::clamp(age / textLifetime, 0.0F, 1.0F);
+    const float fade = (1.0F - t) * (1.0F - t);
+    const float lift = unitSize * ((defeatText || rewardText) ? (1.00F + t * 2.75F) : (0.70F + t * 2.25F));
+    const float scale = unitSize * (defeatText ? 0.92F : (critical ? 0.88F : (rewardText ? 0.76F : 0.72F)));
+    std::string text;
+    if (defeatText) {
+        text = "DOWN";
+    } else if (rewardText) {
+        text = "+" + std::to_string(amount) + (rewardCommon ? "C" : (rewardRare ? "R" : "E"));
+    } else {
+        text = critical
+            ? ("CRIT " + std::to_string(amount))
+            : ((rigDamage ? "-" : "") + std::to_string(amount));
+    }
+    const float glyphW = scale * 0.48F;
+    const float glyphH = scale * 0.78F;
+    const float gap = scale * 0.14F;
+    const float totalW = static_cast<float>(text.size()) * glyphW + static_cast<float>(std::max(0, static_cast<int>(text.size()) - 1)) * gap;
+    const float startX = cx - totalW * 0.5F;
+    const float baseY = cy + lift;
+
+    auto appendGlyph = [&](std::vector<float>& vertices, char ch, float x, float y, Color color) {
+        auto add = [&](float ax, float ay, float bx, float by) {
+            appendLine(vertices, x + ax * glyphW, y + ay * glyphH, x + bx * glyphW, y + by * glyphH, color);
+        };
+        if (ch == ' ') {
+            return;
+        }
+        if (ch == '-') {
+            add(0.18F, 0.50F, 0.82F, 0.50F);
+            return;
+        }
+        if (ch == '+') {
+            add(0.18F, 0.50F, 0.82F, 0.50F);
+            add(0.50F, 0.18F, 0.50F, 0.82F);
+            return;
+        }
+        if (ch == 'C') {
+            add(0.82F, 0.88F, 0.22F, 0.88F);
+            add(0.18F, 0.82F, 0.18F, 0.18F);
+            add(0.22F, 0.12F, 0.82F, 0.12F);
+            return;
+        }
+        if (ch == 'R') {
+            add(0.18F, 0.10F, 0.18F, 0.92F);
+            add(0.18F, 0.88F, 0.76F, 0.88F);
+            add(0.80F, 0.82F, 0.80F, 0.56F);
+            add(0.18F, 0.52F, 0.76F, 0.52F);
+            add(0.42F, 0.50F, 0.84F, 0.10F);
+            return;
+        }
+        if (ch == 'I') {
+            add(0.24F, 0.90F, 0.76F, 0.90F);
+            add(0.50F, 0.88F, 0.50F, 0.12F);
+            add(0.24F, 0.10F, 0.76F, 0.10F);
+            return;
+        }
+        if (ch == 'T') {
+            add(0.16F, 0.90F, 0.84F, 0.90F);
+            add(0.50F, 0.88F, 0.50F, 0.10F);
+            return;
+        }
+        if (ch == 'D') {
+            add(0.18F, 0.10F, 0.18F, 0.90F);
+            add(0.18F, 0.90F, 0.70F, 0.78F);
+            add(0.74F, 0.76F, 0.82F, 0.50F);
+            add(0.82F, 0.50F, 0.72F, 0.22F);
+            add(0.70F, 0.22F, 0.18F, 0.10F);
+            return;
+        }
+        if (ch == 'O') {
+            add(0.26F, 0.90F, 0.74F, 0.90F);
+            add(0.78F, 0.84F, 0.84F, 0.50F);
+            add(0.78F, 0.16F, 0.84F, 0.50F);
+            add(0.26F, 0.10F, 0.74F, 0.10F);
+            add(0.18F, 0.50F, 0.26F, 0.90F);
+            add(0.18F, 0.50F, 0.26F, 0.10F);
+            return;
+        }
+        if (ch == 'W') {
+            add(0.12F, 0.90F, 0.26F, 0.10F);
+            add(0.26F, 0.10F, 0.50F, 0.46F);
+            add(0.50F, 0.46F, 0.74F, 0.10F);
+            add(0.74F, 0.10F, 0.88F, 0.90F);
+            return;
+        }
+        if (ch == 'N') {
+            add(0.18F, 0.10F, 0.18F, 0.90F);
+            add(0.18F, 0.90F, 0.82F, 0.10F);
+            add(0.82F, 0.10F, 0.82F, 0.90F);
+            return;
+        }
+        if (ch == 'E') {
+            add(0.18F, 0.10F, 0.18F, 0.90F);
+            add(0.18F, 0.90F, 0.82F, 0.90F);
+            add(0.18F, 0.50F, 0.74F, 0.50F);
+            add(0.18F, 0.10F, 0.82F, 0.10F);
+            return;
+        }
+        const int mask = pickupDigitMask(ch);
+        if ((mask & (1 << 0)) != 0) {
+            add(0.20F, 0.92F, 0.80F, 0.92F);
+        }
+        if ((mask & (1 << 1)) != 0) {
+            add(0.84F, 0.88F, 0.84F, 0.54F);
+        }
+        if ((mask & (1 << 2)) != 0) {
+            add(0.84F, 0.46F, 0.84F, 0.12F);
+        }
+        if ((mask & (1 << 3)) != 0) {
+            add(0.20F, 0.08F, 0.80F, 0.08F);
+        }
+        if ((mask & (1 << 4)) != 0) {
+            add(0.16F, 0.46F, 0.16F, 0.12F);
+        }
+        if ((mask & (1 << 5)) != 0) {
+            add(0.16F, 0.88F, 0.16F, 0.54F);
+        }
+        if ((mask & (1 << 6)) != 0) {
+            add(0.20F, 0.50F, 0.80F, 0.50F);
+        }
+    };
+
+    Color color = miningDamageTextColor(allied, critical, rigDamage);
+    if (defeatText) {
+        color = {0.34F, 0.94F, 1.0F, 0.96F};
+    } else if (rewardCommon) {
+        color = {0.82F, 0.92F, 0.82F, 0.94F};
+    } else if (rewardRare) {
+        color = {0.42F, 0.86F, 1.0F, 0.94F};
+    } else if (rewardExotic) {
+        color = {1.0F, 0.82F, 0.26F, 0.96F};
+    }
+    std::vector<float>& shadowVertices = scratchVertices(text.size() * 18U);
+    const Color shadow {0.004F, 0.006F, 0.008F, 0.70F * fade};
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        appendGlyph(shadowVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap) + unitSize * 0.045F, baseY - glyphH * 0.5F - unitSize * 0.045F, shadow);
+    }
+    submitLines(shadowVertices, critical ? 4.0F : 3.2F);
+
+    std::vector<float>& textVertices = scratchVertices(text.size() * 18U);
+    Color faded = color;
+    faded.a *= fade;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        appendGlyph(textVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap), baseY - glyphH * 0.5F, faded);
+    }
+    submitLines(textVertices, critical ? 2.5F : 2.0F);
 }
 
 std::vector<float>& WebGLRenderer::scratchVertices(std::size_t reserveCount)
@@ -1693,6 +1974,31 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     }
     miningPickupBursts_ = std::move(activeBursts);
 
+    const Vec2 rigCenterForTells = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+    for (const MiningProjectileSnapshot& projectile : snapshot.miningProjectiles) {
+        const float t = static_cast<float>(std::clamp(projectile.lifetime <= 0.0 ? 1.0 : projectile.age / projectile.lifetime, 0.0, 1.0));
+        const float fade = (1.0F - t) * (1.0F - t);
+        const Vec2 start = cellCenter(projectile.startX, projectile.startY);
+        const Vec2 end = cellCenter(projectile.endX, projectile.endY);
+        const Vec2 head {
+            start.x + (end.x - start.x) * std::min(1.0F, t * 1.35F),
+            start.y + (end.y - start.y) * std::min(1.0F, t * 1.35F)
+        };
+        Color shot = miningProjectileColor(projectile.team, projectile.sourceType, projectile.affinity, projectile.critical);
+        shot.a *= fade;
+        const Vec2 tail {
+            start.x + (end.x - start.x) * std::max(0.0F, std::min(1.0F, t * 1.35F - 0.18F)),
+            start.y + (end.y - start.y) * std::max(0.0F, std::min(1.0F, t * 1.35F - 0.18F))
+        };
+        const bool alliedShot = projectile.team == static_cast<int>(MiningCombatTeam::Allied);
+        drawLine(start.x, start.y, head.x, head.y, {shot.r, shot.g, shot.b, 0.18F * fade}, projectile.critical ? 5.2F : 3.6F);
+        drawLine(tail.x, tail.y, head.x, head.y, {shot.r, shot.g, shot.b, alliedShot ? 0.62F * fade : 0.54F * fade}, projectile.critical ? 3.4F : 2.4F);
+        if (projectile.critical) {
+            drawCircle(head.x, head.y, cellSize * 0.42F, {1.0F, 0.82F, 0.22F, 0.18F * fade}, 18);
+        }
+        drawCircle(head.x, head.y, cellSize * (projectile.critical ? 0.28F : 0.18F), shot, 12);
+    }
+
     for (const MiningEnemySnapshot& enemy : snapshot.miningEnemies) {
         if (!enemy.active) {
             continue;
@@ -1700,12 +2006,46 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const Vec2 enemyCenter = cellCenter(enemy.x, enemy.y);
         const float health = static_cast<float>(std::clamp(enemy.maxHealth <= 0.0 ? 1.0 : enemy.health / enemy.maxHealth, 0.0, 1.0));
         const Color base = miningEnemyColor(enemy.type, enemy.affinity);
+        const bool rangedEnemy = enemy.type == static_cast<int>(MiningEnemyType::Flying) || enemy.type == static_cast<int>(MiningEnemyType::Elemental);
+        const bool eliteEnemy = enemy.type == static_cast<int>(MiningEnemyType::Beetle) || enemy.type == static_cast<int>(MiningEnemyType::Mammal);
+        const float attackInterval = rangedEnemy
+            ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
+            : static_cast<float>(tuning::mining::enemyMeleeAttackIntervalSeconds);
+        const float attackReady = 1.0F - std::clamp(static_cast<float>(enemy.attackCooldownSeconds) / std::max(0.01F, attackInterval), 0.0F, 1.0F);
+        const float tellPulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * (rangedEnemy ? 10.0F : 13.0F));
         if (enemy.effectRadius > 0.0) {
             drawCircle(enemyCenter.x, enemyCenter.y, static_cast<float>(enemy.effectRadius) * std::min(cellW, cellH), {base.r, base.g, base.b, 0.075F}, 28);
         }
-        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * 1.42F, {base.r, base.g, base.b, 0.18F}, 18);
-        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * (0.56F + health * 0.34F), base, 16);
-        drawRect(enemyCenter.x, enemyCenter.y - cellH * 0.72F, cellW * 1.18F * health, cellH * 0.10F, {1.0F, 0.18F, 0.12F, 0.82F});
+        if (rangedEnemy) {
+            const float tellRadius = std::min(cellW, cellH) * (1.08F + attackReady * 0.34F + tellPulse * 0.05F);
+            drawEllipseLine(enemyCenter.x, enemyCenter.y, tellRadius, tellRadius * 0.72F, {base.r, base.g, base.b, 0.10F + attackReady * 0.22F}, 36, 0.0F, 2.0F * kPi);
+            drawLine(enemyCenter.x - cellW * 0.82F, enemyCenter.y, enemyCenter.x + cellW * 0.82F, enemyCenter.y, {base.r, base.g, base.b, 0.12F + attackReady * 0.18F}, 1.4F);
+            drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.82F, enemyCenter.x, enemyCenter.y + cellH * 0.82F, {base.r, base.g, base.b, 0.12F + attackReady * 0.18F}, 1.4F);
+        } else {
+            const Vec2 directionToRig = normalize({rigCenterForTells.x - enemyCenter.x, rigCenterForTells.y - enemyCenter.y});
+            const float windupLength = std::min(cellW, cellH) * (0.74F + attackReady * 0.52F);
+            const Vec2 slashStart {
+                enemyCenter.x - directionToRig.y * windupLength * 0.35F,
+                enemyCenter.y + directionToRig.x * windupLength * 0.35F
+            };
+            const Vec2 slashEnd {
+                enemyCenter.x + directionToRig.x * windupLength,
+                enemyCenter.y + directionToRig.y * windupLength
+            };
+            drawLine(slashStart.x, slashStart.y, slashEnd.x, slashEnd.y, {1.0F, 0.22F, 0.12F, 0.12F + attackReady * 0.24F}, 1.8F + attackReady * 1.2F);
+        }
+        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * (eliteEnemy ? 1.78F : 1.42F), {base.r, base.g, base.b, eliteEnemy ? 0.25F : 0.18F}, 18);
+        if (rangedEnemy) {
+            drawLine(enemyCenter.x - cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y + cellH * 0.62F, base, 2.0F);
+            drawLine(enemyCenter.x, enemyCenter.y + cellH * 0.62F, enemyCenter.x + cellW * 0.62F, enemyCenter.y, base, 2.0F);
+            drawLine(enemyCenter.x + cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y - cellH * 0.62F, base, 2.0F);
+            drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.62F, enemyCenter.x - cellW * 0.62F, enemyCenter.y, base, 2.0F);
+        } else {
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 1.24F : 0.94F), cellH * (eliteEnemy ? 1.24F : 0.94F), {base.r, base.g, base.b, 0.88F});
+        }
+        drawCircle(enemyCenter.x, enemyCenter.y, std::min(cellW, cellH) * (0.38F + health * 0.24F), {1.0F, 0.20F, 0.14F, 0.70F}, 12);
+        drawRect(enemyCenter.x, enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F), cellH * 0.12F, {0.16F, 0.02F, 0.02F, 0.78F});
+        drawRect(enemyCenter.x - cellW * (eliteEnemy ? 0.79F : 0.59F) * (1.0F - health), enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F) * health, cellH * 0.12F, {1.0F, 0.18F, 0.12F, 0.90F});
     }
 
     Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
@@ -1774,6 +2114,133 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     };
     Vec2 particleAnchor = target;
     const Color heatTint = miningHeatSpriteTint(snapshot.miningHeat, snapshot.animationTime);
+    const float rigHealth = static_cast<float>(std::clamp(snapshot.miningDrillIntegrity, 0.0, 1.0));
+    const float healthPulse = snapshot.miningContactIntensity > 0.05
+        ? 0.55F + 0.45F * std::sin(static_cast<float>(snapshot.animationTime) * 20.0F)
+        : 0.0F;
+
+    if (snapshot.miningSynergyCount > 0) {
+        const float synergyPulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * (2.4F + static_cast<float>(snapshot.miningSynergyCount) * 0.35F));
+        const Color synergyColor {1.0F, 0.78F, 0.22F, 0.34F + 0.08F * static_cast<float>(std::min(snapshot.miningSynergyCount, 3))};
+        const float railY = drone.y + droneSize * (0.48F + synergyPulse * 0.02F);
+        const float railHalf = droneSize * 0.38F;
+        drawLine(drone.x - railHalf, railY, drone.x + railHalf, railY, synergyColor, 1.8F);
+        drawLine(drone.x - railHalf * 0.72F, railY + cellH * 0.14F, drone.x + railHalf * 0.72F, railY + cellH * 0.14F, {synergyColor.r, synergyColor.g, synergyColor.b, synergyColor.a * 0.70F}, 1.2F);
+    }
+    if (snapshot.miningSignatureTier > 0) {
+        const float signaturePulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * (3.1F + static_cast<float>(snapshot.miningSignatureTier) * 0.22F));
+        const float signatureAlpha = 0.34F + 0.08F * static_cast<float>(std::min(snapshot.miningSignatureTier, 3));
+        Color primary = miningSignaturePrimaryColor(snapshot.miningSignatureStyle);
+        Color secondary = miningSignatureSecondaryColor(snapshot.miningSignatureStyle);
+        Color accent = miningSignatureAccentColor(snapshot.miningSignatureStyle);
+        primary.a = signatureAlpha;
+        secondary.a = signatureAlpha * 0.78F;
+        accent.a = signatureAlpha * 0.64F;
+        const float bracketX = droneSize * (0.46F + signaturePulse * 0.02F);
+        const float bracketY = droneSize * 0.35F;
+        const float bracketLen = droneSize * 0.18F;
+        drawLine(drone.x - bracketX, drone.y - bracketY, drone.x - bracketX + bracketLen, drone.y - bracketY, primary, 1.8F);
+        drawLine(drone.x - bracketX, drone.y - bracketY, drone.x - bracketX, drone.y - bracketY + bracketLen, primary, 1.8F);
+        drawLine(drone.x + bracketX, drone.y - bracketY, drone.x + bracketX - bracketLen, drone.y - bracketY, primary, 1.8F);
+        drawLine(drone.x + bracketX, drone.y - bracketY, drone.x + bracketX, drone.y - bracketY + bracketLen, primary, 1.8F);
+        drawLine(drone.x - bracketX, drone.y + bracketY, drone.x - bracketX + bracketLen, drone.y + bracketY, secondary, 1.8F);
+        drawLine(drone.x - bracketX, drone.y + bracketY, drone.x - bracketX, drone.y + bracketY - bracketLen, secondary, 1.8F);
+        drawLine(drone.x + bracketX, drone.y + bracketY, drone.x + bracketX - bracketLen, drone.y + bracketY, secondary, 1.8F);
+        drawLine(drone.x + bracketX, drone.y + bracketY, drone.x + bracketX, drone.y + bracketY - bracketLen, secondary, 1.8F);
+        if (miningSignatureIs(snapshot.miningSignatureStyle, MiniDroneSignatureKind::SentryKillbox)) {
+            drawLine(drone.x - droneSize * 0.48F, drone.y, drone.x - droneSize * 0.24F, drone.y, accent, 1.6F);
+            drawLine(drone.x + droneSize * 0.24F, drone.y, drone.x + droneSize * 0.48F, drone.y, accent, 1.6F);
+        } else if (miningSignatureIs(snapshot.miningSignatureStyle, MiniDroneSignatureKind::ExcavationStorm)) {
+            drawLine(drone.x - droneSize * 0.40F, drone.y + droneSize * 0.54F, drone.x + droneSize * 0.02F, drone.y + droneSize * 0.42F, accent, 1.8F);
+            drawLine(drone.x + droneSize * 0.08F, drone.y + droneSize * 0.42F, drone.x + droneSize * 0.48F, drone.y + droneSize * 0.54F, accent, 1.8F);
+        } else if (miningSignatureIs(snapshot.miningSignatureStyle, MiniDroneSignatureKind::FortressRig)) {
+            drawLine(drone.x - droneSize * 0.72F, drone.y - droneSize * 0.36F, drone.x - droneSize * 0.52F, drone.y - droneSize * 0.52F, accent, 2.0F);
+            drawLine(drone.x + droneSize * 0.72F, drone.y - droneSize * 0.36F, drone.x + droneSize * 0.52F, drone.y - droneSize * 0.52F, accent, 2.0F);
+            drawLine(drone.x - droneSize * 0.72F, drone.y + droneSize * 0.36F, drone.x - droneSize * 0.52F, drone.y + droneSize * 0.52F, accent, 2.0F);
+            drawLine(drone.x + droneSize * 0.72F, drone.y + droneSize * 0.36F, drone.x + droneSize * 0.52F, drone.y + droneSize * 0.52F, accent, 2.0F);
+        } else if (miningSignatureIs(snapshot.miningSignatureStyle, MiniDroneSignatureKind::RelicPathfinder)) {
+            for (int i = 0; i < 5; ++i) {
+                const float angle = static_cast<float>(snapshot.animationTime) * 0.62F + static_cast<float>(i) * (2.0F * kPi / 5.0F);
+                const float x = drone.x + std::cos(angle) * droneSize * 0.68F;
+                const float y = drone.y + std::sin(angle) * droneSize * 0.42F;
+                drawLine(x - cellSize * 0.08F, y, x + cellSize * 0.08F, y, secondary, 1.2F);
+                drawLine(x, y - cellSize * 0.08F, x, y + cellSize * 0.08F, secondary, 1.2F);
+            }
+        } else if (miningSignatureIs(snapshot.miningSignatureStyle, MiniDroneSignatureKind::FullSpectrumSwarm)) {
+            drawLine(drone.x - droneSize * 0.58F, drone.y - droneSize * 0.48F, drone.x + droneSize * 0.58F, drone.y - droneSize * 0.48F, secondary, 1.4F);
+            drawLine(drone.x - droneSize * 0.58F, drone.y + droneSize * 0.48F, drone.x + droneSize * 0.58F, drone.y + droneSize * 0.48F, accent, 1.4F);
+        }
+    }
+    if (snapshot.miningShieldActive) {
+        const Color shieldColor {0.72F, 1.0F, 0.96F, 0.34F + healthPulse * 0.16F};
+        const float sx = droneSize * 0.52F;
+        const float sy = droneSize * 0.30F;
+        drawLine(drone.x - sx, drone.y - sy * 0.20F, drone.x - sx * 0.70F, drone.y - sy, shieldColor, 2.0F);
+        drawLine(drone.x - sx, drone.y + sy * 0.20F, drone.x - sx * 0.70F, drone.y + sy, shieldColor, 2.0F);
+        drawLine(drone.x + sx, drone.y - sy * 0.20F, drone.x + sx * 0.70F, drone.y - sy, shieldColor, 2.0F);
+        drawLine(drone.x + sx, drone.y + sy * 0.20F, drone.x + sx * 0.70F, drone.y + sy, shieldColor, 2.0F);
+    }
+    const int supportDrones = std::clamp(snapshot.miningSupportDroneCount, 0, 6);
+    const int tunedDrones = std::clamp(snapshot.miningTunedDroneCount, 0, supportDrones);
+    for (int i = 0; i < supportDrones; ++i) {
+        const float orbit = static_cast<float>(snapshot.animationTime) * (1.15F + static_cast<float>(i) * 0.08F) + static_cast<float>(i) * (kPi * 2.0F / static_cast<float>(std::max(1, supportDrones)));
+        const float radius = droneSize * (0.66F + 0.05F * static_cast<float>(i % 2));
+        const float sx = drone.x + std::cos(orbit) * radius;
+        const float sy = drone.y + std::sin(orbit) * radius * 0.72F;
+        int role = static_cast<int>(MiniDroneRole::Mining);
+        if (i < static_cast<int>(snapshot.miningDroneRoles.size())) {
+            role = snapshot.miningDroneRoles[static_cast<std::size_t>(i)];
+        } else {
+            const bool attackDrone = i < snapshot.miningAttackDroneCount;
+            const bool defenseDrone = !attackDrone && i < snapshot.miningAttackDroneCount + snapshot.miningDefenseDroneCount;
+            role = attackDrone
+                ? static_cast<int>(MiniDroneRole::Attack)
+                : (defenseDrone ? static_cast<int>(MiniDroneRole::Defense) : static_cast<int>(MiniDroneRole::Mining));
+        }
+        const int upgradeLevel = i < static_cast<int>(snapshot.miningDroneUpgradeLevels.size())
+            ? std::clamp(snapshot.miningDroneUpgradeLevels[static_cast<std::size_t>(i)], 1, 3)
+            : (i < tunedDrones ? 2 : 1);
+        const Color droneColor = miningMiniDroneRoleColor(role);
+        const bool tunedDrone = upgradeLevel > 1;
+        if (tunedDrone) {
+            const float tunePulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.2F + static_cast<float>(i));
+            const Color tuneColor {1.0F, 0.80F, 0.24F, upgradeLevel >= 3 ? 0.72F : 0.52F};
+            const float tuneHalf = cellSize * (0.28F + tunePulse * 0.03F);
+            drawLine(sx - tuneHalf, sy - cellSize * 0.34F, sx + tuneHalf, sy - cellSize * 0.34F, tuneColor, upgradeLevel >= 3 ? 1.8F : 1.3F);
+        }
+        drawRect(sx, sy, cellSize * 0.34F, cellSize * 0.28F, {droneColor.r, droneColor.g, droneColor.b, tunedDrone ? 0.92F : 0.78F});
+        drawRect(sx, sy, cellSize * 0.16F, cellSize * 0.12F, {0.96F, 1.0F, 0.98F, 0.62F});
+        const Color mark {0.96F, 1.0F, 0.98F, 0.78F};
+        const float markSize = cellSize * 0.18F;
+        switch (static_cast<MiniDroneRole>(role)) {
+        case MiniDroneRole::Attack:
+            drawLine(sx - markSize, sy - markSize, sx + markSize, sy + markSize, mark, 1.2F);
+            drawLine(sx + markSize, sy - markSize, sx - markSize, sy + markSize, mark, 1.2F);
+            break;
+        case MiniDroneRole::Defense:
+            drawLine(sx - markSize, sy - markSize * 0.70F, sx, sy - markSize, mark, 1.2F);
+            drawLine(sx, sy - markSize, sx + markSize, sy - markSize * 0.70F, mark, 1.2F);
+            drawLine(sx - markSize, sy + markSize * 0.70F, sx, sy + markSize, mark, 1.2F);
+            drawLine(sx, sy + markSize, sx + markSize, sy + markSize * 0.70F, mark, 1.2F);
+            break;
+        case MiniDroneRole::Mining:
+            drawLine(sx - markSize * 0.80F, sy + markSize, sx + markSize * 0.75F, sy - markSize, mark, 1.2F);
+            drawLine(sx + markSize * 0.10F, sy - markSize, sx + markSize, sy - markSize * 0.40F, mark, 1.2F);
+            break;
+        case MiniDroneRole::Resource:
+            drawRect(sx, sy, markSize * 1.35F, markSize * 1.35F, {mark.r, mark.g, mark.b, 0.58F});
+            break;
+        case MiniDroneRole::Survey:
+            drawLine(sx - markSize, sy, sx + markSize, sy, mark, 1.2F);
+            drawLine(sx, sy - markSize, sx, sy + markSize, mark, 1.2F);
+            drawLine(sx - markSize * 0.70F, sy - markSize * 0.70F, sx + markSize * 0.70F, sy + markSize * 0.70F, {mark.r, mark.g, mark.b, 0.46F}, 1.0F);
+            break;
+        case MiniDroneRole::Stabilizer:
+            drawLine(sx - markSize, sy, sx + markSize, sy, mark, 1.2F);
+            drawLine(sx, sy - markSize * 0.70F, sx, sy + markSize * 0.70F, mark, 1.2F);
+            break;
+        }
+    }
 
     if (textureReady(MiningDroneAsset)) {
         drawSpriteRotated(
@@ -1790,6 +2257,8 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drawCircle(drone.x, drone.y, cellW * 0.72F, {0.28F * heatTint.r, 0.82F * heatTint.g, 0.98F * heatTint.b, 1.0F}, 20);
         drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F * heatTint.r, 0.88F * heatTint.g, 0.92F * heatTint.b, 1.0F});
     }
+    drawRect(drone.x, drone.y - droneSize * 0.62F, cellW * 4.0F, cellH * 0.22F, {0.02F, 0.05F, 0.07F, 0.88F});
+    drawRect(drone.x - cellW * 2.0F * (1.0F - rigHealth), drone.y - droneSize * 0.62F, cellW * 4.0F * rigHealth, cellH * 0.22F, {0.22F + (1.0F - rigHealth) * 0.78F, 0.92F * rigHealth + 0.16F, 1.0F * rigHealth + 0.08F, 0.95F});
 
     if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable) {
         const float dx = target.x - drillOrigin.x;
@@ -1857,6 +2326,20 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             appendRect(particleVertices, px, py, size, size, spark);
         }
         submit(particleVertices, 0x0004);
+    }
+
+    for (const MiningDamageNumberSnapshot& number : snapshot.miningDamageNumbers) {
+        const Vec2 label = cellCenter(number.x, number.y);
+        drawMiningCombatText(
+            label.x,
+            label.y,
+            cellSize,
+            std::max(1, static_cast<int>(std::ceil(number.amount))),
+            static_cast<float>(number.age),
+            number.team == static_cast<int>(MiningCombatTeam::Allied),
+            number.critical,
+            number.rigDamage,
+            number.kind);
     }
 
     if (pressureColor.a > 0.001F) {
@@ -2176,8 +2659,13 @@ void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float al
     const float blend = static_cast<float>(cycle - static_cast<double>(frame));
     const float smoothBlend = blend * blend * (3.0F - 2.0F * blend);
     const float clampedAlpha = std::clamp(alpha, 0.0F, 1.0F);
-    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, clampedAlpha * (1.0F - smoothBlend)}, LocalSolarBgAsset, frame, 4, false);
-    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, clampedAlpha * smoothBlend}, LocalSolarBgAsset, nextFrame, 4, false);
+    // Compensate for source-over blending so the crossfade keeps constant opacity.
+    const float currentAlpha = clampedAlpha * (1.0F - smoothBlend);
+    const float nextAlpha = currentAlpha < 1.0F
+        ? (clampedAlpha * smoothBlend) / (1.0F - currentAlpha)
+        : 0.0F;
+    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, currentAlpha}, LocalSolarBgAsset, frame, 4, false);
+    drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, std::clamp(nextAlpha, 0.0F, 1.0F)}, LocalSolarBgAsset, nextFrame, 4, false);
 }
 
 void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
@@ -2346,6 +2834,19 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             drawSprite(center.x, center.y, size, size, {1.0F, 1.0F, 1.0F, alpha}, assetIndex);
         }
     };
+    auto drawArkSprite = [&](Vec2 center, float size, float alpha) {
+        const int assetIndex = arkDamaged(snapshot.arkCondition) ? ArkDamagedAsset : ArkOperationalAsset;
+        if (textureReady(assetIndex)) {
+            drawSprite(center.x, center.y, size, size, {1.0F, 1.0F, 1.0F, alpha}, assetIndex);
+        } else {
+            const Color hull = arkDamaged(snapshot.arkCondition)
+                ? Color{0.42F, 0.42F, 0.40F, alpha * 0.70F}
+                : Color{0.58F, 0.62F, 0.62F, alpha * 0.74F};
+            drawRect(center.x, center.y, size * 0.66F, size * 0.13F, hull);
+            drawRect(center.x - size * 0.20F, center.y - size * 0.07F, size * 0.28F, size * 0.08F, {0.26F, 0.30F, 0.34F, alpha * 0.68F});
+            drawCircle(center.x - size * 0.36F, center.y - size * 0.01F, size * 0.045F, {0.20F, 0.70F, 1.0F, alpha * 0.62F}, 18);
+        }
+    };
 
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;
@@ -2392,6 +2893,11 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4) {
+            const Vec2 arkHome = routePoint(snapshot, 0.0F);
+            drawCircle(arkHome.x - 0.02F, arkHome.y - 0.01F, 0.20F, {0.30F, 0.72F, 1.0F, arkDamaged(snapshot.arkCondition) ? 0.060F : 0.080F}, 64);
+            drawArkSprite({arkHome.x - 0.06F, arkHome.y - 0.01F}, 0.62F, arkDamaged(snapshot.arkCondition) ? 0.82F : 0.88F);
+        }
         if (snapshot.destinationTier == 2) {
             const float earthX = -0.34F;
             const float earthY = -0.89F;
@@ -2454,6 +2960,9 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             drawBodySprite(SaturnAsset, {endpoint.x - radius * 2.35F, endpoint.y + radius * 1.18F}, radius * 2.45F, 0.62F);
             drawBodySprite(UranusAsset, {endpoint.x + radius * 1.94F, endpoint.y + radius * 0.90F}, radius * 1.10F, 0.58F);
             drawBodySprite(NeptuneAsset, {endpoint.x + radius * 2.40F, endpoint.y - radius * 0.70F}, radius * 1.00F, 0.52F);
+            if (arkVisible(snapshot.arkCondition)) {
+                drawArkSprite({endpoint.x + radius * 3.12F, endpoint.y - radius * 1.58F}, radius * 4.80F, 0.84F);
+            }
         } else if (snapshot.destinationTier == 4) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)

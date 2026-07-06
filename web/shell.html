@@ -1508,6 +1508,308 @@
       justify-content: end;
     }
 
+    .phase-board-drone-ops .drone-build-strip {
+      max-width: 704px;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, auto);
+      border-color: rgba(71, 220, 255, 0.28);
+      background:
+        linear-gradient(135deg, rgba(71, 220, 255, 0.10), rgba(255, 209, 102, 0.055)),
+        rgba(255, 255, 255, 0.035);
+      box-shadow: inset 0 0 24px rgba(71, 220, 255, 0.055);
+    }
+
+    .phase-board-drone-ops .drone-build-strip h2 {
+      color: #dffbff;
+    }
+
+    .phase-board-drone-ops .drone-build-stats {
+      grid-template-columns: repeat(2, minmax(126px, 1fr));
+      justify-content: end;
+    }
+
+    .phase-board-drone-ops .drone-build-guidance {
+      max-width: 704px;
+      grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+      border-color: rgba(183, 132, 255, 0.24);
+      background:
+        linear-gradient(135deg, rgba(183, 132, 255, 0.075), rgba(71, 220, 255, 0.045)),
+        rgba(255, 255, 255, 0.028);
+    }
+
+    .phase-board-drone-ops .drone-build-guidance h2 {
+      color: #d8c7ff;
+    }
+
+    .phase-board-drone-ops .drone-build-guidance p {
+      font-size: 13px;
+    }
+
+    .phase-board-drone-ops .drone-guidance-stats {
+      grid-template-columns: repeat(2, minmax(116px, 1fr));
+      justify-content: end;
+    }
+
+    .phase-board-drone-ops .drone-loadout-bench {
+      max-width: 704px;
+      margin-bottom: 14px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-bench h2 {
+      margin-bottom: 8px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot {
+      min-height: 130px;
+      padding: 10px;
+      border: 1px solid rgba(137, 178, 211, 0.16);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.filled {
+      border-color: rgba(71, 220, 255, 0.28);
+      background:
+        linear-gradient(135deg, rgba(71, 220, 255, 0.075), rgba(255, 255, 255, 0.025)),
+        rgba(255, 255, 255, 0.03);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.open {
+      border-color: rgba(112, 224, 168, 0.28);
+      background: rgba(112, 224, 168, 0.055);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.locked {
+      opacity: 0.76;
+      border-color: rgba(137, 178, 211, 0.12);
+      background: rgba(255, 255, 255, 0.018);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-attack {
+      border-color: rgba(71, 220, 255, 0.38);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-defense {
+      border-color: rgba(183, 255, 241, 0.36);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-mining {
+      border-color: rgba(112, 224, 168, 0.34);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-resource {
+      border-color: rgba(255, 209, 102, 0.34);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-survey {
+      border-color: rgba(183, 132, 255, 0.34);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.role-stabilizer {
+      border-color: rgba(137, 178, 211, 0.34);
+    }
+
+    .phase-board-drone-ops .slot-topline {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .phase-board-drone-ops .slot-topline strong {
+      color: #ffd166;
+      font-weight: 700;
+      text-transform: none;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot h3 {
+      margin: 7px 0 2px;
+      font-size: 15px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot .slot-role {
+      color: #bfeef7;
+      min-height: 16px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot .stat-grid {
+      min-height: 25px;
+      margin-top: 8px;
+    }
+
+    .phase-board-drone-ops .drone-combat-forecast {
+      max-width: 704px;
+      grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1.45fr);
+      border-color: rgba(255, 209, 102, 0.24);
+      background:
+        linear-gradient(135deg, rgba(255, 209, 102, 0.075), rgba(71, 220, 255, 0.055)),
+        rgba(255, 255, 255, 0.028);
+    }
+
+    .phase-board-drone-ops .drone-combat-forecast h2 {
+      color: #ffd166;
+    }
+
+    .phase-board-drone-ops .drone-combat-forecast p {
+      font-size: 13px;
+    }
+
+    .phase-board-drone-ops .drone-forecast-stats {
+      grid-template-columns: repeat(5, minmax(92px, 1fr));
+      justify-content: end;
+    }
+
+    .phase-board-drone-ops .drone-forecast-stats .stat-chip {
+      flex: 1 1 92px;
+      min-width: 92px;
+      text-align: center;
+    }
+
+    .phase-board-drone-ops .drone-forecast-stats .stat-chip.wide {
+      flex-basis: 116px;
+    }
+
+    .phase-board-drone-ops .drone-recipe-board {
+      max-width: 704px;
+      margin-bottom: 14px;
+    }
+
+    .phase-board-drone-ops .drone-recipe-board h2 {
+      margin-bottom: 8px;
+    }
+
+    .phase-board-drone-ops .drone-recipe-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .phase-board-drone-ops .drone-recipe-card {
+      min-height: 126px;
+      padding: 10px;
+      border: 1px solid rgba(137, 178, 211, 0.16);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .phase-board-drone-ops .drone-recipe-card.active {
+      border-color: rgba(71, 220, 255, 0.34);
+      background: rgba(71, 220, 255, 0.075);
+    }
+
+    .phase-board-drone-ops .drone-recipe-card.signature {
+      border-color: rgba(255, 209, 102, 0.28);
+    }
+
+    .phase-board-drone-ops .recipe-topline {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
+    .phase-board-drone-ops .recipe-topline strong {
+      color: #ffd166;
+      font-weight: 700;
+      text-transform: none;
+    }
+
+    .phase-board-drone-ops .drone-recipe-card h3 {
+      margin: 7px 0 4px;
+      font-size: 15px;
+    }
+
+    .phase-board-drone-ops .recipe-requirements {
+      color: #bfeef7;
+      font-size: 12px;
+      min-height: 18px;
+    }
+
+    .phase-board-drone-ops .drone-recipe-card p {
+      margin: 4px 0 0;
+      line-height: 1.25;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .ops-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      max-width: 704px;
+      align-items: stretch;
+    }
+
+    .phase-board-drone-ops .drone-card {
+      min-height: 372px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .phase-board-drone-ops .drone-card > p:not(.drone-build-hook) {
+      min-height: 58px;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-build-hook {
+      min-height: 58px;
+      margin: 8px 0 8px;
+      padding: 8px;
+      border: 1px solid rgba(71, 220, 255, 0.18);
+      border-radius: 6px;
+      background: rgba(71, 220, 255, 0.055);
+      color: #bfeef7;
+      font-size: 12px;
+      line-height: 1.28;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-card .drone-upgrade-summary {
+      min-height: 42px;
+      margin: 0 0 8px;
+      color: #ffd166;
+      font-size: 12px;
+      line-height: 1.25;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-card .stat-grid {
+      min-height: 58px;
+      align-content: start;
+    }
+
+    .phase-board-drone-ops .drone-card .card-footer {
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+      grid-template-columns: minmax(0, 1fr) 76px 76px;
+      gap: 6px;
+    }
+
+    .phase-board-drone-ops .drone-card .card-footer button {
+      width: 76px;
+      min-width: 76px;
+      padding-left: 6px;
+      padding-right: 6px;
+    }
+
     .phase-board .actions {
       grid-template-columns: repeat(auto-fit, minmax(180px, 240px));
       justify-content: end;
@@ -1531,6 +1833,94 @@
     .phase-board-mining .mining-payload {
       grid-template-columns: 1fr;
       margin-bottom: 12px;
+    }
+
+    .phase-board-mining .mining-combat-strip {
+      grid-template-columns: 1fr;
+      margin: 8px 0 12px;
+      border-color: rgba(71, 220, 255, 0.26);
+      background:
+        linear-gradient(135deg, rgba(71, 220, 255, 0.075), rgba(255, 126, 87, 0.045)),
+        rgba(255, 255, 255, 0.03);
+    }
+
+    .phase-board-mining .mining-combat-strip h2 {
+      color: #dffbff;
+    }
+
+    .phase-board-mining .mining-combat-strip p {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .phase-board-mining .mining-combat-stats {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      justify-content: stretch;
+    }
+
+    .phase-board-mining .mining-health-strip {
+      border: 1px solid rgba(71, 220, 255, 0.28);
+      border-radius: 8px;
+      background: rgba(7, 24, 32, 0.86);
+      padding: 10px 12px;
+      display: grid;
+      gap: 7px;
+      box-shadow: 0 0 0 1px rgba(8, 16, 24, 0.45) inset;
+    }
+
+    .phase-board-mining .mining-health-strip > div:first-child {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .phase-board-mining .mining-health-strip span {
+      color: rgba(169, 231, 246, 0.88);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .phase-board-mining .mining-health-strip strong {
+      color: #e7fbff;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .phase-board-mining .mining-health-bar {
+      height: 12px;
+      border-radius: 6px;
+      background: rgba(1, 8, 13, 0.92);
+      overflow: hidden;
+      border: 1px solid rgba(127, 236, 255, 0.18);
+    }
+
+    .phase-board-mining .mining-health-bar i {
+      display: block;
+      height: 100%;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #4be7ff, #b7fff1);
+    }
+
+    .phase-board-mining .mining-health-bar .health-fill-0 { width: 0%; }
+    .phase-board-mining .mining-health-bar .health-fill-10 { width: 10%; }
+    .phase-board-mining .mining-health-bar .health-fill-20 { width: 20%; }
+    .phase-board-mining .mining-health-bar .health-fill-30 { width: 30%; }
+    .phase-board-mining .mining-health-bar .health-fill-40 { width: 40%; }
+    .phase-board-mining .mining-health-bar .health-fill-50 { width: 50%; }
+    .phase-board-mining .mining-health-bar .health-fill-60 { width: 60%; }
+    .phase-board-mining .mining-health-bar .health-fill-70 { width: 70%; }
+    .phase-board-mining .mining-health-bar .health-fill-80 { width: 80%; }
+    .phase-board-mining .mining-health-bar .health-fill-90 { width: 90%; }
+    .phase-board-mining .mining-health-bar .health-fill-100 { width: 100%; }
+
+    .phase-board-mining .mining-health-strip p {
+      margin: 0;
+      color: rgba(199, 224, 226, 0.76);
+      font-size: 12px;
+      line-height: 1.25;
     }
 
     .phase-board-mining .mining-payload .stat-grid {
@@ -3029,6 +3419,28 @@
       .orbit-key-grid {
         grid-template-columns: 1fr;
       }
+
+      .phase-board-drone-ops .drone-combat-forecast {
+        grid-template-columns: 1fr;
+      }
+
+      .phase-board-drone-ops .drone-build-guidance {
+        grid-template-columns: 1fr;
+      }
+
+      .phase-board-drone-ops .drone-guidance-stats {
+        grid-template-columns: repeat(2, minmax(96px, 1fr));
+        justify-content: stretch;
+      }
+
+      .phase-board-drone-ops .drone-forecast-stats {
+        grid-template-columns: repeat(2, minmax(96px, 1fr));
+        justify-content: stretch;
+      }
+
+      .phase-board-drone-ops .drone-loadout-grid {
+        grid-template-columns: 1fr;
+      }
     }
 
     .toast-root {
@@ -3734,6 +4146,7 @@
       droneOps: () => rrCall("rr_drone_ops"),
       surfaceOps: () => rrCall("rr_surface_ops"),
       equipDrone: (index) => rrCall("rr_equip_drone", [index], ["number"]),
+      upgradeDrone: (index) => rrCall("rr_upgrade_drone", [index], ["number"]),
       upgradeDroneSlot: () => rrCall("rr_upgrade_drone_slot"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
@@ -3757,7 +4170,10 @@
       restCrew: () => rrCall("rr_rest_crew"),
       resetSave: () => {
         if (window.confirm("Reset Rocket Rogue save data?")) {
+          closePanelModal();
           rrCall("rr_reset_save");
+          closePanelModal();
+          syncSceneOverlays();
         }
       },
       rmlMouseMove: (x, y) => rrCall("rr_rml_mouse_move", [x, y], ["number", "number"], "number") === 1,
@@ -3788,6 +4204,7 @@
       droneOps: "drone_ops",
       surfaceOps: "back_to_surface_ops",
       equipDronePrefix: "equip_drone:",
+      upgradeDronePrefix: "upgrade_drone:",
       upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
       arrivalFlyby: "arrival_flyby",
@@ -4003,6 +4420,21 @@
           lastPanelAction = action;
           lastPanelActionAt = performance.now();
           rr.equipDrone(index);
+          return true;
+        }
+        return false;
+      }
+
+      if (action.startsWith(rrActionIds.upgradeDronePrefix)) {
+        const rawIndex = action.slice(rrActionIds.upgradeDronePrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.upgradeDrone(index);
           return true;
         }
         return false;

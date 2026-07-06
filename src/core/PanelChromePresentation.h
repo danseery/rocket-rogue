@@ -69,6 +69,7 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
     const Astronaut* astronaut = activeAstronaut(state);
 
     metrics.push_back(panelMetric(text::labels::missionCredits, display::money(state.run.credits)));
+    metrics.push_back(panelMetric(text::labels::chapter, chapterLabel(state.meta.chapter)));
     metrics.push_back(panelMetric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage)));
     metrics.push_back(panelMetric(transferLaunch ? text::labels::transferTarget : text::labels::currentFrontier, displayDestination.name));
     metrics.push_back(panelMetric(

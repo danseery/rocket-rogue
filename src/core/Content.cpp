@@ -230,12 +230,12 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.miniDrones = {
-        miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
-        miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables for longer surface runs.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneBay, {"logistics", "endurance"}),
-        miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines deeper silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneBay, {"exploration", "navigation"}),
-        miniDrone(content::drone::stabilizerDrone, "Stabilizer Drone", "Counter-thrusts hard-rock chatter so the drill loses less bite.", Rarity::Uncommon, MiniDroneRole::Stabilizer, {.drillIntegrityRelief = 0.12, .hardRockBounceRelief = 0.28}, content::unlock::droneBay, {"engineering", "resilience"}),
-        miniDrone(content::drone::attackDrone, "Attack Drone", "Passive sentry fire for hostile worlds beyond the solar system.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
-        miniDrone(content::drone::defenseDrone, "Defense Drone", "Projects a short-range shield around the mining drone under attack.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
+        miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
+        miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneBay, {"logistics", "endurance"}),
+        miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneBay, {"exploration", "navigation"}),
+        miniDrone(content::drone::stabilizerDrone, "Stabilizer Drone", "Counter-thrusts hard-rock chatter so enemy hits and rough drilling cost less rig health.", Rarity::Uncommon, MiniDroneRole::Stabilizer, {.drillIntegrityRelief = 0.12, .hardRockBounceRelief = 0.28}, content::unlock::droneBay, {"engineering", "resilience"}),
+        miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
+        miniDrone(content::drone::defenseDrone, "Defense Drone", "Projects teal shield arcs, absorbs incoming fire, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
 
     catalog.researchProjects = {
@@ -501,6 +501,70 @@ std::string_view toString(CampaignMilestone milestone)
         return "Hostile system stranded";
     case CampaignMilestone::ArkRepairing:
         return "Ark repairing";
+    }
+    return text::enums::unknown;
+}
+
+std::string_view toString(GameChapter chapter)
+{
+    switch (chapter) {
+    case GameChapter::ProvingGround:
+        return "Proving Ground";
+    case GameChapter::LunarProgram:
+        return "Lunar Program";
+    case GameChapter::RedFrontier:
+        return "Red Frontier";
+    case GameChapter::Breakthrough:
+        return "Breakthrough";
+    case GameChapter::Straylight:
+        return "Straylight";
+    case GameChapter::Arkfall:
+        return "Arkfall";
+    case GameChapter::LastCampfire:
+        return "Last Campfire";
+    case GameChapter::VoidCompass:
+        return "Void Compass";
+    case GameChapter::Ouroboros:
+        return "Ouroboros";
+    case GameChapter::Ascent:
+        return "Ascent";
+    }
+    return text::enums::unknown;
+}
+
+int chapterNumber(GameChapter chapter)
+{
+    return static_cast<int>(chapter);
+}
+
+std::string chapterLabel(GameChapter chapter)
+{
+    return "Chapter " + std::to_string(chapterNumber(chapter)) + ": " + std::string(toString(chapter));
+}
+
+std::string_view chapterGate(GameChapter chapter)
+{
+    switch (chapter) {
+    case GameChapter::ProvingGround:
+        return "Advance to the Moon.";
+    case GameChapter::LunarProgram:
+        return "Advance to Mars.";
+    case GameChapter::RedFrontier:
+        return "Advance to the Outer Planets.";
+    case GameChapter::Breakthrough:
+        return "Find the operational Ark beyond Neptune.";
+    case GameChapter::Straylight:
+        return "Leave the peaceful relay system with the Ark jump.";
+    case GameChapter::Arkfall:
+        return "Survive the gravity-well disaster and unlock Navigation.";
+    case GameChapter::LastCampfire:
+        return "Complete the first hostile-system sortie.";
+    case GameChapter::VoidCompass:
+        return "Complete the Rift Belt or deeper route.";
+    case GameChapter::Ouroboros:
+        return "Repair the Ark enough to attempt the next route.";
+    case GameChapter::Ascent:
+        return "Reach the future New Earth route.";
     }
     return text::enums::unknown;
 }

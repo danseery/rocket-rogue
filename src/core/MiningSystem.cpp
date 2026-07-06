@@ -1056,6 +1056,153 @@ bool enemyIgnoresTerrain(MiningEnemyType type)
     return type == MiningEnemyType::Flying;
 }
 
+bool enemyUsesRangedAttack(MiningEnemyType type)
+{
+    return type == MiningEnemyType::Flying || type == MiningEnemyType::Elemental;
+}
+
+bool enemyUsesMeleeAttack(MiningEnemyType type)
+{
+    return type == MiningEnemyType::Ant || type == MiningEnemyType::Beetle || type == MiningEnemyType::Mammal;
+}
+
+double deterministicCombatRoll(const MiningRunState& mining, const MiningEnemy& enemy, int salt)
+{
+    std::uint64_t value = hashCombine(0xC0FFEEULL, static_cast<std::uint64_t>(mining.combatSequence + 1));
+    value = hashCombine(value, static_cast<std::uint64_t>(static_cast<int>(enemy.type) + 11));
+    value = hashCombine(value, static_cast<std::uint64_t>(static_cast<int>(enemy.affinity) + 23));
+    value = hashCombine(value, static_cast<std::uint64_t>(std::max(0, static_cast<int>(std::round(enemy.x * 31.0)))));
+    value = hashCombine(value, static_cast<std::uint64_t>(std::max(0, static_cast<int>(std::round(enemy.y * 37.0)))));
+    value = hashCombine(value, static_cast<std::uint64_t>(salt));
+    return static_cast<double>(value % 10000ULL) / 10000.0;
+}
+
+bool deterministicCombatCrit(MiningRunState& mining, const MiningEnemy& enemy, double chance, int salt)
+{
+    const bool critical = deterministicCombatRoll(mining, enemy, salt) < chance;
+    mining.combatSequence += 1;
+    return critical;
+}
+
+void trimMiningCombatVisuals(MiningRunState& mining)
+{
+    if (mining.combatProjectiles.size() > static_cast<std::size_t>(tuning::mining::maxCombatProjectiles)) {
+        mining.combatProjectiles.erase(
+            mining.combatProjectiles.begin(),
+            mining.combatProjectiles.begin() + static_cast<std::ptrdiff_t>(mining.combatProjectiles.size() - tuning::mining::maxCombatProjectiles));
+    }
+    if (mining.damageNumbers.size() > static_cast<std::size_t>(tuning::mining::maxDamageNumbers)) {
+        mining.damageNumbers.erase(
+            mining.damageNumbers.begin(),
+            mining.damageNumbers.begin() + static_cast<std::ptrdiff_t>(mining.damageNumbers.size() - tuning::mining::maxDamageNumbers));
+    }
+}
+
+void advanceMiningCombatVisuals(MiningRunState& mining, double dt)
+{
+    for (MiningProjectileVisual& projectile : mining.combatProjectiles) {
+        projectile.age += dt;
+    }
+    for (MiningDamageNumber& number : mining.damageNumbers) {
+        number.age += dt;
+    }
+    mining.combatProjectiles.erase(
+        std::remove_if(mining.combatProjectiles.begin(), mining.combatProjectiles.end(), [](const MiningProjectileVisual& projectile) {
+            return projectile.age >= projectile.lifetime;
+        }),
+        mining.combatProjectiles.end());
+    mining.damageNumbers.erase(
+        std::remove_if(mining.damageNumbers.begin(), mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+            return number.age >= number.lifetime;
+        }),
+        mining.damageNumbers.end());
+}
+
+void pushMiningProjectile(
+    MiningRunState& mining,
+    double startX,
+    double startY,
+    double endX,
+    double endY,
+    MiningCombatTeam team,
+    MiningEnemyType sourceType,
+    MiningElementalAffinity affinity,
+    bool critical)
+{
+    mining.combatProjectiles.push_back({
+        startX,
+        startY,
+        endX,
+        endY,
+        0.0,
+        tuning::mining::projectileLifetimeSeconds,
+        team,
+        sourceType,
+        affinity,
+        critical
+    });
+    trimMiningCombatVisuals(mining);
+}
+
+void pushMiningDamageNumber(
+    MiningRunState& mining,
+    double x,
+    double y,
+    double amount,
+    MiningCombatTeam team,
+    bool critical,
+    bool rigDamage)
+{
+    if (amount <= 0.0) {
+        return;
+    }
+    for (MiningDamageNumber& number : mining.damageNumbers) {
+        const double dx = number.x - x;
+        const double dy = number.y - y;
+        if (number.kind == MiningCombatTextKind::Damage && number.team == team && number.critical == critical && number.rigDamage == rigDamage && number.age < 0.18 && dx * dx + dy * dy < 0.36) {
+            number.amount += amount;
+            number.age = 0.0;
+            return;
+        }
+    }
+    mining.damageNumbers.push_back({
+        x,
+        y,
+        amount,
+        0.0,
+        tuning::mining::damageNumberLifetimeSeconds,
+        team,
+        MiningCombatTextKind::Damage,
+        critical,
+        rigDamage
+    });
+    trimMiningCombatVisuals(mining);
+}
+
+void pushMiningCombatPopup(
+    MiningRunState& mining,
+    double x,
+    double y,
+    double amount,
+    MiningCombatTextKind kind)
+{
+    if (amount <= 0.0) {
+        return;
+    }
+    mining.damageNumbers.push_back({
+        x,
+        y,
+        amount,
+        0.0,
+        tuning::mining::damageNumberLifetimeSeconds * 1.15,
+        MiningCombatTeam::Allied,
+        kind,
+        false,
+        false
+    });
+    trimMiningCombatVisuals(mining);
+}
+
 std::pair<double, double> enemyMoveDirection(const MiningRunState& mining, const MiningEnemy& enemy, double dirX, double dirY)
 {
     if (enemy.type != MiningEnemyType::Flying) {
@@ -1135,15 +1282,28 @@ void addEnemyDefeatReward(GameState& state, const MiningEnemy& enemy)
     }
     addMiningMaterials(mining.temporaryMaterials, gain);
     mining.cargo += materialCargo(gain);
+    pushMiningCombatPopup(mining, enemy.x, enemy.y, 1.0, MiningCombatTextKind::Defeat);
+    if (gain.common > 0) {
+        pushMiningCombatPopup(mining, enemy.x + 0.18, enemy.y + 0.20, static_cast<double>(gain.common), MiningCombatTextKind::CommonReward);
+    }
+    if (gain.rare > 0) {
+        pushMiningCombatPopup(mining, enemy.x - 0.18, enemy.y + 0.36, static_cast<double>(gain.rare), MiningCombatTextKind::RareReward);
+    }
+    if (gain.exotic > 0) {
+        pushMiningCombatPopup(mining, enemy.x, enemy.y + 0.52, static_cast<double>(gain.exotic), MiningCombatTextKind::ExoticReward);
+    }
 }
 
-double applyDefenseDamage(GameState& state, MiningEnemy& enemy, double rawDamage)
+double applyDefenseDamage(GameState& state, MiningEnemy& enemy, double rawDamage, bool critical = false, bool emitNumber = false)
 {
     if (!enemy.active || rawDamage <= 0.0) {
         return 0.0;
     }
-    const double appliedDamage = rawDamage * std::clamp(1.0 - enemy.armor, 0.20, 1.0);
+    const double appliedDamage = rawDamage * (critical ? tuning::mining::alliedCritMultiplier : 1.0) * std::clamp(1.0 - enemy.armor, 0.20, 1.0);
     enemy.health = std::max(0.0, enemy.health - appliedDamage);
+    if (emitNumber) {
+        pushMiningDamageNumber(state.run.mining, enemy.x, enemy.y, appliedDamage, MiningCombatTeam::Allied, critical, false);
+    }
     if (enemy.health <= 0.0 && enemy.active) {
         enemy.active = false;
         state.run.mining.enemiesDefeated += 1;
@@ -1185,10 +1345,13 @@ void applyElementalContact(GameState& state, const MiningEnemy& enemy, double sh
 void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, double dt)
 {
     MiningRunState& mining = state.run.mining;
+    advanceMiningCombatVisuals(mining, dt);
     mining.movementSlowSeconds = std::max(0.0, mining.movementSlowSeconds - dt);
     if (mining.movementSlowSeconds <= 0.0) {
         mining.movementSlowScale = 1.0;
     }
+    mining.alliedFireCooldownSeconds = std::max(0.0, mining.alliedFireCooldownSeconds - dt);
+    mining.areaControlPulseCooldownSeconds = std::max(0.0, mining.areaControlPulseCooldownSeconds - dt);
     if (mining.enemies.empty()) {
         return;
     }
@@ -1198,8 +1361,11 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
     const double incomingRelief = std::clamp(drones.enemyDamageRelief + drones.enemyEncounterRelief * 0.75, 0.0, 0.70);
     const double shieldRelief = std::clamp(incomingRelief + drones.environmentalShieldRelief, 0.0, 0.82);
     const double areaRangeSq = tuning::mining::areaControlRangeCells * tuning::mining::areaControlRangeCells;
-    int nearestIndex = -1;
-    double nearestDistanceSq = tuning::mining::defenseRangeCells * tuning::mining::defenseRangeCells;
+    const double alliedCritChance = std::clamp(tuning::mining::alliedCritChance + drones.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum);
+    const double alliedShotInterval = tuning::mining::alliedShotIntervalSeconds / (1.0 + std::clamp(drones.alliedFireRateBonus, 0.0, tuning::mining::alliedFireRateBonusMaximum));
+    const int sentryShots = 1 + std::clamp(drones.sentryVolleyBonus, 0, tuning::mining::alliedSentryVolleyMaximum);
+    std::vector<std::pair<double, int>> sentryTargets;
+    const double defenseRangeSq = tuning::mining::defenseRangeCells * tuning::mining::defenseRangeCells;
 
     for (std::size_t i = 0; i < mining.enemies.size(); ++i) {
         MiningEnemy& enemy = mining.enemies[i];
@@ -1209,19 +1375,39 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
         const double dx = mining.droneX - enemy.x;
         const double dy = mining.droneY - enemy.y;
         const double distanceSq = dx * dx + dy * dy;
-        if (distanceSq < nearestDistanceSq) {
-            nearestDistanceSq = distanceSq;
-            nearestIndex = static_cast<int>(i);
+        if (distanceSq <= defenseRangeSq) {
+            sentryTargets.push_back({distanceSq, static_cast<int>(i)});
         }
     }
+    std::sort(sentryTargets.begin(), sentryTargets.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
 
-    if (nearestIndex >= 0 && defenseDamage > 0.0) {
-        MiningEnemy& target = mining.enemies[static_cast<std::size_t>(nearestIndex)];
-        const double appliedDamage = applyDefenseDamage(state, target, defenseDamage * dt);
-        mining.defenseDamageDealt += appliedDamage;
+    if (!sentryTargets.empty() && defenseDamage > 0.0 && mining.alliedFireCooldownSeconds <= 0.0) {
+        const int shots = std::min(sentryShots, static_cast<int>(sentryTargets.size()));
+        for (int shot = 0; shot < shots; ++shot) {
+            MiningEnemy& target = mining.enemies[static_cast<std::size_t>(sentryTargets[static_cast<std::size_t>(shot)].second)];
+            if (!target.active) {
+                continue;
+            }
+            const bool critical = deterministicCombatCrit(mining, target, alliedCritChance, 101 + shot * 17);
+            pushMiningProjectile(
+                mining,
+                mining.droneX,
+                mining.droneY,
+                target.x,
+                target.y,
+                MiningCombatTeam::Allied,
+                target.type,
+                target.affinity,
+                critical);
+            const double appliedDamage = applyDefenseDamage(state, target, defenseDamage * alliedShotInterval, critical, true);
+            mining.defenseDamageDealt += appliedDamage;
+        }
+        mining.alliedFireCooldownSeconds = alliedShotInterval;
     }
 
-    if (drones.areaControlDamagePerSecond > 0.0) {
+    if (drones.areaControlDamagePerSecond > 0.0 && mining.areaControlPulseCooldownSeconds <= 0.0) {
         for (MiningEnemy& enemy : mining.enemies) {
             if (!enemy.active) {
                 continue;
@@ -1231,22 +1417,37 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             if (dx * dx + dy * dy > areaRangeSq) {
                 continue;
             }
-            const double appliedDamage = applyDefenseDamage(state, enemy, drones.areaControlDamagePerSecond * dt);
+            const bool critical = deterministicCombatCrit(mining, enemy, alliedCritChance * 0.55, 211);
+            const double appliedDamage = applyDefenseDamage(state, enemy, drones.areaControlDamagePerSecond * tuning::mining::areaControlPulseSeconds, critical, true);
             mining.defenseDamageDealt += appliedDamage;
             mining.areaControlDamageDealt += appliedDamage;
         }
+        mining.areaControlPulseCooldownSeconds = tuning::mining::areaControlPulseSeconds;
     }
 
     for (MiningEnemy& enemy : mining.enemies) {
         if (!enemy.active) {
             continue;
         }
+        enemy.attackCooldownSeconds = std::max(0.0, enemy.attackCooldownSeconds - dt);
         const double dx = mining.droneX - enemy.x;
         const double dy = mining.droneY - enemy.y;
         const double distance = std::max(0.001, std::sqrt(dx * dx + dy * dy));
         const double dirX = dx / distance;
         const double dirY = dy / distance;
-        const auto [moveDirX, moveDirY] = enemyMoveDirection(mining, enemy, dirX, dirY);
+        double desiredDirX = dirX;
+        double desiredDirY = dirY;
+        if (enemyUsesRangedAttack(enemy.type)) {
+            if (distance < tuning::mining::enemyRangedStandoffCells) {
+                desiredDirX = -dirX;
+                desiredDirY = -dirY;
+            } else if (distance <= tuning::mining::enemyRangedStandoffCells + 0.60) {
+                const double wave = std::sin(mining.elapsedSeconds * 4.7 + enemy.x * 0.41 + enemy.y * 0.73);
+                desiredDirX = -dirY * (wave >= 0.0 ? 1.0 : -1.0);
+                desiredDirY = dirX * (wave >= 0.0 ? 1.0 : -1.0);
+            }
+        }
+        const auto [moveDirX, moveDirY] = enemyMoveDirection(mining, enemy, desiredDirX, desiredDirY);
         const double areaSlow = distance * distance <= areaRangeSq ? drones.enemySlow : 0.0;
         const double speedScale = std::clamp(1.0 - areaSlow, 0.40, 1.0);
         enemy.velocityX = moveDirX * enemy.speed * speedScale;
@@ -1287,20 +1488,45 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             enemy.y = std::clamp(nextY, 1.0, static_cast<double>(mining.terrain.height - 2));
         }
 
-        const double attackRadius = std::max(tuning::mining::enemyContactRadiusCells, enemy.effectRadius);
-        if (distance <= attackRadius) {
-            const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * dt;
+        if (enemy.type == MiningEnemyType::Elemental && distance <= std::max(0.0, enemy.effectRadius)) {
+            applyElementalContact(state, enemy, shieldRelief, dt);
+        }
+
+        if (enemyUsesMeleeAttack(enemy.type) && distance <= tuning::mining::enemyContactRadiusCells && enemy.attackCooldownSeconds <= 0.0) {
+            const bool critical = deterministicCombatCrit(mining, enemy, tuning::mining::enemyCritChance, 307);
+            const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * tuning::mining::enemyMeleeAttackIntervalSeconds * (critical ? tuning::mining::enemyCritMultiplier : 1.0);
             const double damage = rawDamage * (1.0 - shieldRelief);
             mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - damage);
             mining.enemyDamageTaken += damage;
             mining.environmentalShieldAbsorbed += rawDamage - damage;
             mining.contactIntensity = std::max(mining.contactIntensity, 0.65);
-            applyElementalContact(state, enemy, shieldRelief, dt);
+            pushMiningDamageNumber(mining, mining.droneX, mining.droneY, damage * 100.0, MiningCombatTeam::Enemy, critical, true);
+            enemy.attackCooldownSeconds = tuning::mining::enemyMeleeAttackIntervalSeconds;
             if (drones.reactiveArmorDamagePerSecond > 0.0) {
-                const double appliedDamage = applyDefenseDamage(state, enemy, drones.reactiveArmorDamagePerSecond * dt);
+                const double appliedDamage = applyDefenseDamage(state, enemy, drones.reactiveArmorDamagePerSecond * tuning::mining::enemyMeleeAttackIntervalSeconds, false, true);
                 mining.defenseDamageDealt += appliedDamage;
                 mining.reactiveArmorDamageDealt += appliedDamage;
             }
+        } else if (enemyUsesRangedAttack(enemy.type) && distance <= tuning::mining::enemyRangedAttackRangeCells && enemy.attackCooldownSeconds <= 0.0) {
+            const bool critical = deterministicCombatCrit(mining, enemy, tuning::mining::enemyCritChance, 401);
+            const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * tuning::mining::enemyRangedAttackIntervalSeconds * (critical ? tuning::mining::enemyCritMultiplier : 1.0);
+            const double damage = rawDamage * (1.0 - shieldRelief);
+            pushMiningProjectile(
+                mining,
+                enemy.x,
+                enemy.y,
+                mining.droneX,
+                mining.droneY,
+                MiningCombatTeam::Enemy,
+                enemy.type,
+                enemy.affinity,
+                critical);
+            mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - damage);
+            mining.enemyDamageTaken += damage;
+            mining.environmentalShieldAbsorbed += rawDamage - damage;
+            mining.contactIntensity = std::max(mining.contactIntensity, 0.50);
+            pushMiningDamageNumber(mining, mining.droneX, mining.droneY, damage * 100.0, MiningCombatTeam::Enemy, critical, true);
+            enemy.attackCooldownSeconds = tuning::mining::enemyRangedAttackIntervalSeconds;
         }
     }
 }
@@ -1919,6 +2145,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
     if (mining.failurePending) {
+        advanceMiningCombatVisuals(mining, dt);
         mining.elapsedSeconds += dt;
         mining.failureSeconds = std::min(1.5, mining.failureSeconds + dt);
         mining.contactIntensity = 1.0;

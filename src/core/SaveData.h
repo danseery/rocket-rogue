@@ -24,6 +24,7 @@ struct SaveData {
     double nextLaunchSpeedBoost = 0.0;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
+    GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
     std::vector<std::string> inventoryModuleIds;
@@ -42,6 +43,7 @@ struct SaveData {
     int droneBaySlots = 0;
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
+    std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ArtifactRecord> artifacts;
     int furthestTier = 0;
     int shipsLost = 0;

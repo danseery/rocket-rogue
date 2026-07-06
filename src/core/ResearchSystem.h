@@ -74,6 +74,15 @@ struct SurfaceUpgradeEffects {
     std::vector<std::string> names;
 };
 
+enum class MiniDroneSignatureKind {
+    None,
+    SentryKillbox,
+    ExcavationStorm,
+    FortressRig,
+    RelicPathfinder,
+    FullSpectrumSwarm
+};
+
 struct MiniDroneLoadoutEffects {
     double passiveMiningRate = 0.0;
     double oxygenSeconds = 0.0;
@@ -88,7 +97,15 @@ struct MiniDroneLoadoutEffects {
     double enemySlow = 0.0;
     double reactiveArmorDamagePerSecond = 0.0;
     double environmentalShieldRelief = 0.0;
+    double alliedCritChanceBonus = 0.0;
+    double alliedFireRateBonus = 0.0;
+    int sentryVolleyBonus = 0;
+    int signatureTier = 0;
+    MiniDroneSignatureKind signatureKind = MiniDroneSignatureKind::None;
     std::vector<std::string> names;
+    std::vector<std::string> synergyNames;
+    std::string signatureName;
+    std::string signatureDetail;
 };
 
 struct SurfaceActionOutcome {
@@ -155,9 +172,13 @@ SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile);
 SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog);
 bool droneBayUnlocked(const GameState& state);
 MaterialInventory droneSlotUpgradeCost(int nextSlot);
+int miniDroneUpgradeLevel(const GameState& state, std::string_view droneId);
+MaterialInventory miniDroneUpgradeCost(int nextLevel);
 void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
 bool canUpgradeDroneSlot(const GameState& state);
 bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog);
+bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, int index);
+bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
 bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
 MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);

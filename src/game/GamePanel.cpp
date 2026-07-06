@@ -560,9 +560,39 @@ std::string miniDroneCard(const MiniDroneCardPresentation& drone)
     out << "<div class=\"module-art\"><span>" << htmlEscape(drone.title.empty() ? "D" : std::string(1, drone.title.front())) << "</span></div>";
     out << "<h3>" << htmlEscape(drone.title) << "</h3>";
     out << "<p>" << htmlEscape(drone.detail) << "</p>";
+    out << "<p class=\"drone-build-hook\">" << htmlEscape(drone.buildHook) << "</p>";
+    out << "<p class=\"drone-upgrade-summary\">" << htmlEscape(drone.upgradeSummary) << "</p>";
     out << "<div class=\"stat-grid\">" << resourceChipGrid(drone.effectChips) << "</div>";
     out << "<div class=\"card-footer\"><span>" << htmlEscape(drone.status)
-        << "</span>" << panelButton(drone.action) << "</div></article>";
+        << "</span>" << panelButton(drone.action) << panelButton(drone.upgradeAction) << "</div></article>";
+    return out.str();
+}
+
+std::string droneBuildRecipeCard(const DroneBuildRecipePresentation& recipe)
+{
+    std::ostringstream out;
+    out << "<article class=\"drone-recipe-card " << (recipe.active ? "active" : "locked")
+        << (recipe.signature ? " signature" : "") << "\">";
+    out << "<div class=\"recipe-topline\"><span>" << htmlEscape(recipe.signature ? "Signature" : "Pair")
+        << "</span><strong>" << htmlEscape(recipe.status) << "</strong></div>";
+    out << "<h3>" << htmlEscape(recipe.title) << "</h3>";
+    out << "<p class=\"recipe-requirements\">" << htmlEscape(recipe.requirements) << "</p>";
+    out << "<p>" << htmlEscape(recipe.detail) << "</p>";
+    out << "</article>";
+    return out.str();
+}
+
+std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
+{
+    std::ostringstream out;
+    out << "<article class=\"drone-loadout-slot " << htmlEscape(slot.cssClass) << "\">";
+    out << "<div class=\"slot-topline\"><span>" << htmlEscape("Slot " + std::to_string(slot.slot))
+        << "</span><strong>" << htmlEscape(slot.status) << "</strong></div>";
+    out << "<h3>" << htmlEscape(slot.title) << "</h3>";
+    out << "<p class=\"slot-role\">" << htmlEscape(slot.role) << "</p>";
+    out << "<p>" << htmlEscape(slot.detail) << "</p>";
+    out << "<div class=\"stat-grid\">" << resourceChipGrid(slot.chips) << "</div>";
+    out << "</article>";
     return out.str();
 }
 
@@ -1240,12 +1270,17 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
         out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
+        const bool arkKnown = arkDiscovered(state);
         out << tutorialCard(
             "launch-controls",
-            "Press your luck, then return to Earth",
+            arkKnown ? "Press your luck, then return to Ark" : "Press your luck, then return to Earth",
             hasAdvancedFlightControls
-                ? "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs."
-                : "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. Learn the burn, bank flight data, and unlock the Moon route.");
+                ? (arkKnown
+                    ? "Return to Ark banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs."
+                    : "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. If gauges climb, cut engines, open the relief valve, or jettison cargo to buy time with tradeoffs.")
+                : (arkKnown
+                    ? "Return to Ark banks data but still has return risk. Eject is the expensive emergency out. Keep the shuttle useful while the Ark stays operational."
+                    : "Return to Earth banks data but still has return risk. Eject is the expensive emergency out. Learn the burn, bank flight data, and unlock the Moon route."));
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
@@ -1440,6 +1475,15 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
         }
+        const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
+        const int rigHealthBucket = std::clamp(((rigHealthWidth + 5) / 10) * 10, 0, 100);
+        out << "<section class=\"mining-health-strip\"><div><span>" << htmlEscape("Rig health")
+            << "</span><strong>" << htmlEscape(miningPanel.rigHealth) << "</strong></div>"
+            << "<div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div>"
+            << "<p>" << htmlEscape("Mine and recover artifacts while mini-drones handle the fighting.") << "</p></section>";
+        out << "<section class=\"resource-bank mining-combat-strip\"><div><h2>" << htmlEscape(miningPanel.combatTitle)
+            << "</h2><p>" << htmlEscape(miningPanel.combatDetail) << "</p></div>"
+            << "<div class=\"stat-grid mining-combat-stats\">" << resourceChipGrid(miningPanel.combatMetrics) << "</div></section>";
         out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Current payload")
             << "</h2><p>" << htmlEscape("Materials recovered during this dig and artifacts delivered to the ship bay. Stow payload to carry it back to surface extraction.") << "</p></div>"
             << "<div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
@@ -1493,6 +1537,27 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "<div class=\"stat-grid drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
             << "<div class=\"stat-grid drone-bay-materials\">" << resourceChipGrid(droneMaterialChips) << "</div>"
             << panelButton(dronePanel.upgradeSlotAction) << "</section>";
+        out << "<section class=\"resource-bank drone-build-strip\"><div class=\"drone-build-copy\"><h2>" << htmlEscape(dronePanel.buildTitle)
+            << "</h2><p>" << htmlEscape(dronePanel.buildDetail) << "</p></div>"
+            << "<div class=\"stat-grid drone-build-stats\">" << resourceChipGrid(dronePanel.buildChips) << "</div></section>";
+        out << "<section class=\"resource-bank drone-build-guidance\"><div class=\"drone-guidance-copy\"><h2>" << htmlEscape("Build guidance")
+            << "</h2><p>" << htmlEscape("Closest recipe, missing role, and tuning priority for the next hostile mining run.") << "</p></div>"
+            << "<div class=\"stat-grid drone-guidance-stats\">" << resourceChipGrid(dronePanel.buildGuidanceChips) << "</div></section>";
+        out << "<section class=\"board-primary drone-loadout-bench\"><h2>" << htmlEscape("Loadout bench")
+            << "</h2><div class=\"drone-loadout-grid\">";
+        for (const DroneLoadoutSlotPresentation& slot : dronePanel.loadoutSlots) {
+            out << droneLoadoutSlotCard(slot);
+        }
+        out << "</div></section>";
+        out << "<section class=\"resource-bank drone-combat-forecast\"><div class=\"drone-forecast-copy\"><h2>" << htmlEscape("Combat forecast")
+            << "</h2><p>" << htmlEscape("This is the passive swarm profile that will protect the mining rig while you dig, scan, tether, and extract.") << "</p></div>"
+            << "<div class=\"stat-grid drone-forecast-stats\">" << resourceChipGrid(dronePanel.forecastChips) << "</div></section>";
+        out << "<section class=\"board-primary drone-recipe-board\"><h2>" << htmlEscape("Build recipes")
+            << "</h2><div class=\"drone-recipe-grid\">";
+        for (const DroneBuildRecipePresentation& recipe : dronePanel.buildRecipes) {
+            out << droneBuildRecipeCard(recipe);
+        }
+        out << "</div></section>";
         out << "<section class=\"board-primary drone-roster\"><h2>" << htmlEscape("Drone roster") << "</h2><div class=\"ops-grid\">";
         for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
             out << miniDroneCard(drone);

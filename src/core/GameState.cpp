@@ -355,6 +355,8 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
             }
         }
     }
+
+    syncChapterProgress(state, catalog);
 }
 
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
@@ -827,6 +829,7 @@ bool hostileSystemActive(const GameState& state)
 {
     return state.meta.campaignMilestone == CampaignMilestone::HostileSystemStranded ||
         state.meta.campaignMilestone == CampaignMilestone::ArkRepairing ||
+        state.meta.campaignMilestone == CampaignMilestone::GravityWellDisaster ||
         state.meta.ark.gravityWellDisaster ||
         state.meta.ark.condition == ArkCondition::DamagedStranded ||
         state.meta.ark.condition == ArkCondition::Repairing;
@@ -835,6 +838,71 @@ bool hostileSystemActive(const GameState& state)
 bool navigationAvailable(const GameState& state)
 {
     return hostileSystemActive(state);
+}
+
+GameChapter chapterForState(const GameState& state, const ContentCatalog& catalog)
+{
+    const auto destinationSuccesses = [&](const std::string& destinationId) {
+        const int index = destinationIndexForId(catalog, destinationId);
+        if (index < 0 || index >= static_cast<int>(state.meta.destinationSuccesses.size())) {
+            return 0;
+        }
+        return state.meta.destinationSuccesses[static_cast<std::size_t>(index)];
+    };
+
+    if (state.meta.campaignMilestone == CampaignMilestone::ArkRepairing ||
+        state.meta.ark.condition == ArkCondition::Repairing) {
+        return GameChapter::Ouroboros;
+    }
+
+    if (destinationSuccesses(content::destination::nearbyGalaxy) > 0) {
+        return GameChapter::VoidCompass;
+    }
+
+    if (destinationSuccesses(content::destination::nearbyStar) > 0) {
+        return GameChapter::LastCampfire;
+    }
+
+    if (hostileSystemActive(state)) {
+        return GameChapter::Arkfall;
+    }
+
+    if (state.meta.ark.firstJumpComplete ||
+        state.meta.campaignMilestone == CampaignMilestone::FirstArkJumpComplete ||
+        state.meta.navigation.currentSystemId == "relay_system") {
+        return GameChapter::Straylight;
+    }
+
+    const int outerIndex = destinationIndexForId(catalog, content::destination::outerPlanets);
+    if (arkDiscovered(state) ||
+        (outerIndex >= 0 && state.run.destinationIndex >= outerIndex) ||
+        (outerIndex >= 0 && state.meta.furthestTier >= catalog.destinations[static_cast<std::size_t>(outerIndex)].tier)) {
+        return GameChapter::Breakthrough;
+    }
+
+    const int marsIndex = destinationIndexForId(catalog, content::destination::mars);
+    if (marsIndex >= 0 &&
+        (state.run.destinationIndex >= marsIndex ||
+            state.meta.furthestTier >= catalog.destinations[static_cast<std::size_t>(marsIndex)].tier)) {
+        return GameChapter::RedFrontier;
+    }
+
+    const int moonIndex = destinationIndexForId(catalog, content::destination::moon);
+    if (moonIndex >= 0 &&
+        (state.run.destinationIndex >= moonIndex ||
+            state.meta.furthestTier >= catalog.destinations[static_cast<std::size_t>(moonIndex)].tier)) {
+        return GameChapter::LunarProgram;
+    }
+
+    return GameChapter::ProvingGround;
+}
+
+void syncChapterProgress(GameState& state, const ContentCatalog& catalog)
+{
+    const GameChapter derived = chapterForState(state, catalog);
+    if (chapterNumber(derived) > chapterNumber(state.meta.chapter)) {
+        state.meta.chapter = derived;
+    }
 }
 
 bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog)
@@ -930,6 +998,7 @@ bool performArkJump(GameState& state, const ContentCatalog& catalog)
         state.meta.navigation.currentSystemId = "relay_system";
         state.meta.navigation.arkLocationId = "relay_void";
         state.statusLine = "First Ark jump complete. The vessel can move, but every jump spends the future.";
+        syncChapterProgress(state, catalog);
         return true;
     }
 

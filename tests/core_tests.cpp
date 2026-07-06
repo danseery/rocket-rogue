@@ -434,6 +434,9 @@ void launchStatusLinesComeFromSharedSelector()
     context.returnDriftHome = true;
     require(launchStatusLine(context) == std::string(text::status::coastingHome), "drift return should use shared coast status");
 
+    context.arkKnown = true;
+    require(launchStatusLine(context).find("Ark") != std::string::npos, "Ark drift return should name the Ark as the return destination");
+
     TelemetryEvent critical = nominal;
     critical.message = "TEMP: cooling runaway";
     critical.warning = tuning::launch::warningCriticalThreshold + 0.01;
@@ -2243,6 +2246,12 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(equipMiniDrone(state, catalog, 1), "second drone should fit after slot upgrade");
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
+    const MiniDroneLoadoutEffects beforeTune = miniDroneLoadoutEffects(state, catalog);
+    require(canUpgradeMiniDrone(state, catalog, 0), "funded owned drone should expose tuning");
+    require(upgradeMiniDrone(state, catalog, 0), "material-funded drone tuning should succeed");
+    require(miniDroneUpgradeLevel(state, content::drone::miningDrone) == 2, "tuned drone should advance to Mk II");
+    const MiniDroneLoadoutEffects afterTune = miniDroneLoadoutEffects(state, catalog);
+    require(afterTune.passiveMiningRate > beforeTune.passiveMiningRate, "tuned mining drone should scale passive mining output");
 
     for (int i = 0; i < 4; ++i) {
         state.meta.materials.common = 99;
@@ -2262,6 +2271,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(restored.meta.droneBaySlots == state.meta.droneBaySlots, "drone bay slots should round trip");
     require(restored.meta.ownedDroneIds == state.meta.ownedDroneIds, "owned drones should round trip");
     require(restored.meta.equippedDroneIds == state.meta.equippedDroneIds, "equipped drones should round trip");
+    require(miniDroneUpgradeLevel(restored, content::drone::miningDrone) == 2, "drone tuning should round trip");
 
     restored.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     ensureDroneBayState(restored, catalog);
@@ -2277,6 +2287,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.materials.common = 4;
+    state.meta.materials.rare = 2;
     ensureDroneBayState(state, catalog);
 
     SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state, catalog);
@@ -2287,7 +2298,129 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
     require(drones.drones.front().title == "Mining Drone", "Drone Ops should present mining support first");
     require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
+    require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be tunable");
+    require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
+    require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
+    require(drones.drones.front().upgradeSummary.find("auto-mine") != std::string::npos, "drone tuning previews should explain the next payoff");
+    require(!drones.buildRecipes.empty(), "Drone Ops should expose build recipes");
+    require(drones.loadoutSlots.size() == 6, "Drone Ops should present the full six-slot loadout bench");
+    require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Open slot" && slot.status == "Ready";
+    }), "Drone Ops loadout bench should show open bay slots");
+    require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Locked slot" && slot.status.find("upgrade") != std::string::npos;
+    }), "Drone Ops loadout bench should show the next locked bay slot upgrade");
+    require(std::any_of(drones.buildRecipes.begin(), drones.buildRecipes.end(), [](const DroneBuildRecipePresentation& recipe) {
+        return recipe.title == "Targeting Grid" && recipe.requirements.find("Attack") != std::string::npos;
+    }), "Drone Ops recipes should explain required drone roles");
+    require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Next recipe" && !chip.value.empty();
+    }), "Drone Ops should expose a next build recipe target");
+    require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Tune next" && !chip.value.empty();
+    }), "Drone Ops should expose a tuning priority for the active build");
     require(drones.upgradeSlotAction.enabled, "funded first slot upgrade should be offered when materials allow");
+    require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
+        return row.label == "Passive combat plan" && row.value.find("auto-fire") != std::string::npos;
+    }), "Drone Ops details should frame combat as passive mini-drone abilities");
+
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    drones = droneOpsPresentation(state, catalog);
+    const auto attackDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
+        return drone.title == "Attack Drone";
+    });
+    require(attackDrone != drones.drones.end(), "Drone Ops should show the attack drone card after perimeter drones unlock");
+    require(attackDrone->detail.find("Auto-fires") != std::string::npos, "attack drone card should describe passive auto-fire behavior");
+    require(attackDrone->upgradeSummary.find("shot power") != std::string::npos, "attack drone tuning preview should highlight combat damage payoff");
+    require(std::any_of(attackDrone->effectChips.begin(), attackDrone->effectChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Crits";
+    }), "attack drone chips should expose crit payoff");
+
+    state.meta.droneBaySlots = 3;
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
+    state.meta.droneUpgrades = {{content::drone::attackDrone, 2}, {content::drone::defenseDrone, 1}, {content::drone::surveyDrone, 1}};
+    drones = droneOpsPresentation(state, catalog);
+    require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Attack Drone" && slot.role == "Attack" && slot.detail.find("Mk 2") != std::string::npos;
+    }), "Drone Ops loadout bench should show equipped tuned attack drones");
+    require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Defense Drone" && slot.cssClass.find("role-defense") != std::string::npos;
+    }), "Drone Ops loadout bench should style equipped drone roles");
+    const MiniDroneLoadoutEffects synergyEffects = miniDroneLoadoutEffects(state, catalog);
+    require(std::find(synergyEffects.synergyNames.begin(), synergyEffects.synergyNames.end(), "Targeting Grid") != synergyEffects.synergyNames.end(), "attack plus survey should unlock the Targeting Grid synergy");
+    require(std::find(synergyEffects.synergyNames.begin(), synergyEffects.synergyNames.end(), "Killbox Screen") != synergyEffects.synergyNames.end(), "attack plus defense should unlock the Killbox Screen synergy");
+    require(synergyEffects.sentryVolleyBonus >= 1, "Killbox Screen should add an extra sentry target");
+    require(synergyEffects.alliedCritChanceBonus > 0.0, "Targeting Grid should improve drone crit chance");
+    require(synergyEffects.signatureName == "Sentry Killbox", "attack defense survey should activate the Sentry Killbox signature");
+    require(synergyEffects.signatureKind == MiniDroneSignatureKind::SentryKillbox, "Sentry Killbox should expose a matching render style identity");
+    require(synergyEffects.signatureTier == 2, "signature builds should expose a visual strength tier");
+    require(synergyEffects.sentryVolleyBonus == 2, "Sentry Killbox should add a signature volley on top of Killbox Screen");
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::miningDrone, content::drone::resourceDrone};
+    const MiniDroneLoadoutEffects excavationEffects = miniDroneLoadoutEffects(state, catalog);
+    require(excavationEffects.signatureKind == MiniDroneSignatureKind::ExcavationStorm, "Excavation Storm should expose a distinct render style identity");
+    state.meta.equippedDroneIds = {content::drone::defenseDrone, content::drone::stabilizerDrone, content::drone::resourceDrone};
+    const MiniDroneLoadoutEffects fortressEffects = miniDroneLoadoutEffects(state, catalog);
+    require(fortressEffects.signatureKind == MiniDroneSignatureKind::FortressRig, "Fortress Rig should expose a distinct render style identity");
+    state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::resourceDrone, content::drone::surveyDrone};
+    const MiniDroneLoadoutEffects pathfinderEffects = miniDroneLoadoutEffects(state, catalog);
+    require(pathfinderEffects.signatureKind == MiniDroneSignatureKind::RelicPathfinder, "Relic Pathfinder should expose a distinct render style identity");
+    state.meta.droneBaySlots = 6;
+    state.meta.equippedDroneIds = {
+        content::drone::attackDrone,
+        content::drone::defenseDrone,
+        content::drone::surveyDrone,
+        content::drone::miningDrone,
+        content::drone::resourceDrone,
+        content::drone::stabilizerDrone
+    };
+    const MiniDroneLoadoutEffects spectrumEffects = miniDroneLoadoutEffects(state, catalog);
+    require(spectrumEffects.signatureKind == MiniDroneSignatureKind::FullSpectrumSwarm, "Full Spectrum Swarm should expose the capstone render style identity");
+    state.meta.droneBaySlots = 3;
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
+    drones = droneOpsPresentation(state, catalog);
+    require(drones.buildTitle.find("Sentry Killbox") != std::string::npos, "Drone Ops build strip should name the active signature");
+    require(std::any_of(drones.buildRecipes.begin(), drones.buildRecipes.end(), [](const DroneBuildRecipePresentation& recipe) {
+        return recipe.title == "Sentry Killbox" && recipe.active && recipe.signature;
+    }), "Drone Ops recipe board should mark active signature builds");
+    require(std::any_of(drones.buildChips.begin(), drones.buildChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Active synergies" && chip.value == "2";
+    }), "Drone Ops build strip should count active synergies");
+    require(std::any_of(drones.buildChips.begin(), drones.buildChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Signature" && chip.value == "Sentry Killbox";
+    }), "Drone Ops build strip should expose signature build identity");
+    require(std::any_of(drones.buildChips.begin(), drones.buildChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Tuned drones" && chip.value == "1";
+    }), "Drone Ops build strip should count tuned drones");
+    require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Next recipe" && chip.value == "Excavation Barrage";
+    }), "Drone Ops build guidance should name the closest inactive recipe");
+    require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Missing roles" && chip.value.find("Mining") != std::string::npos;
+    }), "Drone Ops build guidance should explain the missing role for the next recipe");
+    require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
+        return row.label == "Build guidance" && row.value.find("ore") != std::string::npos;
+    }), "Drone Ops details should explain why the recommended build target matters");
+    require(std::any_of(drones.forecastChips.begin(), drones.forecastChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Cadence" && chip.value.find("s") != std::string::npos;
+    }), "Drone Ops combat forecast should expose passive shot cadence");
+    require(std::any_of(drones.forecastChips.begin(), drones.forecastChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Sentry output" && chip.value.find("/s") != std::string::npos;
+    }), "Drone Ops combat forecast should expose passive sentry output");
+    require(std::any_of(drones.forecastChips.begin(), drones.forecastChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Shield relief" && chip.value != "None";
+    }), "Drone Ops combat forecast should expose shield payoff for defense builds");
+    require(std::any_of(drones.forecastChips.begin(), drones.forecastChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Build state" && chip.value == "Signature";
+    }), "Drone Ops combat forecast should identify signature build state");
+    require(std::any_of(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
+        return drone.title == "Survey Drone" && drone.buildHook.find("Sentry Killbox") != std::string::npos;
+    }), "Drone cards should explain which builds they help unlock");
+    require(std::any_of(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
+        return drone.title == "Attack Drone" && std::any_of(drone.effectChips.begin(), drone.effectChips.end(), [](const PanelMetricPresentation& chip) {
+            return chip.label == "Tuning" && chip.value == "Mk 2";
+        });
+    }), "tuned drone cards should show Mk-scaled chip presentation");
 
     state.meta.materials = {};
     drones = droneOpsPresentation(state, catalog);
@@ -2983,6 +3116,7 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     updateMiningRun(state, catalog, 1.0);
     require(state.run.mining.enemyDamageTaken > 0.0, "nearby enemies should damage the mining drill");
     require(state.run.mining.drillIntegrity < integrityBefore, "enemy contact should reduce drill integrity");
+    require(!state.run.mining.damageNumbers.empty(), "enemy melee hits should create rig damage numbers");
 
     GameState defended = createNewGame(catalog, 91922);
     defended.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
@@ -3006,7 +3140,95 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     }
     require(defended.run.mining.enemiesDefeated == 1, "passive sentry defenses should defeat weakened enemies");
     require(defended.run.mining.defenseDamageDealt > 0.0, "passive sentry defenses should report damage dealt");
+    require(!defended.run.mining.combatProjectiles.empty(), "passive sentry defenses should create allied projectile visuals");
+    const MiningRunPresentation defendedMining = miningRunPresentation(defended, catalog);
+    require(defendedMining.combatTitle.find("Killbox Screen") != std::string::npos, "live mining combat strip should name the active drone build");
+    require(std::any_of(defendedMining.combatMetrics.begin(), defendedMining.combatMetrics.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Allied shots" && chip.value != "0";
+    }), "live mining combat strip should count active allied projectile visuals");
+    require(std::any_of(defendedMining.combatMetrics.begin(), defendedMining.combatMetrics.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "KOs" && chip.value == "1";
+    }), "live mining combat strip should show enemies defeated by the drone build");
+    require(std::any_of(defendedMining.combatMetrics.begin(), defendedMining.combatMetrics.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Drone dmg" && chip.value != "0.0";
+    }), "live mining combat strip should show passive drone damage dealt");
+    require(std::any_of(defended.run.mining.damageNumbers.begin(), defended.run.mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+        return number.team == MiningCombatTeam::Allied;
+    }), "passive sentry defenses should create allied damage numbers");
+    require(std::any_of(defended.run.mining.damageNumbers.begin(), defended.run.mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+        return number.kind == MiningCombatTextKind::Defeat;
+    }), "enemy defeats should create a distinct defeat popup");
+    require(std::any_of(defended.run.mining.damageNumbers.begin(), defended.run.mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+        return number.kind == MiningCombatTextKind::RareReward || number.kind == MiningCombatTextKind::ExoticReward;
+    }), "enemy defeat rewards should create material popup text");
     require(defended.run.mining.temporaryMaterials.rare > 0 || defended.run.mining.temporaryMaterials.exotic > 0, "miniboss defeats should grant upgrade-grade rewards");
+}
+
+void rangedMiningEnemiesShootAndCombatVisualsExpire()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91929);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "ranged enemy mining run should start");
+    state.run.mining.enemies = {
+        {MiningEnemyType::Flying, MiningCellFeature::HiveNest, state.run.mining.droneX + 5.0, state.run.mining.droneY, 0.0, 0.0, 40.0, 40.0, 0.0, 0.0, 1.0, 0.0, true}
+    };
+    const double healthBefore = state.run.mining.drillIntegrity;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.drillIntegrity < healthBefore, "ranged enemies should damage the rig from standoff range");
+    require(!state.run.mining.combatProjectiles.empty(), "ranged enemies should create enemy projectile visuals");
+    require(std::any_of(state.run.mining.damageNumbers.begin(), state.run.mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+        return number.team == MiningCombatTeam::Enemy && number.rigDamage;
+    }), "ranged enemy shots should create rig damage numbers");
+
+    for (int tick = 0; tick < 30; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.combatProjectiles.size() <= static_cast<std::size_t>(tuning::mining::maxCombatProjectiles), "combat projectile visuals should stay capped");
+    require(state.run.mining.damageNumbers.size() <= static_cast<std::size_t>(tuning::mining::maxDamageNumbers), "combat damage numbers should stay capped");
+}
+
+void attackDroneCombatCanCritAndEnemyCooldownPersists()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91930);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::attackDrone};
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "attack drone crit mining run should start");
+    state.run.mining.enemies = {
+        {MiningEnemyType::Beetle, MiningCellFeature::EncounterZone, state.run.mining.droneX + 3.0, state.run.mining.droneY, 0.0, 0.0, 200.0, 200.0, 0.0, 0.0, 0.0, 0.0, true}
+    };
+    bool sawCrit = false;
+    for (int tick = 0; tick < 80 && !sawCrit; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+        sawCrit = std::any_of(state.run.mining.damageNumbers.begin(), state.run.mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+            return number.team == MiningCombatTeam::Allied && number.critical;
+        });
+    }
+    require(sawCrit, "attack drone fire should be able to create critical damage text");
+
+    state.run.mining.enemies.front().attackCooldownSeconds = 0.42;
+    const SaveData save = captureSaveData(state);
+    GameState restored = createNewGame(catalog, 91931);
+    restoreSaveData(restored, catalog, save);
+    require(!restored.run.mining.enemies.empty(), "enemy cooldown save test should restore active enemies");
+    require(std::abs(restored.run.mining.enemies.front().attackCooldownSeconds - 0.42) < 0.000001, "enemy attack cooldown should round trip through saves");
 }
 
 void elementalMiningCombatAppliesAffinityAndAreaDefenses()
@@ -3786,6 +4008,12 @@ void surfacePresentationComesFromSharedHelper()
     require(std::find_if(surface.actions[3].payoffChips.begin(), surface.actions[3].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::artifacts) && chip.value == "+1";
     }) != surface.actions[3].payoffChips.end(), "surface extraction preview should expose loaded artifact payoff");
+    state.meta.ark.condition = ArkCondition::DerelictOperable;
+    surface = surfaceExpeditionPresentation(state);
+    require(surface.actions[3].title == "Return to Ark", "Ark surface extraction should relabel the card title");
+    require(surface.actions[3].action.label == "Return to Ark", "Ark surface extraction should relabel the button");
+    require(surface.actions[3].action.actionId == std::string(ui::actions::extractSurface), "Ark surface extraction should keep the stable action id");
+    state.meta.ark.condition = ArkCondition::NotFound;
 
     surface = surfaceExpeditionPresentation(state);
     require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "fresh surface mine should use shared action id");
@@ -3986,6 +4214,7 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::ownedModules) + save_schema::keyValueDelimiter) != std::string::npos, "owned modules key should use shared schema name");
     require(text.find(std::string(save_schema::field::defaultEquippedModules) + save_schema::keyValueDelimiter) != std::string::npos, "default equipped modules key should use shared schema name");
     require(text.find(std::string(save_schema::field::screen) + save_schema::keyValueDelimiter) != std::string::npos, "screen key should use shared schema name");
+    require(text.find(std::string(save_schema::field::chapter) + save_schema::keyValueDelimiter) != std::string::npos, "chapter key should use shared schema name");
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceLog) + save_schema::keyValueDelimiter) != std::string::npos, "surface log key should use shared schema name");
@@ -3994,6 +4223,7 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::droneBaySlots) + save_schema::keyValueDelimiter) != std::string::npos, "drone bay slots key should use shared schema name");
     require(text.find(std::string(save_schema::field::ownedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "owned drones key should use shared schema name");
     require(text.find(std::string(save_schema::field::equippedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "equipped drones key should use shared schema name");
+    require(text.find(std::string(save_schema::field::droneUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "drone tuning key should use shared schema name");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -4116,6 +4346,7 @@ void enumDisplayLabelsComeFromSharedText()
     require(toString(CrewStatus::Injured) == text::enums::crewStatus::injured, "crew status labels should come from shared text");
     require(toString(LaunchResultType::MissionComplete) == text::enums::launchResult::missionComplete, "launch result labels should come from shared text");
     require(toString(RecoveryMethod::ReturnHome) == text::enums::recovery::returnHome, "recovery labels should come from shared text");
+    require(toString(GameChapter::Arkfall) == std::string_view("Arkfall"), "chapter labels should come from shared enum display");
 }
 
 bool hasRefitChip(const RefitPresentation& presentation, std::string_view label, std::string_view value, bool positive)
@@ -4508,6 +4739,23 @@ void launchPanelPresentationComesFromSharedHelper()
     require(returnHome != nullptr && !returnHome->enabled, "returning-home action should be disabled once committed");
     require(cutEngines != nullptr && !cutEngines->enabled, "system actions should be disabled during return home");
 
+    GameState arkState = createNewGame(catalog, 909);
+    discoverArk(arkState, catalog);
+    Random arkRng(909);
+    PreparedLaunch arkLaunch = prepareLaunch(arkState, catalog, arkRng);
+    panel = launchPanelPresentation(
+        arkState,
+        catalog,
+        arkLaunch,
+        currentMultiplier,
+        1.0,
+        0.0,
+        returnDuration,
+        {},
+        false);
+    returnHome = findFlightActionButton(panel.primaryActions, "Return to Ark");
+    require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "Ark launch presentation should relabel the return action without changing its action id");
+
     FlightActionState reliefOpen;
     reliefOpen.pressureReliefOpen = true;
     panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
@@ -4590,14 +4838,16 @@ void panelChromePresentationComesFromSharedHelper()
     PreparedLaunch launch;
     std::vector<PanelMetricPresentation> metrics = panelHeaderMetrics(state, catalog, launch, launch);
     const PanelMetricPresentation* credits = findPanelMetric(metrics, text::labels::missionCredits);
+    const PanelMetricPresentation* chapter = findPanelMetric(metrics, text::labels::chapter);
     const PanelMetricPresentation* hullDamage = findPanelMetric(metrics, text::labels::hullDamage);
     const PanelMetricPresentation* currentFrontier = findPanelMetric(metrics, text::labels::currentFrontier);
     const PanelMetricPresentation* flightData = findPanelMetric(metrics, text::labels::flightData);
     const PanelMetricPresentation* difficulty = findPanelMetric(metrics, text::labels::missionDifficulty);
     const PanelMetricPresentation* crewStress = findPanelMetric(metrics, text::labels::crewStress);
 
-    require(metrics.size() == 6, "panel chrome should expose six top-level metrics");
+    require(metrics.size() == 7, "panel chrome should expose seven top-level metrics");
     require(credits != nullptr && credits->value == display::money(state.run.credits), "panel chrome should format mission credits");
+    require(chapter != nullptr && chapter->value == "Chapter 1: Proving Ground", "panel chrome should expose the current chapter");
     require(hullDamage != nullptr && hullDamage->value == display::wholePercent(state.run.shipDamage), "panel chrome should format hull damage");
     require(currentFrontier != nullptr && currentFrontier->value == catalog.destinations[0].name, "panel chrome should show current frontier off launch");
     require(flightData != nullptr && flightData->value == display::fraction(state.run.frontierReadiness, frontierReadinessRequired(state, catalog)), "panel chrome should show readiness off launch");
@@ -4665,6 +4915,17 @@ void panelHtmlIncludesContextualTutorialLayer()
     const std::string moonLaunchHtml = buildGamePanelHtml(moonLaunchContext);
     require(moonLaunchHtml.find("relief valve") != std::string::npos, "Moon-tier launch help should mention mitigation controls");
 
+    GameState arkLaunchState = createNewGame(catalog, 714);
+    discoverArk(arkLaunchState, catalog);
+    arkLaunchState.screen = Screen::Launch;
+    Random arkLaunchRng(714);
+    const PreparedLaunch arkLaunch = prepareLaunch(arkLaunchState, catalog, arkLaunchRng);
+    PanelRenderContext arkLaunchContext {arkLaunchState, catalog, arkLaunch, arkLaunch};
+    arkLaunchContext.currentMultiplier = 1.12;
+    const std::string arkLaunchHtml = buildGamePanelHtml(arkLaunchContext);
+    require(arkLaunchHtml.find("Return to Ark banks data") != std::string::npos, "Ark launch help should relabel the return destination");
+    require(arkLaunchHtml.find(">Return to Ark</button>") != std::string::npos, "Ark launch controls should show the Ark return label");
+
     launchContext.flightArmed = false;
     const std::string preflightHtml = buildGamePanelHtml(launchContext);
     require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
@@ -4714,9 +4975,42 @@ void panelHtmlIncludesContextualTutorialLayer()
     const std::string miningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
     require(miningHtml.find("<h1>Mining</h1>") != std::string::npos, "mining panel should title the mining phase");
     require(miningHtml.find("class=\"cockpit-hud mining-hud\"") != std::string::npos, "mining controls should render in a cockpit HUD");
+    require(miningHtml.find("class=\"mining-health-strip\"") != std::string::npos, "mining panel should expose a prominent rig health strip");
+    require(miningHtml.find("class=\"resource-bank mining-combat-strip\"") != std::string::npos, "mining panel should expose live drone combat status");
+    require(miningHtml.find("Rig health") != std::string::npos, "mining panel should label player health as rig health");
+    require(miningHtml.find("Swarm command") != std::string::npos, "mining combat strip should title the passive drone command readout");
+    require(miningHtml.find("Cyan shots") != std::string::npos, "mining combat strip should explain allied projectile colors");
+    require(miningHtml.find("Allied shots") != std::string::npos, "mining combat strip should expose live allied projectile counts");
+    require(miningHtml.find("Drone dmg") != std::string::npos, "mining combat strip should expose live drone damage results");
+    require(miningHtml.find("Shielded") != std::string::npos, "mining combat strip should expose shield absorption results");
     require(miningHtml.find("data-help-topic=\"mining-basics\"") != std::string::npos, "mining panel should introduce controls and purpose");
     require(miningHtml.find("Move with WASD or arrows") != std::string::npos, "mining help should explain movement controls");
     require(miningHtml.find("materials and artifacts") != std::string::npos, "mining help should explain the mining purpose");
+    require(miningHtml.find("Combat read") != std::string::npos, "mining details should include a combat readability legend");
+    require(miningHtml.find("Blue numbers") != std::string::npos, "mining details should explain allied and enemy damage text colors");
+
+    GameState droneState = createNewGame(catalog, 715);
+    droneState.screen = Screen::DroneOps;
+    droneState.meta.unlockKeys.push_back(content::unlock::droneBay);
+    droneState.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(droneState, catalog);
+    droneState.meta.droneBaySlots = 3;
+    droneState.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
+    Random droneRng(715);
+    const PreparedLaunch droneLaunch = prepareLaunch(droneState, catalog, droneRng);
+    const std::string droneHtml = buildGamePanelHtml({droneState, catalog, droneLaunch, droneLaunch});
+    require(droneHtml.find("drone-build-strip") != std::string::npos, "Drone Ops HTML should include the active build strip");
+    require(droneHtml.find("drone-build-guidance") != std::string::npos, "Drone Ops HTML should include the build guidance strip");
+    require(droneHtml.find("Next recipe") != std::string::npos, "Drone Ops HTML should expose the next recipe target");
+    require(droneHtml.find("Tune next") != std::string::npos, "Drone Ops HTML should expose the next tuning priority");
+    require(droneHtml.find("drone-loadout-bench") != std::string::npos, "Drone Ops HTML should include the loadout bench");
+    require(droneHtml.find("Slot 1") != std::string::npos, "Drone Ops loadout bench should label slot positions");
+    require(droneHtml.find("drone-combat-forecast") != std::string::npos, "Drone Ops HTML should include the combat forecast strip");
+    require(droneHtml.find("Sentry output") != std::string::npos, "Drone Ops combat forecast should show passive combat output");
+    require(droneHtml.find("drone-recipe-board") != std::string::npos, "Drone Ops HTML should include the build recipe board");
+    require(droneHtml.find("Sentry Killbox") != std::string::npos, "Drone Ops HTML should name active signature builds");
+    require(droneHtml.find("Targeting Grid") != std::string::npos, "Drone Ops HTML should name active loadout synergies");
+    require(droneHtml.find("drone-build-hook") != std::string::npos, "Drone Ops HTML should expose per-drone build hooks");
 }
 
 void surfaceHtmlPromotesMiningAction()
@@ -5063,22 +5357,88 @@ void arkDiscoveryAndScriptedJumpProgression()
 
     require(arkDiscovered(state), "reaching Outer Planets should discover the operable derelict Ark");
     require(state.meta.campaignMilestone == CampaignMilestone::ArkDiscovered, "Ark discovery should advance the campaign milestone");
+    require(state.meta.chapter == GameChapter::Breakthrough, "Ark discovery should enter Breakthrough chapter");
     require(state.meta.ark.condition == ArkCondition::DerelictOperable, "discovered Ark should be derelict but operable");
     require(!navigationAvailable(state), "navigation should not become the main loop before the gravity-well disaster");
 
     require(performArkJump(state, catalog), "first Ark jump should resolve");
     require(state.meta.ark.firstJumpComplete, "first Ark jump should be recorded");
     require(state.meta.campaignMilestone == CampaignMilestone::FirstArkJumpComplete, "first Ark jump should have its own milestone");
+    require(state.meta.chapter == GameChapter::Straylight, "first Ark jump should enter Straylight");
     require(state.meta.ark.condition == ArkCondition::DerelictOperable, "first Ark jump should not strand the Ark");
 
     require(performArkJump(state, catalog), "second Ark jump should resolve into the scripted disaster");
     require(hostileSystemActive(state), "second Ark jump should activate the hostile system loop");
+    require(state.meta.chapter == GameChapter::Arkfall, "gravity-well disaster should enter Arkfall");
     require(navigationAvailable(state), "navigation should become available after the disaster");
     require(state.meta.ark.gravityWellDisaster, "gravity-well disaster should be recorded");
     require(state.meta.ark.condition == ArkCondition::DamagedStranded, "Ark should be damaged and stranded after the scripted disaster");
     require(hasUnlock(state.meta, content::unlock::deepSpace), "hostile system should unlock deep-space destinations");
     require(hasUnlock(state.meta, content::unlock::perimeterDrones), "hostile system should unlock combat-drone tech timing");
     require(state.screen == Screen::Navigation, "gravity-well disaster should land the player on Navigation");
+}
+
+void numberedChaptersAdvanceMonotonically()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 62005);
+    require(state.meta.chapter == GameChapter::ProvingGround, "new game should start at Chapter 1");
+    require(chapterLabel(state.meta.chapter) == "Chapter 1: Proving Ground", "chapter label should include stable number and provisional title");
+    require(chapterGate(GameChapter::Straylight) == std::string_view("Leave the peaceful relay system with the Ark jump."), "Straylight gate should describe the calm-before-storm beat");
+
+    auto completeTransfer = [&](std::string_view destinationId, double multiplier) {
+        LaunchOutcome outcome;
+        outcome.type = LaunchResultType::MissionComplete;
+        outcome.recoveryMethod = RecoveryMethod::TransferArrival;
+        outcome.frontierTransfer = true;
+        outcome.destinationId = std::string(destinationId);
+        outcome.ejectMultiplier = multiplier;
+        outcome.crashMultiplier = multiplier + 0.65;
+        applyLaunchOutcome(state, catalog, outcome);
+    };
+
+    completeTransfer(content::destination::moon, 1.95);
+    require(state.meta.chapter == GameChapter::LunarProgram, "Moon advancement should enter Chapter 2");
+
+    completeTransfer(content::destination::mars, 2.65);
+    require(state.meta.chapter == GameChapter::RedFrontier, "Mars advancement should enter Chapter 3");
+
+    completeTransfer(content::destination::outerPlanets, 3.55);
+    require(state.meta.chapter == GameChapter::Breakthrough, "Outer Planets Ark discovery should enter Chapter 4");
+    require(arkDiscovered(state), "Chapter 4 should coincide with Ark discovery");
+
+    require(performArkJump(state, catalog), "first Ark jump should enter Straylight");
+    require(state.meta.chapter == GameChapter::Straylight, "first Ark jump should enter Chapter 5");
+    require(state.meta.navigation.currentSystemId == "relay_system", "Straylight should use the peaceful relay system");
+    require(!hostileSystemActive(state), "Straylight should remain non-hostile");
+
+    require(performArkJump(state, catalog), "second Ark jump should trigger Arkfall");
+    require(state.meta.chapter == GameChapter::Arkfall, "gravity-well disaster should enter Chapter 6");
+    require(hostileSystemActive(state), "Arkfall should activate the hostile-system loop");
+
+    GameState legacyDisaster = createNewGame(catalog, 62007);
+    legacyDisaster.meta.campaignMilestone = CampaignMilestone::GravityWellDisaster;
+    syncChapterProgress(legacyDisaster, catalog);
+    require(legacyDisaster.meta.chapter == GameChapter::Arkfall, "legacy gravity-well milestone should derive Arkfall");
+    require(navigationAvailable(legacyDisaster), "legacy gravity-well milestone should make Navigation available");
+
+    completeTransfer(content::destination::nearbyStar, 5.10);
+    require(state.meta.chapter == GameChapter::LastCampfire, "first hostile-system sortie success should enter Chapter 7");
+
+    completeTransfer(content::destination::nearbyGalaxy, 7.00);
+    require(state.meta.chapter == GameChapter::VoidCompass, "Rift Belt success should enter Chapter 8");
+
+    state.meta.campaignMilestone = CampaignMilestone::ArkRepairing;
+    syncChapterProgress(state, catalog);
+    require(state.meta.chapter == GameChapter::Ouroboros, "Ark repair milestone should enter Chapter 9");
+
+    state.meta.chapter = GameChapter::Ascent;
+    state.run.destinationIndex = 0;
+    state.meta.campaignMilestone = CampaignMilestone::SolarTutorial;
+    state.meta.ark = {};
+    state.meta.navigation = {};
+    syncChapterProgress(state, catalog);
+    require(state.meta.chapter == GameChapter::Ascent, "chapter sync should never roll a later chapter backward");
 }
 
 void hostileNavigationSelectsShuttleSortie()
@@ -5158,10 +5518,21 @@ void arkCampaignStateRoundTripsThroughSave()
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *parsed);
     require(restored.meta.campaignMilestone == CampaignMilestone::HostileSystemStranded, "campaign milestone should round trip");
+    require(restored.meta.chapter == GameChapter::Arkfall, "chapter should round trip and stay at Arkfall before hostile sortie success");
     require(restored.meta.ark.condition == ArkCondition::DamagedStranded, "Ark condition should round trip");
     require(restored.meta.ark.gravityWellDisaster, "gravity-well flag should round trip");
     require(restored.meta.navigation.currentSystemId == "hostile_system", "navigation system id should round trip");
     require(restored.meta.navigation.selectedDestinationId == content::destination::nearbyGalaxy, "selected navigation target should round trip");
+
+    SaveData legacy = captureSaveData(createNewGame(catalog, 62006));
+    legacy.destinationIndex = 3;
+    legacy.furthestTier = 3;
+    legacy.campaignMilestone = CampaignMilestone::ArkDiscovered;
+    legacy.chapter = GameChapter::ProvingGround;
+    legacy.ark.condition = ArkCondition::DerelictOperable;
+    GameState migrated = createNewGame(catalog, 1);
+    restoreSaveData(migrated, catalog, legacy);
+    require(migrated.meta.chapter == GameChapter::Breakthrough, "old saves should derive the highest eligible chapter when no saved chapter existed");
 }
 
 void uiActionsUseStableSchemaIds()
@@ -5178,6 +5549,7 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::surfaceUpgrade(2) == "surface_upgrade:2", "indexed surface upgrade actions should share one action family");
     require(ui::actions::droneOps == "drone_ops", "Drone Ops action should use a stable schema id");
     require(ui::actions::equipDrone(2) == "equip_drone:2", "indexed drone equipment actions should share one action family");
+    require(ui::actions::upgradeDrone(2) == "upgrade_drone:2", "indexed drone tuning actions should share one action family");
     require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
     require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
@@ -5352,6 +5724,8 @@ int main()
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();
     hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
+    rangedMiningEnemiesShootAndCombatVisualsExpire();
+    attackDroneCombatCanCritAndEnemyCooldownPersists();
     elementalMiningCombatAppliesAffinityAndAreaDefenses();
     mammalBossChambersGrantAdvancedRewards();
     enemyMovementTypesHaveDistinctBehavior();
@@ -5395,6 +5769,7 @@ int main()
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();
     arkDiscoveryAndScriptedJumpProgression();
+    numberedChaptersAdvanceMonotonically();
     hostileNavigationSelectsShuttleSortie();
     legacyDeepSpaceFrontierMigratesToArkFlow();
     arkCampaignStateRoundTripsThroughSave();

@@ -31,7 +31,33 @@ struct MiningEnemySnapshot {
     double health = 1.0;
     double maxHealth = 1.0;
     double effectRadius = 0.0;
+    double attackCooldownSeconds = 0.0;
     bool active = true;
+};
+
+struct MiningProjectileSnapshot {
+    double startX = 0.0;
+    double startY = 0.0;
+    double endX = 0.0;
+    double endY = 0.0;
+    double age = 0.0;
+    double lifetime = 0.35;
+    int team = 0;
+    int sourceType = 0;
+    int affinity = 0;
+    bool critical = false;
+};
+
+struct MiningDamageNumberSnapshot {
+    double x = 0.0;
+    double y = 0.0;
+    double amount = 0.0;
+    double age = 0.0;
+    double lifetime = 0.90;
+    int team = 0;
+    int kind = 0;
+    bool critical = false;
+    bool rigDamage = false;
 };
 
 struct MiningArtifactSnapshot {
@@ -63,6 +89,7 @@ struct RenderSnapshot {
     double shipDamage = 0.0;
     int destinationTier = 0;
     int currentFrontierTier = 0;
+    ArkCondition arkCondition = ArkCondition::NotFound;
     bool frontierTransfer = false;
     bool returningHome = false;
     bool poweredFlight = false;
@@ -98,10 +125,22 @@ struct RenderSnapshot {
     int miningSharedFuel = 0;
     int miningSharedFuelCapacity = 0;
     int miningCargo = 0;
+    int miningSupportDroneCount = 0;
+    int miningAttackDroneCount = 0;
+    int miningDefenseDroneCount = 0;
+    int miningSynergyCount = 0;
+    int miningSignatureTier = 0;
+    int miningSignatureStyle = 0;
+    int miningTunedDroneCount = 0;
+    std::vector<int> miningDroneRoles;
+    std::vector<int> miningDroneUpgradeLevels;
+    bool miningShieldActive = false;
     MaterialInventory miningMaterials;
     MiningArtifactSnapshot miningArtifact;
     std::vector<MiningCellSnapshot> miningCells;
     std::vector<MiningEnemySnapshot> miningEnemies;
+    std::vector<MiningProjectileSnapshot> miningProjectiles;
+    std::vector<MiningDamageNumberSnapshot> miningDamageNumbers;
     bool flybyActive = false;
     bool flybyCompleted = false;
     int flybyZone = 0;
@@ -183,6 +222,7 @@ private:
     void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age);
+    void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<float>& scratchVertices(std::size_t reserveCount);
@@ -228,7 +268,7 @@ private:
         float textOffsetX = 0.0F;
     };
 
-    std::array<TextureAsset, 15> assets_ {};
+    std::array<TextureAsset, 17> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
     std::vector<int> previousMiningMaterials_;

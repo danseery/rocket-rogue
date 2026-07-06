@@ -14,6 +14,21 @@ USG Notes remain the primary design direction. This implementation adds the firs
   - Nearby Star: first hostile-system sortie target.
   - Nearby Galaxy: high-risk placeholder for later deep route content.
 
+## Numbered Chapters
+
+Chapter numbers are stable references for saves, tests, UI, and docs. Subtitles are provisional and can be renamed later without changing the chapter number.
+
+- Chapter 1: Proving Ground - Earth Orbit tutorial/proving loop.
+- Chapter 2: Lunar Program - Moon arrival, flyby, orbit, and landing phase.
+- Chapter 3: Red Frontier - Mars research, surface, and mining loop.
+- Chapter 4: Breakthrough - Outer Planets and the operational Ark discovery beyond Neptune.
+- Chapter 5: Straylight / Aaru Vale - operational Straylight as the Ark home, exploring friendly Aaru Vale for fuel, search, discovery, and mining without combat.
+- Chapter 6: Arkfall - gravity-well disaster after leaving Aaru Vale; Straylight is damaged and stranded near Khepri Prime.
+- Chapter 7: Last Campfire - stranded hostile-system survival from damaged Straylight near Khepri Prime.
+- Chapter 8: Void Compass - Rift Belt and deeper-route placeholder content.
+- Chapter 9: Ouroboros - future Ark repair loop.
+- Chapter 10: Ascent - future repaired-Ark and New Earth route.
+
 ## Future Expansion
 
 Navigation should eventually become a proper local system map with planets, moons, asteroid fields, anomalies, fuel costs, danger, terrain durability, artifact leads, and discovered enemy presence.

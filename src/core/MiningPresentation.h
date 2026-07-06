@@ -17,8 +17,13 @@ namespace rocket {
 struct MiningRunPresentation {
     std::vector<PanelMetricPresentation> metrics;
     std::vector<PanelMetricPresentation> payloadMetrics;
+    std::vector<PanelMetricPresentation> combatMetrics;
     std::vector<DetailPresentationRow> details;
     std::vector<PanelButtonPresentation> actions;
+    std::string combatTitle;
+    std::string combatDetail;
+    std::string rigHealth;
+    double rigHealthRatio = 1.0;
     bool failurePending = false;
     std::string failureTitle;
     std::string failureBody;
@@ -56,6 +61,18 @@ inline std::string miningDroneSummary(const MiniDroneLoadoutEffects& drones)
     return summary;
 }
 
+inline std::string miningNameListSummary(const std::vector<std::string>& names)
+{
+    if (names.empty()) {
+        return "None";
+    }
+    std::string summary = names.front();
+    for (std::size_t i = 1; i < names.size(); ++i) {
+        summary += ", " + names[i];
+    }
+    return summary;
+}
+
 inline std::string hostileTunnelSummary(const MiningTerrain& terrain)
 {
     int structures = 0;
@@ -89,6 +106,27 @@ inline int activeMiningEnemyCount(const MiningRunState& mining)
 {
     return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
         return enemy.active;
+    }));
+}
+
+inline int activeMiningProjectileCount(const MiningRunState& mining, MiningCombatTeam team)
+{
+    return static_cast<int>(std::count_if(mining.combatProjectiles.begin(), mining.combatProjectiles.end(), [team](const MiningProjectileVisual& projectile) {
+        return projectile.team == team;
+    }));
+}
+
+inline int activeMiningCritTextCount(const MiningRunState& mining)
+{
+    return static_cast<int>(std::count_if(mining.damageNumbers.begin(), mining.damageNumbers.end(), [](const MiningDamageNumber& number) {
+        return number.critical;
+    }));
+}
+
+inline int tunedMiningDroneCount(const GameState& state)
+{
+    return static_cast<int>(std::count_if(state.meta.droneUpgrades.begin(), state.meta.droneUpgrades.end(), [](const DroneUpgradeRecord& record) {
+        return record.level > 1;
     }));
 }
 
@@ -194,16 +232,20 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     presentation.failureBody = mining.failureMessage.empty()
         ? std::string("Mining drone recall is in progress.")
         : mining.failureMessage;
+    presentation.rigHealthRatio = std::clamp(mining.drillIntegrity, 0.0, 1.0);
+    presentation.rigHealth = display::percent(presentation.rigHealthRatio);
     presentation.metrics = {
+        panelMetric("Rig health", presentation.rigHealth),
         panelMetric(text::labels::oxygen, miningOxygenValue(mining.oxygenSeconds)),
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity))),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelBurnSeconds)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
         panelMetric(text::labels::drillHeat, display::percent(mining.drillHeat)),
-        panelMetric(text::labels::drillIntegrity, display::percent(mining.drillIntegrity)),
         panelMetric(text::labels::extractionRisk, display::signedPercent(extractionDelta)),
         panelMetric("Enemies", std::to_string(activeMiningEnemyCount(mining))),
         panelMetric("Drones", drones.names.empty() ? "0" : std::to_string(static_cast<int>(drones.names.size()))),
+        panelMetric("Synergies", std::to_string(static_cast<int>(drones.synergyNames.size()))),
+        panelMetric("Build", drones.signatureName.empty() ? "Solo" : drones.signatureName),
         panelMetric(text::labels::targetMaterial, std::string(miningMaterialName(mining.targetMaterial))),
         panelMetric(text::labels::toughness, miningToughnessValue(mining))
     };
@@ -219,6 +261,29 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::exoticMaterials, std::to_string(mining.temporaryMaterials.exotic)),
         panelMetric(text::labels::artifacts, std::to_string(mining.temporaryArtifacts.size()))
     };
+    presentation.combatTitle = drones.signatureName.empty()
+        ? (drones.synergyNames.empty() ? "Swarm command" : drones.synergyNames.front())
+        : drones.signatureName;
+    presentation.combatDetail = "Cyan shots and blue numbers are your mini-drones. Red/orange shots and red numbers are hostile fire. Keep mining while the build fights.";
+    const double alliedCritChance = std::clamp(tuning::mining::alliedCritChance + drones.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum);
+    const double shieldRelief = std::clamp(drones.enemyDamageRelief + drones.environmentalShieldRelief, 0.0, 1.0);
+    presentation.combatMetrics = {
+        panelMetric("Active build", drones.signatureName.empty() ? (drones.synergyNames.empty() ? "Solo cover" : drones.synergyNames.front()) : drones.signatureName),
+        panelMetric("Threats", std::to_string(activeMiningEnemyCount(mining))),
+        panelMetric("Allied shots", std::to_string(activeMiningProjectileCount(mining, MiningCombatTeam::Allied))),
+        panelMetric("Enemy shots", std::to_string(activeMiningProjectileCount(mining, MiningCombatTeam::Enemy))),
+        panelMetric("Crit text", std::to_string(activeMiningCritTextCount(mining))),
+        panelMetric("Volley", "x" + std::to_string(1 + drones.sentryVolleyBonus)),
+        panelMetric("Crit chance", display::percent(alliedCritChance)),
+        panelMetric("Shield", display::percent(shieldRelief)),
+        panelMetric("Tuned", std::to_string(tunedMiningDroneCount(state))),
+        panelMetric("KOs", std::to_string(mining.enemiesDefeated)),
+        panelMetric("Drone dmg", display::fixed(mining.defenseDamageDealt, 1)),
+        panelMetric("Field dmg", display::fixed(mining.areaControlDamageDealt, 1)),
+        panelMetric("Counter", display::fixed(mining.reactiveArmorDamageDealt, 1)),
+        panelMetric("Shielded", display::percent(mining.environmentalShieldAbsorbed)),
+        panelMetric("Rig dmg", display::percent(mining.enemyDamageTaken))
+    };
     presentation.details = {
         detailPresentationRow("Controls", std::string("WASD/arrows move; mouse or Space drills; E scans; T tethers artifacts; R stows; Esc aborts.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
@@ -228,6 +293,12 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Fuel spent this dig", std::to_string(mining.fuelSpent)),
         detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown, static_cast<int>(std::round(tuning::mining::fuelSecondsPerUnit)))),
         detailPresentationRow("Drone loadout", miningDroneSummary(drones)),
+        detailPresentationRow("Build signature", drones.signatureName.empty() ? "None" : drones.signatureName),
+        detailPresentationRow("Signature payoff", drones.signatureDetail.empty() ? "Equip complementary Drone Ops roles before the run to activate a signature build." : drones.signatureDetail),
+        detailPresentationRow("Active synergies", miningNameListSummary(drones.synergyNames)),
+        detailPresentationRow("Combat read", std::string("Your rig and mini-drones are cyan/blue. Melee enemies rush the rig; ranged enemies fire red or elemental shots from standoff range.")),
+        detailPresentationRow("Damage text", std::string("Blue numbers are your mini-drones hurting enemies. Red numbers are rig damage. Gold CRIT text marks a critical hit.")),
+        detailPresentationRow("Drone crits", display::percent(std::clamp(tuning::mining::alliedCritChance + drones.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum)) + " crit; volley x" + std::to_string(1 + drones.sentryVolleyBonus)),
         detailPresentationRow("Drone auto-mining", drones.passiveMiningRate > 0.0 ? ("+" + display::fixed(drones.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Passive defense", display::fixed(tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond, 1) + " DPS; " + display::percent(std::clamp(drones.enemyDamageRelief + drones.environmentalShieldRelief, 0.0, 1.0)) + " shield relief"),
         detailPresentationRow("Area control", drones.areaControlDamagePerSecond > 0.0 ? (display::fixed(drones.areaControlDamagePerSecond, 1) + " DPS field; " + display::percent(drones.enemySlow) + " slow") : "None"),

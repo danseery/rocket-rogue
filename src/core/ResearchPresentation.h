@@ -102,17 +102,46 @@ struct MiniDroneCardPresentation {
     std::string title;
     std::string detail;
     std::string status;
+    std::string buildHook;
+    std::string upgradeSummary;
     std::vector<PanelMetricPresentation> effectChips;
     PanelButtonPresentation action;
+    PanelButtonPresentation upgradeAction;
+};
+
+struct DroneBuildRecipePresentation {
+    std::string title;
+    std::string requirements;
+    std::string detail;
+    std::string status;
+    bool active = false;
+    bool signature = false;
+};
+
+struct DroneLoadoutSlotPresentation {
+    int slot = 0;
+    std::string title;
+    std::string role;
+    std::string status;
+    std::string detail;
+    std::string cssClass;
+    std::vector<PanelMetricPresentation> chips;
 };
 
 struct DroneOpsPresentation {
     std::vector<PanelMetricPresentation> metrics;
     std::vector<DetailPresentationRow> details;
+    std::vector<PanelMetricPresentation> buildChips;
+    std::vector<PanelMetricPresentation> buildGuidanceChips;
+    std::vector<PanelMetricPresentation> forecastChips;
+    std::vector<DroneBuildRecipePresentation> buildRecipes;
+    std::vector<DroneLoadoutSlotPresentation> loadoutSlots;
     std::vector<MiniDroneCardPresentation> drones;
     PanelButtonPresentation upgradeSlotAction;
     PanelButtonPresentation backAction;
     std::string nextSlotCost;
+    std::string buildTitle;
+    std::string buildDetail;
 };
 
 inline std::string materialSummary(const MaterialInventory& materials)
@@ -268,9 +297,31 @@ inline SurfaceUpgradeCardPresentation surfaceUpgradeCardPresentation(const Surfa
     };
 }
 
-inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats& stats)
+inline MiniDroneStats scaledMiniDroneStats(MiniDroneStats stats, int upgradeLevel)
+{
+    const double multiplier = 1.0 + 0.30 * static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1);
+    stats.passiveMiningRate *= multiplier;
+    stats.oxygenSeconds *= multiplier;
+    stats.scannerRadius *= multiplier;
+    stats.drillIntegrityRelief *= multiplier;
+    stats.hardRockBounceRelief *= multiplier;
+    stats.extractionRiskRelief *= multiplier;
+    stats.enemyEncounterRelief *= multiplier;
+    stats.sentryDamagePerSecond *= multiplier;
+    stats.enemyDamageRelief *= multiplier;
+    stats.areaControlDamagePerSecond *= multiplier;
+    stats.enemySlow *= multiplier;
+    stats.reactiveArmorDamagePerSecond *= multiplier;
+    stats.environmentalShieldRelief *= multiplier;
+    return stats;
+}
+
+inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats& stats, int upgradeLevel = 1)
 {
     std::vector<PanelMetricPresentation> chips;
+    if (upgradeLevel > 1) {
+        chips.push_back(panelMetric("Tuning", "Mk " + std::to_string(upgradeLevel)));
+    }
     if (stats.passiveMiningRate > 0.0) {
         chips.push_back(panelMetric("Auto-mine", "+" + display::fixed(stats.passiveMiningRate * 60.0, 1) + "/min"));
     }
@@ -283,17 +334,94 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats&
     addPercentChip(chips, text::labels::extractionRisk, stats.extractionRiskRelief);
     addPercentChip(chips, text::labels::contactRisk, stats.enemyEncounterRelief);
     if (stats.sentryDamagePerSecond > 0.0) {
-        chips.push_back(panelMetric("Sentry", "+" + display::fixed(stats.sentryDamagePerSecond, 1) + "/s"));
+        chips.push_back(panelMetric("Auto-fire", display::fixed(tuning::mining::alliedShotIntervalSeconds, 2) + "s"));
+        chips.push_back(panelMetric("Shot power", "+" + display::fixed(stats.sentryDamagePerSecond, 1) + "/s"));
+        chips.push_back(panelMetric("Crits", display::percent(tuning::mining::alliedCritChance)));
     }
     if (stats.areaControlDamagePerSecond > 0.0) {
-        chips.push_back(panelMetric("Area fire", "+" + display::fixed(stats.areaControlDamagePerSecond, 1) + "/s"));
+        chips.push_back(panelMetric("Field pulse", "+" + display::fixed(stats.areaControlDamagePerSecond, 1) + "/s"));
     }
     addPercentChip(chips, "Slow", stats.enemySlow);
     if (stats.reactiveArmorDamagePerSecond > 0.0) {
-        chips.push_back(panelMetric("Reactive", "+" + display::fixed(stats.reactiveArmorDamagePerSecond, 1) + "/s"));
+        chips.push_back(panelMetric("Counter-hit", "+" + display::fixed(stats.reactiveArmorDamagePerSecond, 1) + "/s"));
     }
     addPercentChip(chips, "Shield", stats.environmentalShieldRelief);
     return chips;
+}
+
+inline std::string miniDroneBestUpgradePayoff(const MiniDroneStats& current, const MiniDroneStats& next)
+{
+    struct Candidate {
+        std::string label;
+        std::string value;
+        double weight = 0.0;
+    };
+    std::vector<Candidate> candidates;
+    auto addRate = [&](std::string label, double before, double after, double scale, std::string suffix, double weightScale) {
+        const double delta = after - before;
+        if (delta > 0.0001) {
+            candidates.push_back({std::move(label), "+" + display::fixed(delta * scale, 1) + suffix, delta * weightScale});
+        }
+    };
+    auto addPercent = [&](std::string label, double before, double after, double weightScale) {
+        const double delta = after - before;
+        if (delta > 0.0001) {
+            candidates.push_back({std::move(label), display::signedPercent(delta), delta * weightScale});
+        }
+    };
+    addRate("auto-mine", current.passiveMiningRate, next.passiveMiningRate, 60.0, "/min", 80.0);
+    addRate("oxygen", current.oxygenSeconds, next.oxygenSeconds, 1.0, "s", 1.0);
+    addRate("scanner", current.scannerRadius, next.scannerRadius, 1.0, " radius", 12.0);
+    addPercent("durability", current.drillIntegrityRelief, next.drillIntegrityRelief, 100.0);
+    addPercent("bounce relief", current.hardRockBounceRelief, next.hardRockBounceRelief, 80.0);
+    addPercent("extraction risk", current.extractionRiskRelief, next.extractionRiskRelief, 130.0);
+    addPercent("contact risk", current.enemyEncounterRelief, next.enemyEncounterRelief, 90.0);
+    addRate("shot power", current.sentryDamagePerSecond, next.sentryDamagePerSecond, 1.0, "/s", 18.0);
+    addPercent("shield", current.enemyDamageRelief + current.environmentalShieldRelief, next.enemyDamageRelief + next.environmentalShieldRelief, 120.0);
+    addRate("field pulse", current.areaControlDamagePerSecond, next.areaControlDamagePerSecond, 1.0, "/s", 14.0);
+    addPercent("slow field", current.enemySlow, next.enemySlow, 90.0);
+    addRate("counter-hit", current.reactiveArmorDamagePerSecond, next.reactiveArmorDamagePerSecond, 1.0, "/s", 16.0);
+    if (candidates.empty()) {
+        return "No stat gain";
+    }
+    const auto best = std::max_element(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
+        return lhs.weight < rhs.weight;
+    });
+    return best->label + " " + best->value;
+}
+
+inline std::string miniDroneUpgradeSummary(const MiniDrone& drone, bool owned, int upgradeLevel)
+{
+    if (!owned) {
+        return "Acquire drone to tune";
+    }
+    if (upgradeLevel >= 3) {
+        return "Mk 3 max tuning";
+    }
+    const int nextLevel = upgradeLevel + 1;
+    const MiniDroneStats currentStats = scaledMiniDroneStats(drone.stats, upgradeLevel);
+    const MiniDroneStats nextStats = scaledMiniDroneStats(drone.stats, nextLevel);
+    return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) + ": " +
+        miniDroneBestUpgradePayoff(currentStats, nextStats) + " / " + materialSummary(miniDroneUpgradeCost(nextLevel));
+}
+
+inline std::string miniDroneBuildHook(MiniDroneRole role)
+{
+    switch (role) {
+    case MiniDroneRole::Mining:
+        return "Pairs with Attack for Excavation Barrage, Resource for Long Haul Rig, and Survey for Relic Pathfinder.";
+    case MiniDroneRole::Resource:
+        return "Pairs with Mining for Long Haul Rig, Survey for Pathfinder Loop, and Defense/Stabilizer for Fortress Rig.";
+    case MiniDroneRole::Survey:
+        return "Pairs with Attack for Targeting Grid and helps unlock Sentry Killbox or Relic Pathfinder signatures.";
+    case MiniDroneRole::Stabilizer:
+        return "Pairs with Defense for Bulwark Harness and anchors the Fortress Rig endurance signature.";
+    case MiniDroneRole::Attack:
+        return "Pairs with Survey for crits, Defense for volleys, and Mining for area-control excavation.";
+    case MiniDroneRole::Defense:
+        return "Pairs with Attack for Killbox Screen and Stabilizer/Resource for shield-heavy endurance builds.";
+    }
+    return "Equip complementary roles to unlock named drone synergies.";
 }
 
 inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& drone, const GameState& state, int index)
@@ -302,12 +430,21 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
     const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
     const bool equipped = std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id) != state.meta.equippedDroneIds.end();
     const bool hasFreeSlot = state.meta.equippedDroneIds.size() < static_cast<std::size_t>(std::max(0, state.meta.droneBaySlots));
+    const int upgradeLevel = owned ? miniDroneUpgradeLevel(state, drone.id) : 1;
+    const MaterialInventory nextUpgradeCost = miniDroneUpgradeCost(upgradeLevel + 1);
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
     std::string status = unlocked ? (equipped ? "Equipped" : (owned ? "Ready" : "Not owned")) : ("Locked: " + std::string(unlockDisplayName(drone.unlockKey)));
+    PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
+    std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
     if (owned && unlocked) {
         action = equipped
             ? panelActionButton("Unequip", ui::actions::equipDrone(index), "warn")
             : (hasFreeSlot ? panelActionButton("Equip", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full"));
+        upgradeAction = upgradeLevel >= 3
+            ? disabledPanelButton("Mk III")
+            : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
+                ? panelActionButton("Tune Mk " + std::to_string(upgradeLevel + 1), ui::actions::upgradeDrone(index), "ok")
+                : disabledPanelButton("Need mats"));
     }
     return {
         index,
@@ -316,8 +453,11 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         drone.name,
         drone.description,
         std::move(status),
-        miniDroneChips(drone.stats),
-        std::move(action)
+        miniDroneBuildHook(drone.role),
+        std::move(upgradeSummary),
+        miniDroneChips(scaledMiniDroneStats(drone.stats, upgradeLevel), upgradeLevel),
+        std::move(action),
+        std::move(upgradeAction)
     };
 }
 
@@ -343,10 +483,426 @@ inline std::string miniDroneNameSummary(const GameState& state, const ContentCat
     return summary.empty() ? "No drones assigned" : summary;
 }
 
+inline std::string miniDroneSynergySummary(const MiniDroneLoadoutEffects& effects)
+{
+    if (effects.synergyNames.empty()) {
+        return "None";
+    }
+    std::string summary = effects.synergyNames.front();
+    for (std::size_t i = 1; i < effects.synergyNames.size(); ++i) {
+        summary += ", " + effects.synergyNames[i];
+    }
+    return summary;
+}
+
+inline std::string droneBuildTitle(const MiniDroneLoadoutEffects& effects)
+{
+    if (effects.names.empty()) {
+        return "No build assigned";
+    }
+    if (!effects.signatureName.empty()) {
+        return effects.signatureName;
+    }
+    if (!effects.synergyNames.empty()) {
+        return effects.synergyNames.front() + " build";
+    }
+    if (effects.sentryDamagePerSecond > 0.0 || effects.enemyDamageRelief > 0.0) {
+        return "Combat support build";
+    }
+    if (effects.passiveMiningRate > 0.0) {
+        return "Excavation support build";
+    }
+    if (effects.oxygenSeconds > 0.0 || effects.extractionRiskRelief > 0.0) {
+        return "Endurance support build";
+    }
+    return "Field support build";
+}
+
+inline std::string droneBuildDetail(const MiniDroneLoadoutEffects& effects)
+{
+    if (effects.names.empty()) {
+        return "Assign drones to create passive mining, combat, shield, scanner, and endurance synergies before the run starts.";
+    }
+    if (!effects.signatureName.empty()) {
+        return effects.signatureDetail;
+    }
+    if (!effects.synergyNames.empty()) {
+        return "Active synergies change how the rig survives while you mine: " + miniDroneSynergySummary(effects) + ".";
+    }
+    return "This loadout has useful solo drone effects. Add complementary roles to unlock named synergies.";
+}
+
+inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniDroneLoadoutEffects& effects)
+{
+    const double critChance = std::clamp(tuning::mining::alliedCritChance + effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum);
+    const double shotInterval = tuning::mining::alliedShotIntervalSeconds /
+        (1.0 + std::clamp(effects.alliedFireRateBonus, 0.0, tuning::mining::alliedFireRateBonusMaximum));
+    const int volley = 1 + std::clamp(effects.sentryVolleyBonus, 0, tuning::mining::alliedSentryVolleyMaximum);
+    const double sentryOutput = tuning::mining::baseDefenseDamagePerSecond + effects.sentryDamagePerSecond;
+    const double shieldRelief = std::clamp(effects.enemyDamageRelief + effects.enemyEncounterRelief * 0.75 + effects.environmentalShieldRelief, 0.0, 0.82);
+    std::vector<PanelMetricPresentation> chips {
+        panelMetric("Volley", std::to_string(volley) + " target" + (volley == 1 ? "" : "s")),
+        panelMetric("Cadence", display::fixed(shotInterval, 2) + "s"),
+        panelMetric("Crit chance", display::percent(critChance)),
+        panelMetric("Sentry output", display::fixed(sentryOutput, 1) + "/s"),
+        panelMetric("Field pulse", effects.areaControlDamagePerSecond > 0.0 ? (display::fixed(effects.areaControlDamagePerSecond, 1) + "/s") : "None"),
+        panelMetric("Shield relief", shieldRelief > 0.0 ? display::percent(shieldRelief) : "None"),
+        panelMetric("Counter-hit", effects.reactiveArmorDamagePerSecond > 0.0 ? (display::fixed(effects.reactiveArmorDamagePerSecond, 1) + "/s") : "None"),
+        panelMetric("Enemy slow", effects.enemySlow > 0.0 ? display::percent(effects.enemySlow) : "None"),
+        panelMetric("Auto-mine", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + "/min") : "None")
+    };
+    if (effects.names.empty()) {
+        chips.push_back(panelMetric("Build state", "No drones"));
+    } else if (!effects.signatureName.empty()) {
+        chips.push_back(panelMetric("Build state", "Signature"));
+    } else if (!effects.synergyNames.empty()) {
+        chips.push_back(panelMetric("Build state", "Synergy"));
+    } else {
+        chips.push_back(panelMetric("Build state", "Solo effects"));
+    }
+    return chips;
+}
+
+inline int tunedDroneCount(const GameState& state)
+{
+    return static_cast<int>(std::count_if(state.meta.droneUpgrades.begin(), state.meta.droneUpgrades.end(), [](const DroneUpgradeRecord& record) {
+        return record.level > 1;
+    }));
+}
+
+inline int equippedMiniDroneRoleCount(const GameState& state, const ContentCatalog& catalog, MiniDroneRole role)
+{
+    int count = 0;
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (drone != nullptr && drone->role == role) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+inline std::string miniDroneRoleLabel(MiniDroneRole role)
+{
+    return std::string(toString(role));
+}
+
+inline std::string miniDroneRoleClass(MiniDroneRole role)
+{
+    switch (role) {
+    case MiniDroneRole::Mining:
+        return "role-mining";
+    case MiniDroneRole::Resource:
+        return "role-resource";
+    case MiniDroneRole::Survey:
+        return "role-survey";
+    case MiniDroneRole::Stabilizer:
+        return "role-stabilizer";
+    case MiniDroneRole::Attack:
+        return "role-attack";
+    case MiniDroneRole::Defense:
+        return "role-defense";
+    }
+    return "role-support";
+}
+
+inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameState& state, const ContentCatalog& catalog)
+{
+    std::vector<DroneLoadoutSlotPresentation> slots;
+    constexpr int maxSlots = 6;
+    const int unlockedSlots = std::clamp(state.meta.droneBaySlots, 0, maxSlots);
+    for (int index = 0; index < maxSlots; ++index) {
+        const int slotNumber = index + 1;
+        if (index < unlockedSlots) {
+            const bool equipped = index < static_cast<int>(state.meta.equippedDroneIds.size());
+            const MiniDrone* drone = equipped ? catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(index)]) : nullptr;
+            if (drone != nullptr) {
+                const int upgradeLevel = miniDroneUpgradeLevel(state, drone->id);
+                slots.push_back({
+                    slotNumber,
+                    drone->name,
+                    miniDroneRoleLabel(drone->role),
+                    "Equipped",
+                    "Mk " + std::to_string(upgradeLevel) + " " + miniDroneRoleLabel(drone->role) + " support is active in the next mining run.",
+                    "filled " + miniDroneRoleClass(drone->role),
+                    {
+                        panelMetric("Slot", std::to_string(slotNumber)),
+                        panelMetric("Mk", std::to_string(upgradeLevel)),
+                        panelMetric("Role", miniDroneRoleLabel(drone->role))
+                    }
+                });
+            } else {
+                slots.push_back({
+                    slotNumber,
+                    "Open slot",
+                    "Empty",
+                    "Ready",
+                    "Equip a drone from the roster to add another passive ability to the build.",
+                    "open",
+                    {
+                        panelMetric("Slot", std::to_string(slotNumber)),
+                        panelMetric("State", "Open")
+                    }
+                });
+            }
+            continue;
+        }
+
+        const MaterialInventory cost = droneSlotUpgradeCost(slotNumber);
+        slots.push_back({
+            slotNumber,
+            "Locked slot",
+            "Locked",
+            index == unlockedSlots ? "Next bay upgrade" : "Locked",
+            index == unlockedSlots
+                ? ("Upgrade Drone Bay to unlock this build slot: " + materialSummary(cost) + ".")
+                : "Unlock earlier bay slots before this position becomes available.",
+            "locked",
+            {
+                panelMetric("Slot", std::to_string(slotNumber)),
+                panelMetric("Need", index == unlockedSlots ? materialSummary(cost) : "Prior slot")
+            }
+        });
+    }
+    return slots;
+}
+
+inline std::string droneRecipeRequirements(const std::vector<MiniDroneRole>& roles)
+{
+    if (roles.empty()) {
+        return "Any loadout";
+    }
+    std::string result = miniDroneRoleLabel(roles.front());
+    for (std::size_t i = 1; i < roles.size(); ++i) {
+        result += " + " + miniDroneRoleLabel(roles[i]);
+    }
+    return result;
+}
+
+inline DroneBuildRecipePresentation droneBuildRecipe(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string title,
+    std::vector<MiniDroneRole> roles,
+    std::string detail,
+    bool signature)
+{
+    std::vector<std::string> missing;
+    for (MiniDroneRole role : roles) {
+        if (equippedMiniDroneRoleCount(state, catalog, role) <= 0) {
+            missing.push_back(miniDroneRoleLabel(role));
+        }
+    }
+    std::string status = "Active";
+    if (!missing.empty()) {
+        status = "Need " + missing.front();
+        for (std::size_t i = 1; i < missing.size(); ++i) {
+            status += ", " + missing[i];
+        }
+    }
+    return {
+        std::move(title),
+        droneRecipeRequirements(roles),
+        std::move(detail),
+        std::move(status),
+        missing.empty(),
+        signature
+    };
+}
+
+inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameState& state, const ContentCatalog& catalog)
+{
+    return {
+        droneBuildRecipe(state, catalog, "Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Crit chance, fire rate, and scanner paint for priority targets.", false),
+        droneBuildRecipe(state, catalog, "Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Extra sentry target plus shield and retaliatory damage.", false),
+        droneBuildRecipe(state, catalog, "Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Mining output and area-control pressure in the work zone.", false),
+        droneBuildRecipe(state, catalog, "Bulwark Harness", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer}, "Rig health relief, environmental shielding, and bounce control.", false),
+        droneBuildRecipe(state, catalog, "Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "More passive excavation, oxygen, and safer extraction.", false),
+        droneBuildRecipe(state, catalog, "Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scanner reach and extraction safety for artifact routes.", false),
+        droneBuildRecipe(state, catalog, "Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Signature: faster volleys, better crits, and tougher shields.", true),
+        droneBuildRecipe(state, catalog, "Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "Signature: ore flow stays high while combat pulses slow enemies.", true),
+        droneBuildRecipe(state, catalog, "Fortress Rig", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer, MiniDroneRole::Resource}, "Signature: long-dig endurance with shields, reserve time, and counter-hits.", true),
+        droneBuildRecipe(state, catalog, "Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "Signature: artifact routing with wider scans and safer extraction.", true),
+        droneBuildRecipe(state, catalog, "Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Stabilizer}, "Capstone: every role online for volleys, scans, shields, logistics, and mining.", true)
+    };
+}
+
+struct DroneBuildGuidancePresentation {
+    std::string nextRecipe;
+    std::string missingRoles;
+    std::string tuneNext;
+    std::string runPosture;
+    std::string detail;
+};
+
+inline std::string droneRoleListSummary(const std::vector<MiniDroneRole>& roles)
+{
+    if (roles.empty()) {
+        return "None";
+    }
+    std::string result = miniDroneRoleLabel(roles.front());
+    for (std::size_t i = 1; i < roles.size(); ++i) {
+        result += ", " + miniDroneRoleLabel(roles[i]);
+    }
+    return result;
+}
+
+inline std::string droneRunPosture(const MiniDroneLoadoutEffects& effects)
+{
+    switch (effects.signatureKind) {
+    case MiniDroneSignatureKind::SentryKillbox:
+        return "Killbox";
+    case MiniDroneSignatureKind::ExcavationStorm:
+        return "Greedy mine";
+    case MiniDroneSignatureKind::FortressRig:
+        return "Hold ground";
+    case MiniDroneSignatureKind::RelicPathfinder:
+        return "Artifact route";
+    case MiniDroneSignatureKind::FullSpectrumSwarm:
+        return "Capstone";
+    case MiniDroneSignatureKind::None:
+        break;
+    }
+    if (effects.sentryDamagePerSecond > 0.0 || effects.areaControlDamagePerSecond > 0.0) {
+        return "Cover fire";
+    }
+    if (effects.enemyDamageRelief > 0.0 || effects.environmentalShieldRelief > 0.0) {
+        return "Shield line";
+    }
+    if (effects.passiveMiningRate > 0.0) {
+        return "Ore tempo";
+    }
+    if (effects.scannerRadius > 0.0 || effects.extractionRiskRelief > 0.0) {
+        return "Route scout";
+    }
+    return effects.names.empty() ? "Open bay" : "Field support";
+}
+
+inline std::string droneTunePriority(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
+{
+    auto equippedDroneWithRole = [&](MiniDroneRole role) -> const MiniDrone* {
+        for (const std::string& droneId : state.meta.equippedDroneIds) {
+            const MiniDrone* drone = catalog.findMiniDrone(droneId);
+            if (drone != nullptr && drone->role == role && miniDroneUpgradeLevel(state, drone->id) < 3) {
+                return drone;
+            }
+        }
+        return nullptr;
+    };
+
+    std::vector<MiniDroneRole> priorities;
+    if (effects.sentryDamagePerSecond > 0.0 || effects.areaControlDamagePerSecond > 0.0 || effects.alliedCritChanceBonus > 0.0) {
+        priorities.push_back(MiniDroneRole::Attack);
+    }
+    if (effects.enemyDamageRelief > 0.0 || effects.reactiveArmorDamagePerSecond > 0.0 || effects.environmentalShieldRelief > 0.0) {
+        priorities.push_back(MiniDroneRole::Defense);
+    }
+    if (effects.passiveMiningRate > 0.0) {
+        priorities.push_back(MiniDroneRole::Mining);
+    }
+    if (effects.oxygenSeconds > 0.0 || effects.extractionRiskRelief > 0.0) {
+        priorities.push_back(MiniDroneRole::Resource);
+    }
+    if (effects.scannerRadius > 0.0) {
+        priorities.push_back(MiniDroneRole::Survey);
+    }
+    if (effects.drillIntegrityRelief > 0.0 || effects.hardRockBounceRelief > 0.0) {
+        priorities.push_back(MiniDroneRole::Stabilizer);
+    }
+
+    for (MiniDroneRole role : priorities) {
+        if (const MiniDrone* drone = equippedDroneWithRole(role)) {
+            return drone->name + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+        }
+    }
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (drone != nullptr && miniDroneUpgradeLevel(state, drone->id) < 3) {
+            return drone->name + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+        }
+    }
+    return state.meta.equippedDroneIds.empty() ? "Equip first" : "All Mk III";
+}
+
+inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
+{
+    struct Candidate {
+        std::string title;
+        std::vector<MiniDroneRole> roles;
+        std::string detail;
+        bool signature = false;
+    };
+    const std::vector<Candidate> candidates {
+        {"Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Add scanner paint to raise crit chance and drone fire rate.", false},
+        {"Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Pair cover fire with shields so close threats trigger counter-hits.", false},
+        {"Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Turn ore tempo into area-control pressure around the work zone.", false},
+        {"Bulwark Harness", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer}, "Bias the rig toward shields, hard-rock control, and safer long digs.", false},
+        {"Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "Keep ore and oxygen flowing for deeper mining routes.", false},
+        {"Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scout artifact paths and reduce extraction pressure.", false},
+        {"Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Next logical combat signature: volleys, crits, and shield relief.", true},
+        {"Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "A greedier mining signature that keeps damage pulsing while ore flows.", true},
+        {"Fortress Rig", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer, MiniDroneRole::Resource}, "The endurance signature for holding position under pressure.", true},
+        {"Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "The artifact-routing signature for safer, wider recovery lines.", true},
+        {"Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Stabilizer}, "Capstone build: every role online for combat, logistics, scans, and mining.", true}
+    };
+
+    const Candidate* best = nullptr;
+    std::vector<MiniDroneRole> bestMissing;
+    int bestMissingCount = 99;
+    for (const Candidate& candidate : candidates) {
+        std::vector<MiniDroneRole> missing;
+        for (MiniDroneRole role : candidate.roles) {
+            if (equippedMiniDroneRoleCount(state, catalog, role) <= 0) {
+                missing.push_back(role);
+            }
+        }
+        if (missing.empty()) {
+            continue;
+        }
+        const int missingCount = static_cast<int>(missing.size());
+        const bool preferCandidate =
+            best == nullptr ||
+            missingCount < bestMissingCount ||
+            (missingCount == bestMissingCount && candidate.signature && !best->signature);
+        if (preferCandidate) {
+            best = &candidate;
+            bestMissing = std::move(missing);
+            bestMissingCount = missingCount;
+        }
+    }
+
+    if (best == nullptr) {
+        return {
+            "Full Spectrum Swarm",
+            "None",
+            droneTunePriority(state, catalog, effects),
+            droneRunPosture(effects),
+            "Every build recipe is active. Spend materials on favorite drones and push hostile mining depth."
+        };
+    }
+    if (state.meta.equippedDroneIds.empty()) {
+        return {
+            "First role",
+            "Mining or Attack",
+            droneTunePriority(state, catalog, effects),
+            droneRunPosture(effects),
+            "Start with Mining for ore tempo or Attack for hostile-system cover, then pair a second role to unlock the first named recipe."
+        };
+    }
+    return {
+        best->title,
+        droneRoleListSummary(bestMissing),
+        droneTunePriority(state, catalog, effects),
+        droneRunPosture(effects),
+        best->detail
+    };
+}
+
 inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentCatalog& catalog)
 {
     ensureDroneBayState(state, catalog);
     const MiniDroneLoadoutEffects effects = miniDroneLoadoutEffects(state, catalog);
+    const DroneBuildGuidancePresentation guidance = droneBuildGuidance(state, catalog, effects);
     const int nextSlot = state.meta.droneBaySlots + 1;
     const MaterialInventory nextCost = droneSlotUpgradeCost(nextSlot);
     const bool maxed = state.meta.droneBaySlots >= 6;
@@ -360,13 +916,41 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         panelMetric(text::labels::rareMaterials, std::to_string(state.meta.materials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(state.meta.materials.exotic))
     };
+    presentation.buildTitle = droneBuildTitle(effects);
+    presentation.buildDetail = droneBuildDetail(effects);
+    presentation.buildChips = {
+        panelMetric("Signature", effects.signatureName.empty() ? "None" : effects.signatureName),
+        panelMetric("Active synergies", std::to_string(static_cast<int>(effects.synergyNames.size()))),
+        panelMetric("Tuned drones", std::to_string(tunedDroneCount(state))),
+        panelMetric("Crit chance", display::percent(std::clamp(tuning::mining::alliedCritChance + effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum))),
+        panelMetric("Volley", std::to_string(1 + effects.sentryVolleyBonus)),
+        panelMetric("Fire rate", effects.alliedFireRateBonus > 0.0 ? ("+" + display::percent(effects.alliedFireRateBonus)) : "Base")
+    };
+    presentation.buildGuidanceChips = {
+        panelMetric("Next recipe", guidance.nextRecipe),
+        panelMetric("Missing roles", guidance.missingRoles),
+        panelMetric("Tune next", guidance.tuneNext),
+        panelMetric("Run posture", guidance.runPosture)
+    };
+    presentation.forecastChips = droneCombatForecastChips(effects);
+    presentation.loadoutSlots = droneLoadoutSlots(state, catalog);
+    presentation.buildRecipes = droneBuildRecipes(state, catalog);
     presentation.details = {
         detailPresentationRow("Drone Bay", std::to_string(std::max(0, state.meta.droneBaySlots)) + " slot capacity"),
         detailPresentationRow("Loadout", miniDroneNameSummary(state, catalog)),
+        detailPresentationRow("Build signature", effects.signatureName.empty() ? "None" : effects.signatureName),
+        detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
+        detailPresentationRow("Build guidance", guidance.detail),
+        detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Tune: " + guidance.tuneNext),
+        detailPresentationRow("Drone tuning", std::to_string(tunedDroneCount(state)) + " drones above Mk I. Tuning scales that drone's passive stats while it is equipped."),
+        detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
         detailPresentationRow("Stability support", effects.hardRockBounceRelief > 0.0 ? display::percent(effects.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
+        detailPresentationRow("Passive combat plan", std::string("During hostile mining, the rig mines while equipped mini-drones auto-fire, shield, slow, and counter-hit enemies.")),
+        detailPresentationRow("Combat forecast", std::string("The forecast row shows the passive combat profile that will carry into the next hostile mining run.")),
+        detailPresentationRow("Upgrade path", std::string("Material-paid bay slots are the build lever: more slots mean more passive abilities active while you focus on ore and artifacts.")),
         detailPresentationRow("Combat support", effects.sentryDamagePerSecond > 0.0 || effects.enemyDamageRelief > 0.0
             ? display::fixed(effects.sentryDamagePerSecond + effects.areaControlDamagePerSecond, 1) + "/s sentry output, " + display::percent(effects.enemyDamageRelief + effects.environmentalShieldRelief) + " shield relief"
             : "Attack and Defense drones unlock after hostile surface encounters beyond the solar system.")
@@ -658,7 +1242,7 @@ inline bool hasSurfacePayload(const SurfaceExpeditionState& expedition)
         || !expedition.temporaryArtifacts.empty();
 }
 
-inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExpeditionState& expedition, double extractionRisk)
+inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExpeditionState& expedition, double extractionRisk, bool arkKnown)
 {
     SurfaceExpeditionPresentation presentation;
     const bool payloadLoaded = hasSurfacePayload(expedition);
@@ -671,7 +1255,7 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExp
     }
     if (expedition.supply <= 0 && !miningWindowOpen) {
         presentation.postureTitle = std::string(text::panel::messages::surfacePostureExtract);
-        presentation.postureDetail = std::string(text::panel::messages::surfacePostureExtractDetail);
+        presentation.postureDetail = text::panel::messages::surfacePostureExtractDetailForHome(arkKnown);
         presentation.postureClass = "danger";
         return presentation;
     }
@@ -786,11 +1370,12 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
     const double extractionRisk = surfaceExtractionRisk(state);
-    SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk);
+    const bool arkKnown = arkDiscovered(state);
+    SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk, arkKnown);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
-    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkDiscovered(state));
+    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkKnown);
     presentation.logEntries = expedition.logEntries;
     presentation.selectedUpgradeNames = upgrades.names;
     if (expedition.surfaceUpgradeOfferAvailable) {
@@ -805,7 +1390,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::fieldKit, surfaceFieldKitSummary(state.meta)),
         panelMetric(text::labels::hazard, display::percent(expedition.hazard)),
         panelMetric(text::labels::supply, std::to_string(expedition.supply)),
-        panelMetric(text::fuel::reserveLabel(arkDiscovered(state)), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
+        panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
         panelMetric(text::labels::depth, std::to_string(expedition.depth)),
         panelMetric(text::labels::extractionRisk, display::percent(extractionRisk)),
@@ -839,17 +1424,17 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
 
     SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(
         text::buttons::mineDeposit,
-        std::string(text::panel::messages::surfaceMineDetail) + text::fuel::deployDetail(arkDiscovered(state)),
+        std::string(text::panel::messages::surfaceMineDetail) + text::fuel::deployDetail(arkKnown),
         expedition.supply,
         0,
         std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s",
         std::string(text::labels::oxygen),
         {},
         miningSurfaceActionButton(state));
-    miningPreview.cost = "1 " + std::string(text::fuel::reserveLabel(arkDiscovered(state)));
+    miningPreview.cost = "1 " + std::string(text::fuel::reserveLabel(arkKnown));
     miningPreview.availability = miningSurfaceActionAvailability(state);
     miningPreview.payoffChips.push_back(panelMetric(text::labels::oxygen, std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s"));
-    miningPreview.payoffChips.push_back(panelMetric(text::fuel::reserveLabel(arkDiscovered(state)), "-1 deploy"));
+    miningPreview.payoffChips.push_back(panelMetric(text::fuel::reserveLabel(arkKnown), "-1 deploy"));
     addPositiveChip(miningPreview.payoffChips, "Tagged CM", expedition.prospectMaterials.common);
     addPositiveChip(miningPreview.payoffChips, "Tagged RM", expedition.prospectMaterials.rare);
     addPositiveChip(miningPreview.payoffChips, "Tagged EX", expedition.prospectMaterials.exotic);
@@ -869,14 +1454,14 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     presentation.actions.push_back(std::move(pushPreview));
 
     presentation.actions.push_back(surfaceActionPreview(
-        text::buttons::returnHome,
-        std::string(text::panel::messages::surfaceExtractDetail),
+        text::buttons::returnHomeLabel(arkKnown),
+        text::panel::messages::surfaceExtractDetailForHome(arkKnown),
         expedition.supply,
         0,
         display::percent(extractionRisk),
         std::string(text::labels::extractionRisk),
         extractPayoffChips(expedition),
-        panelActionButton(text::buttons::returnHome, ui::actions::extractSurface, "ok")));
+        panelActionButton(text::buttons::returnHomeLabel(arkKnown), ui::actions::extractSurface, "ok")));
     return presentation;
 }
 

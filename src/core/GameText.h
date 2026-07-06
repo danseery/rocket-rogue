@@ -72,6 +72,36 @@ inline constexpr std::string_view enginesCut = "Engines cut. Cooler burn, less v
 inline constexpr std::string_view transferBurnStable = "Transfer burn stable. Survive to the required burn or abort.";
 inline constexpr std::string_view dataGoalReached = "Data goal reached. Return to Earth now, or overburn for extra telemetry.";
 inline constexpr std::string_view provingBurnStable = "Proving burn stable. Push for more data or return to Earth.";
+inline std::string provingBurnStartedForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Proving burn underway. Return to Ark to bank data; eject only when the vehicle leaves you no choice."
+        : std::string(provingBurnStarted);
+}
+inline std::string fuelReserveGoneForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Fuel reserve is gone. Coasting back to the Ark on gravity and uncomfortable math."
+        : std::string(fuelReserveGone);
+}
+inline std::string coastingHomeForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Coasting back to the Ark. No thrust, less control, plenty of silence."
+        : std::string(coastingHome);
+}
+inline std::string dataGoalReachedForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Data goal reached. Return to Ark now, or overburn for extra telemetry."
+        : std::string(dataGoalReached);
+}
+inline std::string provingBurnStableForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Proving burn stable. Push for more data or return to Ark."
+        : std::string(provingBurnStable);
+}
 inline constexpr std::string_view engineCutConfirmed = "Engine cut confirmed. Ship is running cooler, but guidance drift is widening.";
 inline constexpr std::string_view thrustRestored = "Thrust restored. Burn is climbing again, and so are the hot systems.";
 inline constexpr std::string_view pressureReliefStuck = "Pressure relief valve stuck. PRESS is worse and nav authority is degraded.";
@@ -114,6 +144,7 @@ inline constexpr WarningCopy abortRisk {"ABORT: escape window collapsing", "ABOR
 
 namespace labels {
 inline constexpr std::string_view missionCredits = "Mission credits";
+inline constexpr std::string_view chapter = "Chapter";
 inline constexpr std::string_view hullDamage = "Hull damage";
 inline constexpr std::string_view transferTarget = "Transfer target";
 inline constexpr std::string_view currentFrontier = "Current frontier";
@@ -353,6 +384,14 @@ inline constexpr std::string_view opensDeeperShaft = "Opens deeper mining lanes"
 namespace buttons {
 inline constexpr std::string_view returnHome = "Return to Earth";
 inline constexpr std::string_view returningHome = "Returning to Earth";
+inline std::string returnHomeLabel(bool arkKnown)
+{
+    return arkKnown ? "Return to Ark" : std::string(returnHome);
+}
+inline std::string returningHomeLabel(bool arkKnown)
+{
+    return arkKnown ? "Returning to Ark" : std::string(returningHome);
+}
 inline constexpr std::string_view arrivalOps = "Approach";
 inline constexpr std::string_view eject = "Eject";
 inline constexpr std::string_view cutEngines = "Cut engines";
@@ -636,6 +675,18 @@ inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining 
 inline constexpr std::string_view surfaceMineDetail = "Deploy the mining drone once for this surface loop; mining spends fuel, not action kits.";
 inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";
 inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to Earth. Cargo rigs reduce extraction risk.";
+inline std::string surfacePostureExtractDetailForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "No action kits remain for field work. Bring the payload back to the Ark before conditions get worse."
+        : std::string(surfacePostureExtractDetail);
+}
+inline std::string surfaceExtractDetailForHome(bool arkKnown)
+{
+    return arkKnown
+        ? "Recover the payload and return to the Ark. Cargo rigs reduce extraction risk."
+        : std::string(surfaceExtractDetail);
+}
 
 inline std::string closeCallSurvival(std::string_view margin)
 {

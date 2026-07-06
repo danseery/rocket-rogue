@@ -434,6 +434,37 @@ CampaignMilestone campaignMilestoneFromInt(int value)
     }
 }
 
+int gameChapterToInt(GameChapter chapter)
+{
+    return chapterNumber(chapter);
+}
+
+GameChapter gameChapterFromInt(int value)
+{
+    switch (value) {
+    case 2:
+        return GameChapter::LunarProgram;
+    case 3:
+        return GameChapter::RedFrontier;
+    case 4:
+        return GameChapter::Breakthrough;
+    case 5:
+        return GameChapter::Straylight;
+    case 6:
+        return GameChapter::Arkfall;
+    case 7:
+        return GameChapter::LastCampfire;
+    case 8:
+        return GameChapter::VoidCompass;
+    case 9:
+        return GameChapter::Ouroboros;
+    case 10:
+        return GameChapter::Ascent;
+    default:
+        return GameChapter::ProvingGround;
+    }
+}
+
 int arkConditionToInt(ArkCondition condition)
 {
     switch (condition) {
@@ -702,6 +733,44 @@ void parseMiningCells(std::string_view text, MiningTerrain& terrain)
     terrain.dirtyChunks.assign(static_cast<std::size_t>(std::max(1, chunksX * chunksY)), 1);
 }
 
+std::string serializeDroneUpgrades(const std::vector<DroneUpgradeRecord>& upgrades)
+{
+    std::ostringstream out;
+    bool first = true;
+    for (const DroneUpgradeRecord& upgrade : upgrades) {
+        if (upgrade.droneId.empty()) {
+            continue;
+        }
+        if (!first) {
+            out << save_schema::crewRecordDelimiter;
+        }
+        first = false;
+        out << upgrade.droneId << save_schema::crewFieldDelimiter << std::clamp(upgrade.level, 1, 3);
+    }
+    return out.str();
+}
+
+std::vector<DroneUpgradeRecord> parseDroneUpgrades(std::string_view text)
+{
+    std::vector<DroneUpgradeRecord> upgrades;
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        if (record.empty()) {
+            continue;
+        }
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.empty() || fields[0].empty()) {
+            continue;
+        }
+        DroneUpgradeRecord upgrade;
+        upgrade.droneId = fields[0];
+        if (fields.size() > 1) {
+            upgrade.level = std::clamp(parseInt(fields[1], 1), 1, 3);
+        }
+        upgrades.push_back(std::move(upgrade));
+    }
+    return upgrades;
+}
+
 std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
 {
     std::ostringstream out;
@@ -724,7 +793,8 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.damagePerSecond
             << save_schema::crewFieldDelimiter << enemy.effectRadius
             << save_schema::crewFieldDelimiter << (enemy.active ? 1 : 0)
-            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(enemy.affinity);
+            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(enemy.affinity)
+            << save_schema::crewFieldDelimiter << enemy.attackCooldownSeconds;
     }
     return out.str();
 }
@@ -780,6 +850,9 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         }
         if (fields.size() > 13) {
             enemy.affinity = miningElementalAffinityFromInt(parseInt(fields[13], 0));
+        }
+        if (fields.size() > 14) {
+            enemy.attackCooldownSeconds = parseDouble(fields[14], enemy.attackCooldownSeconds);
         }
         enemies.push_back(enemy);
     }
@@ -993,6 +1066,7 @@ SaveData captureSaveData(const GameState& state)
         save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
     }
     save.campaignMilestone = state.meta.campaignMilestone;
+    save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
     save.navigation = state.meta.navigation;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
@@ -1011,6 +1085,7 @@ SaveData captureSaveData(const GameState& state)
     save.droneBaySlots = state.meta.droneBaySlots;
     save.ownedDroneIds = state.meta.ownedDroneIds;
     save.equippedDroneIds = state.meta.equippedDroneIds;
+    save.droneUpgrades = state.meta.droneUpgrades;
     save.artifacts = state.meta.artifacts;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
@@ -1111,11 +1186,13 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.droneBaySlots = save.droneBaySlots;
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
+    state.meta.droneUpgrades = save.droneUpgrades;
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
         state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
     }
     state.meta.campaignMilestone = save.campaignMilestone;
+    state.meta.chapter = save.chapter;
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
     if (state.screen == Screen::Navigation && !navigationAvailable(state)) {
@@ -1192,6 +1269,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::nextLaunchSpeedBoost, save.nextLaunchSpeedBoost);
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
+    writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
     writeField(out, save_schema::field::arkCondition, arkConditionToInt(save.ark.condition));
     writeField(out, save_schema::field::arkFuelReserve, save.ark.fuelReserve);
     writeField(out, save_schema::field::arkHullDamage, save.ark.hullDamage);
@@ -1272,6 +1350,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::droneBaySlots, save.droneBaySlots);
     writeField(out, save_schema::field::ownedDrones, join(save.ownedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equippedDrones, join(save.equippedDroneIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::furthestTier, save.furthestTier);
     writeField(out, save_schema::field::shipsLost, save.shipsLost);
@@ -1350,6 +1429,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::campaignMilestone) {
             save.campaignMilestone = campaignMilestoneFromInt(parseInt(value, campaignMilestoneToInt(save.campaignMilestone)));
+        } else if (key == save_schema::field::chapter) {
+            save.chapter = gameChapterFromInt(parseInt(value, gameChapterToInt(save.chapter)));
         } else if (key == save_schema::field::arkCondition) {
             save.ark.condition = arkConditionFromInt(parseInt(value, arkConditionToInt(save.ark.condition)));
         } else if (key == save_schema::field::arkFuelReserve) {
@@ -1522,6 +1603,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.ownedDroneIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::equippedDrones) {
             save.equippedDroneIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::droneUpgrades) {
+            save.droneUpgrades = parseDroneUpgrades(value);
         } else if (key == save_schema::field::artifacts) {
             save.artifacts = parseArtifacts(value);
         } else if (key == save_schema::field::furthestTier) {

@@ -11,6 +11,8 @@
 - `saturn.png` - Saturn sprite with alpha, packed on a 512x512 square.
 - `uranus.png` - Uranus sprite with alpha, packed on a 512x512 square.
 - `neptune.png` - Neptune sprite with alpha, packed on a 512x512 square.
+- `ark-operational.png` - Operational Ark sprite with alpha, packed on a 1254x1254 square.
+- `ark-damaged.png` - Damaged Ark sprite with alpha, packed on a 1254x1254 square.
 - `rocket.png` - Player rocket sprite with alpha and no active thrust.
 - `thrust-sheet.png` - 6-frame horizontal thrust animation sheet with alpha, extracted from the original rocket flame.
 - `explosion-sheet.png` - 8-frame horizontal explosion sprite sheet with alpha.

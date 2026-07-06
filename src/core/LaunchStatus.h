@@ -13,6 +13,7 @@ struct LaunchStatusContext {
     TelemetryEvent event;
     FlightActionState actions;
     bool frontierTransfer = false;
+    bool arkKnown = false;
     bool returnDriftHome = false;
     bool pastDataGoal = false;
     double returnProgress = 0.0;
@@ -30,12 +31,12 @@ inline std::string launchStatusLine(const LaunchStatusContext& context)
 
         if (context.returnProgress < tuning::session::returnEarlyProgressThreshold) {
             return context.returnDriftHome
-                ? std::string(text::status::fuelReserveGone)
+                ? text::status::fuelReserveGoneForHome(context.arkKnown)
                 : std::string(text::status::returnBurnRotating);
         }
 
         return context.returnDriftHome
-            ? std::string(text::status::coastingHome)
+            ? text::status::coastingHomeForHome(context.arkKnown)
             : std::string(text::status::returnBurnUnderway);
     }
 
@@ -59,8 +60,8 @@ inline std::string launchStatusLine(const LaunchStatusContext& context)
     }
 
     return context.pastDataGoal
-        ? std::string(text::status::dataGoalReached)
-        : std::string(text::status::provingBurnStable);
+        ? text::status::dataGoalReachedForHome(context.arkKnown)
+        : text::status::provingBurnStableForHome(context.arkKnown);
 }
 
 } // namespace rocket

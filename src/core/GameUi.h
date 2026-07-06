@@ -41,6 +41,7 @@ inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
 inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
 inline constexpr std::string_view equipDronePrefix = "equip_drone:";
+inline constexpr std::string_view upgradeDronePrefix = "upgrade_drone:";
 inline constexpr std::string_view upgradeDroneSlot = "upgrade_drone_slot";
 inline constexpr std::string_view skipResearch = "skip_research";
 inline constexpr std::string_view surveySurface = "survey_surface";
@@ -87,6 +88,11 @@ inline std::string surfaceUpgrade(int index)
 inline std::string equipDrone(int index)
 {
     return std::string(equipDronePrefix) + std::to_string(index);
+}
+
+inline std::string upgradeDrone(int index)
+{
+    return std::string(upgradeDronePrefix) + std::to_string(index);
 }
 } // namespace actions
 

@@ -41,6 +41,19 @@ enum class CampaignMilestone {
     ArkRepairing
 };
 
+enum class GameChapter {
+    ProvingGround = 1,
+    LunarProgram = 2,
+    RedFrontier = 3,
+    Breakthrough = 4,
+    Straylight = 5,
+    Arkfall = 6,
+    LastCampfire = 7,
+    VoidCompass = 8,
+    Ouroboros = 9,
+    Ascent = 10
+};
+
 enum class ArkCondition {
     NotFound,
     DerelictOperable,
@@ -243,6 +256,11 @@ struct MaterialInventory {
     int exotic = 0;
 };
 
+struct DroneUpgradeRecord {
+    std::string droneId;
+    int level = 1;
+};
+
 struct SurfaceDepthProspect {
     int depthOffset = 0;
     int absoluteDepth = 0;
@@ -407,6 +425,7 @@ struct NavigationState {
 
 struct MetaProgress {
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
+    GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
     std::vector<std::string> unlockKeys;
@@ -417,6 +436,7 @@ struct MetaProgress {
     int droneBaySlots = 0;
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
+    std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ArtifactRecord> artifacts;
     int furthestTier = 0;
     int shipsLost = 0;
@@ -616,6 +636,45 @@ struct MiningEnemy {
     double effectRadius = 0.0;
     bool active = true;
     MiningElementalAffinity affinity = MiningElementalAffinity::None;
+    double attackCooldownSeconds = 0.0;
+};
+
+enum class MiningCombatTeam {
+    Allied,
+    Enemy
+};
+
+enum class MiningCombatTextKind {
+    Damage,
+    Defeat,
+    CommonReward,
+    RareReward,
+    ExoticReward
+};
+
+struct MiningProjectileVisual {
+    double startX = 0.0;
+    double startY = 0.0;
+    double endX = 0.0;
+    double endY = 0.0;
+    double age = 0.0;
+    double lifetime = 0.35;
+    MiningCombatTeam team = MiningCombatTeam::Allied;
+    MiningEnemyType sourceType = MiningEnemyType::None;
+    MiningElementalAffinity affinity = MiningElementalAffinity::None;
+    bool critical = false;
+};
+
+struct MiningDamageNumber {
+    double x = 0.0;
+    double y = 0.0;
+    double amount = 0.0;
+    double age = 0.0;
+    double lifetime = 0.90;
+    MiningCombatTeam team = MiningCombatTeam::Allied;
+    MiningCombatTextKind kind = MiningCombatTextKind::Damage;
+    bool critical = false;
+    bool rigDamage = false;
 };
 
 struct MiningArtifactObject {
@@ -680,6 +739,9 @@ struct MiningRunState {
     double elementalExposureSeconds = 0.0;
     double movementSlowSeconds = 0.0;
     double movementSlowScale = 1.0;
+    double alliedFireCooldownSeconds = 0.0;
+    double areaControlPulseCooldownSeconds = 0.0;
+    int combatSequence = 0;
     int targetCellX = -1;
     int targetCellY = -1;
     double targetTipX = 32.0;
@@ -689,6 +751,8 @@ struct MiningRunState {
     double targetMaxToughness = 0.0;
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
+    std::vector<MiningProjectileVisual> combatProjectiles;
+    std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;
 };
 
@@ -743,6 +807,10 @@ std::string_view toString(CrewStatus status);
 std::string_view toString(LaunchResultType result);
 std::string_view toString(RecoveryMethod method);
 std::string_view toString(CampaignMilestone milestone);
+std::string_view toString(GameChapter chapter);
+int chapterNumber(GameChapter chapter);
+std::string chapterLabel(GameChapter chapter);
+std::string_view chapterGate(GameChapter chapter);
 std::string_view toString(ArkCondition condition);
 
 ModuleStats operator+(ModuleStats lhs, const ModuleStats& rhs);

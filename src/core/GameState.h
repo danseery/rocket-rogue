@@ -72,6 +72,8 @@ bool bankFrontierReadiness(GameState& state, const ContentCatalog& catalog);
 bool arkDiscovered(const GameState& state);
 bool hostileSystemActive(const GameState& state);
 bool navigationAvailable(const GameState& state);
+GameChapter chapterForState(const GameState& state, const ContentCatalog& catalog);
+void syncChapterProgress(GameState& state, const ContentCatalog& catalog);
 bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog);
 std::vector<const Destination*> navigationDestinations(const GameState& state, const ContentCatalog& catalog);
 void discoverArk(GameState& state, const ContentCatalog& catalog);

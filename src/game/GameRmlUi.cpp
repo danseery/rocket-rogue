@@ -1599,7 +1599,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card {
     width: 205px;
-    min-height: 138px;
+    height: 330px;
     padding: 8px;
     margin-top: 6px;
     margin-right: 7px;
@@ -1629,10 +1629,11 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card p {
     width: 189px;
-    min-height: 36px;
+    height: 38px;
     margin-top: 3px;
     margin-bottom: 4px;
     line-height: 1.16;
+    overflow: hidden;
 }
 .phase-board-arrival .arrival-card p {
     width: 191px;
@@ -1662,8 +1663,32 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card .stat-grid {
     width: 189px;
-    min-height: 26px;
+    height: 54px;
     margin-top: 2px;
+}
+.phase-board-drone-ops .drone-card .drone-build-hook {
+    width: 177px;
+    height: 52px;
+    margin-top: 5px;
+    margin-bottom: 5px;
+    padding: 6px;
+    border-width: 1px;
+    border-color: rgba(71, 220, 255, 0.18);
+    background-color: rgba(71, 220, 255, 0.06);
+    color: #bfeef7;
+    font-size: 11px;
+    line-height: 1.20;
+    overflow: hidden;
+}
+.phase-board-drone-ops .drone-card .drone-upgrade-summary {
+    width: 189px;
+    height: 40px;
+    margin-top: 2px;
+    margin-bottom: 5px;
+    color: #ffd166;
+    font-size: 11px;
+    line-height: 1.15;
+    overflow: hidden;
 }
 .phase-board-drone-ops .drone-card .stat-chip {
     max-width: 92px;
@@ -1719,7 +1744,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-drone-ops .drone-card .card-footer {
     width: 189px;
     height: 34px;
-    margin-top: 5px;
+    margin-top: 7px;
     padding-top: 6px;
 }
 .phase-board-arrival .arrival-card .card-footer {
@@ -1736,7 +1761,7 @@ scrollbarhorizontal sliderbar {
     line-height: 1.15;
 }
 .phase-board-drone-ops .drone-card .card-footer span {
-    width: 64px;
+    width: 45px;
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer span {
@@ -1757,7 +1782,7 @@ scrollbarhorizontal sliderbar {
     font-size: 12px;
 }
 .phase-board-drone-ops .drone-card .card-footer button {
-    width: 86px;
+    width: 63px;
     height: 28px;
     line-height: 28px;
     font-size: 11px;
@@ -1768,6 +1793,258 @@ scrollbarhorizontal sliderbar {
 .phase-board-research .phase-advisory,
 .phase-board-drone-ops .resource-bank {
     width: 704px;
+}
+.phase-board-drone-ops .drone-build-strip {
+    width: 704px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    background-color: rgba(11, 36, 44, 0.86);
+    border-color: rgba(71, 220, 255, 0.28);
+}
+.phase-board-drone-ops .drone-build-strip .drone-build-copy {
+    width: 368px;
+}
+.phase-board-drone-ops .drone-build-strip h2 {
+    color: #dffbff;
+    margin-top: 0px;
+}
+.phase-board-drone-ops .drone-build-strip p {
+    width: 358px;
+    line-height: 1.22;
+}
+.phase-board-drone-ops .drone-build-strip .drone-build-stats {
+    width: 286px;
+    margin-top: 0px;
+    justify-content: flex-end;
+}
+.phase-board-drone-ops .drone-build-strip .stat-chip {
+    width: 126px;
+    min-height: 24px;
+    padding: 4px 6px;
+    margin-left: 5px;
+    margin-bottom: 5px;
+}
+.phase-board-drone-ops .drone-build-guidance {
+    width: 704px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    background-color: rgba(33, 28, 46, 0.76);
+    border-color: rgba(183, 132, 255, 0.24);
+}
+.phase-board-drone-ops .drone-build-guidance .drone-guidance-copy {
+    width: 224px;
+}
+.phase-board-drone-ops .drone-build-guidance h2 {
+    color: #d8c7ff;
+    margin-top: 0px;
+}
+.phase-board-drone-ops .drone-build-guidance p {
+    width: 214px;
+    font-size: 12px;
+    line-height: 1.18;
+}
+.phase-board-drone-ops .drone-build-guidance .drone-guidance-stats {
+    width: 438px;
+    margin-top: 0px;
+    justify-content: flex-end;
+}
+.phase-board-drone-ops .drone-build-guidance .stat-chip {
+    width: 96px;
+    min-height: 24px;
+    padding: 4px 5px;
+    margin-left: 5px;
+    margin-bottom: 5px;
+}
+.phase-board-drone-ops .drone-build-guidance .stat-chip.wide {
+    width: 132px;
+}
+.phase-board-drone-ops .drone-loadout-bench {
+    width: 704px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+.phase-board-drone-ops .drone-loadout-grid {
+    width: 680px;
+}
+.phase-board-drone-ops .drone-loadout-slot {
+    width: 202px;
+    height: 126px;
+    padding: 8px;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    border-width: 1px;
+    border-color: rgba(137, 178, 211, 0.16);
+    background-color: rgba(255, 255, 255, 0.03);
+}
+.phase-board-drone-ops .drone-loadout-slot.filled {
+    border-color: rgba(71, 220, 255, 0.28);
+    background-color: rgba(19, 48, 58, 0.58);
+}
+.phase-board-drone-ops .drone-loadout-slot.open {
+    border-color: rgba(112, 224, 168, 0.28);
+    background-color: rgba(20, 54, 39, 0.52);
+}
+.phase-board-drone-ops .drone-loadout-slot.locked {
+    border-color: rgba(137, 178, 211, 0.12);
+    background-color: rgba(255, 255, 255, 0.018);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-attack {
+    border-color: rgba(71, 220, 255, 0.38);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-defense {
+    border-color: rgba(183, 255, 241, 0.36);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-mining {
+    border-color: rgba(112, 224, 168, 0.34);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-resource {
+    border-color: rgba(255, 209, 102, 0.34);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-survey {
+    border-color: rgba(183, 132, 255, 0.34);
+}
+.phase-board-drone-ops .drone-loadout-slot.role-stabilizer {
+    border-color: rgba(137, 178, 211, 0.34);
+}
+.phase-board-drone-ops .drone-loadout-slot .slot-topline {
+    width: 202px;
+    height: 18px;
+    color: #89b2d3;
+    font-size: 11px;
+}
+.phase-board-drone-ops .drone-loadout-slot .slot-topline span {
+    width: 82px;
+}
+.phase-board-drone-ops .drone-loadout-slot .slot-topline strong {
+    width: 112px;
+    color: #ffd166;
+    text-align: right;
+}
+.phase-board-drone-ops .drone-loadout-slot h3 {
+    margin-top: 5px;
+    margin-bottom: 2px;
+    font-size: 14px;
+}
+.phase-board-drone-ops .drone-loadout-slot p {
+    margin-top: 3px;
+    line-height: 1.18;
+    overflow: hidden;
+}
+.phase-board-drone-ops .drone-loadout-slot .slot-role {
+    height: 15px;
+    color: #bfeef7;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-grid {
+    min-height: 24px;
+    margin-top: 6px;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-chip {
+    width: 58px;
+    min-height: 20px;
+    padding: 4px 5px;
+    margin-right: 4px;
+    margin-bottom: 4px;
+    font-size: 11px;
+    line-height: 1.12;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-chip.wide {
+    width: 88px;
+}
+.phase-board-drone-ops .drone-combat-forecast {
+    width: 704px;
+    padding: 10px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    background-color: rgba(37, 32, 17, 0.72);
+    border-color: rgba(255, 209, 102, 0.26);
+}
+.phase-board-drone-ops .drone-combat-forecast .drone-forecast-copy {
+    width: 180px;
+}
+.phase-board-drone-ops .drone-combat-forecast h2 {
+    color: #ffd166;
+    margin-top: 0px;
+}
+.phase-board-drone-ops .drone-combat-forecast p {
+    width: 170px;
+    font-size: 12px;
+    line-height: 1.18;
+}
+.phase-board-drone-ops .drone-combat-forecast .drone-forecast-stats {
+    width: 482px;
+    margin-top: 0px;
+    justify-content: flex-end;
+}
+.phase-board-drone-ops .drone-combat-forecast .stat-chip {
+    width: 84px;
+    min-height: 24px;
+    padding: 4px 5px;
+    margin-left: 5px;
+    margin-bottom: 5px;
+}
+.phase-board-drone-ops .drone-combat-forecast .stat-chip.wide {
+    width: 112px;
+}
+.phase-board-drone-ops .drone-recipe-board {
+    width: 704px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+.phase-board-drone-ops .drone-recipe-grid {
+    width: 680px;
+}
+.phase-board-drone-ops .drone-recipe-card {
+    width: 316px;
+    height: 118px;
+    padding: 8px;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    border-width: 1px;
+    border-color: rgba(137, 178, 211, 0.16);
+    background-color: rgba(255, 255, 255, 0.03);
+}
+.phase-board-drone-ops .drone-recipe-card.active {
+    border-color: rgba(71, 220, 255, 0.34);
+    background-color: rgba(71, 220, 255, 0.08);
+}
+.phase-board-drone-ops .drone-recipe-card.signature {
+    border-color: rgba(255, 209, 102, 0.28);
+}
+.phase-board-drone-ops .drone-recipe-card .recipe-topline {
+    width: 316px;
+    height: 18px;
+    color: #89b2d3;
+    font-size: 11px;
+}
+.phase-board-drone-ops .drone-recipe-card .recipe-topline span {
+    width: 132px;
+}
+.phase-board-drone-ops .drone-recipe-card .recipe-topline strong {
+    width: 170px;
+    color: #ffd166;
+    text-align: right;
+}
+.phase-board-drone-ops .drone-recipe-card h3 {
+    margin-top: 5px;
+    margin-bottom: 3px;
+    font-size: 14px;
+}
+.phase-board-drone-ops .drone-recipe-card .recipe-requirements {
+    height: 18px;
+    margin-top: 0px;
+    margin-bottom: 3px;
+    color: #bfeef7;
+    font-size: 11px;
+    overflow: hidden;
+}
+.phase-board-drone-ops .drone-recipe-card p {
+    height: 42px;
+    margin-top: 2px;
+    margin-bottom: 0px;
+    line-height: 1.18;
+    overflow: hidden;
 }
 .phase-board-research .board-primary,
 .phase-board-drone-ops .board-primary {
@@ -3304,9 +3581,105 @@ scrollbarhorizontal sliderbar {
 }
 .control-panel .phase-board-mining .tutorial-card,
 .control-panel .phase-board-mining .phase-advisory,
+.control-panel .phase-board-mining .mining-health-strip,
+.control-panel .phase-board-mining .mining-combat-strip,
 .control-panel .phase-board-mining .mining-payload,
 .control-panel .phase-board-mining .mining-hud {
     width: 400px;
+}
+.control-panel .phase-board-mining .mining-health-strip {
+    padding: 10px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border-width: 1px;
+    border-color: rgba(71, 220, 255, 0.28);
+    background-color: rgba(7, 24, 32, 0.86);
+}
+.control-panel .phase-board-mining .mining-health-strip > div {
+    width: 380px;
+}
+.control-panel .phase-board-mining .mining-health-strip span {
+    display: inline-block;
+    width: 250px;
+    color: rgba(169, 231, 246, 0.88);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+.control-panel .phase-board-mining .mining-health-strip strong {
+    display: inline-block;
+    width: 118px;
+    color: #e7fbff;
+    font-size: 22px;
+    text-align: right;
+}
+.control-panel .phase-board-mining .mining-health-bar {
+    width: 378px;
+    height: 12px;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    background-color: rgba(1, 8, 13, 0.92);
+}
+.control-panel .phase-board-mining .mining-health-bar i {
+    display: block;
+    height: 12px;
+    background-color: #4be7ff;
+}
+.control-panel .phase-board-mining .mining-health-bar .health-fill-0 { width: 0px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-10 { width: 38px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-20 { width: 76px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-30 { width: 113px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-40 { width: 151px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-50 { width: 189px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-60 { width: 227px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-70 { width: 265px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-80 { width: 302px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-90 { width: 340px; }
+.control-panel .phase-board-mining .mining-health-bar .health-fill-100 { width: 378px; }
+.control-panel .phase-board-mining .mining-health-strip p {
+    width: 380px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    color: rgba(199, 224, 226, 0.76);
+    font-size: 12px;
+    line-height: 1.22;
+}
+.control-panel .phase-board-mining .mining-combat-strip {
+    padding: 10px;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border-width: 1px;
+    border-color: rgba(71, 220, 255, 0.26);
+    background-color: rgba(9, 28, 36, 0.84);
+}
+.control-panel .phase-board-mining .mining-combat-strip > div {
+    width: 382px;
+}
+.control-panel .phase-board-mining .mining-combat-strip h2 {
+    margin-top: 0px;
+    margin-bottom: 4px;
+    color: #dffbff;
+    font-size: 15px;
+}
+.control-panel .phase-board-mining .mining-combat-strip p {
+    width: 382px;
+    margin-top: 0px;
+    margin-bottom: 6px;
+    color: rgba(199, 224, 226, 0.76);
+    font-size: 12px;
+    line-height: 1.20;
+}
+.control-panel .phase-board-mining .mining-combat-strip .stat-grid {
+    width: 390px;
+    justify-content: flex-start;
+}
+.control-panel .phase-board-mining .mining-combat-strip .stat-chip {
+    width: 104px;
+    min-height: 17px;
+    padding: 4px 6px;
+    margin-top: 4px;
+    margin-right: 5px;
+    font-size: 11px;
+    line-height: 1.12;
 }
 .control-panel .phase-board-mining .mining-payload {
     padding: 10px;
@@ -4214,7 +4587,10 @@ void GameRmlUi::dismissHelp(const std::string& topic)
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
-    openModalId_.clear();
+    if (!openModalId_.empty()) {
+        openModalId_.clear();
+        rebuildDocument();
+    }
     if (actionHandler_) {
         actionHandler_(action);
     }

@@ -1595,12 +1595,40 @@ MaterialInventory droneSlotUpgradeCost(int nextSlot)
     }
 }
 
+int miniDroneUpgradeLevel(const GameState& state, std::string_view droneId)
+{
+    for (const DroneUpgradeRecord& record : state.meta.droneUpgrades) {
+        if (record.droneId == droneId) {
+            return std::clamp(record.level, 1, 3);
+        }
+    }
+    return 1;
+}
+
+MaterialInventory miniDroneUpgradeCost(int nextLevel)
+{
+    switch (std::clamp(nextLevel, 1, 4)) {
+    case 2:
+        return {.common = 3, .rare = 1};
+    case 3:
+        return {.common = 6, .rare = 3, .exotic = 1};
+    default:
+        return {};
+    }
+}
+
+double miniDroneUpgradeMultiplier(int level)
+{
+    return 1.0 + 0.30 * static_cast<double>(std::clamp(level, 1, 3) - 1);
+}
+
 void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
 {
     if (!droneBayUnlocked(state)) {
         state.meta.droneBaySlots = 0;
         state.meta.ownedDroneIds.clear();
         state.meta.equippedDroneIds.clear();
+        state.meta.droneUpgrades.clear();
         return;
     }
 
@@ -1646,6 +1674,27 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
     if (state.meta.equippedDroneIds.size() > static_cast<std::size_t>(state.meta.droneBaySlots)) {
         state.meta.equippedDroneIds.resize(static_cast<std::size_t>(state.meta.droneBaySlots));
     }
+
+    state.meta.droneUpgrades.erase(
+        std::remove_if(
+            state.meta.droneUpgrades.begin(),
+            state.meta.droneUpgrades.end(),
+            [&](const DroneUpgradeRecord& record) {
+                return std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), record.droneId) == state.meta.ownedDroneIds.end();
+            }),
+        state.meta.droneUpgrades.end());
+    for (DroneUpgradeRecord& record : state.meta.droneUpgrades) {
+        record.level = std::clamp(record.level, 1, 3);
+    }
+    for (const std::string& droneId : state.meta.ownedDroneIds) {
+        const auto existing = std::find_if(
+            state.meta.droneUpgrades.begin(),
+            state.meta.droneUpgrades.end(),
+            [&](const DroneUpgradeRecord& record) { return record.droneId == droneId; });
+        if (existing == state.meta.droneUpgrades.end()) {
+            state.meta.droneUpgrades.push_back({droneId, 1});
+        }
+    }
 }
 
 bool canUpgradeDroneSlot(const GameState& state)
@@ -1672,6 +1721,59 @@ bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog)
 
     state.meta.droneBaySlots += 1;
     state.statusLine = "Drone Bay expanded to " + std::to_string(state.meta.droneBaySlots) + " slots.";
+    return true;
+}
+
+bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, int index)
+{
+    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size())) {
+        return false;
+    }
+    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
+    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
+    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
+        return false;
+    }
+    const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
+    if (currentLevel >= 3) {
+        return false;
+    }
+    return canAffordMaterials(state.meta.materials, miniDroneUpgradeCost(currentLevel + 1));
+}
+
+bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
+{
+    ensureDroneBayState(state, catalog);
+    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size())) {
+        return false;
+    }
+    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
+    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
+    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
+        state.statusLine = drone.name + " is still locked.";
+        return false;
+    }
+    const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
+    if (currentLevel >= 3) {
+        state.statusLine = drone.name + " is already fully tuned.";
+        return false;
+    }
+    const MaterialInventory cost = miniDroneUpgradeCost(currentLevel + 1);
+    if (!canAffordMaterials(state.meta.materials, cost)) {
+        state.statusLine = "Need " + std::to_string(cost.common) + " common, " + std::to_string(cost.rare) + " rare, " + std::to_string(cost.exotic) + " exotic to tune " + drone.name + ".";
+        return false;
+    }
+    spendMaterials(state.meta.materials, cost);
+    auto existing = std::find_if(
+        state.meta.droneUpgrades.begin(),
+        state.meta.droneUpgrades.end(),
+        [&](const DroneUpgradeRecord& record) { return record.droneId == drone.id; });
+    if (existing == state.meta.droneUpgrades.end()) {
+        state.meta.droneUpgrades.push_back({drone.id, currentLevel + 1});
+    } else {
+        existing->level = currentLevel + 1;
+    }
+    state.statusLine = drone.name + " tuned to Mk " + std::to_string(currentLevel + 1) + ".";
     return true;
 }
 
@@ -1713,25 +1815,152 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         return effects;
     }
 
+    int miningDrones = 0;
+    int resourceDrones = 0;
+    int surveyDrones = 0;
+    int stabilizerDrones = 0;
+    int attackDrones = 0;
+    int defenseDrones = 0;
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone)) {
             continue;
         }
-        effects.passiveMiningRate += drone->stats.passiveMiningRate;
-        effects.oxygenSeconds += drone->stats.oxygenSeconds;
-        effects.scannerRadius += drone->stats.scannerRadius;
-        effects.drillIntegrityRelief += drone->stats.drillIntegrityRelief;
-        effects.hardRockBounceRelief += drone->stats.hardRockBounceRelief;
-        effects.extractionRiskRelief += drone->stats.extractionRiskRelief;
-        effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief;
-        effects.sentryDamagePerSecond += drone->stats.sentryDamagePerSecond;
-        effects.enemyDamageRelief += drone->stats.enemyDamageRelief;
-        effects.areaControlDamagePerSecond += drone->stats.areaControlDamagePerSecond;
-        effects.enemySlow += drone->stats.enemySlow;
-        effects.reactiveArmorDamagePerSecond += drone->stats.reactiveArmorDamagePerSecond;
-        effects.environmentalShieldRelief += drone->stats.environmentalShieldRelief;
-        effects.names.push_back(drone->name);
+        const int upgradeLevel = miniDroneUpgradeLevel(state, drone->id);
+        const double upgradeMultiplier = miniDroneUpgradeMultiplier(upgradeLevel);
+        effects.passiveMiningRate += drone->stats.passiveMiningRate * upgradeMultiplier;
+        effects.oxygenSeconds += drone->stats.oxygenSeconds * upgradeMultiplier;
+        effects.scannerRadius += drone->stats.scannerRadius * upgradeMultiplier;
+        effects.drillIntegrityRelief += drone->stats.drillIntegrityRelief * upgradeMultiplier;
+        effects.hardRockBounceRelief += drone->stats.hardRockBounceRelief * upgradeMultiplier;
+        effects.extractionRiskRelief += drone->stats.extractionRiskRelief * upgradeMultiplier;
+        effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief * upgradeMultiplier;
+        effects.sentryDamagePerSecond += drone->stats.sentryDamagePerSecond * upgradeMultiplier;
+        effects.enemyDamageRelief += drone->stats.enemyDamageRelief * upgradeMultiplier;
+        effects.areaControlDamagePerSecond += drone->stats.areaControlDamagePerSecond * upgradeMultiplier;
+        effects.enemySlow += drone->stats.enemySlow * upgradeMultiplier;
+        effects.reactiveArmorDamagePerSecond += drone->stats.reactiveArmorDamagePerSecond * upgradeMultiplier;
+        effects.environmentalShieldRelief += drone->stats.environmentalShieldRelief * upgradeMultiplier;
+        effects.names.push_back(drone->name + " Mk " + std::to_string(upgradeLevel));
+        switch (drone->role) {
+        case MiniDroneRole::Mining:
+            miningDrones += 1;
+            break;
+        case MiniDroneRole::Resource:
+            resourceDrones += 1;
+            break;
+        case MiniDroneRole::Survey:
+            surveyDrones += 1;
+            break;
+        case MiniDroneRole::Stabilizer:
+            stabilizerDrones += 1;
+            break;
+        case MiniDroneRole::Attack:
+            attackDrones += 1;
+            break;
+        case MiniDroneRole::Defense:
+            defenseDrones += 1;
+            break;
+        }
+    }
+
+    auto addSynergy = [&effects](std::string name) {
+        effects.synergyNames.push_back(std::move(name));
+    };
+    if (attackDrones > 0 && surveyDrones > 0) {
+        effects.alliedCritChanceBonus += 0.12;
+        effects.alliedFireRateBonus += 0.15;
+        effects.scannerRadius += 0.75;
+        addSynergy("Targeting Grid");
+    }
+    if (attackDrones > 0 && defenseDrones > 0) {
+        effects.sentryVolleyBonus += 1;
+        effects.enemyDamageRelief += 0.08;
+        effects.reactiveArmorDamagePerSecond += 0.45;
+        addSynergy("Killbox Screen");
+    }
+    if (attackDrones > 0 && miningDrones > 0) {
+        effects.passiveMiningRate += 0.04;
+        effects.areaControlDamagePerSecond += 0.40;
+        effects.enemySlow += 0.04;
+        addSynergy("Excavation Barrage");
+    }
+    if (defenseDrones > 0 && stabilizerDrones > 0) {
+        effects.drillIntegrityRelief += 0.05;
+        effects.environmentalShieldRelief += 0.06;
+        effects.hardRockBounceRelief += 0.08;
+        addSynergy("Bulwark Harness");
+    }
+    if (miningDrones > 0 && resourceDrones > 0) {
+        effects.passiveMiningRate += 0.035;
+        effects.oxygenSeconds += 12.0;
+        effects.extractionRiskRelief += 0.012;
+        addSynergy("Long Haul Rig");
+    }
+    if (resourceDrones > 0 && surveyDrones > 0) {
+        effects.scannerRadius += 0.85;
+        effects.extractionRiskRelief += 0.012;
+        addSynergy("Pathfinder Loop");
+    }
+
+    auto setSignature = [&effects](MiniDroneSignatureKind kind, std::string name, std::string detail, int tier) {
+        effects.signatureKind = kind;
+        effects.signatureName = std::move(name);
+        effects.signatureDetail = std::move(detail);
+        effects.signatureTier = tier;
+    };
+    if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && stabilizerDrones > 0) {
+        effects.alliedCritChanceBonus += 0.05;
+        effects.alliedFireRateBonus += 0.10;
+        effects.sentryVolleyBonus += 1;
+        effects.passiveMiningRate += 0.025;
+        effects.oxygenSeconds += 8.0;
+        effects.scannerRadius += 0.50;
+        effects.enemyDamageRelief += 0.04;
+        setSignature(
+            MiniDroneSignatureKind::FullSpectrumSwarm,
+            "Full Spectrum Swarm",
+            "Every drone bay role is online: sentries volley, scanners paint targets, shields hold the rig, and logistics keep the dig alive.",
+            3);
+    } else if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0) {
+        effects.alliedCritChanceBonus += 0.06;
+        effects.alliedFireRateBonus += 0.20;
+        effects.sentryVolleyBonus += 1;
+        effects.enemyDamageRelief += 0.04;
+        setSignature(
+            MiniDroneSignatureKind::SentryKillbox,
+            "Sentry Killbox",
+            "Attack, Defense, and Survey drones turn the rig into a marked killbox with faster volleys, better crits, and tougher shields.",
+            2);
+    } else if (attackDrones > 0 && miningDrones > 0 && resourceDrones > 0) {
+        effects.passiveMiningRate += 0.045;
+        effects.areaControlDamagePerSecond += 0.55;
+        effects.enemySlow += 0.03;
+        effects.alliedFireRateBonus += 0.10;
+        setSignature(
+            MiniDroneSignatureKind::ExcavationStorm,
+            "Excavation Storm",
+            "Mining, Resource, and Attack drones keep ore flowing while combat pulses punish enemies that enter the work zone.",
+            2);
+    } else if (defenseDrones > 0 && stabilizerDrones > 0 && resourceDrones > 0) {
+        effects.drillIntegrityRelief += 0.06;
+        effects.environmentalShieldRelief += 0.05;
+        effects.reactiveArmorDamagePerSecond += 0.35;
+        effects.oxygenSeconds += 10.0;
+        setSignature(
+            MiniDroneSignatureKind::FortressRig,
+            "Fortress Rig",
+            "Defense, Stabilizer, and Resource drones bias the build toward long digs: more shields, more reserve time, and harder counter-hits.",
+            2);
+    } else if (miningDrones > 0 && resourceDrones > 0 && surveyDrones > 0) {
+        effects.passiveMiningRate += 0.020;
+        effects.scannerRadius += 0.70;
+        effects.extractionRiskRelief += 0.018;
+        setSignature(
+            MiniDroneSignatureKind::RelicPathfinder,
+            "Relic Pathfinder",
+            "Mining, Resource, and Survey drones favor artifact routes with wider scans, safer extraction, and steady passive excavation.",
+            2);
     }
 
     effects.passiveMiningRate = std::clamp(effects.passiveMiningRate, 0.0, 0.40);
@@ -1746,6 +1975,9 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     effects.enemySlow = std::clamp(effects.enemySlow, 0.0, 0.45);
     effects.reactiveArmorDamagePerSecond = std::clamp(effects.reactiveArmorDamagePerSecond, 0.0, 4.0);
     effects.environmentalShieldRelief = std::clamp(effects.environmentalShieldRelief, 0.0, 0.35);
+    effects.alliedCritChanceBonus = std::clamp(effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum - tuning::mining::alliedCritChance);
+    effects.alliedFireRateBonus = std::clamp(effects.alliedFireRateBonus, 0.0, tuning::mining::alliedFireRateBonusMaximum);
+    effects.sentryVolleyBonus = std::clamp(effects.sentryVolleyBonus, 0, tuning::mining::alliedSentryVolleyMaximum);
     return effects;
 }
 

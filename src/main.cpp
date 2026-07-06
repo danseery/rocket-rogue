@@ -480,6 +480,16 @@ void rr_equip_drone(int index)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_upgrade_drone(int index)
+{
+    if (g_app) {
+        g_app->upgradeDrone(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_upgrade_drone_slot()
 {
     if (g_app) {
