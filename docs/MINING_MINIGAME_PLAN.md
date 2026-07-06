@@ -25,7 +25,7 @@ Current flow:
 4. Surface Ops shows Survey, Mine deposit, Push deeper, Return, and Drone Ops when unlocked.
 5. Pressing `Mine deposit` spends 1 shared fuel and opens the direct-control Mining screen.
 
-Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` and disabled buttons should say `Unavailable`. `Push deeper` is also disabled after mining because digging commits the field team to the current extraction window. Survey can technically remain available when action kits remain, but UX copy should guide the player toward extracting once payload is loaded or the drone is offline.
+Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
 
 ## Shared Fuel And Oxygen
 

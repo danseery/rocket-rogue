@@ -1180,7 +1180,7 @@ Rml::Rectanglei panelBounds(bool phaseBoard)
     const int top = phaseBoard ? 16 : kPanelInset;
     const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, 736) : kPanelWidth + 34;
     const int height = phaseBoard
-        ? std::clamp(viewportHeight - 64, 420, 960)
+        ? std::clamp(viewportHeight - 32, 420, 1040)
         : std::max(1, viewportHeight - 32);
     return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
 }
@@ -1402,7 +1402,7 @@ scrollbarhorizontal sliderbar {
     width: 500px;
 }
 .phase-board-arrival {
-    padding-bottom: 18px;
+    padding-bottom: 24px;
 }
 .phase-board-arrival .result-grid,
 .phase-board-results .result-grid,
@@ -1576,7 +1576,7 @@ scrollbarhorizontal sliderbar {
     width: 704px;
     flex-wrap: nowrap;
     margin-top: 8px;
-    margin-bottom: 8px;
+    margin-bottom: 14px;
 }
 .phase-board-arrival .arrival-card,
 .phase-board-research .ops-card,
@@ -1606,7 +1606,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-arrival .arrival-card {
     width: 209px;
-    height: 206px;
+    height: 250px;
     margin-right: 8px;
     padding: 10px 9px;
 }
@@ -1636,7 +1636,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-arrival .arrival-card p {
     width: 191px;
-    height: 66px;
+    height: 100px;
     overflow: hidden;
 }
 .phase-board-research .ops-card .module-impact {
@@ -1740,7 +1740,7 @@ scrollbarhorizontal sliderbar {
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer span {
-    width: 54px;
+    width: 42px;
     height: 34px;
     overflow: hidden;
 }
@@ -1763,7 +1763,7 @@ scrollbarhorizontal sliderbar {
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer button {
-    width: 126px;
+    width: 140px;
 }
 .phase-board-research .phase-advisory,
 .phase-board-drone-ops .resource-bank {
@@ -2259,10 +2259,11 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
     padding-left: 3px;
     padding-right: 3px;
-    font-size: 9px;
+    font-size: 11px;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer button {
-    margin-left: 20px;
+    width: 124px;
+    margin-left: 10px;
 }
 .phase-board-surface-minigame .surface-minigame,
 .phase-board-surface-minigame .minigame-readout,
@@ -2352,7 +2353,7 @@ scrollbarhorizontal sliderbar {
     margin-right: 8px;
     background-color: #151c24;
     border-width: 2px;
-    border-color: #6d5d35;
+    border-color: #4f8e6b;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .pilot-card-top {
     margin-bottom: 6px;
@@ -2364,14 +2365,14 @@ scrollbarhorizontal sliderbar {
     height: 48px;
     margin-top: 4px;
     margin-bottom: 6px;
-    background-color: #0c141d;
+    background-color: #102019;
     border-width: 1px;
-    border-color: #3c596a;
+    border-color: #4f8e6b;
     border-radius: 6px;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .draft-art span {
     width: 100%;
-    color: #8fd8f0;
+    color: #8de0b3;
     font-size: 24px;
     line-height: 48px;
     text-align: center;

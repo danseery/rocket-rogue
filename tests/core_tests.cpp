@@ -1513,7 +1513,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     updateFlybyRun(impact, 0.1);
     require(impact.run.flyby.completed && impact.run.flyby.collidedWithBody, "flyby should end immediately when the ship intersects the destination body");
     require(impact.run.flyby.result == FlybyGrade::Miss, "planet impact should grade as a missed flyby");
-    require(impact.run.shipDamage == 7 + tuning::flyby::impactHullDamage, "planet impact should add hull damage to the ship");
+    require(impact.run.shipDamage == 7 + impact.run.flyby.impactHullDamage, "planet impact should add assisted hull damage to the ship");
 
     GameState outOfBounds = createNewGame(catalog, 714);
     startArrivalOps(outOfBounds, moonArrival);
@@ -1547,6 +1547,52 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     updateFlybyRun(turn, 0.2);
     const double headingAfter = std::atan2(turn.run.flyby.velocityY, turn.run.flyby.velocityX);
     require(headingAfter > headingBefore, "positive flyby turn input should rotate counter-clockwise");
+}
+
+void shipUpgradesAssistFlybyAndOrbitMinigames()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    LaunchOutcome marsArrival;
+    marsArrival.type = LaunchResultType::MissionComplete;
+    marsArrival.destinationId = content::destination::mars;
+    marsArrival.frontierTransfer = true;
+
+    GameState baseline = createNewGame(catalog, 718);
+    baseline.run.equippedModuleIds = {
+        content::module::sparrowEngine,
+        content::module::stableTank,
+        content::module::patchworkHull,
+        content::module::radiatorVanes,
+        content::module::analogTelemetry,
+        content::module::springCapsule
+    };
+    startArrivalOps(baseline, marsArrival);
+    startArrivalFlybyRun(baseline, catalog);
+    startArrivalOrbitRun(baseline, catalog);
+    const FlybyRunState baselineFlyby = baseline.run.flyby;
+    const OrbitRunState baselineOrbit = baseline.run.orbit;
+
+    GameState assisted = createNewGame(catalog, 719);
+    assisted.run.equippedModuleIds = {
+        content::module::kestrelEngine,
+        content::module::deepReservoir,
+        content::module::titaniumRib,
+        content::module::ablativeSkin,
+        content::module::predictiveGuidance,
+        content::module::abortTower
+    };
+    startArrivalOps(assisted, marsArrival);
+    startArrivalFlybyRun(assisted, catalog);
+    startArrivalOrbitRun(assisted, catalog);
+
+    require(assisted.run.flyby.goodBand > baselineFlyby.goodBand, "sensor upgrades should widen the flyby good corridor");
+    require(assisted.run.flyby.perfectBand > baselineFlyby.perfectBand, "sensor upgrades should widen the flyby perfect corridor");
+    require(assisted.run.flyby.turnRateRadians > baselineFlyby.turnRateRadians, "thrust and escape upgrades should improve flyby steering response");
+    require(assisted.run.flyby.impactHullDamage < baselineFlyby.impactHullDamage, "hull, cooling, and escape upgrades should reduce flyby impact damage");
+    require(assisted.run.orbit.goodBand > baselineOrbit.goodBand, "sensor upgrades should widen the orbital research band");
+    require(assisted.run.orbit.perfectBand > baselineOrbit.perfectBand, "sensor upgrades should widen the perfect orbit band");
+    require(assisted.run.orbit.thrustAcceleration > baselineOrbit.thrustAcceleration, "thrust and cooling upgrades should improve orbit trim authority");
+    require(assisted.run.orbit.durationSeconds > baselineOrbit.durationSeconds, "fuel and sensors should add a small orbit insertion buffer");
 }
 
 void activeFlybySaveResumesAtApproach()
@@ -1584,7 +1630,8 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     startArrivalOrbitRun(miss, catalog);
     require(miss.screen == Screen::Orbit && miss.run.orbit.active, "starting arrival orbit should open the orbit minigame");
     require(miss.run.orbit.currentZone >= 1, "orbit should begin inside the scalable orbital band");
-    require(miss.run.orbit.durationSeconds == tuning::orbit::durationSeconds, "orbit should use the tuned insertion timer");
+    require(miss.run.orbit.durationSeconds >= tuning::orbit::durationSeconds, "orbit should start from the tuned insertion timer");
+    require(miss.run.orbit.durationSeconds <= tuning::orbit::durationSeconds + tuning::orbit::maxAssistDurationBonus + 0.001, "orbit assist should keep the insertion buffer bounded");
     const int missOrbitsBefore = destinationHistoryValue(miss.meta.destinationOrbits, catalog, content::destination::moon);
     const int missBlueprintsBefore = miss.meta.blueprintProgress;
     const double missCreditsBefore = miss.run.credits;
@@ -2030,6 +2077,56 @@ void surfaceUpgradesAndDronesModifyDeepPushMiniGame()
     require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should keep post-step collapse risk lower");
 }
 
+void surfaceScanAndPushDepthLimitsStayInParity()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = createNewGame(catalog, 1937);
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    baseline.run.surfaceExpedition.supply = 10;
+
+    auto scanPushLimitPair = [](const GameState& state, int seed) {
+        GameState scanState = state;
+        GameState pushState = state;
+        Random scanRng(seed);
+        Random pushRng(seed + 1);
+        require(startSurfaceScanRun(scanState, scanRng).applied, "scan should start for depth-limit parity");
+        require(startSurfacePushRun(pushState, pushRng).applied, "push should start for depth-limit parity");
+        return std::pair<int, int> {
+            scanState.run.surfaceScan.maxPulses,
+            pushState.run.surfacePush.maxSteps
+        };
+    };
+
+    const auto baselineLimits = scanPushLimitPair(baseline, 1938);
+    require(baselineLimits.first == baselineLimits.second + 1, "baseline scan should map current layer plus every reachable pushed layer");
+
+    GameState scannerUpgraded = baseline;
+    scannerUpgraded.run.surfaceUpgradeIds = {
+        content::surfaceUpgrade::widebandPulse,
+        content::surfaceUpgrade::deepEchoMapper
+    };
+    scannerUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    scannerUpgraded.meta.droneBaySlots = 1;
+    scannerUpgraded.meta.equippedDroneIds = {content::drone::surveyDrone};
+    const auto scannerLimits = scanPushLimitPair(scannerUpgraded, 1939);
+    require(scannerLimits.first == scannerLimits.second + 1, "scanner support should keep scan and push depth limits in parity");
+    require(scannerLimits.second > baselineLimits.second, "scanner support should also expand reachable push depth");
+
+    GameState structureUpgraded = baseline;
+    structureUpgraded.run.surfaceUpgradeIds = {
+        content::surfaceUpgrade::thermalDrillJackets,
+        content::surfaceUpgrade::shockMounts,
+        content::surfaceUpgrade::recoilBraces
+    };
+    structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    structureUpgraded.meta.droneBaySlots = 1;
+    structureUpgraded.meta.equippedDroneIds = {content::drone::stabilizerDrone};
+    const auto structureLimits = scanPushLimitPair(structureUpgraded, 1940);
+    require(structureLimits.first == structureLimits.second + 1, "structural support should keep scan and push depth limits in parity");
+    require(structureLimits.first > baselineLimits.first, "structural support should also expand scan depth");
+}
+
 void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2075,6 +2172,38 @@ void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
     restored.run.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
     startNewExpedition(restored, catalog);
     require(restored.run.surfaceUpgradeIds.empty(), "surface upgrades should clear when the current ship/run is replaced");
+}
+
+void surfaceUpgradesResetOnlyWhenMiningDroneIsDestroyed()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState recalled = createNewGame(catalog, 648);
+    recalled.run.destinationIndex = 2;
+    startSurfaceExpedition(recalled, catalog);
+    prepareMiningSiteForTest(recalled);
+    recalled.run.surfaceUpgradeIds = {content::surfaceUpgrade::shockMounts};
+    require(startMiningRun(recalled, catalog).applied, "mining should start for oxygen recall upgrade test");
+    recalled.run.mining.oxygenSeconds = 0.0;
+    updateMiningRun(recalled, catalog, 0.08);
+    require(recalled.run.mining.failurePending, "oxygen failure should recall the mining drone");
+    require(finishMiningRun(recalled, catalog, true).applied, "oxygen recall should be acknowledgeable");
+    require(recalled.run.surfaceUpgradeIds.size() == 1 && recalled.run.surfaceUpgradeIds.front() == content::surfaceUpgrade::shockMounts, "drone upgrades should survive non-destructive mining recalls");
+
+    GameState destroyed = createNewGame(catalog, 649);
+    destroyed.run.destinationIndex = 2;
+    startSurfaceExpedition(destroyed, catalog);
+    prepareMiningSiteForTest(destroyed);
+    destroyed.run.surfaceUpgradeIds = {
+        content::surfaceUpgrade::shockMounts,
+        content::surfaceUpgrade::oreHopper
+    };
+    require(startMiningRun(destroyed, catalog).applied, "mining should start for destroyed drone upgrade test");
+    destroyed.run.mining.drillIntegrity = 0.0;
+    updateMiningRun(destroyed, catalog, 0.08);
+    require(destroyed.run.mining.failurePending, "zero integrity should mark the mining drone destroyed");
+    require(finishMiningRun(destroyed, catalog, true).applied, "destroyed drone recall should be acknowledgeable");
+    require(destroyed.run.surfaceUpgradeIds.empty(), "drone upgrades should reset when the mining drone is destroyed");
 }
 
 void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
@@ -2459,6 +2588,16 @@ void surfaceMiningUsesSharedFuelAndRunsOnce()
     require(state.run.surfaceExpedition.supply == supplyAfterMining, "blocked post-mining push should not spend action kits");
     require(state.run.surfaceExpedition.depth == depthAfterMining, "blocked post-mining push should not increase depth");
     require(surfaceActionSummary(pushAfterMining).find("Extract before pushing deeper") != std::string::npos, "blocked post-mining push should explain extraction");
+
+    const SurfaceActionOutcome surveyAfterMining = surveySurfaceSite(state, rng);
+    require(!surveyAfterMining.applied, "surveying should be blocked after the mining run is used");
+    require(state.run.surfaceExpedition.supply == supplyAfterMining, "blocked post-mining survey should not spend action kits");
+    require(surfaceActionSummary(surveyAfterMining).find("Extract before surveying") != std::string::npos, "blocked post-mining survey should explain extraction");
+
+    const SurfaceActionOutcome scanAfterMining = startSurfaceScanRun(state, rng);
+    require(!scanAfterMining.applied, "surface scan should be blocked after the mining run is used");
+    require(state.run.surfaceExpedition.supply == supplyAfterMining, "blocked post-mining scan should not spend action kits");
+    require(surfaceActionSummary(scanAfterMining).find("Extract before surveying") != std::string::npos, "blocked post-mining scan should explain extraction");
 
     const SurfaceActionOutcome repeated = startMiningRun(state, catalog);
     require(!repeated.applied, "mining should only start once per surface loop");
@@ -3666,10 +3805,11 @@ void surfacePresentationComesFromSharedHelper()
     state.run.surfaceExpedition.miningRunUsed = true;
     surface = surfaceExpeditionPresentation(state);
     require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "used mining run should disable the mine action with the unified offline state");
-    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::fuel::offline), "used mining run should disable pushing deeper with the unified offline state");
+    require(!surface.actions[0].action.enabled && surface.actions[0].availability == std::string(text::panel::messages::surfaceFieldworkClosed), "used mining run should disable surveying with extraction-focused copy");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::panel::messages::surfaceFieldworkClosed), "used mining run should disable pushing deeper with extraction-focused copy");
     require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "used mining run mine button should use the neutral unavailable label");
+    require(surface.actions[0].action.label == std::string(text::buttons::unavailable), "post-mining survey button should use the neutral unavailable label");
     require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "post-mining push button should use the neutral unavailable label");
-    require(surface.actions[0].action.enabled, "used mining run should still allow surveying the current site");
 
     state.run.surfaceExpedition.supply = 0;
     surface = surfaceExpeditionPresentation(state);
@@ -4679,6 +4819,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
 
     GameState upgradeState = surfaceState;
     upgradeState.screen = Screen::SurfaceUpgrade;
+    upgradeState.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
     Random upgradeRng(721);
     generateSurfaceUpgradeOffers(upgradeState, catalog, upgradeRng);
     const PreparedLaunch upgradeLaunch = prepareLaunch(upgradeState, catalog, upgradeRng);
@@ -4688,6 +4829,14 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(upgradeHtml.find("surface-upgrade-card") != std::string::npos, "surface upgrades should render as tactile draft cards");
     require(upgradeHtml.find("draft-actions") != std::string::npos, "surface upgrade should keep reroll and skip actions centered as a draft row");
     require(upgradeHtml.find("phase-status") == std::string::npos, "surface upgrade should not duplicate the yellow mission status inside the board");
+    const std::size_t contextStart = upgradeHtml.find("draft-context");
+    const std::size_t contextEnd = upgradeHtml.find("</div></section>", contextStart);
+    require(contextStart != std::string::npos && contextEnd != std::string::npos, "surface upgrade should render a bounded field context chip row");
+    const std::string contextHtml = upgradeHtml.substr(contextStart, contextEnd - contextStart);
+    require(contextHtml.find("Risk ") != std::string::npos, "surface upgrade context should use compact risk chip text");
+    require(contextHtml.find("Extraction risk") == std::string::npos, "surface upgrade context should avoid clipped long risk labels");
+    require(contextHtml.find("Site Basin") != std::string::npos, "surface upgrade context should use compact site chip text");
+    require(contextHtml.find("Survey Basin") == std::string::npos, "surface upgrade context should avoid clipped long site labels");
 }
 
 void hangarHtmlShowsPilotIntakeModal()
@@ -5163,6 +5312,7 @@ int main()
     researchPhasesUnlockOnlyAfterMarsArrival();
     arrivalOperationsGateMoonButAllowMarsRisk();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
+    shipUpgradesAssistFlybyAndOrbitMinigames();
     activeFlybySaveResumesAtApproach();
     arrivalOrbitMinigameRewardsProgressionOnlyResearch();
     activeOrbitSaveResumesAtApproach();
@@ -5179,7 +5329,9 @@ int main()
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
     surfaceUpgradesAndDronesModifyScanMiniGame();
     surfaceUpgradesAndDronesModifyDeepPushMiniGame();
+    surfaceScanAndPushDepthLimitsStayInParity();
     surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
+    surfaceUpgradesResetOnlyWhenMiningDroneIsDestroyed();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     droneOpsPresentationExposesPersistentLoadout();
     surfaceSiteProfilesChangeExpeditionRules();

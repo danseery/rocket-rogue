@@ -457,25 +457,25 @@ double flybyFinishPlaneValue(double shipX, double shipY)
     return (shipX - tuning::flyby::endX) * tangentX + (shipY - tuning::flyby::endY) * tangentY;
 }
 
-int flybyZoneForDistance(double distance)
+int flybyZoneForDistance(double distance, double perfectBand, double goodBand)
 {
-    if (distance <= tuning::flyby::perfectBand) {
+    if (distance <= perfectBand) {
         return 2;
     }
-    if (distance <= tuning::flyby::goodBand) {
+    if (distance <= goodBand) {
         return 1;
     }
     return 0;
 }
 
-int flybyZoneAt(double shipX, double shipY)
+int flybyZoneAt(double shipX, double shipY, double perfectBand, double goodBand)
 {
-    return flybyZoneForDistance(nearestFlybyPathSample(shipX, shipY).distance);
+    return flybyZoneForDistance(nearestFlybyPathSample(shipX, shipY).distance, perfectBand, goodBand);
 }
 
-void addFlybyTravelSample(FlybyTravelSample& result, const FlybyPathSample& sample)
+void addFlybyTravelSample(FlybyTravelSample& result, const FlybyPathSample& sample, double perfectBand, double goodBand)
 {
-    const int zone = flybyZoneForDistance(sample.distance);
+    const int zone = flybyZoneForDistance(sample.distance, perfectBand, goodBand);
     result.progress = std::max(result.progress, sample.progress);
     result.bestZone = std::max(result.bestZone, zone);
     result.worstZone = std::min(result.worstZone, zone);
@@ -494,16 +494,16 @@ FlybyFinishHit flybyFinishLineHit(double startX, double startY, double endX, dou
     return {};
 }
 
-FlybyTravelSample sampleFlybyTravel(double startX, double startY, double endX, double endY)
+FlybyTravelSample sampleFlybyTravel(double startX, double startY, double endX, double endY, double perfectBand, double goodBand)
 {
     const double distance = std::hypot(endX - startX, endY - startY);
     const int sampleCount = std::clamp(
-        static_cast<int>(std::ceil(distance / std::max(0.001, tuning::flyby::perfectBand * 0.15))),
+        static_cast<int>(std::ceil(distance / std::max(0.001, perfectBand * 0.15))),
         2,
         96);
 
     FlybyTravelSample result;
-    addFlybyTravelSample(result, nearestFlybyPathSample(startX, startY));
+    addFlybyTravelSample(result, nearestFlybyPathSample(startX, startY), perfectBand, goodBand);
     const FlybyFinishHit finishHit = flybyFinishLineHit(startX, startY, endX, endY);
     if (finishHit.hit && finishHit.t <= 0.0) {
         result.progress = std::max(result.progress, tuning::flyby::finishProgress);
@@ -522,7 +522,7 @@ FlybyTravelSample sampleFlybyTravel(double startX, double startY, double endX, d
         const double y = startY + (endY - startY) * t;
         const FlybyPathSample sample = nearestFlybyPathSample(x, y);
 
-        addFlybyTravelSample(result, sample);
+        addFlybyTravelSample(result, sample, perfectBand, goodBand);
         if (t >= sampleEndT) {
             break;
         }
@@ -554,6 +554,65 @@ double flybyPlanetColliderRadius(const Destination& destination)
     return tuning::flyby::planetColliderBaseRadius
         + static_cast<double>(std::min(4, destination.tier)) * tuning::flyby::planetColliderTierRadius
         + tuning::flyby::planetColliderPadding;
+}
+
+double flightControlScale(const ModuleStats& stats, double thrustScale, double secondaryScale, double volatilityPenalty, double secondary)
+{
+    return std::clamp(
+        1.0 +
+            std::max(0.0, stats.thrust) * thrustScale +
+            std::max(0.0, secondary) * secondaryScale -
+            std::max(0.0, stats.volatility) * volatilityPenalty,
+        0.90,
+        1.22);
+}
+
+void applyShipAssistToFlyby(FlybyRunState& flyby, const ModuleStats& stats)
+{
+    const double sensors = std::max(0.0, stats.sensors);
+    flyby.perfectBand = tuning::flyby::perfectBand + sensors * tuning::flyby::sensorPerfectBandScale;
+    flyby.goodBand = tuning::flyby::goodBand + sensors * tuning::flyby::sensorGoodBandScale;
+
+    const double controlScale = flightControlScale(
+        stats,
+        tuning::flyby::thrustControlScale,
+        tuning::flyby::escapeControlScale,
+        tuning::flyby::volatilityControlPenalty,
+        stats.escape);
+    flyby.turnRateRadians = tuning::flyby::turnRateRadians * controlScale;
+    flyby.thrustAcceleration = tuning::flyby::thrustAcceleration * controlScale;
+    flyby.brakeAcceleration = tuning::flyby::brakeAcceleration * std::clamp(
+        1.0 + std::max(0.0, stats.escape) * tuning::flyby::escapeControlScale,
+        0.95,
+        1.18);
+
+    const int relief = std::clamp(
+        static_cast<int>(std::round(
+            std::max(0.0, stats.hull) * tuning::flyby::hullImpactReliefScale +
+            std::max(0.0, stats.cooling) * tuning::flyby::coolingImpactReliefScale +
+            std::max(0.0, stats.escape) * tuning::flyby::escapeImpactReliefScale)),
+        0,
+        tuning::flyby::impactMaximumRelief);
+    flyby.impactHullDamage = std::max(6, tuning::flyby::impactHullDamage - relief);
+}
+
+void applyShipAssistToOrbit(OrbitRunState& orbit, const ModuleStats& stats)
+{
+    const double sensors = std::max(0.0, stats.sensors);
+    const double escape = std::max(0.0, stats.escape);
+    orbit.goodBand = orbit.planetRadius * (tuning::orbit::goodBandScale + sensors * tuning::orbit::sensorGoodBandScale + escape * tuning::orbit::escapeBandScale);
+    orbit.perfectBand = orbit.planetRadius * (tuning::orbit::perfectBandScale + sensors * tuning::orbit::sensorPerfectBandScale);
+    orbit.durationSeconds += std::clamp(
+        std::max(0.0, stats.fuel) * tuning::orbit::fuelDurationScale +
+            sensors * tuning::orbit::sensorDurationScale,
+        0.0,
+        tuning::orbit::maxAssistDurationBonus);
+    orbit.thrustAcceleration = tuning::orbit::thrustAcceleration * flightControlScale(
+        stats,
+        tuning::orbit::thrustControlScale,
+        tuning::orbit::coolingControlScale,
+        tuning::orbit::volatilityControlPenalty,
+        stats.cooling);
 }
 
 bool flybyShipIntersectsPlanet(const FlybyRunState& flyby)
@@ -879,9 +938,10 @@ void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
     flyby.velocityY = tuning::flyby::startVelocityY;
     flyby.gravityStrength = flybyGravityForDestination(*destination);
     flyby.planetColliderRadius = flybyPlanetColliderRadius(*destination);
+    applyShipAssistToFlyby(flyby, aggregateShipStats(state, catalog));
     const auto [scoreX, scoreY] = flybyShipNosePoint(flyby.shipX, flyby.shipY, flyby.velocityX, flyby.velocityY);
     flyby.pathProgress = nearestFlybyPathSample(scoreX, scoreY).progress;
-    flyby.currentZone = flybyZoneAt(scoreX, scoreY);
+    flyby.currentZone = flybyZoneAt(scoreX, scoreY, flyby.perfectBand, flyby.goodBand);
     flyby.worstZone = flyby.currentZone;
     pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
     state.run.flyby = flyby;
@@ -937,7 +997,7 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
         state.run.shipDamage = std::clamp(
-            state.run.shipDamage + tuning::flyby::impactHullDamage,
+            state.run.shipDamage + flyby.impactHullDamage,
             0,
             tuning::damage::destroyedShipDamage);
     };
@@ -955,7 +1015,7 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
     double headingX = speed > 0.001 ? flyby.velocityX / speed : 1.0;
     double headingY = speed > 0.001 ? flyby.velocityY / speed : 0.0;
 
-    const double turnRadians = std::clamp(flyby.inputX, -1.0, 1.0) * tuning::flyby::turnRateRadians * dt;
+    const double turnRadians = std::clamp(flyby.inputX, -1.0, 1.0) * flyby.turnRateRadians * dt;
     if (std::abs(turnRadians) > 0.000001) {
         const double c = std::cos(turnRadians);
         const double s = std::sin(turnRadians);
@@ -967,9 +1027,9 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
 
     const double throttle = std::clamp(flyby.inputY, -1.0, 1.0);
     if (throttle > 0.0) {
-        speed += throttle * tuning::flyby::thrustAcceleration * dt;
+        speed += throttle * flyby.thrustAcceleration * dt;
     } else if (throttle < 0.0) {
-        speed += throttle * tuning::flyby::brakeAcceleration * dt;
+        speed += throttle * flyby.brakeAcceleration * dt;
     }
     speed = std::clamp(speed, tuning::flyby::minSpeed, tuning::flyby::maxSpeed);
     flyby.velocityX = headingX * speed;
@@ -1000,7 +1060,7 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
 
     const auto [previousScoreX, previousScoreY] = flybyShipNosePoint(previousX, previousY, previousVelocityX, previousVelocityY);
     const auto [currentScoreX, currentScoreY] = flybyShipNosePoint(flyby.shipX, flyby.shipY, flyby.velocityX, flyby.velocityY);
-    const FlybyTravelSample travelSample = sampleFlybyTravel(previousScoreX, previousScoreY, currentScoreX, currentScoreY);
+    const FlybyTravelSample travelSample = sampleFlybyTravel(previousScoreX, previousScoreY, currentScoreX, currentScoreY, flyby.perfectBand, flyby.goodBand);
     flyby.pathProgress = std::max(flyby.pathProgress, travelSample.progress);
     flyby.worstZone = std::min(flyby.worstZone, travelSample.worstZone);
     flyby.currentZone = travelSample.worstZone;
@@ -1177,6 +1237,8 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     orbit.goodBand = orbit.planetRadius * tuning::orbit::goodBandScale;
     orbit.perfectBand = orbit.planetRadius * tuning::orbit::perfectBandScale;
     orbit.gravityStrength = orbit.targetRadius * orbit.targetRadius * tuning::orbit::gravityScale;
+    orbit.thrustAcceleration = tuning::orbit::thrustAcceleration;
+    applyShipAssistToOrbit(orbit, aggregateShipStats(state, catalog));
 
     const double angle = tuning::orbit::startAngleRadians;
     orbit.shipX = std::cos(angle) * orbit.targetRadius;
@@ -1239,8 +1301,8 @@ void updateOrbitRun(GameState& state, double deltaSeconds)
 
     const double radialInput = std::clamp(orbit.inputX, -1.0, 1.0);
     const double tangentialInput = std::clamp(orbit.inputY, -1.0, 1.0);
-    orbit.velocityX += (radialX * radialInput + tangentX * tangentialInput) * tuning::orbit::thrustAcceleration * dt;
-    orbit.velocityY += (radialY * radialInput + tangentY * tangentialInput) * tuning::orbit::thrustAcceleration * dt;
+    orbit.velocityX += (radialX * radialInput + tangentX * tangentialInput) * orbit.thrustAcceleration * dt;
+    orbit.velocityY += (radialY * radialInput + tangentY * tangentialInput) * orbit.thrustAcceleration * dt;
 
     const double drag = std::max(0.0, 1.0 - tuning::orbit::driftDrag * dt);
     orbit.velocityX *= drag;
@@ -1977,8 +2039,13 @@ double surfaceEnemyEncounterChance(const GameState& state)
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    SurfaceActionOutcome outcome;
+    if (expedition.miningRunUsed) {
+        outcome.message = "Mining run is complete. Extract before surveying again.";
+        return outcome;
+    }
     const double extractionRiskBefore = surfaceExtractionRisk(state);
-    SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
+    outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
     if (!outcome.applied) {
         return outcome;
     }
@@ -2091,6 +2158,17 @@ bool hasPendingSurfacePayload(const MaterialInventory& materials, const std::vec
     return cargo > 0 || materials.common > 0 || materials.rare > 0 || materials.exotic > 0 || !artifacts.empty();
 }
 
+int surfaceDepthEnvelopeBonus(const SurfaceUpgradeEffects& upgrades, const MiniDroneLoadoutEffects& drones)
+{
+    const double scannerReach = std::max(0.0, upgrades.scannerRadius + drones.scannerRadius);
+    const int scannerBonus = std::clamp(static_cast<int>(std::floor(scannerReach / 2.5)), 0, 2);
+    const int structureBonus = std::clamp(
+        static_cast<int>(std::floor((upgrades.drillDurability + upgrades.drillCooling + drones.hardRockBounceRelief * 5.0) / 4.0)),
+        0,
+        2);
+    return std::clamp(std::max(scannerBonus, structureBonus), 0, 2);
+}
+
 struct SurfaceScanSupport {
     double signalBonus = 0.0;
     double riskRelief = 0.0;
@@ -2098,7 +2176,7 @@ struct SurfaceScanSupport {
     double exoticChanceBonus = 0.0;
     double artifactChanceBonus = 0.0;
     double hazardRelief = 0.0;
-    int maxPulseBonus = 0;
+    int reachablePushSteps = tuning::research::pushMaxSteps;
 };
 
 SurfaceScanSupport surfaceScanSupport(const GameState& state)
@@ -2115,7 +2193,7 @@ SurfaceScanSupport surfaceScanSupport(const GameState& state)
     support.exoticChanceBonus = std::clamp(upgrades.oreYieldChance * 0.35 + scannerReach * 0.006, 0.0, 0.10);
     support.artifactChanceBonus = std::clamp(scannerReach * 0.010, 0.0, 0.09);
     support.hazardRelief = std::clamp(upgrades.hazardRelief, 0.0, 0.06);
-    support.maxPulseBonus = std::clamp(static_cast<int>(std::floor(scannerReach / 2.5)), 0, 2);
+    support.reachablePushSteps = tuning::research::pushMaxSteps + surfaceDepthEnvelopeBonus(upgrades, drones);
     return support;
 }
 
@@ -2147,7 +2225,7 @@ SurfacePushSupport surfacePushSupport(const GameState& state)
     support.richChanceBonus = std::clamp(upgrades.oreYieldChance + upgrades.hardRockBounceRelief * 0.15 + drones.hardRockBounceRelief * 0.10, 0.0, 0.22);
     support.artifactChanceBonus = std::clamp(upgrades.hardRockBounceRelief * 0.10 + drones.drillIntegrityRelief * 0.12, 0.0, 0.08);
     support.hazardRelief = std::clamp(upgrades.hazardRelief + structureSupport * 0.20, 0.0, 0.08);
-    support.maxStepBonus = std::clamp(static_cast<int>(std::floor((upgrades.drillDurability + upgrades.drillCooling + drones.hardRockBounceRelief * 5.0) / 4.0)), 0, 1);
+    support.maxStepBonus = surfaceDepthEnvelopeBonus(upgrades, drones);
     return support;
 }
 
@@ -2330,7 +2408,12 @@ void resetSurfacePush(GameState& state)
 SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
+    SurfaceActionOutcome outcome;
+    if (expedition.miningRunUsed) {
+        outcome.message = "Mining run is complete. Extract before surveying again.";
+        return outcome;
+    }
+    outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
     if (!outcome.applied) {
         outcome.message = "Need an action kit to run a surface scan.";
         return outcome;
@@ -2340,7 +2423,7 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     const SurfaceScanSupport support = surfaceScanSupport(state);
     scan.active = true;
     scan.destinationId = expedition.destinationId;
-    scan.maxPulses = tuning::research::scanMaxPulses + support.maxPulseBonus;
+    scan.maxPulses = support.reachablePushSteps + 1;
     scan.signal = std::clamp(0.12 + support.signalBonus, 0.0, 0.42);
     scan.interference = std::clamp(expedition.hazard * 0.25 - support.riskRelief * 0.35, 0.0, 0.30);
     scan.bustRisk = std::clamp(

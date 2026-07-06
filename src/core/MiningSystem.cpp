@@ -2054,6 +2054,8 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     outcome.artifactFound = !mining.temporaryArtifacts.empty();
     outcome.cargoDelta = mining.cargo;
     outcome.hazardDelta = mining.hazardDelta + static_cast<double>(std::max(0, mining.cargo)) * tuning::mining::cargoExtractionRiskScale - miningDrillStats(state, catalog).extractionRiskRelief;
+    const bool droneDestroyed = abort && mining.drillIntegrity <= 0.0;
+    const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
 
     addMiningMaterials(expedition.temporaryMaterials, mining.temporaryMaterials);
     expedition.temporaryArtifacts.insert(expedition.temporaryArtifacts.end(), mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
@@ -2061,6 +2063,12 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     expedition.depth = std::max(expedition.depth, mining.depthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
     outcome.extractionRiskDelta = std::max(0.0, outcome.hazardDelta);
+    if (droneDestroyed) {
+        state.run.surfaceUpgradeIds.clear();
+        if (hadDroneUpgrades) {
+            appendSurfaceLog(expedition, "Mining drone destroyed; drone upgrades lost.");
+        }
+    }
 
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
     mining = {};

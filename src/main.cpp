@@ -580,6 +580,16 @@ void rr_debug_mining()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_combat_mining()
+{
+    if (g_app) {
+        g_app->debugStartCombatMining();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_surface_scan()
 {
     if (g_app) {

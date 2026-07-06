@@ -1905,15 +1905,15 @@
     }
 
     .phase-board-arrival .arrival-card {
-      min-height: 206px;
+      min-height: 250px;
     }
 
     .phase-board-arrival .ops-grid {
-      margin-bottom: 8px;
+      margin-bottom: 14px;
     }
 
     .phase-board-arrival .arrival-card .card-footer {
-      grid-template-columns: 54px minmax(126px, 1fr);
+      grid-template-columns: 42px minmax(140px, 1fr);
     }
 
     .phase-board-arrival .arrival-card h3,
@@ -1923,11 +1923,11 @@
     }
 
     .phase-board-arrival .arrival-card p {
-      min-height: 66px;
+      min-height: 100px;
     }
 
     .phase-board-arrival .arrival-card .card-footer button {
-      min-width: 126px;
+      min-width: 140px;
       white-space: nowrap;
     }
 
@@ -2003,8 +2003,9 @@
     }
 
     .surface-action-card .card-footer button {
-      min-width: 104px;
+      min-width: 124px;
       justify-self: center;
+      font-size: 13px;
     }
 
     .ops-card.repair {
@@ -2198,8 +2199,32 @@
     }
 
     .upgrade-draft-card {
+      position: relative;
+      overflow: hidden;
       min-height: 430px;
       border-color: rgba(255, 209, 102, 0.38);
+    }
+
+    .surface-upgrade-card {
+      border-color: rgba(141, 224, 179, 0.46);
+      box-shadow: 0 0 0 1px rgba(141, 224, 179, 0.08), 0 12px 34px rgba(14, 54, 39, 0.18);
+    }
+
+    .surface-upgrade-card::after {
+      content: "";
+      position: absolute;
+      inset: -40% auto -40% -55%;
+      width: 42%;
+      background: linear-gradient(90deg, transparent, rgba(141, 224, 179, 0.18), transparent);
+      transform: rotate(12deg);
+      animation: upgrade-card-sheen 3.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes upgrade-card-sheen {
+      0%, 46% { left: -55%; opacity: 0; }
+      56% { opacity: 1; }
+      78%, 100% { left: 112%; opacity: 0; }
     }
 
     .phase-board-refit .upgrade-draft-card {
@@ -3234,6 +3259,7 @@
     <p>Sandbox launches use default settings and do not write save data.</p>
     <div class="debug-tool-grid">
       <button class="warn" type="button" data-debug-action="mining">Mining sandbox</button>
+      <button class="danger" type="button" data-debug-action="combat-mining">Combat mining sandbox</button>
       <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
       <button class="danger" type="button" data-debug-action="push">Deep push sandbox</button>
       <button type="button" data-debug-action="flyby">Flyby sandbox</button>
@@ -3718,6 +3744,7 @@
       miningAbort: () => rrCall("rr_mining_abort"),
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
       debugMining: () => rrCall("rr_debug_mining"),
+      debugCombatMining: () => rrCall("rr_debug_combat_mining"),
       debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
       debugSurfacePush: () => rrCall("rr_debug_surface_push"),
       debugFlyby: () => rrCall("rr_debug_flyby"),
@@ -3846,6 +3873,7 @@
 
     const debugActions = Object.freeze({
       mining: () => rr.debugMining(),
+      "combat-mining": () => rr.debugCombatMining(),
       scan: () => rr.debugSurfaceScan(),
       push: () => rr.debugSurfacePush(),
       flyby: () => rr.debugFlyby(),

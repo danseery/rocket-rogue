@@ -234,9 +234,15 @@ inline void addSignedPercentChip(std::vector<PanelMetricPresentation>& chips, st
 inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpgradeStats& stats)
 {
     std::vector<PanelMetricPresentation> chips;
+    const int depthReach = std::clamp(static_cast<int>(std::floor(std::max(
+        std::max(0.0, stats.scannerRadius) / 2.5,
+        (std::max(0.0, stats.drillDurability) + std::max(0.0, stats.drillCooling)) / 4.0))),
+        0,
+        2);
     addDoubleChip(chips, "Drill", stats.drillPower);
     addDoubleChip(chips, "Cooling", stats.drillCooling);
     addDoubleChip(chips, "Durability", stats.drillDurability);
+    addPositiveChip(chips, "Depth reach", depthReach);
     addPercentChip(chips, "Recoil", stats.hardRockBounceRelief);
     addPercentChip(chips, "Ore yield", stats.oreYieldChance);
     addDoubleChip(chips, "Scanner", stats.scannerRadius);
@@ -276,6 +282,17 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats&
     addPercentChip(chips, "Bounce relief", stats.hardRockBounceRelief);
     addPercentChip(chips, text::labels::extractionRisk, stats.extractionRiskRelief);
     addPercentChip(chips, text::labels::contactRisk, stats.enemyEncounterRelief);
+    if (stats.sentryDamagePerSecond > 0.0) {
+        chips.push_back(panelMetric("Sentry", "+" + display::fixed(stats.sentryDamagePerSecond, 1) + "/s"));
+    }
+    if (stats.areaControlDamagePerSecond > 0.0) {
+        chips.push_back(panelMetric("Area fire", "+" + display::fixed(stats.areaControlDamagePerSecond, 1) + "/s"));
+    }
+    addPercentChip(chips, "Slow", stats.enemySlow);
+    if (stats.reactiveArmorDamagePerSecond > 0.0) {
+        chips.push_back(panelMetric("Reactive", "+" + display::fixed(stats.reactiveArmorDamagePerSecond, 1) + "/s"));
+    }
+    addPercentChip(chips, "Shield", stats.environmentalShieldRelief);
     return chips;
 }
 
@@ -350,7 +367,9 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
         detailPresentationRow("Stability support", effects.hardRockBounceRelief > 0.0 ? display::percent(effects.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
-        detailPresentationRow("Future combat", std::string("Attack and Defense drones unlock after hostile surface encounters exist beyond the solar system."))
+        detailPresentationRow("Combat support", effects.sentryDamagePerSecond > 0.0 || effects.enemyDamageRelief > 0.0
+            ? display::fixed(effects.sentryDamagePerSecond + effects.areaControlDamagePerSecond, 1) + "/s sentry output, " + display::percent(effects.enemyDamageRelief + effects.environmentalShieldRelief) + " shield relief"
+            : "Attack and Defense drones unlock after hostile surface encounters beyond the solar system.")
     };
 
     for (int index = 0; index < static_cast<int>(catalog.miniDrones.size()); ++index) {
@@ -460,6 +479,14 @@ inline PanelButtonPresentation surfaceActionButton(std::string_view label, std::
         : disabledPanelButton(text::buttons::unavailable);
 }
 
+inline PanelButtonPresentation fieldSurfaceActionButton(const GameState& state, std::string_view label, std::string_view actionId, int cost, std::string cssClass = "")
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return disabledPanelButton(text::buttons::unavailable);
+    }
+    return surfaceActionButton(label, actionId, state.run.surfaceExpedition.supply, cost, std::move(cssClass));
+}
+
 inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
 {
     if (state.run.surfaceExpedition.miningRunUsed) {
@@ -476,6 +503,14 @@ inline std::string surfaceActionAvailability(int supply, int cost)
     return supply >= cost ? std::string(text::panel::ready) : text::panel::messages::needSupply(cost);
 }
 
+inline std::string fieldSurfaceActionAvailability(const GameState& state, int cost)
+{
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return std::string(text::panel::messages::surfaceFieldworkClosed);
+    }
+    return surfaceActionAvailability(state.run.surfaceExpedition.supply, cost);
+}
+
 inline std::string miningSurfaceActionAvailability(const GameState& state)
 {
     if (state.run.surfaceExpedition.miningRunUsed) {
@@ -489,18 +524,12 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
 
 inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
 {
-    if (state.run.surfaceExpedition.miningRunUsed) {
-        return disabledPanelButton(text::buttons::unavailable);
-    }
-    return surfaceActionButton(text::buttons::pushDeeper, ui::actions::pushSurface, state.run.surfaceExpedition.supply, tuning::research::pushSupplyCost, "danger");
+    return fieldSurfaceActionButton(state, text::buttons::pushDeeper, ui::actions::pushSurface, tuning::research::pushSupplyCost, "danger");
 }
 
 inline std::string pushSurfaceActionAvailability(const GameState& state)
 {
-    if (state.run.surfaceExpedition.miningRunUsed) {
-        return std::string(text::fuel::offline);
-    }
-    return surfaceActionAvailability(state.run.surfaceExpedition.supply, tuning::research::pushSupplyCost);
+    return fieldSurfaceActionAvailability(state, tuning::research::pushSupplyCost);
 }
 
 inline std::string surfaceHazardRisk(double hazard, double scale, double relief)
@@ -805,7 +834,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
         std::string(text::labels::hazard),
         surveyPayoffChips(state, tools, crew, site),
-        surfaceActionButton(text::buttons::surveySite, ui::actions::surveySurface, expedition.supply, tuning::research::surveySupplyCost)));
+        fieldSurfaceActionButton(state, text::buttons::surveySite, ui::actions::surveySurface, tuning::research::surveySupplyCost)));
+    presentation.actions.back().availability = fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
 
     SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(
         text::buttons::mineDeposit,

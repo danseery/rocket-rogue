@@ -210,6 +210,34 @@ std::string surfaceActionChip(const PanelMetricPresentation& chip)
         htmlEscape(text) + "</span>";
 }
 
+std::string fieldContextValue(const PanelMetricPresentation& chip)
+{
+    if (chip.label != text::labels::site) {
+        return chip.value;
+    }
+    if (chip.value == text::panel::surfaceSites::surveyBasin) {
+        return "Basin";
+    }
+    if (chip.value == text::panel::surfaceSites::oreShelf) {
+        return "Ore";
+    }
+    if (chip.value == text::panel::surfaceSites::fractureField) {
+        return "Fracture";
+    }
+    return chip.value;
+}
+
+std::string fieldContextChip(const PanelMetricPresentation& chip)
+{
+    const std::string label = surfaceActionChipLabel(chip.label);
+    const std::string text = label + " " + fieldContextValue(chip);
+    const bool positive = chip.value.empty() || chip.value.front() != '-';
+    const bool wideChip = text.size() > 11 || label.find(' ') != std::string::npos;
+    return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
+        std::string(wideChip ? " wide" : "") + "\">" +
+        htmlEscape(text) + "</span>";
+}
+
 std::string statChipGrid(const std::vector<RefitStatChip>& chips)
 {
     std::string tags;
@@ -224,6 +252,15 @@ std::string resourceChipGrid(const std::vector<PanelMetricPresentation>& chips)
     std::string tags;
     for (const PanelMetricPresentation& chip : chips) {
         tags += resourceChip(chip);
+    }
+    return tags;
+}
+
+std::string fieldContextChipGrid(const std::vector<PanelMetricPresentation>& chips)
+{
+    std::string tags;
+    for (const PanelMetricPresentation& chip : chips) {
+        tags += fieldContextChip(chip);
     }
     return tags;
 }
@@ -509,7 +546,7 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
     out << "<h3>" << htmlEscape(upgrade.title) << "</h3>";
     out << "<p>" << htmlEscape(upgrade.detail) << "</p>";
     out << "<div class=\"stat-grid\">" << resourceChipGrid(upgrade.effectChips) << "</div>";
-    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape("This landing only") << "</span>"
+    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape("Until drone loss") << "</span>"
         << panelButton(upgrade.action) << "</div></article>";
     return out.str();
 }
@@ -1051,7 +1088,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                     ? "Perfect corridor exit. Fast completion amplified the payout, and exit speed amplified the next-launch slingshot."
                     : flybyResultBody(grade));
             const std::string tagOne = flyby.collidedWithBody
-                ? "Hull +" + std::to_string(tuning::flyby::impactHullDamage) + "%"
+                ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
                 : (grade == FlybyGrade::Miss ? "No flyby data" : "Flyby data secured");
             const std::string tagTwo = flyby.collidedWithBody
                 ? "No recon recovered"
@@ -1600,7 +1637,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-surface-upgrade phase-board-draft-room", state.statusLine);
         out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Drone Upgrade")
             << "</span><h2>" << htmlEscape("Pick your Field Research") << "</h2><p>"
-            << htmlEscape("Choose one temporary upgrade. It stays active as long as your shuttle and drone survive.") << "</p></div>";
+            << htmlEscape("Choose one drone upgrade. It stays active until your shuttle or mining drone is destroyed.") << "</p></div>";
         std::vector<PanelMetricPresentation> fieldContext;
         if (!surfacePanel.metrics.empty()) {
             fieldContext.push_back(surfacePanel.metrics[0]);
@@ -1611,10 +1648,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 fieldContext.push_back(metricItem);
             }
         }
-        out << "<div class=\"stat-grid draft-context\">" << resourceChipGrid(fieldContext) << "</div></section>";
+        out << "<div class=\"stat-grid draft-context\">" << fieldContextChipGrid(fieldContext) << "</div></section>";
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
             << htmlEscape("Choose one drone upgrade") << "</h2><p>"
-            << htmlEscape("Scanner, drill, and drone tech change how the next dig feels. Take one, reroll the field research, or walk away.") << "</p></div></div>";
+            << htmlEscape("Scanner, drill, and drone tech improve future digs until the rig is lost. Take one, reroll the field research, or walk away.") << "</p></div></div>";
         out << "<div class=\"pilot-card-grid draft-card-grid\">";
         for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
             out << surfaceUpgradeCard(upgrade);

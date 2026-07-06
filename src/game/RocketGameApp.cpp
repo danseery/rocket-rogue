@@ -1160,6 +1160,85 @@ void RocketGameApp::debugStartMining()
     panelDirty_ = true;
 }
 
+void RocketGameApp::debugStartCombatMining()
+{
+    beginDebugSandbox("Debug combat mining sandbox. No payload, materials, or save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::nearbyStar);
+    state_.run.surfaceExpedition = {};
+    state_.run.surfaceExpedition.active = true;
+    state_.run.surfaceExpedition.destinationId = content::destination::nearbyStar;
+    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::FractureField;
+    state_.run.surfaceExpedition.supply = tuning::research::baseSupply + 3;
+    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.18;
+    state_.run.surfaceExpedition.depth = 2;
+    state_.run.surfaceExpedition.enemyEncountersEnabled = true;
+    state_.run.surfaceExpedition.miningSitePrepared = true;
+    state_.run.surfaceExpedition.prospectArtifacts = 1;
+    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
+        state_.meta.unlockKeys.push_back(content::unlock::droneBay);
+    }
+    if (!hasUnlock(state_.meta, content::unlock::perimeterDrones)) {
+        state_.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    }
+    state_.meta.droneBaySlots = 3;
+    state_.meta.ownedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
+    state_.meta.equippedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
+    ensureDroneBayState(state_, catalog_);
+
+    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
+    if (outcome.applied) {
+        MiningRunState& mining = state_.run.mining;
+        const auto seedEnemy = [](MiningEnemyType type,
+                                  MiningCellFeature sourceFeature,
+                                  double x,
+                                  double y,
+                                  double maxHealth,
+                                  double armor,
+                                  double speed,
+                                  double damagePerSecond,
+                                  double effectRadius,
+                                  MiningElementalAffinity affinity = MiningElementalAffinity::None) {
+            MiningEnemy enemy;
+            enemy.type = type;
+            enemy.sourceFeature = sourceFeature;
+            enemy.x = x;
+            enemy.y = y;
+            enemy.health = maxHealth;
+            enemy.maxHealth = maxHealth;
+            enemy.armor = armor;
+            enemy.speed = speed;
+            enemy.damagePerSecond = damagePerSecond;
+            enemy.effectRadius = effectRadius;
+            enemy.active = true;
+            enemy.affinity = type == MiningEnemyType::Elemental ? affinity : MiningElementalAffinity::None;
+            return enemy;
+        };
+        const double centerX = std::clamp(mining.droneX, 4.0, static_cast<double>(std::max(5, mining.terrain.width - 5)));
+        const double centerY = std::clamp(mining.droneY, 4.0, static_cast<double>(std::max(5, mining.terrain.height - 5)));
+        mining.enemies = {
+            seedEnemy(MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, centerX + 2.0, centerY + 0.5, 48.0, 0.18, 1.65, 0.72, tuning::mining::enemyElementalRadiusCells, MiningElementalAffinity::Thermal),
+            seedEnemy(MiningEnemyType::Flying, MiningCellFeature::HiveNest, centerX - 2.5, centerY + 1.0, 36.0, 0.0, 3.1, 0.48, 0.0),
+            seedEnemy(MiningEnemyType::Beetle, MiningCellFeature::MinibossLair, centerX + 4.0, centerY + 2.0, 72.0, 0.45, 1.15, 0.82, 0.0),
+            seedEnemy(MiningEnemyType::Ant, MiningCellFeature::EncounterZone, centerX - 4.0, centerY + 2.0, 40.0, 0.0, 2.0, 0.62, 0.0)
+        };
+    }
+    state_.statusLine = outcome.applied
+        ? "Debug combat mining sandbox. 4 active enemies and defense drones are live; no save data will be written."
+        : surfaceActionSummary(outcome);
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugStartSurfaceScan()
 {
     beginDebugSandbox("Debug scanner sandbox. No materials, artifacts, or save data will be written.");

@@ -463,6 +463,12 @@ struct FlybyRunState {
     double inputX = 0.0;
     double inputY = 0.0;
     double gravityStrength = 0.0;
+    double goodBand = 0.145;
+    double perfectBand = 0.050;
+    double turnRateRadians = 1.45;
+    double thrustAcceleration = 0.66;
+    double brakeAcceleration = 0.52;
+    int impactHullDamage = 18;
     double pathProgress = 0.0;
     int worstZone = 2;
     double planetColliderRadius = 0.15;
@@ -501,6 +507,7 @@ struct OrbitRunState {
     double inputX = 0.0;
     double inputY = 0.0;
     double gravityStrength = 0.040;
+    double thrustAcceleration = 0.075;
     double orbitProgress = 0.0;
     double angleRadians = 0.0;
     int worstZone = 2;
@@ -545,7 +552,7 @@ struct SurfaceScanRunState {
     bool busted = false;
     std::string destinationId;
     int pulses = 0;
-    int maxPulses = 6;
+    int maxPulses = 5;
     double signal = 0.0;
     double interference = 0.0;
     double bustRisk = 0.0;

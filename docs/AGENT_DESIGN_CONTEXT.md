@@ -28,7 +28,7 @@ The desired aesthetic is:
 
 - Launch loop: risk hidden failure, manage telemetry, return/eject/mitigate, earn flight data and credits.
 - Arrival loop: reaching a destination should feel rewarding, then ask whether to flyby, orbit, or land.
-- Surface loop: landing opens survey, one fuel-gated mining run, deeper excavation before mining, payload extraction, and temporary field upgrades.
+- Surface loop: landing opens survey, one fuel-gated mining run, deeper excavation before mining, payload extraction, and drone upgrades that persist until the shuttle or mining drone is destroyed.
 - Mining mini-game: direct drone control, destructible chunked terrain, fog of war, scanner pulses, drill friction, ore pockets, artifacts, 15s baseline oxygen, shared fuel draw, cargo, and extraction risk.
 - Long-term loop: recovered materials, blueprints, artifacts, and research unlock better tools, drone bay options, ship parts, Ark/base systems, and future story threads.
 

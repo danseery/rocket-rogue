@@ -155,7 +155,7 @@ The current C++ WebGL prototype should keep this scope focused:
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
 - Mining uses a direct-control drone screen with 15s baseline oxygen, shared fuel draw, scanner pulses, destructible terrain, drill integrity, stow/abort decisions, and payload conversion back into the surface expedition.
 - Shared fuel is displayed as a shuttle/drone tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as "Mining drone offline" with disabled button copy "Unavailable".
-- Push deeper is unavailable after mining. Survey may remain available if action kits remain, but the primary recommendation should move toward extraction once payload is loaded or the drone is offline.
+- Survey site and Push deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the drone is offline.
 - Solar-system surface expeditions have environmental risk only.
 - Nearby Star and later surface expeditions can trigger hostile contact events.
 - Nearby Star and later mining runs can include enemy tunnel networks and passive-defense combat pressure.

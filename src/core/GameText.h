@@ -631,6 +631,7 @@ inline constexpr std::string_view surfacePostureGreedy = "Recommended: extract n
 inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is valuable, but recovery risk is climbing into expensive territory.";
 inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
+inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
 inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining layer first; extra pulses preview deeper Push Deeper layers.";
 inline constexpr std::string_view surfaceMineDetail = "Deploy the mining drone once for this surface loop; mining spends fuel, not action kits.";
 inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";

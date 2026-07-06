@@ -70,6 +70,7 @@ public:
     void miningAbort();
     void miningFailureAck();
     void debugStartMining();
+    void debugStartCombatMining();
     void debugStartSurfaceScan();
     void debugStartSurfacePush();
     void debugStartFlyby();
