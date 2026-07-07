@@ -73,6 +73,27 @@
       padding: 18px 24px 28px;
     }
 
+    #panel.mining-fullscreen-panel {
+      inset: 0;
+      width: 100vw;
+      max-height: 100dvh;
+      height: 100dvh;
+      overflow: hidden;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      pointer-events: none;
+    }
+
+    #panel.mining-fullscreen-panel .panel-head,
+    #panel.mining-fullscreen-panel > .status,
+    #panel.mining-fullscreen-panel > .panel-kpis {
+      display: none;
+    }
+
     .panel-head {
       display: flex;
       align-items: center;
@@ -2014,6 +2035,317 @@
       width: 100%;
     }
 
+    .mining-fullscreen {
+      position: relative;
+      width: 100vw;
+      height: 100dvh;
+      overflow: hidden;
+      color: #edf8fb;
+      pointer-events: none;
+    }
+
+    .mining-top-rail,
+    .mining-bottom-rail,
+    .mining-failure-banner {
+      position: absolute;
+      pointer-events: auto;
+      border: 1px solid rgba(71, 220, 255, 0.34);
+      border-radius: 8px;
+      background:
+        linear-gradient(180deg, rgba(12, 36, 45, 0.90), rgba(5, 13, 18, 0.86)),
+        rgba(5, 13, 18, 0.86);
+      box-shadow: 0 14px 42px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(9, 15, 19, 0.60) inset;
+    }
+
+    .mining-top-rail {
+      top: 14px;
+      left: 18px;
+      right: 18px;
+      min-height: 96px;
+      padding: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .mining-run-title {
+      width: 260px;
+      flex: 0 0 auto;
+    }
+
+    .mining-run-title span,
+    .mining-utility-cluster span,
+    .mining-command-dock span,
+    .mining-payload-strip > span {
+      color: rgba(154, 230, 244, 0.80);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .mining-run-title strong {
+      display: block;
+      margin-top: 2px;
+      color: #f1fbff;
+      font-size: 25px;
+      line-height: 1;
+    }
+
+    .mining-run-title small {
+      display: block;
+      margin-top: 6px;
+      color: rgba(215, 232, 234, 0.78);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .mining-vitals {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(92px, 1fr));
+      gap: 6px;
+      max-width: 760px;
+      margin: 0;
+    }
+
+    .mining-vitals .metric {
+      min-height: 38px;
+      padding: 6px 8px;
+      background: rgba(8, 25, 32, 0.90);
+      border-color: rgba(96, 218, 241, 0.24);
+    }
+
+    .mining-vitals .metric strong {
+      font-size: 16px;
+      line-height: 1.05;
+    }
+
+    .mining-vitals .metric span {
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
+    .mining-utility-cluster {
+      width: 118px;
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+    }
+
+    .mining-utility-cluster button {
+      width: 100%;
+      min-height: 31px;
+      padding: 0 8px;
+      font-size: 12px;
+      line-height: 1;
+      pointer-events: auto;
+    }
+
+    .mining-health-strip {
+      margin-top: 8px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .mining-health-strip > div:first-child {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .mining-health-bar {
+      height: 9px;
+      margin-top: 3px;
+      border-radius: 5px;
+    }
+
+    .mining-health-bar i {
+      height: 100%;
+    }
+
+    .mining-playfield-space {
+      position: absolute;
+      inset: 132px 18px 156px;
+      pointer-events: none;
+    }
+
+    .mining-bottom-rail {
+      left: 18px;
+      right: 18px;
+      bottom: 14px;
+      min-height: 108px;
+      padding: 10px;
+      display: block;
+    }
+
+    .mining-payload-strip {
+      width: min(560px, calc(100% - 400px));
+      min-width: 320px;
+    }
+
+    .mining-payload-strip .stat-grid,
+    .mining-artifact-strip .stat-grid {
+      justify-content: start;
+      gap: 6px;
+    }
+
+    .mining-payload-strip .stat-chip,
+    .mining-artifact-strip .stat-chip {
+      width: 120px;
+      min-height: 22px;
+      padding: 5px 7px;
+      font-size: 11px;
+      line-height: 1.1;
+    }
+
+    .mining-artifact-strip {
+      margin-top: 6px;
+    }
+
+    .mining-command-dock {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: min(380px, calc(100% - 20px));
+    }
+
+    .mining-command-dock strong {
+      display: block;
+      margin: 2px 0 7px;
+      color: #f1fbff;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .mining-command-dock .system-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .mining-command-dock .system-actions button {
+      width: 100%;
+      min-height: 42px;
+      padding: 0 8px;
+      font-size: 13px;
+      line-height: 1.08;
+      pointer-events: auto;
+    }
+
+    .mining-command-dock .system-actions button.mining-primary-command {
+      width: 100%;
+    }
+
+    .mining-recall-dock {
+      position: absolute;
+      left: 50%;
+      bottom: 10px;
+      width: 180px;
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    .mining-recall-dock .system-actions button {
+      width: 100%;
+      min-height: 42px;
+      padding: 0 8px;
+      font-size: 13px;
+      line-height: 1.08;
+      pointer-events: auto;
+    }
+
+    .mining-failure-banner {
+      top: 136px;
+      left: 18px;
+      width: min(520px, calc(100vw - 36px));
+      padding: 10px 12px;
+      border-color: rgba(255, 95, 87, 0.52);
+      background: rgba(42, 10, 13, 0.90);
+    }
+
+    .mining-failure-banner strong {
+      display: block;
+      color: #ffe1df;
+      font-size: 17px;
+      line-height: 1.1;
+    }
+
+    .mining-failure-banner span {
+      display: block;
+      margin-top: 4px;
+      color: rgba(255, 226, 222, 0.82);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    @media (max-width: 760px) {
+      .mining-top-rail {
+        left: 10px;
+        right: 10px;
+        top: 10px;
+        min-height: 146px;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .mining-run-title {
+        width: calc(100% - 128px);
+      }
+
+      .mining-run-title strong {
+        font-size: 21px;
+      }
+
+      .mining-vitals {
+        order: 3;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-width: none;
+        width: 100%;
+      }
+
+      .mining-utility-cluster {
+        width: 112px;
+      }
+
+      .mining-playfield-space {
+        inset: 176px 10px 190px;
+      }
+
+      .mining-bottom-rail {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        min-height: 162px;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .mining-payload-strip {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .mining-payload-strip .stat-chip,
+      .mining-artifact-strip .stat-chip {
+        width: calc(50% - 13px);
+      }
+
+      .mining-command-dock {
+        width: calc(100% - 20px);
+      }
+
+      .mining-recall-dock {
+        width: min(180px, calc(100% - 20px));
+      }
+
+      .mining-command-dock .system-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
     .phase-board-surface {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -3723,6 +4055,10 @@
       display: none;
     }
 
+    .debug-tools.hud-suppressed {
+      display: none;
+    }
+
     .debug-tools h2 {
       margin: 0 0 6px;
       color: var(--warn);
@@ -4107,7 +4443,7 @@
       const width = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
       const height = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
       let leftPx = 0;
-      if (panel && width > 720) {
+      if (panel && width > 720 && !isMiningActive()) {
         const rect = panel.getBoundingClientRect();
         leftPx = Math.max(0, rect.right + 24);
         if (width - leftPx < 520) {
@@ -4147,7 +4483,9 @@
       const flyby = Boolean(panel.querySelector("[data-flyby-run]"));
       const orbit = Boolean(panel.querySelector("[data-orbit-run]"));
       const phaseBoard = panel.classList.contains("phase-board-panel");
+      const miningFullscreen = panel.classList.contains("mining-fullscreen-panel");
       const rmlModalOpen = document.body.classList.contains("rmlui-modal-open");
+      debugTools.classList.toggle("hud-suppressed", miningFullscreen);
 
       sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard && !rmlModalOpen);
       sceneLaunchControl.hidden = !(preflight && !phaseBoard && !rmlModalOpen);
@@ -4256,7 +4594,9 @@
         syncLocalControls(panel);
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
+        const miningFullscreen = mode === "mining-fullscreen";
         panel.classList.toggle("phase-board-panel", phaseBoard);
+        panel.classList.toggle("mining-fullscreen-panel", miningFullscreen);
         panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
         panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
         if (phaseBoard) {

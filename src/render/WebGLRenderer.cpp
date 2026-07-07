@@ -219,6 +219,10 @@ EM_JS(double, rr_scene_left_ndc, (), {
         return -1;
     }
 
+    if (panel && panel.querySelector(".mining-fullscreen")) {
+        return -1;
+    }
+
     const flybyVisible = panel && (
         panel.querySelector("[data-flyby-run]") ||
         panel.querySelector("[data-flyby-stamp]"));
@@ -1745,8 +1749,15 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
 
 void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
 {
-    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.012F, 0.014F, 0.018F, 1.0F}, false);
-    drawSolarBackground(snapshot, 0.42F);
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.006F, 0.010F, 0.012F, 1.0F}, false);
+    drawRadialGlow(0.0F, -0.10F, 1.18F, {0.04F, 0.13F, 0.15F, 0.34F}, 80, false);
+    drawRadialGlow(0.0F, -0.34F, 0.86F, {0.16F, 0.11F, 0.05F, 0.14F}, 64, false);
+    for (int i = 0; i <= 10; ++i) {
+        const float x = -1.0F + static_cast<float>(i) * 0.20F;
+        const float y = -1.0F + static_cast<float>(i) * 0.20F;
+        drawLine(x, -1.0F, x, 1.0F, {0.10F, 0.35F, 0.39F, 0.045F}, 1.0F, false);
+        drawLine(-1.0F, y, 1.0F, y, {0.10F, 0.35F, 0.39F, 0.035F}, 1.0F, false);
+    }
     if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
         return;
     }
@@ -1942,11 +1953,19 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         0.0F,
         2.0F * kPi);
     drawRadialGlow(shipBay.x, shipBay.y, cellSize * (snapshot.miningAtReturnZone ? 2.45F : 1.85F), {0.18F, 0.72F, 0.92F, snapshot.miningAtReturnZone ? 0.18F : 0.08F}, 48);
-    drawRect(shipBay.x, shipBay.y, cellW * 6.2F, cellH * 1.55F, {0.10F, 0.18F, 0.22F, 0.78F});
-    drawLine(shipBay.x - cellW * 3.0F, shipBay.y - cellH * 0.82F, shipBay.x + cellW * 3.0F, shipBay.y - cellH * 0.82F, {0.46F, 0.90F, 1.0F, snapshot.miningAtReturnZone ? 0.72F : 0.46F}, 2.0F);
-    drawLine(shipBay.x - cellW * 3.0F, shipBay.y + cellH * 0.82F, shipBay.x + cellW * 3.0F, shipBay.y + cellH * 0.82F, {1.0F, 0.82F, 0.28F, snapshot.miningAtReturnZone ? 0.62F : 0.30F}, 1.5F);
-    drawTriangle(shipBay.x, shipBay.y - cellH * 1.35F, shipBay.x - cellW * 0.72F, shipBay.y - cellH * 0.24F, shipBay.x + cellW * 0.72F, shipBay.y - cellH * 0.24F, {0.76F, 0.94F, 1.0F, 0.84F});
-    drawRect(shipBay.x, shipBay.y + cellH * 0.12F, cellW * 1.10F, cellH * 0.78F, {0.20F, 0.32F, 0.40F, 0.90F});
+    if (textureReady(RocketAsset)) {
+        drawSpriteRotated(
+            shipBay.x,
+            shipBay.y,
+            cellSize * 9.50F,
+            cellSize * 9.50F,
+            0.0F,
+            1.0F,
+            {1.0F, 1.0F, 1.0F, 0.96F},
+            RocketAsset);
+    } else {
+        drawTriangle(shipBay.x, shipBay.y - cellH * 1.10F, shipBay.x - cellW * 0.64F, shipBay.y + cellH * 0.58F, shipBay.x + cellW * 0.64F, shipBay.y + cellH * 0.58F, {0.76F, 0.94F, 1.0F, 0.84F});
+    }
 
     std::vector<float>& terrainVertices = scratchVertices(snapshot.miningCells.size() * 48U);
     for (const MiningCellSnapshot& cell : snapshot.miningCells) {
@@ -2398,7 +2417,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     drawRect(drone.x, drone.y - droneSize * 0.62F, cellW * 4.0F, cellH * 0.22F, {0.02F, 0.05F, 0.07F, 0.88F});
     drawRect(drone.x - cellW * 2.0F * (1.0F - droneHealth), drone.y - droneSize * 0.62F, cellW * 4.0F * droneHealth, cellH * 0.22F, {0.22F + (1.0F - droneHealth) * 0.78F, 0.92F * droneHealth + 0.16F, 1.0F * droneHealth + 0.08F, 0.95F});
 
-    if (textureReady(DrillBitAsset) && (snapshot.miningTargetDrillable || drillBroken)) {
+    if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable && !drillBroken) {
         const float dx = target.x - drillOrigin.x;
         const float dy = target.y - drillOrigin.y;
         const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
@@ -2413,10 +2432,6 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             drillOrigin.y + drillDirection.y * drillH
         };
         const int drillFrame = snapshot.miningDrilling ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
-        Color bitTint = heatTint;
-        if (drillBroken) {
-            bitTint = {0.30F, 0.34F, 0.36F, 0.62F};
-        }
         drawSpriteRotated(
             bitCenter.x,
             bitCenter.y,
@@ -2424,7 +2439,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             drillH,
             -drillDirection.x,
             -drillDirection.y,
-            bitTint,
+            heatTint,
             DrillBitAsset,
             drillFrame,
             6);
@@ -2450,10 +2465,9 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         submitLines(crackVertices, 1.5F + contact * 1.2F);
     }
 
-    if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0 || drillBroken) {
+    if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0) {
         const int failureBurst = snapshot.miningFailurePulse > 0.0 ? 18 : 0;
-        const int brokenSparks = drillBroken ? 7 : 0;
-        const int particleCount = 12 + failureBurst + brokenSparks + static_cast<int>(std::round(snapshot.miningContactIntensity * 18.0));
+        const int particleCount = 12 + failureBurst + static_cast<int>(std::round(snapshot.miningContactIntensity * 18.0));
         std::vector<float>& particleVertices = scratchVertices(static_cast<std::size_t>(particleCount) * 48U);
         for (int i = 0; i < particleCount; ++i) {
             const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37, 1.0));
@@ -2464,9 +2478,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             const float py = particleAnchor.y + std::sin(angle) * radius;
             const Color spark = snapshot.miningFailurePulse > 0.0
                 ? mix({1.0F, 0.18F, 0.08F, 0.95F}, {1.0F, 0.78F, 0.22F, 0.20F}, t)
-                : (drillBroken
-                    ? mix({1.0F, 0.58F, 0.18F, 0.72F}, {0.48F, 0.56F, 0.62F, 0.10F}, t)
-                    : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t));
+                : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
             const float size = cellSize * (0.16F + miningCellNoise(i, static_cast<int>(snapshot.animationTime * 10.0), 73) * 0.15F);
             appendRect(particleVertices, px, py, size, size, spark);
         }

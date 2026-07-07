@@ -663,7 +663,7 @@ namespace mining {
 inline constexpr int terrainWidth = 64;
 inline constexpr int terrainHeight = 40;
 inline constexpr int chunkSize = 8;
-inline constexpr double oxygenSeconds = 15.0;
+inline constexpr double oxygenSeconds = 30.0;
 inline constexpr double fuelSecondsPerUnit = 15.0;
 inline constexpr double targetRunSeconds = 120.0;
 inline constexpr double droneSpeedCellsPerSecond = 7.2;

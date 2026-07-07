@@ -34,7 +34,7 @@ Mining exists to make surface greed compete with route-home safety:
 - Surface expeditions start with shared fuel capacity from `tuning::research::sharedFuelCapacity`.
 - Mining spends 1 fuel on deployment.
 - While oxygen remains, mining spends another fuel every `tuning::mining::fuelSecondsPerUnit`, currently 15 seconds.
-- The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 15 seconds.
+- The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 30 seconds.
 - Oxygen can improve through crew class, Resource Drone support, and surface upgrades such as Emergency Winch.
 - If fuel runs dry mid-dig, the mining drone is recalled so the shuttle still has a route home.
 
@@ -62,7 +62,7 @@ Controls:
 ## Mining Resources
 
 - Shared fuel: the shuttle/drone reserve. This is the central tradeoff and must stay visible in Surface Ops and Mining.
-- Oxygen: short-run timer, currently 15 seconds before upgrades.
+- Oxygen: short-run timer, currently 30 seconds before upgrades.
 - Drill integrity: durability. Low integrity raises failure pressure; zero integrity aborts the run.
 - Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
 - Cargo load: reward now, extraction risk later.

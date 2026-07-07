@@ -3429,7 +3429,7 @@ void miningDrillBreaksCellsAndMarksChunks()
     require(state.run.surfaceExpedition.sharedFuel == fuelBefore - 1, "starting mining should spend one shared fuel");
 
     MiningRunState& mining = state.run.mining;
-    require(std::abs(mining.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "starter mining run should begin with 15 seconds of oxygen");
+    require(std::abs(mining.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "starter mining run should begin with configured oxygen");
     require(mining.fuelSpent == 1, "active mining run should track the deployment fuel spend");
     MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
     require(ore != nullptr, "test ore cell should exist");
@@ -5087,16 +5087,25 @@ void panelHtmlIncludesContextualTutorialLayer()
     const PreparedLaunch miningLaunch = prepareLaunch(miningState, catalog, miningRng);
     const std::string miningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
     require(miningHtml.find("<h1>Mining</h1>") != std::string::npos, "mining panel should title the mining phase");
-    require(miningHtml.find("class=\"cockpit-hud mining-hud\"") != std::string::npos, "mining controls should render in a cockpit HUD");
+    require(miningHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string::npos, "mining should opt into the full-screen HUD mode");
+    require(miningHtml.find("class=\"mining-fullscreen\"") != std::string::npos, "mining controls should render in the full-screen HUD");
+    require(miningHtml.find("class=\"cockpit-hud mining-hud\"") == std::string::npos, "mining should not render the old compact cockpit HUD");
     require(miningHtml.find("class=\"mining-health-strip\"") != std::string::npos, "mining panel should expose a prominent drone health strip");
     require(miningHtml.find("Drone health") != std::string::npos, "mining panel should label drone health");
+    require(miningHtml.find("Oxygen") != std::string::npos, "mining panel should expose oxygen");
+    require(miningHtml.find("Next fuel") != std::string::npos, "mining panel should expose fuel cadence");
     require(miningHtml.find("Drill bit") != std::string::npos, "mining panel should label drill bit health");
-    require(miningHtml.find("Carried") != std::string::npos, "mining panel should expose carried payload");
-    require(miningHtml.find("Banked") != std::string::npos, "mining panel should expose banked payload");
+    require(miningHtml.find("Drill heat") != std::string::npos, "mining panel should expose drill heat");
+    require(miningHtml.find("Carried cargo") != std::string::npos, "mining panel should expose carried payload");
+    require(miningHtml.find("Banked cargo") != std::string::npos, "mining panel should expose banked payload");
+    require(miningHtml.find("Carried mats") != std::string::npos, "mining panel should expose carried materials");
+    require(miningHtml.find("Banked mats") != std::string::npos, "mining panel should expose banked materials");
     require(miningHtml.find("Load") != std::string::npos, "mining panel should expose load burden");
-    require(miningHtml.find("data-help-topic=\"mining-basics\"") != std::string::npos, "mining panel should introduce controls and purpose");
-    require(miningHtml.find("Move with WASD or arrows") != std::string::npos, "mining help should explain movement controls");
-    require(miningHtml.find("ship ring banks carried payload") != std::string::npos, "mining help should explain ship banking");
+    require(miningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos, "mining HUD should keep scanner control");
+    require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos, "mining HUD should keep tether control");
+    require(miningHtml.find("data-rr-action=\"mining_abort\"") != std::string::npos, "mining HUD should keep abort control away from the ship");
+    require(miningHtml.find("data-help-topic=\"mining-basics\"") == std::string::npos, "mining panel should not show the old tutorial card inline");
+    require(miningHtml.find("WASD/arrows move") != std::string::npos, "mining details should retain movement controls");
     require(miningHtml.find("Combat read") != std::string::npos, "mining details should include a combat readability legend");
     require(miningHtml.find("Blue numbers") != std::string::npos, "mining details should explain allied and enemy damage text colors");
 

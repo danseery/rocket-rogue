@@ -1460,52 +1460,85 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     if (state.screen == Screen::Mining) {
         const MiningRunPresentation miningPanel = miningRunPresentation(state, catalog);
         const bool arkKnown = arkDiscovered(state);
-        out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
-        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
-            << "</h2><p>" << htmlEscape("Mine outward, get heavier, return to the ship to bank, then leave safely or push again.") << "</p></div>"
-            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
-            << "</div></div>";
-        const std::string miningFuelHelp = arkKnown
-            ? "Mining uses the same fuel reserve as Ark shuttle routes. Returning to the Ark replenishes the shuttle and drone from Ark reserves; recover fuel or extract it from materials to keep sorties moving."
-            : "Mining uses the same shared fuel supply as the shuttle. Return to base to replenish the shuttle and drone, then bring back materials and artifacts before oxygen, fuel, or extraction risk gets ugly.";
-        out << tutorialCard(
-            "mining-basics",
-            "Dig, scan, tether, bank",
-            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, T tethers exposed artifacts, and the ship ring banks carried payload. " + miningFuelHelp);
-        if (miningPanel.failurePending) {
-            out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
-                << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
-        }
         const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
         const int rigHealthBucket = std::clamp(((rigHealthWidth + 5) / 10) * 10, 0, 100);
-        out << "<section class=\"mining-health-strip\"><div><span>" << htmlEscape(text::labels::droneHealth)
+        auto metricFor = [&miningPanel](std::string_view label) -> const PanelMetricPresentation* {
+            const auto it = std::find_if(miningPanel.metrics.begin(), miningPanel.metrics.end(), [label](const PanelMetricPresentation& item) {
+                return item.label == label;
+            });
+            return it == miningPanel.metrics.end() ? nullptr : &*it;
+        };
+        auto payloadMetricFor = [&miningPanel](std::string_view label) -> const PanelMetricPresentation* {
+            const auto it = std::find_if(miningPanel.payloadMetrics.begin(), miningPanel.payloadMetrics.end(), [label](const PanelMetricPresentation& item) {
+                return item.label == label;
+            });
+            return it == miningPanel.payloadMetrics.end() ? nullptr : &*it;
+        };
+        auto emitMetricIfPresent = [&out, &metricFor](std::string_view label) {
+            if (const PanelMetricPresentation* item = metricFor(label)) {
+                out << metric(item->label, item->value);
+            }
+        };
+        auto emitPayloadIfPresent = [&out, &payloadMetricFor](std::string_view label) {
+            if (const PanelMetricPresentation* item = payloadMetricFor(label)) {
+                out << resourceChip(*item);
+            }
+        };
+
+        out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\">";
+        out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title\"><span>"
+            << htmlEscape(text::panel::sections::miningRun) << "</span><strong>" << htmlEscape("Subsurface Rig")
+            << "</strong><small>" << htmlEscape(state.statusLine) << "</small>"
+            << "<section class=\"mining-health-strip\"><div><span>" << htmlEscape(text::labels::droneHealth)
             << "</span><strong>" << htmlEscape(miningPanel.rigHealth) << "</strong></div>"
-            << "<div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section>";
-        out << "<div class=\"metric-grid mining-metrics\">";
-        for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
-            const bool showPrimaryMetric =
-                metricItem.label == text::labels::droneHealth ||
-                metricItem.label == text::labels::drillBit ||
-                metricItem.label == text::labels::oxygen ||
-                metricItem.label == text::labels::carried ||
-                metricItem.label == text::labels::banked ||
-                metricItem.label == text::labels::load;
-            if (!showPrimaryMetric) {
+            << "<div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section></div>";
+        out << "<div class=\"metric-grid mining-vitals\">";
+        emitMetricIfPresent(text::labels::oxygen);
+        emitMetricIfPresent(text::fuel::reserveLabel(arkKnown));
+        emitMetricIfPresent("Next fuel");
+        emitMetricIfPresent(text::labels::drillBit);
+        emitMetricIfPresent(text::labels::drillHeat);
+        emitMetricIfPresent(text::labels::load);
+        out << "</div><div class=\"mining-utility-cluster\"><span>" << htmlEscape("Systems")
+            << "</span>" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+            << modalButton("Inventory", ui::modals::inventory, "ghost")
+            << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div></div>";
+        if (miningPanel.failurePending) {
+            out << "<div class=\"mining-failure-banner\"><strong>" << htmlEscape(miningPanel.failureTitle)
+                << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
+        }
+        out << "<div class=\"mining-playfield-space\"></div>";
+        out << "<div class=\"mining-bottom-rail\"><section class=\"mining-payload-strip\"><span>"
+            << htmlEscape("Payload") << "</span><div class=\"stat-grid\">";
+        emitPayloadIfPresent("Carried cargo");
+        emitPayloadIfPresent("Banked cargo");
+        emitPayloadIfPresent("Carried mats");
+        emitPayloadIfPresent("Banked mats");
+        out << "</div>";
+        if (metricFor("Artifact") != nullptr) {
+            out << "<div class=\"mining-artifact-strip\"><div class=\"stat-grid\">";
+            emitMetricIfPresent("Artifact");
+            emitMetricIfPresent("Tether");
+            emitMetricIfPresent("Artifact integrity");
+            out << "</div></div>";
+        }
+        const PanelButtonPresentation* miningPrimaryAction = nullptr;
+        out << "</section><section class=\"mining-command-dock\"><span>" << htmlEscape("Commands")
+            << "</span><strong>" << htmlEscape("Scan, tether") << "</strong><div class=\"actions system-actions\">";
+        for (const PanelButtonPresentation& action : miningPanel.actions) {
+            if (action.actionId == ui::actions::miningStow || action.actionId == ui::actions::miningAbort) {
+                miningPrimaryAction = &action;
                 continue;
             }
-            out << metric(metricItem.label, metricItem.value);
-        }
-        out << "</div>";
-        out << "<section class=\"cockpit-hud mining-hud\"><div class=\"cockpit-label\"><span>"
-            << htmlEscape("Mining controls") << "</span><strong>" << htmlEscape("Scan, tether, or exit") << "</strong></div>";
-        out << "<div class=\"actions system-actions\">";
-        for (const PanelButtonPresentation& action : miningPanel.actions) {
             out << panelButton(action);
         }
         out << "</div></section>";
-        out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Payload")
-            << "</h2></div><div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
-        out << phaseBoardClose();
+        if (miningPrimaryAction != nullptr) {
+            PanelButtonPresentation dockAction = *miningPrimaryAction;
+            dockAction.cssClass += dockAction.cssClass.empty() ? "mining-primary-command" : " mining-primary-command";
+            out << "<section class=\"mining-recall-dock\"><div class=\"actions system-actions\">" << panelButton(dockAction) << "</div></section>";
+        }
+        out << "</div></section>";
         if (miningPanel.failurePending) {
             std::ostringstream failureBody;
             failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)

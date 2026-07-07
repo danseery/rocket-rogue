@@ -21,6 +21,12 @@ struct RmlButtonBinding {
     bool debugToolsToggle = false;
 };
 
+enum class RmlPanelMode {
+    Control,
+    PhaseBoard,
+    MiningFullscreen
+};
+
 class GameRmlUi {
 public:
     using ActionHandler = std::function<void(const std::string&)>;
@@ -49,7 +55,7 @@ private:
     std::string openModalId_;
     std::vector<RmlButtonBinding> buttonBindings_;
     Rml::Element* pressedButton_ = nullptr;
-    bool phaseBoard_ = false;
+    RmlPanelMode panelMode_ = RmlPanelMode::Control;
     bool initialized_ = false;
 };
 

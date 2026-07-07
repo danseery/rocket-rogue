@@ -1157,9 +1157,25 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
     return bindings;
 }
 
-bool panelUsesPhaseBoard(std::string_view html)
+RmlPanelMode panelModeForHtml(std::string_view html)
 {
-    return html.find("data-panel-mode=\"phase-board\"") != std::string_view::npos;
+    if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
+        return RmlPanelMode::MiningFullscreen;
+    }
+    if (html.find("data-panel-mode=\"phase-board\"") != std::string_view::npos) {
+        return RmlPanelMode::PhaseBoard;
+    }
+    return RmlPanelMode::Control;
+}
+
+bool panelUsesPhaseBoard(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::PhaseBoard;
+}
+
+bool panelUsesMiningFullscreen(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::MiningFullscreen;
 }
 
 bool panelUsesSurfaceOps(std::string_view html)
@@ -1177,10 +1193,14 @@ bool panelUsesDraftRoom(std::string_view html)
     return html.find("phase-board-draft-room") != std::string_view::npos;
 }
 
-Rml::Rectanglei panelBounds(bool phaseBoard)
+Rml::Rectanglei panelBounds(RmlPanelMode mode)
 {
     const int viewportWidth = rr_rml_viewport_width();
     const int viewportHeight = rr_rml_viewport_height();
+    if (mode == RmlPanelMode::MiningFullscreen) {
+        return Rml::Rectanglei::FromPositionSize({0, 0}, {std::max(1, viewportWidth), std::max(1, viewportHeight)});
+    }
+    const bool phaseBoard = panelUsesPhaseBoard(mode);
     const int left = phaseBoard ? 16 : kPanelInset;
     const int top = phaseBoard ? 16 : kPanelInset;
     const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, 736) : kPanelWidth + 34;
@@ -1190,9 +1210,12 @@ Rml::Rectanglei panelBounds(bool phaseBoard)
     return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
 }
 
-Rml::Rectanglei expandedPanelClip(bool phaseBoard)
+Rml::Rectanglei expandedPanelClip(RmlPanelMode mode)
 {
-    const Rml::Rectanglei bounds = panelBounds(phaseBoard);
+    const Rml::Rectanglei bounds = panelBounds(mode);
+    if (mode == RmlPanelMode::MiningFullscreen) {
+        return bounds;
+    }
     return Rml::Rectanglei::FromPositionSize(
         {std::max(0, bounds.Left() - 4), std::max(0, bounds.Top() - 4)},
         {bounds.Width() + 40, bounds.Height() + 40});
@@ -1206,13 +1229,27 @@ const ModalTemplate* findModal(const std::vector<ModalTemplate>& modals, std::st
     return it == modals.end() ? nullptr : &*it;
 }
 
-std::string panelRcss(bool phaseBoard)
+std::string panelRcss(RmlPanelMode mode)
 {
-    const Rml::Rectanglei bounds = panelBounds(phaseBoard);
+    const Rml::Rectanglei bounds = panelBounds(mode);
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
     const int left = bounds.Left();
     const int top = bounds.Top();
+    const int miningInset = panelWidth < 620 ? 10 : 18;
+    const int miningRailWidth = std::max(1, panelWidth - miningInset * 2);
+    const int miningTopHeight = panelWidth < 620 ? 154 : 116;
+    const int miningBottomHeight = panelWidth < 620 ? 164 : 126;
+    const int miningBottomTop = std::max(miningTopHeight + 18, panelHeight - miningBottomHeight - miningInset);
+    const int miningTitleWidth = panelWidth < 620 ? std::max(1, miningRailWidth - 124) : 260;
+    const int miningVitalWidth = panelWidth < 620 ? 86 : 104;
+    const int miningPayloadWidth = panelWidth < 620 ? miningRailWidth : std::max(260, miningRailWidth - 378);
+    const int miningActionWidth = panelWidth < 620 ? 126 : 154;
+    const int miningCommandWidth = panelWidth < 620 ? miningRailWidth : std::min(380, miningRailWidth);
+    const int miningCommandLeft = panelWidth < 620 ? 0 : std::max(0, miningRailWidth - miningCommandWidth - 4);
+    const int miningPrimaryActionWidth = panelWidth < 620 ? std::min(180, miningRailWidth) : 170;
+    const int miningPrimaryActionLeft = std::max(0, (miningRailWidth - miningPrimaryActionWidth) / 2);
+    const int miningPrimaryActionTop = std::max(8, miningBottomHeight - 56);
 
     return R"(
 body {
@@ -1266,6 +1303,243 @@ scrollbarhorizontal sliderbar {
 #rr-panel.surface-ops-panel {
     height: 704px;
     overflow: hidden;
+}
+#rr-panel.mining-fullscreen-panel {
+    left: 0px;
+    top: 0px;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+    overflow: hidden;
+    padding: 0px;
+    background-color: transparent;
+    border-width: 0px;
+    border-radius: 0px;
+}
+#rr-panel.mining-fullscreen-panel .panel-head,
+#rr-panel.mining-fullscreen-panel .status,
+#rr-panel.mining-fullscreen-panel .panel-kpis {
+    display: none;
+}
+.mining-fullscreen {
+    position: relative;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+}
+.mining-top-rail,
+.mining-bottom-rail,
+.mining-failure-banner {
+    position: absolute;
+    border-width: 1px;
+    border-color: rgba(71, 220, 255, 0.34);
+    border-radius: 8px;
+    background-color: rgba(5, 13, 18, 0.86);
+}
+.mining-top-rail {
+    left: )" + std::to_string(miningInset) + R"(px;
+    top: )" + std::to_string(miningInset) + R"(px;
+    width: )" + std::to_string(miningRailWidth) + R"(px;
+    min-height: )" + std::to_string(miningTopHeight) + R"(px;
+    padding: 9px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+.mining-run-title {
+    width: )" + std::to_string(miningTitleWidth) + R"(px;
+    margin-right: 10px;
+}
+.mining-run-title span,
+.mining-utility-cluster span,
+.mining-command-dock span,
+.mining-payload-strip > span {
+    color: rgba(154, 230, 244, 0.80);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+.mining-run-title strong {
+    color: #f1fbff;
+    font-size: 25px;
+    line-height: 1.05;
+}
+.mining-run-title small {
+    color: rgba(215, 232, 234, 0.78);
+    font-size: 12px;
+    line-height: 1.18;
+}
+.mining-vitals {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: )" + std::to_string(std::max(1, miningRailWidth - miningTitleWidth - 132)) + R"(px;
+    margin-right: 8px;
+}
+.mining-vitals .metric {
+    width: )" + std::to_string(miningVitalWidth) + R"(px;
+    min-height: 34px;
+    margin-right: 5px;
+    margin-bottom: 5px;
+    padding: 5px 6px;
+    background-color: rgba(8, 25, 32, 0.90);
+}
+.mining-vitals .metric strong {
+    font-size: 16px;
+    line-height: 1.05;
+}
+.mining-vitals .metric span {
+    font-size: 10px;
+    line-height: 1.08;
+}
+.mining-health-strip {
+    width: )" + std::to_string(std::max(1, miningTitleWidth - 4)) + R"(px;
+    margin-top: 8px;
+}
+.mining-health-strip > div {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+.mining-health-strip span {
+    color: rgba(169, 231, 246, 0.88);
+    font-size: 11px;
+    text-transform: uppercase;
+}
+.mining-health-strip strong {
+    color: #e7fbff;
+    font-size: 17px;
+}
+.mining-health-bar {
+    width: )" + std::to_string(std::max(1, miningTitleWidth - 6)) + R"(px;
+    height: 9px;
+    margin-top: 3px;
+    background-color: rgba(1, 8, 13, 0.92);
+    border-width: 1px;
+    border-color: rgba(127, 236, 255, 0.18);
+}
+.mining-health-bar i {
+    display: block;
+    height: 9px;
+    background-color: #4be7ff;
+}
+.mining-health-bar .health-fill-0 { width: 0px; }
+.mining-health-bar .health-fill-10 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 10) / 100) + R"(px; }
+.mining-health-bar .health-fill-20 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 20) / 100) + R"(px; }
+.mining-health-bar .health-fill-30 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 30) / 100) + R"(px; }
+.mining-health-bar .health-fill-40 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 40) / 100) + R"(px; }
+.mining-health-bar .health-fill-50 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 50) / 100) + R"(px; }
+.mining-health-bar .health-fill-60 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 60) / 100) + R"(px; }
+.mining-health-bar .health-fill-70 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 70) / 100) + R"(px; }
+.mining-health-bar .health-fill-80 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 80) / 100) + R"(px; }
+.mining-health-bar .health-fill-90 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 90) / 100) + R"(px; }
+.mining-health-bar .health-fill-100 { width: )" + std::to_string(std::max(1, miningTitleWidth - 6)) + R"(px; }
+.mining-utility-cluster {
+    width: 114px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.mining-utility-cluster button {
+    width: 102px;
+    height: 31px;
+    line-height: 31px;
+    margin-left: 4px;
+    margin-bottom: 5px;
+    padding: 0px 4px;
+    font-size: 12px;
+}
+.mining-playfield-space {
+    position: absolute;
+    left: )" + std::to_string(miningInset) + R"(px;
+    top: )" + std::to_string(miningTopHeight + miningInset + 14) + R"(px;
+    width: )" + std::to_string(miningRailWidth) + R"(px;
+    height: )" + std::to_string(std::max(1, miningBottomTop - miningTopHeight - miningInset - 26)) + R"(px;
+}
+.mining-bottom-rail {
+    left: )" + std::to_string(miningInset) + R"(px;
+    top: )" + std::to_string(miningBottomTop) + R"(px;
+    width: )" + std::to_string(miningRailWidth) + R"(px;
+    min-height: )" + std::to_string(miningBottomHeight) + R"(px;
+    padding: 10px;
+    display: block;
+}
+.mining-payload-strip {
+    width: )" + std::to_string(miningPayloadWidth) + R"(px;
+    margin-right: 12px;
+}
+.mining-payload-strip .stat-grid,
+.mining-artifact-strip .stat-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+.mining-payload-strip .stat-chip,
+.mining-artifact-strip .stat-chip {
+    width: 112px;
+    min-height: 18px;
+    padding: 4px 6px;
+    margin-top: 5px;
+    margin-right: 6px;
+    font-size: 11px;
+}
+.mining-artifact-strip {
+    width: )" + std::to_string(miningPayloadWidth) + R"(px;
+    margin-top: 6px;
+}
+.mining-command-dock {
+    position: absolute;
+    left: )" + std::to_string(miningCommandLeft) + R"(px;
+    top: 10px;
+    width: )" + std::to_string(miningCommandWidth) + R"(px;
+}
+.mining-command-dock strong {
+    color: #f1fbff;
+    font-size: 17px;
+    margin-bottom: 6px;
+}
+.mining-command-dock .system-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.mining-command-dock .system-actions button {
+    width: )" + std::to_string(miningActionWidth) + R"(px;
+    height: 40px;
+    line-height: 40px;
+    margin-right: 8px;
+    margin-bottom: 7px;
+    padding: 0px 4px;
+    font-size: 13px;
+}
+.mining-recall-dock {
+    position: absolute;
+    left: )" + std::to_string(miningPrimaryActionLeft) + R"(px;
+    top: )" + std::to_string(miningPrimaryActionTop) + R"(px;
+    width: )" + std::to_string(miningPrimaryActionWidth) + R"(px;
+}
+.mining-recall-dock .system-actions button {
+    width: )" + std::to_string(miningPrimaryActionWidth) + R"(px;
+    height: 40px;
+    line-height: 40px;
+    padding: 0px 4px;
+    font-size: 13px;
+}
+.mining-failure-banner {
+    left: )" + std::to_string(miningInset) + R"(px;
+    top: )" + std::to_string(miningTopHeight + miningInset + 12) + R"(px;
+    width: )" + std::to_string(std::min(520, miningRailWidth)) + R"(px;
+    padding: 10px;
+    border-color: rgba(255, 95, 87, 0.52);
+    background-color: rgba(42, 10, 13, 0.90);
+}
+.mining-failure-banner strong {
+    color: #ffe1df;
+    font-size: 17px;
+}
+.mining-failure-banner span {
+    color: rgba(255, 226, 222, 0.82);
+    font-size: 12px;
+    line-height: 1.22;
 }
 .panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .pilot-card-top, .card-topline, .card-kicker {
     display: flex;
@@ -4277,14 +4551,17 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
         }
     }
 
-    const bool phaseBoard = panelUsesPhaseBoard(panelHtml);
+    const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
+    const bool phaseBoard = panelUsesPhaseBoard(panelMode);
+    const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
     const bool droneOps = panelUsesDroneOps(panelHtml);
     const bool draftRoom = panelUsesDraftRoom(panelHtml);
     std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
 
-    std::string document = "<rml><head><style>" + panelRcss(phaseBoard) + "</style></head><body>";
-    document += "<div id=\"rr-panel\" class=\"" + std::string(phaseBoard ? "phase-board-panel" : "control-panel");
+    std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body>";
+    document += "<div id=\"rr-panel\" class=\"" +
+        std::string(miningFullscreen ? "mining-fullscreen-panel" : (phaseBoard ? "phase-board-panel" : "control-panel"));
     if (surfaceOps) {
         document += " surface-ops-panel";
     }
@@ -4539,7 +4816,7 @@ void GameRmlUi::setPanelHtml(const std::string& html)
         return;
     }
     panelHtml_ = html;
-    phaseBoard_ = panelUsesPhaseBoard(panelHtml_);
+    panelMode_ = panelModeForHtml(panelHtml_);
     buttonBindings_ = extractButtonBindings(panelHtml_);
     rebuildDocument();
 }
@@ -4558,7 +4835,7 @@ void GameRmlUi::render()
     if (!openModalId_.empty()) {
         g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({width, height}));
     } else {
-        g_renderInterface->setRootClip(expandedPanelClip(phaseBoard_));
+        g_renderInterface->setRootClip(expandedPanelClip(panelMode_));
     }
     g_context->Update();
     g_renderInterface->beginFrame();
@@ -4586,11 +4863,14 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
     const int scaledX = static_cast<int>(std::round(static_cast<double>(x) * ratio));
     const int scaledY = static_cast<int>(std::round(static_cast<double>(y) * ratio));
     g_context->ProcessMouseMove(scaledX, scaledY, 0);
-    g_context->ProcessMouseButtonDown(std::max(0, button), 0);
-    if (button == 0 && hitTest(x, y)) {
+    const bool overUi = hitTest(x, y);
+    if (overUi) {
+        g_context->ProcessMouseButtonDown(std::max(0, button), 0);
+    }
+    if (button == 0 && overUi) {
         pressedButton_ = buttonElementAtPoint(*g_context, {static_cast<float>(scaledX), static_cast<float>(scaledY)});
     }
-    return hitTest(x, y);
+    return overUi;
 }
 
 bool GameRmlUi::mouseUp(int x, int y, int button)
@@ -4637,7 +4917,15 @@ bool GameRmlUi::hitTest(int x, int y) const
     if (!openModalId_.empty()) {
         return true;
     }
-    const Rml::Rectanglei bounds = panelBounds(phaseBoard_);
+    if (panelMode_ == RmlPanelMode::MiningFullscreen && g_context) {
+        const double ratio = rr_rml_density_ratio();
+        const Rml::Vector2f point {
+            static_cast<float>(std::round(static_cast<double>(x) * ratio)),
+            static_cast<float>(std::round(static_cast<double>(y) * ratio))
+        };
+        return buttonElementAtPoint(*g_context, point) != nullptr;
+    }
+    const Rml::Rectanglei bounds = panelBounds(panelMode_);
     return x >= bounds.Left() && y >= bounds.Top() && x <= bounds.Right() && y <= bounds.Bottom();
 }
 

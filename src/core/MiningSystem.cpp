@@ -16,6 +16,7 @@ namespace rocket {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr double kMiningShipSpawnOffsetCells = 11.0;
 
 std::uint64_t hashCombine(std::uint64_t value, std::uint64_t mix)
 {
@@ -46,6 +47,12 @@ double unitHash(std::uint64_t seed, int x, int y, int depthZone, std::uint64_t l
     value = hashCombine(value, static_cast<std::uint64_t>(depthZone + 4099));
     value = hashCombine(value, lane);
     return static_cast<double>(value & 0xFFFFFFULL) / static_cast<double>(0x1000000ULL);
+}
+
+double miningShipStartX(const MiningRunState& mining)
+{
+    const double leftClearance = tuning::mining::returnZoneRadiusCells + 0.5;
+    return std::max(leftClearance, mining.droneX - kMiningShipSpawnOffsetCells);
 }
 
 bool hasUnlockKey(const MetaProgress& meta, std::string_view key)
@@ -1622,12 +1629,13 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
-    mining.returnZoneX = mining.droneX;
+    mining.returnZoneX = miningShipStartX(mining);
     mining.returnZoneY = mining.droneY;
     mining.aimX = mining.droneX;
     mining.aimY = mining.droneY + 1.0;
     mining.aimDirX = 0.0;
     mining.aimDirY = 1.0;
+    revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     refreshTargetCell(mining);
 }
@@ -2054,10 +2062,13 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
+    mining.returnZoneX = miningShipStartX(mining);
+    mining.returnZoneY = mining.droneY;
     mining.aimX = mining.droneX;
     mining.aimY = mining.droneY + 1.0;
     mining.aimDirX = 0.0;
     mining.aimDirY = 1.0;
+    revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     refreshTargetCell(mining);
     state.run.mining = std::move(mining);
