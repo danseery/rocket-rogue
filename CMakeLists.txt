@@ -35,6 +35,9 @@ set_target_properties(rocket_core_tests PROPERTIES
 
 enable_testing()
 if(EMSCRIPTEN)
+    target_link_options(rocket_core_tests PRIVATE
+        -sSTACK_SIZE=2097152
+        -sALLOW_MEMORY_GROWTH=1)
     if(DEFINED ENV{EMSDK_NODE})
         set(ROCKET_TEST_NODE "$ENV{EMSDK_NODE}")
     else()

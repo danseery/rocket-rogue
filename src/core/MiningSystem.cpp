@@ -2238,12 +2238,11 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     const MiningLoadStats loadStats = miningLoadStats(state, catalog);
     mining.elapsedSeconds += dt;
-    const double previousOxygen = mining.oxygenSeconds;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
     if (mining.oxygenSeconds <= 0.0) {
         mining.droneHealth = std::max(0.0, mining.droneHealth - tuning::mining::oxygenDroneDamagePerSecond * dt);
         mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
-        if (previousOxygen > 0.0 && !mining.oxygenDepletedNotified) {
+        if (!mining.oxygenDepletedNotified) {
             mining.oxygenDepletedNotified = true;
             state.statusLine = std::string(text::status::miningOxygenFailed);
         }
@@ -2392,11 +2391,12 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     outcome.artifactFound = !mining.stowedArtifacts.empty();
     outcome.cargoDelta = mining.stowedCargo;
     const double recallPenalty = abort ? tuning::mining::emergencyRecallHazardPenalty : 0.0;
-    outcome.hazardDelta =
+    const double payloadHazard = std::max(
+        0.0,
         mining.hazardDelta +
-        static_cast<double>(std::max(0, mining.stowedCargo)) * tuning::mining::cargoExtractionRiskScale +
-        recallPenalty -
-        miningDrillStats(state, catalog).extractionRiskRelief;
+            static_cast<double>(std::max(0, mining.stowedCargo)) * tuning::mining::cargoExtractionRiskScale -
+            miningDrillStats(state, catalog).extractionRiskRelief);
+    outcome.hazardDelta = payloadHazard + recallPenalty;
     const bool emergencyRecall = abort;
     const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
 

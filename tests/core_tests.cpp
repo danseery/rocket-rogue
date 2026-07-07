@@ -3631,6 +3631,8 @@ void miningCompletionFeedsSurfacePayload()
     state.run.mining.temporaryMaterials.rare = 1;
     state.run.mining.cargo = 4;
     state.run.mining.hazardDelta = 0.05;
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
 
     const SurfaceActionOutcome finished = finishMiningRun(state, catalog, false);
     require(finished.applied, "finishing mining should produce a surface action outcome");
@@ -3686,6 +3688,8 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
 
     state.run.mining.temporaryMaterials.common = 2;
     state.run.mining.cargo = 2;
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
     updateMiningRun(state, catalog, 0.08);
     require(state.run.mining.temporaryMaterials.common == 0, "ship zone should clear carried materials after banking");
     require(state.run.mining.cargo == 0, "ship zone should clear carried cargo after banking");
