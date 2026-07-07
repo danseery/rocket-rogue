@@ -1015,6 +1015,25 @@ void normalizeLegacyMiningArtifact(MiningRunState& mining)
     }
 }
 
+void normalizeLegacyMiningReturnZone(MiningRunState& mining)
+{
+    if (!mining.active) {
+        return;
+    }
+    const bool invalidZone = mining.returnZoneX <= 0.0 ||
+        mining.returnZoneY <= 0.0 ||
+        mining.returnZoneX >= static_cast<double>(std::max(1, mining.terrain.width)) ||
+        mining.returnZoneY >= static_cast<double>(std::max(1, mining.terrain.height));
+    if (invalidZone) {
+        mining.returnZoneX = static_cast<double>(std::max(1, mining.terrain.width)) * 0.5;
+        mining.returnZoneY = 4.0;
+    }
+    mining.droneHealth = std::clamp(mining.droneHealth, 0.0, 1.0);
+    mining.drillIntegrity = std::clamp(mining.drillIntegrity, 0.0, 1.0);
+    mining.stowedCargo = std::max(0, mining.stowedCargo);
+    mining.cargo = std::max(0, mining.cargo);
+}
+
 std::vector<int> parseInts(std::string_view text)
 {
     std::vector<int> values;
@@ -1178,6 +1197,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     normalizeLegacyMiningArtifact(state.run.mining);
+    normalizeLegacyMiningReturnZone(state.run.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;
@@ -1316,15 +1336,20 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
     writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
+    writeField(out, save_schema::field::miningDroneHealth, save.mining.droneHealth);
     writeField(out, save_schema::field::miningFuelBurn, save.mining.fuelBurnSeconds);
     writeField(out, save_schema::field::miningFuelSpent, save.mining.fuelSpent);
     writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
+    writeField(out, save_schema::field::miningReturnZone, serializePair(save.mining.returnZoneX, save.mining.returnZoneY));
     writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
     writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
     writeField(out, save_schema::field::miningDepth, save.mining.depthZone);
     writeField(out, save_schema::field::miningCargo, save.mining.cargo);
     writeField(out, save_schema::field::miningMaterials, serializeMaterials(save.mining.temporaryMaterials));
     writeField(out, save_schema::field::miningArtifacts, serializeArtifacts(save.mining.temporaryArtifacts));
+    writeField(out, save_schema::field::miningStowedCargo, save.mining.stowedCargo);
+    writeField(out, save_schema::field::miningStowedMaterials, serializeMaterials(save.mining.stowedMaterials));
+    writeField(out, save_schema::field::miningStowedArtifacts, serializeArtifacts(save.mining.stowedArtifacts));
     writeField(out, save_schema::field::miningHazard, save.mining.hazardDelta);
     writeField(out, save_schema::field::miningPassiveDroneYield, save.mining.passiveDroneYield);
     writeField(out, save_schema::field::miningCellsBroken, save.mining.cellsBroken);
@@ -1523,12 +1548,16 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);
         } else if (key == save_schema::field::miningOxygen) {
             save.mining.oxygenSeconds = parseDouble(value, save.mining.oxygenSeconds);
+        } else if (key == save_schema::field::miningDroneHealth) {
+            save.mining.droneHealth = std::clamp(parseDouble(value, save.mining.droneHealth), 0.0, 1.0);
         } else if (key == save_schema::field::miningFuelBurn) {
             save.mining.fuelBurnSeconds = parseDouble(value, save.mining.fuelBurnSeconds);
         } else if (key == save_schema::field::miningFuelSpent) {
             save.mining.fuelSpent = parseInt(value, save.mining.fuelSpent);
         } else if (key == save_schema::field::miningDrone) {
             parsePair(value, save.mining.droneX, save.mining.droneY);
+        } else if (key == save_schema::field::miningReturnZone) {
+            parsePair(value, save.mining.returnZoneX, save.mining.returnZoneY);
         } else if (key == save_schema::field::miningAim) {
             parsePair(value, save.mining.aimX, save.mining.aimY);
             const double aimDirX = save.mining.aimX - save.mining.droneX;
@@ -1548,6 +1577,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.temporaryMaterials = parseMaterials(value);
         } else if (key == save_schema::field::miningArtifacts) {
             save.mining.temporaryArtifacts = parseArtifacts(value);
+        } else if (key == save_schema::field::miningStowedCargo) {
+            save.mining.stowedCargo = parseInt(value, save.mining.stowedCargo);
+        } else if (key == save_schema::field::miningStowedMaterials) {
+            save.mining.stowedMaterials = parseMaterials(value);
+        } else if (key == save_schema::field::miningStowedArtifacts) {
+            save.mining.stowedArtifacts = parseArtifacts(value);
         } else if (key == save_schema::field::miningHazard) {
             save.mining.hazardDelta = parseDouble(value, save.mining.hazardDelta);
         } else if (key == save_schema::field::miningPassiveDroneYield) {

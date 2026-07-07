@@ -211,6 +211,8 @@ struct ModuleStats {
     double miningDurability = 0.0;
     double miningWidth = 0.0;
     double miningDepth = 0.0;
+    double miningStorage = 0.0;
+    double miningEngineEfficiency = 0.0;
 };
 
 struct CrewUpgradeStats {
@@ -232,6 +234,9 @@ struct SurfaceUpgradeStats {
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
     double extractionRiskRelief = 0.0;
+    double droneStorage = 0.0;
+    double droneEngineEfficiency = 0.0;
+    double artifactTowEfficiency = 0.0;
 };
 
 struct MiniDroneStats {
@@ -716,6 +721,9 @@ struct MiningRunState {
     std::string failureMessage;
     double drillHeat = 0.0;
     double drillIntegrity = 1.0;
+    double droneHealth = 1.0;
+    double returnZoneX = 0.0;
+    double returnZoneY = 0.0;
     double contactIntensity = 0.0;
     double recoilX = 0.0;
     double recoilY = 0.0;
@@ -727,7 +735,12 @@ struct MiningRunState {
     int cargo = 0;
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
+    int stowedCargo = 0;
+    MaterialInventory stowedMaterials;
+    std::vector<ArtifactRecord> stowedArtifacts;
     double hazardDelta = 0.0;
+    bool drillBreakNotified = false;
+    bool oxygenDepletedNotified = false;
     int passiveDroneYield = 0;
     int cellsBroken = 0;
     int enemiesDefeated = 0;

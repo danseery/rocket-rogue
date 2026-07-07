@@ -55,7 +55,8 @@ std::string htmlEscape(std::string_view text)
 
 std::string metric(std::string_view label, std::string value)
 {
-    return "<div class=\"metric\"><strong>" + htmlEscape(value) + "</strong><span>" + htmlEscape(label) + "</span></div>";
+    const std::string classAttr = label == text::labels::chapter ? " metric-chapter" : "";
+    return "<div class=\"metric" + classAttr + "\"><strong>" + htmlEscape(value) + "</strong><span>" + htmlEscape(label) + "</span></div>";
 }
 
 std::string compactMetric(std::string_view label, std::string value)
@@ -1461,7 +1462,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const bool arkKnown = arkDiscovered(state);
         out << phaseBoardOpen("phase-board-mining", state.statusLine, false);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::miningRun)
-            << "</h2><p>" << htmlEscape("Drill tunnels, scan shadows, tether fragile artifacts, and stow payload before oxygen, shared fuel, or extraction risk turns ugly.") << "</p></div>"
+            << "</h2><p>" << htmlEscape("Mine outward, get heavier, return to the ship to bank, then leave safely or push again.") << "</p></div>"
             << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << "</div></div>";
         const std::string miningFuelHelp = arkKnown
@@ -1469,36 +1470,41 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             : "Mining uses the same shared fuel supply as the shuttle. Return to base to replenish the shuttle and drone, then bring back materials and artifacts before oxygen, fuel, or extraction risk gets ugly.";
         out << tutorialCard(
             "mining-basics",
-            "Dig, scan, tether, stow",
-            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, T tethers exposed artifacts, and R stows delivered payload. " + miningFuelHelp);
+            "Dig, scan, tether, bank",
+            "Move with WASD or arrows, aim with the mouse, hold Space or click to drill, E pulses the scanner, T tethers exposed artifacts, and the ship ring banks carried payload. " + miningFuelHelp);
         if (miningPanel.failurePending) {
             out << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
         }
         const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
         const int rigHealthBucket = std::clamp(((rigHealthWidth + 5) / 10) * 10, 0, 100);
-        out << "<section class=\"mining-health-strip\"><div><span>" << htmlEscape("Rig health")
+        out << "<section class=\"mining-health-strip\"><div><span>" << htmlEscape(text::labels::droneHealth)
             << "</span><strong>" << htmlEscape(miningPanel.rigHealth) << "</strong></div>"
-            << "<div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div>"
-            << "<p>" << htmlEscape("Mine and recover artifacts while mini-drones handle the fighting.") << "</p></section>";
-        out << "<section class=\"resource-bank mining-combat-strip\"><div><h2>" << htmlEscape(miningPanel.combatTitle)
-            << "</h2><p>" << htmlEscape(miningPanel.combatDetail) << "</p></div>"
-            << "<div class=\"stat-grid mining-combat-stats\">" << resourceChipGrid(miningPanel.combatMetrics) << "</div></section>";
-        out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Current payload")
-            << "</h2><p>" << htmlEscape("Materials recovered during this dig and artifacts delivered to the ship bay. Stow payload to carry it back to surface extraction.") << "</p></div>"
-            << "<div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
+            << "<div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section>";
         out << "<div class=\"metric-grid mining-metrics\">";
         for (const PanelMetricPresentation& metricItem : miningPanel.metrics) {
+            const bool showPrimaryMetric =
+                metricItem.label == text::labels::droneHealth ||
+                metricItem.label == text::labels::drillBit ||
+                metricItem.label == text::labels::oxygen ||
+                metricItem.label == text::labels::carried ||
+                metricItem.label == text::labels::banked ||
+                metricItem.label == text::labels::load;
+            if (!showPrimaryMetric) {
+                continue;
+            }
             out << metric(metricItem.label, metricItem.value);
         }
         out << "</div>";
         out << "<section class=\"cockpit-hud mining-hud\"><div class=\"cockpit-label\"><span>"
-            << htmlEscape("Mining controls") << "</span><strong>" << htmlEscape("Scan, stow, or abort") << "</strong></div>";
+            << htmlEscape("Mining controls") << "</span><strong>" << htmlEscape("Scan, tether, or exit") << "</strong></div>";
         out << "<div class=\"actions system-actions\">";
         for (const PanelButtonPresentation& action : miningPanel.actions) {
             out << panelButton(action);
         }
         out << "</div></section>";
+        out << "<section class=\"resource-bank mining-payload\"><div><h2>" << htmlEscape("Payload")
+            << "</h2></div><div class=\"stat-grid\">" << resourceChipGrid(miningPanel.payloadMetrics) << "</div></section>";
         out << phaseBoardClose();
         if (miningPanel.failurePending) {
             std::ostringstream failureBody;

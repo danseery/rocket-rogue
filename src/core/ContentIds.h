@@ -43,6 +43,9 @@ inline constexpr const char* oreSorter = "ore_sorter";
 inline constexpr const char* coolantSleeve = "coolant_sleeve";
 inline constexpr const char* diamondBearings = "diamond_bearings";
 inline constexpr const char* deepBoreFrame = "deep_bore_frame";
+inline constexpr const char* cargoSpine = "cargo_spine";
+inline constexpr const char* haulerThrusters = "hauler_thrusters";
+inline constexpr const char* massDriverWinch = "mass_driver_winch";
 } // namespace module
 
 namespace crewUpgrade {
@@ -80,6 +83,9 @@ inline constexpr const char* recoilBraces = "recoil_braces";
 inline constexpr const char* oreHopper = "ore_hopper";
 inline constexpr const char* emergencyWinch = "emergency_winch";
 inline constexpr const char* deepEchoMapper = "deep_echo_mapper";
+inline constexpr const char* expandablePanniers = "expandable_panniers";
+inline constexpr const char* vectorNozzles = "vector_nozzles";
+inline constexpr const char* artifactTowline = "artifact_towline";
 } // namespace surfaceUpgrade
 
 namespace drone {

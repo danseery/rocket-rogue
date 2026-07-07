@@ -85,7 +85,7 @@ inline std::string slotClass(SlotType slot)
     return "module";
 }
 
-inline std::array<ModuleStatDisplay, 16> moduleStatDisplays(const ModuleStats& stats)
+inline std::array<ModuleStatDisplay, 18> moduleStatDisplays(const ModuleStats& stats)
 {
     return {{
         {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail},
@@ -103,7 +103,9 @@ inline std::array<ModuleStatDisplay, 16> moduleStatDisplays(const ModuleStats& s
         {stats.miningCooling, text::moduleStats::miningCooling, text::moduleStats::miningCoolingChip, text::moduleStats::miningCooling},
         {stats.miningDurability, text::moduleStats::miningDurability, text::moduleStats::miningDurabilityChip, text::moduleStats::miningDurability},
         {stats.miningWidth, text::moduleStats::miningWidth, text::moduleStats::miningWidthChip, text::moduleStats::miningWidth},
-        {stats.miningDepth, text::moduleStats::miningDepth, text::moduleStats::miningDepthChip, text::moduleStats::miningDepth}
+        {stats.miningDepth, text::moduleStats::miningDepth, text::moduleStats::miningDepthChip, text::moduleStats::miningDepth},
+        {stats.miningStorage, text::moduleStats::miningStorage, text::moduleStats::miningStorageChip, text::moduleStats::miningStorage},
+        {stats.miningEngineEfficiency, text::moduleStats::miningEngineEfficiency, text::moduleStats::miningEngineEfficiencyChip, text::moduleStats::miningEngineEfficiency}
     }};
 }
 
@@ -126,6 +128,12 @@ inline std::string moduleThreat(const ShipModule& module)
     }
     if (module.stats.miningDepth > 0.0) {
         return std::string(text::moduleThreats::opensDeeperShaft);
+    }
+    if (module.stats.miningStorage > 0.0) {
+        return "Gives the mining drone more free carry before load drag";
+    }
+    if (module.stats.miningEngineEfficiency > 0.0) {
+        return "Keeps the mining drone faster and cheaper under load";
     }
 
     switch (module.slot) {

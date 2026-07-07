@@ -1566,9 +1566,14 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
         effects.droneSpeed += upgrade->stats.droneSpeed;
         effects.oxygenSeconds += upgrade->stats.oxygenSeconds;
         effects.extractionRiskRelief += upgrade->stats.extractionRiskRelief;
+        effects.droneStorage += upgrade->stats.droneStorage;
+        effects.droneEngineEfficiency += upgrade->stats.droneEngineEfficiency;
+        effects.artifactTowEfficiency += upgrade->stats.artifactTowEfficiency;
         effects.names.push_back(upgrade->name);
     }
     effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.35);
+    effects.droneEngineEfficiency = std::clamp(effects.droneEngineEfficiency, 0.0, 0.75);
+    effects.artifactTowEfficiency = std::clamp(effects.artifactTowEfficiency, 0.0, 0.80);
     return effects;
 }
 

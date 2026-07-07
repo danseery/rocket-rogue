@@ -958,6 +958,11 @@ void RocketGameApp::miningStow()
     if (state_.screen != Screen::Mining) {
         return;
     }
+    if (!miningAtReturnZone(state_.run.mining)) {
+        state_.statusLine = std::string(text::status::miningReturnToShip);
+        panelDirty_ = true;
+        return;
+    }
 
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
     if (outcome.applied) {
@@ -1080,6 +1085,11 @@ void RocketGameApp::pushSurfaceAbort()
 void RocketGameApp::miningAbort()
 {
     if (state_.screen != Screen::Mining) {
+        return;
+    }
+    if (miningAtReturnZone(state_.run.mining) && !state_.run.mining.failurePending) {
+        state_.statusLine = "Leave is available inside the ship zone.";
+        panelDirty_ = true;
         return;
     }
 
@@ -1767,6 +1777,14 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningOxygenSeconds = mining.oxygenSeconds;
         result.miningFuelBurnSeconds = mining.fuelBurnSeconds;
         result.miningDrillIntegrity = mining.drillIntegrity;
+        result.miningDroneHealth = mining.droneHealth;
+        result.miningReturnZoneX = mining.returnZoneX;
+        result.miningReturnZoneY = mining.returnZoneY;
+        result.miningAtReturnZone = miningAtReturnZone(mining);
+        const MiningLoadStats loadStats = miningLoadStats(state_, catalog_);
+        result.miningLoad = loadStats.currentLoad;
+        result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
+        result.miningLoadFuelMultiplier = loadStats.fuelMultiplier;
         result.miningHazardDelta = mining.hazardDelta;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
@@ -1787,6 +1805,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningSharedFuel = state_.run.surfaceExpedition.sharedFuel;
         result.miningSharedFuelCapacity = state_.run.surfaceExpedition.sharedFuelCapacity;
         result.miningCargo = mining.cargo;
+        result.miningStowedCargo = mining.stowedCargo;
         const MiniDroneLoadoutEffects droneEffects = miniDroneLoadoutEffects(state_, catalog_);
         result.miningSynergyCount = static_cast<int>(droneEffects.synergyNames.size());
         result.miningSignatureTier = droneEffects.signatureTier;
@@ -1810,6 +1829,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         }
         result.miningShieldActive = mining.environmentalShieldAbsorbed > 0.0 || result.miningDefenseDroneCount > 0;
         result.miningMaterials = mining.temporaryMaterials;
+        result.miningStowedMaterials = mining.stowedMaterials;
         if (mining.artifact.present) {
             result.miningArtifact = {
                 true,

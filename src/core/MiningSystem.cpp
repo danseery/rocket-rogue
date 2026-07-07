@@ -1333,7 +1333,7 @@ void applyElementalContact(GameState& state, const MiningEnemy& enemy, double sh
         break;
     case MiningElementalAffinity::Toxic: {
         const double toxicDamage = tuning::mining::elementalToxicIntegrityDamagePerSecond * exposureScale * dt;
-        mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - toxicDamage);
+        mining.droneHealth = std::max(0.0, mining.droneHealth - toxicDamage);
         mining.enemyDamageTaken += toxicDamage;
         break;
     }
@@ -1496,7 +1496,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             const bool critical = deterministicCombatCrit(mining, enemy, tuning::mining::enemyCritChance, 307);
             const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * tuning::mining::enemyMeleeAttackIntervalSeconds * (critical ? tuning::mining::enemyCritMultiplier : 1.0);
             const double damage = rawDamage * (1.0 - shieldRelief);
-            mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - damage);
+            mining.droneHealth = std::max(0.0, mining.droneHealth - damage);
             mining.enemyDamageTaken += damage;
             mining.environmentalShieldAbsorbed += rawDamage - damage;
             mining.contactIntensity = std::max(mining.contactIntensity, 0.65);
@@ -1521,7 +1521,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
                 enemy.type,
                 enemy.affinity,
                 critical);
-            mining.drillIntegrity = std::max(0.0, mining.drillIntegrity - damage);
+            mining.droneHealth = std::max(0.0, mining.droneHealth - damage);
             mining.enemyDamageTaken += damage;
             mining.environmentalShieldAbsorbed += rawDamage - damage;
             mining.contactIntensity = std::max(mining.contactIntensity, 0.50);
@@ -1622,6 +1622,8 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     spawnMiningEnemies(mining, *destination);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
+    mining.returnZoneX = mining.droneX;
+    mining.returnZoneY = mining.droneY;
     mining.aimX = mining.droneX;
     mining.aimY = mining.droneY + 1.0;
     mining.aimDirX = 0.0;
@@ -1805,6 +1807,8 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     const double miningDurability = std::max(0.0, shipStats.miningDurability);
     const double miningWidth = std::max(0.0, shipStats.miningWidth);
     const double miningDepth = std::max(0.0, shipStats.miningDepth);
+    const double miningStorage = std::max(0.0, shipStats.miningStorage);
+    const double miningEngineEfficiency = std::max(0.0, shipStats.miningEngineEfficiency);
 
     stats.power += miningPower * 0.75;
     stats.oreYieldChance += miningYield * 0.09;
@@ -1813,6 +1817,8 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.integrityRelief += miningDurability * 0.075;
     stats.terrainWidth = std::clamp(tuning::mining::terrainWidth + static_cast<int>(std::round(miningWidth * 4.0)), 48, 84);
     stats.terrainHeight = std::clamp(tuning::mining::terrainHeight + static_cast<int>(std::round(miningDepth * 5.0)), 32, 58);
+    stats.storage += miningStorage;
+    stats.engineEfficiency += miningEngineEfficiency;
 
     if (hasUnlockKey(state.meta, content::unlock::surfaceDrills)) {
         stats.power += tuning::mining::surfaceDrillPowerBonus;
@@ -1849,6 +1855,9 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.integrityRelief += surfaceUpgrades.drillDurability * 0.070;
     stats.hardRockBounceRelief += surfaceUpgrades.hardRockBounceRelief;
     stats.extractionRiskRelief += surfaceUpgrades.extractionRiskRelief;
+    stats.storage += surfaceUpgrades.droneStorage;
+    stats.engineEfficiency += surfaceUpgrades.droneEngineEfficiency;
+    stats.artifactTowEfficiency += surfaceUpgrades.artifactTowEfficiency;
 
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
     stats.passiveDroneMiningRate += drones.passiveMiningRate;
@@ -1864,7 +1873,80 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.integrityRelief = std::clamp(stats.integrityRelief, 0.0, 0.70);
     stats.passiveDroneMiningRate = std::clamp(stats.passiveDroneMiningRate, 0.0, 0.40);
     stats.hardRockBounceRelief = std::clamp(stats.hardRockBounceRelief, 0.0, 0.55);
+    stats.storage = std::max(0.0, stats.storage);
+    stats.engineEfficiency = std::clamp(stats.engineEfficiency, 0.0, 0.75);
+    stats.artifactTowEfficiency = std::clamp(stats.artifactTowEfficiency, 0.0, 0.80);
     return stats;
+}
+
+int miningCarriedCargo(const MiningRunState& mining)
+{
+    return std::max(0, mining.cargo);
+}
+
+int miningBankedCargo(const MiningRunState& mining)
+{
+    return std::max(0, mining.stowedCargo);
+}
+
+bool miningAtReturnZone(const MiningRunState& mining)
+{
+    if (!mining.active) {
+        return false;
+    }
+    const double dx = mining.droneX - mining.returnZoneX;
+    const double dy = mining.droneY - mining.returnZoneY;
+    return dx * dx + dy * dy <= tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
+}
+
+MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog)
+{
+    MiningLoadStats load;
+    const MiningRunState& mining = state.run.mining;
+    const MiningDrillStats stats = miningDrillStats(state, catalog);
+    const double towWeight = (mining.artifact.present &&
+                                 mining.artifact.tethered &&
+                                 mining.artifact.state != MiningArtifactState::Delivered &&
+                                 mining.artifact.state != MiningArtifactState::Destroyed)
+        ? tuning::mining::tetheredArtifactCargoWeight * std::clamp(1.0 - stats.artifactTowEfficiency, 0.20, 1.0)
+        : 0.0;
+    load.currentLoad = static_cast<double>(miningCarriedCargo(mining)) + towWeight;
+    load.freeBuffer = tuning::mining::baseCarryBufferCargo + stats.storage;
+    load.burden = std::max(0.0, load.currentLoad - load.freeBuffer);
+    const double penaltyScale = std::clamp(1.0 - stats.engineEfficiency, 0.20, 1.0);
+    load.speedMultiplier = std::clamp(
+        1.0 - load.burden * tuning::mining::loadSpeedPenaltyPerCargo * penaltyScale,
+        tuning::mining::minLoadedSpeedMultiplier,
+        1.0);
+    load.fuelMultiplier = std::clamp(
+        1.0 + load.burden * tuning::mining::loadFuelPenaltyPerCargo * penaltyScale,
+        1.0,
+        tuning::mining::maxLoadedFuelMultiplier);
+    return load;
+}
+
+bool bankMiningPayloadAtShip(GameState& state)
+{
+    MiningRunState& mining = state.run.mining;
+    if (!miningAtReturnZone(mining)) {
+        return false;
+    }
+    const bool hasPayload = mining.cargo > 0 ||
+        mining.temporaryMaterials.common > 0 ||
+        mining.temporaryMaterials.rare > 0 ||
+        mining.temporaryMaterials.exotic > 0 ||
+        !mining.temporaryArtifacts.empty();
+    if (!hasPayload) {
+        return false;
+    }
+
+    addMiningMaterials(mining.stowedMaterials, mining.temporaryMaterials);
+    mining.temporaryMaterials = {};
+    mining.stowedArtifacts.insert(mining.stowedArtifacts.end(), mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
+    mining.temporaryArtifacts.clear();
+    mining.stowedCargo += std::max(0, mining.cargo);
+    mining.cargo = 0;
+    return true;
 }
 
 MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width, int height)
@@ -2014,7 +2096,7 @@ void setMiningAim(GameState& state, double normalizedX, double normalizedY)
 void setMiningDrilling(GameState& state, bool drilling)
 {
     if (state.run.mining.active) {
-        state.run.mining.drilling = drilling;
+        state.run.mining.drilling = drilling && state.run.mining.drillIntegrity > 0.0 && !state.run.mining.failurePending;
     }
 }
 
@@ -2123,8 +2205,8 @@ void updateMiningArtifact(GameState& state, double dt)
         artifact.velocityY *= -0.46;
     }
 
-    const double bayX = static_cast<double>(mining.terrain.width) * 0.5;
-    const double bayY = tuning::mining::artifactShipBayY;
+    const double bayX = mining.returnZoneX;
+    const double bayY = mining.returnZoneY;
     const double bayDx = artifact.x - bayX;
     const double bayDy = artifact.y - bayY;
     if (artifact.tethered && bayDx * bayDx + bayDy * bayDy <= tuning::mining::artifactDeliveryRadiusCells * tuning::mining::artifactDeliveryRadiusCells) {
@@ -2154,10 +2236,20 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return;
     }
     const MiningDrillStats stats = miningDrillStats(state, catalog);
+    const MiningLoadStats loadStats = miningLoadStats(state, catalog);
     mining.elapsedSeconds += dt;
+    const double previousOxygen = mining.oxygenSeconds;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
+    if (mining.oxygenSeconds <= 0.0) {
+        mining.droneHealth = std::max(0.0, mining.droneHealth - tuning::mining::oxygenDroneDamagePerSecond * dt);
+        mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
+        if (previousOxygen > 0.0 && !mining.oxygenDepletedNotified) {
+            mining.oxygenDepletedNotified = true;
+            state.statusLine = std::string(text::status::miningOxygenFailed);
+        }
+    }
     applyMiningEnemyCombat(state, catalog, dt);
-    mining.fuelBurnSeconds += dt;
+    mining.fuelBurnSeconds += dt * loadStats.fuelMultiplier;
     if (mining.oxygenSeconds > 0.0) {
         while (mining.fuelBurnSeconds >= tuning::mining::fuelSecondsPerUnit) {
             if (state.run.surfaceExpedition.sharedFuel <= 0) {
@@ -2178,10 +2270,13 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     mining.contactIntensity = std::max(0.0, mining.contactIntensity - dt * 5.5);
     mining.scannerPulseSeconds = std::max(0.0, mining.scannerPulseSeconds - dt);
     updateContactBounce(mining, dt);
+    if (mining.drillIntegrity <= 0.0) {
+        mining.drilling = false;
+    }
 
     const double moveLength = std::sqrt(mining.moveX * mining.moveX + mining.moveY * mining.moveY);
     if (moveLength > 0.01) {
-        const double step = stats.speed * std::clamp(mining.movementSlowScale, 0.40, 1.0) * dt;
+        const double step = stats.speed * std::clamp(mining.movementSlowScale, 0.40, 1.0) * loadStats.speedMultiplier * dt;
         const double dirX = mining.moveX / std::max(1.0, moveLength);
         const double dirY = mining.moveY / std::max(1.0, moveLength);
         const double dx = dirX * step;
@@ -2200,7 +2295,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
                 position = proposed;
                 return;
             }
-            if (mining.drilling && obstacle->material != MiningCellMaterial::Bedrock) {
+            if (mining.drilling && mining.drillIntegrity > 0.0 && obstacle->material != MiningCellMaterial::Bedrock) {
                 setAimDirection(mining, dirX, dirY);
                 const double resistance = miningContactResistance(obstacle->material);
                 mining.contactIntensity = std::max(mining.contactIntensity, softMiningMaterial(obstacle->material) ? 0.45 : 1.0);
@@ -2244,7 +2339,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
 
     refreshTargetCell(mining);
-    const bool drillTouchesTerrain = mining.drilling && !drillFootprintCells(mining, mining.aimDirX, mining.aimDirY).empty();
+    const bool drillTouchesTerrain = mining.drilling && mining.drillIntegrity > 0.0 && !drillFootprintCells(mining, mining.aimDirX, mining.aimDirY).empty();
     if (drillTouchesTerrain) {
         applyDrillFootprintDamage(state, stats, mining.aimDirX, mining.aimDirY, dt);
     } else {
@@ -2253,14 +2348,22 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
     updateMiningArtifact(state, dt);
+    if (bankMiningPayloadAtShip(state)) {
+        state.statusLine = std::string(text::status::miningStowed);
+    } else if (!miningAtReturnZone(mining) && miningCarriedCargo(mining) > 0) {
+        state.statusLine = std::string(text::status::miningReturnToShip);
+    }
     refreshTargetCell(mining);
 
-    if (mining.oxygenSeconds <= 0.0 || mining.drillIntegrity <= 0.0) {
+    if (mining.drillIntegrity <= 0.0 && !mining.drillBreakNotified) {
+        mining.drillBreakNotified = true;
+        mining.drilling = false;
+        state.statusLine = std::string(text::status::miningDrillFailed);
+    }
+    if (mining.droneHealth <= 0.0) {
         triggerMiningFailure(
             state,
-            mining.drillIntegrity <= 0.0
-                ? std::string(text::status::miningDrillFailed)
-                : std::string(text::status::miningOxygenFailed));
+            std::string("Drone health lost. Emergency recall fired; carried payload was lost."));
     }
 }
 
@@ -2273,27 +2376,40 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
         return outcome;
     }
 
+    if (!abort && !miningAtReturnZone(mining)) {
+        outcome.message = std::string(text::status::miningReturnToShip);
+        return outcome;
+    }
+    if (!abort) {
+        bankMiningPayloadAtShip(state);
+    }
+
     outcome.applied = true;
     outcome.message = abort
-        ? (mining.failureMessage.empty() ? std::string("Mining drone recalled under pressure.") : mining.failureMessage)
-        : std::string("Mining payload stowed for extraction.");
-    outcome.materialDelta = mining.temporaryMaterials;
-    outcome.artifactFound = !mining.temporaryArtifacts.empty();
-    outcome.cargoDelta = mining.cargo;
-    outcome.hazardDelta = mining.hazardDelta + static_cast<double>(std::max(0, mining.cargo)) * tuning::mining::cargoExtractionRiskScale - miningDrillStats(state, catalog).extractionRiskRelief;
-    const bool droneDestroyed = abort && mining.drillIntegrity <= 0.0;
+        ? (mining.failureMessage.empty() ? std::string(text::status::miningAborted) : mining.failureMessage)
+        : std::string("Banked payload loaded for surface extraction.");
+    outcome.materialDelta = mining.stowedMaterials;
+    outcome.artifactFound = !mining.stowedArtifacts.empty();
+    outcome.cargoDelta = mining.stowedCargo;
+    const double recallPenalty = abort ? tuning::mining::emergencyRecallHazardPenalty : 0.0;
+    outcome.hazardDelta =
+        mining.hazardDelta +
+        static_cast<double>(std::max(0, mining.stowedCargo)) * tuning::mining::cargoExtractionRiskScale +
+        recallPenalty -
+        miningDrillStats(state, catalog).extractionRiskRelief;
+    const bool emergencyRecall = abort;
     const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
 
-    addMiningMaterials(expedition.temporaryMaterials, mining.temporaryMaterials);
-    expedition.temporaryArtifacts.insert(expedition.temporaryArtifacts.end(), mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
-    expedition.cargo += mining.cargo;
+    addMiningMaterials(expedition.temporaryMaterials, mining.stowedMaterials);
+    expedition.temporaryArtifacts.insert(expedition.temporaryArtifacts.end(), mining.stowedArtifacts.begin(), mining.stowedArtifacts.end());
+    expedition.cargo += mining.stowedCargo;
     expedition.depth = std::max(expedition.depth, mining.depthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
     outcome.extractionRiskDelta = std::max(0.0, outcome.hazardDelta);
-    if (droneDestroyed) {
+    if (emergencyRecall) {
         state.run.surfaceUpgradeIds.clear();
         if (hadDroneUpgrades) {
-            appendSurfaceLog(expedition, "Mining drone destroyed; drone upgrades lost.");
+            appendSurfaceLog(expedition, "Emergency recall cleared temporary field upgrades.");
         }
     }
 

@@ -23,8 +23,19 @@ struct MiningDrillStats {
     double oreYieldChance = 0.0;
     double heatRiseScale = 1.0;
     double heatCoolingPerSecond = 0.0;
+    double storage = 0.0;
+    double engineEfficiency = 0.0;
+    double artifactTowEfficiency = 0.0;
     int terrainWidth = 0;
     int terrainHeight = 0;
+};
+
+struct MiningLoadStats {
+    double currentLoad = 0.0;
+    double freeBuffer = tuning::mining::baseCarryBufferCargo;
+    double burden = 0.0;
+    double speedMultiplier = 1.0;
+    double fuelMultiplier = 1.0;
 };
 
 std::string_view miningMaterialName(MiningCellMaterial material);
@@ -36,6 +47,10 @@ double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
+int miningCarriedCargo(const MiningRunState& mining);
+int miningBankedCargo(const MiningRunState& mining);
+bool miningAtReturnZone(const MiningRunState& mining);
+MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
 MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width = tuning::mining::terrainWidth, int height = tuning::mining::terrainHeight);
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog);
 void setMiningMove(GameState& state, double xAxis, double yAxis);

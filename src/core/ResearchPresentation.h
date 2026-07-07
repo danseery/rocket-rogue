@@ -281,6 +281,9 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
         chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
     }
     addPercentChip(chips, text::labels::extractionRisk, stats.extractionRiskRelief);
+    addDoubleChip(chips, "Storage", stats.droneStorage);
+    addPercentChip(chips, "Haul engines", stats.droneEngineEfficiency);
+    addPercentChip(chips, "Towline", stats.artifactTowEfficiency);
     return chips;
 }
 

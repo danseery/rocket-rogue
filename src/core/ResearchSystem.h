@@ -71,6 +71,9 @@ struct SurfaceUpgradeEffects {
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
     double extractionRiskRelief = 0.0;
+    double droneStorage = 0.0;
+    double droneEngineEfficiency = 0.0;
+    double artifactTowEfficiency = 0.0;
     std::vector<std::string> names;
 };
 

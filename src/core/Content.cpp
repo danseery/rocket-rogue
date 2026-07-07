@@ -205,7 +205,10 @@ ContentCatalog createDefaultContent()
         module(content::module::oreSorter, "Ore Sorter", SlotType::Fuel, Rarity::Uncommon, {.fuel = -0.2, .miningYield = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "yield"}, {.common = 1}),
         module(content::module::coolantSleeve, "Coolant Sleeve", SlotType::Cooling, Rarity::Uncommon, {.cooling = 0.4, .miningCooling = 1.1}, content::unlock::surfaceDrills, {"surface", "mining", "cooling"}, {.common = 1}),
         module(content::module::diamondBearings, "Diamond Bearings", SlotType::Hull, Rarity::Rare, {.hull = 0.2, .miningDurability = 1.2}, content::unlock::surfaceDrills, {"surface", "mining", "durable"}, {.common = 1, .rare = 1}),
-        module(content::module::deepBoreFrame, "Deep-Bore Frame", SlotType::Fuel, Rarity::Rare, {.fuel = -0.4, .miningPower = 0.4, .miningDepth = 1.0}, content::unlock::cargoRigs, {"surface", "mining", "deep"}, {.common = 2, .rare = 1})
+        module(content::module::deepBoreFrame, "Deep-Bore Frame", SlotType::Fuel, Rarity::Rare, {.fuel = -0.4, .miningPower = 0.4, .miningDepth = 1.0}, content::unlock::cargoRigs, {"surface", "mining", "deep"}, {.common = 2, .rare = 1}),
+        module(content::module::cargoSpine, "Cargo Spine", SlotType::Hull, Rarity::Common, {.hull = 0.4, .miningStorage = 3.0}, content::unlock::cargoRigs, {"surface", "mining", "cargo"}, {.common = 2}),
+        module(content::module::haulerThrusters, "Hauler Thrusters", SlotType::Engine, Rarity::Uncommon, {.thrust = 0.6, .fuel = -0.2, .volatility = 0.20, .miningEngineEfficiency = 0.24}, content::unlock::cargoRigs, {"surface", "mining", "hauler"}, {.common = 2, .rare = 1}),
+        module(content::module::massDriverWinch, "Mass Driver Winch", SlotType::Escape, Rarity::Rare, {.escape = 0.6, .volatility = 0.25, .miningStorage = 2.0, .miningEngineEfficiency = 0.34}, content::unlock::cargoRigs, {"surface", "mining", "artifact"}, {.rare = 2, .exotic = 1})
     };
 
     catalog.crewUpgrades = {
@@ -219,14 +222,17 @@ ContentCatalog createDefaultContent()
     catalog.surfaceUpgrades = {
         surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines and steady deeper pushes.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4, .drillDurability = 0.4}, {"drill", "cooling", "depth"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams, bad pockets, and one deeper layer.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.5, .hazardRelief = 0.02}, {"scanner", "reveal", "depth"}),
-        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids keep loaded canisters from turning extraction into drama.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.03}, {"drone", "cargo"}),
+        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids help the drone bank heavier canisters before load drag gets ugly.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.02, .droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
         surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter and contact jolts.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.2, .hardRockBounceRelief = 0.18, .hazardRelief = 0.015}, {"drill", "durability", "recoil"}),
         surfaceUpgrade(content::surfaceUpgrade::oreScentArray, "Ore-Scent Array", "Spectral sniffers help the crew sort richer pockets from plain dust before the dig.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.14, .scannerRadius = 1.2, .hazardRelief = 0.01}, {"scanner", "yield", "survey"}),
         surfaceUpgrade(content::surfaceUpgrade::coolantMist, "Coolant Mist", "A hiss of cold vapor keeps the drill biting without cooking the head.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 1.6, .drillDurability = 0.6}, {"drill", "cooling"}),
         surfaceUpgrade(content::surfaceUpgrade::recoilBraces, "Recoil Braces", "Kickback struts turn hard-rock bonks into controlled shoves while the drone keeps moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.drillDurability = 0.5, .hardRockBounceRelief = 0.24, .droneSpeed = 0.25}, {"drone", "recoil", "control"}),
-        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rig keeps good fragments from scattering into the dust or the return lane.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .extractionRiskRelief = 0.015}, {"drone", "yield"}),
-        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Emergency Winch", "A tiny return tether gives the crew a cleaner pull when the dig turns ugly.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.oxygenSeconds = 10.0, .extractionRiskRelief = 0.045}, {"drone", "recovery"}),
-        surfaceUpgrade(content::surfaceUpgrade::deepEchoMapper, "Deep Echo Mapper", "Low-frequency pings read deeper silhouettes and artifact pockets before the flare fades.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.04, .scannerRadius = 3.0, .hazardRelief = 0.015}, {"scanner", "depth", "artifact"})
+        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rack gives loose ore a cleaner ride back to the ship zone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .extractionRiskRelief = 0.01, .droneStorage = 1.0}, {"drone", "yield"}),
+        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Emergency Winch", "A return tether preserves banked haul and softens emergency recall penalties.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.oxygenSeconds = 10.0, .extractionRiskRelief = 0.035, .artifactTowEfficiency = 0.25}, {"drone", "recovery"}),
+        surfaceUpgrade(content::surfaceUpgrade::deepEchoMapper, "Deep Echo Mapper", "Low-frequency pings read deeper silhouettes and artifact pockets before the flare fades.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.04, .scannerRadius = 3.0, .hazardRelief = 0.015}, {"scanner", "depth", "artifact"}),
+        surfaceUpgrade(content::surfaceUpgrade::expandablePanniers, "Expandable Panniers", "Fold-out panniers widen the free carry buffer before ore starts slowing the drone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 3.0}, {"drone", "cargo", "storage"}),
+        surfaceUpgrade(content::surfaceUpgrade::vectorNozzles, "Vector Nozzles", "Trim jets keep loaded turns crisp and burn less fuel under a heavy haul.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.15, .droneEngineEfficiency = 0.25}, {"drone", "engine", "load"}),
+        surfaceUpgrade(content::surfaceUpgrade::artifactTowline, "Artifact Towline", "Braided towline spreads artifact drag so tethered relics pull cleaner toward the ship.", Rarity::Rare, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.015, .artifactTowEfficiency = 0.40}, {"drone", "artifact", "tether"})
     };
 
     catalog.miniDrones = {
@@ -604,6 +610,8 @@ ModuleStats& operator+=(ModuleStats& lhs, const ModuleStats& rhs)
     lhs.miningDurability += rhs.miningDurability;
     lhs.miningWidth += rhs.miningWidth;
     lhs.miningDepth += rhs.miningDepth;
+    lhs.miningStorage += rhs.miningStorage;
+    lhs.miningEngineEfficiency += rhs.miningEngineEfficiency;
     return lhs;
 }
 

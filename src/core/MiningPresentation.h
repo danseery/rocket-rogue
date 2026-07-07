@@ -222,21 +222,28 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
     const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
     const bool arkKnown = arkDiscovered(state);
+    const MiningLoadStats load = miningLoadStats(state, catalog);
+    const int carriedCargo = miningCarriedCargo(mining);
+    const int bankedCargo = miningBankedCargo(mining);
     const double extractionDelta = std::clamp(
-        mining.hazardDelta + static_cast<double>(std::max(0, mining.cargo)) * tuning::mining::cargoExtractionRiskScale - stats.extractionRiskRelief,
+        mining.hazardDelta + static_cast<double>(std::max(0, bankedCargo)) * tuning::mining::cargoExtractionRiskScale - stats.extractionRiskRelief,
         0.0,
         tuning::mining::maxMiningHazardDelta);
     MiningRunPresentation presentation;
     presentation.failurePending = mining.failurePending;
-    presentation.failureTitle = mining.drillIntegrity <= 0.0 ? "Drill failure" : "Emergency recall";
+    presentation.failureTitle = "Emergency recall";
     presentation.failureBody = mining.failureMessage.empty()
         ? std::string("Mining drone recall is in progress.")
         : mining.failureMessage;
-    presentation.rigHealthRatio = std::clamp(mining.drillIntegrity, 0.0, 1.0);
+    presentation.rigHealthRatio = std::clamp(mining.droneHealth, 0.0, 1.0);
     presentation.rigHealth = display::percent(presentation.rigHealthRatio);
     presentation.metrics = {
-        panelMetric("Rig health", presentation.rigHealth),
+        panelMetric(text::labels::droneHealth, presentation.rigHealth),
+        panelMetric(text::labels::drillBit, display::percent(std::clamp(mining.drillIntegrity, 0.0, 1.0))),
         panelMetric(text::labels::oxygen, miningOxygenValue(mining.oxygenSeconds)),
+        panelMetric(text::labels::carried, std::to_string(carriedCargo)),
+        panelMetric(text::labels::banked, std::to_string(bankedCargo)),
+        panelMetric(text::labels::load, display::fixed(load.currentLoad, 1) + " / " + display::percent(load.speedMultiplier)),
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity))),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelBurnSeconds)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
@@ -255,11 +262,12 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         presentation.metrics.push_back(panelMetric("Artifact integrity", display::percent(mining.artifact.maxHealth <= 0.0 ? 0.0 : mining.artifact.health / mining.artifact.maxHealth)));
     }
     presentation.payloadMetrics = {
-        panelMetric(text::labels::cargo, std::to_string(mining.cargo)),
-        panelMetric(text::labels::commonMaterials, std::to_string(mining.temporaryMaterials.common)),
-        panelMetric(text::labels::rareMaterials, std::to_string(mining.temporaryMaterials.rare)),
-        panelMetric(text::labels::exoticMaterials, std::to_string(mining.temporaryMaterials.exotic)),
-        panelMetric(text::labels::artifacts, std::to_string(mining.temporaryArtifacts.size()))
+        panelMetric("Carried cargo", std::to_string(carriedCargo)),
+        panelMetric("Banked cargo", std::to_string(bankedCargo)),
+        panelMetric("Carried mats", std::to_string(mining.temporaryMaterials.common + mining.temporaryMaterials.rare + mining.temporaryMaterials.exotic)),
+        panelMetric("Banked mats", std::to_string(mining.stowedMaterials.common + mining.stowedMaterials.rare + mining.stowedMaterials.exotic)),
+        panelMetric("Carried artifacts", std::to_string(mining.temporaryArtifacts.size())),
+        panelMetric("Banked artifacts", std::to_string(mining.stowedArtifacts.size()))
     };
     presentation.combatTitle = drones.signatureName.empty()
         ? (drones.synergyNames.empty() ? "Swarm command" : drones.synergyNames.front())
@@ -285,13 +293,14 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Rig dmg", display::percent(mining.enemyDamageTaken))
     };
     presentation.details = {
-        detailPresentationRow("Controls", std::string("WASD/arrows move; mouse or Space drills; E scans; T tethers artifacts; R stows; Esc aborts.")),
+        detailPresentationRow("Controls", std::string("WASD/arrows move; mouse or Space drills while the bit works; E scans; T tethers artifacts; return to the ship to bank and Leave.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
         detailPresentationRow("Drill power", display::fixed(stats.power, 1)),
         detailPresentationRow("Scanner radius", display::fixed(stats.scannerRadius, 1)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity)) + " available for this dig"),
         detailPresentationRow("Fuel spent this dig", std::to_string(mining.fuelSpent)),
-        detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown, static_cast<int>(std::round(tuning::mining::fuelSecondsPerUnit)))),
+        detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown, static_cast<int>(std::round(tuning::mining::fuelSecondsPerUnit))) + " Load multiplier " + display::fixed(load.fuelMultiplier, 2) + "x."),
+        detailPresentationRow("Load burden", display::fixed(load.currentLoad, 1) + " load; " + display::fixed(load.freeBuffer, 1) + " free carry; speed " + display::percent(load.speedMultiplier)),
         detailPresentationRow("Drone loadout", miningDroneSummary(drones)),
         detailPresentationRow("Build signature", drones.signatureName.empty() ? "None" : drones.signatureName),
         detailPresentationRow("Signature payoff", drones.signatureDetail.empty() ? "Equip complementary Drone Ops roles before the run to activate a signature build." : drones.signatureDetail),
@@ -319,18 +328,20 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Depth pressure", std::string("Deeper zones have tougher terrain, richer pockets, and more extraction risk."))
     };
     if (mining.artifact.present) {
-        presentation.details.push_back(detailPresentationRow("Artifact recovery", std::string("Expose the object, press T nearby to tether, pull it to the ship bay, and avoid drilling or bouncing it.")));
+        presentation.details.push_back(detailPresentationRow("Artifact recovery", std::string("Expose the object, press T nearby to tether, pull it to the ship ring, and avoid drilling or bouncing it.")));
     }
     if (mining.failurePending) {
         presentation.actions = {
             disabledPanelButton("Drill disabled")
         };
     } else {
+        const bool atShip = miningAtReturnZone(mining);
         presentation.actions = {
             panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
             panelActionButton(text::buttons::tetherArtifact, ui::actions::miningTether, "warn"),
-            panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"),
-            panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
+            atShip
+                ? panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok")
+                : panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
         };
     }
     return presentation;

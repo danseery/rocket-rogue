@@ -111,6 +111,13 @@ struct RenderSnapshot {
     double miningOxygenSeconds = 15.0;
     double miningFuelBurnSeconds = 0.0;
     double miningDrillIntegrity = 1.0;
+    double miningDroneHealth = 1.0;
+    double miningReturnZoneX = 0.0;
+    double miningReturnZoneY = 0.0;
+    bool miningAtReturnZone = false;
+    double miningLoad = 0.0;
+    double miningLoadSpeedMultiplier = 1.0;
+    double miningLoadFuelMultiplier = 1.0;
     double miningHazardDelta = 0.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
@@ -125,6 +132,7 @@ struct RenderSnapshot {
     int miningSharedFuel = 0;
     int miningSharedFuelCapacity = 0;
     int miningCargo = 0;
+    int miningStowedCargo = 0;
     int miningSupportDroneCount = 0;
     int miningAttackDroneCount = 0;
     int miningDefenseDroneCount = 0;
@@ -136,6 +144,7 @@ struct RenderSnapshot {
     std::vector<int> miningDroneUpgradeLevels;
     bool miningShieldActive = false;
     MaterialInventory miningMaterials;
+    MaterialInventory miningStowedMaterials;
     MiningArtifactSnapshot miningArtifact;
     std::vector<MiningCellSnapshot> miningCells;
     std::vector<MiningEnemySnapshot> miningEnemies;
@@ -223,6 +232,7 @@ private:
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age);
     void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);
+    void drawMiningBankedText(float cx, float cy, float unitSize, float age);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<float>& scratchVertices(std::size_t reserveCount);
@@ -238,7 +248,7 @@ private:
     void drawMining(const RenderSnapshot& snapshot);
     void drawSurfaceScan(const RenderSnapshot& snapshot);
     void drawSurfacePush(const RenderSnapshot& snapshot);
-    void drawSolarBackground(const RenderSnapshot& snapshot, float alpha);
+    void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
     void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0, bool worldSpace = true);
@@ -273,7 +283,9 @@ private:
     std::vector<float> projectedVertices_;
     std::vector<int> previousMiningMaterials_;
     MaterialInventory previousMiningInventory_;
+    MaterialInventory previousMiningStowedInventory_;
     int previousMiningCargo_ = 0;
+    int previousMiningStowedCargo_ = 0;
     std::vector<MiningPickupBurst> miningPickupBursts_;
     int previousMiningWidth_ = 0;
     int previousMiningHeight_ = 0;
