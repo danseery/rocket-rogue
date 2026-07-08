@@ -44,7 +44,7 @@
       inset: 16px auto 16px 16px;
       width: min(440px, calc(100vw - 32px));
       max-height: calc(100dvh - 56px);
-      overflow: auto;
+      overflow: hidden;
       padding: 16px;
       border: 1px solid var(--panel-border);
       border-radius: 8px;
@@ -71,6 +71,14 @@
       max-height: calc(100dvh - 32px);
       overflow: hidden;
       padding: 18px 24px 28px;
+    }
+
+    #panel.phase-board-panel.navigation-panel .panel-kpis {
+      display: none;
+    }
+
+    #panel.phase-board-panel.navigation-panel .status {
+      margin-bottom: 6px;
     }
 
     #panel.mining-fullscreen-panel {
@@ -660,9 +668,8 @@
       font: inherit;
       font-size: 15px;
       cursor: pointer;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      white-space: normal;
     }
 
     button:hover {
@@ -1042,6 +1049,56 @@
       text-transform: uppercase;
     }
 
+    .ops-card,
+    .pilot-card,
+    .upgrade-draft-card,
+    .arrival-card,
+    .nav-card,
+    .inventory-item,
+    .achievement-card,
+    .crew-fate-card,
+    .result-group,
+    .drone-recipe-card,
+    .drone-loadout-slot,
+    .drone-control-card,
+    .modal-body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-topline,
+    .card-kicker,
+    .pilot-card-top,
+    .slot-topline,
+    .recipe-topline,
+    .card-title,
+    .card-copy,
+    .metric-strip,
+    .chip-strip,
+    .utility-actions {
+      flex: none;
+    }
+
+    .ops-card h3,
+    .pilot-card h3,
+    .upgrade-draft-card h3,
+    .arrival-card h3,
+    .nav-card h3,
+    .ops-card p,
+    .pilot-card p,
+    .upgrade-draft-card p,
+    .arrival-card p,
+    .nav-card p,
+    .module-impact,
+    .drone-build-hook,
+    .drone-upgrade-summary,
+    .inventory-art,
+    .inventory-copy,
+    .card-title,
+    .card-copy {
+      flex: none;
+    }
+
     .module-art {
       position: absolute;
       top: 34px;
@@ -1079,14 +1136,20 @@
       font-size: 16px;
     }
 
-    .stat-grid {
+    .stat-grid,
+    .chip-strip,
+    .metric-strip {
       display: flex;
       flex-wrap: wrap;
       gap: 5px;
       margin-top: 10px;
+      align-content: flex-start;
+      align-items: flex-start;
+      flex: none;
     }
 
     .stat-chip {
+      flex: none;
       border: 1px solid rgba(137, 178, 211, 0.18);
       border-radius: 5px;
       padding: 3px 6px;
@@ -1107,12 +1170,26 @@
       border-color: rgba(255, 108, 92, 0.30);
     }
 
-    .card-footer {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(112px, auto);
+    .card-footer,
+    .draft-card-footer {
+      display: flex;
+      flex: none;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
+    .action-row {
+      display: flex;
+      flex: none;
+      flex-direction: row;
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
-      margin-top: 12px;
     }
 
     .card-footer span {
@@ -1120,8 +1197,18 @@
       font-size: 15px;
     }
 
-    .card-footer button {
+    .card-footer button,
+    .draft-card-footer button,
+    .action-row button,
+    .utility-actions button {
+      flex: none;
       min-height: 34px;
+      white-space: normal;
+    }
+
+    .modal-body {
+      flex: 1 1 auto;
+      min-height: 0;
     }
 
     .ops-grid {
@@ -1561,41 +1648,35 @@
       justify-content: end;
     }
 
-    .phase-board-drone-ops .drone-build-strip {
+    .phase-board-drone-ops .drone-top-row {
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
       max-width: 704px;
-      grid-template-columns: minmax(0, 1fr) minmax(300px, auto);
-      align-items: center;
-      padding: 10px 12px;
-      margin-top: 8px;
-      margin-bottom: 8px;
-      border-color: rgba(71, 220, 255, 0.28);
-      background:
-        linear-gradient(135deg, rgba(71, 220, 255, 0.10), rgba(255, 209, 102, 0.055)),
-        rgba(255, 255, 255, 0.035);
-      box-shadow: inset 0 0 24px rgba(71, 220, 255, 0.055);
+      margin-top: 6px;
+      margin-bottom: 6px;
     }
 
-    .phase-board-drone-ops .drone-build-strip h2 {
-      color: #dffbff;
-      margin-bottom: 2px;
+    .phase-board-drone-ops .drone-top-row .resource-bank {
+      margin-top: 0;
+      margin-bottom: 0;
     }
 
-    .phase-board-drone-ops .drone-build-strip p {
-      line-height: 1.2;
-    }
-
-    .phase-board-drone-ops .drone-build-stats {
-      grid-template-columns: repeat(2, minmax(126px, 1fr));
-      justify-content: end;
+    .phase-board-drone-ops .drone-bay-strip {
+      flex: 1 1 412px;
+      min-width: 0;
+      padding: 7px;
     }
 
     .phase-board-drone-ops .drone-build-guidance {
+      flex: 0 0 240px;
+      min-width: 0;
       max-width: 704px;
-      grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+      grid-template-columns: 92px minmax(0, 1fr);
       align-items: center;
-      padding: 10px 12px;
-      margin-top: 8px;
-      margin-bottom: 8px;
+      padding: 7px;
+      margin-top: 0;
+      margin-bottom: 0;
       border-color: rgba(183, 132, 255, 0.24);
       background:
         linear-gradient(135deg, rgba(183, 132, 255, 0.075), rgba(71, 220, 255, 0.045)),
@@ -1608,13 +1689,25 @@
     }
 
     .phase-board-drone-ops .drone-build-guidance p {
-      font-size: 13px;
-      line-height: 1.18;
+      font-size: 11px;
+      line-height: 1.12;
     }
 
     .phase-board-drone-ops .drone-guidance-stats {
-      grid-template-columns: repeat(2, minmax(116px, 1fr));
+      grid-template-columns: 1fr;
       justify-content: end;
+    }
+
+    .phase-board-drone-ops .drone-guidance-stats .stat-chip,
+    .phase-board-drone-ops .drone-bay-strip .stat-chip {
+      min-height: 16px;
+      padding: 2px 5px;
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
+    .phase-board-drone-ops .drone-combat-forecast {
+      display: none;
     }
 
     .phase-board-drone-ops .drone-loadout-bench {
@@ -1628,15 +1721,37 @@
       margin-bottom: 8px;
     }
 
+    .phase-board-drone-ops .section-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 4px;
+    }
+
+    .phase-board-drone-ops .section-heading h2 {
+      margin: 0;
+    }
+
+    .phase-board-drone-ops .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.1;
+      text-align: right;
+    }
+
     .phase-board-drone-ops .drone-loadout-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
       gap: 8px;
     }
 
     .phase-board-drone-ops .drone-loadout-slot {
-      min-height: 116px;
-      padding: 8px;
+      flex: 0 0 calc((100% - 16px) / 3);
+      min-height: 76px;
+      padding: 6px;
       border: 1px solid rgba(137, 178, 211, 0.16);
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.03);
@@ -1686,8 +1801,9 @@
     }
 
     .phase-board-drone-ops .slot-topline {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
       gap: 6px;
       color: var(--muted);
       font-size: 12px;
@@ -1702,27 +1818,27 @@
     }
 
     .phase-board-drone-ops .drone-loadout-slot h3 {
-      margin: 5px 0 2px;
-      font-size: 15px;
+      margin: 2px 0 1px;
+      font-size: 13px;
     }
 
     .phase-board-drone-ops .drone-loadout-slot p {
-      margin: 3px 0 0;
+      margin: 2px 0 0;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.18;
-      max-height: 42px;
+      max-height: 18px;
       overflow: hidden;
     }
 
     .phase-board-drone-ops .drone-loadout-slot .slot-role {
       color: #bfeef7;
-      min-height: 16px;
+      min-height: 14px;
     }
 
     .phase-board-drone-ops .drone-loadout-slot .stat-grid {
-      min-height: 25px;
-      margin-top: 6px;
+      min-height: 16px;
+      margin-top: 2px;
     }
 
     .phase-board-drone-ops .drone-combat-forecast {
@@ -1758,72 +1874,6 @@
 
     .phase-board-drone-ops .drone-forecast-stats .stat-chip.wide {
       flex-basis: 116px;
-    }
-
-    .phase-board-drone-ops .drone-recipe-board {
-      max-width: 704px;
-      padding: 10px 12px;
-      margin-bottom: 12px;
-    }
-
-    .phase-board-drone-ops .drone-recipe-board h2 {
-      margin-bottom: 8px;
-    }
-
-    .phase-board-drone-ops .drone-recipe-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-
-    .phase-board-drone-ops .drone-recipe-card {
-      min-height: 126px;
-      padding: 10px;
-      border: 1px solid rgba(137, 178, 211, 0.16);
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .phase-board-drone-ops .drone-recipe-card.active {
-      border-color: rgba(71, 220, 255, 0.34);
-      background: rgba(71, 220, 255, 0.075);
-    }
-
-    .phase-board-drone-ops .drone-recipe-card.signature {
-      border-color: rgba(255, 209, 102, 0.28);
-    }
-
-    .phase-board-drone-ops .recipe-topline {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0;
-    }
-
-    .phase-board-drone-ops .recipe-topline strong {
-      color: #ffd166;
-      font-weight: 700;
-      text-transform: none;
-    }
-
-    .phase-board-drone-ops .drone-recipe-card h3 {
-      margin: 7px 0 4px;
-      font-size: 15px;
-    }
-
-    .phase-board-drone-ops .recipe-requirements {
-      color: #bfeef7;
-      font-size: 12px;
-      min-height: 18px;
-    }
-
-    .phase-board-drone-ops .drone-recipe-card p {
-      margin: 4px 0 0;
-      line-height: 1.25;
-      overflow: hidden;
     }
 
     .phase-board-drone-ops .ops-grid {
@@ -1874,7 +1924,6 @@
       margin-top: auto;
       padding-top: 10px;
       border-top: 1px solid rgba(137, 178, 211, 0.14);
-      grid-template-columns: minmax(0, 1fr) 76px 76px;
       gap: 6px;
     }
 
@@ -1883,6 +1932,338 @@
       min-width: 76px;
       padding-left: 6px;
       padding-right: 6px;
+    }
+
+    .phase-board-drone-ops .drone-build-guidance,
+    .phase-board-drone-ops .drone-combat-forecast,
+    .phase-board-drone-ops .drone-loadout-bench,
+    .phase-board-drone-ops .drone-roster {
+      padding: 8px 10px;
+      margin-top: 6px;
+      margin-bottom: 6px;
+    }
+
+    .phase-board-drone-ops .drone-build-guidance p,
+    .phase-board-drone-ops .drone-combat-forecast p {
+      font-size: 12px;
+      line-height: 1.14;
+    }
+
+    .phase-board-drone-ops .drone-build-guidance,
+    .phase-board-drone-ops .drone-combat-forecast {
+      grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1.45fr);
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot {
+      min-height: 96px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot p {
+      max-height: 30px;
+    }
+
+    .phase-board-drone-ops .drone-control-grid {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .phase-board-drone-ops .drone-control-card {
+      flex: 0 0 calc((100% - 14px) / 3);
+      min-height: 92px;
+      padding: 6px;
+      border: 1px solid rgba(137, 178, 211, 0.16);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-control-card h3 {
+      margin: 2px 0 1px;
+      font-size: 12px;
+    }
+
+    .phase-board-drone-ops .drone-control-status {
+      min-height: 12px;
+      max-height: 14px;
+      margin: 0 0 2px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.12;
+      overflow: hidden;
+    }
+
+    .phase-board-drone-ops .drone-control-card .stat-grid {
+      min-height: 28px;
+      margin-top: 1px;
+    }
+
+    .phase-board-drone-ops .drone-control-card .stat-chip {
+      flex: 0 0 84px;
+      min-width: 84px;
+      min-height: 15px;
+      padding: 2px 5px;
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
+    .phase-board-drone-ops .drone-control-card .card-footer {
+      margin-top: auto;
+      padding-top: 3px;
+      border-top: 1px solid rgba(137, 178, 211, 0.14);
+      gap: 5px;
+    }
+
+    .phase-board-drone-ops .drone-control-card .card-footer button {
+      flex: 1 1 76px;
+      min-width: 76px;
+      height: 18px;
+      min-height: 18px;
+      margin-bottom: 0;
+      padding: 2px 5px;
+      font-size: 9px;
+      line-height: 1.1;
+    }
+
+    .phase-board-drone-ops .drone-control-card,
+    .phase-board-drone-ops .drone-loadout-slot {
+      border-radius: 8px;
+      border-width: 2px;
+      border-color: #31566b;
+      background: #0d1d27;
+    }
+
+    .phase-board-drone-ops > .phase-titlebar > div {
+      flex: 0 1 430px;
+      max-width: 430px;
+    }
+
+    .phase-board-drone-ops > .phase-titlebar p {
+      max-width: 410px;
+      line-height: 1.18;
+    }
+
+    .phase-board-drone-ops > .phase-titlebar .compact-tools {
+      flex: 0 0 238px;
+      display: flex;
+      flex-flow: row nowrap;
+      justify-content: flex-end;
+    }
+
+    .phase-board-drone-ops > .phase-titlebar .compact-tools button {
+      flex: 0 0 106px;
+      margin-left: 6px;
+      margin-right: 0;
+    }
+
+    .phase-board-drone-ops .drone-top-row {
+      max-width: 704px;
+      margin-top: 8px;
+      margin-bottom: 8px;
+    }
+
+    .phase-board-drone-ops .drone-bay-strip {
+      flex: 0 0 684px;
+      min-height: 116px;
+      padding: 10px;
+    }
+
+    .phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
+      flex: 0 0 198px;
+    }
+
+    .phase-board-drone-ops .drone-bay-strip p {
+      max-width: 190px;
+      line-height: 1.2;
+    }
+
+    .phase-board-drone-ops .drone-bay-stats,
+    .phase-board-drone-ops .drone-bay-materials {
+      flex: 0 0 160px;
+    }
+
+    .phase-board-drone-ops .drone-bay-strip .stat-chip {
+      flex: 0 0 150px;
+      max-width: 150px;
+      min-height: 24px;
+      padding: 4px 6px;
+    }
+
+    .phase-board-drone-ops .drone-bay-strip button {
+      flex: 0 0 100px;
+      min-width: 100px;
+      min-height: 34px;
+    }
+
+    .phase-board-drone-ops .drone-control-card {
+      height: 142px;
+      min-height: 142px;
+      padding: 8px;
+    }
+
+    .phase-board-drone-ops .drone-control-card.rarity-uncommon {
+      border-color: #3a735c;
+      background: #0d2222;
+    }
+
+    .phase-board-drone-ops .drone-control-card.rarity-rare {
+      border-color: #806b2c;
+      background: #201c12;
+    }
+
+    .phase-board-drone-ops .drone-card-head {
+      display: flex;
+      align-items: flex-start;
+      min-height: 32px;
+    }
+
+    .phase-board-drone-ops .drone-role-mark {
+      display: block;
+      flex: 0 0 22px;
+      height: 22px;
+      margin-right: 7px;
+      padding-top: 3px;
+      border: 1px solid #4a7f96;
+      border-radius: 6px;
+      background: #15384a;
+      color: #dffbff;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .phase-board-drone-ops .drone-card-id {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    .phase-board-drone-ops .drone-card-id .card-topline {
+      min-height: 11px;
+      color: var(--muted);
+      font-size: 9px;
+    }
+
+    .phase-board-drone-ops .drone-card-id .card-title {
+      margin: 2px 0 0;
+      font-size: 12px;
+    }
+
+    .phase-board-drone-ops .drone-control-status {
+      min-height: 15px;
+      max-height: 15px;
+      margin-top: 3px;
+      padding-top: 2px;
+      border-top: 1px solid #243b4c;
+      color: #bfeef7;
+      font-size: 10px;
+    }
+
+    .phase-board-drone-ops .drone-control-card .stat-grid {
+      min-height: 42px;
+      margin-top: 5px;
+    }
+
+    .phase-board-drone-ops .drone-control-card .stat-chip {
+      flex: 0 0 104px;
+      min-width: 104px;
+      min-height: 15px;
+    }
+
+    .phase-board-drone-ops .drone-control-card .card-footer {
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+      min-height: 24px;
+      padding-top: 5px;
+      border-top-color: #2d5265;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot {
+      height: 118px;
+      min-height: 118px;
+      padding: 8px;
+      background: #0b1720;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.filled {
+      border-color: #367486;
+      background: #0d252d;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.open {
+      border-color: #397459;
+      background: #0d2119;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot.locked {
+      border-color: #2a3845;
+      background: #0e141a;
+    }
+
+    .phase-board-drone-ops .slot-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 22px;
+    }
+
+    .phase-board-drone-ops .slot-number {
+      display: block;
+      flex: 0 0 24px;
+      min-height: 16px;
+      padding-top: 2px;
+      border: 1px solid #456b80;
+      border-radius: 5px;
+      background: #132f3d;
+      color: #dffbff;
+      text-align: center;
+      font-size: 10px;
+      line-height: 1;
+    }
+
+    .phase-board-drone-ops .slot-state {
+      flex: 1 1 auto;
+      min-width: 0;
+      color: #ffd166;
+      text-align: right;
+      font-size: 10px;
+    }
+
+    .phase-board-drone-ops .slot-card-body {
+      min-height: 36px;
+      margin-top: 4px;
+    }
+
+    .phase-board-drone-ops .slot-card-body .card-title {
+      margin: 0 0 1px;
+      font-size: 12px;
+    }
+
+    .phase-board-drone-ops .slot-card-body .slot-role {
+      min-height: 11px;
+      margin-top: 0;
+      color: #bfeef7;
+      font-size: 10px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot .stat-grid {
+      min-height: 36px;
+      margin-top: 5px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot .stat-chip {
+      flex: 0 0 76px;
+      min-width: 76px;
+      min-height: 14px;
+      padding: 2px 5px;
+      font-size: 9px;
+    }
+
+    .phase-board-drone-ops .drone-loadout-slot .stat-chip.wide {
+      flex-basis: 92px;
+      min-width: 92px;
     }
 
     .phase-board .actions {
@@ -2061,8 +2442,8 @@
       top: 14px;
       left: 18px;
       right: 18px;
-      min-height: 96px;
-      padding: 10px;
+      min-height: 76px;
+      padding: 8px 10px;
       display: flex;
       align-items: flex-start;
       gap: 12px;
@@ -2087,16 +2468,16 @@
       display: block;
       margin-top: 2px;
       color: #f1fbff;
-      font-size: 25px;
+      font-size: 23px;
       line-height: 1;
     }
 
     .mining-run-title small {
       display: block;
-      margin-top: 6px;
+      margin-top: 4px;
       color: rgba(215, 232, 234, 0.78);
-      font-size: 12px;
-      line-height: 1.25;
+      font-size: 11px;
+      line-height: 1.15;
     }
 
     .mining-vitals {
@@ -2109,8 +2490,8 @@
     }
 
     .mining-vitals .metric {
-      min-height: 38px;
-      padding: 6px 8px;
+      min-height: 31px;
+      padding: 4px 7px;
       background: rgba(8, 25, 32, 0.90);
       border-color: rgba(96, 218, 241, 0.24);
     }
@@ -2135,7 +2516,7 @@
 
     .mining-utility-cluster button {
       width: 100%;
-      min-height: 31px;
+      min-height: 28px;
       padding: 0 8px;
       font-size: 12px;
       line-height: 1;
@@ -2143,7 +2524,7 @@
     }
 
     .mining-health-strip {
-      margin-top: 8px;
+      margin-top: 5px;
       padding: 0;
       border: 0;
       background: transparent;
@@ -2286,7 +2667,7 @@
         left: 10px;
         right: 10px;
         top: 10px;
-        min-height: 146px;
+        min-height: 124px;
         flex-wrap: wrap;
         gap: 8px;
       }
@@ -2640,8 +3021,8 @@
     }
 
     .board-secondary .detail-stack {
-      max-height: 42vh;
-      overflow: auto;
+      max-height: none;
+      overflow: hidden;
       padding: 10px;
       border: 1px solid rgba(137, 178, 211, 0.16);
       border-radius: 8px;
@@ -2697,7 +3078,6 @@
     }
 
     .phase-board-hangar .ops-card .card-footer {
-      grid-template-columns: minmax(0, 1fr) 92px;
       gap: 4px;
     }
 
@@ -2725,13 +3105,13 @@
     }
 
     .phase-board-research .ops-card .stat-grid {
-      min-height: 54px;
+      min-height: 0;
       align-content: start;
     }
 
     .phase-board-arrival .arrival-card {
-      display: grid;
-      grid-template-rows: 34px 22px 100px 48px;
+      display: flex;
+      flex-direction: column;
       min-height: 250px;
       align-content: start;
     }
@@ -2753,14 +3133,12 @@
     }
 
     .phase-board-arrival .arrival-card .card-footer {
-      grid-template-columns: 42px minmax(140px, 1fr);
-      align-self: end;
-      margin-top: 0;
+      margin-top: auto;
     }
 
     .phase-board-arrival .arrival-card .card-topline {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      display: flex;
+      justify-content: space-between;
       align-items: start;
       min-height: 34px;
       overflow: hidden;
@@ -2777,12 +3155,12 @@
     }
 
     .phase-board-arrival .arrival-card h3 {
-      height: 22px;
+      min-height: 22px;
     }
 
     .phase-board-arrival .arrival-card p {
       min-height: 0;
-      height: 100px;
+      max-height: 100px;
       margin-top: 0;
       margin-bottom: 0;
     }
@@ -2793,26 +3171,34 @@
       justify-content: center;
       min-width: 140px;
       white-space: normal;
-      height: 36px;
       min-height: 36px;
-      line-height: 36px;
+      height: auto;
+      line-height: 1.15;
       overflow-wrap: anywhere;
     }
 
     .phase-board-navigation .ark-status,
     .phase-board-navigation .navigation-map {
       max-width: 704px;
+      margin-top: 6px;
+      padding: 8px 10px;
     }
 
     .phase-board-navigation .nav-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
+      gap: 8px;
       max-width: 704px;
+      margin-top: 4px;
     }
 
     .phase-board-navigation .nav-card {
-      min-height: 238px;
+      min-height: 168px;
+      padding: 8px 10px;
+    }
+
+    .phase-board-navigation .nav-card .card-kicker {
+      gap: 8px;
     }
 
     .phase-board-navigation .nav-card h3,
@@ -2823,18 +3209,37 @@
     }
 
     .phase-board-navigation .nav-card p {
-      min-height: 44px;
+      min-height: 26px;
+      margin-top: 2px;
+      margin-bottom: 5px;
+      font-size: 12px;
+      line-height: 1.12;
     }
 
     .phase-board-navigation .nav-card .stat-grid {
-      min-height: 58px;
+      min-height: 38px;
       align-content: start;
     }
 
+    .phase-board-navigation .nav-card .stat-chip {
+      flex: 1 1 124px;
+      max-width: 132px;
+      min-height: 18px;
+      padding: 2px 5px;
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
     .phase-board-navigation .nav-card .card-footer {
-      margin-top: 10px;
-      padding-top: 10px;
+      margin-top: auto;
+      padding-top: 5px;
       border-top: 1px solid rgba(137, 178, 211, 0.14);
+    }
+
+    .phase-board-navigation .nav-card .card-footer button {
+      min-height: 30px;
+      font-size: 11px;
+      line-height: 1.1;
     }
 
     .surface-action-card {
@@ -2910,7 +3315,6 @@
 
     .surface-action-card .card-footer {
       margin-top: auto;
-      grid-template-columns: 1fr;
       align-items: start;
       gap: 6px;
     }
@@ -2965,7 +3369,8 @@
     }
 
     .pilot-card {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 10px;
       min-height: 390px;
       padding: 12px;
@@ -3206,8 +3611,9 @@
     }
 
     .draft-card-footer {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
+      display: flex;
+      flex: none;
+      flex-direction: column;
       gap: 8px;
       margin-top: auto;
     }
@@ -3391,7 +3797,8 @@
     }
 
     .detail-stack {
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 8px;
     }
 
@@ -3442,7 +3849,7 @@
     .modal-panel {
       width: min(520px, calc(100vw - 36px));
       max-height: min(72vh, 720px);
-      overflow: auto;
+      overflow: hidden;
       padding: 16px;
       border: 1px solid var(--panel-border);
       border-radius: 8px;
@@ -3999,7 +4406,12 @@
       }
 
       .phase-board-drone-ops .drone-loadout-grid {
-        grid-template-columns: 1fr;
+        flex-direction: column;
+      }
+
+      .phase-board-drone-ops .drone-loadout-slot,
+      .phase-board-drone-ops .drone-control-card {
+        flex-basis: 100%;
       }
     }
 
@@ -4197,6 +4609,48 @@
       }
     }
 
+    @media (max-width: 1100px) {
+      .debug-tools.is-visible {
+        display: none;
+      }
+
+      .modal-panel:has(.inventory-modal) {
+        width: min(796px, calc(100vw - 36px));
+        max-height: calc(100dvh - 72px);
+      }
+
+      .inventory-layout {
+        grid-template-columns: 164px minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .inventory-side-column {
+        padding: 10px;
+      }
+
+      .inventory-summary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .inventory-grid,
+      .inventory-section-resources .inventory-grid,
+      .inventory-section-payload .inventory-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .inventory-section-artifacts .inventory-grid,
+      .inventory-section-drones .inventory-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .inventory-item {
+        min-height: 96px;
+        padding: 10px;
+      }
+    }
+
     @media (max-width: 460px) {
       .inventory-summary,
       .inventory-section-resources .inventory-grid,
@@ -4230,9 +4684,9 @@
     <div class="telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong><small>thermal buildup over the burn</small></div>
     <div class="telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong><small>where the burn starts feeling spicy</small></div>
   </div>
-  <aside id="debug-tools" class="debug-tools" aria-label="Debug mini-game tools">
-    <h2>Debug mini-games</h2>
-    <p>Sandbox launches use default settings and do not write save data.</p>
+  <aside id="debug-tools" class="debug-tools" aria-label="Debug screen tools">
+    <h2>Debug screens</h2>
+    <p>Sandbox screens use default settings and do not write save data.</p>
     <div class="debug-tool-grid">
       <button class="warn" type="button" data-debug-action="mining">Mining sandbox</button>
       <button class="danger" type="button" data-debug-action="combat-mining">Combat mining sandbox</button>
@@ -4240,6 +4694,13 @@
       <button class="danger" type="button" data-debug-action="push">Deep push sandbox</button>
       <button type="button" data-debug-action="flyby">Flyby sandbox</button>
       <button type="button" data-debug-action="orbit">Orbit sandbox</button>
+      <button type="button" data-debug-action="hangar">Hangar board</button>
+      <button type="button" data-debug-action="results">Debrief board</button>
+      <button type="button" data-debug-action="arrival-ops">Arrival Ops board</button>
+      <button type="button" data-debug-action="research">Research board</button>
+      <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
+      <button type="button" data-debug-action="drone-ops">Drone Ops board</button>
+      <button type="button" data-debug-action="navigation">Navigation board</button>
       <button class="ghost" type="button" data-debug-action="exit">Exit debug / reload save</button>
     </div>
   </aside>
@@ -4612,6 +5073,7 @@
         panel.classList.toggle("mining-fullscreen-panel", miningFullscreen);
         panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
         panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
+        panel.classList.toggle("navigation-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-navigation")));
         if (phaseBoard) {
           showToast(panel.querySelector(".phase-status")?.textContent || "");
         }
@@ -4730,6 +5192,13 @@
       debugSurfacePush: () => rrCall("rr_debug_surface_push"),
       debugFlyby: () => rrCall("rr_debug_flyby"),
       debugOrbit: () => rrCall("rr_debug_orbit"),
+      debugHangar: () => rrCall("rr_debug_hangar"),
+      debugResults: () => rrCall("rr_debug_results"),
+      debugArrivalOps: () => rrCall("rr_debug_arrival_ops"),
+      debugResearch: () => rrCall("rr_debug_research"),
+      debugSurfaceUpgrade: () => rrCall("rr_debug_surface_upgrade"),
+      debugDroneOps: () => rrCall("rr_debug_drone_ops"),
+      debugNavigation: () => rrCall("rr_debug_navigation"),
       debugExit: () => rrCall("rr_debug_exit"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
@@ -4863,6 +5332,13 @@
       push: () => rr.debugSurfacePush(),
       flyby: () => rr.debugFlyby(),
       orbit: () => rr.debugOrbit(),
+      hangar: () => rr.debugHangar(),
+      results: () => rr.debugResults(),
+      "arrival-ops": () => rr.debugArrivalOps(),
+      research: () => rr.debugResearch(),
+      "surface-upgrade": () => rr.debugSurfaceUpgrade(),
+      "drone-ops": () => rr.debugDroneOps(),
+      navigation: () => rr.debugNavigation(),
       exit: () => rr.debugExit()
     });
 

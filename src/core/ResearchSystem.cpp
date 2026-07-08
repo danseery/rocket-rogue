@@ -1772,12 +1772,12 @@ bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index
     }
     const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
     if (currentLevel >= 3) {
-        state.statusLine = drone.name + " is already fully tuned.";
+        state.statusLine = drone.name + " is already fully upgraded.";
         return false;
     }
     const MaterialInventory cost = miniDroneUpgradeCost(currentLevel + 1);
     if (!canAffordMaterials(state.meta.materials, cost)) {
-        state.statusLine = "Need " + std::to_string(cost.common) + " common, " + std::to_string(cost.rare) + " rare, " + std::to_string(cost.exotic) + " exotic to tune " + drone.name + ".";
+        state.statusLine = "Need " + std::to_string(cost.common) + " common, " + std::to_string(cost.rare) + " rare, " + std::to_string(cost.exotic) + " exotic to upgrade " + drone.name + ".";
         return false;
     }
     spendMaterials(state.meta.materials, cost);
@@ -1790,7 +1790,7 @@ bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index
     } else {
         existing->level = currentLevel + 1;
     }
-    state.statusLine = drone.name + " tuned to Mk " + std::to_string(currentLevel + 1) + ".";
+    state.statusLine = drone.name + " upgraded to Mk " + std::to_string(currentLevel + 1) + ".";
     return true;
 }
 

@@ -303,9 +303,9 @@ std::string operationCard(std::string title, std::string detail, std::string cos
 {
     std::ostringstream out;
     out << "<article class=\"ops-card " << htmlEscape(cssClass) << "\">";
-    out << "<h3>" << htmlEscape(title) << "</h3>";
-    out << "<p class=\"ops-detail\">" << htmlEscape(detail) << "</p>";
-    out << "<div class=\"card-footer\"><span class=\"ops-cost\">" << htmlEscape(cost) << "</span>";
+    out << "<h3 class=\"card-title\">" << htmlEscape(title) << "</h3>";
+    out << "<p class=\"card-copy ops-detail\">" << htmlEscape(detail) << "</p>";
+    out << "<div class=\"card-footer action-row\"><span class=\"ops-cost\">" << htmlEscape(cost) << "</span>";
     out << (available ? button(text::buttons::assign, action) : disabledButton(text::buttons::unavailable));
     out << "</div></article>";
     return out.str();
@@ -320,9 +320,9 @@ std::string operationModalCard(const HangarOperationCardPresentation& card, std:
 {
     std::ostringstream out;
     out << "<article class=\"ops-card " << htmlEscape(card.cssClass) << "\">";
-    out << "<h3>" << htmlEscape(card.title) << "</h3>";
-    out << "<p class=\"ops-detail\">" << htmlEscape(card.detail) << "</p>";
-    out << "<div class=\"card-footer\"><span class=\"ops-cost\">" << htmlEscape(card.cost) << "</span>";
+    out << "<h3 class=\"card-title\">" << htmlEscape(card.title) << "</h3>";
+    out << "<p class=\"card-copy ops-detail\">" << htmlEscape(card.detail) << "</p>";
+    out << "<div class=\"card-footer action-row\"><span class=\"ops-cost\">" << htmlEscape(card.cost) << "</span>";
     out << (card.available ? modalButton(buttonLabel, modalId) : disabledButton(text::buttons::unavailable));
     out << "</div></article>";
     return out.str();
@@ -348,9 +348,9 @@ std::string pilotCandidateCard(const Astronaut& candidate, int index, bool avail
     out << "<article class=\"pilot-card\">";
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(focus) << "</span><strong>" << htmlEscape(crewClass) << "</strong></div>";
     out << "<div class=\"pilot-portrait-placeholder\"><span>" << htmlEscape(candidate.name.substr(0, 1)) << "</span></div>";
-    out << "<h3>" << htmlEscape(candidate.name) << "</h3>";
-    out << "<p>" << htmlEscape(candidate.trait) << "</p>";
-    out << "<div class=\"pilot-stat-grid\">";
+    out << "<h3 class=\"card-title\">" << htmlEscape(candidate.name) << "</h3>";
+    out << "<p class=\"card-copy\">" << htmlEscape(candidate.trait) << "</p>";
+    out << "<div class=\"pilot-stat-grid metric-strip\">";
     out << "<span>Training <strong>" << htmlEscape(std::to_string(candidate.training)) << "</strong></span>";
     out << "<span>Stress <strong>" << htmlEscape(display::percent(candidate.stress)) << "</strong></span>";
     out << "</div>";
@@ -495,11 +495,11 @@ std::string refitOfferCard(const RefitOfferPresentation& offer)
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(presentation.category) << "</span><strong>"
         << htmlEscape(presentation.rarity) << " refit</strong></div>";
     out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(presentation.glyph) << "</span></div>";
-    out << "<h3>" << htmlEscape(presentation.title) << "</h3>";
-    out << "<p>" << htmlEscape(presentation.detail) << "</p>";
+    out << "<h3 class=\"card-title\">" << htmlEscape(presentation.title) << "</h3>";
+    out << "<p class=\"card-copy\">" << htmlEscape(presentation.detail) << "</p>";
     out << "<strong class=\"module-impact\">" << htmlEscape(presentation.primaryImpact) << "</strong>";
-    out << "<div class=\"stat-grid\">" << statChipGrid(presentation.statChips) << "</div>";
-    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape(offer.footerCostSummary) << "</span>"
+    out << "<div class=\"stat-grid chip-strip\">" << statChipGrid(presentation.statChips) << "</div>";
+    out << "<div class=\"draft-card-footer action-row\"><span>" << htmlEscape(offer.footerCostSummary) << "</span>"
         << panelButton(offer.action) << "</div></article>";
     return out.str();
 }
@@ -510,13 +510,13 @@ std::string researchProjectCard(const ResearchProjectCardPresentation& project)
     out << "<article class=\"ops-card\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(project.rarity) << "</span><span>"
         << htmlEscape(project.blueprintGain) << "</span></div>";
-    out << "<h3>" << htmlEscape(project.title) << "</h3>";
-    out << "<p>" << htmlEscape(project.detail) << "</p>";
+    out << "<h3 class=\"card-title\">" << htmlEscape(project.title) << "</h3>";
+    out << "<p class=\"card-copy\">" << htmlEscape(project.detail) << "</p>";
     if (!project.reward.empty()) {
         out << "<strong class=\"module-impact\">" << htmlEscape(project.reward) << "</strong>";
     }
-    out << "<div class=\"stat-grid\">" << resourceChipGrid(project.resourceChips) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape(project.materialCost) << "</span>"
+    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(project.resourceChips) << "</div>";
+    out << "<div class=\"card-footer action-row\"><span>" << htmlEscape(project.materialCost) << "</span>"
         << panelButton(project.action) << "</div></article>";
     return out.str();
 }
@@ -529,10 +529,10 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
     out << "<article class=\"ops-card surface-action-card" << (isMining ? " featured-action" : "") << "\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(action.cost) << "</span><span>"
         << htmlEscape(action.risk) << " " << htmlEscape(surfaceActionChipLabel(action.riskLabel)) << "</span></div>";
-    out << "<h3>" << htmlEscape(action.title) << "</h3>";
-    out << "<p class=\"ops-detail\">" << htmlEscape(detail) << "</p>";
-    out << "<div class=\"stat-grid\">" << surfaceActionChipGrid(action.payoffChips) << "</div>";
-    out << "<div class=\"card-footer\"><span class=\"surface-action-status\">" << htmlEscape(action.availability)
+    out << "<h3 class=\"card-title\">" << htmlEscape(action.title) << "</h3>";
+    out << "<p class=\"card-copy ops-detail\">" << htmlEscape(detail) << "</p>";
+    out << "<div class=\"stat-grid chip-strip\">" << surfaceActionChipGrid(action.payoffChips) << "</div>";
+    out << "<div class=\"card-footer action-row\"><span class=\"surface-action-status\">" << htmlEscape(action.availability)
         << "</span>" << panelButton(surfaceActionFooterButton(action)) << "</div></article>";
     return out.str();
 }
@@ -544,42 +544,33 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(upgrade.category) << "</span><strong>"
         << htmlEscape(upgrade.rarity) << " field mod</strong></div>";
     out << "<div class=\"pilot-portrait-placeholder draft-art\"><span>" << htmlEscape(draftInitial(upgrade.category, "F")) << "</span></div>";
-    out << "<h3>" << htmlEscape(upgrade.title) << "</h3>";
-    out << "<p>" << htmlEscape(upgrade.detail) << "</p>";
-    out << "<div class=\"stat-grid\">" << resourceChipGrid(upgrade.effectChips) << "</div>";
-    out << "<div class=\"draft-card-footer\"><span>" << htmlEscape("Until drone loss") << "</span>"
+    out << "<h3 class=\"card-title\">" << htmlEscape(upgrade.title) << "</h3>";
+    out << "<p class=\"card-copy\">" << htmlEscape(upgrade.detail) << "</p>";
+    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(upgrade.effectChips) << "</div>";
+    out << "<div class=\"draft-card-footer action-row\"><span>" << htmlEscape("Until drone loss") << "</span>"
         << panelButton(upgrade.action) << "</div></article>";
     return out.str();
 }
 
-std::string miniDroneCard(const MiniDroneCardPresentation& drone)
+std::string miniDroneControlCard(const MiniDroneCardPresentation& drone)
 {
-    std::ostringstream out;
-    out << "<article class=\"ops-card drone-card " << rarityCardClass(drone.rarity) << "\">";
-    out << "<div class=\"card-topline\"><span>" << htmlEscape(drone.role) << "</span><span>"
-        << htmlEscape(drone.rarity) << "</span></div>";
-    out << "<div class=\"module-art\"><span>" << htmlEscape(drone.title.empty() ? "D" : std::string(1, drone.title.front())) << "</span></div>";
-    out << "<h3>" << htmlEscape(drone.title) << "</h3>";
-    out << "<p>" << htmlEscape(drone.detail) << "</p>";
-    out << "<p class=\"drone-build-hook\">" << htmlEscape(drone.buildHook) << "</p>";
-    out << "<p class=\"drone-upgrade-summary\">" << htmlEscape(drone.upgradeSummary) << "</p>";
-    out << "<div class=\"stat-grid\">" << resourceChipGrid(drone.effectChips) << "</div>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape(drone.status)
-        << "</span>" << panelButton(drone.action) << panelButton(drone.upgradeAction) << "</div></article>";
-    return out.str();
-}
+    std::vector<PanelMetricPresentation> chips;
+    chips.reserve(std::min<std::size_t>(drone.effectChips.size(), 2));
+    for (std::size_t i = 0; i < drone.effectChips.size() && i < 2; ++i) {
+        chips.push_back(drone.effectChips[i]);
+    }
 
-std::string droneBuildRecipeCard(const DroneBuildRecipePresentation& recipe)
-{
     std::ostringstream out;
-    out << "<article class=\"drone-recipe-card " << (recipe.active ? "active" : "locked")
-        << (recipe.signature ? " signature" : "") << "\">";
-    out << "<div class=\"recipe-topline\"><span>" << htmlEscape(recipe.signature ? "Signature" : "Pair")
-        << "</span><strong>" << htmlEscape(recipe.status) << "</strong></div>";
-    out << "<h3>" << htmlEscape(recipe.title) << "</h3>";
-    out << "<p class=\"recipe-requirements\">" << htmlEscape(recipe.requirements) << "</p>";
-    out << "<p>" << htmlEscape(recipe.detail) << "</p>";
-    out << "</article>";
+    out << "<article class=\"drone-control-card " << rarityCardClass(drone.rarity) << "\">";
+    out << "<div class=\"drone-card-head\"><span class=\"drone-role-mark\">"
+        << htmlEscape(drone.role.empty() ? "D" : std::string(1, drone.role.front())) << "</span>"
+        << "<div class=\"drone-card-id\"><div class=\"card-topline\"><span>" << htmlEscape(drone.role)
+        << "</span><span>" << htmlEscape(drone.rarity) << "</span></div>"
+        << "<h3 class=\"card-title\">" << htmlEscape(drone.title) << "</h3></div></div>";
+    out << "<p class=\"card-copy drone-control-status\">" << htmlEscape(drone.status) << "</p>";
+    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(chips) << "</div>";
+    out << "<div class=\"card-footer action-row\">" << panelButton(drone.action)
+        << panelButton(drone.upgradeAction) << "</div></article>";
     return out.str();
 }
 
@@ -587,12 +578,11 @@ std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
 {
     std::ostringstream out;
     out << "<article class=\"drone-loadout-slot " << htmlEscape(slot.cssClass) << "\">";
-    out << "<div class=\"slot-topline\"><span>" << htmlEscape("Slot " + std::to_string(slot.slot))
-        << "</span><strong>" << htmlEscape(slot.status) << "</strong></div>";
-    out << "<h3>" << htmlEscape(slot.title) << "</h3>";
-    out << "<p class=\"slot-role\">" << htmlEscape(slot.role) << "</p>";
-    out << "<p>" << htmlEscape(slot.detail) << "</p>";
-    out << "<div class=\"stat-grid\">" << resourceChipGrid(slot.chips) << "</div>";
+    out << "<div class=\"slot-card-head\"><span class=\"slot-number\">" << htmlEscape(std::to_string(slot.slot))
+        << "</span><strong class=\"slot-state\">" << htmlEscape(slot.status) << "</strong></div>";
+    out << "<div class=\"slot-card-body\"><h3 class=\"card-title\">" << htmlEscape(slot.title) << "</h3>";
+    out << "<p class=\"card-copy slot-role\">" << htmlEscape(slot.role) << "</p></div>";
+    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(slot.chips) << "</div>";
     out << "</article>";
     return out.str();
 }
@@ -603,10 +593,10 @@ std::string primarySurfaceActionCard(const SurfaceActionPreviewPresentation& act
     out << "<article class=\"surface-primary-action\">";
     out << "<div class=\"surface-primary-copy\"><div class=\"surface-action-topline\"><span>" << htmlEscape(action.cost)
         << "</span><span>" << htmlEscape(action.risk) << " " << htmlEscape(surfaceActionChipLabel(action.riskLabel)) << "</span></div>";
-    out << "<h3>" << htmlEscape(action.title) << "</h3>";
-    out << "<p class=\"ops-detail\">" << htmlEscape(surfaceActionDetail(action)) << "</p>";
-    out << "<div class=\"stat-grid\">" << surfaceActionChipGrid(action.payoffChips) << "</div></div>";
-    out << "<div class=\"surface-primary-control\"><span>" << htmlEscape(action.availability) << "</span>";
+    out << "<h3 class=\"card-title\">" << htmlEscape(action.title) << "</h3>";
+    out << "<p class=\"card-copy ops-detail\">" << htmlEscape(surfaceActionDetail(action)) << "</p>";
+    out << "<div class=\"stat-grid chip-strip\">" << surfaceActionChipGrid(action.payoffChips) << "</div></div>";
+    out << "<div class=\"surface-primary-control action-row\"><span>" << htmlEscape(action.availability) << "</span>";
     out << panelButton(action.action);
     out << "</div>";
     out << "</article>";
@@ -651,7 +641,7 @@ std::string surfaceMiniGamePanel(
     out << "<section class=\"surface-minigame " << htmlEscape(cssClass) << "\">";
     out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(title)
         << "</h2><p>" << htmlEscape(subtitle) << "</p></div>"
-        << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+        << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
         << "</div></div>";
     out << "<div class=\"minigame-readout\"><div class=\"minigame-metrics\">";
     for (std::size_t index = 0; index < metrics.size(); index += 2) {
@@ -665,7 +655,7 @@ std::string surfaceMiniGamePanel(
     out << "</div><div class=\"stat-grid minigame-rewards\">" << resourceChipGrid(rewards) << "</div></div>";
     out << "<article class=\"resource-bank minigame-callout\"><div><h2>" << htmlEscape(statusTitle)
         << "</h2><p>" << htmlEscape(statusDetail) << "</p></div></article>";
-    out << "<div class=\"actions minigame-actions\">";
+    out << "<div class=\"actions action-row minigame-actions\">";
     for (const PanelButtonPresentation& action : actions) {
         out << panelButton(action);
     }
@@ -683,9 +673,9 @@ std::string arrivalOperationCard(
     std::ostringstream out;
     out << "<article class=\"ops-card arrival-card\">";
     out << "<div class=\"card-topline\"><span>" << htmlEscape(risk) << "</span><span>" << htmlEscape(reward) << "</span></div>";
-    out << "<h3>" << htmlEscape(title) << "</h3>";
-    out << "<p>" << htmlEscape(detail) << "</p>";
-    out << "<div class=\"card-footer\"><span>" << htmlEscape(action.enabled ? std::string(text::panel::ready) : std::string(text::buttons::unavailable))
+    out << "<h3 class=\"card-title\">" << htmlEscape(title) << "</h3>";
+    out << "<p class=\"card-copy\">" << htmlEscape(detail) << "</p>";
+    out << "<div class=\"card-footer action-row\"><span>" << htmlEscape(action.enabled ? std::string(text::panel::ready) : std::string(text::buttons::unavailable))
         << "</span>" << panelButton(action) << "</div></article>";
     return out.str();
 }
@@ -702,7 +692,7 @@ std::string detailHeader(std::string_view label)
 
 std::string detailStack(const std::vector<DetailPresentationRow>& rows)
 {
-    std::string body = "<div class=\"detail-stack\">";
+    std::string body = "<div class=\"detail-stack modal-body\">";
     for (const DetailPresentationRow& row : rows) {
         body += row.heading ? detailHeader(row.label) : detailRow(row.label, row.value);
     }
@@ -712,7 +702,7 @@ std::string detailStack(const std::vector<DetailPresentationRow>& rows)
 
 std::string missionLog(const std::vector<std::string>& entries)
 {
-    std::string body = "<div class=\"detail-stack\">";
+    std::string body = "<div class=\"detail-stack modal-body\">";
     for (std::size_t i = 0; i < entries.size(); ++i) {
         body += detailRow(std::to_string(i + 1), entries[i]);
     }
@@ -725,7 +715,7 @@ std::string inventoryItemCard(const InventoryItemPresentation& item)
     std::ostringstream out;
     out << "<article class=\"inventory-item " << htmlEscape(item.cssClass) << "\">";
     out << "<div class=\"inventory-art\"><span>" << htmlEscape(item.glyph) << "</span></div>";
-    out << "<div class=\"inventory-copy\"><h3>" << htmlEscape(item.title) << "</h3><p>" << htmlEscape(item.detail) << "</p></div>";
+    out << "<div class=\"inventory-copy card-copy\"><h3 class=\"card-title\">" << htmlEscape(item.title) << "</h3><p>" << htmlEscape(item.detail) << "</p></div>";
     out << "<strong class=\"inventory-count\">" << htmlEscape(item.count) << "</strong>";
     out << "</article>";
     return out.str();
@@ -764,6 +754,19 @@ std::string inventorySection(const InventorySectionPresentation& section)
     return out.str();
 }
 
+bool shouldShowInventorySection(const InventorySectionPresentation& section)
+{
+    if (section.title == "Ship tech") {
+        return false;
+    }
+    if (section.title != "Artifacts") {
+        return true;
+    }
+    return std::any_of(section.items.begin(), section.items.end(), [](const InventoryItemPresentation& item) {
+        return item.count != "0" && !item.count.empty();
+    });
+}
+
 std::string inventoryBody(const InventoryPresentation& inventory)
 {
     std::ostringstream out;
@@ -784,7 +787,9 @@ std::string inventoryBody(const InventoryPresentation& inventory)
     }
     out << "</div>";
     for (const InventorySectionPresentation& section : inventory.sections) {
-        out << inventorySection(section);
+        if (shouldShowInventorySection(section)) {
+            out << inventorySection(section);
+        }
     }
     out << "</div></div></div>";
     return out.str();
@@ -903,7 +908,7 @@ std::string phaseAdvisory(const PhaseAdvisoryPresentation& advisory)
 std::string resultMetricGroup(const LaunchOutcomeMetricGroupPresentation& group)
 {
     const std::string classAttr = group.cssClass.empty() ? "" : " " + htmlEscape(group.cssClass);
-    std::string out = "<article class=\"result-group" + classAttr + "\"><h3>" + htmlEscape(group.title) + "</h3>";
+    std::string out = "<article class=\"result-group" + classAttr + "\"><h3 class=\"card-title\">" + htmlEscape(group.title) + "</h3>";
     for (const LaunchOutcomeMetricPresentation& metricItem : group.metrics) {
         out += "<div class=\"result-row\"><span>" + htmlEscape(metricItem.label) + "</span><strong>" +
             htmlEscape(metricItem.value) + "</strong></div>";
@@ -988,11 +993,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\">"
         << htmlEscape("Disable camera shake") << "</button></section>";
     settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
-        << "<div><h3>" << htmlEscape("Debug mini-games") << "</h3>"
-        << "<p>" << htmlEscape("Show sandbox launch tools for mining, flyby, and orbit. These do not write save data.") << "</p></div>"
+        << "<div><h3>" << htmlEscape("Debug screens") << "</h3>"
+        << "<p>" << htmlEscape("Show sandbox screen tools for board, mining, flyby, and orbit checks. These do not write save data.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\">"
         << htmlEscape("Show debug tools") << "</button></section>";
-    settingsBody << "<div class=\"modal-actions\">";
+    settingsBody << "<div class=\"modal-actions action-row\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         settingsBody << panelButton(action);
     }
@@ -1013,7 +1018,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 : "Plot the next route through known space.") << "</p></div></div>";
         out << "<section class=\"resource-bank ark-status\"><div><h2>" << htmlEscape("Ark status")
             << "</h2><p>" << htmlEscape(std::string(toString(state.meta.ark.condition))) << "</p></div>"
-            << "<div class=\"stat-grid\">"
+            << "<div class=\"stat-grid chip-strip\">"
             << resourceChipGrid({
                 panelMetric("Campaign", std::string(toString(state.meta.campaignMilestone))),
                 panelMetric("System", state.meta.navigation.currentSystemId.empty() ? "Solar system" : state.meta.navigation.currentSystemId),
@@ -1037,17 +1042,17 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 out << "<article class=\"ops-card nav-card " << (selected ? "selected" : "") << "\">";
                 out << "<div class=\"card-kicker\"><span>" << htmlEscape("Fuel " + std::to_string(fuelCost) + " / reserve " + std::to_string(state.meta.ark.fuelReserve))
                     << "</span><span>" << htmlEscape("Danger " + display::percent(static_cast<double>(danger) / 100.0)) << "</span></div>";
-                out << "<h3>" << htmlEscape(destination.name) << "</h3>";
-                out << "<p>" << htmlEscape(destination.tier >= 4
+                out << "<h3 class=\"card-title\">" << htmlEscape(destination.name) << "</h3>";
+                out << "<p class=\"card-copy\">" << htmlEscape(destination.tier >= 4
                     ? "Hostile-system sortie. Rich resources, artifact leads, and enemy pressure."
                     : "Known solar-system route.") << "</p>";
-                out << "<div class=\"stat-grid\">";
+                out << "<div class=\"stat-grid chip-strip\">";
                 out << resourceChip(panelMetric("Value", std::to_string(value)));
                 out << resourceChip(panelMetric("Terrain", display::percent(static_cast<double>(durability) / 100.0)));
                 out << resourceChip(panelMetric("Artifacts", destination.tier >= 4 ? "Possible" : "None"));
                 out << resourceChip(panelMetric("Enemies", destination.tier >= 4 ? "Detected" : "None"));
                 out << "</div>";
-                out << "<div class=\"card-footer\"><span>" << htmlEscape(selected ? "Selected" : (fuelAvailable ? "Mapped" : "Need fuel"))
+                out << "<div class=\"card-footer action-row\"><span>" << htmlEscape(selected ? "Selected" : (fuelAvailable ? "Mapped" : "Need fuel"))
                     << "</span>" << (fuelAvailable
                         ? button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn")
                         : disabledButton("Need fuel"))
@@ -1146,7 +1151,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Result locked. Click the mission stamp or press Space to continue.") << "</p>";
         } else {
             out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("W/Up faster, S/Down slower. A/Left rotates counter-clockwise; D/Right rotates clockwise. Escape aborts as a Miss.") << "</p>";
-            out << "<div class=\"actions primary-actions\">"
+            out << "<div class=\"actions action-row primary-actions\">"
                 << panelButton(panelActionButton("Abort flyby", ui::actions::flybyAbort, "danger"))
                 << "</div>";
         }
@@ -1230,7 +1235,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             orbitControlCard("tighten", "A", "Tighten", "Left arrow");
             out << "</div></div>";
             out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Escape aborts as a Miss.") << "</p>";
-            out << "<div class=\"actions primary-actions\">"
+            out << "<div class=\"actions action-row primary-actions\">"
                 << panelButton(panelActionButton("Abort orbit", ui::actions::orbitAbort, "danger"))
                 << "</div>";
         }
@@ -1268,7 +1273,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << warningButton(sample.label, sample.value);
         }
         out << "</div>";
-        out << "<div class=\"utility-row\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
+        out << "<div class=\"utility-row utility-actions\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
         out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         const bool arkKnown = arkDiscovered(state);
@@ -1289,14 +1294,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         if (!context.flightArmed) {
             out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Review the burn profile, then use the cockpit launch control beside the vehicle.") << "</p>";
         } else {
-            out << "<div class=\"actions primary-actions\">";
+            out << "<div class=\"actions action-row primary-actions\">";
             for (const FlightActionButtonPresentation& action : launchPanel.primaryActions) {
                 out << panelButton(action);
             }
             out << "</div>";
 
             if (hasAdvancedFlightControls) {
-                out << "<div class=\"actions system-actions\">";
+                out << "<div class=\"actions action-row system-actions\">";
                 for (const FlightActionButtonPresentation& action : launchPanel.systemActions) {
                     out << panelButton(action);
                 }
@@ -1323,7 +1328,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         if (opensPostArrival) {
             const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
             out << phaseTrack(postArrivalPhaseSteps(Screen::Results));
-            out << "<div class=\"utility-row\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div>";
+            out << "<div class=\"utility-row utility-actions\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div>";
             out << modalTemplate(ui::modals::phaseBriefing, arrivalBriefing.title, detailStack(arrivalBriefing.rows));
         }
         out << crewFateCard(presentation.crewFate);
@@ -1343,7 +1348,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             }
             out << "</div>";
         }
-        out << "<div class=\"actions\">";
+        out << "<div class=\"actions action-row\">";
         out << button(presentation.nextActionLabel, ui::actions::next, "ok");
         out << "</div>";
         out << phaseBoardClose();
@@ -1433,7 +1438,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-research", state.statusLine);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::research)
             << "</h2><p>" << htmlEscape("Turn arrival data into better tools, or continue down to the surface.") << "</p></div>"
-            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::research, "ghost")
+            << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::details, ui::modals::research, "ghost")
             << "</div></div>";
         out << phaseAdvisory(researchPanel.advisory);
         out << "<div class=\"metric-grid focus-metrics\">";
@@ -1446,7 +1451,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << researchProjectCard(project);
         }
         out << "</div></section>";
-        out << "<div class=\"actions\">";
+        out << "<div class=\"actions action-row\">";
         out << panelButton(researchPanel.skipAction);
         out << "</div>";
         out << phaseBoardClose();
@@ -1509,14 +1514,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "<div class=\"mining-playfield-space\"></div>";
         out << "<div class=\"mining-bottom-rail\"><section class=\"mining-payload-strip\"><span>"
-            << htmlEscape("Payload") << "</span><div class=\"stat-grid\">";
+            << htmlEscape("Payload") << "</span><div class=\"stat-grid chip-strip\">";
         emitPayloadIfPresent("Carried cargo");
         emitPayloadIfPresent("Banked cargo");
         emitPayloadIfPresent("Carried mats");
         emitPayloadIfPresent("Banked mats");
         out << "</div>";
         if (metricFor("Artifact") != nullptr) {
-            out << "<div class=\"mining-artifact-strip\"><div class=\"stat-grid\">";
+            out << "<div class=\"mining-artifact-strip\"><div class=\"stat-grid chip-strip\">";
             emitMetricIfPresent("Artifact");
             emitMetricIfPresent("Tether");
             emitMetricIfPresent("Artifact integrity");
@@ -1524,7 +1529,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         const PanelButtonPresentation* miningPrimaryAction = nullptr;
         out << "</section><section class=\"mining-command-dock\"><span>" << htmlEscape("Commands")
-            << "</span><strong>" << htmlEscape("Scan, tether") << "</strong><div class=\"actions system-actions\">";
+            << "</span><strong>" << htmlEscape("Scan, tether") << "</strong><div class=\"actions action-row system-actions\">";
         for (const PanelButtonPresentation& action : miningPanel.actions) {
             if (action.actionId == ui::actions::miningStow || action.actionId == ui::actions::miningAbort) {
                 miningPrimaryAction = &action;
@@ -1536,14 +1541,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         if (miningPrimaryAction != nullptr) {
             PanelButtonPresentation dockAction = *miningPrimaryAction;
             dockAction.cssClass += dockAction.cssClass.empty() ? "mining-primary-command" : " mining-primary-command";
-            out << "<section class=\"mining-recall-dock\"><div class=\"actions system-actions\">" << panelButton(dockAction) << "</div></section>";
+            out << "<section class=\"mining-recall-dock\"><div class=\"actions action-row system-actions\">" << panelButton(dockAction) << "</div></section>";
         }
         out << "</div></section>";
         if (miningPanel.failurePending) {
             std::ostringstream failureBody;
             failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
-            failureBody << "<div class=\"modal-actions actions\">"
+            failureBody << "<div class=\"modal-actions actions action-row\">"
                 << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"))
                 << "</div>";
             out << autoModalTemplate(ui::modals::miningFailure, miningPanel.failureTitle, failureBody.str());
@@ -1559,50 +1564,46 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-drone-ops", state.statusLine);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape("Drone Ops")
             << "</h2><p>" << htmlEscape("Assign persistent helper drones before committing the mining rig.") << "</p></div>"
-            << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
-            << "</div></div>";
+            << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
+            << panelButton(dronePanel.backAction) << "</div></div>";
         const std::vector<PanelMetricPresentation> droneBayChips {
             dronePanel.metrics.size() > 0 ? dronePanel.metrics[0] : panelMetric("Slots", "0/0"),
-            dronePanel.metrics.size() > 1 ? dronePanel.metrics[1] : panelMetric("Owned drones", "0"),
+            panelMetric("Owned", dronePanel.metrics.size() > 1 ? dronePanel.metrics[1].value : "0"),
             panelMetric("Next slot", dronePanel.nextSlotCost)
         };
         const std::vector<PanelMetricPresentation> droneMaterialChips {
-            dronePanel.metrics.size() > 2 ? dronePanel.metrics[2] : panelMetric(text::labels::commonMaterials, "0"),
-            dronePanel.metrics.size() > 3 ? dronePanel.metrics[3] : panelMetric(text::labels::rareMaterials, "0"),
-            dronePanel.metrics.size() > 4 ? dronePanel.metrics[4] : panelMetric(text::labels::exoticMaterials, "0")
+            panelMetric("Common", dronePanel.metrics.size() > 2 ? dronePanel.metrics[2].value : "0"),
+            panelMetric("Rare", dronePanel.metrics.size() > 3 ? dronePanel.metrics[3].value : "0"),
+            panelMetric("Exotic", dronePanel.metrics.size() > 4 ? dronePanel.metrics[4].value : "0")
         };
+        out << "<div class=\"drone-top-row\">";
         out << "<section class=\"resource-bank drone-bay-strip\"><div class=\"drone-bay-copy\"><h2>" << htmlEscape("Drone Bay")
-            << "</h2><p>" << htmlEscape("Slots persist across expeditions. Equipped drones support the next mining run.") << "</p></div>"
-            << "<div class=\"stat-grid drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
-            << "<div class=\"stat-grid drone-bay-materials\">" << resourceChipGrid(droneMaterialChips) << "</div>"
+            << "</h2><p>" << htmlEscape("Slots persist. Equipped drones support the next mining run.") << "</p></div>"
+            << "<div class=\"stat-grid chip-strip drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
+            << "<div class=\"stat-grid chip-strip drone-bay-materials\">" << resourceChipGrid(droneMaterialChips) << "</div>"
             << panelButton(dronePanel.upgradeSlotAction) << "</section>";
-        out << "<section class=\"resource-bank drone-build-strip\"><div class=\"drone-build-copy\"><h2>" << htmlEscape(dronePanel.buildTitle)
-            << "</h2><p>" << htmlEscape(dronePanel.buildDetail) << "</p></div>"
-            << "<div class=\"stat-grid drone-build-stats\">" << resourceChipGrid(dronePanel.buildChips) << "</div></section>";
-        out << "<section class=\"resource-bank drone-build-guidance\"><div class=\"drone-guidance-copy\"><h2>" << htmlEscape("Build guidance")
-            << "</h2><p>" << htmlEscape("Closest recipe, missing role, and tuning priority for the next hostile mining run.") << "</p></div>"
-            << "<div class=\"stat-grid drone-guidance-stats\">" << resourceChipGrid(dronePanel.buildGuidanceChips) << "</div></section>";
-        out << "<section class=\"board-primary drone-loadout-bench\"><h2>" << htmlEscape("Loadout bench")
-            << "</h2><div class=\"drone-loadout-grid\">";
+        out << "</div>";
+        out << "<section class=\"board-primary drone-roster\"><div class=\"section-heading\"><h2>" << htmlEscape("Drone controls")
+            << "</h2><p>" << htmlEscape("Owned drones: equip, unequip, and upgrade.") << "</p></div><div class=\"drone-control-grid\">";
+        for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
+            out << miniDroneControlCard(drone);
+        }
+        out << "</div></section>";
+        out << "<section class=\"board-primary drone-loadout-bench\"><div class=\"section-heading\"><h2>" << htmlEscape("Loadout bench")
+            << "</h2><p>" << htmlEscape("Active bay slots that launch with the rig.") << "</p></div><div class=\"drone-loadout-grid\">";
         for (const DroneLoadoutSlotPresentation& slot : dronePanel.loadoutSlots) {
             out << droneLoadoutSlotCard(slot);
         }
         out << "</div></section>";
+        std::vector<PanelMetricPresentation> compactForecastChips;
+        for (const PanelMetricPresentation& chip : dronePanel.forecastChips) {
+            if (chip.label == "Volley" || chip.label == "Cadence" || chip.label == "Crit chance" || chip.label == "Sentry output") {
+                compactForecastChips.push_back(chip);
+            }
+        }
         out << "<section class=\"resource-bank drone-combat-forecast\"><div class=\"drone-forecast-copy\"><h2>" << htmlEscape("Combat forecast")
-            << "</h2><p>" << htmlEscape("This is the passive swarm profile that will protect the mining rig while you dig, scan, tether, and extract.") << "</p></div>"
-            << "<div class=\"stat-grid drone-forecast-stats\">" << resourceChipGrid(dronePanel.forecastChips) << "</div></section>";
-        out << "<section class=\"board-primary drone-recipe-board\"><h2>" << htmlEscape("Build recipes")
-            << "</h2><div class=\"drone-recipe-grid\">";
-        for (const DroneBuildRecipePresentation& recipe : dronePanel.buildRecipes) {
-            out << droneBuildRecipeCard(recipe);
-        }
-        out << "</div></section>";
-        out << "<section class=\"board-primary drone-roster\"><h2>" << htmlEscape("Drone roster") << "</h2><div class=\"ops-grid\">";
-        for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
-            out << miniDroneCard(drone);
-        }
-        out << "</div></section>";
-        out << "<div class=\"actions\">" << panelButton(dronePanel.backAction) << "</div>";
+            << "</h2><p>" << htmlEscape("Passive swarm cover during hostile mining.") << "</p></div>"
+            << "<div class=\"stat-grid chip-strip drone-forecast-stats\">" << resourceChipGrid(compactForecastChips) << "</div></section>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, "Drone Ops Details", detailStack(dronePanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
@@ -1700,7 +1701,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-surface surface-ops-screen", state.statusLine);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
             << "</h2></div>";
-        out << "<div class=\"utility-row compact-tools\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
+        out << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
             << modalButton(text::buttons::details, ui::modals::surface, "ghost");
         if (!surfacePanel.logEntries.empty()) {
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
@@ -1752,7 +1753,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 fieldContext.push_back(metricItem);
             }
         }
-        out << "<div class=\"stat-grid draft-context\">" << fieldContextChipGrid(fieldContext) << "</div></section>";
+        out << "<div class=\"stat-grid chip-strip draft-context\">" << fieldContextChipGrid(fieldContext) << "</div></section>";
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
             << htmlEscape("Choose one drone upgrade") << "</h2><p>"
             << htmlEscape("Scanner, drill, and drone tech improve future digs until the rig is lost. Take one, reroll the field research, or walk away.") << "</p></div></div>";
@@ -1760,7 +1761,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
             out << surfaceUpgradeCard(upgrade);
         }
-        out << "</div><div class=\"actions draft-actions\">";
+        out << "</div><div class=\"actions action-row draft-actions\">";
         const double rerollCost = offerRerollCost(state);
         out << panelButton(state.run.credits >= rerollCost
             ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
@@ -1779,7 +1780,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Hangar draft")
             << "</span><h2>" << htmlEscape("Pick your next build card") << "</h2><p>"
             << htmlEscape("The bay crew can only sleeve one permanent refit before launch. Choose the card that defines this vehicle's next role.") << "</p></div>";
-        out << "<div class=\"stat-grid draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
+        out << "<div class=\"stat-grid chip-strip draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
         if (!refitWindow.recoveryDetail.empty()) {
             out << "<p class=\"draft-recovery-note\">" << htmlEscape(refitWindow.recoveryDetail) << "</p>";
         }
@@ -1789,7 +1790,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         for (const RefitOfferPresentation& offer : refitWindow.offers) {
             out << refitOfferCard(offer);
         }
-        out << "</div><div class=\"actions draft-actions\">";
+        out << "</div><div class=\"actions action-row draft-actions\">";
         out << panelButton(refitWindow.rerollAction);
         out << panelButton(refitWindow.skipAction);
         out << "</div></section>";
@@ -1808,7 +1809,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         launchBlockedBody << "<p class=\"status\">" << htmlEscape(message) << "</p>";
     }
     launchBlockedBody << detailStack(launchReadiness.details);
-    launchBlockedBody << "<div class=\"modal-actions actions\">";
+    launchBlockedBody << "<div class=\"modal-actions actions action-row\">";
     for (const PanelButtonPresentation& action : launchReadiness.actions) {
         if (astronaut == nullptr && action.actionId == ui::actions::recruitCrew) {
             launchBlockedBody << modalButton("Choose pilot", ui::modals::pilotIntake, action.cssClass);
@@ -1851,7 +1852,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
-    out << "<div class=\"actions hangar-actions\">";
+    out << "<div class=\"actions action-row hangar-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
     }

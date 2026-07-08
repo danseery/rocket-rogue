@@ -152,6 +152,25 @@ inline std::string materialSummary(const MaterialInventory& materials)
     return text::panel::materialSummary(materials.common, materials.rare, materials.exotic);
 }
 
+inline std::string compactMaterialSummary(const MaterialInventory& materials)
+{
+    std::string summary;
+    const auto add = [&](int amount, std::string_view suffix) {
+        if (amount <= 0) {
+            return;
+        }
+        if (!summary.empty()) {
+            summary += " ";
+        }
+        summary += std::to_string(amount);
+        summary += suffix;
+    };
+    add(materials.common, "C");
+    add(materials.rare, "R");
+    add(materials.exotic, "E");
+    return summary.empty() ? "Free" : summary;
+}
+
 inline std::string researchMaterialSummary(const MaterialInventory& cost, const MaterialInventory& owned)
 {
     return "Cost: " + materialSummary(cost) + " / Have: " + materialSummary(owned);
@@ -323,7 +342,7 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats&
 {
     std::vector<PanelMetricPresentation> chips;
     if (upgradeLevel > 1) {
-        chips.push_back(panelMetric("Tuning", "Mk " + std::to_string(upgradeLevel)));
+        chips.push_back(panelMetric("Upgrade", "Mk " + std::to_string(upgradeLevel)));
     }
     if (stats.passiveMiningRate > 0.0) {
         chips.push_back(panelMetric("Auto-mine", "+" + display::fixed(stats.passiveMiningRate * 60.0, 1) + "/min"));
@@ -396,10 +415,10 @@ inline std::string miniDroneBestUpgradePayoff(const MiniDroneStats& current, con
 inline std::string miniDroneUpgradeSummary(const MiniDrone& drone, bool owned, int upgradeLevel)
 {
     if (!owned) {
-        return "Acquire drone to tune";
+        return "Acquire drone to upgrade";
     }
     if (upgradeLevel >= 3) {
-        return "Mk 3 max tuning";
+        return "Mk 3 max upgrade";
     }
     const int nextLevel = upgradeLevel + 1;
     const MiniDroneStats currentStats = scaledMiniDroneStats(drone.stats, upgradeLevel);
@@ -446,7 +465,7 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         upgradeAction = upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
             : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
-                ? panelActionButton("Tune Mk " + std::to_string(upgradeLevel + 1), ui::actions::upgradeDrone(index), "ok")
+                ? panelActionButton("Upgrade", ui::actions::upgradeDrone(index), "ok")
                 : disabledPanelButton("Need mats"));
     }
     return {
@@ -614,6 +633,23 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
     std::vector<DroneLoadoutSlotPresentation> slots;
     constexpr int maxSlots = 6;
     const int unlockedSlots = std::clamp(state.meta.droneBaySlots, 0, maxSlots);
+    auto compactMaterialSummary = [](const MaterialInventory& materials) {
+        std::string summary;
+        auto add = [&](int amount, std::string_view suffix) {
+            if (amount <= 0) {
+                return;
+            }
+            if (!summary.empty()) {
+                summary += " ";
+            }
+            summary += std::to_string(amount);
+            summary += suffix;
+        };
+        add(materials.common, "C");
+        add(materials.rare, "R");
+        add(materials.exotic, "E");
+        return summary.empty() ? "Free" : summary;
+    };
     for (int index = 0; index < maxSlots; ++index) {
         const int slotNumber = index + 1;
         if (index < unlockedSlots) {
@@ -663,7 +699,7 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
             "locked",
             {
                 panelMetric("Slot", std::to_string(slotNumber)),
-                panelMetric("Need", index == unlockedSlots ? materialSummary(cost) : "Prior slot")
+                panelMetric(index == unlockedSlots ? "Cost" : "Prior", index == unlockedSlots ? compactMaterialSummary(cost) : "")
             }
         });
     }
@@ -783,6 +819,14 @@ inline std::string droneRunPosture(const MiniDroneLoadoutEffects& effects)
 
 inline std::string droneTunePriority(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
 {
+    auto shortDroneName = [](const MiniDrone& drone) {
+        std::string name = drone.name;
+        const std::string suffix = " Drone";
+        if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            name.erase(name.size() - suffix.size());
+        }
+        return name;
+    };
     auto equippedDroneWithRole = [&](MiniDroneRole role) -> const MiniDrone* {
         for (const std::string& droneId : state.meta.equippedDroneIds) {
             const MiniDrone* drone = catalog.findMiniDrone(droneId);
@@ -815,13 +859,13 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
 
     for (MiniDroneRole role : priorities) {
         if (const MiniDrone* drone = equippedDroneWithRole(role)) {
-            return drone->name + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+            return shortDroneName(*drone) + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
         }
     }
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone != nullptr && miniDroneUpgradeLevel(state, drone->id) < 3) {
-            return drone->name + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+            return shortDroneName(*drone) + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
         }
     }
     return state.meta.equippedDroneIds.empty() ? "Equip first" : "All Mk III";
@@ -924,16 +968,16 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     presentation.buildChips = {
         panelMetric("Signature", effects.signatureName.empty() ? "None" : effects.signatureName),
         panelMetric("Active synergies", std::to_string(static_cast<int>(effects.synergyNames.size()))),
-        panelMetric("Tuned drones", std::to_string(tunedDroneCount(state))),
+        panelMetric("Upgraded drones", std::to_string(tunedDroneCount(state))),
         panelMetric("Crit chance", display::percent(std::clamp(tuning::mining::alliedCritChance + effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum))),
         panelMetric("Volley", std::to_string(1 + effects.sentryVolleyBonus)),
         panelMetric("Fire rate", effects.alliedFireRateBonus > 0.0 ? ("+" + display::percent(effects.alliedFireRateBonus)) : "Base")
     };
     presentation.buildGuidanceChips = {
-        panelMetric("Next recipe", guidance.nextRecipe),
-        panelMetric("Missing roles", guidance.missingRoles),
-        panelMetric("Tune next", guidance.tuneNext),
-        panelMetric("Run posture", guidance.runPosture)
+        panelMetric("Recipe", guidance.nextRecipe),
+        panelMetric("Missing", guidance.missingRoles),
+        panelMetric("Upgrade", guidance.tuneNext),
+        panelMetric("Posture", guidance.runPosture)
     };
     presentation.forecastChips = droneCombatForecastChips(effects);
     presentation.loadoutSlots = droneLoadoutSlots(state, catalog);
@@ -944,8 +988,8 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Build signature", effects.signatureName.empty() ? "None" : effects.signatureName),
         detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
         detailPresentationRow("Build guidance", guidance.detail),
-        detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Tune: " + guidance.tuneNext),
-        detailPresentationRow("Drone tuning", std::to_string(tunedDroneCount(state)) + " drones above Mk I. Tuning scales that drone's passive stats while it is equipped."),
+        detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
+        detailPresentationRow("Drone upgrades", std::to_string(tunedDroneCount(state)) + " drones above Mk I. Upgrades scale that drone's passive stats while it is equipped."),
         detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
@@ -962,11 +1006,11 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     for (int index = 0; index < static_cast<int>(catalog.miniDrones.size()); ++index) {
         presentation.drones.push_back(miniDroneCardPresentation(catalog.miniDrones[static_cast<std::size_t>(index)], state, index));
     }
-    presentation.nextSlotCost = maxed ? "Max capacity" : materialSummary(nextCost);
-    const std::string blockedSlotLabel = "Need " + presentation.nextSlotCost;
+    presentation.nextSlotCost = maxed ? "Max capacity" : compactMaterialSummary(nextCost);
+    const std::string blockedSlotLabel = "Need mats";
     presentation.upgradeSlotAction = maxed
         ? disabledPanelButton("Bay maxed")
-        : (affordable ? panelActionButton("Add drone slot", ui::actions::upgradeDroneSlot, "ok") : disabledPanelButton(blockedSlotLabel));
+        : (affordable ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok") : disabledPanelButton(blockedSlotLabel));
     presentation.backAction = panelActionButton("Back to Surface Ops", ui::actions::backToSurfaceOps);
     return presentation;
 }

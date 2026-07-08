@@ -2297,7 +2297,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
     require(drones.drones.front().title == "Mining Drone", "Drone Ops should present mining support first");
     require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
-    require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be tunable");
+    require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be upgradable");
     require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
     require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
     require(drones.drones.front().upgradeSummary.find("auto-mine") != std::string::npos, "drone tuning previews should explain the next payoff");
@@ -2313,11 +2313,11 @@ void droneOpsPresentationExposesPersistentLoadout()
         return recipe.title == "Targeting Grid" && recipe.requirements.find("Attack") != std::string::npos;
     }), "Drone Ops recipes should explain required drone roles");
     require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Next recipe" && !chip.value.empty();
+        return chip.label == "Recipe" && !chip.value.empty();
     }), "Drone Ops should expose a next build recipe target");
     require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Tune next" && !chip.value.empty();
-    }), "Drone Ops should expose a tuning priority for the active build");
+        return chip.label == "Upgrade" && !chip.value.empty();
+    }), "Drone Ops should expose an upgrade priority for the active build");
     require(drones.upgradeSlotAction.enabled, "funded first slot upgrade should be offered when materials allow");
     require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
         return row.label == "Passive combat plan" && row.value.find("auto-fire") != std::string::npos;
@@ -2389,13 +2389,13 @@ void droneOpsPresentationExposesPersistentLoadout()
         return chip.label == "Signature" && chip.value == "Sentry Killbox";
     }), "Drone Ops build strip should expose signature build identity");
     require(std::any_of(drones.buildChips.begin(), drones.buildChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Tuned drones" && chip.value == "1";
-    }), "Drone Ops build strip should count tuned drones");
+        return chip.label == "Upgraded drones" && chip.value == "1";
+    }), "Drone Ops build strip should count upgraded drones");
     require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Next recipe" && chip.value == "Excavation Barrage";
+        return chip.label == "Recipe" && chip.value == "Excavation Barrage";
     }), "Drone Ops build guidance should name the closest inactive recipe");
     require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Missing roles" && chip.value.find("Mining") != std::string::npos;
+        return chip.label == "Missing" && chip.value.find("Mining") != std::string::npos;
     }), "Drone Ops build guidance should explain the missing role for the next recipe");
     require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
         return row.label == "Build guidance" && row.value.find("ore") != std::string::npos;
@@ -2417,7 +2417,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     }), "Drone cards should explain which builds they help unlock");
     require(std::any_of(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
         return drone.title == "Attack Drone" && std::any_of(drone.effectChips.begin(), drone.effectChips.end(), [](const PanelMetricPresentation& chip) {
-            return chip.label == "Tuning" && chip.value == "Mk 2";
+            return chip.label == "Upgrade" && chip.value == "Mk 2";
         });
     }), "tuned drone cards should show Mk-scaled chip presentation");
 
@@ -2682,7 +2682,7 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.destinationId == content::destination::mars, "surface destination should round trip");
     require(restored.run.surfaceExpedition.siteProfile == state.run.surfaceExpedition.siteProfile, "surface site profile should round trip");
     require(restored.run.surfaceExpedition.sharedFuel == 2, "surface shared fuel should round trip");
-    require(restored.run.surfaceExpedition.sharedFuelCapacity == tuning::research::sharedFuelCapacity, "surface shared fuel capacity should round trip");
+    require(restored.run.surfaceExpedition.sharedFuelCapacity == state.run.surfaceExpedition.sharedFuelCapacity, "surface shared fuel capacity should round trip");
     require(restored.run.surfaceExpedition.miningSitePrepared, "surface mining preparation should round trip");
     require(!restored.run.surfaceExpedition.miningRunUsed, "unused surface mining run should round trip");
     require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
@@ -5119,18 +5119,19 @@ void panelHtmlIncludesContextualTutorialLayer()
     Random droneRng(715);
     const PreparedLaunch droneLaunch = prepareLaunch(droneState, catalog, droneRng);
     const std::string droneHtml = buildGamePanelHtml({droneState, catalog, droneLaunch, droneLaunch});
-    require(droneHtml.find("drone-build-strip") != std::string::npos, "Drone Ops HTML should include the active build strip");
-    require(droneHtml.find("drone-build-guidance") != std::string::npos, "Drone Ops HTML should include the build guidance strip");
-    require(droneHtml.find("Next recipe") != std::string::npos, "Drone Ops HTML should expose the next recipe target");
-    require(droneHtml.find("Tune next") != std::string::npos, "Drone Ops HTML should expose the next tuning priority");
+    require(droneHtml.find("drone-bay-strip") != std::string::npos, "Drone Ops HTML should include the Drone Bay strip");
+    require(droneHtml.find("drone-build-guidance") == std::string::npos, "Drone Ops HTML should not render build guidance inline");
     require(droneHtml.find("drone-loadout-bench") != std::string::npos, "Drone Ops HTML should include the loadout bench");
     require(droneHtml.find("Slot 1") != std::string::npos, "Drone Ops loadout bench should label slot positions");
     require(droneHtml.find("drone-combat-forecast") != std::string::npos, "Drone Ops HTML should include the combat forecast strip");
     require(droneHtml.find("Sentry output") != std::string::npos, "Drone Ops combat forecast should show passive combat output");
-    require(droneHtml.find("drone-recipe-board") != std::string::npos, "Drone Ops HTML should include the build recipe board");
+    require(droneHtml.find("Drone controls") != std::string::npos, "Drone Ops HTML should include compact drone controls");
+    require(droneHtml.find("drone-control-card") != std::string::npos, "Drone Ops HTML should use compact drone control cards");
+    require(droneHtml.find("drone-control-status") != std::string::npos, "Drone Ops compact controls should expose drone status");
+    require(droneHtml.find("drone-build-strip") == std::string::npos, "Drone Ops HTML should not render the old active build strip inline");
+    require(droneHtml.find("drone-recipe-board") == std::string::npos, "Drone Ops HTML should not render the old build recipe board inline");
     require(droneHtml.find("Sentry Killbox") != std::string::npos, "Drone Ops HTML should name active signature builds");
     require(droneHtml.find("Targeting Grid") != std::string::npos, "Drone Ops HTML should name active loadout synergies");
-    require(droneHtml.find("drone-build-hook") != std::string::npos, "Drone Ops HTML should expose per-drone build hooks");
 }
 
 void surfaceHtmlPromotesMiningAction()
@@ -5228,8 +5229,9 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(droneHtml.find("phase-board phase-board-drone-ops") != std::string::npos, "drone ops should render inside the dedicated drone board");
     require(droneHtml.find("drone-bay-strip") != std::string::npos, "drone ops should use the compact bay strip");
     require(droneHtml.find("focus-metrics") == std::string::npos, "drone ops should avoid a separate metric block above the roster");
-    require(droneHtml.find("module-art") != std::string::npos, "drone ops cards should reserve art/glyph space");
-    require(droneHtml.find("drone-card") != std::string::npos, "drone ops should use styled drone cards");
+    require(droneHtml.find("drone-control-grid") != std::string::npos, "drone ops should use the compact control grid");
+    require(droneHtml.find("drone-control-card") != std::string::npos, "drone ops should use compact drone control cards");
+    require(droneHtml.find("module-art") == std::string::npos, "drone ops should not reserve large art space in compact controls");
 
     GameState upgradeState = surfaceState;
     upgradeState.screen = Screen::SurfaceUpgrade;

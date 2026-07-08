@@ -76,6 +76,13 @@ public:
     void debugStartSurfacePush();
     void debugStartFlyby();
     void debugStartOrbit();
+    void debugShowHangar();
+    void debugShowResults();
+    void debugShowArrivalOps();
+    void debugShowResearch();
+    void debugShowSurfaceUpgrade();
+    void debugShowDroneOps();
+    void debugShowNavigation();
     void debugExit();
     void repairShip();
     void recruitCrew();

@@ -15,10 +15,95 @@
 #include <algorithm>
 #include <cmath>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocket {
 namespace {
+
+int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
+
+void addDebugUnlock(GameState& state, const char* unlockKey)
+{
+    if (!hasUnlock(state.meta, unlockKey)) {
+        state.meta.unlockKeys.push_back(unlockKey);
+    }
+}
+
+LaunchOutcome debugTransferOutcome(std::string destinationId)
+{
+    LaunchOutcome outcome;
+    outcome.type = LaunchResultType::MissionComplete;
+    outcome.recoveryMethod = RecoveryMethod::TransferArrival;
+    outcome.destinationId = std::move(destinationId);
+    outcome.assignedAstronautId = content::astronaut::ava;
+    outcome.frontierTransfer = true;
+    outcome.crashMultiplier = 2.2;
+    outcome.ejectMultiplier = 2.4;
+    outcome.payout = 260.0;
+    outcome.blueprintGain = 3;
+    outcome.peakWarning = 0.38;
+    outcome.peakAbortRisk = 0.24;
+    outcome.telemetry = {
+        {1.0, 0.12, 0.10, 0.05, 0.92, 0.86, 0.04, 0.10, 0.12, "Debug launch nominal."},
+        {1.7, 0.32, 0.24, 0.20, 0.72, 0.70, 0.12, 0.18, 0.28, "Transfer burn committed."},
+        {2.4, 0.46, 0.36, 0.30, 0.44, 0.62, 0.24, 0.26, 0.38, "Arrival corridor reached."}
+    };
+    return outcome;
+}
+
+void seedDebugResearchAccess(GameState& state)
+{
+    addDebugUnlock(state, content::unlock::starter);
+    addDebugUnlock(state, content::unlock::thermal);
+    addDebugUnlock(state, content::unlock::recovery);
+    addDebugUnlock(state, content::unlock::deepSpace);
+    addDebugUnlock(state, content::unlock::surfaceProbes);
+    addDebugUnlock(state, content::unlock::surfaceDrills);
+    addDebugUnlock(state, content::unlock::cargoRigs);
+    addDebugUnlock(state, content::unlock::analysisLab);
+    addDebugUnlock(state, content::unlock::droneBay);
+    addDebugUnlock(state, content::unlock::perimeterDrones);
+    state.meta.materials.common = std::max(state.meta.materials.common, 18);
+    state.meta.materials.rare = std::max(state.meta.materials.rare, 8);
+    state.meta.materials.exotic = std::max(state.meta.materials.exotic, 2);
+    state.meta.blueprintProgress = std::max(state.meta.blueprintProgress, 7);
+}
+
+void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
+{
+    addDebugUnlock(state, content::unlock::droneBay);
+    addDebugUnlock(state, content::unlock::perimeterDrones);
+    state.meta.droneBaySlots = std::max(state.meta.droneBaySlots, 3);
+    state.meta.ownedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::resourceDrone,
+        content::drone::surveyDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
+    state.meta.equippedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
+    ensureDroneBayState(state, catalog);
+}
+
+void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random& rng, std::string_view destinationId)
+{
+    state.run.destinationIndex = destinationIndexForId(catalog, destinationId);
+    state.run.arrivalOps = {true, std::string(destinationId)};
+    startSurfaceExpedition(state, catalog, &rng);
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    expedition.cargo = std::max(expedition.cargo, 2);
+    expedition.temporaryMaterials.common = std::max(expedition.temporaryMaterials.common, 3);
+    expedition.temporaryMaterials.rare = std::max(expedition.temporaryMaterials.rare, 1);
+    expedition.prospectMaterials.common = std::max(expedition.prospectMaterials.common, 4);
+    expedition.prospectMaterials.rare = std::max(expedition.prospectMaterials.rare, 2);
+    expedition.prospectArtifacts = std::max(expedition.prospectArtifacts, 1);
+    expedition.miningSitePrepared = true;
+}
 
 std::vector<TelemetryEvent> chartTelemetryForOutcome(
     const PreparedLaunch& launch,
@@ -1299,6 +1384,100 @@ void RocketGameApp::debugStartSurfacePush()
     state_.statusLine = outcome.applied
         ? "Debug deep-push sandbox. Descend, bank, or collapse without touching your save."
         : surfaceActionSummary(outcome);
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowHangar()
+{
+    beginDebugSandbox("Debug Hangar board. No save data will be written.");
+    state_.screen = Screen::Hangar;
+    state_.run.credits = std::max(state_.run.credits, 180.0);
+    state_.statusLine = "Debug Hangar board. Inspect compact ops cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowResults()
+{
+    beginDebugSandbox("Debug Debrief board. No save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
+    state_.lastOutcome = debugTransferOutcome(content::destination::mars);
+    state_.screen = Screen::Results;
+    state_.statusLine = "Debug Debrief board. Inspect result cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowArrivalOps()
+{
+    beginDebugSandbox("Debug Arrival Ops board. No save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
+    state_.lastOutcome = debugTransferOutcome(content::destination::mars);
+    startArrivalOps(state_, state_.lastOutcome);
+    state_.screen = Screen::ArrivalOps;
+    state_.statusLine = "Debug Arrival Ops board. Inspect approach cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowResearch()
+{
+    beginDebugSandbox("Debug Research board. No save data will be written.");
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
+    state_.run.arrivalOps = {true, content::destination::mars};
+    seedDebugResearchAccess(state_);
+    generateResearchProjects(state_, catalog_, rng_);
+    state_.screen = Screen::Research;
+    state_.statusLine = "Debug Research board. Inspect project cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowSurfaceUpgrade()
+{
+    beginDebugSandbox("Debug Surface Upgrade board. No save data will be written.");
+    seedDebugResearchAccess(state_);
+    seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::mars);
+    generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    state_.screen = Screen::SurfaceUpgrade;
+    state_.statusLine = "Debug Surface Upgrade board. Inspect draft cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowDroneOps()
+{
+    beginDebugSandbox("Debug Drone Ops board. No save data will be written.");
+    seedDebugResearchAccess(state_);
+    seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::nearbyStar);
+    seedDebugDroneBay(state_, catalog_);
+    state_.screen = Screen::DroneOps;
+    state_.statusLine = "Debug Drone Ops board. Inspect drone cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowNavigation()
+{
+    beginDebugSandbox("Debug Navigation board. No save data will be written.");
+    addDebugUnlock(state_, content::unlock::deepSpace);
+    addDebugUnlock(state_, content::unlock::perimeterDrones);
+    state_.meta.ark.gravityWellDisaster = true;
+    state_.meta.ark.condition = ArkCondition::DamagedStranded;
+    state_.meta.ark.hullDamage = std::max(state_.meta.ark.hullDamage, 72);
+    state_.meta.ark.fuelReserve = std::max(state_.meta.ark.fuelReserve, tuning::ark::hostileSystemFuelReserve);
+    state_.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state_.meta.navigation.currentSystemId = "hostile_system";
+    state_.meta.navigation.arkLocationId = "gravity_well";
+    state_.meta.navigation.discoveredDestinationIds = {
+        content::destination::nearbyStar,
+        content::destination::nearbyGalaxy
+    };
+    state_.meta.navigation.selectedDestinationId = content::destination::nearbyStar;
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::nearbyStar);
+    state_.screen = Screen::Navigation;
+    state_.statusLine = "Debug Navigation board. Inspect sortie cards without touching your save.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }

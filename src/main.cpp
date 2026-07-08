@@ -640,6 +640,76 @@ void rr_debug_orbit()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_hangar()
+{
+    if (g_app) {
+        g_app->debugShowHangar();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_results()
+{
+    if (g_app) {
+        g_app->debugShowResults();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_arrival_ops()
+{
+    if (g_app) {
+        g_app->debugShowArrivalOps();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_research()
+{
+    if (g_app) {
+        g_app->debugShowResearch();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_surface_upgrade()
+{
+    if (g_app) {
+        g_app->debugShowSurfaceUpgrade();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_drone_ops()
+{
+    if (g_app) {
+        g_app->debugShowDroneOps();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_navigation()
+{
+    if (g_app) {
+        g_app->debugShowNavigation();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_exit()
 {
     if (g_app) {

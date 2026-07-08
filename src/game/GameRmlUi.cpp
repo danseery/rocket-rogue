@@ -1188,6 +1188,11 @@ bool panelUsesDroneOps(std::string_view html)
     return html.find("phase-board-drone-ops") != std::string_view::npos;
 }
 
+bool panelUsesNavigation(std::string_view html)
+{
+    return html.find("phase-board-navigation") != std::string_view::npos;
+}
+
 bool panelUsesDraftRoom(std::string_view html)
 {
     return html.find("phase-board-draft-room") != std::string_view::npos;
@@ -1238,7 +1243,7 @@ std::string panelRcss(RmlPanelMode mode)
     const int top = bounds.Top();
     const int miningInset = panelWidth < 620 ? 10 : 18;
     const int miningRailWidth = std::max(1, panelWidth - miningInset * 2);
-    const int miningTopHeight = panelWidth < 620 ? 154 : 116;
+    const int miningTopHeight = panelWidth < 620 ? 132 : 86;
     const int miningBottomHeight = panelWidth < 620 ? 164 : 126;
     const int miningBottomTop = std::max(miningTopHeight + 18, panelHeight - miningBottomHeight - miningInset);
     const int miningTitleWidth = panelWidth < 620 ? std::max(1, miningRailWidth - 124) : 260;
@@ -1293,7 +1298,7 @@ scrollbarhorizontal sliderbar {
     top: )" + std::to_string(top) + R"(px;
     width: )" + std::to_string(panelWidth) + R"(px;
     height: )" + std::to_string(panelHeight) + R"(px;
-    overflow: auto;
+    overflow: hidden;
     padding: 14px;
     background-color: #0b1118;
     border-width: 1px;
@@ -1339,7 +1344,7 @@ scrollbarhorizontal sliderbar {
     top: )" + std::to_string(miningInset) + R"(px;
     width: )" + std::to_string(miningRailWidth) + R"(px;
     min-height: )" + std::to_string(miningTopHeight) + R"(px;
-    padding: 9px;
+    padding: 7px 9px;
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1358,13 +1363,13 @@ scrollbarhorizontal sliderbar {
 }
 .mining-run-title strong {
     color: #f1fbff;
-    font-size: 25px;
+    font-size: 23px;
     line-height: 1.05;
 }
 .mining-run-title small {
     color: rgba(215, 232, 234, 0.78);
-    font-size: 12px;
-    line-height: 1.18;
+    font-size: 11px;
+    line-height: 1.12;
 }
 .mining-vitals {
     display: flex;
@@ -1375,14 +1380,14 @@ scrollbarhorizontal sliderbar {
 }
 .mining-vitals .metric {
     width: )" + std::to_string(miningVitalWidth) + R"(px;
-    min-height: 34px;
+    min-height: 30px;
     margin-right: 5px;
     margin-bottom: 5px;
-    padding: 5px 6px;
+    padding: 4px 6px;
     background-color: rgba(8, 25, 32, 0.90);
 }
 .mining-vitals .metric strong {
-    font-size: 16px;
+    font-size: 15px;
     line-height: 1.05;
 }
 .mining-vitals .metric span {
@@ -1391,7 +1396,7 @@ scrollbarhorizontal sliderbar {
 }
 .mining-health-strip {
     width: )" + std::to_string(std::max(1, miningTitleWidth - 4)) + R"(px;
-    margin-top: 8px;
+    margin-top: 5px;
 }
 .mining-health-strip > div {
     display: flex;
@@ -1440,11 +1445,12 @@ scrollbarhorizontal sliderbar {
 }
 .mining-utility-cluster button {
     width: 102px;
-    height: 31px;
-    line-height: 31px;
+    min-height: 28px;
+    height: auto;
+    line-height: 1.15;
     margin-left: 4px;
     margin-bottom: 5px;
-    padding: 0px 4px;
+    padding: 6px 4px;
     font-size: 12px;
 }
 .mining-playfield-space {
@@ -1504,11 +1510,12 @@ scrollbarhorizontal sliderbar {
 }
 .mining-command-dock .system-actions button {
     width: )" + std::to_string(miningActionWidth) + R"(px;
-    height: 40px;
-    line-height: 40px;
+    min-height: 40px;
+    height: auto;
+    line-height: 1.15;
     margin-right: 8px;
     margin-bottom: 7px;
-    padding: 0px 4px;
+    padding: 7px 4px;
     font-size: 13px;
 }
 .mining-recall-dock {
@@ -1519,9 +1526,10 @@ scrollbarhorizontal sliderbar {
 }
 .mining-recall-dock .system-actions button {
     width: )" + std::to_string(miningPrimaryActionWidth) + R"(px;
-    height: 40px;
-    line-height: 40px;
-    padding: 0px 4px;
+    min-height: 40px;
+    height: auto;
+    line-height: 1.15;
+    padding: 7px 4px;
     font-size: 13px;
 }
 .mining-failure-banner {
@@ -1541,19 +1549,69 @@ scrollbarhorizontal sliderbar {
     font-size: 12px;
     line-height: 1.22;
 }
-.panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .pilot-card-top, .card-topline, .card-kicker {
+.panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .utility-actions, .pilot-card-top, .card-topline, .card-kicker, .slot-topline, .recipe-topline {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
+}
+.action-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
 }
 .phase-board, .board-primary, .draft-hero, .draft-board, .surface-command, .surface-quickbar, .cockpit-hud, .arrival-fanfare-panel {
     display: block;
     width: 100%;
 }
-.summary-grid, .metric-grid, .panel-kpis, .ops-grid, .pilot-card-grid, .inventory-grid, .stat-grid, .actions, .warning-grid, .surface-kpi-grid, .surface-quickbar, .draft-context, .result-grid, .achievement-grid {
+.summary-grid, .metric-grid, .metric-strip, .panel-kpis, .ops-grid, .pilot-card-grid, .inventory-grid, .stat-grid, .chip-strip, .actions, .action-row, .warning-grid, .surface-kpi-grid, .surface-quickbar, .draft-context, .result-grid, .achievement-grid {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
+}
+.ops-card, .pilot-card, .upgrade-draft-card, .arrival-card, .nav-card, .inventory-item, .achievement-card, .crew-fate-card, .result-group, .drone-recipe-card, .drone-loadout-slot, .drone-control-card, .modal-body {
+    display: flex;
+    flex-direction: column;
+}
+.card-topline, .card-kicker, .pilot-card-top, .slot-topline, .recipe-topline, .card-title, .card-copy, .metric-strip, .chip-strip, .utility-actions {
+    flex: none;
+}
+.ops-card h3, .pilot-card h3, .upgrade-draft-card h3, .arrival-card h3, .nav-card h3,
+.ops-card p, .pilot-card p, .upgrade-draft-card p, .arrival-card p, .nav-card p,
+.module-impact, .drone-build-hook, .drone-upgrade-summary, .inventory-art, .inventory-copy, .card-title, .card-copy {
+    flex: none;
+}
+.stat-grid, .chip-strip, .metric-strip {
+    flex: none;
+    align-content: flex-start;
+    align-items: flex-start;
+    gap: 5px;
+    row-gap: 5px;
+    column-gap: 5px;
+}
+.stat-grid .stat-chip {
+    flex: none;
+}
+.card-footer, .draft-card-footer {
+    flex: none;
+    margin-top: auto;
+    gap: 8px;
+    row-gap: 8px;
+    column-gap: 8px;
+}
+.action-row {
+    flex: none;
+    gap: 8px;
+    row-gap: 8px;
+    column-gap: 8px;
+}
+.card-footer button, .draft-card-footer button, .actions button, .action-row button, .utility-row button, .compact-tools button, .utility-actions button {
+    flex: none;
+    white-space: normal;
+}
+.modal-body {
+    flex: auto;
+    min-height: 0px;
 }
 .panel-head {
     margin-bottom: 10px;
@@ -1639,6 +1697,15 @@ scrollbarhorizontal sliderbar {
 .phase-board-panel.drone-ops-panel .panel-kpis {
     display: none;
 }
+.phase-board-panel.navigation-panel .panel-kpis {
+    display: none;
+}
+.phase-board-panel.navigation-panel .panel-head {
+    margin-bottom: 6px;
+}
+.phase-board-panel.navigation-panel .status {
+    margin-bottom: 6px;
+}
 .phase-board-panel .phase-titlebar {
     width: 704px;
     margin-top: 8px;
@@ -1668,7 +1735,7 @@ scrollbarhorizontal sliderbar {
     width: 736px;
 }
 .phase-board-drone-ops {
-    padding-bottom: 24px;
+    padding-bottom: 8px;
 }
 .phase-board-panel.drone-ops-panel .panel-head {
     margin-bottom: 8px;
@@ -1680,8 +1747,26 @@ scrollbarhorizontal sliderbar {
     margin-top: 4px;
     margin-bottom: 6px;
 }
+.phase-board-panel.drone-ops-panel .phase-titlebar > div {
+    width: 430px;
+}
 .phase-board-panel.drone-ops-panel .phase-titlebar p {
-    width: 500px;
+    width: 410px;
+    line-height: 1.18;
+}
+.phase-board-panel.drone-ops-panel .compact-tools {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 238px;
+    justify-content: flex-end;
+}
+.phase-board-panel.drone-ops-panel .compact-tools button {
+    width: 106px;
+    min-height: 30px;
+    margin-left: 6px;
+    margin-right: 0px;
+    padding: 5px 7px;
 }
 .phase-board-arrival {
     padding-bottom: 0px;
@@ -1873,7 +1958,7 @@ scrollbarhorizontal sliderbar {
     width: 204px;
 }
 .phase-board-research .ops-card {
-    height: 238px;
+    min-height: 238px;
 }
 .phase-board-drone-ops .ops-grid {
     width: 704px;
@@ -1881,30 +1966,30 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card {
     width: 205px;
-    height: 330px;
+    min-height: 330px;
     padding: 8px;
     margin-top: 6px;
     margin-right: 7px;
 }
 .phase-board-arrival .arrival-card {
     width: 209px;
-    height: 250px;
+    min-height: 250px;
     margin-right: 8px;
     padding: 10px 9px;
 }
 .phase-board-arrival .arrival-card .card-topline {
     width: 191px;
-    height: 34px;
+    min-height: 34px;
     overflow: hidden;
 }
 .phase-board-arrival .arrival-card .card-topline span {
     width: 88px;
-    height: 34px;
+    min-height: 34px;
     line-height: 1.15;
     overflow: hidden;
 }
 .phase-board-arrival .arrival-card h3 {
-    height: 20px;
+    min-height: 20px;
     overflow: hidden;
 }
 .phase-board-arrival .arrival-card p,
@@ -1917,12 +2002,12 @@ scrollbarhorizontal sliderbar {
     line-height: 1.28;
 }
 .phase-board-research .ops-card p {
-    height: 54px;
+    min-height: 54px;
     overflow: hidden;
 }
 .phase-board-drone-ops .drone-card p {
     width: 189px;
-    height: 38px;
+    min-height: 38px;
     margin-top: 3px;
     margin-bottom: 4px;
     line-height: 1.16;
@@ -1930,13 +2015,13 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-arrival .arrival-card p {
     width: 191px;
-    height: 100px;
+    max-height: 100px;
     overflow: hidden;
 }
 .phase-board-research .ops-card .module-impact {
     display: block;
     width: 194px;
-    height: 30px;
+    min-height: 30px;
     margin-top: 4px;
     margin-bottom: 4px;
     font-size: 13px;
@@ -1950,18 +2035,15 @@ scrollbarhorizontal sliderbar {
     margin-top: 4px;
     justify-content: center;
 }
-.phase-board-research .ops-card .card-footer {
-    height: 54px;
-    margin-top: 10px;
-}
 .phase-board-drone-ops .drone-card .stat-grid {
     width: 189px;
-    height: 54px;
+    min-height: 54px;
+    height: auto;
     margin-top: 2px;
 }
 .phase-board-drone-ops .drone-card .drone-build-hook {
     width: 177px;
-    height: 52px;
+    min-height: 52px;
     margin-top: 5px;
     margin-bottom: 5px;
     padding: 6px;
@@ -1975,7 +2057,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card .drone-upgrade-summary {
     width: 189px;
-    height: 40px;
+    min-height: 40px;
     margin-top: 2px;
     margin-bottom: 5px;
     color: #ffd166;
@@ -2027,8 +2109,9 @@ scrollbarhorizontal sliderbar {
 .phase-board-arrival .arrival-card .card-footer,
 .phase-board-research .ops-card .card-footer,
 .phase-board-drone-ops .drone-card .card-footer {
-    height: 48px;
-    margin-top: 8px;
+    min-height: 48px;
+    height: auto;
+    margin-top: auto;
     padding-top: 9px;
     border-top-width: 1px;
     border-top-color: #263b4c;
@@ -2036,14 +2119,16 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card .card-footer {
     width: 189px;
-    height: 34px;
-    margin-top: 7px;
+    min-height: 34px;
+    height: auto;
+    margin-top: auto;
     padding-top: 6px;
 }
 .phase-board-arrival .arrival-card .card-footer {
     width: 191px;
-    height: 48px;
-    margin-top: 10px;
+    min-height: 48px;
+    height: auto;
+    margin-top: auto;
 }
 .phase-board-arrival .arrival-card .card-footer span,
 .phase-board-research .ops-card .card-footer span,
@@ -2059,15 +2144,16 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-arrival .arrival-card .card-footer span {
     width: 42px;
-    height: 34px;
+    min-height: 34px;
     overflow: hidden;
 }
 .phase-board-arrival .arrival-card .card-footer button,
 .phase-board-research .ops-card .card-footer button,
 .phase-board-drone-ops .drone-card .card-footer button {
     width: 104px;
-    height: 36px;
-    line-height: 36px;
+    min-height: 36px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
     padding-left: 5px;
@@ -2076,14 +2162,16 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-card .card-footer button {
     width: 63px;
-    height: 28px;
-    line-height: 28px;
+    min-height: 28px;
+    height: auto;
+    line-height: 1.15;
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer button {
     width: 140px;
-    height: 36px;
-    line-height: 36px;
+    min-height: 36px;
+    height: auto;
+    line-height: 1.15;
     white-space: normal;
     overflow-wrap: anywhere;
 }
@@ -2091,58 +2179,32 @@ scrollbarhorizontal sliderbar {
 .phase-board-drone-ops .resource-bank {
     width: 704px;
 }
-.phase-board-drone-ops .drone-build-strip {
-    width: 704px;
+.phase-board-drone-ops .drone-top-row {
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 10px;
+    width: 704px;
     margin-top: 6px;
     margin-bottom: 6px;
-    background-color: rgba(11, 36, 44, 0.86);
-    border-color: rgba(71, 220, 255, 0.28);
+    gap: 8px;
 }
-.phase-board-drone-ops .drone-build-strip .drone-build-copy {
-    width: 358px;
-}
-.phase-board-drone-ops .drone-build-strip h2 {
-    color: #dffbff;
-    margin-top: 0px;
-    margin-bottom: 2px;
-}
-.phase-board-drone-ops .drone-build-strip p {
-    width: 348px;
+.phase-board-drone-ops .drone-top-row .resource-bank {
     margin-top: 0px;
     margin-bottom: 0px;
-    line-height: 1.16;
-}
-.phase-board-drone-ops .drone-build-strip .drone-build-stats {
-    width: 306px;
-    margin-top: 0px;
-    justify-content: flex-end;
-}
-.phase-board-drone-ops .drone-build-strip .stat-chip {
-    width: 140px;
-    min-height: 20px;
-    padding: 4px 6px;
-    margin-left: 5px;
-    margin-bottom: 4px;
 }
 .phase-board-drone-ops .drone-build-guidance {
-    width: 704px;
+    width: 240px;
     display: flex;
     flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    padding: 8px 10px;
-    margin-top: 6px;
-    margin-bottom: 6px;
+    justify-content: flex-start;
+    align-items: flex-start;
+    padding: 7px;
+    margin-top: 0px;
+    margin-bottom: 0px;
     background-color: rgba(33, 28, 46, 0.76);
     border-color: rgba(183, 132, 255, 0.24);
 }
 .phase-board-drone-ops .drone-build-guidance .drone-guidance-copy {
-    width: 248px;
+    width: 94px;
 }
 .phase-board-drone-ops .drone-build-guidance h2 {
     color: #d8c7ff;
@@ -2150,26 +2212,27 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 2px;
 }
 .phase-board-drone-ops .drone-build-guidance p {
-    width: 238px;
+    width: 92px;
     margin-top: 0px;
     margin-bottom: 0px;
     font-size: 12px;
     line-height: 1.14;
 }
 .phase-board-drone-ops .drone-build-guidance .drone-guidance-stats {
-    width: 414px;
+    width: 136px;
     margin-top: 0px;
     justify-content: flex-end;
 }
 .phase-board-drone-ops .drone-build-guidance .stat-chip {
-    width: 124px;
-    min-height: 20px;
-    padding: 4px 5px;
-    margin-left: 5px;
-    margin-bottom: 4px;
+    width: 126px;
+    min-height: 16px;
+    padding: 2px 5px;
+    margin-left: 0px;
+    margin-bottom: 3px;
+    font-size: 10px;
 }
 .phase-board-drone-ops .drone-build-guidance .stat-chip.wide {
-    width: 152px;
+    width: 126px;
 }
 .phase-board-drone-ops .drone-loadout-bench {
     width: 704px;
@@ -2178,12 +2241,15 @@ scrollbarhorizontal sliderbar {
     padding: 8px 10px;
 }
 .phase-board-drone-ops .drone-loadout-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
     width: 684px;
 }
 .phase-board-drone-ops .drone-loadout-slot {
-    width: 206px;
-    height: 112px;
-    padding: 7px;
+    width: 196px;
+    min-height: 76px;
+    padding: 6px;
     margin-right: 7px;
     margin-bottom: 7px;
     border-width: 1px;
@@ -2221,43 +2287,43 @@ scrollbarhorizontal sliderbar {
     border-color: rgba(137, 178, 211, 0.34);
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-topline {
-    width: 206px;
-    height: 16px;
+    width: 196px;
+    min-height: 16px;
     color: #89b2d3;
     font-size: 11px;
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-topline span {
-    width: 82px;
+    width: 74px;
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-topline strong {
-    width: 116px;
+    width: 114px;
     color: #ffd166;
     text-align: right;
 }
 .phase-board-drone-ops .drone-loadout-slot h3 {
-    margin-top: 4px;
+    margin-top: 2px;
     margin-bottom: 1px;
-    font-size: 14px;
+    font-size: 13px;
 }
 .phase-board-drone-ops .drone-loadout-slot p {
-    height: 36px;
+    max-height: 18px;
     margin-top: 2px;
     margin-bottom: 0px;
     line-height: 1.15;
     overflow: hidden;
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-role {
-    height: 14px;
+    min-height: 14px;
     color: #bfeef7;
 }
 .phase-board-drone-ops .drone-loadout-slot .stat-grid {
-    min-height: 20px;
-    margin-top: 4px;
+    min-height: 16px;
+    margin-top: 2px;
 }
 .phase-board-drone-ops .drone-loadout-slot .stat-chip {
     width: 58px;
-    min-height: 18px;
-    padding: 3px 5px;
+    min-height: 15px;
+    padding: 2px 5px;
     margin-right: 4px;
     margin-bottom: 3px;
     font-size: 11px;
@@ -2301,66 +2367,6 @@ scrollbarhorizontal sliderbar {
 .phase-board-drone-ops .drone-combat-forecast .stat-chip.wide {
     width: 112px;
 }
-.phase-board-drone-ops .drone-recipe-board {
-    width: 704px;
-    margin-top: 6px;
-    margin-bottom: 8px;
-    padding: 8px 10px;
-}
-.phase-board-drone-ops .drone-recipe-grid {
-    width: 680px;
-}
-.phase-board-drone-ops .drone-recipe-card {
-    width: 316px;
-    height: 118px;
-    padding: 8px;
-    margin-right: 8px;
-    margin-bottom: 8px;
-    border-width: 1px;
-    border-color: rgba(137, 178, 211, 0.16);
-    background-color: rgba(255, 255, 255, 0.03);
-}
-.phase-board-drone-ops .drone-recipe-card.active {
-    border-color: rgba(71, 220, 255, 0.34);
-    background-color: rgba(71, 220, 255, 0.08);
-}
-.phase-board-drone-ops .drone-recipe-card.signature {
-    border-color: rgba(255, 209, 102, 0.28);
-}
-.phase-board-drone-ops .drone-recipe-card .recipe-topline {
-    width: 316px;
-    height: 18px;
-    color: #89b2d3;
-    font-size: 11px;
-}
-.phase-board-drone-ops .drone-recipe-card .recipe-topline span {
-    width: 132px;
-}
-.phase-board-drone-ops .drone-recipe-card .recipe-topline strong {
-    width: 170px;
-    color: #ffd166;
-    text-align: right;
-}
-.phase-board-drone-ops .drone-recipe-card h3 {
-    margin-top: 5px;
-    margin-bottom: 3px;
-    font-size: 14px;
-}
-.phase-board-drone-ops .drone-recipe-card .recipe-requirements {
-    height: 18px;
-    margin-top: 0px;
-    margin-bottom: 3px;
-    color: #bfeef7;
-    font-size: 11px;
-    overflow: hidden;
-}
-.phase-board-drone-ops .drone-recipe-card p {
-    height: 42px;
-    margin-top: 2px;
-    margin-bottom: 0px;
-    line-height: 1.18;
-    overflow: hidden;
-}
 .phase-board-research .board-primary,
 .phase-board-drone-ops .board-primary {
     width: 704px;
@@ -2380,19 +2386,134 @@ scrollbarhorizontal sliderbar {
 .phase-board-research .actions button,
 .phase-board-drone-ops .actions button {
     width: 210px;
-    height: 38px;
-    line-height: 38px;
+    min-height: 38px;
+    height: auto;
+    line-height: 1.15;
+}
+.phase-board-drone-ops .drone-combat-forecast {
+    padding: 7px 9px;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+.phase-board-drone-ops .drone-combat-forecast .drone-forecast-copy {
+    width: 188px;
+}
+.phase-board-drone-ops .drone-combat-forecast p {
+    width: 180px;
+    font-size: 11px;
+    line-height: 1.12;
+}
+.phase-board-drone-ops .drone-combat-forecast .drone-forecast-stats {
+    width: 480px;
+}
+.phase-board-drone-ops .drone-combat-forecast {
+    display: none;
+}
+.phase-board-drone-ops .drone-loadout-bench,
+.phase-board-drone-ops .drone-roster {
+    margin-top: 6px;
+    margin-bottom: 6px;
+    padding: 7px 9px;
+}
+.phase-board-drone-ops .section-heading {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+    width: 684px;
+    margin-bottom: 4px;
+}
+.phase-board-drone-ops .section-heading h2 {
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+.phase-board-drone-ops .section-heading p {
+    width: 360px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    color: #9eaebe;
+    font-size: 11px;
+    line-height: 1.1;
+    text-align: right;
+}
+.phase-board-drone-ops .drone-loadout-slot {
+    min-height: 92px;
+    width: 196px;
+}
+.phase-board-drone-ops .drone-loadout-slot p {
+    max-height: 26px;
+}
+.phase-board-drone-ops .drone-control-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 684px;
+}
+.phase-board-drone-ops .drone-control-card {
+    width: 196px;
+    min-height: 92px;
+    padding: 6px;
+    margin-right: 7px;
+    margin-bottom: 7px;
+    border-width: 1px;
+    border-color: rgba(137, 178, 211, 0.16);
+    border-radius: 6px;
+    background-color: rgba(255, 255, 255, 0.03);
+}
+.phase-board-drone-ops .drone-control-card h3 {
+    margin-top: 2px;
+    margin-bottom: 1px;
+    font-size: 12px;
+}
+.phase-board-drone-ops .drone-control-status {
+    width: 188px;
+    min-height: 12px;
+    max-height: 14px;
+    margin-top: 0px;
+    margin-bottom: 2px;
+    color: #9eaebe;
+    font-size: 10px;
+    line-height: 1.12;
+    overflow: hidden;
+}
+.phase-board-drone-ops .drone-control-card .stat-grid {
+    width: 188px;
+    min-height: 28px;
+    margin-top: 1px;
+}
+.phase-board-drone-ops .drone-control-card .stat-chip {
+    width: 84px;
+    min-height: 15px;
+    padding: 2px 5px;
+    font-size: 10px;
+    line-height: 1.1;
+}
+.phase-board-drone-ops .drone-control-card .card-footer {
+    width: 188px;
+    min-height: 24px;
+    margin-top: auto;
+    padding-top: 3px;
+    border-top-width: 1px;
+    border-top-color: #263b4c;
+    gap: 5px;
+}
+.phase-board-drone-ops .drone-control-card .card-footer button {
+    width: 82px;
+    min-height: 22px;
+    padding: 3px 5px;
+    font-size: 9px;
+    line-height: 1.1;
 }
 .phase-board-navigation {
     width: 736px;
-    padding-bottom: 28px;
+    padding-bottom: 12px;
 }
 .phase-board-navigation .ark-status,
 .phase-board-navigation .navigation-map {
     width: 704px;
-    margin-top: 10px;
+    margin-top: 6px;
     margin-right: 0px;
-    padding: 10px 12px;
+    padding: 8px 10px;
 }
 .phase-board-navigation .ark-status {
     display: flex;
@@ -2410,102 +2531,108 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-navigation .nav-grid {
     width: 704px;
-    margin-top: 6px;
+    margin-top: 4px;
 }
 .phase-board-navigation .nav-card {
-    width: 334px;
-    height: 226px;
-    margin-top: 8px;
+    width: 316px;
+    min-height: 168px;
+    margin-top: 6px;
     margin-right: 8px;
-    padding: 11px 12px;
+    padding: 8px 10px;
 }
 .phase-board-navigation .nav-card.selected {
     background-color: #10241f;
     border-color: #72e0a8;
 }
 .phase-board-navigation .nav-card .card-kicker span {
-    width: 150px;
-    height: 16px;
+    width: 140px;
+    height: 14px;
+    font-size: 10px;
     overflow: hidden;
 }
 .phase-board-navigation .nav-card h3 {
-    height: 22px;
-    margin-top: 6px;
-    margin-bottom: 4px;
+    min-height: 18px;
+    margin-top: 4px;
+    margin-bottom: 2px;
+    font-size: 14px;
     overflow: hidden;
 }
 .phase-board-navigation .nav-card p {
-    width: 310px;
-    height: 38px;
-    margin-top: 4px;
-    margin-bottom: 8px;
-    line-height: 1.24;
+    width: 292px;
+    min-height: 26px;
+    margin-top: 2px;
+    margin-bottom: 5px;
+    font-size: 12px;
+    line-height: 1.12;
     overflow: hidden;
 }
 .phase-board-navigation .nav-card .stat-grid {
-    width: 310px;
-    height: 58px;
+    width: 292px;
+    min-height: 38px;
     margin-top: 0px;
     align-content: flex-start;
     align-items: flex-start;
 }
 .phase-board-navigation .nav-card .stat-chip {
-    width: 132px;
-    height: 20px;
-    line-height: 20px;
+    width: 124px;
+    min-height: 16px;
+    line-height: 1.08;
     margin-top: 0px;
     margin-right: 5px;
-    margin-bottom: 5px;
-    padding: 0px 5px;
-    font-size: 11px;
+    margin-bottom: 4px;
+    padding: 2px 5px;
+    font-size: 10px;
 }
 .phase-board-navigation .nav-card .stat-chip.wide {
-    width: 144px;
+    width: 136px;
 }
 .phase-board-navigation .nav-card .card-footer {
-    width: 310px;
-    height: 48px;
-    margin-top: 10px;
-    padding-top: 8px;
+    width: 292px;
+    min-height: 32px;
+    height: auto;
+    margin-top: auto;
+    padding-top: 5px;
     border-top-width: 1px;
     border-top-color: #263b4c;
     align-items: center;
 }
 .phase-board-navigation .nav-card .card-footer span {
-    width: 116px;
-    height: 34px;
+    width: 100px;
+    min-height: 24px;
     color: #d7c276;
     font-size: 12px;
     line-height: 1.15;
     overflow: hidden;
 }
 .phase-board-navigation .nav-card .card-footer button {
-    width: 150px;
-    height: 36px;
-    line-height: 36px;
+    width: 140px;
+    min-height: 30px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
     padding-left: 6px;
     padding-right: 6px;
-    font-size: 12px;
+    font-size: 11px;
 }
 .phase-board-drone-ops .drone-bay-strip {
     display: flex;
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 10px;
-    margin-top: 6px;
+    width: 412px;
+    padding: 7px;
+    margin-top: 0px;
 }
 .phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
-    width: 252px;
+    width: 150px;
 }
 .phase-board-drone-ops .drone-bay-strip h2 {
     margin-top: 0px;
     margin-bottom: 2px;
 }
 .phase-board-drone-ops .drone-bay-strip p {
-    width: 244px;
+    width: 146px;
     margin-top: 0px;
     margin-bottom: 0px;
     line-height: 1.18;
@@ -2514,10 +2641,10 @@ scrollbarhorizontal sliderbar {
     margin-top: 0px;
 }
 .phase-board-drone-ops .drone-bay-stats {
-    width: 174px;
+    width: 86px;
 }
 .phase-board-drone-ops .drone-bay-materials {
-    width: 112px;
+    width: 86px;
 }
 .phase-board-drone-ops .drone-bay-strip .stat-chip {
     max-width: 84px;
@@ -2530,12 +2657,13 @@ scrollbarhorizontal sliderbar {
     max-width: 116px;
 }
 .phase-board-drone-ops .drone-bay-strip button {
-    width: 124px;
-    min-height: 34px;
+    width: 78px;
+    min-height: 28px;
     height: auto;
     line-height: 1.15;
     padding-left: 6px;
     padding-right: 6px;
+    font-size: 10px;
     white-space: normal;
 }
 .phase-board-drone-ops .drone-roster {
@@ -2683,8 +2811,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface .resource-bank button {
     width: 132px;
-    height: 32px;
-    line-height: 32px;
+    min-height: 32px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 3px;
     margin-right: 0px;
 }
@@ -2738,8 +2867,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface .surface-primary-action button {
     width: 132px;
-    height: 38px;
-    line-height: 38px;
+    min-height: 38px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
 }
@@ -2793,8 +2923,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface .surface-action-card p {
     width: 140px;
-    height: 62px;
-    min-height: 0px;
+    min-height: 62px;
     margin-top: 5px;
     margin-bottom: 6px;
     font-size: 12px;
@@ -2803,7 +2932,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface.surface-ops-screen .surface-action-card p {
     width: 140px;
-    height: 72px;
+    min-height: 72px;
 }
 .phase-board-surface .surface-action-card .stat-grid {
     width: 140px;
@@ -2821,7 +2950,6 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-action-card .stat-grid .stat-chip {
     flex: none;
     width: 62px;
-    height: 16px;
     min-height: 16px;
     margin-top: 0px;
     margin-bottom: 3px;
@@ -2838,7 +2966,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface .surface-action-card .card-footer {
     width: 140px;
-    height: 52px;
+    min-height: 52px;
     margin-top: auto;
     padding-top: 6px;
     border-top-width: 1px;
@@ -2849,12 +2977,12 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer {
     width: 140px;
-    height: 60px;
+    min-height: 60px;
     margin-top: auto;
 }
 .phase-board-surface .surface-action-card .card-footer span {
     width: 140px;
-    height: 16px;
+    min-height: 16px;
     color: #d7c276;
     font-size: 11px;
     line-height: 16px;
@@ -2862,13 +2990,14 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer span {
     width: 140px;
-    height: 18px;
+    min-height: 18px;
     line-height: 18px;
 }
 .phase-board-surface .surface-action-card .card-footer button {
     width: 104px;
-    height: 27px;
-    line-height: 27px;
+    min-height: 27px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 3px;
     margin-left: 0px;
     margin-right: 0px;
@@ -2878,8 +3007,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer button {
     width: 120px;
-    height: 30px;
-    line-height: 30px;
+    min-height: 30px;
+    height: auto;
+    line-height: 1.15;
     margin-left: 0px;
 }
 .phase-board-surface-minigame .surface-minigame,
@@ -2952,8 +3082,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-minigame .minigame-actions button {
     width: 176px;
-    height: 38px;
-    line-height: 38px;
+    min-height: 38px;
+    height: auto;
+    line-height: 1.15;
     margin-right: 8px;
 }
 .phase-board-surface-upgrade {
@@ -2965,7 +3096,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .upgrade-draft-card {
     width: 206px;
-    height: 368px;
+    min-height: 368px;
     padding: 10px;
     margin-top: 8px;
     margin-right: 8px;
@@ -2997,20 +3128,22 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .upgrade-draft-card h3,
 .phase-board-refit .upgrade-draft-card h3 {
-    height: 34px;
+    min-height: 34px;
+    height: auto;
     margin-bottom: 5px;
     line-height: 1.16;
     overflow: hidden;
 }
 .phase-board-surface-upgrade .upgrade-draft-card p {
-    height: 48px;
+    min-height: 48px;
     margin-bottom: 6px;
     line-height: 1.28;
     overflow: hidden;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .stat-grid {
     width: 186px;
-    height: 132px;
+    min-height: 0px;
+    height: auto;
     margin-top: 5px;
     justify-content: center;
     align-content: flex-start;
@@ -3018,8 +3151,8 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .upgrade-draft-card .stat-chip {
     width: 70px;
-    height: 20px;
-    line-height: 20px;
+    min-height: 20px;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 5px;
     margin-bottom: 4px;
@@ -3032,8 +3165,9 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
 }
 .phase-board-surface-upgrade .upgrade-draft-card .draft-card-footer {
-    height: 52px;
-    margin-top: 6px;
+    min-height: 52px;
+    height: auto;
+    margin-top: auto;
     padding-top: 8px;
     border-top-width: 1px;
     border-top-color: #34485a;
@@ -3047,8 +3181,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .upgrade-draft-card .draft-card-footer button {
     width: 98px;
-    height: 34px;
-    line-height: 34px;
+    min-height: 34px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
     padding-left: 6px;
@@ -3065,8 +3200,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface-upgrade .draft-actions button {
     width: 224px;
-    height: 38px;
-    line-height: 38px;
+    min-height: 38px;
+    height: auto;
+    line-height: 1.15;
     margin-right: 8px;
 }
 .phase-board-hangar {
@@ -3082,7 +3218,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-hangar .ops-card {
     width: 202px;
-    height: 182px;
+    min-height: 182px;
     padding: 10px;
     margin-top: 10px;
     margin-right: 8px;
@@ -3092,7 +3228,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-hangar .ops-card .ops-detail {
     color: #9aabba;
-    height: 78px;
+    min-height: 78px;
     margin-top: 0px;
     margin-bottom: 10px;
     line-height: 1.28;
@@ -3103,8 +3239,9 @@ scrollbarhorizontal sliderbar {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    height: 48px;
-    margin-top: 0px;
+    min-height: 48px;
+    height: auto;
+    margin-top: auto;
     padding-top: 10px;
     border-top-width: 1px;
     border-top-color: #263b4c;
@@ -3119,7 +3256,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-hangar .ops-card .card-footer button {
     width: 92px;
-    height: 36px;
+    min-height: 36px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
 }
@@ -3179,7 +3318,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-refit .upgrade-draft-card {
     width: 206px;
-    height: 368px;
+    min-height: 368px;
     padding: 10px;
     margin-top: 8px;
     margin-right: 8px;
@@ -3210,7 +3349,7 @@ scrollbarhorizontal sliderbar {
     text-align: center;
 }
 .phase-board-refit .upgrade-draft-card p {
-    height: 46px;
+    min-height: 46px;
     margin-bottom: 5px;
     line-height: 1.25;
     overflow: hidden;
@@ -3218,13 +3357,14 @@ scrollbarhorizontal sliderbar {
 .phase-board-refit .upgrade-draft-card .module-impact {
     color: #edf4f8;
     font-size: 13px;
-    height: 30px;
+    min-height: 30px;
     line-height: 14px;
     overflow: hidden;
 }
 .phase-board-refit .upgrade-draft-card .stat-grid {
     width: 186px;
-    height: 108px;
+    min-height: 0px;
+    height: auto;
     margin-top: 5px;
     justify-content: center;
     align-content: flex-start;
@@ -3232,8 +3372,8 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-refit .upgrade-draft-card .stat-chip {
     width: 70px;
-    height: 20px;
-    line-height: 20px;
+    min-height: 20px;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 5px;
     margin-bottom: 4px;
@@ -3246,8 +3386,9 @@ scrollbarhorizontal sliderbar {
     margin-right: 0px;
 }
 .phase-board-refit .upgrade-draft-card .draft-card-footer {
-    height: 52px;
-    margin-top: 6px;
+    min-height: 52px;
+    height: auto;
+    margin-top: auto;
     padding-top: 8px;
     border-top-width: 1px;
     border-top-color: #34485a;
@@ -3255,15 +3396,16 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-refit .upgrade-draft-card .draft-card-footer span {
     width: 78px;
-    height: 44px;
+    min-height: 44px;
     font-size: 12px;
     line-height: 12px;
     overflow: hidden;
 }
 .phase-board-refit .upgrade-draft-card .draft-card-footer button {
     width: 98px;
-    height: 34px;
-    line-height: 34px;
+    min-height: 34px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
     padding-left: 6px;
@@ -3280,8 +3422,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-refit .draft-actions button {
     width: 224px;
-    height: 38px;
-    line-height: 38px;
+    min-height: 38px;
+    height: auto;
+    line-height: 1.15;
     margin-right: 8px;
 }
 .phase-board-results {
@@ -3410,8 +3553,9 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-results .actions button {
     width: 230px;
-    height: 42px;
-    line-height: 42px;
+    min-height: 42px;
+    height: auto;
+    line-height: 1.15;
     margin-right: 0px;
 }
 .metric, .summary-card, .ops-card, .pilot-card, .inventory-item, .resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .achievement-card, .crew-fate-card, .tutorial-card, .result-group {
@@ -3424,20 +3568,20 @@ scrollbarhorizontal sliderbar {
     border-radius: 6px;
 }
 .inventory-modal {
-    width: 1016px;
-    margin-top: 12px;
+    width: 724px;
+    margin-top: 10px;
 }
 .inventory-layout {
     display: flex;
     flex-direction: row;
-    width: 1016px;
+    width: 724px;
 }
 .inventory-side-column {
-    width: 220px;
-    margin-right: 16px;
+    width: 164px;
+    margin-right: 10px;
 }
 .inventory-main-column {
-    width: 780px;
+    width: 550px;
 }
 .inventory-modal.inventory-main-only,
 .inventory-layout-main-only,
@@ -3445,36 +3589,36 @@ scrollbarhorizontal sliderbar {
 .inventory-layout-main-only .inventory-section,
 .inventory-layout-main-only .inventory-section-head,
 .inventory-layout-main-only .inventory-grid {
-    width: 1016px;
+    width: 724px;
 }
 .inventory-layout-main-only .inventory-section-head p {
-    width: 986px;
+    width: 696px;
 }
 .inventory-side-column .inventory-section {
-    width: 220px;
+    width: 164px;
     margin-top: 0px;
     padding-top: 0px;
     border-top-width: 0px;
 }
 .inventory-side-column .inventory-section-head {
-    width: 220px;
+    width: 164px;
 }
 .inventory-side-column .inventory-section-head p {
-    width: 208px;
+    width: 150px;
 }
 .inventory-side-column .inventory-grid {
-    width: 220px;
+    width: 164px;
 }
 .inventory-summary {
-    width: 780px;
+    width: 550px;
     margin-top: 4px;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 .inventory-layout-main-only .inventory-summary {
-    width: 1016px;
+    width: 724px;
 }
 .inventory-summary .metric {
-    width: 230px;
+    width: 154px;
     height: 42px;
     padding: 8px 10px;
     margin-right: 10px;
@@ -3483,25 +3627,25 @@ scrollbarhorizontal sliderbar {
     border-color: #46677d;
 }
 .inventory-layout-main-only .inventory-summary .metric {
-    width: 286px;
+    width: 184px;
 }
 .inventory-summary .metric span {
-    width: 210px;
+    width: 134px;
     white-space: nowrap;
 }
 .inventory-layout-main-only .inventory-summary .metric span {
-    width: 266px;
+    width: 164px;
 }
 .inventory-section {
-    width: 780px;
-    margin-top: 14px;
-    padding-top: 14px;
+    width: 550px;
+    margin-top: 8px;
+    padding-top: 8px;
     border-top-width: 1px;
     border-top-color: #26394a;
 }
 .inventory-section-head {
-    width: 780px;
-    margin-bottom: 8px;
+    width: 550px;
+    margin-bottom: 6px;
 }
 .inventory-section-head h3 {
     margin-top: 0px;
@@ -3509,17 +3653,17 @@ scrollbarhorizontal sliderbar {
     font-size: 16px;
 }
 .inventory-section-head p {
-    width: 750px;
+    width: 520px;
     margin-top: 4px;
     line-height: 1.32;
 }
 .inventory-grid {
-    width: 780px;
+    width: 550px;
 }
 .inventory-item {
-    width: 148px;
-    min-height: 112px;
-    padding: 12px;
+    width: 110px;
+    min-height: 88px;
+    padding: 10px;
     margin-top: 8px;
     margin-right: 10px;
     background-color: #101923;
@@ -3541,7 +3685,7 @@ scrollbarhorizontal sliderbar {
     text-align: center;
 }
 .inventory-copy {
-    width: 148px;
+    width: 110px;
 }
 .inventory-copy h3 {
     margin-top: 0px;
@@ -3550,7 +3694,7 @@ scrollbarhorizontal sliderbar {
     line-height: 1.18;
 }
 .inventory-copy p {
-    width: 142px;
+    width: 106px;
     margin-top: 5px;
     color: #9eb0bf;
     font-size: 13px;
@@ -3570,19 +3714,19 @@ scrollbarhorizontal sliderbar {
     text-align: center;
 }
 .inventory-section-resources .inventory-item {
-    width: 176px;
-    min-height: 112px;
-    padding: 12px;
+    width: 118px;
+    min-height: 88px;
+    padding: 10px;
     margin-right: 8px;
 }
 .inventory-layout-main-only .inventory-section-resources .inventory-item {
-    width: 204px;
+    width: 148px;
 }
 .inventory-section-resources .inventory-copy {
-    width: 176px;
+    width: 118px;
 }
 .inventory-layout-main-only .inventory-section-resources .inventory-copy {
-    width: 204px;
+    width: 148px;
 }
 .inventory-section-resources .inventory-copy h3 {
     font-size: 15px;
@@ -3590,11 +3734,11 @@ scrollbarhorizontal sliderbar {
     white-space: nowrap;
 }
 .inventory-section-resources .inventory-copy p {
-    width: 168px;
+    width: 112px;
     font-size: 13px;
 }
 .inventory-layout-main-only .inventory-section-resources .inventory-copy p {
-    width: 196px;
+    width: 142px;
 }
 .inventory-section-resources .inventory-art {
     width: 42px;
@@ -3605,8 +3749,8 @@ scrollbarhorizontal sliderbar {
     width: 100px;
 }
 .inventory-side-column .inventory-item {
-    width: 190px;
-    height: 58px;
+    width: 140px;
+    min-height: 58px;
     padding: 6px 8px;
     margin-top: 5px;
     margin-right: 0px;
@@ -4293,7 +4437,8 @@ strong {
     display: inline-block;
 }
 .detail-stack {
-    display: block;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     margin-top: 8px;
 }
@@ -4328,12 +4473,12 @@ strong {
 button {
     display: inline-block;
     min-width: 92px;
-    min-height: 0px;
-    height: 36px;
-    line-height: 36px;
+    min-height: 36px;
+    height: auto;
+    line-height: 1.15;
     margin-top: 6px;
     margin-right: 6px;
-    padding: 0px 9px;
+    padding: 7px 9px;
     color: #edf4f8;
     text-align: center;
     background-color: #153244;
@@ -4361,6 +4506,227 @@ button {
 }
 .card-footer button, .draft-card-footer button, .summary-card button, .resource-bank button {
     width: 116px;
+}
+.phase-board-drone-ops .drone-control-card .card-footer button {
+    width: 82px;
+    min-width: 82px;
+    height: 18px;
+    min-height: 18px;
+    margin-top: 0px;
+    margin-right: 0px;
+    margin-bottom: 0px;
+    padding: 2px 5px;
+    font-size: 9px;
+    line-height: 1.1;
+}
+.phase-board-drone-ops .drone-bay-strip button {
+    width: 78px;
+    min-width: 78px;
+    min-height: 28px;
+    margin-top: 0px;
+    margin-right: 0px;
+    padding: 4px 5px;
+    font-size: 10px;
+    line-height: 1.1;
+}
+.phase-board-drone-ops .drone-control-card,
+.phase-board-drone-ops .drone-loadout-slot {
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: #31566b;
+    background-color: #0d1d27;
+}
+.phase-board-drone-ops .drone-top-row {
+    width: 704px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+.phase-board-drone-ops .drone-bay-strip {
+    width: 684px;
+    min-height: 116px;
+    padding: 10px;
+}
+.phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
+    width: 198px;
+}
+.phase-board-drone-ops .drone-bay-strip p {
+    width: 190px;
+    line-height: 1.2;
+}
+.phase-board-drone-ops .drone-bay-stats,
+.phase-board-drone-ops .drone-bay-materials {
+    width: 160px;
+}
+.phase-board-drone-ops .drone-bay-strip .stat-chip {
+    width: 150px;
+    max-width: 150px;
+    min-height: 24px;
+    padding: 4px 6px;
+}
+.phase-board-drone-ops .drone-bay-strip button {
+    width: 100px;
+    min-width: 100px;
+    min-height: 34px;
+}
+.phase-board-drone-ops .drone-control-card {
+    height: 142px;
+    min-height: 142px;
+    padding: 8px;
+}
+.phase-board-drone-ops .drone-control-card.rarity-common {
+    border-color: #31566b;
+}
+.phase-board-drone-ops .drone-control-card.rarity-uncommon {
+    border-color: #3a735c;
+    background-color: #0d2222;
+}
+.phase-board-drone-ops .drone-control-card.rarity-rare {
+    border-color: #806b2c;
+    background-color: #201c12;
+}
+.phase-board-drone-ops .drone-card-head {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    width: 184px;
+    min-height: 32px;
+}
+.phase-board-drone-ops .drone-role-mark {
+    display: block;
+    width: 22px;
+    height: 22px;
+    margin-right: 7px;
+    padding-top: 3px;
+    color: #dffbff;
+    text-align: center;
+    font-size: 12px;
+    line-height: 1;
+    border-width: 1px;
+    border-color: #4a7f96;
+    border-radius: 6px;
+    background-color: #15384a;
+}
+.phase-board-drone-ops .drone-card-id {
+    display: block;
+    width: 155px;
+}
+.phase-board-drone-ops .drone-card-id .card-topline {
+    width: 155px;
+    min-height: 11px;
+    font-size: 9px;
+    color: #89b2d3;
+}
+.phase-board-drone-ops .drone-card-id .card-title {
+    width: 155px;
+    margin-top: 2px;
+    margin-bottom: 0px;
+    font-size: 12px;
+}
+.phase-board-drone-ops .drone-control-status {
+    width: 184px;
+    min-height: 15px;
+    max-height: 15px;
+    margin-top: 3px;
+    padding-top: 2px;
+    color: #bfeef7;
+    font-size: 10px;
+    border-top-width: 1px;
+    border-top-color: #243b4c;
+}
+.phase-board-drone-ops .drone-control-card .stat-grid {
+    width: 184px;
+    min-height: 42px;
+    margin-top: 5px;
+}
+.phase-board-drone-ops .drone-control-card .stat-chip {
+    width: 104px;
+    min-height: 15px;
+    padding: 2px 5px;
+}
+.phase-board-drone-ops .drone-control-card .card-footer {
+    width: 184px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    min-height: 24px;
+    padding-top: 5px;
+    border-top-color: #2d5265;
+    justify-content: space-between;
+}
+.phase-board-drone-ops .drone-loadout-slot {
+    height: 118px;
+    min-height: 118px;
+    padding: 8px;
+    background-color: #0b1720;
+}
+.phase-board-drone-ops .drone-loadout-slot.filled {
+    border-color: #367486;
+    background-color: #0d252d;
+}
+.phase-board-drone-ops .drone-loadout-slot.open {
+    border-color: #397459;
+    background-color: #0d2119;
+}
+.phase-board-drone-ops .drone-loadout-slot.locked {
+    border-color: #2a3845;
+    background-color: #0e141a;
+}
+.phase-board-drone-ops .slot-card-head {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    width: 184px;
+    min-height: 22px;
+}
+.phase-board-drone-ops .slot-number {
+    display: block;
+    width: 24px;
+    min-height: 16px;
+    padding-top: 2px;
+    color: #dffbff;
+    text-align: center;
+    font-size: 10px;
+    border-width: 1px;
+    border-color: #456b80;
+    border-radius: 5px;
+    background-color: #132f3d;
+}
+.phase-board-drone-ops .slot-state {
+    width: 142px;
+    color: #ffd166;
+    text-align: right;
+    font-size: 10px;
+}
+.phase-board-drone-ops .slot-card-body {
+    width: 184px;
+    min-height: 36px;
+    margin-top: 4px;
+}
+.phase-board-drone-ops .slot-card-body .card-title {
+    margin-top: 0px;
+    margin-bottom: 1px;
+    font-size: 12px;
+}
+.phase-board-drone-ops .slot-card-body .slot-role {
+    min-height: 11px;
+    margin-top: 0px;
+    color: #bfeef7;
+    font-size: 10px;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-grid {
+    width: 184px;
+    min-height: 36px;
+    margin-top: 5px;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-chip {
+    width: 76px;
+    min-height: 14px;
+    padding: 2px 5px;
+    font-size: 9px;
+}
+.phase-board-drone-ops .drone-loadout-slot .stat-chip.wide {
+    width: 92px;
 }
 button:hover {
     background-color: #1f4b62;
@@ -4530,12 +4896,14 @@ button.settings-toggle:hover {
     border-width: 1px;
     border-color: #4e6b80;
     border-radius: 8px;
-    overflow: auto;
+    overflow: hidden;
 }
 #rr-modal.modal-inventory {
-    width: 1068px;
-    margin-left: -534px;
-    padding: 20px;
+    top: 4%;
+    width: 760px;
+    height: 88%;
+    margin-left: -400px;
+    padding: 18px;
 }
 #rr-modal.modal-phase_briefing {
     top: 14%;
@@ -4579,6 +4947,7 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
     const bool droneOps = panelUsesDroneOps(panelHtml);
+    const bool navigation = panelUsesNavigation(panelHtml);
     const bool draftRoom = panelUsesDraftRoom(panelHtml);
     std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
 
@@ -4590,6 +4959,9 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     }
     if (droneOps) {
         document += " drone-ops-panel";
+    }
+    if (navigation) {
+        document += " navigation-panel";
     }
     if (draftRoom) {
         document += " draft-room-panel";
