@@ -173,6 +173,7 @@ SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta);
 SurfaceCrewEffects surfaceCrewEffects(const GameState& state);
 SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile);
 SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog);
+int surfaceSharedFuelCapacity(const GameState& state, const ContentCatalog& catalog);
 bool droneBayUnlocked(const GameState& state);
 MaterialInventory droneSlotUpgradeCost(int nextSlot);
 int miniDroneUpgradeLevel(const GameState& state, std::string_view droneId);

@@ -1577,6 +1577,18 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
     return effects;
 }
 
+int surfaceSharedFuelCapacity(const GameState& state, const ContentCatalog& catalog)
+{
+    int fuelModules = 0;
+    for (const std::string& moduleId : state.run.equippedModuleIds) {
+        const ShipModule* module = catalog.findModule(moduleId);
+        if (module != nullptr && module->slot == SlotType::Fuel) {
+            fuelModules += 1;
+        }
+    }
+    return tuning::research::sharedFuelCapacity + fuelModules * tuning::research::sharedFuelCapacityPerFuelModule;
+}
+
 bool droneBayUnlocked(const GameState& state)
 {
     return hasUnlock(state.meta, content::unlock::droneBay);
@@ -2117,7 +2129,7 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
     const double reconPenalty = landingReconHazardPenalty(state, catalog, *destination);
     expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
-    expedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    expedition.sharedFuelCapacity = surfaceSharedFuelCapacity(state, catalog);
     expedition.sharedFuel = expedition.sharedFuelCapacity;
     if (arkDiscovered(state)) {
         expedition.sharedFuel = std::min(expedition.sharedFuelCapacity, state.meta.ark.fuelReserve);

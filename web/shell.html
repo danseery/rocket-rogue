@@ -2380,6 +2380,7 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-quickbar {
+      max-width: 704px;
       margin-bottom: 0;
     }
 
@@ -2843,16 +2844,26 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-actions {
+      max-width: 704px;
       padding-bottom: 24px;
     }
 
     .phase-board-surface.surface-ops-screen .ops-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      max-width: 704px;
       gap: 8px;
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card {
-      min-height: 276px;
+      min-height: 344px;
       padding: 8px;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-action-card .card-topline,
+    .phase-board-surface.surface-ops-screen .surface-action-card h3,
+    .phase-board-surface.surface-ops-screen .surface-action-card p,
+    .phase-board-surface.surface-ops-screen .surface-action-card .stat-grid {
+      flex: none;
     }
 
     .surface-action-card.featured-action {
@@ -2870,8 +2881,8 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card p {
-      min-height: 58px;
-      max-height: 70px;
+      min-height: 72px;
+      max-height: 72px;
       margin-top: 4px;
       line-height: 1.22;
       overflow: hidden;
@@ -2883,13 +2894,14 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card .stat-grid {
-      min-height: 66px;
-      max-height: 78px;
+      min-height: 0;
+      max-height: none;
       gap: 5px;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card .stat-chip {
+      flex: none;
       min-height: 20px;
       padding: 3px 6px;
       font-size: 11px;
@@ -2904,7 +2916,8 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card .card-footer {
-      min-height: 52px;
+      min-height: 60px;
+      margin-top: auto;
       padding-top: 7px;
       gap: 5px;
       align-items: end;

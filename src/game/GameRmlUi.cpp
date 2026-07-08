@@ -2634,9 +2634,9 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface.surface-ops-screen .drone-ops-callout,
 .phase-board-surface.surface-ops-screen .surface-primary-action,
 .phase-board-surface.surface-ops-screen .board-primary {
-    width: 720px;
-    margin-left: 8px;
-    margin-right: 0px;
+    width: 704px;
+    margin-left: 16px;
+    margin-right: 16px;
 }
 .phase-board-surface .surface-kpi {
     width: 128px;
@@ -2657,7 +2657,7 @@ scrollbarhorizontal sliderbar {
     width: 184px;
 }
 .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
-    width: 200px;
+    width: 184px;
 }
 .phase-board-surface .surface-kpi strong {
     font-size: 15px;
@@ -2752,7 +2752,7 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 0px;
 }
 .phase-board-surface.surface-ops-screen .surface-actions .phase-titlebar {
-    width: 720px;
+    width: 704px;
 }
 .phase-board-surface .surface-actions .phase-titlebar h2 {
     margin-top: 6px;
@@ -2762,16 +2762,25 @@ scrollbarhorizontal sliderbar {
     width: 704px;
 }
 .phase-board-surface.surface-ops-screen .surface-actions .ops-grid {
-    width: 720px;
+    width: 704px;
 }
 .phase-board-surface .surface-action-card {
+    display: flex;
+    flex-direction: column;
     width: 154px;
-    height: 292px;
+    min-height: 292px;
     padding: 7px;
     margin-right: 6px;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card {
-    width: 158px;
+    width: 154px;
+    min-height: 344px;
+}
+.phase-board-surface .surface-action-card .card-topline,
+.phase-board-surface .surface-action-card h3,
+.phase-board-surface .surface-action-card p,
+.phase-board-surface .surface-action-card .stat-grid {
+    flex: none;
 }
 .phase-board-surface .surface-action-card.featured-action {
     border-color: #4c6d5a;
@@ -2793,18 +2802,24 @@ scrollbarhorizontal sliderbar {
     overflow: hidden;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card p {
-    width: 144px;
+    width: 140px;
+    height: 72px;
 }
 .phase-board-surface .surface-action-card .stat-grid {
     width: 140px;
-    height: 82px;
+    min-height: 82px;
+    height: auto;
     align-content: flex-start;
     align-items: flex-start;
+    flex-wrap: wrap;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .stat-grid {
-    width: 144px;
+    width: 140px;
+    min-height: 0px;
+    height: auto;
 }
 .phase-board-surface .surface-action-card .stat-grid .stat-chip {
+    flex: none;
     width: 62px;
     height: 16px;
     min-height: 16px;
@@ -2819,19 +2834,23 @@ scrollbarhorizontal sliderbar {
     width: 132px;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .stat-grid .stat-chip.wide {
-    width: 136px;
+    width: 132px;
 }
 .phase-board-surface .surface-action-card .card-footer {
     width: 140px;
     height: 52px;
-    margin-top: 5px;
+    margin-top: auto;
     padding-top: 6px;
     border-top-width: 1px;
     border-top-color: #263b4c;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer {
-    width: 144px;
+    width: 140px;
+    height: 60px;
+    margin-top: auto;
 }
 .phase-board-surface .surface-action-card .card-footer span {
     width: 140px;
@@ -2842,22 +2861,26 @@ scrollbarhorizontal sliderbar {
     overflow: hidden;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer span {
-    width: 144px;
+    width: 140px;
+    height: 18px;
+    line-height: 18px;
 }
 .phase-board-surface .surface-action-card .card-footer button {
     width: 104px;
     height: 27px;
     line-height: 27px;
     margin-top: 3px;
-    margin-left: 18px;
+    margin-left: 0px;
     margin-right: 0px;
     padding-left: 3px;
     padding-right: 3px;
     font-size: 11px;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card .card-footer button {
-    width: 124px;
-    margin-left: 10px;
+    width: 120px;
+    height: 30px;
+    line-height: 30px;
+    margin-left: 0px;
 }
 .phase-board-surface-minigame .surface-minigame,
 .phase-board-surface-minigame .minigame-readout,

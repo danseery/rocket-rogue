@@ -1159,11 +1159,20 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.run.surfaceExpedition.miningSitePrepared = true;
         state.run.surfaceExpedition.miningRunUsed = true;
     }
-    if (state.run.surfaceExpedition.active && state.run.surfaceExpedition.sharedFuelCapacity <= 0) {
-        state.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-        state.run.surfaceExpedition.sharedFuel = state.run.mining.active
-            ? std::max(0, state.run.surfaceExpedition.sharedFuelCapacity - std::max(0, state.run.mining.fuelSpent))
-            : state.run.surfaceExpedition.sharedFuelCapacity;
+    if (state.run.surfaceExpedition.active) {
+        const int expectedFuelCapacity = surfaceSharedFuelCapacity(state, catalog);
+        if (state.run.surfaceExpedition.sharedFuelCapacity <= 0) {
+            state.run.surfaceExpedition.sharedFuelCapacity = expectedFuelCapacity;
+            state.run.surfaceExpedition.sharedFuel = state.run.mining.active
+                ? std::max(0, state.run.surfaceExpedition.sharedFuelCapacity - std::max(0, state.run.mining.fuelSpent))
+                : state.run.surfaceExpedition.sharedFuelCapacity;
+        } else if (state.run.surfaceExpedition.sharedFuelCapacity < expectedFuelCapacity) {
+            const int capacityDelta = expectedFuelCapacity - state.run.surfaceExpedition.sharedFuelCapacity;
+            state.run.surfaceExpedition.sharedFuelCapacity = expectedFuelCapacity;
+            state.run.surfaceExpedition.sharedFuel = std::min(
+                expectedFuelCapacity,
+                std::max(0, state.run.surfaceExpedition.sharedFuel) + capacityDelta);
+        }
     }
     if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
         state.run.surfaceExpedition.logEntries.erase(
