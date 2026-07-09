@@ -12,6 +12,15 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 - Do not let panel content cover the game window more than necessary. The player should still see enough of the mission scene to understand context.
 - Avoid repeated status copy. One mission update is useful; duplicate yellow paragraphs feel like a bug.
 
+## UI Layout Contract
+
+- Phase-board screens use one named content lane. The current canonical frame is `736px` wide with a `704px` content lane and `16px` side insets unless a future redesign updates the shared contract.
+- Titlebar controls, KPI rows, section cards, card grids, footer lanes, and final actions must share the same left and right edges. Do not create a second local alignment grid for one row.
+- Use shared lane primitives before adding local layout math: `.phase-lane`, `.phase-row`, `.phase-title-row`, `.phase-action-grid`, `.phase-card-slot`, `.phase-footer-lane`, and stable chip/button slots.
+- Parent regions own alignment. Child cards fill fixed slots, and the last card or final action must not carry trailing margin.
+- Fixed-format regions reserve lanes for chips, status, and footer actions. Prefer taller cards over squeezed content, clipped chips, or buttons pushed into dividers.
+- Do not solve alignment with arbitrary one-off width, height, padding, or margin tweaks. If a screen needs a new lane width or slot size, update the shared contract and mirror it in both native RmlUi and `web/shell.html`.
+
 ## Readability
 
 - Primary numbers must be readable by a normal player. Telemetry values should feel like mission gauges, not tiny spreadsheet cells.

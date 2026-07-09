@@ -1273,6 +1273,53 @@
       line-height: 1.35;
     }
 
+    .phase-lane,
+    .phase-title-row,
+    .phase-footer-lane {
+      width: 100%;
+      max-width: 704px;
+    }
+
+    .phase-row,
+    .phase-title-row,
+    .phase-action-grid,
+    .phase-footer-lane {
+      display: flex;
+      flex-flow: row nowrap;
+    }
+
+    .phase-title-row {
+      justify-content: space-between;
+    }
+
+    .phase-action-grid {
+      width: 100%;
+      max-width: 704px;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .phase-card-slot {
+      flex: 0 0 170px;
+      min-width: 0;
+      display: flex;
+    }
+
+    .phase-card-slot > .ops-card,
+    .phase-card-slot > .pilot-card,
+    .phase-card-slot > .upgrade-draft-card {
+      width: 100%;
+      margin-right: 0;
+    }
+
+    .phase-common-button {
+      width: 132px;
+    }
+
+    .phase-chip-slot {
+      width: 132px;
+    }
+
     .board-note {
       display: inline-block;
       max-width: 760px;
@@ -2067,10 +2114,12 @@
       flex: 0 0 684px;
       min-height: 116px;
       padding: 10px;
+      justify-content: flex-start;
     }
 
     .phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
       flex: 0 0 198px;
+      margin-right: 18px;
     }
 
     .phase-board-drone-ops .drone-bay-strip p {
@@ -2080,12 +2129,17 @@
 
     .phase-board-drone-ops .drone-bay-stats,
     .phase-board-drone-ops .drone-bay-materials {
-      flex: 0 0 160px;
+      flex: 0 0 132px;
+      margin-right: 12px;
+    }
+
+    .phase-board-drone-ops .drone-bay-materials {
+      margin-right: 24px;
     }
 
     .phase-board-drone-ops .drone-bay-strip .stat-chip {
-      flex: 0 0 150px;
-      max-width: 150px;
+      flex: 0 0 122px;
+      max-width: 122px;
       min-height: 24px;
       padding: 4px 6px;
     }
@@ -2281,6 +2335,110 @@
       margin-bottom: 24px;
     }
 
+    .phase-board-results .debrief-handoff {
+      display: flex;
+      align-items: center;
+      width: min(704px, 100%);
+      min-height: 112px;
+      margin-top: 8px;
+      margin-bottom: 10px;
+      padding: 10px 12px;
+      border: 1px solid #31566b;
+      border-radius: 8px;
+      background: #101923;
+    }
+
+    .phase-board-results .debrief-handoff-copy {
+      flex: 0 0 184px;
+      margin-right: 14px;
+    }
+
+    .phase-board-results .debrief-handoff-copy span {
+      color: #d7c276;
+      font-size: 11px;
+    }
+
+    .phase-board-results .debrief-handoff-copy h3 {
+      margin: 4px 0 5px;
+      color: #edf4f8;
+      font-size: 16px;
+    }
+
+    .phase-board-results .debrief-handoff-copy p {
+      max-width: 180px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.22;
+    }
+
+    .phase-board-results .debrief-handoff-plan {
+      flex: 0 0 360px;
+      margin-right: 12px;
+    }
+
+    .phase-board-results .debrief-phase-track {
+      display: flex;
+      flex-flow: row wrap;
+      gap: 6px 7px;
+      width: 360px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .phase-board-results .phase-step-card {
+      flex: 0 0 76px;
+      min-height: 42px;
+      padding: 6px 7px;
+      border: 1px solid #31566b;
+      border-radius: 6px;
+      background: #0d1d27;
+    }
+
+    .phase-board-results .phase-step-card.active {
+      border-color: #70e0a8;
+      background: #0d2119;
+    }
+
+    .phase-board-results .phase-step-card.done {
+      border-color: #3d6174;
+      background: #102332;
+    }
+
+    .phase-board-results .phase-step-card.pending {
+      border-color: #34485a;
+    }
+
+    .phase-board-results .phase-step-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .phase-board-results .phase-step-card strong {
+      display: block;
+      margin-top: 3px;
+      color: #edf4f8;
+      font-size: 11px;
+    }
+
+    .phase-board-results .phase-step-card.active strong {
+      color: #70e0a8;
+    }
+
+    .phase-board-results .debrief-handoff-actions {
+      flex: 0 0 108px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .phase-board-results .debrief-handoff-actions button {
+      width: 106px;
+      min-height: 34px;
+      margin-right: 0;
+    }
+
     .phase-board-mining .mining-metrics {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       max-width: 430px;
@@ -2442,15 +2600,13 @@
       top: 14px;
       left: 18px;
       right: 18px;
-      min-height: 76px;
-      padding: 8px 10px;
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
+      min-height: 60px;
+      padding: 6px 8px;
+      display: block;
     }
 
     .mining-run-title {
-      width: 260px;
+      width: 240px;
       flex: 0 0 auto;
     }
 
@@ -2459,9 +2615,9 @@
     .mining-command-dock span,
     .mining-payload-strip > span {
       color: rgba(154, 230, 244, 0.80);
-      font-size: 11px;
+      font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0;
     }
 
     .mining-run-title strong {
@@ -2476,38 +2632,46 @@
       display: block;
       margin-top: 4px;
       color: rgba(215, 232, 234, 0.78);
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.15;
     }
 
     .mining-vitals {
-      flex: 1 1 auto;
+      position: absolute;
+      top: 6px;
+      left: 50%;
+      transform: translateX(-50%);
       display: grid;
-      grid-template-columns: repeat(6, minmax(92px, 1fr));
-      gap: 6px;
-      max-width: 760px;
+      grid-template-columns: repeat(6, 86px);
+      gap: 5px;
+      max-width: none;
+      width: 541px;
       margin: 0;
     }
 
     .mining-vitals .metric {
-      min-height: 31px;
-      padding: 4px 7px;
+      min-height: 42px;
+      height: 42px;
+      padding: 3px 5px;
       background: rgba(8, 25, 32, 0.90);
       border-color: rgba(96, 218, 241, 0.24);
     }
 
     .mining-vitals .metric strong {
-      font-size: 16px;
-      line-height: 1.05;
+      font-size: 24px;
+      line-height: 0.98;
     }
 
     .mining-vitals .metric span {
-      font-size: 10px;
-      line-height: 1.1;
+      font-size: 12px;
+      line-height: 1;
     }
 
     .mining-utility-cluster {
-      width: 118px;
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      width: 108px;
       flex: 0 0 auto;
       display: grid;
       grid-template-columns: 1fr;
@@ -2516,7 +2680,7 @@
 
     .mining-utility-cluster button {
       width: 100%;
-      min-height: 28px;
+      min-height: 24px;
       padding: 0 8px;
       font-size: 12px;
       line-height: 1;
@@ -2549,7 +2713,7 @@
 
     .mining-playfield-space {
       position: absolute;
-      inset: 132px 18px 156px;
+      inset: 118px 18px 156px;
       pointer-events: none;
     }
 
@@ -2639,7 +2803,7 @@
     }
 
     .mining-failure-banner {
-      top: 136px;
+      top: 122px;
       left: 18px;
       width: min(520px, calc(100vw - 36px));
       padding: 10px 12px;
@@ -2662,18 +2826,16 @@
       line-height: 1.25;
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 1220px) {
       .mining-top-rail {
         left: 10px;
         right: 10px;
         top: 10px;
-        min-height: 124px;
-        flex-wrap: wrap;
-        gap: 8px;
+        min-height: 118px;
       }
 
       .mining-run-title {
-        width: calc(100% - 128px);
+        width: calc(100% - 120px);
       }
 
       .mining-run-title strong {
@@ -2682,17 +2844,22 @@
 
       .mining-vitals {
         order: 3;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        position: relative;
+        top: auto;
+        left: auto;
+        transform: none;
+        grid-template-columns: repeat(3, minmax(78px, 1fr));
         max-width: none;
         width: 100%;
+        margin-top: 8px;
       }
 
       .mining-utility-cluster {
-        width: 112px;
+        width: 104px;
       }
 
       .mining-playfield-space {
-        inset: 176px 10px 190px;
+        inset: 158px 10px 190px;
       }
 
       .mining-bottom-rail {
@@ -2739,6 +2906,15 @@
       padding-bottom: 24px;
     }
 
+    .phase-board-surface .phase-lane,
+    .phase-board-surface .phase-title-row,
+    .phase-board-surface .phase-footer-lane {
+      width: calc(100% - 32px);
+      max-width: 704px;
+      margin-left: 16px;
+      margin-right: 16px;
+    }
+
     .phase-board-surface > .phase-titlebar,
     .phase-board-surface > .phase-track,
     .phase-board-surface > .board-note,
@@ -2763,14 +2939,32 @@
     .phase-board-surface.surface-ops-screen .surface-quickbar {
       max-width: 704px;
       margin-bottom: 0;
+      gap: 8px;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-item.is-last {
+      margin-right: 0;
     }
 
     .phase-board-surface.surface-ops-screen .surface-quickbar .surface-kpi {
+      flex: 0 0 74px;
       min-height: 38px;
       padding: 5px 7px;
     }
 
+    .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-site {
+      flex-basis: 104px;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
+      flex-basis: 184px;
+    }
+
     .phase-board-surface.surface-ops-screen .drone-ops-callout {
+      display: flex;
+      flex-flow: row nowrap;
+      justify-content: space-between;
+      align-items: center;
       min-height: 52px;
       padding: 8px 10px;
     }
@@ -3257,6 +3451,29 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
       max-width: 704px;
       gap: 8px;
+    }
+
+    .phase-board-surface.surface-ops-screen .ops-grid.phase-action-grid {
+      display: flex;
+      flex-flow: row nowrap;
+      width: 100%;
+      max-width: 704px;
+      gap: 8px;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-action-slot {
+      flex: 0 0 170px;
+      min-width: 0;
+      display: flex;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-action-slot.is-last {
+      margin-right: 0;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-action-slot .surface-action-card {
+      width: 100%;
+      margin-right: 0;
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-card {
@@ -3779,7 +3996,7 @@
     }
 
     .phase-board-surface .compact-tools {
-      padding-right: 6px;
+      padding-right: 0;
     }
 
     .compact-tools button {
@@ -4559,6 +4776,45 @@
       .phase-titlebar,
       .surface-command {
         grid-template-columns: 1fr;
+      }
+
+      .phase-row,
+      .phase-title-row,
+      .phase-action-grid,
+      .phase-footer-lane {
+        flex-flow: column nowrap;
+      }
+
+      .phase-lane,
+      .phase-title-row,
+      .phase-footer-lane,
+      .phase-board-surface .phase-lane,
+      .phase-board-surface .phase-title-row,
+      .phase-board-surface .phase-footer-lane {
+        width: 100%;
+        max-width: none;
+        margin-left: 0;
+        margin-right: 0;
+      }
+
+      .phase-action-grid {
+        max-width: none;
+      }
+
+      .phase-card-slot,
+      .phase-board-surface.surface-ops-screen .surface-action-slot {
+        flex: 1 1 auto;
+        width: 100%;
+      }
+
+      .phase-board-surface.surface-ops-screen .surface-quickbar {
+        flex-flow: row wrap;
+      }
+
+      .phase-board-surface.surface-ops-screen .surface-quickbar .surface-kpi,
+      .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-site,
+      .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
+        flex: 1 1 118px;
       }
 
       .flight-readout {
@@ -5824,7 +6080,10 @@
       if (sceneWidth <= 0 || rect.height <= 0) {
         return;
       }
-      rr.miningAim((event.clientX - sceneLeft) / sceneWidth, (event.clientY - rect.top) / rect.height);
+      const terrainTop = (1 - 0.82) * 0.5;
+      const terrainHeight = (0.82 + 1) * 0.5;
+      const normalizedY = ((event.clientY - rect.top) / rect.height - terrainTop) / terrainHeight;
+      rr.miningAim((event.clientX - sceneLeft) / sceneWidth, normalizedY);
     }
 
     function handleMiningKeyDown(event) {

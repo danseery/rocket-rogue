@@ -64,10 +64,10 @@ std::string compactMetric(std::string_view label, std::string value)
     return "<div class=\"surface-kpi\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
 }
 
-std::string surfaceQuickMetric(std::string_view label, std::string value, std::string_view cssClass = "")
+std::string surfaceQuickMetric(std::string_view label, std::string value, std::string_view cssClass = "", bool isLast = false)
 {
     const std::string classAttr = cssClass.empty() ? "" : " " + htmlEscape(cssClass);
-    return "<div class=\"surface-kpi surface-quick-item" + classAttr + "\"><span>" + htmlEscape(label) +
+    return "<div class=\"surface-kpi surface-quick-item" + classAttr + (isLast ? " is-last" : "") + "\"><span>" + htmlEscape(label) +
         "</span><strong>" + htmlEscape(value) + "</strong></div>";
 }
 
@@ -537,6 +537,11 @@ std::string surfaceActionCard(const SurfaceActionPreviewPresentation& action)
     return out.str();
 }
 
+std::string phaseCardSlot(std::string cardHtml, std::string_view cssClass, bool isLast)
+{
+    return "<div class=\"phase-card-slot " + htmlEscape(cssClass) + (isLast ? " is-last" : "") + "\">" + std::move(cardHtml) + "</div>";
+}
+
 std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
 {
     std::ostringstream out;
@@ -846,6 +851,17 @@ std::string phaseTrack(const std::vector<PhaseStepPresentation>& steps)
     return out;
 }
 
+std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
+{
+    std::string out = "<div class=\"debrief-phase-track\">";
+    for (const PhaseStepPresentation& step : steps) {
+        out += "<div class=\"phase-step-card " + htmlEscape(step.stateClass) + "\"><span>" +
+            htmlEscape(step.label) + "</span><strong>" + htmlEscape(step.stateLabel) + "</strong></div>";
+    }
+    out += "</div>";
+    return out;
+}
+
 std::string surfacePosture(const SurfaceExpeditionPresentation& surface)
 {
     return "<article class=\"phase-advisory surface-posture " + htmlEscape(surface.postureClass) + "\"><strong>" +
@@ -866,13 +882,13 @@ std::string surfaceCommandSummary(const SurfaceExpeditionPresentation& surface)
 std::string surfaceQuickbar(const SurfaceExpeditionPresentation& surface, const SurfaceExpeditionState& expedition, double extractionRisk)
 {
     std::ostringstream out;
-    out << "<section class=\"surface-quickbar\">";
+    out << "<section class=\"surface-quickbar phase-lane phase-row\">";
     out << surfaceQuickMetric(text::labels::site, surface.metrics.empty() ? "" : surface.metrics.front().value, "surface-quick-site");
     out << surfaceQuickMetric("Next", surface.postureTitle, "surface-quick-next");
     out << surfaceQuickMetric(text::labels::supply, std::to_string(expedition.supply));
     out << surfaceQuickMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
-    out << surfaceQuickMetric(text::labels::extractionRisk, display::percent(extractionRisk));
+    out << surfaceQuickMetric(text::labels::extractionRisk, display::percent(extractionRisk), "", true);
     out << "</section>";
     return out.str();
 }
@@ -1327,8 +1343,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "</p></section>";
         if (opensPostArrival) {
             const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
-            out << phaseTrack(postArrivalPhaseSteps(Screen::Results));
-            out << "<div class=\"utility-row utility-actions\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div>";
+            out << "<section class=\"debrief-handoff\"><div class=\"debrief-handoff-copy\"><span>"
+                << htmlEscape("Next windows") << "</span><h3>" << htmlEscape("Arrival handoff")
+                << "</h3><p>" << htmlEscape("Arrival is open now. Research, surface work, and refit queue up next.")
+                << "</p></div><div class=\"debrief-handoff-plan\">" << debriefPhaseTrack(postArrivalPhaseSteps(Screen::Results))
+                << "</div><div class=\"debrief-handoff-actions utility-actions\">"
+                << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div></section>";
             out << modalTemplate(ui::modals::phaseBriefing, arrivalBriefing.title, detailStack(arrivalBriefing.rows));
         }
         out << crewFateCard(presentation.crewFate);
@@ -1699,7 +1719,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
         const double extractionRisk = surfaceExtractionRisk(state);
         out << phaseBoardOpen("phase-board-surface surface-ops-screen", state.statusLine);
-        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
+        out << "<div class=\"phase-titlebar phase-title-row\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
             << "</h2></div>";
         out << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost")
             << modalButton(text::buttons::details, ui::modals::surface, "ghost");
@@ -1709,23 +1729,28 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "</div></div>";
         out << surfaceQuickbar(surfacePanel, expedition, extractionRisk);
         if (surfacePanel.droneOpsAction.enabled) {
-            out << "<section class=\"resource-bank drone-ops-callout\"><div><h2>" << htmlEscape("Drone Ops")
+            out << "<section class=\"resource-bank drone-ops-callout phase-lane phase-row\"><div><h2>" << htmlEscape("Drone Ops")
                 << "</h2><p>" << htmlEscape("Equip persistent helper drones before you launch the mining run.") << "</p></div>"
                 << panelButton(surfacePanel.droneOpsAction) << "</section>";
         }
         const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
             return isSurfaceMiningAction(action);
         });
-        out << "<section class=\"board-primary surface-actions\">";
-        out << "<div class=\"ops-grid\">";
+        std::vector<const SurfaceActionPreviewPresentation*> orderedActions;
+        orderedActions.reserve(surfacePanel.actions.size());
         if (mineAction != surfacePanel.actions.end()) {
-            out << surfaceActionCard(*mineAction);
+            orderedActions.push_back(&*mineAction);
         }
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             if (isSurfaceMiningAction(action)) {
                 continue;
             }
-            out << surfaceActionCard(action);
+            orderedActions.push_back(&action);
+        }
+        out << "<section class=\"board-primary surface-actions phase-lane\">";
+        out << "<div class=\"ops-grid phase-action-grid\">";
+        for (std::size_t i = 0; i < orderedActions.size(); ++i) {
+            out << phaseCardSlot(surfaceActionCard(*orderedActions[i]), "surface-action-slot", i + 1 == orderedActions.size());
         }
         out << "</div></section>";
         out << phaseBoardClose();

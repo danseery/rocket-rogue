@@ -297,6 +297,8 @@ private:
     float scenePixelCenterX_ = 640.0F;
     float scenePixelCenterY_ = 360.0F;
     float sceneWorldUnit_ = 360.0F;
+    float sceneWorldUnitX_ = 360.0F;
+    float sceneWorldUnitY_ = 360.0F;
     float sceneAspect_ = 16.0F / 9.0F;
     bool initialized_ = false;
 };

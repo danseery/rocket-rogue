@@ -2248,9 +2248,22 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     const MiningLoadStats loadStats = miningLoadStats(state, catalog);
+    auto finishAtReturnZone = [&]() {
+        if (!miningAtReturnZone(mining)) {
+            return false;
+        }
+        const SurfaceActionOutcome outcome = finishMiningRun(state, catalog, false);
+        if (!outcome.message.empty()) {
+            state.statusLine = outcome.message;
+        }
+        return outcome.applied;
+    };
     mining.elapsedSeconds += dt;
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
     if (mining.oxygenSeconds <= 0.0) {
+        if (finishAtReturnZone()) {
+            return;
+        }
         mining.droneHealth = std::max(0.0, mining.droneHealth - tuning::mining::oxygenDroneDamagePerSecond * dt);
         mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
         if (!mining.oxygenDepletedNotified) {
@@ -2263,6 +2276,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     if (mining.oxygenSeconds > 0.0) {
         while (mining.fuelBurnSeconds >= tuning::mining::fuelSecondsPerUnit) {
             if (state.run.surfaceExpedition.sharedFuel <= 0) {
+                if (finishAtReturnZone()) {
+                    return;
+                }
                 triggerMiningFailure(state, text::fuel::miningFailedStatus(arkDiscovered(state)));
                 return;
             }
@@ -2371,6 +2387,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         state.statusLine = std::string(text::status::miningDrillFailed);
     }
     if (mining.droneHealth <= 0.0) {
+        if (finishAtReturnZone()) {
+            return;
+        }
         triggerMiningFailure(
             state,
             std::string("Drone health lost. Emergency recall fired; carried payload was lost."));

@@ -36,6 +36,13 @@ namespace {
 
 constexpr int kPanelWidth = 448;
 constexpr int kPanelInset = 16;
+constexpr int kPhaseBoardFrameWidth = 736;
+constexpr int kPhaseContentLaneWidth = 704;
+constexpr int kPhaseLaneInset = 16;
+constexpr int kPhaseCardSlotWidth = 170;
+constexpr int kPhaseCardGap = 8;
+constexpr int kPhaseCommonButtonWidth = 132;
+constexpr int kPhaseCommonChipSlotWidth = 132;
 
 EM_JS(double, rr_rml_now_seconds, (), {
     return performance.now() / 1000.0;
@@ -1208,7 +1215,7 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
     const bool phaseBoard = panelUsesPhaseBoard(mode);
     const int left = phaseBoard ? 16 : kPanelInset;
     const int top = phaseBoard ? 16 : kPanelInset;
-    const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, 736) : kPanelWidth + 34;
+    const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, kPhaseBoardFrameWidth) : kPanelWidth + 34;
     const int height = phaseBoard
         ? std::clamp(viewportHeight - 32, 420, 1040)
         : std::max(1, viewportHeight - 56);
@@ -1241,18 +1248,24 @@ std::string panelRcss(RmlPanelMode mode)
     const int panelHeight = std::max(180, bounds.Height());
     const int left = bounds.Left();
     const int top = bounds.Top();
-    const int miningInset = panelWidth < 620 ? 10 : 18;
+    const bool compactMining = panelWidth < 1220;
+    const int miningInset = compactMining ? 10 : 18;
     const int miningRailWidth = std::max(1, panelWidth - miningInset * 2);
-    const int miningTopHeight = panelWidth < 620 ? 132 : 86;
-    const int miningBottomHeight = panelWidth < 620 ? 164 : 126;
+    const int miningTopHeight = compactMining ? 118 : 62;
+    const int miningBottomHeight = compactMining ? 164 : 126;
     const int miningBottomTop = std::max(miningTopHeight + 18, panelHeight - miningBottomHeight - miningInset);
-    const int miningTitleWidth = panelWidth < 620 ? std::max(1, miningRailWidth - 124) : 260;
-    const int miningVitalWidth = panelWidth < 620 ? 86 : 104;
-    const int miningPayloadWidth = panelWidth < 620 ? miningRailWidth : std::max(260, miningRailWidth - 378);
-    const int miningActionWidth = panelWidth < 620 ? 126 : 154;
-    const int miningCommandWidth = panelWidth < 620 ? miningRailWidth : std::min(380, miningRailWidth);
-    const int miningCommandLeft = panelWidth < 620 ? 0 : std::max(0, miningRailWidth - miningCommandWidth - 4);
-    const int miningPrimaryActionWidth = panelWidth < 620 ? std::min(180, miningRailWidth) : 170;
+    const int miningUtilityWidth = compactMining ? 104 : 108;
+    const int miningTitleWidth = compactMining ? std::max(1, miningRailWidth - miningUtilityWidth - 12) : 246;
+    const int miningVitalWidth = compactMining ? 78 : 86;
+    const int miningVitalGap = 5;
+    const int miningVitalsWidth = compactMining ? miningRailWidth : (miningVitalWidth * 6 + miningVitalGap * 5 + 84);
+    const int miningVitalsLeft = compactMining ? 0 : std::max(0, (miningRailWidth - miningVitalsWidth) / 2);
+    const int miningPlayfieldTop = miningTopHeight + miningInset + (compactMining ? 30 : 40);
+    const int miningPayloadWidth = compactMining ? miningRailWidth : std::max(260, miningRailWidth - 378);
+    const int miningActionWidth = compactMining ? 126 : 154;
+    const int miningCommandWidth = compactMining ? miningRailWidth : std::min(380, miningRailWidth);
+    const int miningCommandLeft = compactMining ? 0 : std::max(0, miningRailWidth - miningCommandWidth - 4);
+    const int miningPrimaryActionWidth = compactMining ? std::min(180, miningRailWidth) : 170;
     const int miningPrimaryActionLeft = std::max(0, (miningRailWidth - miningPrimaryActionWidth) / 2);
     const int miningPrimaryActionTop = std::max(8, miningBottomHeight - 56);
 
@@ -1344,10 +1357,8 @@ scrollbarhorizontal sliderbar {
     top: )" + std::to_string(miningInset) + R"(px;
     width: )" + std::to_string(miningRailWidth) + R"(px;
     min-height: )" + std::to_string(miningTopHeight) + R"(px;
-    padding: 7px 9px;
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
+    padding: 5px 8px;
+    display: block;
 }
 .mining-run-title {
     width: )" + std::to_string(miningTitleWidth) + R"(px;
@@ -1358,7 +1369,7 @@ scrollbarhorizontal sliderbar {
 .mining-command-dock span,
 .mining-payload-strip > span {
     color: rgba(154, 230, 244, 0.80);
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
 }
 .mining-run-title strong {
@@ -1368,31 +1379,36 @@ scrollbarhorizontal sliderbar {
 }
 .mining-run-title small {
     color: rgba(215, 232, 234, 0.78);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.12;
 }
 .mining-vitals {
+    position: )" + std::string(compactMining ? "relative" : "absolute") + R"(;
+    left: )" + std::to_string(miningVitalsLeft) + R"(px;
+    top: )" + std::string(compactMining ? "0px" : "5px") + R"(;
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    width: )" + std::to_string(std::max(1, miningRailWidth - miningTitleWidth - 132)) + R"(px;
-    margin-right: 8px;
+    width: )" + std::to_string(miningVitalsWidth) + R"(px;
+    margin-top: )" + std::string(compactMining ? "8px" : "0px") + R"(;
+    margin-right: 0px;
 }
 .mining-vitals .metric {
     width: )" + std::to_string(miningVitalWidth) + R"(px;
-    min-height: 30px;
-    margin-right: 5px;
+    height: 42px;
+    min-height: 42px;
+    margin-right: )" + std::to_string(miningVitalGap) + R"(px;
     margin-bottom: 5px;
-    padding: 4px 6px;
+    padding: 3px 5px;
     background-color: rgba(8, 25, 32, 0.90);
 }
 .mining-vitals .metric strong {
-    font-size: 15px;
-    line-height: 1.05;
+    font-size: 24px;
+    line-height: 0.98;
 }
 .mining-vitals .metric span {
-    font-size: 10px;
-    line-height: 1.08;
+    font-size: 12px;
+    line-height: 1.0;
 }
 .mining-health-strip {
     width: )" + std::to_string(std::max(1, miningTitleWidth - 4)) + R"(px;
@@ -1405,7 +1421,7 @@ scrollbarhorizontal sliderbar {
 }
 .mining-health-strip span {
     color: rgba(169, 231, 246, 0.88);
-    font-size: 11px;
+    font-size: 12px;
     text-transform: uppercase;
 }
 .mining-health-strip strong {
@@ -1437,7 +1453,10 @@ scrollbarhorizontal sliderbar {
 .mining-health-bar .health-fill-90 { width: )" + std::to_string((std::max(1, miningTitleWidth - 6) * 90) / 100) + R"(px; }
 .mining-health-bar .health-fill-100 { width: )" + std::to_string(std::max(1, miningTitleWidth - 6)) + R"(px; }
 .mining-utility-cluster {
-    width: 114px;
+    position: absolute;
+    right: 8px;
+    top: 6px;
+    width: )" + std::to_string(miningUtilityWidth) + R"(px;
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
@@ -1445,20 +1464,20 @@ scrollbarhorizontal sliderbar {
 }
 .mining-utility-cluster button {
     width: 102px;
-    min-height: 28px;
+    min-height: 24px;
     height: auto;
     line-height: 1.15;
     margin-left: 4px;
     margin-bottom: 5px;
-    padding: 6px 4px;
+    padding: 4px 4px;
     font-size: 12px;
 }
 .mining-playfield-space {
     position: absolute;
     left: )" + std::to_string(miningInset) + R"(px;
-    top: )" + std::to_string(miningTopHeight + miningInset + 14) + R"(px;
+    top: )" + std::to_string(miningPlayfieldTop) + R"(px;
     width: )" + std::to_string(miningRailWidth) + R"(px;
-    height: )" + std::to_string(std::max(1, miningBottomTop - miningTopHeight - miningInset - 26)) + R"(px;
+    height: )" + std::to_string(std::max(1, miningBottomTop - miningPlayfieldTop - 12)) + R"(px;
 }
 .mining-bottom-rail {
     left: )" + std::to_string(miningInset) + R"(px;
@@ -1534,7 +1553,7 @@ scrollbarhorizontal sliderbar {
 }
 .mining-failure-banner {
     left: )" + std::to_string(miningInset) + R"(px;
-    top: )" + std::to_string(miningTopHeight + miningInset + 12) + R"(px;
+    top: )" + std::to_string(miningPlayfieldTop) + R"(px;
     width: )" + std::to_string(std::min(520, miningRailWidth)) + R"(px;
     padding: 10px;
     border-color: rgba(255, 95, 87, 0.52);
@@ -1548,6 +1567,48 @@ scrollbarhorizontal sliderbar {
     color: rgba(255, 226, 222, 0.82);
     font-size: 12px;
     line-height: 1.22;
+}
+.phase-lane,
+.phase-title-row,
+.phase-footer-lane {
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
+}
+.phase-row,
+.phase-title-row,
+.phase-action-grid,
+.phase-footer-lane {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+}
+.phase-title-row {
+    justify-content: space-between;
+}
+.phase-action-grid {
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    align-items: stretch;
+}
+.phase-card-slot {
+    display: block;
+    flex: none;
+    width: )" + std::to_string(kPhaseCardSlotWidth) + R"(px;
+    margin-right: )" + std::to_string(kPhaseCardGap) + R"(px;
+}
+.phase-card-slot.is-last {
+    margin-right: 0px;
+}
+.phase-card-slot > .ops-card,
+.phase-card-slot > .pilot-card,
+.phase-card-slot > .upgrade-draft-card {
+    margin-right: 0px;
+}
+.phase-common-button {
+    width: )" + std::to_string(kPhaseCommonButtonWidth) + R"(px;
+}
+.phase-chip-slot {
+    width: )" + std::to_string(kPhaseCommonChipSlotWidth) + R"(px;
 }
 .panel-head, .phase-titlebar, .card-footer, .draft-card-footer, .utility-row, .utility-actions, .pilot-card-top, .card-topline, .card-kicker, .slot-topline, .recipe-topline {
     display: flex;
@@ -2674,7 +2735,7 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 2px;
 }
 .phase-board-surface {
-    width: 736px;
+    width: )" + std::to_string(kPhaseBoardFrameWidth) + R"(px;
     padding-bottom: 44px;
 }
 .phase-board-surface .phase-titlebar,
@@ -2684,9 +2745,9 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .drone-ops-callout,
 .phase-board-surface .surface-primary-action,
 .phase-board-surface .board-primary {
-    width: 704px;
-    margin-left: 16px;
-    margin-right: 16px;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
 }
 .phase-board-surface .phase-titlebar {
     margin-bottom: 4px;
@@ -2701,7 +2762,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-surface.surface-ops-screen .compact-tools {
     width: 374px;
-    margin-right: 6px;
+    margin-right: 0px;
 }
 .phase-board-surface .compact-tools button {
     width: 96px;
@@ -2762,9 +2823,9 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface.surface-ops-screen .drone-ops-callout,
 .phase-board-surface.surface-ops-screen .surface-primary-action,
 .phase-board-surface.surface-ops-screen .board-primary {
-    width: 704px;
-    margin-left: 16px;
-    margin-right: 16px;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
 }
 .phase-board-surface .surface-kpi {
     width: 128px;
@@ -2777,6 +2838,9 @@ scrollbarhorizontal sliderbar {
     padding: 4px 6px;
     margin-top: 0px;
     margin-right: 6px;
+}
+.phase-board-surface .surface-quickbar .surface-quick-item.is-last {
+    margin-right: 0px;
 }
 .phase-board-surface .surface-quickbar .surface-quick-site {
     width: 104px;
@@ -2810,7 +2874,7 @@ scrollbarhorizontal sliderbar {
     width: 520px;
 }
 .phase-board-surface .resource-bank button {
-    width: 132px;
+    width: )" + std::to_string(kPhaseCommonButtonWidth) + R"(px;
     min-height: 32px;
     height: auto;
     line-height: 1.15;
@@ -2889,10 +2953,20 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 4px;
 }
 .phase-board-surface .surface-actions .ops-grid {
-    width: 704px;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
 }
 .phase-board-surface.surface-ops-screen .surface-actions .ops-grid {
-    width: 704px;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+}
+.phase-board-surface .surface-action-slot {
+    width: )" + std::to_string(kPhaseCardSlotWidth) + R"(px;
+    margin-right: )" + std::to_string(kPhaseCardGap) + R"(px;
+}
+.phase-board-surface .surface-action-slot.is-last {
+    margin-right: 0px;
+}
+.phase-board-surface .surface-action-slot .surface-action-card {
+    margin-right: 0px;
 }
 .phase-board-surface .surface-action-card {
     display: flex;
@@ -3454,6 +3528,101 @@ scrollbarhorizontal sliderbar {
 .phase-board-results .debrief-hero p {
     width: 672px;
     line-height: 1.35;
+}
+.phase-board-results .debrief-handoff {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 704px;
+    min-height: 112px;
+    margin-top: 8px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    background-color: #101923;
+    border-width: 1px;
+    border-color: #31566b;
+    border-radius: 8px;
+}
+.phase-board-results .debrief-handoff-copy {
+    width: 184px;
+    margin-right: 14px;
+}
+.phase-board-results .debrief-handoff-copy span {
+    color: #d7c276;
+    font-size: 11px;
+}
+.phase-board-results .debrief-handoff-copy h3 {
+    margin-top: 4px;
+    margin-bottom: 5px;
+    color: #edf4f8;
+    font-size: 16px;
+}
+.phase-board-results .debrief-handoff-copy p {
+    width: 180px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    color: #9eaebe;
+    font-size: 12px;
+    line-height: 1.22;
+}
+.phase-board-results .debrief-handoff-plan {
+    width: 360px;
+    margin-right: 12px;
+}
+.phase-board-results .debrief-phase-track {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 360px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+    padding: 0px;
+}
+.phase-board-results .phase-step-card {
+    display: flex;
+    flex-direction: column;
+    width: 76px;
+    min-height: 42px;
+    margin-right: 7px;
+    margin-bottom: 6px;
+    padding: 6px 7px;
+    background-color: #0d1d27;
+    border-width: 1px;
+    border-color: #31566b;
+    border-radius: 6px;
+}
+.phase-board-results .phase-step-card.active {
+    border-color: #70e0a8;
+    background-color: #0d2119;
+}
+.phase-board-results .phase-step-card.done {
+    border-color: #3d6174;
+    background-color: #102332;
+}
+.phase-board-results .phase-step-card.pending {
+    border-color: #34485a;
+}
+.phase-board-results .phase-step-card span {
+    color: #9eaebe;
+    font-size: 10px;
+}
+.phase-board-results .phase-step-card strong {
+    margin-top: 3px;
+    color: #edf4f8;
+    font-size: 11px;
+}
+.phase-board-results .phase-step-card.active strong {
+    color: #70e0a8;
+}
+.phase-board-results .debrief-handoff-actions {
+    display: flex;
+    flex-direction: column;
+    width: 108px;
+}
+.phase-board-results .debrief-handoff-actions button {
+    width: 106px;
+    min-height: 34px;
+    margin-right: 0px;
 }
 .phase-board-results .result-grid,
 .phase-board-results .achievement-grid {
@@ -4545,9 +4714,11 @@ button {
     width: 684px;
     min-height: 116px;
     padding: 10px;
+    justify-content: flex-start;
 }
 .phase-board-drone-ops .drone-bay-strip .drone-bay-copy {
     width: 198px;
+    margin-right: 18px;
 }
 .phase-board-drone-ops .drone-bay-strip p {
     width: 190px;
@@ -4555,11 +4726,15 @@ button {
 }
 .phase-board-drone-ops .drone-bay-stats,
 .phase-board-drone-ops .drone-bay-materials {
-    width: 160px;
+    width: 132px;
+    margin-right: 12px;
+}
+.phase-board-drone-ops .drone-bay-materials {
+    margin-right: 24px;
 }
 .phase-board-drone-ops .drone-bay-strip .stat-chip {
-    width: 150px;
-    max-width: 150px;
+    width: 122px;
+    max-width: 122px;
     min-height: 24px;
     padding: 4px 6px;
 }

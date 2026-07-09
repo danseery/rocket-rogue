@@ -243,7 +243,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::labels::oxygen, miningOxygenValue(mining.oxygenSeconds)),
         panelMetric(text::labels::carried, std::to_string(carriedCargo)),
         panelMetric(text::labels::banked, std::to_string(bankedCargo)),
-        panelMetric(text::labels::load, display::fixed(load.currentLoad, 1) + " / " + display::percent(load.speedMultiplier)),
+        panelMetric(text::labels::load, display::fixed(load.currentLoad, 1)),
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity))),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelBurnSeconds)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),

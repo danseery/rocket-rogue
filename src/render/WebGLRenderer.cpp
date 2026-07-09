@@ -910,7 +910,19 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     scenePixelCenterX_ = scenePixelLeft_ + sceneWidthPixels * 0.5F;
     scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
     sceneWorldUnit_ = std::max(1.0F, std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * kSceneViewportPadding);
+    sceneWorldUnitX_ = sceneWorldUnit_;
+    sceneWorldUnitY_ = sceneWorldUnit_;
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
+    if (snapshot.screen == Screen::Mining) {
+        scenePixelLeft_ = 0.0F;
+        scenePixelRight_ = sceneCssWidth_;
+        scenePixelCenterX_ = sceneCssWidth_ * 0.5F;
+        scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
+        sceneAspect_ = std::max(0.10F, sceneCssWidth_ / sceneCssHeight_);
+        sceneWorldUnit_ = std::max(1.0F, sceneCssHeight_ * 0.5F);
+        sceneWorldUnitX_ = sceneWorldUnit_;
+        sceneWorldUnitY_ = sceneWorldUnit_;
+    }
     const bool cameraShakeEnabled = rr_camera_shake_enabled() != 0;
     const float launchShake = cameraShakeEnabled ? static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0)) : 0.0F;
     if (launchShake > 0.0F) {
@@ -1749,23 +1761,15 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
 
 void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
 {
-    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.006F, 0.010F, 0.012F, 1.0F}, false);
-    drawRadialGlow(0.0F, -0.10F, 1.18F, {0.04F, 0.13F, 0.15F, 0.34F}, 80, false);
-    drawRadialGlow(0.0F, -0.34F, 0.86F, {0.16F, 0.11F, 0.05F, 0.14F}, 64, false);
-    for (int i = 0; i <= 10; ++i) {
-        const float x = -1.0F + static_cast<float>(i) * 0.20F;
-        const float y = -1.0F + static_cast<float>(i) * 0.20F;
-        drawLine(x, -1.0F, x, 1.0F, {0.10F, 0.35F, 0.39F, 0.045F}, 1.0F, false);
-        drawLine(-1.0F, y, 1.0F, y, {0.10F, 0.35F, 0.39F, 0.035F}, 1.0F, false);
-    }
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
     if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
         return;
     }
 
-    const float left = -0.92F;
-    const float right = 0.92F;
-    const float top = 0.78F;
-    const float bottom = -0.86F;
+    const float left = -sceneAspect_;
+    const float right = sceneAspect_;
+    const float top = 0.82F;
+    const float bottom = -1.0F;
     const float cellW = (right - left) / static_cast<float>(snapshot.miningWidth);
     const float cellH = (top - bottom) / static_cast<float>(snapshot.miningHeight);
     const float cellSize = std::min(cellW, cellH);
@@ -1918,53 +1922,30 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     previousMiningStowedInventory_ = snapshot.miningStowedMaterials;
     previousMiningStowedCargo_ = snapshot.miningStowedCargo;
 
-    drawRect((left + right) * 0.5F, (top + bottom) * 0.5F, right - left + 0.035F, top - bottom + 0.035F, {0.010F, 0.014F, 0.016F, 1.0F});
-
-    std::vector<float>& strataVertices = scratchVertices(512);
-    for (int i = 0; i < 13; ++i) {
-        const float y = top - (static_cast<float>(i) + 0.35F) * ((top - bottom) / 13.0F);
-        const float drift = std::sin(static_cast<float>(snapshot.animationTime) * 0.16F + static_cast<float>(i) * 1.7F) * cellH * 0.18F;
-        const float alpha = 0.035F + 0.020F * miningCellNoise(i, snapshot.destinationTier, 5);
-        appendRect(strataVertices, (left + right) * 0.5F + drift, y, right - left, cellH * 0.32F, {0.16F, 0.20F, 0.18F, alpha});
-    }
-    for (int i = 0; i < 54; ++i) {
-        const float nx = miningCellNoise(i, snapshot.destinationTier, 11);
-        const float ny = miningCellNoise(i, snapshot.destinationTier, 23);
-        const float wobble = std::sin(static_cast<float>(snapshot.animationTime) * 0.55F + static_cast<float>(i)) * cellW * 0.18F;
-        const float x = left + nx * (right - left) + wobble;
-        const float y = bottom + ny * (top - bottom);
-        const float size = cellSize * (0.030F + miningCellNoise(i, snapshot.destinationTier, 31) * 0.035F);
-        appendRect(strataVertices, x, y, size, size, {0.78F, 0.86F, 0.80F, 0.050F + miningCellNoise(i, snapshot.destinationTier, 41) * 0.035F});
-    }
-    submit(strataVertices, 0x0004);
+    drawRect((left + right) * 0.5F, (top + bottom) * 0.5F, right - left + 0.035F, top - bottom + 0.035F, {0.0F, 0.0F, 0.0F, 1.0F});
 
     const Vec2 shipBay = returnZone;
-    const float shipPulse = 0.72F + 0.28F * std::sin(static_cast<float>(snapshot.animationTime) * 4.0F);
-    const Color shipRing = snapshot.miningAtReturnZone
-        ? Color {1.0F, 0.82F, 0.24F, 0.36F + shipPulse * 0.18F}
-        : Color {0.28F, 0.72F, 1.0F, 0.20F};
-    drawEllipseLine(
-        shipBay.x,
-        shipBay.y,
-        static_cast<float>(tuning::mining::returnZoneRadiusCells) * cellW,
-        static_cast<float>(tuning::mining::returnZoneRadiusCells) * cellH,
-        shipRing,
-        72,
-        0.0F,
-        2.0F * kPi);
-    drawRadialGlow(shipBay.x, shipBay.y, cellSize * (snapshot.miningAtReturnZone ? 2.45F : 1.85F), {0.18F, 0.72F, 0.92F, snapshot.miningAtReturnZone ? 0.18F : 0.08F}, 48);
+    const float shipGroundY = gridPoint(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY).y;
+    const float shipVisibleFootShare = 0.195F;
+    const float desiredShipSpriteSize = cellSize * 9.50F;
+    const float maxShipSpriteSize = std::max(
+        cellSize * 2.0F,
+        (top - shipGroundY - cellH * 0.85F) / (0.5F + shipVisibleFootShare));
+    const float shipSpriteSize = std::min(desiredShipSpriteSize, maxShipSpriteSize);
+    const float shipVisibleFootOffset = shipSpriteSize * shipVisibleFootShare;
+    const float shipSpriteY = shipGroundY + shipVisibleFootOffset;
     if (textureReady(RocketAsset)) {
         drawSpriteRotated(
             shipBay.x,
-            shipBay.y,
-            cellSize * 9.50F,
-            cellSize * 9.50F,
+            shipSpriteY,
+            shipSpriteSize,
+            shipSpriteSize,
             0.0F,
             1.0F,
             {1.0F, 1.0F, 1.0F, 0.96F},
             RocketAsset);
     } else {
-        drawTriangle(shipBay.x, shipBay.y - cellH * 1.10F, shipBay.x - cellW * 0.64F, shipBay.y + cellH * 0.58F, shipBay.x + cellW * 0.64F, shipBay.y + cellH * 0.58F, {0.76F, 0.94F, 1.0F, 0.84F});
+        drawTriangle(shipBay.x, shipSpriteY + cellH * 1.10F, shipBay.x - cellW * 0.64F, shipGroundY, shipBay.x + cellW * 0.64F, shipGroundY, {0.76F, 0.94F, 1.0F, 0.84F});
     }
 
     std::vector<float>& terrainVertices = scratchVertices(snapshot.miningCells.size() * 48U);
@@ -2382,7 +2363,6 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
 
     const float loadPressure = std::clamp(static_cast<float>(snapshot.miningLoad) / 12.0F, 0.0F, 1.0F);
     if (loadPressure > 0.02F || snapshot.miningCargo > 0) {
-        drawRadialGlow(drone.x, drone.y, droneSize * (0.46F + loadPressure * 0.28F), {0.36F, 0.94F, 0.76F, 0.06F + loadPressure * 0.12F}, 32);
         const int podCount = std::clamp((snapshot.miningCargo + 1) / 2, 0, 4);
         for (int i = 0; i < podCount; ++i) {
             const float side = i % 2 == 0 ? -1.0F : 1.0F;
@@ -3270,8 +3250,8 @@ void WebGLRenderer::submit(const std::vector<float>& vertices, int primitive, bo
         const float invCssWidth = 2.0F / std::max(1.0F, sceneCssWidth_);
         const float invCssHeight = 2.0F / std::max(1.0F, sceneCssHeight_);
         for (std::size_t i = 0; i + 1 < projectedVertices_.size(); i += 8) {
-            const float pixelX = scenePixelCenterX_ + projectedVertices_[i] * sceneWorldUnit_;
-            const float pixelY = scenePixelCenterY_ + projectedVertices_[i + 1] * sceneWorldUnit_;
+            const float pixelX = scenePixelCenterX_ + projectedVertices_[i] * sceneWorldUnitX_;
+            const float pixelY = scenePixelCenterY_ + projectedVertices_[i + 1] * sceneWorldUnitY_;
             projectedVertices_[i] = pixelX * invCssWidth - 1.0F;
             projectedVertices_[i + 1] = pixelY * invCssHeight - 1.0F;
         }

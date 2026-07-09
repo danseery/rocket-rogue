@@ -2208,6 +2208,40 @@ void surfaceUpgradesResetOnEmergencyRecallOnly()
     require(recalled.run.surfaceUpgradeIds.empty(), "field upgrades should reset on emergency recall");
 }
 
+void miningDepletionAtShipGracefullyEndsRun()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto startParkedAtShip = [&catalog](GameState& state, int seed) {
+        state = createNewGame(catalog, seed);
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        require(startMiningRun(state, catalog).applied, "mining run should start for depletion-at-ship test");
+        state.run.mining.droneX = state.run.mining.returnZoneX;
+        state.run.mining.droneY = state.run.mining.returnZoneY;
+    };
+
+    GameState oxygen;
+    startParkedAtShip(oxygen, 650);
+    oxygen.run.mining.oxygenSeconds = 0.01;
+    updateMiningRun(oxygen, catalog, 0.08);
+    require(oxygen.screen == Screen::SurfaceExpedition, "oxygen depletion at the ship should return to surface ops");
+    require(!oxygen.run.mining.active, "oxygen depletion at the ship should finish the mining run");
+    require(!oxygen.run.mining.failurePending, "oxygen depletion at the ship should not start failure recall");
+    require(oxygen.statusLine.find("Emergency recall") == std::string::npos, "oxygen depletion at the ship should not report emergency recall");
+
+    GameState fuel;
+    startParkedAtShip(fuel, 651);
+    fuel.run.surfaceExpedition.sharedFuel = 0;
+    fuel.run.mining.oxygenSeconds = 10.0;
+    fuel.run.mining.fuelBurnSeconds = tuning::mining::fuelSecondsPerUnit;
+    updateMiningRun(fuel, catalog, 0.08);
+    require(fuel.screen == Screen::SurfaceExpedition, "fuel depletion at the ship should return to surface ops");
+    require(!fuel.run.mining.active, "fuel depletion at the ship should finish the mining run");
+    require(!fuel.run.mining.failurePending, "fuel depletion at the ship should not start failure recall");
+    require(fuel.statusLine.find("Emergency recall") == std::string::npos, "fuel depletion at the ship should not report emergency recall");
+}
+
 void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -5148,7 +5182,13 @@ void surfaceHtmlPromotesMiningAction()
     const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
     require(html.find("<h1>Surface Ops</h1>") != std::string::npos, "surface panel should title the surface phase");
     require(html.find("surface-ops-screen") != std::string::npos, "surface panel should use the compact surface ops layout");
-    require(html.find("surface-quickbar") != std::string::npos, "surface panel should expose compact mission context above actions");
+    require(html.find("phase-titlebar phase-title-row") != std::string::npos, "surface panel titlebar should opt into the shared phase lane");
+    require(html.find("surface-quickbar phase-lane phase-row") != std::string::npos, "surface panel should expose compact mission context inside the shared lane");
+    require(html.find("ops-grid phase-action-grid") != std::string::npos, "surface panel action grid should use the shared action lane");
+    require(html.find("phase-card-slot surface-action-slot") != std::string::npos, "surface panel action cards should render inside stable phase card slots");
+    require(html.find("surface-action-slot is-last") != std::string::npos, "surface panel action grid should mark the final slot with no trailing margin");
+    require(countOccurrences(html, "phase-card-slot surface-action-slot") == countOccurrences(html, "surface-action-card"),
+        "every surface action card should have a fixed slot wrapper");
     require(html.find("featured-action") != std::string::npos, "surface panel should promote the mining action in the action grid");
     require(html.find("Mine deposit") != std::string::npos, "surface panel should keep mining obvious");
     require(html.find("Mine deposit") < html.find("Survey site"), "surface panel should put the mining action before secondary field actions");
@@ -5219,6 +5259,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(surfaceHtml.find("surface-quickbar") != std::string::npos, "surface ops should expose compact mission context");
     require(surfaceHtml.find("featured-action") != std::string::npos, "surface ops should promote mining inside the action grid");
     require(surfaceHtml.find("surface-action-card") != std::string::npos, "surface ops should keep actions in styled cards");
+    require(surfaceHtml.find("drone-ops-callout phase-lane phase-row") != std::string::npos, "surface ops drone callout should align to the shared phase lane");
     require(surfaceHtml.find("phase-status") == std::string::npos, "surface ops should not duplicate the yellow mission status inside the board");
 
     GameState droneState = surfaceState;
@@ -5826,6 +5867,7 @@ int main()
     surfaceScanAndPushDepthLimitsStayInParity();
     surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
     surfaceUpgradesResetOnEmergencyRecallOnly();
+    miningDepletionAtShipGracefullyEndsRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     droneOpsPresentationExposesPersistentLoadout();
     surfaceSiteProfilesChangeExpeditionRules();
