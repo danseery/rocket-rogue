@@ -70,7 +70,7 @@ Core actions:
 
 - Survey site: low-risk, low-reward; improves knowledge and finds common materials.
 - Mine deposit: opens one direct-control drone mining run for the current surface loop. It spends shared fuel, not action kits.
-- Push deeper: raises hazard and potential reward; this is the surface version of overburning. It is disabled after mining because the mining run commits the field team to extracting or wrapping the current site.
+- Push Deeper: raises hazard and potential reward; this is the surface version of overburning. It is disabled after mining because the mining run commits the field team to extracting or wrapping the current site.
 - Extract payload: attempts to bring home the current cargo; risk rises with hazard, cargo, low action kits, and spent fuel.
 
 Surface actions should be presented as decision cards, not mystery buttons. Each card should show action-kit or fuel cost, current hazard/extraction risk, a short explanation of the payoff, and the action button. The player should understand why a field-kit unlock changed the odds without needing to inspect code or external notes.
@@ -155,7 +155,7 @@ The current C++ WebGL prototype should keep this scope focused:
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
 - Mining uses a direct-control drone screen with 30s baseline oxygen, shared fuel draw, scanner pulses, destructible terrain, drill integrity, stow/abort decisions, and payload conversion back into the surface expedition.
 - Shared fuel is displayed as a shuttle/drone tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as "Mining drone offline" with disabled button copy "Unavailable".
-- Survey site and Push deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the drone is offline.
+- Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the drone is offline.
 - Solar-system surface expeditions have environmental risk only.
 - Nearby Star and later surface expeditions can trigger hostile contact events.
 - Nearby Star and later mining runs can include enemy tunnel networks and passive-defense combat pressure.

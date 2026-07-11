@@ -105,6 +105,17 @@ enum class MiniDroneRole {
     Defense
 };
 
+enum class MiningMiniDroneBehavior {
+    Following,
+    Traveling,
+    Working,
+    Returning,
+    Engaging,
+    Guarding,
+    Scouting,
+    Docked
+};
+
 enum class MiningCellMaterial {
     Empty,
     Regolith,
@@ -682,6 +693,22 @@ struct MiningDamageNumber {
     bool rigDamage = false;
 };
 
+struct MiningMiniDroneAgent {
+    MiniDroneRole role = MiniDroneRole::Mining;
+    int roleIndex = 0;
+    int upgradeLevel = 1;
+    double x = 0.0;
+    double y = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
+    MiningMiniDroneBehavior behavior = MiningMiniDroneBehavior::Following;
+    int targetCellX = -1;
+    int targetCellY = -1;
+    int targetEnemyIndex = -1;
+    double actionCooldownSeconds = 0.0;
+    bool finishTargetBeforeReturn = false;
+};
+
 struct MiningArtifactObject {
     bool present = false;
     std::string id;
@@ -705,7 +732,7 @@ struct MiningRunState {
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
     double oxygenSeconds = 15.0;
-    double fuelBurnSeconds = 0.0;
+    double fuelCycleProgress = 0.0;
     int fuelSpent = 0;
     double droneX = 32.0;
     double droneY = 4.0;
@@ -715,6 +742,8 @@ struct MiningRunState {
     double aimY = 5.0;
     double aimDirX = 0.0;
     double aimDirY = 1.0;
+    double hullDirX = 0.0;
+    double hullDirY = 1.0;
     bool drilling = false;
     bool failurePending = false;
     double failureSeconds = 0.0;
@@ -730,6 +759,7 @@ struct MiningRunState {
     double contactBounce = 0.0;
     double contactBounceVelocity = 0.0;
     double contactBounceCooldown = 0.0;
+    double contactSpeedRecovery = 1.0;
     double scannerPulseSeconds = 0.0;
     int depthZone = 0;
     int cargo = 0;
@@ -764,6 +794,7 @@ struct MiningRunState {
     double targetMaxToughness = 0.0;
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
+    std::vector<MiningMiniDroneAgent> miniDrones;
     std::vector<MiningProjectileVisual> combatProjectiles;
     std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;

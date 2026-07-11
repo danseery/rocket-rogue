@@ -20,6 +20,8 @@ struct PanelRenderContext {
     FlightActionState flightActions;
     bool flightArmed = true;
     bool pressureReliefUsed = false;
+    bool preflightReady = true;
+    bool droneTransferEnabled = true;
 };
 
 std::string buildGamePanelHtml(const PanelRenderContext& context);

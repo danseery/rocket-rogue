@@ -1808,20 +1808,27 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
         return false;
     }
 
-    auto equipped = std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id);
-    if (equipped != state.meta.equippedDroneIds.end()) {
-        state.meta.equippedDroneIds.erase(equipped);
-        state.statusLine = drone.name + " returned to standby.";
-        return true;
-    }
-
     if (state.meta.equippedDroneIds.size() >= static_cast<std::size_t>(state.meta.droneBaySlots)) {
-        state.statusLine = "Drone slots full. Unequip a drone or expand the bay.";
+        state.statusLine = "Drone Loadout full. Unequip a slot or expand the bay.";
         return false;
     }
 
     state.meta.equippedDroneIds.push_back(drone.id);
-    state.statusLine = drone.name + " assigned to the next mining run.";
+    state.statusLine = drone.name + " added to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + ".";
+    return true;
+}
+
+bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex)
+{
+    ensureDroneBayState(state, catalog);
+    if (!droneBayUnlocked(state) || slotIndex < 0 || slotIndex >= static_cast<int>(state.meta.equippedDroneIds.size())) {
+        return false;
+    }
+
+    const std::string droneId = state.meta.equippedDroneIds[static_cast<std::size_t>(slotIndex)];
+    const MiniDrone* drone = catalog.findMiniDrone(droneId);
+    state.meta.equippedDroneIds.erase(state.meta.equippedDroneIds.begin() + slotIndex);
+    state.statusLine = (drone != nullptr ? drone->name : std::string("Drone")) + " removed from Drone Loadout.";
     return true;
 }
 
@@ -2682,7 +2689,7 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     scan.message = "Scanner lattice armed. Pulse 1 maps +0; later pulses preview deeper push layers.";
     state.run.surfaceScan = scan;
     state.screen = Screen::SurfaceScan;
-    outcome.message = "Scanner lattice armed. Map layers before deciding whether to push deeper.";
+    outcome.message = "Scanner lattice armed. Map layers before deciding whether to use Push Deeper.";
     return outcome;
 }
 
@@ -2743,7 +2750,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     outcome.hazardDelta = scanHazardDelta;
     outcome.message = scan.pulses >= scan.maxPulses
         ? "Full spectrum scan complete. Bank the payload before the window collapses."
-        : "Scan mapped layer +" + std::to_string(depthOffset) + ". Push deeper to test that forecast.";
+        : "Scan mapped layer +" + std::to_string(depthOffset) + ". Use Push Deeper to test that forecast.";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
         scan.completed = true;
@@ -2814,7 +2821,7 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
 
     outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
-        outcome.message = "Need two action kits to push deeper.";
+        outcome.message = "Need two action kits to use Push Deeper.";
         return outcome;
     }
 
@@ -2841,7 +2848,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
     if (!push.active || push.completed) {
-        outcome.message = "Deep push is not active.";
+        outcome.message = "Push Deeper is not active.";
         return outcome;
     }
 
@@ -2854,7 +2861,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
         outcome.hazardTriggered = true;
         outcome.hazardMessage = "A shelf collapsed across the descent lane.";
         outcome.hazardDelta = tuning::research::pushCollapseHazardIncrease;
-        outcome.message = "Deep push busted. The route collapsed before the crew could bank it.";
+        outcome.message = "Push Deeper busted. The route collapsed before the crew could bank it.";
         push.message = surfaceActionSummary(outcome);
         appendSurfaceLog(expedition, push.message);
         return outcome;
@@ -2947,11 +2954,11 @@ SurfaceActionOutcome abortSurfacePush(GameState& state)
 {
     SurfaceActionOutcome outcome;
     if (!state.run.surfacePush.active && !state.run.surfacePush.completed) {
-        outcome.message = "No deep push is active.";
+        outcome.message = "No Push Deeper run is active.";
         return outcome;
     }
     outcome.applied = true;
-    outcome.message = "Deep push recalled. No route payload banked.";
+    outcome.message = "Push Deeper recalled. No route payload banked.";
     appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
     resetSurfacePush(state);
     state.screen = Screen::SurfaceExpedition;

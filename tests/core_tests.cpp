@@ -2044,7 +2044,7 @@ void surfaceUpgradesAndDronesModifyScanMiniGame()
     require(upgraded.run.surfaceScan.bustRisk < baseline.run.surfaceScan.bustRisk, "scanner support should keep post-pulse bust risk lower");
 }
 
-void surfaceUpgradesAndDronesModifyDeepPushMiniGame()
+void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState baseline = createNewGame(catalog, 1935);
@@ -2065,18 +2065,18 @@ void surfaceUpgradesAndDronesModifyDeepPushMiniGame()
 
     Random baselineRng(1936);
     Random upgradedRng(1936);
-    require(startSurfacePushRun(baseline, baselineRng).applied, "baseline deep push should start");
-    require(startSurfacePushRun(upgraded, upgradedRng).applied, "upgraded deep push should start");
-    require(upgraded.run.surfacePush.maxSteps > baseline.run.surfacePush.maxSteps, "structural support should add deep-push capacity");
-    require(upgraded.run.surfacePush.pressure <= baseline.run.surfacePush.pressure, "structural support should reduce starting deep-push pressure");
+    require(startSurfacePushRun(baseline, baselineRng).applied, "baseline Push Deeper should start");
+    require(startSurfacePushRun(upgraded, upgradedRng).applied, "upgraded Push Deeper should start");
+    require(upgraded.run.surfacePush.maxSteps > baseline.run.surfacePush.maxSteps, "structural support should add Push Deeper capacity");
+    require(upgraded.run.surfacePush.pressure <= baseline.run.surfacePush.pressure, "structural support should reduce starting Push Deeper pressure");
     require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should reduce starting collapse risk");
 
     baseline.run.surfacePush.collapseRisk = 0.0;
     upgraded.run.surfacePush.collapseRisk = 0.0;
-    require(pushSurfaceDepthStep(baseline, baselineRng).applied, "baseline deep-push step should resolve");
-    require(pushSurfaceDepthStep(upgraded, upgradedRng).applied, "upgraded deep-push step should resolve");
+    require(pushSurfaceDepthStep(baseline, baselineRng).applied, "baseline Push Deeper step should resolve");
+    require(pushSurfaceDepthStep(upgraded, upgradedRng).applied, "upgraded Push Deeper step should resolve");
     require(upgraded.run.surfacePush.pressure < baseline.run.surfacePush.pressure, "structural support should slow pressure growth");
-    require(upgraded.run.surfacePush.hazardDelta <= baseline.run.surfacePush.hazardDelta, "field support should reduce deep-push hazard creep");
+    require(upgraded.run.surfacePush.hazardDelta <= baseline.run.surfacePush.hazardDelta, "field support should reduce Push Deeper hazard creep");
     require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should keep post-step collapse risk lower");
 }
 
@@ -2234,7 +2234,7 @@ void miningDepletionAtShipGracefullyEndsRun()
     startParkedAtShip(fuel, 651);
     fuel.run.surfaceExpedition.sharedFuel = 0;
     fuel.run.mining.oxygenSeconds = 10.0;
-    fuel.run.mining.fuelBurnSeconds = tuning::mining::fuelSecondsPerUnit;
+    fuel.run.mining.fuelCycleProgress = 1.0;
     updateMiningRun(fuel, catalog, 0.08);
     require(fuel.screen == Screen::SurfaceExpedition, "fuel depletion at the ship should return to surface ops");
     require(!fuel.run.mining.active, "fuel depletion at the ship should finish the mining run");
@@ -2267,7 +2267,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     const MiningDrillStats baseline = miningDrillStats(state, catalog);
     require(std::abs(baseline.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "baseline mining oxygen should use the short starter tank");
     require(equipMiniDrone(state, catalog, 0), "first equipped drone should fit in the starter slot");
-    require(!equipMiniDrone(state, catalog, 1), "equipped drones should not exceed slot count");
+    require(!equipMiniDrone(state, catalog, 0), "matching drones should still respect available slot count");
     const MiningDrillStats miningSupported = miningDrillStats(state, catalog);
     require(miningSupported.passiveDroneMiningRate > baseline.passiveDroneMiningRate, "mining drone should add passive mining support");
 
@@ -2276,7 +2276,11 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     state.meta.materials.exotic = 10;
     require(upgradeDroneSlot(state, catalog), "material-funded slot upgrade should succeed");
     require(state.meta.droneBaySlots == 2, "slot upgrade should increase drone bay capacity");
-    require(equipMiniDrone(state, catalog, 1), "second drone should fit after slot upgrade");
+    require(equipMiniDrone(state, catalog, 0), "second copy of the same drone should fit after slot upgrade");
+    require(std::count(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), content::drone::miningDrone) == 2, "loadout should allow duplicate equipped drone ids");
+    require(unequipMiniDroneSlot(state, catalog, 1), "loadout slot unequip should remove the selected slot");
+    require(state.meta.equippedDroneIds.size() == 1 && state.meta.equippedDroneIds.front() == content::drone::miningDrone, "slot unequip should preserve the remaining loadout order");
+    require(equipMiniDrone(state, catalog, 1), "different drone should fit after freeing a loadout slot");
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
     const MiniDroneLoadoutEffects beforeTune = miniDroneLoadoutEffects(state, catalog);
@@ -2331,6 +2335,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
     require(drones.drones.front().title == "Mining Drone", "Drone Ops should present mining support first");
     require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
+    require(drones.drones.front().action.label == "Add copy", "Drone controls should frame assignment as adding a loadout copy");
     require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be upgradable");
     require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
     require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
@@ -2378,8 +2383,30 @@ void droneOpsPresentationExposesPersistentLoadout()
         return slot.title == "Attack Drone" && slot.role == "Attack" && slot.detail.find("Mk 2") != std::string::npos;
     }), "Drone Ops loadout bench should show equipped tuned attack drones");
     require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Attack Drone" && slot.action.label == "Unequip" && slot.action.actionId == ui::actions::unequipDroneSlot(0);
+    }), "Drone Ops loadout bench should expose unequip actions on filled slots");
+    require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
         return slot.title == "Defense Drone" && slot.cssClass.find("role-defense") != std::string::npos;
     }), "Drone Ops loadout bench should style equipped drone roles");
+
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::attackDrone, content::drone::attackDrone};
+    drones = droneOpsPresentation(state, catalog);
+    const auto duplicateAttackDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
+        return drone.title == "Attack Drone";
+    });
+    require(duplicateAttackDrone != drones.drones.end() && duplicateAttackDrone->status == "Equipped x3", "Drone controls should count duplicate equipped drones");
+    require(miniDroneNameSummary(state, catalog) == "Attack Drone x3", "Drone Ops details should summarize duplicate drone copies compactly");
+    require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
+        return row.label == "Drone copies" && row.value.find("one copy at a time") != std::string::npos;
+    }), "Drone Ops details should explain add-copy and per-slot unequip behavior");
+    require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
+        return row.label == "Drone upgrades" && row.value.find("every equipped copy") != std::string::npos;
+    }), "Drone Ops details should explain that tuning applies to duplicate copies");
+    require(std::count_if(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
+        return slot.title == "Attack Drone";
+    }) == 3, "Drone Loadout should show duplicate drones in separate slots");
+
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
     const MiniDroneLoadoutEffects synergyEffects = miniDroneLoadoutEffects(state, catalog);
     require(std::find(synergyEffects.synergyNames.begin(), synergyEffects.synergyNames.end(), "Targeting Grid") != synergyEffects.synergyNames.end(), "attack plus survey should unlock the Targeting Grid synergy");
     require(std::find(synergyEffects.synergyNames.begin(), synergyEffects.synergyNames.end(), "Killbox Screen") != synergyEffects.synergyNames.end(), "attack plus defense should unlock the Killbox Screen synergy");
@@ -2833,6 +2860,33 @@ void miningArtifactTetherAndDestructionRules()
     toggleMiningTether(state);
     require(!state.run.mining.artifact.tethered, "T should detach an attached artifact");
 
+    state.run.mining.droneX = 24.0;
+    state.run.mining.droneY = 10.0;
+    state.run.mining.artifact.x = state.run.mining.droneX + 5.0;
+    state.run.mining.artifact.y = state.run.mining.droneY;
+    toggleMiningTether(state);
+    require(state.run.mining.artifact.tethered, "the doubled tether should attach to an exposed artifact five cells away");
+    require(
+        std::abs(tuning::mining::artifactTetherRangeCells - 6.8) < 0.000001 &&
+            std::abs(tuning::mining::artifactTetherRestLengthCells - 1.70) < 0.000001,
+        "artifact tether tuning should double both reach and trailing length");
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    }
+    state.run.mining.artifact.state = MiningArtifactState::Loose;
+    state.run.mining.artifact.x = state.run.mining.droneX + 1.5;
+    state.run.mining.artifact.velocityX = 0.0;
+    state.run.mining.artifact.velocityY = 0.0;
+    const double slackArtifactX = state.run.mining.artifact.x;
+    updateMiningRun(state, catalog, 0.08);
+    require(
+        std::abs(state.run.mining.artifact.x - slackArtifactX) < 0.000001,
+        "the longer tether should leave a nearby loose artifact trailing in its slack envelope");
+    state.run.mining.artifact.x = state.run.mining.droneX + 2.5;
+    state.run.mining.artifact.velocityX = 0.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.artifact.velocityX < 0.0, "the longer tether should pull once an artifact moves beyond its trailing length");
+
     state.run.mining.artifact.state = MiningArtifactState::Destroyed;
     state.run.mining.artifact.tethered = true;
     state.run.mining.artifact.x = state.run.mining.returnZoneX;
@@ -2952,40 +3006,40 @@ void surfacePushMiniGameBanksDepthRoute()
     const int supplyBefore = state.run.surfaceExpedition.supply;
     const SurfaceActionOutcome started = startSurfacePushRun(state, rng);
     require(started.applied, "surface push mini-game should start from Surface Ops");
-    require(state.screen == Screen::SurfacePush, "starting push should move to the deep-push screen");
+    require(state.screen == Screen::SurfacePush, "starting Push Deeper should move to its phase board");
     require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::pushSupplyCost, "starting push should spend push action kits");
 
     state.run.surfacePush.collapseRisk = 0.0;
     const SurfaceActionOutcome step = pushSurfaceDepthStep(state, rng);
-    require(step.applied, "deep-push step should resolve while push is active");
-    require(state.run.surfacePush.depthGain > 0, "deep-push step should stage a depth gain");
-    require(state.run.surfacePush.temporaryMaterials.rare > 0, "deep-push step should stage richer materials");
-    require(!state.run.surfacePush.rewardMarkers.empty(), "deep-push step should record stable visual reward markers");
+    require(step.applied, "Push Deeper step should resolve while active");
+    require(state.run.surfacePush.depthGain > 0, "Push Deeper should stage a depth gain");
+    require(state.run.surfacePush.temporaryMaterials.rare > 0, "Push Deeper should stage richer materials");
+    require(!state.run.surfacePush.rewardMarkers.empty(), "Push Deeper should record stable visual reward markers");
 
     const std::vector<MiningCellMaterial> markersAfterFirstStep = state.run.surfacePush.rewardMarkers;
     state.run.surfacePush.collapseRisk = 0.0;
-    require(pushSurfaceDepthStep(state, rng).applied, "second deep-push step should resolve for marker stability");
+    require(pushSurfaceDepthStep(state, rng).applied, "second Push Deeper step should resolve for marker stability");
     require(
         std::equal(markersAfterFirstStep.begin(), markersAfterFirstStep.end(), state.run.surfacePush.rewardMarkers.begin()),
-        "later deep-push rewards should not rewrite previously displayed marker types");
+        "later Push Deeper rewards should not rewrite previously displayed marker types");
 
     const int depthBeforeBank = state.run.surfaceExpedition.depth;
     const SurfaceActionOutcome banked = bankSurfacePush(state);
-    require(banked.applied, "banking deep push should resolve");
-    require(state.screen == Screen::SurfaceExpedition, "banking deep push should return to Surface Ops");
-    require(state.run.surfaceExpedition.depth > depthBeforeBank, "banked deep push should increase expedition depth");
-    require(state.run.surfaceExpedition.miningSitePrepared, "banked deep push should keep the mining site open");
-    require(state.run.surfaceExpedition.temporaryMaterials.rare == 0, "banked deep push should not grant recovered materials before mining");
-    require(state.run.surfaceExpedition.prospectMaterials.rare > 0, "banked deep push should tag richer material prospects");
+    require(banked.applied, "banking Push Deeper should resolve");
+    require(state.screen == Screen::SurfaceExpedition, "banking Push Deeper should return to Surface Ops");
+    require(state.run.surfaceExpedition.depth > depthBeforeBank, "banked Push Deeper should increase expedition depth");
+    require(state.run.surfaceExpedition.miningSitePrepared, "banked Push Deeper should keep the mining site open");
+    require(state.run.surfaceExpedition.temporaryMaterials.rare == 0, "banked Push Deeper should not grant recovered materials before mining");
+    require(state.run.surfaceExpedition.prospectMaterials.rare > 0, "banked Push Deeper should tag richer material prospects");
 
-    require(startMiningRun(state, catalog).applied, "deep-push prospects should open the mining run");
+    require(startMiningRun(state, catalog).applied, "Push Deeper prospects should open the mining run");
     const bool foundDeepProspect = std::any_of(
         state.run.mining.terrain.cells.begin(),
         state.run.mining.terrain.cells.end(),
         [](const MiningCell& cell) {
             return (cell.material == MiningCellMaterial::RareOre || cell.material == MiningCellMaterial::ArtifactCache) && cell.revealed;
         });
-    require(foundDeepProspect, "deep-push prospects should appear as revealed rich targets in mining terrain");
+    require(foundDeepProspect, "Push Deeper prospects should appear as revealed rich targets in mining terrain");
 }
 
 void surfaceScanForecastsPushDepthLayers()
@@ -3175,6 +3229,16 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     require(defended.run.mining.enemiesDefeated == 1, "passive sentry defenses should defeat weakened enemies");
     require(defended.run.mining.defenseDamageDealt > 0.0, "passive sentry defenses should report damage dealt");
     require(!defended.run.mining.combatProjectiles.empty(), "passive sentry defenses should create allied projectile visuals");
+    const MiningProjectileVisual& alliedProjectile = defended.run.mining.combatProjectiles.front();
+    const auto attackAgent = std::find_if(
+        defended.run.mining.miniDrones.begin(),
+        defended.run.mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& agent) { return agent.role == MiniDroneRole::Attack; });
+    require(attackAgent != defended.run.mining.miniDrones.end(), "equipped Attack drone should create an independent mining agent");
+    require(std::abs(alliedProjectile.startX - attackAgent->x) < 0.001,
+        "allied projectiles should start at the independent Attack drone x position");
+    require(std::abs(alliedProjectile.startY - attackAgent->y) < 0.001,
+        "allied projectiles should start at the independent Attack drone y position");
     const MiningRunPresentation defendedMining = miningRunPresentation(defended, catalog);
     require(defendedMining.combatTitle.find("Killbox Screen") != std::string::npos, "live mining combat strip should name the active drone build");
     require(std::any_of(defendedMining.combatMetrics.begin(), defendedMining.combatMetrics.end(), [](const PanelMetricPresentation& chip) {
@@ -3263,6 +3327,229 @@ void attackDroneCombatCanCritAndEnemyCooldownPersists()
     restoreSaveData(restored, catalog, save);
     require(!restored.run.mining.enemies.empty(), "enemy cooldown save test should restore active enemies");
     require(std::abs(restored.run.mining.enemies.front().attackCooldownSeconds - 0.42) < 0.000001, "enemy attack cooldown should round trip through saves");
+}
+
+void miningMiniDronesFollowIndependentRolePositions()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91932);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 6;
+    state.meta.equippedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::resourceDrone,
+        content::drone::surveyDrone,
+        content::drone::stabilizerDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "all-role mini-drone run should start");
+    require(state.run.mining.miniDrones.size() == 6, "every equipped mini-drone copy should create one independent agent");
+
+    std::vector<std::pair<double, double>> positions;
+    for (const MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        positions.push_back({agent.x, agent.y});
+    }
+    setMiningAim(state, 0.0, 0.8);
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+        require(std::abs(state.run.mining.miniDrones[i].x - positions[i].first) < 0.000001,
+            "changing the main drill aim should not rotate mini-drone x positions");
+        require(std::abs(state.run.mining.miniDrones[i].y - positions[i].second) < 0.000001,
+            "changing the main drill aim should not rotate mini-drone y positions");
+    }
+
+    state.run.mining.enemies.clear();
+    for (int tick = 0; tick < 20; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    const auto resource = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Resource;
+    });
+    const auto survey = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Survey;
+    });
+    const auto stabilizer = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Stabilizer;
+    });
+    require(resource != state.run.mining.miniDrones.end(), "Resource drone agent should remain available");
+    require(survey != state.run.mining.miniDrones.end(), "Survey drone agent should remain available");
+    require(stabilizer != state.run.mining.miniDrones.end(), "Stabilizer drone agent should remain available");
+    require(std::hypot(resource->x - state.run.mining.droneX, resource->y - state.run.mining.droneY) < 2.2,
+        "Resource drone should maintain a tight collection follow distance");
+    require(survey->y > state.run.mining.droneY + 3.0,
+        "Survey drone should scout deeper than the main rig");
+    require(stabilizer->y < state.run.mining.droneY && std::abs(stabilizer->x - state.run.mining.droneX) < 0.5,
+        "Stabilizer drone should dock above the main rig");
+    require(stabilizer->behavior == MiningMiniDroneBehavior::Docked,
+        "Stabilizer drone should report its docked behavior independently");
+}
+
+void miningAndSurveyDroneAgentsPerformWorldActions()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91933);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 3;
+    state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::miningDrone, content::drone::surveyDrone};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "mining and survey agent run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    auto miningAgent = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Mining;
+    });
+    auto surveyAgent = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Survey;
+    });
+    require(miningAgent != state.run.mining.miniDrones.end() && surveyAgent != state.run.mining.miniDrones.end(),
+        "equipped mining and survey roles should create agents");
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell = {};
+        cell.revealed = true;
+    }
+    const int firstOreX = std::clamp(static_cast<int>(std::floor(state.run.mining.droneX)) - 2, 1, state.run.mining.terrain.width - 2);
+    const int secondOreX = std::clamp(static_cast<int>(std::floor(state.run.mining.droneX)) + 2, 1, state.run.mining.terrain.width - 2);
+    const int oreY = std::clamp(static_cast<int>(std::floor(state.run.mining.droneY)) + 2, 1, state.run.mining.terrain.height - 2);
+    *miningCellAt(state.run.mining.terrain, firstOreX, oreY) = {MiningCellMaterial::CommonOre, 3.0, 3.0, true, false};
+    *miningCellAt(state.run.mining.terrain, secondOreX, oreY) = {MiningCellMaterial::CommonOre, 3.0, 3.0, true, false};
+    updateMiningRun(state, catalog, 0.08);
+    std::vector<std::pair<int, int>> miningTargets;
+    for (const MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Mining) {
+            miningTargets.push_back({agent.targetCellX, agent.targetCellY});
+        }
+    }
+    require(miningTargets.size() == 2 && miningTargets[0].first >= 0 && miningTargets[1].first >= 0,
+        "duplicate Mining drones should each acquire real terrain work");
+    require(miningTargets[0] != miningTargets[1],
+        "duplicate Mining drones should reserve different terrain cells instead of stacking on one block");
+
+    const int targetX = miningAgent->targetCellX;
+    const int targetY = miningAgent->targetCellY;
+    MiningCell* target = miningCellAt(state.run.mining.terrain, targetX, targetY);
+    require(target != nullptr, "mining agent test target should exist");
+    target->material = MiningCellMaterial::CommonOre;
+    target->maxToughness = 0.05;
+    target->remainingToughness = 0.05;
+    target->revealed = true;
+    target->hazard = false;
+    miningAgent->x = static_cast<double>(targetX) + 0.25;
+    miningAgent->y = static_cast<double>(targetY) + 0.5;
+    miningAgent->targetCellX = targetX;
+    miningAgent->targetCellY = targetY;
+    miningAgent->behavior = MiningMiniDroneBehavior::Working;
+    state.run.mining.droneX = std::min(
+        static_cast<double>(state.run.mining.terrain.width - 2),
+        miningAgent->x + tuning::mining::miningDroneLeashRadiusCells + 1.0);
+    const int brokenBefore = state.run.mining.cellsBroken;
+    updateMiningRun(state, catalog, 0.08);
+    require(miningCellAt(state.run.mining.terrain, targetX, targetY)->material == MiningCellMaterial::Empty,
+        "Mining drone should break its assigned terrain cell instead of granting synthetic materials");
+    require(state.run.mining.cellsBroken == brokenBefore + 1,
+        "Mining drone terrain work should use the shared cell-break accounting");
+    require(miningAgent->behavior == MiningMiniDroneBehavior::Returning && miningAgent->targetCellX < 0,
+        "an out-of-range Mining drone should finish its cell and then return without acquiring another");
+
+    const int scanX = std::clamp(static_cast<int>(std::floor(state.run.mining.droneX)), 1, state.run.mining.terrain.width - 2);
+    const int scanY = std::clamp(static_cast<int>(std::floor(state.run.mining.droneY + 10.0)), 1, state.run.mining.terrain.height - 2);
+    surveyAgent->x = static_cast<double>(scanX) + 0.5;
+    surveyAgent->y = static_cast<double>(scanY) - 1.0;
+    MiningCell* remoteCell = miningCellAt(state.run.mining.terrain, scanX, scanY);
+    require(remoteCell != nullptr, "remote survey cell should exist");
+    remoteCell->revealed = false;
+    require(std::hypot(
+        static_cast<double>(scanX) + 0.5 - state.run.mining.droneX,
+        static_cast<double>(scanY) + 0.5 - state.run.mining.droneY) > miningDrillStats(state, catalog).scannerRadius,
+        "survey test cell should sit outside the main rig scan radius");
+    pulseMiningScanner(state, catalog);
+    require(remoteCell->revealed,
+        "Survey drone should add its own remote scanner origin to the pulse reveal");
+}
+
+void attackAndDefenseDroneAgentsOwnCombatBehavior()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91934);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 2;
+    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "combat agent run should start");
+
+    MiningEnemy first;
+    first.type = MiningEnemyType::Flying;
+    first.x = state.run.mining.droneX + 4.0;
+    first.y = state.run.mining.droneY;
+    first.health = 100.0;
+    first.maxHealth = 100.0;
+    first.speed = 0.0;
+    first.damagePerSecond = 1.0;
+    first.active = true;
+    MiningEnemy second = first;
+    second.type = MiningEnemyType::Beetle;
+    second.x = state.run.mining.droneX + 5.0;
+    second.damagePerSecond = 0.0;
+    state.run.mining.enemies = {first, second};
+    updateMiningRun(state, catalog, 0.08);
+
+    auto attack = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Attack;
+    });
+    auto defense = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Defense;
+    });
+    require(attack != state.run.mining.miniDrones.end() && defense != state.run.mining.miniDrones.end(),
+        "combat loadout should create Attack and Defense agents");
+    require(attack->targetEnemyIndex == 0 && attack->behavior == MiningMiniDroneBehavior::Engaging,
+        "Attack drone should acquire and engage the closest enemy");
+    const auto enemyShot = std::find_if(state.run.mining.combatProjectiles.begin(), state.run.mining.combatProjectiles.end(), [](const MiningProjectileVisual& projectile) {
+        return projectile.team == MiningCombatTeam::Enemy;
+    });
+    require(enemyShot != state.run.mining.combatProjectiles.end(), "ranged enemy should fire at the guarded rig");
+    require(std::abs(enemyShot->endX - defense->x) < 0.001 && std::abs(enemyShot->endY - defense->y) < 0.001,
+        "Defense drone should intercept ranged fire at its own world position");
+    require(state.run.mining.environmentalShieldAbsorbed > 0.0,
+        "Defense drone interception should contribute to absorbed damage accounting");
+
+    state.run.mining.enemies[0].x = state.run.mining.droneX + 6.0;
+    state.run.mining.enemies[1].x = state.run.mining.droneX + 2.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(attack->targetEnemyIndex == 0,
+        "Attack drone should keep its target until that enemy is defeated");
+
+    state.run.mining.enemies[0].health = 0.01;
+    attack->actionCooldownSeconds = 0.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(!state.run.mining.enemies[0].active && attack->behavior == MiningMiniDroneBehavior::Returning,
+        "Attack drone should finish its target and fly home before acquiring another");
+
+    const std::string serialized = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(serialized);
+    require(save.has_value(), "combat mini-drone save should parse");
+    GameState restored = createNewGame(catalog, 91935);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.run.mining.miniDrones.size() == state.run.mining.miniDrones.size(),
+        "independent mini-drone agents should round trip through active mining saves");
+    require(restored.run.mining.miniDrones.front().behavior == state.run.mining.miniDrones.front().behavior,
+        "mini-drone behavior state should survive an active mining save");
 }
 
 void elementalMiningCombatAppliesAffinityAndAreaDefenses()
@@ -3463,6 +3750,14 @@ void miningDrillBreaksCellsAndMarksChunks()
     require(state.run.surfaceExpedition.sharedFuel == fuelBefore - 1, "starting mining should spend one shared fuel");
 
     MiningRunState& mining = state.run.mining;
+    setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+    setMiningMove(state, -1.0, 0.0);
+    require(mining.hullDirX < -0.99 && std::abs(mining.hullDirY) < 0.01, "hull heading should follow movement input");
+    require(mining.aimDirX < -0.99 && std::abs(mining.aimDirY) < 0.01, "drill direction should remain fixed to the hull heading");
+    setMiningMove(state, 0.0, 0.0);
+    require(mining.hullDirX < -0.99, "hull heading should persist after movement stops");
+    require(mining.aimDirX < -0.99, "drill direction should persist with the stopped hull heading");
+
     require(std::abs(mining.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "starter mining run should begin with configured oxygen");
     require(mining.fuelSpent == 1, "active mining run should track the deployment fuel spend");
     MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
@@ -3474,7 +3769,8 @@ void miningDrillBreaksCellsAndMarksChunks()
     std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 0);
     mining.droneX = 32.0;
     mining.droneY = 4.0;
-    setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+    setMiningMove(state, 1.0, 0.0);
+    setMiningMove(state, 0.0, 0.0);
     setMiningDrilling(state, true);
     for (int i = 0; i < 8; ++i) {
         updateMiningRun(state, catalog, 0.08);
@@ -3509,7 +3805,9 @@ void miningUsesSharedFuelReserve()
     state.run.surfaceExpedition.sharedFuel = 1;
     require(startMiningRun(state, catalog).applied, "mining should start with one shared fuel");
     require(state.run.surfaceExpedition.sharedFuel == 0, "deployment should spend the available shared fuel");
-    require(state.run.mining.oxygenSeconds > tuning::mining::fuelSecondsPerUnit, "oxygen upgrades should allow runs long enough to need another fuel draw");
+    require(
+        state.run.mining.oxygenSeconds * tuning::mining::fuelCycleProgressPerSecond > 1.0,
+        "oxygen upgrades should allow runs long enough to complete another fuel cycle");
 
     for (int i = 0; i < 190 && !state.run.mining.failurePending; ++i) {
         updateMiningRun(state, catalog, 0.08);
@@ -3547,7 +3845,8 @@ void miningDrillFootprintCapsWearToWorstContact()
         mining.droneY = 4.0;
         mining.drillHeat = 0.96;
         mining.drillIntegrity = 1.0;
-        setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+        setMiningMove(state, 1.0, 0.0);
+        setMiningMove(state, 0.0, 0.0);
         setMiningDrilling(state, true);
         updateMiningRun(state, catalog, 0.08);
         return state;
@@ -3601,14 +3900,28 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(hard != nullptr, "hard contact cell should exist");
     *hard = {MiningCellMaterial::HardRock, 8.0, 8.0, false, false};
     mining.contactIntensity = 0.0;
+    mining.contactBounce = 0.0;
+    mining.contactBounceVelocity = 0.0;
+    mining.contactBounceCooldown = 0.0;
+    mining.contactSpeedRecovery = 1.0;
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
+    GameState dampedState = state;
+    dampedState.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::shockMounts);
     updateMiningRun(state, catalog, 0.08);
+    updateMiningRun(dampedState, catalog, 0.08);
 
     require(mining.droneX <= 32.90, "hard rock should resist forward movement before it breaks");
     require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
     require(mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0, "hard contact should trigger a damped bounce impulse");
+    require(
+        std::abs(tuning::mining::hardTerrainBounceImpulse - 54.0) < 0.000001 &&
+            std::abs(tuning::mining::contactBounceMaxCells - 2.24) < 0.000001,
+        "baseline hard-contact rebound should use the fourfold floaty tuning");
+    require(
+        dampedState.run.mining.contactBounceVelocity < mining.contactBounceVelocity,
+        "shock mounts should reduce the amplified hard-contact rebound");
     require(hard->remainingToughness < hard->maxToughness, "hard contact should still drill the terrain");
 
     hard->material = MiningCellMaterial::HardRock;
@@ -3627,6 +3940,27 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::Empty, "default hard rock should clear in a short arcade burst");
+
+    for (MiningCell& cell : mining.terrain.cells) {
+        cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    }
+    mining.droneX = 20.0;
+    mining.droneY = 12.0;
+    mining.contactSpeedRecovery = 0.0;
+    setMiningMove(state, 1.0, 0.0);
+    setMiningDrilling(state, false);
+    const double recoveryStartX = mining.droneX;
+    updateMiningRun(state, catalog, 0.08);
+    const double firstRecoveryStep = mining.droneX - recoveryStartX;
+    double finalRecoveryStep = 0.0;
+    for (int i = 0; i < 7; ++i) {
+        const double previousX = mining.droneX;
+        updateMiningRun(state, catalog, 0.08);
+        finalRecoveryStep = mining.droneX - previousX;
+    }
+    require(firstRecoveryStep > 0.0, "post-contact recovery should keep the drone responsive");
+    require(finalRecoveryStep > firstRecoveryStep * 1.35, "post-contact movement should ramp smoothly back toward full speed");
+    require(mining.contactSpeedRecovery >= 0.999, "post-contact movement should recover its full-speed ceiling");
 }
 
 void miningDrillTargetsFirstSolidCellOnRay()
@@ -3647,7 +3981,8 @@ void miningDrillTargetsFirstSolidCellOnRay()
     *nearOre = {MiningCellMaterial::CommonOre, 1.0, 1.0, true, false};
     *farOre = {MiningCellMaterial::RareOre, 1.0, 1.0, true, false};
 
-    setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
+    setMiningMove(state, 1.0, 0.0);
+    setMiningMove(state, 0.0, 0.0);
 
     require(mining.targetCellX == 33 && mining.targetCellY == 10, "drill targeting should stop at the first solid cell on the ray");
     require(mining.targetTipX < 34.0, "drill visual tip should stop before the far cell when terrain blocks the ray");
@@ -3705,9 +4040,69 @@ void miningBrokenDrillBitDisablesDrillingOnly()
     const PreparedLaunch prepared = prepareLaunch(state, catalog, rng);
     const std::string html = buildGamePanelHtml({state, catalog, prepared, prepared});
     require(html.find("Drill bit") != std::string::npos, "mining panel should show drill bit health separately");
-    require(html.find("Drone health") != std::string::npos, "mining panel should show drone health separately");
+    require(html.find(">Broken<") != std::string::npos, "broken drill bit should replace the zero-percent value with explicit Broken copy");
+    require(html.find("mining-vital-broken") != std::string::npos, "broken drill bit should use the flashing red HUD treatment");
+    require(html.find("Rig health") != std::string::npos, "mining panel should show rig health separately");
     require(html.find("Emergency recall") != std::string::npos, "broken drill away from ship should still allow emergency recall");
     require(html.find("data-auto-modal=\"1\"") == std::string::npos, "broken drill bit should not open the failure modal");
+}
+
+void miningShipRepairsUseBankedMaterialsProportionally()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94950);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "mining should start for ship repair test");
+
+    MiningRunState& mining = state.run.mining;
+    mining.drillIntegrity = 0.0;
+    mining.drillBreakNotified = true;
+    mining.droneHealth = 0.5;
+    mining.stowedMaterials.common = 10;
+    mining.stowedCargo = 10;
+    require(miningDrillRepairCost(mining) == 4, "a broken bit should cost the full four common materials");
+    require(miningDroneRepairCost(mining) == 3, "a half-damaged drone should cost half of its six-common rebuild cost");
+    require(!repairMiningDrill(state), "field repair should be rejected away from the ship");
+    require(mining.stowedMaterials.common == 10, "rejected field repair should not spend banked materials");
+
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    const MiningRunPresentation service = miningRunPresentation(state, catalog);
+    const auto drillAction = std::find_if(service.actions.begin(), service.actions.end(), [](const PanelButtonPresentation& action) {
+        return action.actionId == ui::actions::miningRepairDrill;
+    });
+    const auto droneAction = std::find_if(service.actions.begin(), service.actions.end(), [](const PanelButtonPresentation& action) {
+        return action.actionId == ui::actions::miningRepairDrone;
+    });
+    require(service.commandTitle == "Ship service" && service.commandDetail == "Repair, then leave", "ship radius should switch the command dock to repair framing");
+    require(drillAction != service.actions.end() && drillAction->enabled && drillAction->label.find("4 common") != std::string::npos, "ship service should show the funded drill repair cost");
+    require(droneAction != service.actions.end() && droneAction->enabled && droneAction->label.find("3 common") != std::string::npos, "ship service should show the funded drone repair cost");
+    Random repairRng(94950);
+    const PreparedLaunch repairLaunch = prepareLaunch(state, catalog, repairRng);
+    const std::string repairHtml = buildGamePanelHtml({state, catalog, repairLaunch, repairLaunch});
+    require(repairHtml.find("data-mining-ship-service=\"1\"") != std::string::npos, "docked repairs should emit a spatial ship-service marker");
+    require(repairHtml.find("data-mining-return-x=") != std::string::npos && repairHtml.find("data-mining-return-y=") != std::string::npos, "ship-service marker should expose the return-zone projection anchor");
+    require(repairHtml.find("data-drill-label=\"Repair bit (4 common)\"") != std::string::npos, "ship-service marker should carry the current proportional drill repair label");
+    require(repairHtml.find("data-rr-action=\"mining_repair_drill\"") == std::string::npos, "docked drill repair should no longer render in the lower command dock");
+    require(repairHtml.find("data-rr-action=\"mining_repair_drone\"") == std::string::npos, "docked drone repair should no longer render in the lower command dock");
+
+    require(repairMiningDrill(state), "funded ship service should repair a broken drill bit");
+    require(mining.drillIntegrity == 1.0 && !mining.drillBreakNotified, "drill repair should restore integrity and clear the broken latch");
+    require(mining.stowedMaterials.common == 6 && mining.stowedCargo == 6, "drill repair should consume banked common materials and their cargo mass");
+    require(repairMiningDrone(state), "funded ship service should repair drone damage");
+    require(mining.droneHealth == 1.0, "drone repair should restore full health");
+    require(mining.stowedMaterials.common == 3 && mining.stowedCargo == 3, "drone repair should consume its proportional material and cargo cost");
+
+    mining.drillIntegrity = 0.5;
+    mining.stowedMaterials.common = 1;
+    require(miningDrillRepairCost(mining) == 2, "half drill damage should cost half of a full rebuild");
+    require(!repairMiningDrill(state), "unfunded ship repair should be rejected by game logic");
+    const MiningRunPresentation unfunded = miningRunPresentation(state, catalog);
+    require(std::any_of(unfunded.actions.begin(), unfunded.actions.end(), [](const PanelButtonPresentation& action) {
+        return !action.enabled && action.label.find("Need 2 common for bit") != std::string::npos;
+    }), "unfunded ship service should explain the missing drill repair materials");
 }
 
 void miningShipBankingLeaveAndEmergencyRecallRules()
@@ -3715,13 +4110,16 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 95959);
     state.run.destinationIndex = 2;
-    state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids};
+    state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids, content::surfaceUpgrade::emergencyWinch};
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining should start for ship banking test");
 
     state.run.mining.temporaryMaterials.common = 2;
     state.run.mining.cargo = 2;
+    state.run.mining.oxygenSeconds = 3.0;
+    state.run.mining.oxygenDepletedNotified = true;
+    const double upgradedOxygenCapacity = miningDrillStats(state, catalog).oxygenSeconds;
     state.run.mining.droneX = state.run.mining.returnZoneX;
     state.run.mining.droneY = state.run.mining.returnZoneY;
     updateMiningRun(state, catalog, 0.08);
@@ -3729,6 +4127,17 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(state.run.mining.cargo == 0, "ship zone should clear carried cargo after banking");
     require(state.run.mining.stowedMaterials.common == 2, "ship zone should stow carried materials");
     require(state.run.mining.stowedCargo == 2, "ship zone should stow carried cargo");
+    require(
+        std::abs(state.run.mining.oxygenSeconds - upgradedOxygenCapacity) < 0.000001,
+        "banking payload at the ship should refill the current upgraded oxygen capacity");
+    require(!state.run.mining.oxygenDepletedNotified, "oxygen refill should reset the depletion warning latch");
+    require(state.statusLine == text::status::miningStowed, "successful banking should report the oxygen refill");
+
+    state.run.mining.oxygenSeconds = 3.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(
+        state.run.mining.oxygenSeconds < 3.0,
+        "entering the ship zone without carried payload should not grant a free oxygen refill");
 
     MiningRunPresentation atShip = miningRunPresentation(state, catalog);
     require(std::any_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
@@ -3795,7 +4204,7 @@ void miningLoadBurdenAndUpgradeRelief()
     require(emptyLoad.speedMultiplier == 1.0, "empty mining load should not slow the drone");
     require(heavyLoad.currentLoad == 9.0, "carried cargo should count as load");
     require(heavyLoad.speedMultiplier < 1.0, "carried load should slow the drone");
-    require(heavyLoad.fuelMultiplier > 1.0, "carried load should increase fuel burn");
+    require(heavyLoad.fuelConsumptionMultiplier > 1.0, "carried load should increase fuel consumption rate");
     require(heavyLoad.speedMultiplier >= tuning::mining::minLoadedSpeedMultiplier, "load slowdown should keep the minimum speed floor");
 
     GameState upgraded = loaded;
@@ -3804,7 +4213,9 @@ void miningLoadBurdenAndUpgradeRelief()
     MiningLoadStats upgradedLoad = miningLoadStats(upgraded, catalog);
     require(upgradedLoad.freeBuffer > heavyLoad.freeBuffer, "storage upgrades should increase the free carry buffer");
     require(upgradedLoad.speedMultiplier > heavyLoad.speedMultiplier, "engine upgrades should reduce load speed penalty");
-    require(upgradedLoad.fuelMultiplier < heavyLoad.fuelMultiplier, "engine upgrades should reduce load fuel penalty");
+    require(
+        upgradedLoad.fuelConsumptionMultiplier < heavyLoad.fuelConsumptionMultiplier,
+        "engine upgrades should reduce load fuel penalty");
 }
 
 void miningRefitModulesImproveDrillProfileIncrementally()
@@ -3828,6 +4239,9 @@ void miningRefitModulesImproveDrillProfileIncrementally()
 
     const MiningDrillStats baseStats = miningDrillStats(baseline, catalog);
     const MiningDrillStats upgradedStats = miningDrillStats(upgraded, catalog);
+    require(
+        std::abs(baseStats.heatCoolingPerSecond - tuning::mining::heatCoolingPerSecond * tuning::mining::heatCoolingMultiplier) < 0.000001,
+        "base drill cooling should apply the global cooling multiplier");
     require(upgradedStats.power > baseStats.power, "mining drill modules should improve terrain break speed");
     require(upgradedStats.oreYieldChance > baseStats.oreYieldChance, "mining yield modules should add bonus ore chance");
     require(upgradedStats.heatRiseScale < baseStats.heatRiseScale, "mining cooling modules should reduce heat rise");
@@ -3867,10 +4281,12 @@ void activeMiningRoundTripsThroughSave()
     state.statusLine = std::string(text::status::miningStarted);
     state.run.mining.droneX = 21.5;
     state.run.mining.droneY = 9.25;
+    state.run.mining.hullDirX = -0.6;
+    state.run.mining.hullDirY = 0.8;
     state.run.mining.returnZoneX = 31.5;
     state.run.mining.returnZoneY = 4.25;
     state.run.mining.droneHealth = 0.72;
-    state.run.mining.fuelBurnSeconds = 4.5;
+    state.run.mining.fuelCycleProgress = 0.30;
     state.run.mining.fuelSpent = 2;
     state.run.mining.temporaryMaterials.exotic = 1;
     state.run.mining.stowedMaterials.common = 2;
@@ -3898,6 +4314,8 @@ void activeMiningRoundTripsThroughSave()
     }
 
     const std::string serialized = serializeSaveData(captureSaveData(state));
+    require(serialized.find("miningFuelCycle=") != std::string::npos, "active mining saves should store normalized fuel cycle progress");
+    require(serialized.find("miningFuelBurn=") == std::string::npos, "new saves should not write the legacy seconds-based fuel field");
     const auto save = deserializeSaveData(serialized);
     require(save.has_value(), "active mining save should parse");
 
@@ -3907,10 +4325,12 @@ void activeMiningRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.miningSitePrepared && restored.run.surfaceExpedition.miningRunUsed, "active mining restore should preserve the one-run surface state");
     require(restored.run.mining.active, "active mining state should round trip");
     require(std::abs(restored.run.mining.droneX - 21.5) < 0.000001, "mining drone x should round trip");
+    require(std::abs(restored.run.mining.hullDirX + 0.6) < 0.000001, "mining hull heading x should round trip");
+    require(std::abs(restored.run.mining.hullDirY - 0.8) < 0.000001, "mining hull heading y should round trip");
     require(std::abs(restored.run.mining.returnZoneX - 31.5) < 0.000001, "mining return zone x should round trip");
     require(std::abs(restored.run.mining.returnZoneY - 4.25) < 0.000001, "mining return zone y should round trip");
     require(std::abs(restored.run.mining.droneHealth - 0.72) < 0.000001, "mining drone health should round trip");
-    require(std::abs(restored.run.mining.fuelBurnSeconds - 4.5) < 0.000001, "mining fuel timer should round trip");
+    require(std::abs(restored.run.mining.fuelCycleProgress - 0.30) < 0.000001, "mining fuel cycle should round trip");
     require(restored.run.mining.fuelSpent == 2, "mining fuel spend should round trip");
     require(restored.run.mining.temporaryMaterials.exotic == 1, "mining temporary materials should round trip");
     require(restored.run.mining.stowedMaterials.common == 2, "mining stowed materials should round trip");
@@ -3928,6 +4348,17 @@ void activeMiningRoundTripsThroughSave()
     require(restored.run.mining.enemies.size() == 1, "active mining enemies should round trip");
     require(restored.run.mining.enemies.front().type == MiningEnemyType::Elemental, "active mining enemy type should round trip");
     require(restored.run.mining.enemies.front().sourceFeature == MiningCellFeature::EncounterZone, "active mining enemy source feature should round trip");
+
+    std::string legacySerialized = serialized;
+    const std::size_t legacyCycleStart = legacySerialized.find("miningFuelCycle=");
+    const std::size_t legacyCycleEnd = legacySerialized.find('\n', legacyCycleStart);
+    require(legacyCycleStart != std::string::npos && legacyCycleEnd != std::string::npos, "fuel cycle save line should be replaceable for migration coverage");
+    legacySerialized.replace(legacyCycleStart, legacyCycleEnd - legacyCycleStart, "miningFuelBurn=4.5");
+    const auto legacySave = deserializeSaveData(legacySerialized);
+    require(legacySave.has_value(), "legacy seconds-based mining fuel saves should still parse");
+    require(
+        std::abs(legacySave->mining.fuelCycleProgress - 0.30) < 0.000001,
+        "legacy mining fuel seconds should migrate to normalized cycle progress");
     require(restored.run.mining.enemies.front().affinity == MiningElementalAffinity::Radiation, "active mining enemy affinity should round trip");
     require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
@@ -4040,7 +4471,8 @@ void researchPresentationComesFromSharedHelper()
     const ResearchProjectCardPresentation& card = research.projects.front();
     require(!card.title.empty() && !card.detail.empty(), "research project card should expose content text");
     require(card.blueprintGain.find("BP") != std::string::npos, "research project card should expose blueprint gain");
-    require(card.materialCost.find("Cost:") != std::string::npos && card.materialCost.find("Have:") != std::string::npos, "research project card should show cost and owned materials");
+    require(card.materialCost.find("Cost:") != std::string::npos, "research project card should show its material cost");
+    require(card.materialCost.find("Have:") == std::string::npos, "research project card should leave owned materials to the shared resource summary");
     require(!card.resourceChips.empty(), "research project card should expose resource chips");
     require(card.resourceChips.front().label == std::string(text::labels::blueprints), "research project resource chips should lead with blueprint output");
     require(card.resourceChips.front().value == card.blueprintGain, "research project blueprint chip should match card blueprint gain");
@@ -4052,7 +4484,7 @@ void researchPresentationComesFromSharedHelper()
     const ResearchPhasePresentation brokeResearch = researchPhasePresentation(broke, catalog);
     require(!brokeResearch.projects.empty(), "unaffordable research should still present the project");
     require(!brokeResearch.projects.front().reward.empty(), "unowned reward unlock should be visible on research card");
-    require(brokeResearch.projects.front().materialCost.find("Have: No materials") != std::string::npos, "unaffordable research should show empty owned material inventory");
+    require(brokeResearch.projects.front().materialCost.find("Have:") == std::string::npos, "unaffordable research should not repeat owned inventory on its card");
     require(!brokeResearch.projects.front().affordable, "research project should expose unaffordable state");
     require(!brokeResearch.projects.front().action.enabled, "unaffordable research should disable its action");
     require(brokeResearch.projects.front().action.label == std::string(text::panel::needMaterials), "unaffordable research should use shared need-materials label");
@@ -4143,13 +4575,14 @@ void surfacePresentationComesFromSharedHelper()
     require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::sharedFuel) && chip.value == "-1 deploy";
     }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose deployment fuel spend");
-    require(surface.actions[2].action.cssClass == "danger", "push deeper should expose danger styling");
+    require(surface.actions[2].action.label == std::string(text::buttons::pushDeeper), "Push Deeper should use the shared action label");
+    require(surface.actions[2].action.cssClass == "danger", "Push Deeper should expose danger styling");
     require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::depth) && chip.value == "+1";
-    }) != surface.actions[2].payoffChips.end(), "push deeper preview should expose depth payoff");
+    }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose depth payoff");
     require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
-    }) != surface.actions[2].payoffChips.end(), "push deeper preview should expose projected extraction-risk impact");
+    }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose projected extraction-risk impact");
     require(surface.actions[3].action.actionId == std::string(ui::actions::extractSurface), "surface extraction should use shared action id");
     require(surface.actions[3].riskLabel == std::string(text::labels::extractionRisk), "surface extraction should label extraction risk instead of hazard");
     require(std::find_if(surface.actions[3].payoffChips.begin(), surface.actions[3].payoffChips.end(), [](const PanelMetricPresentation& chip) {
@@ -4169,8 +4602,8 @@ void surfacePresentationComesFromSharedHelper()
     surface = surfaceExpeditionPresentation(state);
     require(!surface.actions[0].action.enabled && surface.actions[0].availability == text::panel::messages::needSupply(tuning::research::surveySupplyCost), "blocked surface survey should keep the detailed action-kit reason in status text");
     require(surface.actions[0].action.label == std::string(text::buttons::unavailable), "blocked surface survey button should stay compact for card footers");
-    require(!surface.actions[2].action.enabled && surface.actions[2].availability == text::panel::messages::needSupply(tuning::research::pushSupplyCost), "blocked deep push should keep the detailed action-kit reason in status text");
-    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "blocked deep push button should stay compact for card footers");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == text::panel::messages::needSupply(tuning::research::pushSupplyCost), "blocked Push Deeper should keep the detailed action-kit reason in status text");
+    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "blocked Push Deeper button should stay compact for card footers");
     state.run.surfaceExpedition.supply = 8;
     state.run.surfaceExpedition.sharedFuel = 0;
     surface = surfaceExpeditionPresentation(state);
@@ -5074,10 +5507,17 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(arkLaunchHtml.find(">Return to Ark</button>") != std::string::npos, "Ark launch controls should show the Ark return label");
 
     launchContext.flightArmed = false;
+    launchContext.preflightReady = false;
+    const std::string boardingHtml = buildGamePanelHtml(launchContext);
+    require(boardingHtml.find("data-preflight-ready=\"0\"") != std::string::npos, "boarding panel should keep scene launch control disabled");
+    require(boardingHtml.find("Securing mining drone") != std::string::npos, "boarding panel should explain the launch hold");
+
+    launchContext.preflightReady = true;
     const std::string preflightHtml = buildGamePanelHtml(launchContext);
     require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
+    require(preflightHtml.find("data-preflight-ready=\"1\"") != std::string::npos, "sealed bay should enable the scene launch control");
     require(preflightHtml.find(">Return to Earth</button>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
-    require(preflightHtml.find("Start the burn when ready") != std::string::npos, "pre-flight panel should explain the launch hold");
+    require(preflightHtml.find("Launch corridor clear") != std::string::npos, "pre-flight panel should confirm the sealed bay");
 
     GameState arrivalState = createNewGame(catalog, 712);
     LaunchOutcome arrival;
@@ -5103,9 +5543,11 @@ void panelHtmlIncludesContextualTutorialLayer()
     arrivalState.screen = Screen::ArrivalFanfare;
     const std::string fanfareHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
     require(fanfareHtml.find("<h1>Arrival</h1>") != std::string::npos, "arrival fanfare should title the transient phase");
+    require(fanfareHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string::npos, "arrival fanfare should select the centered RmlUi stamp mode");
     require(fanfareHtml.find("data-arrival-fanfare=\"1\"") != std::string::npos, "arrival fanfare should signal the scene overlay");
     require(fanfareHtml.find("data-arrival-destination=\"Moon\"") != std::string::npos, "arrival fanfare should expose the destination to the overlay");
-    require(fanfareHtml.find("Arrival lock") != std::string::npos, "arrival fanfare panel should present a compact confirmation readout");
+    require(fanfareHtml.find("Mission stamp") != std::string::npos, "arrival fanfare should render the mission stamp inside RmlUi");
+    require(fanfareHtml.find("Click or press Space to continue") != std::string::npos, "arrival fanfare should expose its RmlUi continue action");
     const SaveData fanfareSave = captureSaveData(arrivalState);
     require(fanfareSave.screen == Screen::ArrivalOps, "arrival fanfare should persist as approach so reloads do not resume a transient screen");
     GameState restoredArrival = createNewGame(catalog, 713);
@@ -5125,7 +5567,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(miningHtml.find("class=\"mining-fullscreen\"") != std::string::npos, "mining controls should render in the full-screen HUD");
     require(miningHtml.find("class=\"cockpit-hud mining-hud\"") == std::string::npos, "mining should not render the old compact cockpit HUD");
     require(miningHtml.find("class=\"mining-health-strip\"") != std::string::npos, "mining panel should expose a prominent drone health strip");
-    require(miningHtml.find("Drone health") != std::string::npos, "mining panel should label drone health");
+    require(miningHtml.find("Rig health") != std::string::npos, "mining panel should label rig health");
     require(miningHtml.find("Oxygen") != std::string::npos, "mining panel should expose oxygen");
     require(miningHtml.find("Next fuel") != std::string::npos, "mining panel should expose fuel cadence");
     require(miningHtml.find("Drill bit") != std::string::npos, "mining panel should label drill bit health");
@@ -5135,13 +5577,57 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(miningHtml.find("Carried mats") != std::string::npos, "mining panel should expose carried materials");
     require(miningHtml.find("Banked mats") != std::string::npos, "mining panel should expose banked materials");
     require(miningHtml.find("Load") != std::string::npos, "mining panel should expose load burden");
+    require(
+        miningHtml.find("mining-vital-fuel-cadence mining-alert-neutral") != std::string::npos,
+        "next-fuel cadence should retain a neutral outline while its cycle has margin");
+    require(miningFuelCycleValue(0.25) == "75%", "next-fuel cadence should display normalized cycle remaining instead of seconds");
     require(miningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos, "mining HUD should keep scanner control");
     require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos, "mining HUD should keep tether control");
     require(miningHtml.find("data-rr-action=\"mining_abort\"") != std::string::npos, "mining HUD should keep abort control away from the ship");
     require(miningHtml.find("data-help-topic=\"mining-basics\"") == std::string::npos, "mining panel should not show the old tutorial card inline");
-    require(miningHtml.find("WASD/arrows move") != std::string::npos, "mining details should retain movement controls");
+    require(miningHtml.find("WASD/arrows turn and thrust the forward drill") != std::string::npos, "mining details should explain forward-facing movement controls");
     require(miningHtml.find("Combat read") != std::string::npos, "mining details should include a combat readability legend");
     require(miningHtml.find("Blue numbers") != std::string::npos, "mining details should explain allied and enemy damage text colors");
+
+    miningState.run.mining.oxygenSeconds = tuning::mining::oxygenSeconds * 0.25;
+    miningState.run.mining.drillIntegrity = 0.25;
+    miningState.run.mining.fuelCycleProgress = 0.75;
+    miningState.run.surfaceExpedition.sharedFuel = std::max(1, miningState.run.surfaceExpedition.sharedFuelCapacity / 4);
+    const std::string miningCautionHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(
+        miningCautionHtml.find("mining-vital-oxygen mining-alert-caution") != std::string::npos,
+        "oxygen should use the yellow mining alert treatment at caution pressure");
+    require(
+        miningCautionHtml.find("mining-vital-drill mining-alert-caution") != std::string::npos,
+        "drill integrity should use the yellow mining alert treatment at caution pressure");
+    require(
+        miningCautionHtml.find("mining-vital-fuel mining-alert-caution") != std::string::npos,
+        "shared fuel should use the yellow mining alert treatment at caution pressure");
+    require(
+        miningCautionHtml.find("mining-vital-fuel-cadence mining-alert-caution") != std::string::npos,
+        "next-fuel cadence should warn as the current fuel cycle approaches its draw");
+
+    miningState.run.mining.oxygenSeconds = 1.0;
+    miningState.run.mining.drillIntegrity = 0.05;
+    miningState.run.mining.cargo = 50;
+    miningState.run.mining.fuelCycleProgress = 0.95;
+    miningState.run.surfaceExpedition.sharedFuel = 1;
+    const std::string miningCriticalHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(
+        miningCriticalHtml.find("mining-vital-oxygen mining-alert-critical") != std::string::npos,
+        "oxygen should use the red mining alert treatment at critical pressure");
+    require(
+        miningCriticalHtml.find("mining-vital-drill mining-alert-critical") != std::string::npos,
+        "drill integrity should use the red mining alert treatment at critical pressure");
+    require(
+        miningCriticalHtml.find("mining-vital-fuel mining-alert-critical") != std::string::npos,
+        "shared fuel should use the red mining alert treatment at critical pressure");
+    require(
+        miningCriticalHtml.find("mining-vital-fuel-cadence mining-alert-critical") != std::string::npos,
+        "next-fuel cadence should turn critical immediately before the current cycle spends fuel");
+    require(
+        miningCriticalHtml.find("mining-vital-load mining-alert-critical") != std::string::npos,
+        "heavy load should use the red mining alert treatment at critical burden");
 
     GameState droneState = createNewGame(catalog, 715);
     droneState.screen = Screen::DroneOps;
@@ -5156,6 +5642,10 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(droneHtml.find("drone-bay-strip") != std::string::npos, "Drone Ops HTML should include the Drone Bay strip");
     require(droneHtml.find("drone-build-guidance") == std::string::npos, "Drone Ops HTML should not render build guidance inline");
     require(droneHtml.find("drone-loadout-bench") != std::string::npos, "Drone Ops HTML should include the loadout bench");
+    require(droneHtml.find("Drone Loadout") != std::string::npos, "Drone Ops HTML should rename the loadout bench");
+    require(droneHtml.find("Owned drone types: add copies and upgrade tuning.") != std::string::npos, "Drone Ops HTML should explain that controls add copies by type");
+    require(droneHtml.find("Unequip one copy from here.") != std::string::npos, "Drone Ops HTML should explain loadout unequip scope");
+    require(droneHtml.find("Unequip") != std::string::npos, "Drone Ops HTML should move unequip controls into the loadout bench");
     require(droneHtml.find("Slot 1") != std::string::npos, "Drone Ops loadout bench should label slot positions");
     require(droneHtml.find("drone-combat-forecast") != std::string::npos, "Drone Ops HTML should include the combat forecast strip");
     require(droneHtml.find("Sentry output") != std::string::npos, "Drone Ops combat forecast should show passive combat output");
@@ -5244,6 +5734,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(researchHtml.find("class=\"ops-card\"") != std::string::npos, "research projects should render as styled cards");
     require(researchHtml.find("class=\"phase-advisory") != std::string::npos, "research should include advisory styling");
     require(researchHtml.find("phase-status") == std::string::npos, "research should not duplicate the yellow mission status inside the board");
+    require(researchHtml.find("Have:") == std::string::npos, "research cards should not repeat the shared material inventory in their yellow footer copy");
 
     GameState surfaceState = createNewGame(catalog, 719);
     surfaceState.run.destinationIndex = 2;
@@ -5721,6 +6212,8 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::surfacePushStep == "surface_push_step", "surface push step action should use a stable schema id");
     require(ui::actions::surfacePushBank == "surface_push_bank", "surface push bank action should use a stable schema id");
     require(ui::actions::miningTether == "mining_tether", "mining tether action should use a stable schema id");
+    require(ui::actions::miningRepairDrill == "mining_repair_drill", "mining drill repair action should use a stable schema id");
+    require(ui::actions::miningRepairDrone == "mining_repair_drone", "mining drone repair action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
 
@@ -5740,7 +6233,7 @@ void panelLayoutModeIsPortablePresentationData()
     require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::PhaseBoard, "surface expedition should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceUpgrade) == PanelLayoutMode::PhaseBoard, "field upgrade draft should use the management board layout");
     require(panelLayoutMode(Screen::SurfaceScan) == PanelLayoutMode::PhaseBoard, "surface scan should use the phase board layout");
-    require(panelLayoutMode(Screen::SurfacePush) == PanelLayoutMode::PhaseBoard, "deep push should use the phase board layout");
+    require(panelLayoutMode(Screen::SurfacePush) == PanelLayoutMode::PhaseBoard, "Push Deeper should use the phase board layout");
     require(panelLayoutMode(Screen::DroneOps) == PanelLayoutMode::PhaseBoard, "drone ops should use the management board layout");
     require(panelLayoutMode(Screen::Navigation) == PanelLayoutMode::PhaseBoard, "navigation should use the management board layout");
     require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::PhaseBoard, "refit should use the management board layout");
@@ -5863,7 +6356,7 @@ int main()
     surfaceUpgradeOffersCanRerollAndKeepDraftState();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
     surfaceUpgradesAndDronesModifyScanMiniGame();
-    surfaceUpgradesAndDronesModifyDeepPushMiniGame();
+    surfaceUpgradesAndDronesModifyPushDeeperMiniGame();
     surfaceScanAndPushDepthLimitsStayInParity();
     surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
     surfaceUpgradesResetOnEmergencyRecallOnly();
@@ -5890,6 +6383,9 @@ int main()
     hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
     rangedMiningEnemiesShootAndCombatVisualsExpire();
     attackDroneCombatCanCritAndEnemyCooldownPersists();
+    miningMiniDronesFollowIndependentRolePositions();
+    miningAndSurveyDroneAgentsPerformWorldActions();
+    attackAndDefenseDroneAgentsOwnCombatBehavior();
     elementalMiningCombatAppliesAffinityAndAreaDefenses();
     mammalBossChambersGrantAdvancedRewards();
     enemyMovementTypesHaveDistinctBehavior();
@@ -5901,6 +6397,7 @@ int main()
     miningDrillTargetsFirstSolidCellOnRay();
     miningCompletionFeedsSurfacePayload();
     miningBrokenDrillBitDisablesDrillingOnly();
+    miningShipRepairsUseBankedMaterialsProportionally();
     miningShipBankingLeaveAndEmergencyRecallRules();
     miningOxygenDrainsDroneHealthBeforeForcedRecall();
     miningLoadBurdenAndUpgradeRelief();

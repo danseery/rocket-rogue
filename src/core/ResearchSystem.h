@@ -184,6 +184,7 @@ bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog);
 bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, int index);
 bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
 bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
+bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex);
 MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);

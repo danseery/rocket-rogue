@@ -30,6 +30,11 @@ void addDebugUnlock(GameState& state, const char* unlockKey)
     }
 }
 
+bool miningDroneTransferEnabled(const GameState& state)
+{
+    return hasUnlock(state.meta, content::unlock::surfaceDrills);
+}
+
 LaunchOutcome debugTransferOutcome(std::string destinationId)
 {
     LaunchOutcome outcome;
@@ -258,6 +263,9 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
     session_.preparedLaunch = preparedLaunch;
     session_.flightArmed = false;
+    session_.preflightElapsed = miningDroneTransferEnabled(state_)
+        ? 0.0
+        : tuning::session::preflightBoardingSeconds;
     session_.elapsed = 0.0;
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
@@ -342,6 +350,14 @@ void RocketGameApp::tick(double deltaSeconds)
 
     if (state_.screen == Screen::Launch) {
         if (!session_.flightArmed) {
+            const bool wasReady = session_.preflightElapsed >= tuning::session::preflightBoardingSeconds;
+            session_.preflightElapsed = std::min(
+                session_.preflightElapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
+                tuning::session::preflightBoardingSeconds);
+            if (!wasReady && session_.preflightElapsed >= tuning::session::preflightBoardingSeconds) {
+                state_.statusLine = std::string(text::status::preflightReady);
+                refreshPanel();
+            }
             return;
         }
         const PreparedLaunch flightModel = currentFlightModel();
@@ -496,7 +512,9 @@ void RocketGameApp::prepareForLaunch()
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
-    state_.statusLine = std::string(text::status::preflightReady);
+    state_.statusLine = miningDroneTransferEnabled(state_)
+        ? std::string(text::status::droneStowing)
+        : std::string(text::status::preflightReadyWithoutDrone);
     refreshPanel();
 }
 
@@ -508,6 +526,12 @@ void RocketGameApp::startLaunch()
     }
 
     if (state_.screen != Screen::Launch || session_.flightArmed) {
+        return;
+    }
+
+    if (session_.preflightElapsed < tuning::session::preflightBoardingSeconds) {
+        state_.statusLine = std::string(text::status::droneStowing);
+        refreshPanel();
         return;
     }
 
@@ -965,6 +989,18 @@ void RocketGameApp::equipDrone(int index)
     panelDirty_ = true;
 }
 
+void RocketGameApp::unequipDroneSlot(int slotIndex)
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    if (unequipMiniDroneSlot(state_, catalog_, slotIndex)) {
+        save();
+    }
+    panelDirty_ = true;
+}
+
 void RocketGameApp::upgradeDrone(int index)
 {
     if (state_.screen != Screen::DroneOps) {
@@ -1034,6 +1070,46 @@ void RocketGameApp::miningTether()
         state_.statusLine = "Expose the artifact before tethering it.";
     } else {
         state_.statusLine = "Move closer to the exposed artifact to tether it.";
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningRepairDrill()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+    MiningRunState& mining = state_.run.mining;
+    const int cost = miningDrillRepairCost(mining);
+    if (!miningAtReturnZone(mining)) {
+        state_.statusLine = "Return to the ship to repair the drill bit.";
+    } else if (cost <= 0) {
+        state_.statusLine = "Drill bit integrity is already full.";
+    } else if (mining.stowedMaterials.common < cost) {
+        state_.statusLine = "Need " + std::to_string(cost) + " banked common materials to repair the drill bit.";
+    } else if (repairMiningDrill(state_)) {
+        state_.statusLine = "Drill bit repaired for " + std::to_string(cost) + " common materials.";
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningRepairDrone()
+{
+    if (state_.screen != Screen::Mining) {
+        return;
+    }
+    MiningRunState& mining = state_.run.mining;
+    const int cost = miningDroneRepairCost(mining);
+    if (!miningAtReturnZone(mining)) {
+        state_.statusLine = "Return to the ship to repair the mining drone.";
+    } else if (cost <= 0) {
+        state_.statusLine = "Mining drone health is already full.";
+    } else if (mining.stowedMaterials.common < cost) {
+        state_.statusLine = "Need " + std::to_string(cost) + " banked common materials to repair the mining drone.";
+    } else if (repairMiningDrone(state_)) {
+        state_.statusLine = "Mining drone repaired for " + std::to_string(cost) + " common materials.";
+        save();
     }
     panelDirty_ = true;
 }
@@ -1370,7 +1446,7 @@ void RocketGameApp::debugStartSurfaceScan()
 
 void RocketGameApp::debugStartSurfacePush()
 {
-    beginDebugSandbox("Debug deep-push sandbox. No materials, artifacts, or save data will be written.");
+    beginDebugSandbox("Debug Push Deeper sandbox. No materials, artifacts, or save data will be written.");
     state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
     state_.run.surfaceExpedition = {};
     state_.run.surfaceExpedition.active = true;
@@ -1382,7 +1458,7 @@ void RocketGameApp::debugStartSurfacePush()
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.08;
     const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
     state_.statusLine = outcome.applied
-        ? "Debug deep-push sandbox. Descend, bank, or collapse without touching your save."
+        ? "Debug Push Deeper sandbox. Descend, bank, or collapse without touching your save."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -1531,7 +1607,9 @@ void RocketGameApp::attemptFrontierTransfer()
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
-    state_.statusLine = std::string(text::status::preflightReady);
+    state_.statusLine = miningDroneTransferEnabled(state_)
+        ? std::string(text::status::droneStowing)
+        : std::string(text::status::preflightReadyWithoutDrone);
     refreshPanel();
 }
 
@@ -1647,11 +1725,7 @@ void RocketGameApp::restCrew()
 
 void RocketGameApp::resetSave()
 {
-    if (debugSessionActive_) {
-        state_.statusLine = "Debug sandbox is isolated. Exit debug before resetting the real save.";
-        panelDirty_ = true;
-        return;
-    }
+    debugSessionActive_ = false;
     clearBrowserSave();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
@@ -1744,6 +1818,8 @@ void RocketGameApp::refreshPanel()
         session_.controls.actions,
         session_.flightArmed,
         session_.controls.pressureReliefUsed,
+        session_.preflightElapsed >= tuning::session::preflightBoardingSeconds,
+        miningDroneTransferEnabled(state_),
     });
     setBrowserPanelHtml(panelHtml);
     rmlUi_.setPanelHtml(panelHtml);
@@ -1761,6 +1837,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectSurfaceUpgrade(index);
     } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
         equipDrone(index);
+    } else if (consumeIndexedAction(action, ui::actions::unequipDroneSlotPrefix, index)) {
+        unequipDroneSlot(index);
     } else if (consumeIndexedAction(action, ui::actions::upgradeDronePrefix, index)) {
         upgradeDrone(index);
     } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
@@ -1843,6 +1921,10 @@ void RocketGameApp::runUiAction(const std::string& action)
         miningScanner();
     } else if (action == ui::actions::miningTether) {
         miningTether();
+    } else if (action == ui::actions::miningRepairDrill) {
+        miningRepairDrill();
+    } else if (action == ui::actions::miningRepairDrone) {
+        miningRepairDrone();
     } else if (action == ui::actions::miningStow) {
         miningStow();
     } else if (action == ui::actions::miningAbort) {
@@ -1871,7 +1953,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.currentMultiplier = session_.currentMultiplier;
     result.animationTime = session_.result.elapsed;
     if (state_.screen == Screen::Launch) {
-        result.animationTime = session_.elapsed;
+        result.animationTime = session_.flightArmed ? session_.elapsed : session_.preflightElapsed;
     } else if (state_.screen == Screen::Mining) {
         result.animationTime = state_.run.mining.elapsedSeconds;
     } else if (state_.screen == Screen::Flyby) {
@@ -1941,6 +2023,10 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.destinationTier = visualDestination->tier;
     result.currentFrontierTier = currentFrontier.tier;
     result.arkCondition = state_.meta.ark.condition;
+    result.preflightActive = state_.screen == Screen::Launch && !session_.flightArmed && miningDroneTransferEnabled(state_);
+    result.preflightProgress = result.preflightActive
+        ? std::clamp(session_.preflightElapsed / tuning::session::preflightBoardingSeconds, 0.0, 1.0)
+        : 1.0;
 
     if (state_.screen == Screen::Mining && state_.run.mining.active) {
         const MiningRunState& mining = state_.run.mining;
@@ -1954,7 +2040,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDrillDirY = mining.aimDirY;
         result.miningHeat = mining.drillHeat;
         result.miningOxygenSeconds = mining.oxygenSeconds;
-        result.miningFuelBurnSeconds = mining.fuelBurnSeconds;
+        result.miningFuelCycleProgress = mining.fuelCycleProgress;
         result.miningDrillIntegrity = mining.drillIntegrity;
         result.miningDroneHealth = mining.droneHealth;
         result.miningReturnZoneX = mining.returnZoneX;
@@ -1963,7 +2049,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         const MiningLoadStats loadStats = miningLoadStats(state_, catalog_);
         result.miningLoad = loadStats.currentLoad;
         result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
-        result.miningLoadFuelMultiplier = loadStats.fuelMultiplier;
+        result.miningLoadFuelConsumptionMultiplier = loadStats.fuelConsumptionMultiplier;
         result.miningHazardDelta = mining.hazardDelta;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
@@ -1971,6 +2057,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
+        result.miningMoveX = mining.moveX;
+        result.miningMoveY = mining.moveY;
+        result.miningHullDirX = mining.hullDirX;
+        result.miningHullDirY = mining.hullDirY;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
         const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
         const double pressureX = -mining.recoilX;
@@ -2005,6 +2095,19 @@ RenderSnapshot RocketGameApp::snapshot() const
             } else if (drone->role == MiniDroneRole::Defense) {
                 result.miningDefenseDroneCount += 1;
             }
+        }
+        result.miningMiniDrones.reserve(mining.miniDrones.size());
+        for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
+            result.miningMiniDrones.push_back({
+                agent.x,
+                agent.y,
+                static_cast<int>(agent.role),
+                agent.upgradeLevel,
+                static_cast<int>(agent.behavior),
+                agent.targetCellX,
+                agent.targetCellY,
+                agent.targetEnemyIndex
+            });
         }
         result.miningShieldActive = mining.environmentalShieldAbsorbed > 0.0 || result.miningDefenseDroneCount > 0;
         result.miningMaterials = mining.temporaryMaterials;

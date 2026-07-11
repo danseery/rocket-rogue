@@ -33,12 +33,12 @@ The first implemented phase model is:
 1. Complete a frontier-transfer arrival at Mars or beyond.
 2. Choose from generated research projects that convert blueprints and recovered materials into unlock variety.
 3. Start a surface expedition with action kits, shared fuel, a rolled site profile, and a short mission log.
-4. Survey, push deeper, or deploy the mining drone for one fuel-gated mining run.
+4. Survey, use Push Deeper, or deploy the mining drone for one fuel-gated mining run.
 5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
 
 Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" Early solar-system expeditions do not have enemies. Enemy encounters should stay disabled until the Nearby Star tier, when the game leaves familiar planetary exploration and starts introducing hostile unknowns.
 
-Shared fuel is intentional friction in the surface loop. The shuttle and mining drone draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. The current mining baseline is 30 seconds of oxygen. Oxygen tank improvements can come from crew class, Drone Bay loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the drone is offline and `Push deeper` is unavailable.
+Shared fuel is intentional friction in the surface loop. The shuttle and mining drone draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. The current mining baseline is 30 seconds of oxygen. Oxygen tank improvements can come from crew class, Drone Bay loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the drone is offline and `Push Deeper` is unavailable.
 
 Research rewards should primarily widen the roguelite possibility space: module families, research facilities, special components, artifact threads, and story leads. Material-funded projects can directly unlock new module or facility families. Artifact-tagged projects identify one recovered artifact when possible; the identified record is tracked now, while its specific story payload remains a later content pass. Raw permanent stat inflation should remain secondary.
 

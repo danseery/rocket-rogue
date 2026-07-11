@@ -22,10 +22,10 @@ Current flow:
 1. Reach a destination.
 2. Choose Flyby, Orbit, or Landing.
 3. Landing opens Research, then Surface Ops.
-4. Surface Ops shows Survey, Mine deposit, Push deeper, Return, and Drone Ops when unlocked.
+4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked.
 5. Pressing `Mine deposit` spends 1 shared fuel and opens the direct-control Mining screen.
 
-Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
+Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push Deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
 
 ## Shared Fuel And Oxygen
 
@@ -33,7 +33,8 @@ Mining exists to make surface greed compete with route-home safety:
 
 - Surface expeditions start with shared fuel capacity from `tuning::research::sharedFuelCapacity`.
 - Mining spends 1 fuel on deployment.
-- While oxygen remains, mining spends another fuel every `tuning::mining::fuelSecondsPerUnit`, currently 15 seconds.
+- While oxygen remains, mining advances a normalized fuel-consumption cycle and spends another fuel when that cycle completes. Load and future efficiency modifiers change the authoritative cycle rate; the HUD shows percentage remaining rather than seconds.
+- Returning carried cargo, materials, or artifacts to the ship banks that payload and replenishes oxygen to the rig's current upgraded capacity. Entering the ship zone empty does not refill oxygen.
 - The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 30 seconds.
 - Oxygen can improve through crew class, Resource Drone support, and surface upgrades such as Emergency Winch.
 - If fuel runs dry mid-dig, the mining drone is recalled so the shuttle still has a route home.
@@ -45,15 +46,14 @@ Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, th
 The first playable version is direct and short:
 
 1. Move the drone through chunked terrain.
-2. Aim and drill into regolith, hard rock, ore, exotic veins, or artifact caches.
+2. Turn the rig and drill straight ahead into regolith, hard rock, ore, exotic veins, or artifact caches.
 3. Pulse the scanner to reveal fog-of-war and hidden seams.
 4. Manage oxygen, fuel cadence, drill heat, drill integrity, cargo, and extraction risk.
 5. Stow payload to bank the run, or abort/lose the run when oxygen, fuel, or drill integrity fails.
 
 Controls:
 
-- WASD/arrows: move.
-- Mouse: aim.
+- WASD/arrows: turn and thrust. The drill remains fixed forward.
 - Space or mouse hold: drill.
 - `E`: pulse scanner.
 - `R`: stow payload.
@@ -63,7 +63,8 @@ Controls:
 
 - Shared fuel: the shuttle/drone reserve. This is the central tradeoff and must stay visible in Surface Ops and Mining.
 - Oxygen: short-run timer, currently 30 seconds before upgrades.
-- Drill integrity: durability. Low integrity raises failure pressure; zero integrity aborts the run.
+- Drill integrity: durability. Low integrity raises failure pressure; zero integrity disables drilling until the bit is repaired at the ship or the run ends.
+- Ship service: while inside the ship ring, banked common materials can fully repair the drill bit or mining drone. Cost scales with missing integrity or health, and spent materials leave the recovered cargo.
 - Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
 - Cargo load: reward now, extraction risk later.
 - Hazard delta: mining-specific danger that feeds back into surface hazard and extraction risk.
@@ -74,7 +75,10 @@ Controls:
 Mining terrain is generated from the destination, surface site profile, and depth:
 
 - Regolith and hard rock define tunneling speed and bounce.
+- Baseline hard-rock contact produces a broad, floaty rebound. Shock Mounts, Recoil Braces, and Stabilizer drones reduce that impulse so upgraded rigs can hold the drill on target.
+- After a hard contact, thrust eases back to full speed instead of snapping forward immediately; bounce relief starts the recovery closer to full control.
 - Common ore, rare ore, exotic veins, and artifact caches produce payload.
+- Exposed artifacts can be tethered across a 6.8-cell recovery envelope, and the towline keeps a visible trailing length instead of collapsing the relic into the drone.
 - Hazard pockets add integrity damage and extraction risk.
 - Bedrock blocks excavation.
 - Deeper or post-solar terrain can add rooms, vaults, hives, miniboss lairs, and boss chambers.
@@ -120,9 +124,9 @@ Solar-system mining should remain enemy-free. After the Ark gravity-well disaste
 - Ant, flying, beetle, mammal, and elemental enemy types.
 - Elemental affinity effects such as thermal, radiation, toxic, and cryo pressure.
 - Hostile tunnel networks, encounter rooms, hives, miniboss lairs, and boss chambers.
-- Passive base defense plus Attack/Defense Drone effects.
+- Passive base defense plus independent Attack drone targeting and Defense drone interception.
 
-The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Attack and Defense drones are passive support.
+The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Mini-drones execute their own role behavior automatically: Mining drones work revealed cells, Survey drones add remote scan origins, Resource drones stay close, Stabilizers dock to the rig, Attack drones hold targets, and Defense drones intercept fire.
 
 ## Implementation Boundaries
 

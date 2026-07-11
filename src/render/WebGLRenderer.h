@@ -48,6 +48,17 @@ struct MiningProjectileSnapshot {
     bool critical = false;
 };
 
+struct MiningMiniDroneSnapshot {
+    double x = 0.0;
+    double y = 0.0;
+    int role = 0;
+    int upgradeLevel = 1;
+    int behavior = 0;
+    int targetCellX = -1;
+    int targetCellY = -1;
+    int targetEnemyIndex = -1;
+};
+
 struct MiningDamageNumberSnapshot {
     double x = 0.0;
     double y = 0.0;
@@ -93,6 +104,8 @@ struct RenderSnapshot {
     bool frontierTransfer = false;
     bool returningHome = false;
     bool poweredFlight = false;
+    bool preflightActive = false;
+    double preflightProgress = 1.0;
     double launchShake = 0.0;
     double returnTurnProgress = 1.0;
     std::array<double, 12> telemetry {};
@@ -109,7 +122,7 @@ struct RenderSnapshot {
     double miningDrillDirY = 1.0;
     double miningHeat = 0.0;
     double miningOxygenSeconds = 15.0;
-    double miningFuelBurnSeconds = 0.0;
+    double miningFuelCycleProgress = 0.0;
     double miningDrillIntegrity = 1.0;
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
@@ -117,7 +130,7 @@ struct RenderSnapshot {
     bool miningAtReturnZone = false;
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;
-    double miningLoadFuelMultiplier = 1.0;
+    double miningLoadFuelConsumptionMultiplier = 1.0;
     double miningHazardDelta = 0.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
@@ -125,6 +138,10 @@ struct RenderSnapshot {
     double miningFailurePulse = 0.0;
     double miningRecoilX = 0.0;
     double miningRecoilY = 0.0;
+    double miningMoveX = 0.0;
+    double miningMoveY = 0.0;
+    double miningHullDirX = 0.0;
+    double miningHullDirY = 1.0;
     double miningBounce = 0.0;
     bool miningInputDrilling = false;
     bool miningTargetDrillable = false;
@@ -148,6 +165,7 @@ struct RenderSnapshot {
     MiningArtifactSnapshot miningArtifact;
     std::vector<MiningCellSnapshot> miningCells;
     std::vector<MiningEnemySnapshot> miningEnemies;
+    std::vector<MiningMiniDroneSnapshot> miningMiniDrones;
     std::vector<MiningProjectileSnapshot> miningProjectiles;
     std::vector<MiningDamageNumberSnapshot> miningDamageNumbers;
     bool flybyActive = false;
@@ -251,7 +269,16 @@ private:
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
-    void submit(const std::vector<float>& vertices, int primitive, bool textured = false, unsigned int texture = 0, bool worldSpace = true);
+    void submit(
+        const std::vector<float>& vertices,
+        int primitive,
+        bool textured = false,
+        unsigned int texture = 0,
+        bool worldSpace = true,
+        int effectMode = 0,
+        Color effectColor = {},
+        std::array<float, 4> effectParams = {},
+        std::array<float, 2> effectSize = {});
     void submitLines(const std::vector<float>& vertices, float width, bool worldSpace = true);
 
     unsigned int program_ = 0;
@@ -259,6 +286,10 @@ private:
     unsigned int vbo_ = 0;
     int useTextureUniform_ = -1;
     int samplerUniform_ = -1;
+    int effectModeUniform_ = -1;
+    int effectColorUniform_ = -1;
+    int effectParamsUniform_ = -1;
+    int effectSizeUniform_ = -1;
     struct TextureAsset {
         const char* key = nullptr;
         const char* path = nullptr;
@@ -278,7 +309,7 @@ private:
         float textOffsetX = 0.0F;
     };
 
-    std::array<TextureAsset, 17> assets_ {};
+    std::array<TextureAsset, 33> assets_ {};
     std::vector<float> vertices_;
     std::vector<float> projectedVertices_;
     std::vector<int> previousMiningMaterials_;

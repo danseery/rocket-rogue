@@ -480,6 +480,16 @@ void rr_equip_drone(int index)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_unequip_drone_slot(int slotIndex)
+{
+    if (g_app) {
+        g_app->unequipDroneSlot(slotIndex);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_upgrade_drone(int index)
 {
     if (g_app) {
@@ -544,6 +554,26 @@ void rr_mining_tether()
 {
     if (g_app) {
         g_app->miningTether();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_repair_drill()
+{
+    if (g_app) {
+        g_app->miningRepairDrill();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_repair_drone()
+{
+    if (g_app) {
+        g_app->miningRepairDrone();
     }
 }
 

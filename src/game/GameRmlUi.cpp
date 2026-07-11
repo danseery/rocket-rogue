@@ -1169,6 +1169,9 @@ RmlPanelMode panelModeForHtml(std::string_view html)
     if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
         return RmlPanelMode::MiningFullscreen;
     }
+    if (html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
+        return RmlPanelMode::ArrivalFanfare;
+    }
     if (html.find("data-panel-mode=\"phase-board\"") != std::string_view::npos) {
         return RmlPanelMode::PhaseBoard;
     }
@@ -1183,6 +1186,11 @@ bool panelUsesPhaseBoard(RmlPanelMode mode)
 bool panelUsesMiningFullscreen(RmlPanelMode mode)
 {
     return mode == RmlPanelMode::MiningFullscreen;
+}
+
+bool panelUsesArrivalFanfare(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::ArrivalFanfare;
 }
 
 bool panelUsesSurfaceOps(std::string_view html)
@@ -1212,12 +1220,19 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
     if (mode == RmlPanelMode::MiningFullscreen) {
         return Rml::Rectanglei::FromPositionSize({0, 0}, {std::max(1, viewportWidth), std::max(1, viewportHeight)});
     }
+    if (mode == RmlPanelMode::ArrivalFanfare) {
+        const int width = std::clamp(viewportWidth - 48, 320, 520);
+        const int height = std::clamp(viewportHeight - 48, 210, 258);
+        const int left = std::max(16, (viewportWidth - width) / 2);
+        const int top = std::max(16, (viewportHeight - height) / 2 - 24);
+        return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
+    }
     const bool phaseBoard = panelUsesPhaseBoard(mode);
     const int left = phaseBoard ? 16 : kPanelInset;
     const int top = phaseBoard ? 16 : kPanelInset;
     const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, kPhaseBoardFrameWidth) : kPanelWidth + 34;
     const int height = phaseBoard
-        ? std::clamp(viewportHeight - 32, 420, 1040)
+        ? std::max(420, viewportHeight - 32)
         : std::max(1, viewportHeight - 56);
     return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
 }
@@ -1246,6 +1261,7 @@ std::string panelRcss(RmlPanelMode mode)
     const Rml::Rectanglei bounds = panelBounds(mode);
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
+    const int arrivalTitleSize = panelWidth < 420 ? 34 : 46;
     const int left = bounds.Left();
     const int top = bounds.Top();
     const bool compactMining = panelWidth < 1220;
@@ -1321,6 +1337,96 @@ scrollbarhorizontal sliderbar {
 #rr-panel.surface-ops-panel {
     height: 704px;
     overflow: hidden;
+}
+#rr-panel.navigation-panel {
+    height: 576px;
+    overflow: hidden;
+}
+#rr-panel.arrival-fanfare-panel-mode {
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 10px;
+    background-color: #0b101a;
+    border-width: 1px;
+    border-color: #8a7131;
+    border-radius: 12px;
+}
+#rr-panel.arrival-fanfare-panel-mode > .panel-head,
+#rr-panel.arrival-fanfare-panel-mode > .status,
+#rr-panel.arrival-fanfare-panel-mode > .panel-kpis {
+    display: none;
+}
+.arrival-fanfare-panel {
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 10px 8px;
+    background-color: #0d1320;
+    border-width: 1px;
+    border-color: #31566b;
+    border-radius: 9px;
+}
+.arrival-stamp-kicker {
+    color: #ffd166;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 1;
+    text-transform: uppercase;
+}
+.arrival-stamp-title {
+    width: 100%;
+    margin-top: 7px;
+    margin-bottom: 5px;
+    color: #f8fbff;
+    font-size: )" + std::to_string(arrivalTitleSize) + R"(px;
+    line-height: 0.95;
+    text-transform: uppercase;
+}
+.arrival-stamp-destination {
+    color: #dceaf2;
+    font-size: 15px;
+    line-height: 1.15;
+}
+.arrival-stamp-tags {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    margin-top: 12px;
+}
+.arrival-stamp-tags span {
+    min-height: 24px;
+    margin-right: 7px;
+    margin-bottom: 5px;
+    padding: 5px 8px;
+    color: #dff7ff;
+    font-size: 13px;
+    font-weight: bold;
+    line-height: 1.1;
+    background-color: #102835;
+    border-width: 1px;
+    border-color: #34566a;
+    border-radius: 14px;
+}
+.arrival-stamp-tags span.gold {
+    color: #ffe6a5;
+    background-color: #332b15;
+    border-color: #8a7131;
+}
+.arrival-stamp-continue {
+    width: 320px;
+    min-height: 28px;
+    height: 28px;
+    margin-top: 3px;
+    margin-right: 0px;
+    padding: 0px;
+    color: #9eafbc;
+    font-size: 13px;
+    line-height: 28px;
+    text-align: left;
+    background-color: transparent;
+    border-width: 0px;
 }
 #rr-panel.mining-fullscreen-panel {
     left: 0px;
@@ -1400,7 +1506,9 @@ scrollbarhorizontal sliderbar {
     margin-right: )" + std::to_string(miningVitalGap) + R"(px;
     margin-bottom: 5px;
     padding: 3px 5px;
-    background-color: rgba(8, 25, 32, 0.90);
+    background-color: rgba(8, 30, 39, 0.94);
+    border-width: 1px;
+    border-color: #2f7d99;
 }
 .mining-vitals .metric strong {
     font-size: 24px;
@@ -1409,6 +1517,52 @@ scrollbarhorizontal sliderbar {
 .mining-vitals .metric span {
     font-size: 12px;
     line-height: 1.0;
+}
+.mining-vitals .metric.mining-alert-caution {
+    border-color: #c8a446;
+}
+.mining-vitals .metric.mining-alert-caution strong,
+.mining-vitals .metric.mining-alert-caution span {
+    color: #ffe6a5;
+}
+.mining-vitals .metric.mining-alert-caution.mining-alert-pulse-1 {
+    background-color: rgba(31, 38, 29, 0.92);
+}
+.mining-vitals .metric.mining-alert-caution.mining-alert-pulse-2 {
+    background-color: rgba(42, 45, 29, 0.94);
+}
+.mining-vitals .metric.mining-alert-caution.mining-alert-pulse-3 {
+    background-color: rgba(53, 53, 29, 0.96);
+}
+.mining-vitals .metric.mining-alert-critical {
+    border-color: #c95d50;
+}
+.mining-vitals .metric.mining-alert-critical strong,
+.mining-vitals .metric.mining-alert-critical span {
+    color: #ffd8d3;
+}
+.mining-vitals .metric.mining-alert-critical.mining-alert-pulse-1 {
+    background-color: rgba(37, 27, 30, 0.92);
+}
+.mining-vitals .metric.mining-alert-critical.mining-alert-pulse-2 {
+    background-color: rgba(50, 30, 32, 0.94);
+}
+.mining-vitals .metric.mining-alert-critical.mining-alert-pulse-3 {
+    background-color: rgba(64, 34, 35, 0.96);
+}
+.mining-vitals .metric.mining-vital-broken strong {
+    color: #b8322b;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.mining-vitals .metric.mining-vital-broken.mining-alert-pulse-1 strong {
+    color: #d94439;
+}
+.mining-vitals .metric.mining-vital-broken.mining-alert-pulse-2 strong {
+    color: #f45b4d;
+}
+.mining-vitals .metric.mining-vital-broken.mining-alert-pulse-3 strong {
+    color: #ff8278;
 }
 .mining-health-strip {
     width: )" + std::to_string(std::max(1, miningTitleWidth - 4)) + R"(px;
@@ -1536,6 +1690,9 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 7px;
     padding: 7px 4px;
     font-size: 13px;
+}
+.mining-ship-service-marker {
+    display: none;
 }
 .mining-recall-dock {
     position: absolute;
@@ -1747,9 +1904,19 @@ scrollbarhorizontal sliderbar {
     display: none;
 }
 .phase-board-panel.surface-ops-panel .panel-head {
-    width: 720px;
-    margin-left: 8px;
-    margin-right: 0px;
+    box-sizing: border-box;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
+}
+.phase-board-panel.surface-ops-panel .panel-title {
+    flex: 1 1 auto;
+    min-width: 0px;
+}
+.phase-board-panel.surface-ops-panel .panel-head-actions {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
 }
 .phase-board-panel.surface-ops-panel .panel-head-actions button {
     margin-left: 8px;
@@ -1762,9 +1929,30 @@ scrollbarhorizontal sliderbar {
     display: none;
 }
 .phase-board-panel.navigation-panel .panel-head {
+    box-sizing: border-box;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
     margin-bottom: 6px;
 }
+.phase-board-panel.navigation-panel .panel-title {
+    flex: 1 1 auto;
+    min-width: 0px;
+}
+.phase-board-panel.navigation-panel .panel-head-actions {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
+}
+.phase-board-panel.navigation-panel .panel-head-actions button {
+    margin-left: 8px;
+    margin-right: 0px;
+}
 .phase-board-panel.navigation-panel .status {
+    box-sizing: border-box;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
     margin-bottom: 6px;
 }
 .phase-board-panel .phase-titlebar {
@@ -2309,7 +2497,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-drone-ops .drone-loadout-slot {
     width: 196px;
-    min-height: 76px;
+    min-height: 96px;
     padding: 6px;
     margin-right: 7px;
     margin-bottom: 7px;
@@ -2498,7 +2686,7 @@ scrollbarhorizontal sliderbar {
     text-align: right;
 }
 .phase-board-drone-ops .drone-loadout-slot {
-    min-height: 92px;
+    min-height: 96px;
     width: 196px;
 }
 .phase-board-drone-ops .drone-loadout-slot p {
@@ -2571,10 +2759,15 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-navigation .ark-status,
 .phase-board-navigation .navigation-map {
-    width: 704px;
+    box-sizing: border-box;
+    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
+    margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
     margin-top: 6px;
-    margin-right: 0px;
     padding: 8px 10px;
+}
+.phase-board-navigation .navigation-map {
+    padding-right: 0px;
 }
 .phase-board-navigation .ark-status {
     display: flex;
@@ -2591,14 +2784,22 @@ scrollbarhorizontal sliderbar {
     justify-content: flex-end;
 }
 .phase-board-navigation .nav-grid {
-    width: 704px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
     margin-top: 4px;
+    align-items: stretch;
+    gap: 8px;
 }
 .phase-board-navigation .nav-card {
-    width: 316px;
+    box-sizing: border-box;
+    flex: 1 1 0px;
+    width: 0px;
+    min-width: 0px;
     min-height: 168px;
     margin-top: 6px;
-    margin-right: 8px;
+    margin-right: 0px;
     padding: 8px 10px;
 }
 .phase-board-navigation .nav-card.selected {
@@ -2619,7 +2820,8 @@ scrollbarhorizontal sliderbar {
     overflow: hidden;
 }
 .phase-board-navigation .nav-card p {
-    width: 292px;
+    width: auto;
+    align-self: stretch;
     min-height: 26px;
     margin-top: 2px;
     margin-bottom: 5px;
@@ -2628,7 +2830,8 @@ scrollbarhorizontal sliderbar {
     overflow: hidden;
 }
 .phase-board-navigation .nav-card .stat-grid {
-    width: 292px;
+    width: auto;
+    align-self: stretch;
     min-height: 38px;
     margin-top: 0px;
     align-content: flex-start;
@@ -2648,7 +2851,8 @@ scrollbarhorizontal sliderbar {
     width: 136px;
 }
 .phase-board-navigation .nav-card .card-footer {
-    width: 292px;
+    width: auto;
+    align-self: stretch;
     min-height: 32px;
     height: auto;
     margin-top: auto;
@@ -2658,7 +2862,8 @@ scrollbarhorizontal sliderbar {
     align-items: center;
 }
 .phase-board-navigation .nav-card .card-footer span {
-    width: 100px;
+    flex: 1 1 auto;
+    width: auto;
     min-height: 24px;
     color: #d7c276;
     font-size: 12px;
@@ -2823,9 +3028,27 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface.surface-ops-screen .drone-ops-callout,
 .phase-board-surface.surface-ops-screen .surface-primary-action,
 .phase-board-surface.surface-ops-screen .board-primary {
+    box-sizing: border-box;
     width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
     margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
     margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
+}
+.phase-board-surface.surface-ops-screen > .phase-titlebar {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    justify-content: space-between;
+}
+.phase-board-surface.surface-ops-screen > .phase-titlebar > div {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+}
+.phase-board-surface.surface-ops-screen > .phase-titlebar > .compact-tools {
+    flex: 0 0 auto;
+    width: auto;
+    margin-left: auto;
 }
 .phase-board-surface .surface-kpi {
     width: 128px;
@@ -2839,17 +3062,27 @@ scrollbarhorizontal sliderbar {
     margin-top: 0px;
     margin-right: 6px;
 }
+.phase-board-surface.surface-ops-screen .surface-quickbar .surface-kpi {
+    box-sizing: border-box;
+    flex: 1 1 74px;
+    width: auto;
+}
 .phase-board-surface .surface-quickbar .surface-quick-item.is-last {
     margin-right: 0px;
 }
 .phase-board-surface .surface-quickbar .surface-quick-site {
     width: 104px;
 }
+.phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-site {
+    flex: 1 1 104px;
+    width: auto;
+}
 .phase-board-surface .surface-quickbar .surface-quick-next {
     width: 184px;
 }
 .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
-    width: 184px;
+    flex: 2 1 184px;
+    width: auto;
 }
 .phase-board-surface .surface-kpi strong {
     font-size: 15px;
@@ -2879,6 +3112,17 @@ scrollbarhorizontal sliderbar {
     height: auto;
     line-height: 1.15;
     margin-top: 3px;
+    margin-right: 0px;
+}
+.phase-board-surface.surface-ops-screen .drone-ops-callout > div {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+}
+.phase-board-surface.surface-ops-screen .drone-ops-callout button {
+    flex: 0 0 140px;
+    width: 140px;
+    margin-left: auto;
     margin-right: 0px;
 }
 .phase-board-surface .surface-primary-action {
@@ -2956,17 +3200,29 @@ scrollbarhorizontal sliderbar {
     width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
 }
 .phase-board-surface.surface-ops-screen .surface-actions .ops-grid {
-    width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
 }
 .phase-board-surface .surface-action-slot {
     width: )" + std::to_string(kPhaseCardSlotWidth) + R"(px;
     margin-right: )" + std::to_string(kPhaseCardGap) + R"(px;
+}
+.phase-board-surface.surface-ops-screen .surface-action-slot {
+    flex: 1 1 0px;
+    width: auto;
 }
 .phase-board-surface .surface-action-slot.is-last {
     margin-right: 0px;
 }
 .phase-board-surface .surface-action-slot .surface-action-card {
     margin-right: 0px;
+}
+.phase-board-surface.surface-ops-screen .surface-action-slot .surface-action-card {
+    box-sizing: border-box;
+    width: 100%;
 }
 .phase-board-surface .surface-action-card {
     display: flex;
@@ -4464,7 +4720,6 @@ scrollbarhorizontal sliderbar {
     text-align: center;
 }
 .control-panel .tutorial-card,
-.control-panel .cockpit-hud,
 .control-panel .phase-advisory {
     width: 370px;
 }
@@ -4512,6 +4767,7 @@ scrollbarhorizontal sliderbar {
     line-height: 1.25;
 }
 .control-panel .cockpit-hud {
+    width: 390px;
     margin-bottom: 12px;
     padding: 9px;
 }
@@ -4527,16 +4783,16 @@ scrollbarhorizontal sliderbar {
 }
 .control-panel .flight-hud .primary-actions {
     flex-wrap: nowrap;
-    width: 350px;
+    width: 372px;
 }
 .control-panel .flight-hud .primary-actions button {
-    width: 164px;
+    width: 176px;
     height: 42px;
     line-height: 42px;
 }
 .control-panel .flight-hud .system-actions {
     flex-wrap: nowrap;
-    width: 350px;
+    width: 372px;
     margin-top: 8px;
 }
 .stat-chip, .telemetry-legend-chip, .surface-kpi {
@@ -4659,13 +4915,13 @@ button {
     width: 184px;
 }
 .control-panel .flight-hud .system-actions button {
-    width: 112px;
+    width: 116px;
     box-sizing: border-box;
     padding: 0 6px;
     height: 38px;
     min-height: 38px;
     line-height: 38px;
-    margin-right: 4px;
+    margin-right: 8px;
     font-size: 12px;
     white-space: nowrap;
     overflow-wrap: normal;
@@ -4873,10 +5129,22 @@ button {
     text-align: right;
     font-size: 10px;
 }
+.phase-board-drone-ops .slot-card-head button {
+    width: 78px;
+    min-width: 78px;
+    height: 17px;
+    min-height: 17px;
+    margin-top: 0px;
+    margin-right: 0px;
+    margin-bottom: 0px;
+    padding: 1px 5px;
+    font-size: 9px;
+    line-height: 1;
+}
 .phase-board-drone-ops .slot-card-body {
     width: 184px;
-    min-height: 36px;
-    margin-top: 4px;
+    min-height: 32px;
+    margin-top: 3px;
 }
 .phase-board-drone-ops .slot-card-body .card-title {
     margin-top: 0px;
@@ -4891,8 +5159,8 @@ button {
 }
 .phase-board-drone-ops .drone-loadout-slot .stat-grid {
     width: 184px;
-    min-height: 36px;
-    margin-top: 5px;
+    min-height: 17px;
+    margin-top: 4px;
 }
 .phase-board-drone-ops .drone-loadout-slot .stat-chip {
     width: 76px;
@@ -5120,6 +5388,7 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
     const bool phaseBoard = panelUsesPhaseBoard(panelMode);
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
+    const bool arrivalFanfare = panelUsesArrivalFanfare(panelMode);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
     const bool droneOps = panelUsesDroneOps(panelHtml);
     const bool navigation = panelUsesNavigation(panelHtml);
@@ -5128,7 +5397,9 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
 
     std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body>";
     document += "<div id=\"rr-panel\" class=\"" +
-        std::string(miningFullscreen ? "mining-fullscreen-panel" : (phaseBoard ? "phase-board-panel" : "control-panel"));
+        std::string(miningFullscreen
+                ? "mining-fullscreen-panel"
+                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel")));
     if (surfaceOps) {
         document += " surface-ops-panel";
     }

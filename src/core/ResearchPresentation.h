@@ -126,6 +126,7 @@ struct DroneLoadoutSlotPresentation {
     std::string detail;
     std::string cssClass;
     std::vector<PanelMetricPresentation> chips;
+    PanelButtonPresentation action;
 };
 
 struct DroneOpsPresentation {
@@ -171,9 +172,9 @@ inline std::string compactMaterialSummary(const MaterialInventory& materials)
     return summary.empty() ? "Free" : summary;
 }
 
-inline std::string researchMaterialSummary(const MaterialInventory& cost, const MaterialInventory& owned)
+inline std::string researchMaterialSummary(const MaterialInventory& cost)
 {
-    return "Cost: " + materialSummary(cost) + " / Have: " + materialSummary(owned);
+    return "Cost: " + materialSummary(cost);
 }
 
 inline PhaseStepPresentation phaseStep(std::string_view label, std::string_view stateLabel, std::string_view stateClass)
@@ -450,18 +451,18 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
 {
     const bool unlocked = isMiniDroneUnlocked(state.meta, drone);
     const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
-    const bool equipped = std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id) != state.meta.equippedDroneIds.end();
+    const int equippedCount = static_cast<int>(std::count(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id));
     const bool hasFreeSlot = state.meta.equippedDroneIds.size() < static_cast<std::size_t>(std::max(0, state.meta.droneBaySlots));
     const int upgradeLevel = owned ? miniDroneUpgradeLevel(state, drone.id) : 1;
     const MaterialInventory nextUpgradeCost = miniDroneUpgradeCost(upgradeLevel + 1);
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
-    std::string status = unlocked ? (equipped ? "Equipped" : (owned ? "Ready" : "Not owned")) : ("Locked: " + std::string(unlockDisplayName(drone.unlockKey)));
+    std::string status = unlocked
+        ? (equippedCount > 0 ? ("Equipped x" + std::to_string(equippedCount)) : (owned ? "Ready" : "Not owned"))
+        : ("Locked: " + std::string(unlockDisplayName(drone.unlockKey)));
     PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
     std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
     if (owned && unlocked) {
-        action = equipped
-            ? panelActionButton("Unequip", ui::actions::equipDrone(index), "warn")
-            : (hasFreeSlot ? panelActionButton("Equip", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full"));
+        action = hasFreeSlot ? panelActionButton("Add copy", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full");
         upgradeAction = upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
             : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
@@ -491,16 +492,34 @@ inline std::string miniDroneNameSummary(const GameState& state, const ContentCat
     if (state.meta.equippedDroneIds.empty()) {
         return "No drones assigned";
     }
+    struct DroneNameCount {
+        std::string name;
+        int count = 0;
+    };
+    std::vector<DroneNameCount> counts;
     std::string summary;
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone == nullptr) {
             continue;
         }
+        auto existing = std::find_if(counts.begin(), counts.end(), [&](const DroneNameCount& count) {
+            return count.name == drone->name;
+        });
+        if (existing != counts.end()) {
+            existing->count += 1;
+        } else {
+            counts.push_back({drone->name, 1});
+        }
+    }
+    for (const DroneNameCount& count : counts) {
         if (!summary.empty()) {
             summary += ", ";
         }
-        summary += drone->name;
+        summary += count.name;
+        if (count.count > 1) {
+            summary += " x" + std::to_string(count.count);
+        }
     }
     return summary.empty() ? "No drones assigned" : summary;
 }
@@ -666,9 +685,9 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
                     "filled " + miniDroneRoleClass(drone->role),
                     {
                         panelMetric("Slot", std::to_string(slotNumber)),
-                        panelMetric("Mk", std::to_string(upgradeLevel)),
-                        panelMetric("Role", miniDroneRoleLabel(drone->role))
-                    }
+                        panelMetric("Mk", std::to_string(upgradeLevel))
+                    },
+                    panelActionButton("Unequip", ui::actions::unequipDroneSlot(index), "warn")
                 });
             } else {
                 slots.push_back({
@@ -681,7 +700,8 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
                     {
                         panelMetric("Slot", std::to_string(slotNumber)),
                         panelMetric("State", "Open")
-                    }
+                    },
+                    {}
                 });
             }
             continue;
@@ -700,7 +720,8 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
             {
                 panelMetric("Slot", std::to_string(slotNumber)),
                 panelMetric(index == unlockedSlots ? "Cost" : "Prior", index == unlockedSlots ? compactMaterialSummary(cost) : "")
-            }
+            },
+            {}
         });
     }
     return slots;
@@ -989,7 +1010,8 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
         detailPresentationRow("Build guidance", guidance.detail),
         detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
-        detailPresentationRow("Drone upgrades", std::to_string(tunedDroneCount(state)) + " drones above Mk I. Upgrades scale that drone's passive stats while it is equipped."),
+        detailPresentationRow("Drone copies", std::string("Drone controls add another copy of an owned type. Drone Loadout slots unequip one copy at a time.")),
+        detailPresentationRow("Drone upgrades", std::to_string(tunedDroneCount(state)) + " drone types above Mk I. Tuning scales every equipped copy of that type."),
         detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
@@ -1027,7 +1049,7 @@ inline ResearchProjectCardPresentation researchProjectCardPresentation(const Res
         project.rewardUnlockKey.empty() || hasUnlock(state.meta, project.rewardUnlockKey)
             ? std::string()
             : text::panel::unlocksFamily(unlockDisplayName(project.rewardUnlockKey)),
-        researchMaterialSummary(project.materialCost, state.meta.materials),
+        researchMaterialSummary(project.materialCost),
         researchResourceChips(project, state.meta),
         affordable,
         affordable
@@ -1393,7 +1415,7 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
-        detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then the Push Deeper layers. Dust can still burn extra action kits.")),
+        detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then layers available through Push Deeper. Dust can still burn extra action kits.")),
         detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only drone run for this surface loop; pushing deeper closes once the run is used.")),
         detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper commits the actual layer depth and marks what the mining drone should find there.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),

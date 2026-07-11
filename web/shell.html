@@ -73,8 +73,56 @@
       padding: 18px 24px 28px;
     }
 
+    #panel.phase-board-panel.surface-ops-panel > .panel-head {
+      box-sizing: border-box;
+      width: calc(100% - 32px);
+      max-width: 704px;
+      margin-left: 16px;
+      margin-right: 16px;
+    }
+
+    #panel.phase-board-panel.surface-ops-panel > .panel-head > .panel-title {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    #panel.phase-board-panel.surface-ops-panel > .panel-head > .panel-head-actions {
+      flex: 0 0 auto;
+      width: auto;
+      margin-left: auto;
+    }
+
     #panel.phase-board-panel.navigation-panel .panel-kpis {
       display: none;
+    }
+
+    #panel.phase-board-panel.navigation-panel > .panel-head,
+    #panel.phase-board-panel.navigation-panel > .status {
+      box-sizing: border-box;
+      width: calc(100% - 32px);
+      max-width: 704px;
+      margin-left: 16px;
+      margin-right: 16px;
+    }
+
+    #panel.phase-board-panel.navigation-panel > .panel-head > .panel-title {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    #panel.phase-board-panel.navigation-panel > .panel-head > .panel-head-actions {
+      flex: 0 0 auto;
+      width: auto;
+      margin-left: auto;
+    }
+
+    #panel.phase-board-panel.navigation-panel {
+      inset: 16px auto auto 16px;
+      width: min(784px, calc(100vw - 32px));
+      min-height: 0;
+      height: auto;
+      max-height: calc(100dvh - 32px);
+      padding: 18px 24px 20px;
     }
 
     #panel.phase-board-panel.navigation-panel .status {
@@ -231,6 +279,7 @@
       position: sticky;
       bottom: 12px;
       z-index: 8;
+      box-sizing: border-box;
       width: 100%;
       max-width: 100%;
       margin-top: 16px;
@@ -515,11 +564,70 @@
       animation: launch-ready-pulse 1.2s ease-in-out infinite alternate;
     }
 
+    .scene-launch-control:disabled {
+      cursor: wait;
+      color: rgba(215, 232, 234, 0.72);
+      border-color: rgba(71, 220, 255, 0.30);
+      background: rgba(12, 25, 32, 0.86);
+      box-shadow: none;
+      animation: none;
+    }
+
     body.rmlui-modal-open .scene-launch-control {
       display: none;
       opacity: 0;
       pointer-events: none;
       animation: none;
+    }
+
+    .scene-ship-service {
+      position: fixed;
+      z-index: 9;
+      display: none;
+      box-sizing: border-box;
+      width: 196px;
+      padding: 9px;
+      border: 1px solid rgba(71, 220, 255, 0.52);
+      border-radius: 8px;
+      background: rgba(5, 16, 22, 0.94);
+      box-shadow: 0 14px 38px rgba(0, 0, 0, 0.48), inset 0 0 18px rgba(71, 220, 255, 0.06);
+      transform: translate(-100%, -50%);
+      pointer-events: auto;
+    }
+
+    .scene-ship-service.is-visible {
+      display: block;
+    }
+
+    .scene-ship-service > span {
+      display: block;
+      color: rgba(154, 230, 244, 0.82);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.1;
+      text-transform: uppercase;
+    }
+
+    .scene-ship-service button {
+      width: 100%;
+      min-height: 38px;
+      margin-top: 7px;
+      padding: 5px 7px;
+      border-color: rgba(114, 224, 168, 0.56);
+      background: rgba(26, 79, 59, 0.92);
+      font-size: 12px;
+      line-height: 1.15;
+    }
+
+    .scene-ship-service button:disabled {
+      color: rgba(215, 232, 234, 0.55);
+      border-color: rgba(137, 178, 211, 0.22);
+      background: rgba(31, 39, 46, 0.92);
+    }
+
+    body.rmlui-modal-open .scene-ship-service {
+      display: none;
+      pointer-events: none;
     }
 
     .arrival-fanfare {
@@ -619,6 +727,70 @@
       margin-top: 12px;
       color: var(--muted);
       font-size: 14px;
+    }
+
+    .arrival-fanfare-panel {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 16px;
+      border: 1px solid rgba(255, 209, 102, 0.58);
+      border-radius: 10px;
+      background: rgba(13, 19, 32, 0.96);
+    }
+
+    .arrival-stamp-kicker {
+      color: var(--warn);
+      font-size: 13px;
+      font-weight: 900;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    .arrival-stamp-title {
+      margin: 7px 0 5px;
+      color: #f8fbff;
+      font-size: clamp(34px, 7vw, 46px);
+      line-height: 0.95;
+      text-transform: uppercase;
+    }
+
+    .arrival-stamp-destination {
+      color: #dceaf2;
+      font-size: 15px;
+    }
+
+    .arrival-stamp-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 12px;
+    }
+
+    .arrival-stamp-tags span {
+      padding: 5px 8px;
+      border: 1px solid rgba(103, 210, 255, 0.30);
+      border-radius: 999px;
+      background: rgba(103, 210, 255, 0.10);
+      color: #dff7ff;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .arrival-stamp-tags span.gold {
+      border-color: rgba(255, 209, 102, 0.44);
+      background: rgba(255, 209, 102, 0.12);
+      color: #ffe6a5;
+    }
+
+    .arrival-stamp-continue {
+      width: auto;
+      min-height: 28px;
+      margin-top: 8px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
     }
 
     @keyframes arrival-card-in {
@@ -1797,7 +1969,7 @@
 
     .phase-board-drone-ops .drone-loadout-slot {
       flex: 0 0 calc((100% - 16px) / 3);
-      min-height: 76px;
+      min-height: 96px;
       padding: 6px;
       border: 1px solid rgba(137, 178, 211, 0.16);
       border-radius: 8px;
@@ -2285,9 +2457,21 @@
       font-size: 10px;
     }
 
+    .phase-board-drone-ops .slot-card-head button {
+      flex: 0 0 78px;
+      width: 78px;
+      min-width: 78px;
+      height: 17px;
+      min-height: 17px;
+      margin: 0;
+      padding: 1px 5px;
+      font-size: 9px;
+      line-height: 1;
+    }
+
     .phase-board-drone-ops .slot-card-body {
-      min-height: 36px;
-      margin-top: 4px;
+      min-height: 32px;
+      margin-top: 3px;
     }
 
     .phase-board-drone-ops .slot-card-body .card-title {
@@ -2303,8 +2487,8 @@
     }
 
     .phase-board-drone-ops .drone-loadout-slot .stat-grid {
-      min-height: 36px;
-      margin-top: 5px;
+      min-height: 17px;
+      margin-top: 4px;
     }
 
     .phase-board-drone-ops .drone-loadout-slot .stat-chip {
@@ -2653,8 +2837,8 @@
       min-height: 42px;
       height: 42px;
       padding: 3px 5px;
-      background: rgba(8, 25, 32, 0.90);
-      border-color: rgba(96, 218, 241, 0.24);
+      background: rgba(8, 30, 39, 0.94);
+      border-color: #2f7d99;
     }
 
     .mining-vitals .metric strong {
@@ -2665,6 +2849,67 @@
     .mining-vitals .metric span {
       font-size: 12px;
       line-height: 1;
+    }
+
+    .mining-vitals .metric.mining-alert-caution {
+      border-color: #c8a446;
+    }
+
+    .mining-vitals .metric.mining-alert-caution strong,
+    .mining-vitals .metric.mining-alert-caution span {
+      color: #ffe6a5;
+    }
+
+    .mining-vitals .metric.mining-alert-caution.mining-alert-pulse-1 {
+      background: rgba(31, 38, 29, 0.92);
+    }
+
+    .mining-vitals .metric.mining-alert-caution.mining-alert-pulse-2 {
+      background: rgba(42, 45, 29, 0.94);
+    }
+
+    .mining-vitals .metric.mining-alert-caution.mining-alert-pulse-3 {
+      background: rgba(53, 53, 29, 0.96);
+    }
+
+    .mining-vitals .metric.mining-alert-critical {
+      border-color: #c95d50;
+    }
+
+    .mining-vitals .metric.mining-alert-critical strong,
+    .mining-vitals .metric.mining-alert-critical span {
+      color: #ffd8d3;
+    }
+
+    .mining-vitals .metric.mining-alert-critical.mining-alert-pulse-1 {
+      background: rgba(37, 27, 30, 0.92);
+    }
+
+    .mining-vitals .metric.mining-alert-critical.mining-alert-pulse-2 {
+      background: rgba(50, 30, 32, 0.94);
+    }
+
+    .mining-vitals .metric.mining-alert-critical.mining-alert-pulse-3 {
+      background: rgba(64, 34, 35, 0.96);
+    }
+
+    .mining-vitals .metric.mining-vital-broken strong {
+      color: #b8322b;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .mining-vitals .metric.mining-vital-broken.mining-alert-pulse-1 strong {
+      color: #d94439;
+    }
+
+    .mining-vitals .metric.mining-vital-broken.mining-alert-pulse-2 strong {
+      color: #f45b4d;
+    }
+
+    .mining-vitals .metric.mining-vital-broken.mining-alert-pulse-3 strong {
+      color: #ff8278;
+      text-shadow: 0 0 10px rgba(255, 73, 61, 0.72);
     }
 
     .mining-utility-cluster {
@@ -2782,6 +3027,10 @@
 
     .mining-command-dock .system-actions button.mining-primary-command {
       width: 100%;
+    }
+
+    .mining-ship-service-marker {
+      display: none;
     }
 
     .mining-recall-dock {
@@ -2906,6 +3155,36 @@
       padding-bottom: 24px;
     }
 
+    .phase-board-surface.surface-ops-screen > .phase-titlebar,
+    .phase-board-surface.surface-ops-screen > .surface-quickbar,
+    .phase-board-surface.surface-ops-screen > .drone-ops-callout,
+    .phase-board-surface.surface-ops-screen > .surface-actions {
+      box-sizing: border-box;
+      width: calc(100% - 32px);
+      max-width: 704px;
+      margin-left: 16px;
+      margin-right: 16px;
+    }
+
+    .phase-board-surface.surface-ops-screen > .phase-titlebar {
+      display: flex;
+      flex-flow: row nowrap;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+
+    .phase-board-surface.surface-ops-screen > .phase-titlebar > div {
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: none;
+    }
+
+    .phase-board-surface.surface-ops-screen > .phase-titlebar > .compact-tools {
+      flex: 0 0 auto;
+      width: auto;
+      margin-left: auto;
+    }
+
     .phase-board-surface .phase-lane,
     .phase-board-surface .phase-title-row,
     .phase-board-surface .phase-footer-lane {
@@ -2947,17 +3226,18 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-quickbar .surface-kpi {
-      flex: 0 0 74px;
+      box-sizing: border-box;
+      flex: 1 1 74px;
       min-height: 38px;
       padding: 5px 7px;
     }
 
     .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-site {
-      flex-basis: 104px;
+      flex: 1 1 104px;
     }
 
     .phase-board-surface.surface-ops-screen .surface-quickbar .surface-quick-next {
-      flex-basis: 184px;
+      flex: 2 1 184px;
     }
 
     .phase-board-surface.surface-ops-screen .drone-ops-callout {
@@ -2980,7 +3260,11 @@
     }
 
     .phase-board-surface.surface-ops-screen .drone-ops-callout button {
+      flex: 0 0 140px;
+      width: 140px;
       min-height: 34px;
+      margin-left: auto;
+      margin-right: 0;
       align-self: center;
     }
 
@@ -3373,20 +3657,33 @@
 
     .phase-board-navigation .ark-status,
     .phase-board-navigation .navigation-map {
+      box-sizing: border-box;
+      width: calc(100% - 32px);
       max-width: 704px;
+      margin-left: 16px;
+      margin-right: 16px;
       margin-top: 6px;
       padding: 8px 10px;
     }
 
+    .phase-board-navigation .navigation-map {
+      padding-right: 0;
+    }
+
     .phase-board-navigation .nav-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      display: flex;
+      flex-flow: row nowrap;
       gap: 8px;
+      width: 100%;
       max-width: 704px;
       margin-top: 4px;
+      align-items: stretch;
     }
 
     .phase-board-navigation .nav-card {
+      box-sizing: border-box;
+      flex: 1 1 0;
+      min-width: 0;
       min-height: 168px;
       padding: 8px 10px;
     }
@@ -3411,6 +3708,7 @@
     }
 
     .phase-board-navigation .nav-card .stat-grid {
+      width: auto;
       min-height: 38px;
       align-content: start;
     }
@@ -3425,6 +3723,7 @@
     }
 
     .phase-board-navigation .nav-card .card-footer {
+      width: auto;
       margin-top: auto;
       padding-top: 5px;
       border-top: 1px solid rgba(137, 178, 211, 0.14);
@@ -3462,7 +3761,7 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-slot {
-      flex: 0 0 170px;
+      flex: 1 1 0;
       min-width: 0;
       display: flex;
     }
@@ -3472,6 +3771,7 @@
     }
 
     .phase-board-surface.surface-ops-screen .surface-action-slot .surface-action-card {
+      box-sizing: border-box;
       width: 100%;
       margin-right: 0;
     }
@@ -4924,6 +5224,11 @@
     <p class="status">Loading WebAssembly...</p>
   </aside>
   <button id="scene-launch-control" class="scene-launch-control" type="button">Launch</button>
+  <div id="scene-ship-service" class="scene-ship-service" hidden aria-label="Ship service">
+    <span>Ship service</span>
+    <button id="scene-repair-drill" type="button">Repair bit</button>
+    <button id="scene-repair-drone" type="button">Repair drone</button>
+  </div>
   <div id="arrival-fanfare" class="arrival-fanfare" hidden aria-live="polite" aria-atomic="true">
     <span id="arrival-fanfare-kicker" class="arrival-kicker">Mission stamp</span>
     <strong id="arrival-fanfare-title">Arrival confirmed</strong>
@@ -4947,7 +5252,7 @@
       <button class="warn" type="button" data-debug-action="mining">Mining sandbox</button>
       <button class="danger" type="button" data-debug-action="combat-mining">Combat mining sandbox</button>
       <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
-      <button class="danger" type="button" data-debug-action="push">Deep push sandbox</button>
+      <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
       <button type="button" data-debug-action="flyby">Flyby sandbox</button>
       <button type="button" data-debug-action="orbit">Orbit sandbox</button>
       <button type="button" data-debug-action="hangar">Hangar board</button>
@@ -4980,6 +5285,9 @@
     const modalClose = modalRoot.querySelector(".modal-close");
     const toastRoot = document.getElementById("toast-root");
     const sceneLaunchControl = document.getElementById("scene-launch-control");
+    const sceneShipService = document.getElementById("scene-ship-service");
+    const sceneRepairDrill = document.getElementById("scene-repair-drill");
+    const sceneRepairDrone = document.getElementById("scene-repair-drone");
     const arrivalFanfare = document.getElementById("arrival-fanfare");
     const arrivalFanfareKicker = document.getElementById("arrival-fanfare-kicker");
     const arrivalFanfareTitle = document.getElementById("arrival-fanfare-title");
@@ -5201,12 +5509,43 @@
       };
     }
 
+    function miningShipServiceAnchor(marker) {
+      const width = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
+      const height = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
+      const terrainWidth = Number(marker?.dataset.miningWidth || 0);
+      const terrainHeight = Number(marker?.dataset.miningHeight || 0);
+      const returnX = Number(marker?.dataset.miningReturnX || 0);
+      const returnY = Number(marker?.dataset.miningReturnY || 0);
+      if (!(terrainWidth > 0) || !(terrainHeight > 0)) {
+        return null;
+      }
+
+      const aspect = Math.max(0.1, width / height);
+      const cellWidth = (aspect * 2) / terrainWidth;
+      const cellHeight = 1.82 / terrainHeight;
+      const cellSize = Math.min(cellWidth, cellHeight);
+      const shipX = -aspect + (returnX + 0.5) * cellWidth;
+      const shipGroundY = 0.82 - returnY * cellHeight;
+      const desiredSpriteSize = cellSize * 9.5;
+      const maxSpriteSize = Math.max(cellSize * 2, (0.82 - shipGroundY - cellHeight * 0.85) / 0.955);
+      const spriteSize = Math.min(desiredSpriteSize, maxSpriteSize);
+      const shipY = shipGroundY + spriteSize * 0.455;
+      const shipCenterX = (shipX + 1) * 0.5 * width;
+      const shipCenterY = (1 - shipY) * 0.5 * height;
+      const spritePixelWidth = spriteSize * width * 0.5;
+      return {
+        right: shipCenterX - spritePixelWidth * 0.5 - 12,
+        y: shipCenterY
+      };
+    }
+
     function syncSceneOverlays() {
-      const preflight = Boolean(panel.querySelector("[data-preflight-launch]"));
-      const arrivalMarker = panel.querySelector("[data-arrival-fanfare]");
+      const preflightMarker = panel.querySelector("[data-preflight-launch]");
+      const preflight = Boolean(preflightMarker);
+      const preflightReady = preflightMarker?.dataset.preflightReady === "1";
       const flybyStampMarker = panel.querySelector("[data-flyby-stamp]");
       const orbitStampMarker = panel.querySelector("[data-orbit-stamp]");
-      const fanfareMarker = arrivalMarker || flybyStampMarker || orbitStampMarker;
+      const fanfareMarker = flybyStampMarker || orbitStampMarker;
       const fanfare = Boolean(fanfareMarker);
       const flight = Boolean(panel.querySelector(".flight-hud"));
       const debrief = Boolean(panel.querySelector(".phase-board-results"));
@@ -5215,15 +5554,41 @@
       const phaseBoard = panel.classList.contains("phase-board-panel");
       const miningFullscreen = panel.classList.contains("mining-fullscreen-panel");
       const rmlModalOpen = document.body.classList.contains("rmlui-modal-open");
+      const shipServiceMarker = panel.querySelector("[data-mining-ship-service]");
+      const drillRepairVisible = shipServiceMarker?.dataset.drillVisible === "1";
+      const droneRepairVisible = shipServiceMarker?.dataset.droneVisible === "1";
+      const showShipService = Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
       debugTools.classList.toggle("hud-suppressed", miningFullscreen);
 
       sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard && !rmlModalOpen);
       sceneLaunchControl.hidden = !(preflight && !phaseBoard && !rmlModalOpen);
+      sceneLaunchControl.disabled = !preflightReady;
+      sceneLaunchControl.textContent = preflightReady ? "Launch" : "Securing Drone";
       if (preflight && !phaseBoard && !rmlModalOpen) {
         const anchor = worldToScreen(-0.18, -0.50);
         sceneLaunchControl.style.left = `${Math.round(anchor.x)}px`;
         sceneLaunchControl.style.top = `${Math.round(anchor.y)}px`;
         sceneLaunchControl.style.transform = "translate(-50%, -50%)";
+      }
+
+      sceneShipService.classList.toggle("is-visible", showShipService);
+      sceneShipService.hidden = !showShipService;
+      if (showShipService) {
+        sceneRepairDrill.hidden = !drillRepairVisible;
+        sceneRepairDrill.disabled = shipServiceMarker.dataset.drillEnabled !== "1";
+        sceneRepairDrill.textContent = shipServiceMarker.dataset.drillLabel || "Repair bit";
+        sceneRepairDrone.hidden = !droneRepairVisible;
+        sceneRepairDrone.disabled = shipServiceMarker.dataset.droneEnabled !== "1";
+        sceneRepairDrone.textContent = shipServiceMarker.dataset.droneLabel || "Repair drone";
+        const anchor = miningShipServiceAnchor(shipServiceMarker);
+        if (anchor) {
+          const dockWidth = sceneShipService.offsetWidth || 196;
+          const dockHeight = sceneShipService.offsetHeight || 54;
+          const rightEdge = Math.max(dockWidth + 10, Math.min(window.innerWidth - 10, anchor.right));
+          const centerY = Math.max(dockHeight * 0.5 + 84, Math.min(window.innerHeight - dockHeight * 0.5 - 10, anchor.y));
+          sceneShipService.style.left = `${Math.round(rightEdge)}px`;
+          sceneShipService.style.top = `${Math.round(centerY)}px`;
+        }
       }
 
       arrivalFanfare.classList.toggle("is-visible", fanfare);
@@ -5248,15 +5613,6 @@
           arrivalFanfareTagTwo.textContent = fanfareMarker.dataset.orbitTagTwo || "Research accounted";
           arrivalCloseCall.textContent = fanfareMarker.dataset.orbitTagThree || "Click or press Space to continue";
           arrivalCloseCall.hidden = false;
-        } else {
-          const destination = fanfareMarker.dataset.arrivalDestination || "Destination";
-          arrivalFanfareKicker.textContent = "Mission stamp";
-          arrivalFanfareTitle.textContent = "Arrival confirmed";
-          arrivalFanfareDestination.textContent = `${destination} approach window open`;
-          arrivalFanfareTagOne.textContent = "Flight data secured";
-          arrivalFanfareTagTwo.textContent = "Approach window open";
-          arrivalCloseCall.textContent = "Close call bonus";
-          arrivalCloseCall.hidden = fanfareMarker.dataset.arrivalCloseCall !== "1";
         }
         arrivalFanfare.style.left = `${Math.round(scene.centerX)}px`;
         arrivalFanfare.style.top = `${Math.round(scene.centerY - scene.unit * 0.28)}px`;
@@ -5358,6 +5714,16 @@
       rr.startLaunch();
     });
 
+    sceneRepairDrill.addEventListener("click", (event) => {
+      event.preventDefault();
+      rr.miningRepairDrill();
+    });
+
+    sceneRepairDrone.addEventListener("click", (event) => {
+      event.preventDefault();
+      rr.miningRepairDrone();
+    });
+
     arrivalFanfare.addEventListener("click", (event) => {
       event.preventDefault();
       if (panel.querySelector("[data-flyby-stamp]")) {
@@ -5432,6 +5798,7 @@
       droneOps: () => rrCall("rr_drone_ops"),
       surfaceOps: () => rrCall("rr_surface_ops"),
       equipDrone: (index) => rrCall("rr_equip_drone", [index], ["number"]),
+      unequipDroneSlot: (slotIndex) => rrCall("rr_unequip_drone_slot", [slotIndex], ["number"]),
       upgradeDrone: (index) => rrCall("rr_upgrade_drone", [index], ["number"]),
       upgradeDroneSlot: () => rrCall("rr_upgrade_drone_slot"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
@@ -5439,6 +5806,8 @@
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
       miningTether: () => rrCall("rr_mining_tether"),
+      miningRepairDrill: () => rrCall("rr_mining_repair_drill"),
+      miningRepairDrone: () => rrCall("rr_mining_repair_drone"),
       miningStow: () => rrCall("rr_mining_stow"),
       miningAbort: () => rrCall("rr_mining_abort"),
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
@@ -5497,6 +5866,7 @@
       droneOps: "drone_ops",
       surfaceOps: "back_to_surface_ops",
       equipDronePrefix: "equip_drone:",
+      unequipDroneSlotPrefix: "unequip_drone_slot:",
       upgradeDronePrefix: "upgrade_drone:",
       upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
@@ -5521,6 +5891,8 @@
       surfacePushAbort: "surface_push_abort",
       miningScanner: "mining_scanner",
       miningTether: "mining_tether",
+      miningRepairDrill: "mining_repair_drill",
+      miningRepairDrone: "mining_repair_drone",
       miningStow: "mining_stow",
       miningAbort: "mining_abort",
       miningFailureAck: "mining_failure_ack",
@@ -5571,6 +5943,8 @@
       [rrActionIds.upgradeDroneSlot]: () => rr.upgradeDroneSlot(),
       [rrActionIds.miningScanner]: () => rr.miningScanner(),
       [rrActionIds.miningTether]: () => rr.miningTether(),
+      [rrActionIds.miningRepairDrill]: () => rr.miningRepairDrill(),
+      [rrActionIds.miningRepairDrone]: () => rr.miningRepairDrone(),
       [rrActionIds.miningStow]: () => rr.miningStow(),
       [rrActionIds.miningAbort]: () => rr.miningAbort(),
       [rrActionIds.miningFailureAck]: () => rr.miningFailureAck(),
@@ -5720,6 +6094,21 @@
           lastPanelAction = action;
           lastPanelActionAt = performance.now();
           rr.equipDrone(index);
+          return true;
+        }
+        return false;
+      }
+
+      if (action.startsWith(rrActionIds.unequipDroneSlotPrefix)) {
+        const rawIndex = action.slice(rrActionIds.unequipDroneSlotPrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.unequipDroneSlot(index);
           return true;
         }
         return false;
@@ -6073,19 +6462,6 @@
       rr.miningMove((right ? 1 : 0) - (left ? 1 : 0), (down ? 1 : 0) - (up ? 1 : 0));
     }
 
-    function updateMiningAimFromPointer(event) {
-      const rect = canvas.getBoundingClientRect();
-      const sceneLeft = Math.min(rect.right, Math.max(rect.left, sceneMetrics().left));
-      const sceneWidth = Math.max(1, rect.right - sceneLeft);
-      if (sceneWidth <= 0 || rect.height <= 0) {
-        return;
-      }
-      const terrainTop = (1 - 0.82) * 0.5;
-      const terrainHeight = (0.82 + 1) * 0.5;
-      const normalizedY = ((event.clientY - rect.top) / rect.height - terrainTop) / terrainHeight;
-      rr.miningAim((event.clientX - sceneLeft) / sceneWidth, normalizedY);
-    }
-
     function handleMiningKeyDown(event) {
       if (!isMiningActive() || event.ctrlKey || event.metaKey || event.altKey) {
         return false;
@@ -6226,7 +6602,6 @@
       }
       miningPointerDown = true;
       canvas.setPointerCapture?.(event.pointerId);
-      updateMiningAimFromPointer(event);
       rr.miningDrill(true);
       event.preventDefault();
     });
@@ -6240,7 +6615,6 @@
         event.preventDefault();
         return;
       }
-      updateMiningAimFromPointer(event);
     });
 
     canvas.addEventListener("pointerup", (event) => {
@@ -6286,6 +6660,11 @@
         closePanelModal();
         return;
       }
+      if (panel.querySelector("[data-arrival-fanfare]") && (event.key === " " || event.key === "Enter")) {
+        rr.skipArrivalFanfare();
+        event.preventDefault();
+        return;
+      }
       if (!arrivalFanfare.hidden && (event.key === " " || event.key === "Enter")) {
         if (panel.querySelector("[data-flyby-stamp]")) {
           rr.flybyContinue();
@@ -6309,10 +6688,15 @@
       if (handleMiningKeyDown(event)) {
         return;
       }
+      if (!event.repeat && event.key === " " && panel.querySelector(".push-minigame [data-rr-action=\"surface_push_step\"]")) {
+        rr.surfacePushStep();
+        event.preventDefault();
+        return;
+      }
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.key === " " && sceneLaunchControl.classList.contains("is-visible") && !sceneLaunchControl.hidden) {
+      if (event.key === " " && sceneLaunchControl.classList.contains("is-visible") && !sceneLaunchControl.hidden && !sceneLaunchControl.disabled) {
         rr.startLaunch();
         event.preventDefault();
         return;

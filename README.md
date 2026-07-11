@@ -211,7 +211,7 @@ Use the on-screen mission-control buttons:
 - New frontiers carry high mission pressure; repeated attempts and successful profiles reduce it, while pressure-control modules dampen the `PRESS` telemetry channel.
 - After each mission summary, choose one of three refit cards or skip the refit window.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
-- Push deeper through the frontier ladder only after enough proving data is banked.
+- Use Push Deeper through the frontier ladder only after enough proving data is banked.
 - Successful arrivals can open flyby/orbit/landing operations. Flyby can grant next-launch slingshot boosts; orbit grants science and credit rewards; landing opens post-arrival research and Surface Ops.
 - Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
 - Mining controls: WASD/arrows move, mouse aims, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.

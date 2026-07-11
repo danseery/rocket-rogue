@@ -24,6 +24,7 @@ struct RmlButtonBinding {
 enum class RmlPanelMode {
     Control,
     PhaseBoard,
+    ArrivalFanfare,
     MiningFullscreen
 };
 

@@ -60,6 +60,7 @@ public:
     void openDroneOps();
     void backToSurfaceOps();
     void equipDrone(int index);
+    void unequipDroneSlot(int slotIndex);
     void upgradeDrone(int index);
     void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
@@ -67,6 +68,8 @@ public:
     void miningDrill(bool active);
     void miningScanner();
     void miningTether();
+    void miningRepairDrill();
+    void miningRepairDrone();
     void miningStow();
     void miningAbort();
     void miningFailureAck();
@@ -124,6 +127,7 @@ private:
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
         bool flightArmed = false;
+        double preflightElapsed = 0.0;
         double elapsed = 0.0;
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;

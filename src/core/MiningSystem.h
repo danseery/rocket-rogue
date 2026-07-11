@@ -35,7 +35,7 @@ struct MiningLoadStats {
     double freeBuffer = tuning::mining::baseCarryBufferCargo;
     double burden = 0.0;
     double speedMultiplier = 1.0;
-    double fuelMultiplier = 1.0;
+    double fuelConsumptionMultiplier = 1.0;
 };
 
 std::string_view miningMaterialName(MiningCellMaterial material);
@@ -51,6 +51,10 @@ int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
 bool miningAtReturnZone(const MiningRunState& mining);
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
+int miningDrillRepairCost(const MiningRunState& mining);
+int miningDroneRepairCost(const MiningRunState& mining);
+bool repairMiningDrill(GameState& state);
+bool repairMiningDrone(GameState& state);
 MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width = tuning::mining::terrainWidth, int height = tuning::mining::terrainHeight);
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog);
 void setMiningMove(GameState& state, double xAxis, double yAxis);

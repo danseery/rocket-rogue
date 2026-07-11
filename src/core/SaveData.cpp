@@ -859,6 +859,77 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
     return enemies;
 }
 
+std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& agents)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < agents.size(); ++i) {
+        if (i > 0) {
+            out << save_schema::listDelimiter;
+        }
+        const MiningMiniDroneAgent& agent = agents[i];
+        out << static_cast<int>(agent.role)
+            << save_schema::crewFieldDelimiter << agent.roleIndex
+            << save_schema::crewFieldDelimiter << agent.upgradeLevel
+            << save_schema::crewFieldDelimiter << agent.x
+            << save_schema::crewFieldDelimiter << agent.y
+            << save_schema::crewFieldDelimiter << agent.velocityX
+            << save_schema::crewFieldDelimiter << agent.velocityY
+            << save_schema::crewFieldDelimiter << static_cast<int>(agent.behavior)
+            << save_schema::crewFieldDelimiter << agent.targetCellX
+            << save_schema::crewFieldDelimiter << agent.targetCellY
+            << save_schema::crewFieldDelimiter << agent.targetEnemyIndex
+            << save_schema::crewFieldDelimiter << agent.actionCooldownSeconds
+            << save_schema::crewFieldDelimiter << (agent.finishTargetBeforeReturn ? 1 : 0);
+    }
+    return out.str();
+}
+
+std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
+{
+    std::vector<MiningMiniDroneAgent> agents;
+    for (const std::string& record : split(text, save_schema::listDelimiter)) {
+        if (record.empty()) {
+            continue;
+        }
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 8) {
+            continue;
+        }
+        MiningMiniDroneAgent agent;
+        agent.role = static_cast<MiniDroneRole>(std::clamp(
+            parseInt(fields[0], static_cast<int>(MiniDroneRole::Mining)),
+            static_cast<int>(MiniDroneRole::Mining),
+            static_cast<int>(MiniDroneRole::Defense)));
+        agent.roleIndex = std::max(0, parseInt(fields[1], agent.roleIndex));
+        agent.upgradeLevel = std::clamp(parseInt(fields[2], agent.upgradeLevel), 1, 3);
+        agent.x = parseDouble(fields[3], agent.x);
+        agent.y = parseDouble(fields[4], agent.y);
+        agent.velocityX = parseDouble(fields[5], agent.velocityX);
+        agent.velocityY = parseDouble(fields[6], agent.velocityY);
+        agent.behavior = static_cast<MiningMiniDroneBehavior>(std::clamp(
+            parseInt(fields[7], static_cast<int>(MiningMiniDroneBehavior::Following)),
+            static_cast<int>(MiningMiniDroneBehavior::Following),
+            static_cast<int>(MiningMiniDroneBehavior::Docked)));
+        if (fields.size() > 8) {
+            agent.targetCellX = parseInt(fields[8], agent.targetCellX);
+        }
+        if (fields.size() > 9) {
+            agent.targetCellY = parseInt(fields[9], agent.targetCellY);
+        }
+        if (fields.size() > 10) {
+            agent.targetEnemyIndex = parseInt(fields[10], agent.targetEnemyIndex);
+        }
+        if (fields.size() > 11) {
+            agent.actionCooldownSeconds = std::max(0.0, parseDouble(fields[11], agent.actionCooldownSeconds));
+        }
+        if (fields.size() > 12) {
+            agent.finishTargetBeforeReturn = parseInt(fields[12], 0) != 0;
+        }
+        agents.push_back(agent);
+    }
+    return agents;
+}
+
 std::string serializeArtifacts(const std::vector<ArtifactRecord>& artifacts)
 {
     std::ostringstream out;
@@ -1158,6 +1229,20 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     if (state.run.mining.active) {
         state.run.surfaceExpedition.miningSitePrepared = true;
         state.run.surfaceExpedition.miningRunUsed = true;
+        const double hullLength = std::sqrt(
+            state.run.mining.hullDirX * state.run.mining.hullDirX +
+            state.run.mining.hullDirY * state.run.mining.hullDirY);
+        if (hullLength <= 0.0001) {
+            state.run.mining.hullDirX = 0.0;
+            state.run.mining.hullDirY = 1.0;
+        } else {
+            state.run.mining.hullDirX /= hullLength;
+            state.run.mining.hullDirY /= hullLength;
+        }
+        state.run.mining.aimDirX = state.run.mining.hullDirX;
+        state.run.mining.aimDirY = state.run.mining.hullDirY;
+        state.run.mining.aimX = state.run.mining.droneX + state.run.mining.aimDirX * tuning::mining::drillRangeCells;
+        state.run.mining.aimY = state.run.mining.droneY + state.run.mining.aimDirY * tuning::mining::drillRangeCells;
     }
     if (state.run.surfaceExpedition.active) {
         const int expectedFuelCapacity = surfaceSharedFuelCapacity(state, catalog);
@@ -1346,11 +1431,12 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
     writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
     writeField(out, save_schema::field::miningDroneHealth, save.mining.droneHealth);
-    writeField(out, save_schema::field::miningFuelBurn, save.mining.fuelBurnSeconds);
+    writeField(out, save_schema::field::miningFuelCycle, save.mining.fuelCycleProgress);
     writeField(out, save_schema::field::miningFuelSpent, save.mining.fuelSpent);
     writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
     writeField(out, save_schema::field::miningReturnZone, serializePair(save.mining.returnZoneX, save.mining.returnZoneY));
     writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
+    writeField(out, save_schema::field::miningHullHeading, serializePair(save.mining.hullDirX, save.mining.hullDirY));
     writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
     writeField(out, save_schema::field::miningDepth, save.mining.depthZone);
     writeField(out, save_schema::field::miningCargo, save.mining.cargo);
@@ -1363,6 +1449,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningPassiveDroneYield, save.mining.passiveDroneYield);
     writeField(out, save_schema::field::miningCellsBroken, save.mining.cellsBroken);
     writeField(out, save_schema::field::miningEnemies, serializeMiningEnemies(save.mining.enemies));
+    writeField(out, save_schema::field::miningMiniDrones, serializeMiningMiniDrones(save.mining.miniDrones));
     writeField(
         out,
         save_schema::field::miningCombat,
@@ -1559,8 +1646,14 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.oxygenSeconds = parseDouble(value, save.mining.oxygenSeconds);
         } else if (key == save_schema::field::miningDroneHealth) {
             save.mining.droneHealth = std::clamp(parseDouble(value, save.mining.droneHealth), 0.0, 1.0);
+        } else if (key == save_schema::field::miningFuelCycle) {
+            save.mining.fuelCycleProgress = std::clamp(parseDouble(value, save.mining.fuelCycleProgress), 0.0, 1.0);
         } else if (key == save_schema::field::miningFuelBurn) {
-            save.mining.fuelBurnSeconds = parseDouble(value, save.mining.fuelBurnSeconds);
+            const double legacyBurnSeconds = std::max(0.0, parseDouble(value, 0.0));
+            save.mining.fuelCycleProgress = std::clamp(
+                legacyBurnSeconds * tuning::mining::fuelCycleProgressPerSecond,
+                0.0,
+                1.0);
         } else if (key == save_schema::field::miningFuelSpent) {
             save.mining.fuelSpent = parseInt(value, save.mining.fuelSpent);
         } else if (key == save_schema::field::miningDrone) {
@@ -1575,6 +1668,16 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             if (aimDirLength > 0.0001) {
                 save.mining.aimDirX = aimDirX / aimDirLength;
                 save.mining.aimDirY = aimDirY / aimDirLength;
+            }
+        } else if (key == save_schema::field::miningHullHeading) {
+            parsePair(value, save.mining.hullDirX, save.mining.hullDirY);
+            const double hullLength = std::sqrt(save.mining.hullDirX * save.mining.hullDirX + save.mining.hullDirY * save.mining.hullDirY);
+            if (hullLength > 0.0001) {
+                save.mining.hullDirX /= hullLength;
+                save.mining.hullDirY /= hullLength;
+            } else {
+                save.mining.hullDirX = 0.0;
+                save.mining.hullDirY = 1.0;
             }
         } else if (key == save_schema::field::miningDrill) {
             parsePair(value, save.mining.drillHeat, save.mining.drillIntegrity);
@@ -1600,6 +1703,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.cellsBroken = parseInt(value, save.mining.cellsBroken);
         } else if (key == save_schema::field::miningEnemies) {
             save.mining.enemies = parseMiningEnemies(value);
+        } else if (key == save_schema::field::miningMiniDrones) {
+            save.mining.miniDrones = parseMiningMiniDrones(value);
         } else if (key == save_schema::field::miningCombat) {
             const std::vector<std::string> fields = split(value, save_schema::crewFieldDelimiter);
             if (!fields.empty()) {

@@ -44,7 +44,7 @@ Resource and object pillars should also stay understandable:
 
 - Weight affects extraction/cargo strain.
 - Durability affects drill time and tool wear.
-- Value affects reward and reason to push deeper.
+- Value affects reward and the reason to use Push Deeper.
 
 ## Crew Direction
 

@@ -450,6 +450,9 @@ double contactLimitedPosition(double current, double proposed, int obstacleCell)
 void updateContactBounce(MiningRunState& mining, double dt)
 {
     mining.contactBounceCooldown = std::max(0.0, mining.contactBounceCooldown - dt);
+    mining.contactSpeedRecovery = std::min(
+        1.0,
+        mining.contactSpeedRecovery + dt / tuning::mining::postContactSpeedRecoverySeconds);
     mining.contactBounceVelocity -= mining.contactBounce * tuning::mining::contactBounceSpring * dt;
     mining.contactBounceVelocity *= std::pow(tuning::mining::contactBounceDamping, dt * 60.0);
     mining.contactBounce += mining.contactBounceVelocity * dt;
@@ -469,6 +472,7 @@ void triggerHardContactBounce(MiningRunState& mining, double dirX, double dirY, 
     }
     const double reliefScale = std::clamp(1.0 - bounceRelief, 0.35, 1.0);
     mining.contactBounceVelocity += tuning::mining::hardTerrainBounceImpulse * reliefScale * (1.0 + mining.contactIntensity * 0.35);
+    mining.contactSpeedRecovery = std::min(mining.contactSpeedRecovery, std::clamp(bounceRelief, 0.0, 0.55));
     mining.contactBounceCooldown = tuning::mining::hardTerrainBounceCooldownSeconds;
 }
 
@@ -545,6 +549,381 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
         return true;
     }
     return false;
+}
+
+struct MiniDroneHomePoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+double miniDroneRoleSpread(int roleIndex)
+{
+    if (roleIndex <= 0) {
+        return 0.0;
+    }
+    const int lane = (roleIndex + 1) / 2;
+    return static_cast<double>(lane) * tuning::mining::miniDroneSameRoleSpacingCells * (roleIndex % 2 == 1 ? 1.0 : -1.0);
+}
+
+MiniDroneHomePoint miniDroneHomePoint(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
+{
+    const double spread = miniDroneRoleSpread(agent.roleIndex);
+    switch (agent.role) {
+    case MiniDroneRole::Mining:
+        return {mining.droneX - 1.35 + spread, mining.droneY + 0.85};
+    case MiniDroneRole::Resource:
+        return {
+            mining.droneX + tuning::mining::resourceDroneFollowDistanceCells + spread,
+            mining.droneY + 0.55 + std::sin(mining.elapsedSeconds * 2.2 + static_cast<double>(agent.roleIndex)) * 0.16
+        };
+    case MiniDroneRole::Survey:
+        return {
+            mining.droneX + spread + std::sin(mining.elapsedSeconds * 0.75 + static_cast<double>(agent.roleIndex)) * 0.35,
+            mining.droneY + tuning::mining::surveyDroneLeadDistanceCells
+        };
+    case MiniDroneRole::Stabilizer:
+        return {
+            mining.droneX + spread * 0.45,
+            mining.droneY - tuning::mining::stabilizerDroneDockOffsetCells
+        };
+    case MiniDroneRole::Attack:
+        return {mining.droneX - 1.60 + spread, mining.droneY - 0.25};
+    case MiniDroneRole::Defense:
+        return {mining.droneX + 1.60 + spread, mining.droneY - 0.15};
+    }
+    return {mining.droneX, mining.droneY};
+}
+
+double miniDroneDistanceSquared(const MiningMiniDroneAgent& agent, double x, double y)
+{
+    const double dx = x - agent.x;
+    const double dy = y - agent.y;
+    return dx * dx + dy * dy;
+}
+
+bool moveMiniDroneToward(
+    MiningMiniDroneAgent& agent,
+    const MiningRunState& mining,
+    double targetX,
+    double targetY,
+    double speed,
+    double dt)
+{
+    const double dx = targetX - agent.x;
+    const double dy = targetY - agent.y;
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    const double currentSpeed = std::sqrt(agent.velocityX * agent.velocityX + agent.velocityY * agent.velocityY);
+    if (distance <= tuning::mining::miniDroneHomeRadiusCells && currentSpeed <= tuning::mining::miniDroneStopSpeedCellsPerSecond) {
+        agent.x = std::clamp(targetX, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+        agent.y = std::clamp(targetY, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+        agent.velocityX = 0.0;
+        agent.velocityY = 0.0;
+        return true;
+    }
+    const double safeDistance = std::max(0.0001, distance);
+    const double speedScale = std::clamp(distance / tuning::mining::miniDroneBrakeRadiusCells, 0.0, 1.0);
+    const double desiredSpeed = std::max(0.0, speed) * speedScale;
+    const double desiredVelocityX = dx / safeDistance * desiredSpeed;
+    const double desiredVelocityY = dy / safeDistance * desiredSpeed;
+    const double response = 1.0 - std::exp(-tuning::mining::miniDroneVelocityResponsePerSecond * dt);
+    agent.velocityX += (desiredVelocityX - agent.velocityX) * response;
+    agent.velocityY += (desiredVelocityY - agent.velocityY) * response;
+    const double nextX = std::clamp(agent.x + agent.velocityX * dt, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+    const double nextY = std::clamp(agent.y + agent.velocityY * dt, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+    const double remainingX = targetX - nextX;
+    const double remainingY = targetY - nextY;
+    if (dx * remainingX + dy * remainingY <= 0.0) {
+        agent.x = std::clamp(targetX, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+        agent.y = std::clamp(targetY, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+        agent.velocityX = 0.0;
+        agent.velocityY = 0.0;
+        return true;
+    }
+    agent.x = nextX;
+    agent.y = nextY;
+    return false;
+}
+
+void slowMiniDroneAtTask(MiningMiniDroneAgent& agent, const MiningRunState& mining, double dt)
+{
+    const double damping = std::exp(-tuning::mining::miniDroneTaskStopDampingPerSecond * dt);
+    agent.velocityX *= damping;
+    agent.velocityY *= damping;
+    agent.x = std::clamp(agent.x + agent.velocityX * dt, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+    agent.y = std::clamp(agent.y + agent.velocityY * dt, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+    if (std::sqrt(agent.velocityX * agent.velocityX + agent.velocityY * agent.velocityY) <= tuning::mining::miniDroneStopSpeedCellsPerSecond) {
+        agent.velocityX = 0.0;
+        agent.velocityY = 0.0;
+    }
+}
+
+bool miniDroneTargetCellValid(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
+{
+    const MiningCell* target = miningCellAt(mining.terrain, agent.targetCellX, agent.targetCellY);
+    return drillableCell(target) && target->revealed && target->material != MiningCellMaterial::HazardPocket &&
+        target->material != MiningCellMaterial::ArtifactCache;
+}
+
+double miningDroneTargetPriority(MiningCellMaterial material)
+{
+    switch (material) {
+    case MiningCellMaterial::ExoticVein:
+        return -4.0;
+    case MiningCellMaterial::RareOre:
+        return -3.2;
+    case MiningCellMaterial::CommonOre:
+        return -2.4;
+    case MiningCellMaterial::Regolith:
+        return 0.0;
+    case MiningCellMaterial::HardRock:
+        return 1.5;
+    default:
+        return 4.0;
+    }
+}
+
+bool acquireMiningDroneTarget(MiningMiniDroneAgent& agent, const MiningRunState& mining)
+{
+    const double acquireRangeSq = tuning::mining::miningDroneAcquireRadiusCells * tuning::mining::miningDroneAcquireRadiusCells;
+    double bestScore = 1.0e9;
+    int bestX = -1;
+    int bestY = -1;
+    const int minX = std::max(0, static_cast<int>(std::floor(mining.droneX - tuning::mining::miningDroneAcquireRadiusCells)));
+    const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(mining.droneX + tuning::mining::miningDroneAcquireRadiusCells)));
+    const int minY = std::max(0, static_cast<int>(std::floor(mining.droneY - tuning::mining::miningDroneAcquireRadiusCells)));
+    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::ceil(mining.droneY + tuning::mining::miningDroneAcquireRadiusCells)));
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            if (!drillableCell(cell) || !cell->revealed || cell->material == MiningCellMaterial::HazardPocket ||
+                cell->material == MiningCellMaterial::ArtifactCache) {
+                continue;
+            }
+            const bool alreadyClaimed = std::any_of(mining.miniDrones.begin(), mining.miniDrones.end(), [&](const MiningMiniDroneAgent& other) {
+                return &other != &agent && other.role == MiniDroneRole::Mining && other.targetCellX == x && other.targetCellY == y &&
+                    miniDroneTargetCellValid(mining, other);
+            });
+            if (alreadyClaimed) {
+                continue;
+            }
+            const double centerX = static_cast<double>(x) + 0.5;
+            const double centerY = static_cast<double>(y) + 0.5;
+            const double mamaDx = centerX - mining.droneX;
+            const double mamaDy = centerY - mining.droneY;
+            if (mamaDx * mamaDx + mamaDy * mamaDy > acquireRangeSq) {
+                continue;
+            }
+            const double agentDistance = std::sqrt(miniDroneDistanceSquared(agent, centerX, centerY));
+            const double score = agentDistance + miningDroneTargetPriority(cell->material);
+            if (score < bestScore) {
+                bestScore = score;
+                bestX = x;
+                bestY = y;
+            }
+        }
+    }
+    agent.targetCellX = bestX;
+    agent.targetCellY = bestY;
+    if (bestX < 0 || bestY < 0) {
+        return false;
+    }
+    agent.behavior = MiningMiniDroneBehavior::Traveling;
+    return true;
+}
+
+bool miniDroneTargetEnemyValid(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
+{
+    return agent.targetEnemyIndex >= 0 && agent.targetEnemyIndex < static_cast<int>(mining.enemies.size()) &&
+        mining.enemies[static_cast<std::size_t>(agent.targetEnemyIndex)].active;
+}
+
+int nearestActiveEnemyIndex(const MiningRunState& mining, double x, double y)
+{
+    double bestDistanceSq = 1.0e12;
+    int bestIndex = -1;
+    for (std::size_t i = 0; i < mining.enemies.size(); ++i) {
+        const MiningEnemy& enemy = mining.enemies[i];
+        if (!enemy.active) {
+            continue;
+        }
+        const double dx = enemy.x - x;
+        const double dy = enemy.y - y;
+        const double distanceSq = dx * dx + dy * dy;
+        if (distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestIndex = static_cast<int>(i);
+        }
+    }
+    return bestIndex;
+}
+
+void ensureMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog)
+{
+    MiningRunState& mining = state.run.mining;
+    std::vector<std::pair<MiniDroneRole, int>> expected;
+    expected.reserve(state.meta.equippedDroneIds.size());
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (drone != nullptr && isMiniDroneUnlocked(state.meta, *drone)) {
+            expected.push_back({drone->role, miniDroneUpgradeLevel(state, drone->id)});
+        }
+    }
+    bool matches = mining.miniDrones.size() == expected.size();
+    for (std::size_t i = 0; matches && i < expected.size(); ++i) {
+        matches = mining.miniDrones[i].role == expected[i].first && mining.miniDrones[i].upgradeLevel == expected[i].second;
+    }
+    if (matches) {
+        return;
+    }
+
+    mining.miniDrones.clear();
+    int roleCounts[6] = {};
+    for (const auto& [role, upgradeLevel] : expected) {
+        MiningMiniDroneAgent agent;
+        agent.role = role;
+        agent.roleIndex = roleCounts[static_cast<int>(role)]++;
+        agent.upgradeLevel = std::clamp(upgradeLevel, 1, 3);
+        const MiniDroneHomePoint home = miniDroneHomePoint(mining, agent);
+        agent.x = home.x;
+        agent.y = home.y;
+        agent.behavior = role == MiniDroneRole::Stabilizer
+            ? MiningMiniDroneBehavior::Docked
+            : MiningMiniDroneBehavior::Following;
+        mining.miniDrones.push_back(agent);
+    }
+}
+
+void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog, const MiningDrillStats& stats, double dt)
+{
+    ensureMiningMiniDroneAgents(state, catalog);
+    MiningRunState& mining = state.run.mining;
+    const int miningDroneCount = std::max(1, static_cast<int>(std::count_if(
+        mining.miniDrones.begin(),
+        mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& agent) { return agent.role == MiniDroneRole::Mining; })));
+
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        agent.actionCooldownSeconds = std::max(0.0, agent.actionCooldownSeconds - dt);
+        const MiniDroneHomePoint home = miniDroneHomePoint(mining, agent);
+        switch (agent.role) {
+        case MiniDroneRole::Mining: {
+            const double mamaDistanceSq = miniDroneDistanceSquared(agent, mining.droneX, mining.droneY);
+            const double leashSq = tuning::mining::miningDroneLeashRadiusCells * tuning::mining::miningDroneLeashRadiusCells;
+            if (miniDroneTargetCellValid(mining, agent)) {
+                if (mamaDistanceSq > leashSq) {
+                    agent.finishTargetBeforeReturn = true;
+                }
+                const double targetX = static_cast<double>(agent.targetCellX) + 0.5;
+                const double targetY = static_cast<double>(agent.targetCellY) + 0.5;
+                const double workRangeSq = tuning::mining::miningDroneWorkRangeCells * tuning::mining::miningDroneWorkRangeCells;
+                if (miniDroneDistanceSquared(agent, targetX, targetY) > workRangeSq) {
+                    agent.behavior = MiningMiniDroneBehavior::Traveling;
+                    moveMiniDroneToward(agent, mining, targetX, targetY, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+                } else {
+                    slowMiniDroneAtTask(agent, mining, dt);
+                    agent.behavior = MiningMiniDroneBehavior::Working;
+                    MiningDrillStats miniStats = stats;
+                    miniStats.power = std::max(
+                        0.35,
+                        stats.passiveDroneMiningRate / static_cast<double>(miningDroneCount) * tuning::mining::miningDroneWorkPowerScale);
+                    if (applyDrillDamage(state, miniStats, agent.targetCellX, agent.targetCellY, dt)) {
+                        agent.targetCellX = -1;
+                        agent.targetCellY = -1;
+                        if (agent.finishTargetBeforeReturn || mamaDistanceSq > leashSq) {
+                            agent.behavior = MiningMiniDroneBehavior::Returning;
+                        } else {
+                            agent.behavior = MiningMiniDroneBehavior::Following;
+                        }
+                    }
+                }
+                break;
+            }
+
+            agent.targetCellX = -1;
+            agent.targetCellY = -1;
+            const double reacquireSq = tuning::mining::miningDroneReacquireRadiusCells * tuning::mining::miningDroneReacquireRadiusCells;
+            if (agent.finishTargetBeforeReturn || mamaDistanceSq > reacquireSq) {
+                agent.behavior = MiningMiniDroneBehavior::Returning;
+                if (moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneReturnSpeedCellsPerSecond, dt)) {
+                    agent.finishTargetBeforeReturn = false;
+                    agent.behavior = MiningMiniDroneBehavior::Following;
+                }
+            } else if (agent.actionCooldownSeconds > 0.0) {
+                agent.behavior = MiningMiniDroneBehavior::Following;
+                moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+            } else if (!acquireMiningDroneTarget(agent, mining)) {
+                agent.actionCooldownSeconds = 0.45;
+                agent.behavior = MiningMiniDroneBehavior::Following;
+                moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+            }
+            break;
+        }
+        case MiniDroneRole::Attack:
+            if (!miniDroneTargetEnemyValid(mining, agent)) {
+                agent.targetEnemyIndex = -1;
+                if (agent.behavior == MiningMiniDroneBehavior::Engaging) {
+                    agent.behavior = MiningMiniDroneBehavior::Returning;
+                }
+            }
+            if (agent.behavior == MiningMiniDroneBehavior::Returning) {
+                if (moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneReturnSpeedCellsPerSecond, dt)) {
+                    agent.behavior = MiningMiniDroneBehavior::Following;
+                }
+                break;
+            }
+            if (agent.targetEnemyIndex < 0) {
+                agent.targetEnemyIndex = nearestActiveEnemyIndex(mining, agent.x, agent.y);
+            }
+            if (miniDroneTargetEnemyValid(mining, agent)) {
+                const MiningEnemy& target = mining.enemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
+                agent.behavior = MiningMiniDroneBehavior::Engaging;
+                const double standoffSq = tuning::mining::attackDroneStandoffCells * tuning::mining::attackDroneStandoffCells;
+                if (miniDroneDistanceSquared(agent, target.x, target.y) > standoffSq) {
+                    moveMiniDroneToward(agent, mining, target.x, target.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+                } else {
+                    slowMiniDroneAtTask(agent, mining, dt);
+                }
+            } else {
+                agent.behavior = MiningMiniDroneBehavior::Following;
+                moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+            }
+            break;
+        case MiniDroneRole::Defense: {
+            const int enemyIndex = nearestActiveEnemyIndex(mining, mining.droneX, mining.droneY);
+            double guardX = home.x;
+            double guardY = home.y;
+            if (enemyIndex >= 0) {
+                const MiningEnemy& enemy = mining.enemies[static_cast<std::size_t>(enemyIndex)];
+                const double dx = enemy.x - mining.droneX;
+                const double dy = enemy.y - mining.droneY;
+                const double length = std::max(0.001, std::sqrt(dx * dx + dy * dy));
+                guardX = mining.droneX + dx / length * tuning::mining::defenseDroneGuardDistanceCells;
+                guardY = mining.droneY + dy / length * tuning::mining::defenseDroneGuardDistanceCells;
+                const double guardSpread = miniDroneRoleSpread(agent.roleIndex) * 0.60;
+                guardX += -dy / length * guardSpread;
+                guardY += dx / length * guardSpread;
+                agent.behavior = MiningMiniDroneBehavior::Guarding;
+            } else {
+                agent.behavior = MiningMiniDroneBehavior::Following;
+            }
+            moveMiniDroneToward(agent, mining, guardX, guardY, tuning::mining::miniDroneReturnSpeedCellsPerSecond, dt);
+            break;
+        }
+        case MiniDroneRole::Resource:
+            agent.behavior = MiningMiniDroneBehavior::Following;
+            moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneReturnSpeedCellsPerSecond, dt);
+            break;
+        case MiniDroneRole::Survey:
+            agent.behavior = MiningMiniDroneBehavior::Scouting;
+            moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt);
+            break;
+        case MiniDroneRole::Stabilizer:
+            agent.behavior = moveMiniDroneToward(agent, mining, home.x, home.y, tuning::mining::miniDroneReturnSpeedCellsPerSecond * 1.35, dt)
+                ? MiningMiniDroneBehavior::Docked
+                : MiningMiniDroneBehavior::Traveling;
+            break;
+        }
+    }
 }
 
 struct DrillFootprintCell {
@@ -1390,7 +1769,62 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
         return lhs.first < rhs.first;
     });
 
-    if (!sentryTargets.empty() && defenseDamage > 0.0 && mining.alliedFireCooldownSeconds <= 0.0) {
+    std::vector<MiningMiniDroneAgent*> attackDrones;
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Attack) {
+            attackDrones.push_back(&agent);
+        }
+    }
+    if (!attackDrones.empty() && defenseDamage > 0.0) {
+        const double damagePerShot = defenseDamage * alliedShotInterval / static_cast<double>(attackDrones.size());
+        for (std::size_t attackIndex = 0; attackIndex < attackDrones.size(); ++attackIndex) {
+            MiningMiniDroneAgent& agent = *attackDrones[attackIndex];
+            if (agent.actionCooldownSeconds > 0.0 || !miniDroneTargetEnemyValid(mining, agent)) {
+                continue;
+            }
+            MiningEnemy& primary = mining.enemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
+            if (miniDroneDistanceSquared(agent, primary.x, primary.y) > defenseRangeSq) {
+                continue;
+            }
+            for (int shot = 0; shot < sentryShots; ++shot) {
+                int targetIndex = agent.targetEnemyIndex;
+                if (shot > 0) {
+                    const auto extra = std::find_if(sentryTargets.begin(), sentryTargets.end(), [&](const auto& candidate) {
+                        return candidate.second != agent.targetEnemyIndex && mining.enemies[static_cast<std::size_t>(candidate.second)].active;
+                    });
+                    if (extra != sentryTargets.end()) {
+                        targetIndex = extra->second;
+                    }
+                }
+                MiningEnemy& target = mining.enemies[static_cast<std::size_t>(targetIndex)];
+                if (!target.active) {
+                    continue;
+                }
+                const bool critical = deterministicCombatCrit(
+                    mining,
+                    target,
+                    alliedCritChance,
+                    101 + static_cast<int>(attackIndex) * 31 + shot * 17);
+                pushMiningProjectile(
+                    mining,
+                    agent.x,
+                    agent.y,
+                    target.x,
+                    target.y,
+                    MiningCombatTeam::Allied,
+                    target.type,
+                    target.affinity,
+                    critical);
+                const double appliedDamage = applyDefenseDamage(state, target, damagePerShot, critical, true);
+                mining.defenseDamageDealt += appliedDamage;
+            }
+            agent.actionCooldownSeconds = alliedShotInterval;
+            if (!miniDroneTargetEnemyValid(mining, agent)) {
+                agent.targetEnemyIndex = -1;
+                agent.behavior = MiningMiniDroneBehavior::Returning;
+            }
+        }
+    } else if (!sentryTargets.empty() && defenseDamage > 0.0 && mining.alliedFireCooldownSeconds <= 0.0) {
         const int shots = std::min(sentryShots, static_cast<int>(sentryTargets.size()));
         for (int shot = 0; shot < shots; ++shot) {
             MiningEnemy& target = mining.enemies[static_cast<std::size_t>(sentryTargets[static_cast<std::size_t>(shot)].second)];
@@ -1518,12 +1952,26 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             const bool critical = deterministicCombatCrit(mining, enemy, tuning::mining::enemyCritChance, 401);
             const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * tuning::mining::enemyRangedAttackIntervalSeconds * (critical ? tuning::mining::enemyCritMultiplier : 1.0);
             const double damage = rawDamage * (1.0 - shieldRelief);
+            MiningMiniDroneAgent* interceptor = nullptr;
+            double interceptorDistanceSq = 1.0e12;
+            for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+                if (agent.role != MiniDroneRole::Defense) {
+                    continue;
+                }
+                const double candidateDistanceSq = miniDroneDistanceSquared(agent, enemy.x, enemy.y);
+                if (candidateDistanceSq < interceptorDistanceSq) {
+                    interceptorDistanceSq = candidateDistanceSq;
+                    interceptor = &agent;
+                }
+            }
+            const double impactX = interceptor != nullptr ? interceptor->x : mining.droneX;
+            const double impactY = interceptor != nullptr ? interceptor->y : mining.droneY;
             pushMiningProjectile(
                 mining,
                 enemy.x,
                 enemy.y,
-                mining.droneX,
-                mining.droneY,
+                impactX,
+                impactY,
                 MiningCombatTeam::Enemy,
                 enemy.type,
                 enemy.affinity,
@@ -1532,7 +1980,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             mining.enemyDamageTaken += damage;
             mining.environmentalShieldAbsorbed += rawDamage - damage;
             mining.contactIntensity = std::max(mining.contactIntensity, 0.50);
-            pushMiningDamageNumber(mining, mining.droneX, mining.droneY, damage * 100.0, MiningCombatTeam::Enemy, critical, true);
+            pushMiningDamageNumber(mining, impactX, impactY, damage * 100.0, MiningCombatTeam::Enemy, critical, true);
             enemy.attackCooldownSeconds = tuning::mining::enemyRangedAttackIntervalSeconds;
         }
     }
@@ -1635,6 +2083,8 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     mining.aimY = mining.droneY + 1.0;
     mining.aimDirX = 0.0;
     mining.aimDirY = 1.0;
+    mining.hullDirX = 0.0;
+    mining.hullDirY = 1.0;
     revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     refreshTargetCell(mining);
@@ -1884,6 +2334,7 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.storage = std::max(0.0, stats.storage);
     stats.engineEfficiency = std::clamp(stats.engineEfficiency, 0.0, 0.75);
     stats.artifactTowEfficiency = std::clamp(stats.artifactTowEfficiency, 0.0, 0.80);
+    stats.heatCoolingPerSecond *= tuning::mining::heatCoolingMultiplier;
     return stats;
 }
 
@@ -1895,6 +2346,62 @@ int miningCarriedCargo(const MiningRunState& mining)
 int miningBankedCargo(const MiningRunState& mining)
 {
     return std::max(0, mining.stowedCargo);
+}
+
+namespace {
+
+int proportionalMiningRepairCost(double integrity, int fullDamageCost)
+{
+    const double missing = std::clamp(1.0 - integrity, 0.0, 1.0);
+    if (missing <= tuning::mining::repairDamageEpsilon) {
+        return 0;
+    }
+    return std::max(1, static_cast<int>(std::ceil(missing * static_cast<double>(fullDamageCost) - 0.000001)));
+}
+
+bool spendMiningRepairMaterials(MiningRunState& mining, int commonCost)
+{
+    if (commonCost <= 0 || mining.stowedMaterials.common < commonCost) {
+        return false;
+    }
+    mining.stowedMaterials.common -= commonCost;
+    mining.stowedCargo = std::max(0, mining.stowedCargo - commonCost * tuning::mining::commonCargo);
+    return true;
+}
+
+} // namespace
+
+int miningDrillRepairCost(const MiningRunState& mining)
+{
+    return proportionalMiningRepairCost(mining.drillIntegrity, tuning::mining::drillRepairCommonAtFullDamage);
+}
+
+int miningDroneRepairCost(const MiningRunState& mining)
+{
+    return proportionalMiningRepairCost(mining.droneHealth, tuning::mining::droneRepairCommonAtFullDamage);
+}
+
+bool repairMiningDrill(GameState& state)
+{
+    MiningRunState& mining = state.run.mining;
+    const int cost = miningDrillRepairCost(mining);
+    if (!mining.active || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
+        return false;
+    }
+    mining.drillIntegrity = 1.0;
+    mining.drillBreakNotified = false;
+    return true;
+}
+
+bool repairMiningDrone(GameState& state)
+{
+    MiningRunState& mining = state.run.mining;
+    const int cost = miningDroneRepairCost(mining);
+    if (!mining.active || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
+        return false;
+    }
+    mining.droneHealth = 1.0;
+    return true;
 }
 
 bool miningAtReturnZone(const MiningRunState& mining)
@@ -1926,14 +2433,14 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
         1.0 - load.burden * tuning::mining::loadSpeedPenaltyPerCargo * penaltyScale,
         tuning::mining::minLoadedSpeedMultiplier,
         1.0);
-    load.fuelMultiplier = std::clamp(
+    load.fuelConsumptionMultiplier = std::clamp(
         1.0 + load.burden * tuning::mining::loadFuelPenaltyPerCargo * penaltyScale,
         1.0,
         tuning::mining::maxLoadedFuelMultiplier);
     return load;
 }
 
-bool bankMiningPayloadAtShip(GameState& state)
+bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
     if (!miningAtReturnZone(mining)) {
@@ -1954,6 +2461,8 @@ bool bankMiningPayloadAtShip(GameState& state)
     mining.temporaryArtifacts.clear();
     mining.stowedCargo += std::max(0, mining.cargo);
     mining.cargo = 0;
+    mining.oxygenSeconds = miningDrillStats(state, catalog).oxygenSeconds;
+    mining.oxygenDepletedNotified = false;
     return true;
 }
 
@@ -2050,7 +2559,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.depthZone = expedition.depth;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.oxygenSeconds = stats.oxygenSeconds;
-    mining.fuelBurnSeconds = 0.0;
+    mining.fuelCycleProgress = 0.0;
     mining.fuelSpent = 1;
     mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
     applySurfaceProspects(mining.terrain, expedition);
@@ -2068,10 +2577,13 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.aimY = mining.droneY + 1.0;
     mining.aimDirX = 0.0;
     mining.aimDirY = 1.0;
+    mining.hullDirX = 0.0;
+    mining.hullDirY = 1.0;
     revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     refreshTargetCell(mining);
     state.run.mining = std::move(mining);
+    ensureMiningMiniDroneAgents(state, catalog);
     state.screen = Screen::Mining;
     appendSurfaceLog(expedition, text::fuel::miningLog(arkKnown));
     return outcome;
@@ -2085,22 +2597,22 @@ void setMiningMove(GameState& state, double xAxis, double yAxis)
     }
     mining.moveX = std::clamp(xAxis, -1.0, 1.0);
     mining.moveY = std::clamp(yAxis, -1.0, 1.0);
+    const double moveLength = std::sqrt(mining.moveX * mining.moveX + mining.moveY * mining.moveY);
+    if (moveLength > 0.01) {
+        setAimDirection(mining, mining.moveX, mining.moveY);
+        mining.hullDirX = mining.aimDirX;
+        mining.hullDirY = mining.aimDirY;
+        refreshTargetCell(mining);
+    }
 }
 
-void setMiningAim(GameState& state, double normalizedX, double normalizedY)
+void setMiningAim(GameState& state, double, double)
 {
     MiningRunState& mining = state.run.mining;
     if (!mining.active) {
         return;
     }
-    const double candidateX = std::clamp(normalizedX, 0.0, 1.0) * static_cast<double>(std::max(1, mining.terrain.width - 1));
-    const double candidateY = std::clamp(normalizedY, 0.0, 1.0) * static_cast<double>(std::max(1, mining.terrain.height - 1));
-    const double dirX = candidateX - mining.droneX;
-    const double dirY = candidateY - mining.droneY;
-    const double distance = std::sqrt(dirX * dirX + dirY * dirY);
-    if (distance >= tuning::mining::drillAimDeadzoneCells) {
-        setAimDirection(mining, dirX, dirY);
-    }
+    // Compatibility entry point: the drill is fixed to the rig's forward heading.
     refreshTargetCell(mining);
 }
 
@@ -2143,7 +2655,14 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     if (!mining.active) {
         return;
     }
-    revealAround(mining, mining.droneX, mining.droneY, miningDrillStats(state, catalog).scannerRadius);
+    ensureMiningMiniDroneAgents(state, catalog);
+    const double scannerRadius = miningDrillStats(state, catalog).scannerRadius;
+    revealAround(mining, mining.droneX, mining.droneY, scannerRadius);
+    for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Survey) {
+            revealAround(mining, agent.x, agent.y, scannerRadius);
+        }
+    }
     mining.scannerPulseSeconds = 0.9;
 }
 
@@ -2164,7 +2683,7 @@ void updateMiningArtifact(GameState& state, double dt)
 
     if (artifact.state == MiningArtifactState::Embedded) {
         if (artifact.tethered) {
-            const double tension = std::max(0.0, distance - 0.85);
+            const double tension = std::max(0.0, distance - tuning::mining::artifactTetherRestLengthCells);
             artifact.embedStrength = std::max(0.0, artifact.embedStrength - tension * tuning::mining::artifactTetherPullPerSecond * dt);
             artifact.velocityX = dx / std::max(0.001, distance) * tension * 0.22;
             artifact.velocityY = dy / std::max(0.001, distance) * tension * 0.22;
@@ -2180,8 +2699,11 @@ void updateMiningArtifact(GameState& state, double dt)
     }
 
     if (artifact.tethered && distance > 0.001) {
-        artifact.velocityX += (dx * tuning::mining::artifactTetherSpring - artifact.velocityX * tuning::mining::artifactTetherDamping) * dt;
-        artifact.velocityY += (dy * tuning::mining::artifactTetherSpring - artifact.velocityY * tuning::mining::artifactTetherDamping) * dt;
+        const double extension = std::max(0.0, distance - tuning::mining::artifactTetherRestLengthCells);
+        const double pullX = dx / distance * extension * tuning::mining::artifactTetherSpring;
+        const double pullY = dy / distance * extension * tuning::mining::artifactTetherSpring;
+        artifact.velocityX += (pullX - artifact.velocityX * tuning::mining::artifactTetherDamping) * dt;
+        artifact.velocityY += (pullY - artifact.velocityY * tuning::mining::artifactTetherDamping) * dt;
     } else {
         artifact.velocityX *= std::max(0.0, 1.0 - dt * 1.8);
         artifact.velocityY *= std::max(0.0, 1.0 - dt * 1.8);
@@ -2271,10 +2793,12 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             state.statusLine = std::string(text::status::miningOxygenFailed);
         }
     }
+    updateMiningMiniDroneAgents(state, catalog, stats, dt);
     applyMiningEnemyCombat(state, catalog, dt);
-    mining.fuelBurnSeconds += dt * loadStats.fuelMultiplier;
+    mining.fuelCycleProgress +=
+        dt * tuning::mining::fuelCycleProgressPerSecond * loadStats.fuelConsumptionMultiplier;
     if (mining.oxygenSeconds > 0.0) {
-        while (mining.fuelBurnSeconds >= tuning::mining::fuelSecondsPerUnit) {
+        while (mining.fuelCycleProgress >= 1.0) {
             if (state.run.surfaceExpedition.sharedFuel <= 0) {
                 if (finishAtReturnZone()) {
                     return;
@@ -2284,14 +2808,8 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             }
             state.run.surfaceExpedition.sharedFuel = std::max(0, state.run.surfaceExpedition.sharedFuel - 1);
             mining.fuelSpent += 1;
-            mining.fuelBurnSeconds -= tuning::mining::fuelSecondsPerUnit;
+            mining.fuelCycleProgress -= 1.0;
         }
-    }
-    const int passiveTarget = static_cast<int>(std::floor(mining.elapsedSeconds * stats.passiveDroneMiningRate));
-    while (mining.passiveDroneYield < passiveTarget) {
-        mining.temporaryMaterials.common += 1;
-        mining.cargo += 1;
-        mining.passiveDroneYield += 1;
     }
     mining.contactIntensity = std::max(0.0, mining.contactIntensity - dt * 5.5);
     mining.scannerPulseSeconds = std::max(0.0, mining.scannerPulseSeconds - dt);
@@ -2302,7 +2820,12 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
 
     const double moveLength = std::sqrt(mining.moveX * mining.moveX + mining.moveY * mining.moveY);
     if (moveLength > 0.01) {
-        const double step = stats.speed * std::clamp(mining.movementSlowScale, 0.40, 1.0) * loadStats.speedMultiplier * dt;
+        const double recovery = std::clamp(mining.contactSpeedRecovery, 0.0, 1.0);
+        const double easedRecovery = recovery * recovery * (3.0 - 2.0 * recovery);
+        const double contactSpeedScale = tuning::mining::postContactMinSpeedScale +
+            (1.0 - tuning::mining::postContactMinSpeedScale) * easedRecovery;
+        const double step = stats.speed * std::clamp(mining.movementSlowScale, 0.40, 1.0) *
+            loadStats.speedMultiplier * contactSpeedScale * dt;
         const double dirX = mining.moveX / std::max(1.0, moveLength);
         const double dirY = mining.moveY / std::max(1.0, moveLength);
         const double dx = dirX * step;
@@ -2369,12 +2892,22 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     if (drillTouchesTerrain) {
         applyDrillFootprintDamage(state, stats, mining.aimDirX, mining.aimDirY, dt);
     } else {
-        mining.drillHeat = std::max(0.0, mining.drillHeat - stats.heatCoolingPerSecond * dt);
+        const bool externalThermalLoad = std::any_of(mining.enemies.begin(), mining.enemies.end(), [&](const MiningEnemy& enemy) {
+            if (!enemy.active || enemy.type != MiningEnemyType::Elemental || enemy.affinity != MiningElementalAffinity::Thermal) {
+                return false;
+            }
+            const double dx = mining.droneX - enemy.x;
+            const double dy = mining.droneY - enemy.y;
+            return dx * dx + dy * dy <= enemy.effectRadius * enemy.effectRadius;
+        });
+        if (!externalThermalLoad) {
+            mining.drillHeat = std::max(0.0, mining.drillHeat - stats.heatCoolingPerSecond * dt);
+        }
     }
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
     updateMiningArtifact(state, dt);
-    if (bankMiningPayloadAtShip(state)) {
+    if (bankMiningPayloadAtShip(state, catalog)) {
         state.statusLine = std::string(text::status::miningStowed);
     } else if (!miningAtReturnZone(mining) && miningCarriedCargo(mining) > 0) {
         state.statusLine = std::string(text::status::miningReturnToShip);
@@ -2410,7 +2943,7 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
         return outcome;
     }
     if (!abort) {
-        bankMiningPayloadAtShip(state);
+        bankMiningPayloadAtShip(state, catalog);
     }
 
     outcome.applied = true;
