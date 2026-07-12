@@ -12,6 +12,7 @@
 #include "core/LaunchReadinessPresentation.h"
 #include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
+#include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
 #include "core/MiningPresentation.h"
 #include "core/OutcomePresentation.h"
@@ -3432,6 +3433,29 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
         "duplicate Mining drones should each acquire real terrain work");
     require(miningTargets[0] != miningTargets[1],
         "duplicate Mining drones should reserve different terrain cells instead of stacking on one block");
+
+    std::vector<MiningMiniDroneAgent*> miningAgents;
+    for (MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Mining) {
+            miningAgents.push_back(&agent);
+        }
+    }
+    miningAgents[0]->targetCellX = firstOreX;
+    miningAgents[0]->targetCellY = oreY;
+    miningAgents[0]->behavior = MiningMiniDroneBehavior::Working;
+    miningAgents[1]->targetCellX = firstOreX;
+    miningAgents[1]->targetCellY = oreY;
+    miningAgents[1]->behavior = MiningMiniDroneBehavior::Working;
+    MiningDroneCoordinator coordinator(state.run.mining);
+    coordinator.synchronizeAssignments();
+    require(coordinator.hasAssignment(*miningAgents[0]),
+        "the first Mining drone should retain a pre-existing contested assignment deterministically");
+    require(!coordinator.hasAssignment(*miningAgents[1]) && miningAgents[1]->targetCellX < 0,
+        "the Mining coordinator should clear duplicate assignments from later drones");
+    require(coordinator.acquireAssignment(*miningAgents[1]),
+        "a displaced Mining drone should acquire another available ore cell");
+    require(miningAgents[0]->targetCellX != miningAgents[1]->targetCellX || miningAgents[0]->targetCellY != miningAgents[1]->targetCellY,
+        "coordinated Mining drones should remain assigned to distinct cells after conflict repair");
 
     const int targetX = miningAgent->targetCellX;
     const int targetY = miningAgent->targetCellY;

@@ -95,19 +95,16 @@ void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
 {
     addDebugUnlock(state, content::unlock::droneBay);
     addDebugUnlock(state, content::unlock::perimeterDrones);
-    state.meta.droneBaySlots = std::max(state.meta.droneBaySlots, 3);
+    state.meta.droneBaySlots = 6;
     state.meta.ownedDroneIds = {
         content::drone::miningDrone,
         content::drone::resourceDrone,
         content::drone::surveyDrone,
+        content::drone::stabilizerDrone,
         content::drone::attackDrone,
         content::drone::defenseDrone
     };
-    state.meta.equippedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::attackDrone,
-        content::drone::defenseDrone
-    };
+    state.meta.equippedDroneIds.clear();
     ensureDroneBayState(state, catalog);
 }
 
@@ -339,6 +336,32 @@ void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
     syncLaunchConfig(state_, catalog_);
     clearResearchAndExpeditionState(state_);
     state_.statusLine = statusLine;
+}
+
+void RocketGameApp::seedDebugDroneLoadout()
+{
+    seedDebugDroneBay(state_, catalog_);
+}
+
+void RocketGameApp::captureDebugDroneLoadout()
+{
+    if (!debugSessionActive_) {
+        return;
+    }
+    debugDroneLoadout_.configured = true;
+    debugDroneLoadout_.equippedDroneIds = state_.meta.equippedDroneIds;
+    debugDroneLoadout_.droneUpgrades = state_.meta.droneUpgrades;
+}
+
+void RocketGameApp::applyDebugDroneLoadout()
+{
+    seedDebugDroneLoadout();
+    if (!debugDroneLoadout_.configured) {
+        return;
+    }
+    state_.meta.equippedDroneIds = debugDroneLoadout_.equippedDroneIds;
+    state_.meta.droneUpgrades = debugDroneLoadout_.droneUpgrades;
+    ensureDroneBayState(state_, catalog_);
 }
 
 bool RocketGameApp::initialize()
@@ -1002,6 +1025,7 @@ void RocketGameApp::equipDrone(int index)
     }
 
     if (equipMiniDrone(state_, catalog_, index)) {
+        captureDebugDroneLoadout();
         save();
     }
     panelDirty_ = true;
@@ -1014,6 +1038,7 @@ void RocketGameApp::unequipDroneSlot(int slotIndex)
     }
 
     if (unequipMiniDroneSlot(state_, catalog_, slotIndex)) {
+        captureDebugDroneLoadout();
         save();
     }
     panelDirty_ = true;
@@ -1026,6 +1051,7 @@ void RocketGameApp::upgradeDrone(int index)
     }
 
     if (::rocket::upgradeMiniDrone(state_, catalog_, index)) {
+        captureDebugDroneLoadout();
         save();
     }
     panelDirty_ = true;
@@ -1038,6 +1064,7 @@ void RocketGameApp::upgradeDroneSlot()
     }
 
     if (::rocket::upgradeDroneSlot(state_, catalog_)) {
+        captureDebugDroneLoadout();
         save();
     }
     panelDirty_ = true;
@@ -1347,13 +1374,7 @@ void RocketGameApp::debugStartMining()
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard;
     state_.run.surfaceExpedition.miningSitePrepared = true;
     state_.run.surfaceExpedition.prospectArtifacts = 1;
-    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
-        state_.meta.unlockKeys.push_back(content::unlock::droneBay);
-    }
-    state_.meta.droneBaySlots = 1;
-    state_.meta.ownedDroneIds = {content::drone::miningDrone};
-    state_.meta.equippedDroneIds = {content::drone::miningDrone};
-    ensureDroneBayState(state_, catalog_);
+    applyDebugDroneLoadout();
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
     state_.statusLine = outcome.applied
@@ -1379,24 +1400,7 @@ void RocketGameApp::debugStartCombatMining()
     state_.run.surfaceExpedition.enemyEncountersEnabled = true;
     state_.run.surfaceExpedition.miningSitePrepared = true;
     state_.run.surfaceExpedition.prospectArtifacts = 1;
-    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
-        state_.meta.unlockKeys.push_back(content::unlock::droneBay);
-    }
-    if (!hasUnlock(state_.meta, content::unlock::perimeterDrones)) {
-        state_.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
-    }
-    state_.meta.droneBaySlots = 3;
-    state_.meta.ownedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::attackDrone,
-        content::drone::defenseDrone
-    };
-    state_.meta.equippedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::attackDrone,
-        content::drone::defenseDrone
-    };
-    ensureDroneBayState(state_, catalog_);
+    applyDebugDroneLoadout();
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
     if (outcome.applied) {
@@ -1545,9 +1549,9 @@ void RocketGameApp::debugShowDroneOps()
     beginDebugSandbox("Debug Drone Ops board. No save data will be written.");
     seedDebugResearchAccess(state_);
     seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::nearbyStar);
-    seedDebugDroneBay(state_, catalog_);
+    applyDebugDroneLoadout();
     state_.screen = Screen::DroneOps;
-    state_.statusLine = "Debug Drone Ops board. Inspect drone cards without touching your save.";
+    state_.statusLine = "Debug Drone Ops. All 6 slots and drone types are available; this loadout carries into Mining and Combat Mining.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -1670,6 +1674,7 @@ void RocketGameApp::debugExit()
     }
     debugSessionActive_ = false;
     debugActOneCheckpoint_ = -1;
+    debugDroneLoadout_ = {};
     loadSavedGameOrDefault();
     state_.statusLine = "Debug sandbox closed. Real save restored from local mission control.";
     refreshPanel();

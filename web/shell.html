@@ -5272,6 +5272,10 @@
       white-space: normal;
     }
 
+    .debug-tools .debug-quick-actions .debug-drone-ops {
+      grid-column: 1 / -1;
+    }
+
     .debug-accordion {
       display: grid;
       gap: 8px;
@@ -5590,11 +5594,12 @@
         <button class="warn debug-act-one-reset" type="button" data-debug-action="act-one-start">Start at Earth Orbit</button>
       </div>
     </section>
-    <section class="debug-quick-launch" aria-label="Quick sandboxes">
-      <h3 class="debug-section-heading">Quick sandboxes</h3>
+    <section class="debug-quick-launch" aria-label="Mining and combat shortcuts">
+      <h3 class="debug-section-heading">Mining / Combat</h3>
       <div class="debug-quick-actions">
         <button class="warn" type="button" data-debug-action="mining">Mining</button>
         <button class="danger" type="button" data-debug-action="combat-mining">Combat Mining</button>
+        <button class="debug-drone-ops" type="button" data-debug-action="drone-ops">Drone Ops board</button>
       </div>
     </section>
     <div class="debug-accordion" aria-label="Debug screens by game phase">
@@ -5622,12 +5627,11 @@
       </section>
       <section class="debug-accordion-item">
         <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-research-surface" data-debug-menu-toggle>
-          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>5 destinations</small></span>
+          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>4 destinations</small></span>
           <span class="debug-accordion-caret" aria-hidden="true">&gt;</span>
         </button>
         <div class="debug-accordion-panel" id="debug-menu-research-surface" hidden>
           <button type="button" data-debug-action="research">Research board</button>
-          <button type="button" data-debug-action="drone-ops">Drone Ops board</button>
           <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
           <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
           <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>

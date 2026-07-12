@@ -8,6 +8,7 @@
 #include "render/WebGLRenderer.h"
 
 #include <string>
+#include <vector>
 
 namespace rocket {
 
@@ -147,6 +148,9 @@ private:
     void finishArrivalFanfare();
     void loadSavedGameOrDefault();
     void beginDebugSandbox(const std::string& statusLine);
+    void seedDebugDroneLoadout();
+    void captureDebugDroneLoadout();
+    void applyDebugDroneLoadout();
     void applyDebugActOneCheckpoint();
     void save();
     void refreshPanel();
@@ -171,6 +175,12 @@ private:
     bool panelDirty_ = true;
     bool debugSessionActive_ = false;
     int debugActOneCheckpoint_ = -1;
+    struct DebugDroneLoadout {
+        bool configured = false;
+        std::vector<std::string> equippedDroneIds;
+        std::vector<DroneUpgradeRecord> droneUpgrades;
+    };
+    DebugDroneLoadout debugDroneLoadout_;
 };
 
 } // namespace rocket

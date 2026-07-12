@@ -13,6 +13,7 @@ add_library(rocket_core
     src/core/Content.cpp
     src/core/GameState.cpp
     src/core/LaunchSimulation.cpp
+    src/core/MiniDroneCoordination.cpp
     src/core/MiningSystem.cpp
     src/core/Random.cpp
     src/core/ResearchSystem.cpp
