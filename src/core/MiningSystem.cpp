@@ -1805,10 +1805,18 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
                     target,
                     alliedCritChance,
                     101 + static_cast<int>(attackIndex) * 31 + shot * 17);
+                const double targetDx = target.x - agent.x;
+                const double targetDy = target.y - agent.y;
+                const double targetDistance = std::max(0.001, std::sqrt(targetDx * targetDx + targetDy * targetDy));
+                const double forwardX = targetDx / targetDistance;
+                const double forwardY = targetDy / targetDistance;
+                const double sideX = -forwardY;
+                const double sideY = forwardX;
+                const double muzzleSide = (mining.combatSequence + static_cast<int>(attackIndex) + shot) % 2 == 0 ? -1.0 : 1.0;
                 pushMiningProjectile(
                     mining,
-                    agent.x,
-                    agent.y,
+                    agent.x + forwardX * 0.54 + sideX * muzzleSide * 0.30,
+                    agent.y + forwardY * 0.54 + sideY * muzzleSide * 0.30,
                     target.x,
                     target.y,
                     MiningCombatTeam::Allied,

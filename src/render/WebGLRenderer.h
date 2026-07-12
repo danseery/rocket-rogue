@@ -100,6 +100,7 @@ struct RenderSnapshot {
     double shipDamage = 0.0;
     int destinationTier = 0;
     int currentFrontierTier = 0;
+    int debugActOneCheckpoint = -1;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool frontierTransfer = false;
     bool returningHome = false;

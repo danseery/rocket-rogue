@@ -1844,7 +1844,7 @@ scrollbarhorizontal sliderbar {
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
-    width: 314px;
+    width: 416px;
     margin-right: 0px;
     justify-content: flex-end;
 }
@@ -1858,7 +1858,7 @@ scrollbarhorizontal sliderbar {
     display: flex;
     flex-direction: row;
     flex-wrap: wrap;
-    width: 260px;
+    width: 316px;
     margin-top: 0px;
     justify-content: flex-end;
 }
@@ -1874,7 +1874,7 @@ scrollbarhorizontal sliderbar {
 }
 .control-panel .panel-head-actions button {
     min-width: 0px;
-    width: 100px;
+    width: 92px;
     margin-top: 0px;
     margin-right: 8px;
 }
@@ -4034,6 +4034,196 @@ scrollbarhorizontal sliderbar {
 .inventory-side-column .inventory-grid {
     width: 164px;
 }
+.solar-map {
+    display: block;
+    width: 888px;
+    color: #dce7ee;
+}
+.solar-map-summary,
+.solar-system-track,
+.solar-map-row,
+.solar-map-lower,
+.solar-map-legend,
+.solar-map-section-head {
+    display: flex;
+    flex-direction: row;
+}
+.solar-map-summary {
+    width: 888px;
+    margin-bottom: 10px;
+}
+.solar-map-summary > div {
+    width: 276px;
+    margin-right: 8px;
+    padding: 7px 9px;
+    background-color: #111b24;
+    border-width: 1px;
+    border-color: #334a5b;
+    border-radius: 5px;
+}
+.solar-map-summary span,
+.solar-map-state,
+.solar-map-section-head span {
+    display: block;
+    color: #8495a3;
+    font-size: 10px;
+}
+.solar-map-summary strong {
+    display: block;
+    margin-top: 2px;
+    color: #edf4f8;
+    font-size: 13px;
+}
+.solar-map-section {
+    display: block;
+    width: 888px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-color: #263845;
+}
+.solar-map-section-head {
+    width: 100%;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 7px;
+}
+.solar-map-section-head h3 {
+    color: #dce7ee;
+    font-size: 13px;
+}
+.solar-system-track {
+    width: 888px;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    padding-top: 7px;
+    padding-bottom: 5px;
+    background-color: #081018;
+    border-width: 1px;
+    border-color: #243c4c;
+    border-radius: 6px;
+}
+.solar-map-row {
+    flex-wrap: nowrap;
+    align-items: flex-start;
+}
+.solar-map-node {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 96px;
+    min-height: 76px;
+    margin-right: 6px;
+    text-align: center;
+    align-items: center;
+}
+.solar-system-track .solar-map-node {
+    width: 88px;
+    margin-right: 8px;
+}
+.solar-map-node strong {
+    display: block;
+    width: 100%;
+    margin-top: 5px;
+    color: #e8f0f4;
+    font-size: 11px;
+    line-height: 1.1;
+}
+.solar-map-glyph {
+    display: flex;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    margin-left: auto;
+    margin-right: auto;
+    align-items: center;
+    justify-content: center;
+    color: #071018;
+    background-color: #6f7b84;
+    border-width: 2px;
+    border-color: #a9b5bd;
+    border-radius: 24px;
+}
+.solar-map-glyph span {
+    font-size: 10px;
+    font-weight: bold;
+}
+.map-sun.is-explored .solar-map-glyph {
+    width: 50px;
+    height: 50px;
+    background-color: #f2c94c;
+    border-color: #fff0a2;
+}
+.map-mercury.is-explored .solar-map-glyph { background-color: #9ba1a6; }
+.map-venus.is-explored .solar-map-glyph { background-color: #d6a45e; }
+.map-earth.is-explored .solar-map-glyph { background-color: #45a8d4; border-color: #9ee8ff; }
+.map-mars.is-explored .solar-map-glyph { background-color: #b85b43; border-color: #ef9a78; }
+.map-jupiter.is-explored .solar-map-glyph { background-color: #c6a173; border-color: #f3d2a1; }
+.map-saturn.is-explored .solar-map-glyph { background-color: #c7a75f; border-color: #f5da8a; }
+.map-uranus.is-explored .solar-map-glyph { background-color: #75c8cd; border-color: #b9f3f0; }
+.map-neptune.is-explored .solar-map-glyph { background-color: #4774c9; border-color: #91b2ff; }
+.map-moon.is-explored .solar-map-glyph { background-color: #929ba2; border-color: #d2d9dd; }
+.map-vessel .solar-map-glyph,
+.map-field .solar-map-glyph {
+    width: 58px;
+    height: 30px;
+    border-radius: 5px;
+}
+.map-vessel.is-explored .solar-map-glyph { background-color: #4a879f; border-color: #8edcf2; }
+.map-anomaly.is-explored .solar-map-glyph { background-color: #5b4f82; border-color: #b6a5ec; }
+.map-field.is-explored .solar-map-glyph { background-color: #665f55; border-color: #afa28e; }
+.solar-map-node.is-charted .solar-map-glyph {
+    color: #a6b0b8;
+    background-color: #1a2127;
+    border-color: #59646d;
+}
+.solar-map-node.is-charted strong,
+.solar-map-node.is-charted .solar-map-state {
+    color: #7f8a92;
+}
+.solar-map-node.is-unknown .solar-map-glyph {
+    color: #ff655f;
+    background-color: #07090c;
+    border-color: #5b6269;
+    border-style: dashed;
+}
+.solar-map-node.is-unknown .solar-map-glyph span {
+    color: #ff655f;
+    font-size: 22px;
+}
+.solar-map-node.is-unknown strong {
+    color: #a2a9ae;
+}
+.solar-map-node.is-unknown .solar-map-state {
+    color: #d76762;
+}
+.solar-map-lower {
+    width: 888px;
+    align-items: flex-start;
+}
+.solar-map-lower-section {
+    width: 282px;
+    margin-right: 8px;
+}
+.solar-map-lower-section .solar-map-node {
+    width: 82px;
+    margin-right: 5px;
+}
+.solar-map-legend {
+    width: 888px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top-width: 1px;
+    border-color: #263845;
+    justify-content: flex-end;
+}
+.solar-map-legend span {
+    margin-left: 12px;
+    font-size: 10px;
+}
+.solar-map-legend .legend-explored { color: #7fd4ac; }
+.solar-map-legend .legend-charted { color: #8c969e; }
+.solar-map-legend .legend-unknown { color: #ff655f; }
 .inventory-summary {
     width: 550px;
     margin-top: 4px;
@@ -5347,6 +5537,13 @@ button.settings-toggle:hover {
     height: 88%;
     margin-left: -400px;
     padding: 18px;
+}
+#rr-modal.modal-map {
+    top: 4%;
+    width: 920px;
+    height: 88%;
+    margin-left: -476px;
+    padding: 16px;
 }
 #rr-modal.modal-phase_briefing {
     top: 14%;

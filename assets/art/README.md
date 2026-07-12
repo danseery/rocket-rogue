@@ -30,3 +30,6 @@
 - `outer-system-moon-01.png` through `outer-system-moon-10.png` - Future post-solar-system moon sprites with alpha, packed on fixed 1254x1254 squares.
 
 The source images used a magenta chroma-key background. The committed PNGs are cleaned, cropped, and packed for the WebGL renderer.
+
+To clean residual chroma from an already packed sprite without changing its layout, run
+`tools/import-chroma-sprite.py source.png destination.png --preserve-layout`.

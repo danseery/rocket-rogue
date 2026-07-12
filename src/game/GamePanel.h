@@ -22,6 +22,7 @@ struct PanelRenderContext {
     bool pressureReliefUsed = false;
     bool preflightReady = true;
     bool droneTransferEnabled = true;
+    int debugActOneCheckpoint = -1;
 };
 
 std::string buildGamePanelHtml(const PanelRenderContext& context);

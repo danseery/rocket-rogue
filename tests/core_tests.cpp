@@ -3235,10 +3235,9 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
         defended.run.mining.miniDrones.end(),
         [](const MiningMiniDroneAgent& agent) { return agent.role == MiniDroneRole::Attack; });
     require(attackAgent != defended.run.mining.miniDrones.end(), "equipped Attack drone should create an independent mining agent");
-    require(std::abs(alliedProjectile.startX - attackAgent->x) < 0.001,
-        "allied projectiles should start at the independent Attack drone x position");
-    require(std::abs(alliedProjectile.startY - attackAgent->y) < 0.001,
-        "allied projectiles should start at the independent Attack drone y position");
+    require(
+        std::hypot(alliedProjectile.startX - attackAgent->x, alliedProjectile.startY - attackAgent->y) > 0.45,
+        "allied projectiles should start from an Attack drone weapon hardpoint");
     const MiningRunPresentation defendedMining = miningRunPresentation(defended, catalog);
     require(defendedMining.combatTitle.find("Killbox Screen") != std::string::npos, "live mining combat strip should name the active drone build");
     require(std::any_of(defendedMining.combatMetrics.begin(), defendedMining.combatMetrics.end(), [](const PanelMetricPresentation& chip) {
@@ -3520,6 +3519,13 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
         "combat loadout should create Attack and Defense agents");
     require(attack->targetEnemyIndex == 0 && attack->behavior == MiningMiniDroneBehavior::Engaging,
         "Attack drone should acquire and engage the closest enemy");
+    const auto alliedShot = std::find_if(state.run.mining.combatProjectiles.begin(), state.run.mining.combatProjectiles.end(), [](const MiningProjectileVisual& projectile) {
+        return projectile.team == MiningCombatTeam::Allied;
+    });
+    require(alliedShot != state.run.mining.combatProjectiles.end(), "Attack drone should fire while engaging its target");
+    require(
+        std::hypot(alliedShot->startX - attack->x, alliedShot->startY - attack->y) > 0.45,
+        "Attack drone projectiles should originate from a weapon hardpoint instead of its center");
     const auto enemyShot = std::find_if(state.run.mining.combatProjectiles.begin(), state.run.mining.combatProjectiles.end(), [](const MiningProjectileVisual& projectile) {
         return projectile.team == MiningCombatTeam::Enemy;
     });
@@ -5464,6 +5470,35 @@ void panelChromePresentationComesFromSharedHelper()
     require(reset != nullptr && reset->enabled && reset->actionId == ui::actions::resetSave && reset->cssClass == "danger", "settings presentation should expose reset-save danger action");
 }
 
+void solarMapModalTracksCampaignDiscovery()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 912);
+    Random rng(912);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    PanelRenderContext context {state, catalog, launch, launch};
+
+    std::string html = buildGamePanelHtml(context);
+    const std::size_t mapButton = html.find("data-ui-modal=\"map\"");
+    const std::size_t inventoryButton = html.find("data-ui-modal=\"inventory\"");
+    require(mapButton != std::string::npos && inventoryButton != std::string::npos && mapButton < inventoryButton, "Map should sit immediately before Inventory in shared panel controls");
+    require(html.find("data-modal=\"map\"") != std::string::npos, "every panel should expose the solar map modal");
+    require(html.find("solar-map-node map-earth is-explored") != std::string::npos, "Earth should begin explored on the solar map");
+    require(html.find("solar-map-node map-saturn is-charted") != std::string::npos, "unvisited planets should remain charted and muted");
+    require(html.find("Unknown vessel") != std::string::npos && html.find("solar-map-node map-vessel is-unknown") != std::string::npos, "undiscovered vessels should use the unknown silhouette state");
+
+    context.debugActOneCheckpoint = 4;
+    html = buildGamePanelHtml(context);
+    require(html.find("solar-map-node map-saturn is-explored") != std::string::npos, "the Saturn debug checkpoint should mark Saturn explored");
+    require(html.find("solar-map-node map-uranus is-charted") != std::string::npos, "the Saturn debug checkpoint should leave Uranus charted");
+
+    discoverArk(state, catalog);
+    context.debugActOneCheckpoint = 6;
+    html = buildGamePanelHtml(context);
+    require(html.find("solar-map-node map-neptune is-explored") != std::string::npos, "the Neptune debug checkpoint should mark Neptune explored");
+    require(html.find("Straylight") != std::string::npos && html.find("solar-map-node map-vessel is-explored") != std::string::npos, "Ark discovery should identify Straylight as an explored vessel");
+}
+
 void panelHtmlIncludesContextualTutorialLayer()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -6216,6 +6251,7 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::miningRepairDrone == "mining_repair_drone", "mining drone repair action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
+    require(ui::modals::map == "map", "solar map modal id should stay shared and data-like");
 
     const std::string buyOffer = ui::actions::buyOffer(2);
     require(buyOffer == "buy_offer:2", "indexed offer actions should encode the offer index in one reusable action family");
@@ -6422,6 +6458,7 @@ int main()
     launchPanelPresentationComesFromSharedHelper();
     launchReadinessPresentationComesFromSharedHelper();
     panelChromePresentationComesFromSharedHelper();
+    solarMapModalTracksCampaignDiscovery();
     panelHtmlIncludesContextualTutorialLayer();
     surfaceHtmlPromotesMiningAction();
     postArrivalPhaseHtmlUsesPolishedBoardStructure();

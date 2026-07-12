@@ -86,6 +86,10 @@ public:
     void debugShowSurfaceUpgrade();
     void debugShowDroneOps();
     void debugShowNavigation();
+    void debugStartActOneFlow();
+    void debugPreviousActOneCheckpoint();
+    void debugNextActOneCheckpoint();
+    int debugActOneCheckpoint() const;
     void debugExit();
     void repairShip();
     void recruitCrew();
@@ -143,6 +147,7 @@ private:
     void finishArrivalFanfare();
     void loadSavedGameOrDefault();
     void beginDebugSandbox(const std::string& statusLine);
+    void applyDebugActOneCheckpoint();
     void save();
     void refreshPanel();
     void runUiAction(const std::string& action);
@@ -165,6 +170,7 @@ private:
     double visualTimeSeconds_ = 0.0;
     bool panelDirty_ = true;
     bool debugSessionActive_ = false;
+    int debugActOneCheckpoint_ = -1;
 };
 
 } // namespace rocket

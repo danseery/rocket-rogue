@@ -4407,6 +4407,194 @@
       width: min(960px, calc(100vw - 36px));
     }
 
+    .modal-panel:has(.solar-map) {
+      width: min(1100px, calc(100vw - 36px));
+      max-height: min(88vh, 860px);
+      overflow-y: auto;
+    }
+
+    .solar-map {
+      display: grid;
+      gap: 12px;
+      color: var(--text);
+    }
+
+    .solar-map-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .solar-map-summary > div {
+      padding: 8px 10px;
+      border: 1px solid rgba(103, 210, 255, 0.22);
+      border-radius: 6px;
+      background: rgba(13, 28, 38, 0.78);
+    }
+
+    .solar-map-summary span,
+    .solar-map-state,
+    .solar-map-section-head span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .solar-map-summary strong {
+      display: block;
+      margin-top: 3px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .solar-map-section {
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.18);
+    }
+
+    .solar-map-section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .solar-map-section-head h3 {
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .solar-system-track,
+    .solar-map-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .solar-system-track {
+      justify-content: space-between;
+      padding: 12px 8px 8px;
+      border: 1px solid rgba(103, 210, 255, 0.18);
+      border-radius: 6px;
+      background: rgba(4, 10, 16, 0.82);
+    }
+
+    .solar-map-row {
+      flex-wrap: wrap;
+    }
+
+    .solar-map-node {
+      display: flex;
+      flex: 0 0 92px;
+      min-width: 0;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .solar-system-track .solar-map-node {
+      flex-basis: 88px;
+    }
+
+    .solar-map-node strong {
+      margin-top: 6px;
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.1;
+    }
+
+    .solar-map-glyph {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border: 2px solid #a9b5bd;
+      border-radius: 50%;
+      color: #071018;
+      background: #6f7b84;
+      box-shadow: 0 0 14px rgba(130, 196, 224, 0.13);
+    }
+
+    .solar-map-glyph span {
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .map-sun.is-explored .solar-map-glyph { width: 50px; height: 50px; background: #f2c94c; border-color: #fff0a2; }
+    .map-mercury.is-explored .solar-map-glyph { background: #9ba1a6; }
+    .map-venus.is-explored .solar-map-glyph { background: #d6a45e; }
+    .map-earth.is-explored .solar-map-glyph { background: #45a8d4; border-color: #9ee8ff; }
+    .map-mars.is-explored .solar-map-glyph { background: #b85b43; border-color: #ef9a78; }
+    .map-jupiter.is-explored .solar-map-glyph { background: #c6a173; border-color: #f3d2a1; }
+    .map-saturn.is-explored .solar-map-glyph { background: #c7a75f; border-color: #f5da8a; }
+    .map-uranus.is-explored .solar-map-glyph { background: #75c8cd; border-color: #b9f3f0; }
+    .map-neptune.is-explored .solar-map-glyph { background: #4774c9; border-color: #91b2ff; }
+    .map-moon.is-explored .solar-map-glyph { background: #929ba2; border-color: #d2d9dd; }
+
+    .map-vessel .solar-map-glyph,
+    .map-field .solar-map-glyph {
+      width: 58px;
+      height: 30px;
+      border-radius: 5px;
+    }
+
+    .map-vessel.is-explored .solar-map-glyph { background: #4a879f; border-color: #8edcf2; }
+    .map-anomaly.is-explored .solar-map-glyph { background: #5b4f82; border-color: #b6a5ec; }
+    .map-field.is-explored .solar-map-glyph { background: #665f55; border-color: #afa28e; }
+
+    .solar-map-node.is-charted .solar-map-glyph {
+      color: #a6b0b8;
+      background: #1a2127;
+      border-color: #59646d;
+      box-shadow: none;
+    }
+
+    .solar-map-node.is-charted strong,
+    .solar-map-node.is-charted .solar-map-state {
+      color: #7f8a92;
+    }
+
+    .solar-map-node.is-unknown .solar-map-glyph {
+      color: #ff655f;
+      background: #07090c;
+      border-color: #5b6269;
+      border-style: dashed;
+      box-shadow: 0 0 12px rgba(255, 101, 95, 0.08);
+    }
+
+    .solar-map-node.is-unknown .solar-map-glyph span {
+      color: #ff655f;
+      font-size: 22px;
+    }
+
+    .solar-map-node.is-unknown strong { color: #a2a9ae; }
+    .solar-map-node.is-unknown .solar-map-state { color: #d76762; }
+
+    .solar-map-lower {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .solar-map-lower-section .solar-map-node {
+      flex-basis: 82px;
+    }
+
+    .solar-map-legend {
+      display: flex;
+      justify-content: flex-end;
+      gap: 14px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(137, 178, 211, 0.18);
+      font-size: 11px;
+    }
+
+    .legend-explored { color: #7fd4ac; }
+    .legend-charted { color: #8c969e; }
+    .legend-unknown { color: #ff655f; }
+
     .inventory-modal {
       display: grid;
       gap: 18px;
@@ -4979,7 +5167,10 @@
       z-index: 16;
       display: none;
       width: 260px;
+      max-height: calc(100vh - 32px);
       padding: 12px;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
       border: 1px solid rgba(255, 209, 102, 0.42);
       border-radius: 8px;
       background:
@@ -5016,10 +5207,150 @@
       line-height: 1.35;
     }
 
-    .debug-tool-grid {
-      display: grid;
-      grid-template-columns: 1fr;
+    .debug-act-one-flow {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 209, 102, 0.22);
+    }
+
+    .debug-act-one-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
       gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .debug-act-one-heading span {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+
+    .debug-act-one-heading strong {
+      color: var(--text);
+      font-size: 12px;
+      text-align: right;
+    }
+
+    .debug-act-one-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .debug-act-one-actions .debug-act-one-reset {
+      grid-column: 1 / -1;
+    }
+
+    .debug-quick-launch {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 209, 102, 0.22);
+    }
+
+    .debug-section-heading {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .debug-quick-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .debug-tools .debug-quick-actions button {
+      min-width: 0;
+      padding-right: 6px;
+      padding-left: 6px;
+      line-height: 1.15;
+      white-space: normal;
+    }
+
+    .debug-accordion {
+      display: grid;
+      gap: 8px;
+    }
+
+    .debug-accordion-item {
+      overflow: hidden;
+      border: 1px solid rgba(79, 132, 160, 0.42);
+      border-radius: 6px;
+      background: rgba(10, 19, 26, 0.68);
+    }
+
+    .debug-tools .debug-accordion-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 42px;
+      padding: 7px 10px;
+      border: 0;
+      border-radius: 0;
+      background: rgba(20, 43, 56, 0.84);
+      text-align: left;
+    }
+
+    .debug-tools .debug-accordion-toggle:hover,
+    .debug-tools .debug-accordion-toggle:focus-visible,
+    .debug-tools .debug-accordion-toggle[aria-expanded="true"] {
+      background: rgba(26, 58, 74, 0.94);
+    }
+
+    .debug-accordion-title {
+      display: grid;
+      min-width: 0;
+      gap: 2px;
+    }
+
+    .debug-accordion-title strong {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .debug-accordion-title small {
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    .debug-accordion-caret {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1;
+      transform: rotate(0deg);
+      transition: transform 140ms ease, color 140ms ease;
+    }
+
+    .debug-accordion-toggle[aria-expanded="true"] .debug-accordion-caret {
+      color: var(--text);
+      transform: rotate(90deg);
+    }
+
+    .debug-accordion-panel {
+      display: grid;
+      gap: 8px;
+      padding: 8px;
+      border-top: 1px solid rgba(79, 132, 160, 0.28);
+    }
+
+    .debug-accordion-panel[hidden] {
+      display: none;
+    }
+
+    .debug-exit-action {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255, 209, 102, 0.22);
     }
 
     .debug-tools button {
@@ -5248,20 +5579,62 @@
   <aside id="debug-tools" class="debug-tools" aria-label="Debug screen tools">
     <h2>Debug screens</h2>
     <p>Sandbox screens use default settings and do not write save data.</p>
-    <div class="debug-tool-grid">
-      <button class="warn" type="button" data-debug-action="mining">Mining sandbox</button>
-      <button class="danger" type="button" data-debug-action="combat-mining">Combat mining sandbox</button>
-      <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
-      <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
-      <button type="button" data-debug-action="flyby">Flyby sandbox</button>
-      <button type="button" data-debug-action="orbit">Orbit sandbox</button>
-      <button type="button" data-debug-action="hangar">Hangar board</button>
-      <button type="button" data-debug-action="results">Debrief board</button>
-      <button type="button" data-debug-action="arrival-ops">Arrival Ops board</button>
-      <button type="button" data-debug-action="research">Research board</button>
-      <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
-      <button type="button" data-debug-action="drone-ops">Drone Ops board</button>
-      <button type="button" data-debug-action="navigation">Navigation board</button>
+    <section class="debug-act-one-flow" aria-label="Act 1 progression controls">
+      <div class="debug-act-one-heading">
+        <span>Act 1 flow</span>
+        <strong id="debug-act-one-label">Not active</strong>
+      </div>
+      <div class="debug-act-one-actions">
+        <button type="button" data-debug-action="act-one-previous" data-debug-act-one-previous disabled>Previous</button>
+        <button type="button" data-debug-action="act-one-next" data-debug-act-one-next disabled>Next</button>
+        <button class="warn debug-act-one-reset" type="button" data-debug-action="act-one-start">Start at Earth Orbit</button>
+      </div>
+    </section>
+    <section class="debug-quick-launch" aria-label="Quick sandboxes">
+      <h3 class="debug-section-heading">Quick sandboxes</h3>
+      <div class="debug-quick-actions">
+        <button class="warn" type="button" data-debug-action="mining">Mining</button>
+        <button class="danger" type="button" data-debug-action="combat-mining">Combat Mining</button>
+      </div>
+    </section>
+    <div class="debug-accordion" aria-label="Debug screens by game phase">
+      <section class="debug-accordion-item">
+        <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-mission-prep" data-debug-menu-toggle>
+          <span class="debug-accordion-title"><strong>Mission Prep</strong><small>2 destinations</small></span>
+          <span class="debug-accordion-caret" aria-hidden="true">&gt;</span>
+        </button>
+        <div class="debug-accordion-panel" id="debug-menu-mission-prep" hidden>
+          <button type="button" data-debug-action="hangar">Hangar board</button>
+          <button type="button" data-debug-action="navigation">Navigation board</button>
+        </div>
+      </section>
+      <section class="debug-accordion-item">
+        <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-flight-arrival" data-debug-menu-toggle>
+          <span class="debug-accordion-title"><strong>Flight &amp; Arrival</strong><small>4 destinations</small></span>
+          <span class="debug-accordion-caret" aria-hidden="true">&gt;</span>
+        </button>
+        <div class="debug-accordion-panel" id="debug-menu-flight-arrival" hidden>
+          <button type="button" data-debug-action="flyby">Flyby sandbox</button>
+          <button type="button" data-debug-action="orbit">Orbit sandbox</button>
+          <button type="button" data-debug-action="results">Debrief board</button>
+          <button type="button" data-debug-action="arrival-ops">Arrival Ops board</button>
+        </div>
+      </section>
+      <section class="debug-accordion-item">
+        <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-research-surface" data-debug-menu-toggle>
+          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>5 destinations</small></span>
+          <span class="debug-accordion-caret" aria-hidden="true">&gt;</span>
+        </button>
+        <div class="debug-accordion-panel" id="debug-menu-research-surface" hidden>
+          <button type="button" data-debug-action="research">Research board</button>
+          <button type="button" data-debug-action="drone-ops">Drone Ops board</button>
+          <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
+          <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
+          <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
+        </div>
+      </section>
+    </div>
+    <div class="debug-exit-action">
       <button class="ghost" type="button" data-debug-action="exit">Exit debug / reload save</button>
     </div>
   </aside>
@@ -5297,6 +5670,9 @@
     const arrivalCloseCall = document.getElementById("arrival-close-call");
     const telemetryChartLegend = document.getElementById("telemetry-chart-legend");
     const debugTools = document.getElementById("debug-tools");
+    const debugActOneLabel = document.getElementById("debug-act-one-label");
+    const debugActOnePrevious = debugTools.querySelector("[data-debug-act-one-previous]");
+    const debugActOneNext = debugTools.querySelector("[data-debug-act-one-next]");
     let lastToastText = "";
     let lastToastAt = 0;
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
@@ -5824,6 +6200,10 @@
       debugSurfaceUpgrade: () => rrCall("rr_debug_surface_upgrade"),
       debugDroneOps: () => rrCall("rr_debug_drone_ops"),
       debugNavigation: () => rrCall("rr_debug_navigation"),
+      debugActOneStart: () => rrCall("rr_debug_act_one_start"),
+      debugActOnePrevious: () => rrCall("rr_debug_act_one_previous"),
+      debugActOneNext: () => rrCall("rr_debug_act_one_next"),
+      debugActOneCheckpoint: () => rrCall("rr_debug_act_one_checkpoint", [], [], "number"),
       debugExit: () => rrCall("rr_debug_exit"),
       repairShip: () => rrCall("rr_repair_ship"),
       recruitCrew: () => rrCall("rr_recruit_crew"),
@@ -5955,7 +6335,28 @@
       [rrActionIds.resetSave]: () => rr.resetSave()
     };
 
+    const debugActOneLabels = Object.freeze([
+      "1/7 Earth Orbit / Proving Mission",
+      "2/7 Moon",
+      "3/7 Mars",
+      "4/7 Jupiter",
+      "5/7 Saturn",
+      "6/7 Uranus",
+      "7/7 Neptune / Straylight"
+    ]);
+
+    function syncDebugActOneControls() {
+      const checkpoint = rr.debugActOneCheckpoint();
+      const active = checkpoint >= 0 && checkpoint < debugActOneLabels.length;
+      debugActOneLabel.textContent = active ? debugActOneLabels[checkpoint] : "Not active";
+      debugActOnePrevious.disabled = !active || checkpoint <= 0;
+      debugActOneNext.disabled = !active || checkpoint >= debugActOneLabels.length - 1;
+    }
+
     const debugActions = Object.freeze({
+      "act-one-start": () => rr.debugActOneStart(),
+      "act-one-previous": () => rr.debugActOnePrevious(),
+      "act-one-next": () => rr.debugActOneNext(),
       mining: () => rr.debugMining(),
       "combat-mining": () => rr.debugCombatMining(),
       scan: () => rr.debugSurfaceScan(),
@@ -5981,6 +6382,28 @@
     }
 
     debugTools.addEventListener("click", (event) => {
+      const menuToggle = closestFromEvent(event, "button[data-debug-menu-toggle]");
+      if (menuToggle && debugTools.contains(menuToggle)) {
+        event.preventDefault();
+        const wasExpanded = menuToggle.getAttribute("aria-expanded") === "true";
+        debugTools.querySelectorAll("button[data-debug-menu-toggle]").forEach((toggle) => {
+          const panelId = toggle.getAttribute("aria-controls");
+          const panel = panelId ? document.getElementById(panelId) : null;
+          toggle.setAttribute("aria-expanded", "false");
+          if (panel) {
+            panel.hidden = true;
+          }
+        });
+        if (!wasExpanded) {
+          const panelId = menuToggle.getAttribute("aria-controls");
+          const panel = panelId ? document.getElementById(panelId) : null;
+          menuToggle.setAttribute("aria-expanded", "true");
+          if (panel) {
+            panel.hidden = false;
+          }
+        }
+        return;
+      }
       const button = closestFromEvent(event, "button[data-debug-action]");
       if (!button || !debugTools.contains(button)) {
         return;
@@ -5991,6 +6414,7 @@
       }
       event.preventDefault();
       action();
+      syncDebugActOneControls();
     });
 
     let lastPanelActionAt = 0;

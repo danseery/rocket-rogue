@@ -13,6 +13,7 @@
 #include "platform/WebSaveStore.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string_view>
 #include <utility>
@@ -22,6 +23,21 @@ namespace rocket {
 namespace {
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
+
+struct DebugActOneCheckpoint {
+    std::string_view label;
+    std::string_view destinationId;
+};
+
+constexpr std::array<DebugActOneCheckpoint, 7> kDebugActOneCheckpoints {{
+    {"Earth Orbit / Proving Mission", content::destination::earthOrbit},
+    {"Moon", content::destination::moon},
+    {"Mars", content::destination::mars},
+    {"Jupiter", content::destination::outerPlanets},
+    {"Saturn", content::destination::outerPlanets},
+    {"Uranus", content::destination::outerPlanets},
+    {"Neptune / Straylight", content::destination::outerPlanets}
+}};
 
 void addDebugUnlock(GameState& state, const char* unlockKey)
 {
@@ -295,6 +311,7 @@ double RocketGameApp::liveBurnMultiplier() const
 
 void RocketGameApp::loadSavedGameOrDefault()
 {
+    debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
     session_ = {};
@@ -314,6 +331,7 @@ void RocketGameApp::loadSavedGameOrDefault()
 void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
 {
     debugSessionActive_ = true;
+    debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0xD36B6D3BU);
     rng_ = Random(state_.seed ^ 0x51A7E5ULL);
     session_ = {};
@@ -1558,12 +1576,100 @@ void RocketGameApp::debugShowNavigation()
     panelDirty_ = true;
 }
 
+void RocketGameApp::debugStartActOneFlow()
+{
+    beginDebugSandbox("Debug Act 1 flow. No save data will be written.");
+    debugActOneCheckpoint_ = 0;
+    applyDebugActOneCheckpoint();
+}
+
+void RocketGameApp::debugPreviousActOneCheckpoint()
+{
+    if (!debugSessionActive_ || debugActOneCheckpoint_ < 0) {
+        debugStartActOneFlow();
+        return;
+    }
+    debugActOneCheckpoint_ = std::max(0, debugActOneCheckpoint_ - 1);
+    applyDebugActOneCheckpoint();
+}
+
+void RocketGameApp::debugNextActOneCheckpoint()
+{
+    if (!debugSessionActive_ || debugActOneCheckpoint_ < 0) {
+        debugStartActOneFlow();
+        return;
+    }
+    debugActOneCheckpoint_ = std::min(
+        static_cast<int>(kDebugActOneCheckpoints.size()) - 1,
+        debugActOneCheckpoint_ + 1);
+    applyDebugActOneCheckpoint();
+}
+
+int RocketGameApp::debugActOneCheckpoint() const
+{
+    return debugActOneCheckpoint_;
+}
+
+void RocketGameApp::applyDebugActOneCheckpoint()
+{
+    debugActOneCheckpoint_ = std::clamp(
+        debugActOneCheckpoint_,
+        0,
+        static_cast<int>(kDebugActOneCheckpoints.size()) - 1);
+    const DebugActOneCheckpoint& checkpoint = kDebugActOneCheckpoints[static_cast<std::size_t>(debugActOneCheckpoint_)];
+
+    session_ = {};
+    clearResearchAndExpeditionState(state_);
+    state_.lastOutcome = debugActOneCheckpoint_ == 0
+        ? LaunchOutcome{}
+        : debugTransferOutcome(std::string(checkpoint.destinationId));
+    state_.run.destinationIndex = destinationIndexForId(catalog_, checkpoint.destinationId);
+    state_.meta.furthestTier = currentDestination(state_, catalog_).tier;
+    state_.meta.ark = {};
+    state_.meta.campaignMilestone = CampaignMilestone::SolarTutorial;
+    state_.meta.chapter = debugActOneCheckpoint_ == 0
+        ? GameChapter::ProvingGround
+        : (debugActOneCheckpoint_ == 1
+            ? GameChapter::LunarProgram
+            : (debugActOneCheckpoint_ == 2 ? GameChapter::RedFrontier : GameChapter::Breakthrough));
+
+    if (debugActOneCheckpoint_ == static_cast<int>(kDebugActOneCheckpoints.size()) - 1) {
+        discoverArk(state_, catalog_);
+    }
+
+    if (debugActOneCheckpoint_ == 0) {
+        state_.launchConfig.frontierTransfer = false;
+        state_.launchConfig.destinationId = std::string(checkpoint.destinationId);
+        state_.launchConfig.burnGoalMultiplier = defaultProvingTarget(currentDestination(state_, catalog_));
+        syncLaunchConfig(state_, catalog_);
+        beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+        session_.flightArmed = true;
+        state_.screen = Screen::Launch;
+    } else {
+        setDestinationHistory(state_.meta.destinationFlybys, catalog_, checkpoint.destinationId, 1);
+        setDestinationHistory(state_.meta.destinationOrbits, catalog_, checkpoint.destinationId, 1);
+        startArrivalOps(state_, state_.lastOutcome);
+        state_.screen = Screen::ArrivalOps;
+    }
+
+    state_.statusLine = "Debug Act 1 "
+        + std::to_string(debugActOneCheckpoint_ + 1)
+        + "/"
+        + std::to_string(kDebugActOneCheckpoints.size())
+        + ": "
+        + std::string(checkpoint.label)
+        + ". Use Previous or Next to inspect the route.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugExit()
 {
     if (!debugSessionActive_) {
         return;
     }
     debugSessionActive_ = false;
+    debugActOneCheckpoint_ = -1;
     loadSavedGameOrDefault();
     state_.statusLine = "Debug sandbox closed. Real save restored from local mission control.";
     refreshPanel();
@@ -1820,6 +1926,7 @@ void RocketGameApp::refreshPanel()
         session_.controls.pressureReliefUsed,
         session_.preflightElapsed >= tuning::session::preflightBoardingSeconds,
         miningDroneTransferEnabled(state_),
+        debugActOneCheckpoint_,
     });
     setBrowserPanelHtml(panelHtml);
     rmlUi_.setPanelHtml(panelHtml);
@@ -2022,6 +2129,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
     result.currentFrontierTier = currentFrontier.tier;
+    result.debugActOneCheckpoint = debugActOneCheckpoint_;
     result.arkCondition = state_.meta.ark.condition;
     result.preflightActive = state_.screen == Screen::Launch && !session_.flightArmed && miningDroneTransferEnabled(state_);
     result.preflightProgress = result.preflightActive

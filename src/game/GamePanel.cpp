@@ -991,6 +991,133 @@ std::string tutorialCard(std::string_view topic, std::string_view title, std::st
         "</p></div><button type=\"button\" class=\"ghost\" data-help-dismiss=\"" + htmlEscape(topic) + "\">Got it</button></aside>";
 }
 
+enum class MapKnowledge {
+    Explored,
+    Charted,
+    Unknown
+};
+
+std::string_view mapKnowledgeClass(MapKnowledge knowledge)
+{
+    switch (knowledge) {
+    case MapKnowledge::Explored:
+        return "is-explored";
+    case MapKnowledge::Charted:
+        return "is-charted";
+    case MapKnowledge::Unknown:
+    default:
+        return "is-unknown";
+    }
+}
+
+std::string_view mapKnowledgeLabel(MapKnowledge knowledge)
+{
+    switch (knowledge) {
+    case MapKnowledge::Explored:
+        return "Explored";
+    case MapKnowledge::Charted:
+        return "Charted";
+    case MapKnowledge::Unknown:
+    default:
+        return "Unresolved";
+    }
+}
+
+std::string solarMapNode(
+    std::string_view name,
+    std::string_view glyph,
+    std::string_view objectClass,
+    MapKnowledge knowledge)
+{
+    const bool unknown = knowledge == MapKnowledge::Unknown;
+    std::ostringstream out;
+    out << "<div class=\"solar-map-node " << htmlEscape(objectClass) << " " << mapKnowledgeClass(knowledge) << "\">"
+        << "<div class=\"solar-map-glyph\"><span>" << htmlEscape(unknown ? "?" : glyph) << "</span></div>"
+        << "<strong>" << htmlEscape(name) << "</strong>"
+        << "<span class=\"solar-map-state\">" << mapKnowledgeLabel(knowledge) << "</span></div>";
+    return out.str();
+}
+
+std::string solarMapBody(const PanelRenderContext& context)
+{
+    const GameState& state = context.state;
+    const ContentCatalog& catalog = context.catalog;
+    const auto reached = [&](int checkpoint, int tier) {
+        return context.debugActOneCheckpoint >= 0
+            ? context.debugActOneCheckpoint >= checkpoint
+            : state.meta.furthestTier >= tier;
+    };
+    const auto destinationVisited = [&](std::string_view destinationId) {
+        return destinationHistoryValue(state.meta.destinationSuccesses, catalog, destinationId) > 0
+            || destinationHistoryValue(state.meta.destinationFlybys, catalog, destinationId) > 0
+            || destinationHistoryValue(state.meta.destinationOrbits, catalog, destinationId) > 0;
+    };
+
+    const bool moonExplored = reached(1, 1) || destinationVisited(content::destination::moon);
+    const bool marsExplored = reached(2, 2) || destinationVisited(content::destination::mars);
+    const bool jupiterExplored = reached(3, 3);
+    const bool saturnExplored = reached(4, 3);
+    const bool uranusExplored = reached(5, 3);
+    const bool neptuneExplored = reached(6, 3) || arkDiscovered(state);
+    const bool straylightFound = arkDiscovered(state);
+    const int exploredWorlds = 1
+        + (moonExplored ? 1 : 0)
+        + (marsExplored ? 1 : 0)
+        + (jupiterExplored ? 1 : 0)
+        + (saturnExplored ? 1 : 0)
+        + (uranusExplored ? 1 : 0)
+        + (neptuneExplored ? 1 : 0);
+
+    std::ostringstream out;
+    out << "<div class=\"solar-map\">"
+        << "<div class=\"solar-map-summary\">"
+        << "<div><span>Current frontier</span><strong>" << htmlEscape(currentDestination(state, catalog).name) << "</strong></div>"
+        << "<div><span>Explored worlds</span><strong>" << exploredWorlds << " / 7</strong></div>"
+        << "<div><span>System</span><strong>Sol</strong></div></div>"
+        << "<div class=\"solar-map-section solar-map-system\"><div class=\"solar-map-section-head\"><h3>System bodies</h3><span>Inner system to heliopause</span></div>"
+        << "<div class=\"solar-system-track\">"
+        << solarMapNode("Sun", "S", "map-sun", MapKnowledge::Explored)
+        << solarMapNode("Mercury", "Me", "map-mercury", MapKnowledge::Charted)
+        << solarMapNode("Venus", "V", "map-venus", MapKnowledge::Charted)
+        << solarMapNode("Earth", "E", "map-earth", MapKnowledge::Explored)
+        << solarMapNode("Mars", "Ma", "map-mars", marsExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Jupiter", "J", "map-jupiter", jupiterExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Saturn", "Sa", "map-saturn", saturnExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Uranus", "U", "map-uranus", uranusExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Neptune", "N", "map-neptune", neptuneExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << "</div></div>"
+        << "<div class=\"solar-map-section\"><div class=\"solar-map-section-head\"><h3>Moons</h3><span>Primary survey targets</span></div><div class=\"solar-map-row\">"
+        << solarMapNode("Luna", "L", "map-moon", moonExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Phobos", "Ph", "map-moon", marsExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Deimos", "De", "map-moon", marsExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Europa", "Eu", "map-moon", jupiterExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Titan", "T", "map-moon", saturnExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Triton", "Tr", "map-moon", neptuneExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << "</div></div>"
+        << "<div class=\"solar-map-lower\">"
+        << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Vessels</h3><span>Tracked contacts</span></div><div class=\"solar-map-row\">"
+        << solarMapNode("Pathfinder", "PF", "map-vessel", MapKnowledge::Explored)
+        << solarMapNode(straylightFound ? "Straylight" : "Unknown vessel", "ARK", "map-vessel", straylightFound ? MapKnowledge::Explored : MapKnowledge::Unknown)
+        << "</div></div>"
+        << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Anomalies</h3><span>Sensor returns</span></div><div class=\"solar-map-row\">"
+        << solarMapNode(marsExplored ? "Mars Echo" : "Unresolved signal", "ME", "map-anomaly", marsExplored ? MapKnowledge::Explored : MapKnowledge::Unknown)
+        << solarMapNode(straylightFound ? "Neptune Signal" : "Deep-space signal", "NS", "map-anomaly", straylightFound ? MapKnowledge::Explored : MapKnowledge::Unknown)
+        << "</div></div>"
+        << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Asteroid fields</h3><span>Navigation hazards</span></div><div class=\"solar-map-row\">"
+        << solarMapNode("Main Belt", "* *", "map-field", marsExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Jovian Trojans", "* *", "map-field", jupiterExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << solarMapNode("Kuiper Belt", "* *", "map-field", uranusExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
+        << "</div></div></div>"
+        << "<div class=\"solar-map-legend\"><span class=\"legend-explored\">Explored</span><span class=\"legend-charted\">Charted</span><span class=\"legend-unknown\">? Unresolved</span></div>"
+        << "</div>";
+    return out.str();
+}
+
+std::string solarMapTemplate(const PanelRenderContext& context)
+{
+    return modalTemplate(ui::modals::map, "Solar System Map", solarMapBody(context));
+}
+
 } // namespace
 
 std::string buildGamePanelHtml(const PanelRenderContext& context)
@@ -1009,12 +1136,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << "<div class=\"panel-head\"><div class=\"panel-title\"><span class=\"game-mark\">" << htmlEscape(text::panel::title)
         << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
         << "<div class=\"panel-head-actions\">"
+        << modalButton("Map", ui::modals::map, "ghost")
         << modalButton("Inventory", ui::modals::inventory, "ghost");
     if (state.screen == Screen::Hangar) {
         out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
     }
     out << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div></div>";
     out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
+    out << solarMapTemplate(context);
 
     std::ostringstream settingsBody;
     settingsBody << detailStack(settingsDetailsPresentation());

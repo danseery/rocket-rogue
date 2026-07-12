@@ -740,6 +740,44 @@ void rr_debug_navigation()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_act_one_start()
+{
+    if (g_app) {
+        g_app->debugStartActOneFlow();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_act_one_previous()
+{
+    if (g_app) {
+        g_app->debugPreviousActOneCheckpoint();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_act_one_next()
+{
+    if (g_app) {
+        g_app->debugNextActOneCheckpoint();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_debug_act_one_checkpoint()
+{
+    return g_app ? g_app->debugActOneCheckpoint() : -1;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_exit()
 {
     if (g_app) {

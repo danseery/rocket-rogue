@@ -384,6 +384,28 @@ int destinationBodyAsset(int destinationTier)
     return -1;
 }
 
+int destinationBodyAsset(const RenderSnapshot& snapshot)
+{
+    switch (snapshot.debugActOneCheckpoint) {
+    case 0:
+        return EarthAsset;
+    case 1:
+        return MoonAsset;
+    case 2:
+        return MarsAsset;
+    case 3:
+        return JupiterAsset;
+    case 4:
+        return SaturnAsset;
+    case 5:
+        return UranusAsset;
+    case 6:
+        return NeptuneAsset;
+    default:
+        return destinationBodyAsset(snapshot.destinationTier);
+    }
+}
+
 bool arkVisible(ArkCondition condition)
 {
     return condition != ArkCondition::NotFound;
@@ -1563,7 +1585,7 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
     drawRadialGlow(destX, destY, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.22F, 0.36F, 0.14F}, 72);
     drawEllipseLine(destX, destY, planetRadius * (1.28F + pulse * 0.03F), planetRadius * (1.28F + pulse * 0.03F), {0.12F, 0.66F, 0.86F, 0.34F}, 72, 0.0F, 2.0F * kPi);
 
-    const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
+    const int destinationAsset = destinationBodyAsset(snapshot);
     if (destinationAsset >= 0 && textureReady(destinationAsset)) {
         const float scale = bodySpriteScale(destinationAsset);
         drawSprite(destX, destY, planetRadius * scale, planetRadius * scale, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
@@ -1691,7 +1713,7 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
     drawRadialGlow(0.0F, 0.0F, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.20F, 0.34F, 0.12F}, 88);
     drawEllipseLine(0.0F, 0.0F, planetRadius * (1.26F + pulse * 0.03F), planetRadius * (1.26F + pulse * 0.03F), {0.12F, 0.64F, 0.84F, 0.30F}, 88, 0.0F, 2.0F * kPi);
 
-    const int destinationAsset = destinationBodyAsset(snapshot.destinationTier);
+    const int destinationAsset = destinationBodyAsset(snapshot);
     if (destinationAsset >= 0 && textureReady(destinationAsset)) {
         const float scale = bodySpriteScale(destinationAsset);
         drawSprite(0.0F, 0.0F, planetRadius * scale, planetRadius * scale, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
@@ -2386,13 +2408,53 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const int droneAsset = miningMiniDroneAsset(role);
         if (textureReady(droneAsset)) {
             const float spriteSize = cellSize * 1.50F;
-            drawSprite(
-                sx,
-                sy,
-                spriteSize,
-                spriteSize,
-                {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
-                droneAsset);
+            const bool miningTask = role == static_cast<int>(MiniDroneRole::Mining) && agent.targetCellX >= 0 && agent.targetCellY >= 0 &&
+                (behavior == MiningMiniDroneBehavior::Traveling || behavior == MiningMiniDroneBehavior::Working);
+            const bool attackTargeting = role == static_cast<int>(MiniDroneRole::Attack) &&
+                behavior == MiningMiniDroneBehavior::Engaging &&
+                agent.targetEnemyIndex >= 0 && agent.targetEnemyIndex < static_cast<int>(snapshot.miningEnemies.size());
+            if (attackTargeting) {
+                const MiningEnemySnapshot& targetEnemy = snapshot.miningEnemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
+                const Vec2 targetPosition = cellCenter(targetEnemy.x, targetEnemy.y);
+                Vec2 gunDirection = normalize({targetPosition.x - sx, targetPosition.y - sy});
+                if (std::abs(gunDirection.x) + std::abs(gunDirection.y) < 0.001F) {
+                    gunDirection = {0.0F, 1.0F};
+                }
+                drawSpriteRotated(
+                    sx,
+                    sy,
+                    spriteSize,
+                    spriteSize,
+                    -gunDirection.x,
+                    -gunDirection.y,
+                    {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
+                    droneAsset);
+            } else if (miningTask) {
+                const Vec2 targetPosition = cellCenter(agent.targetCellX, agent.targetCellY);
+                Vec2 drillDirection = normalize({targetPosition.x - sx, targetPosition.y - sy});
+                if (std::abs(drillDirection.x) + std::abs(drillDirection.y) < 0.001F) {
+                    drillDirection = {0.0F, 1.0F};
+                }
+                // The mining sprite's drill is authored on its lower-right diagonal.
+                const Vec2 spriteForward = normalize({-drillDirection.x - drillDirection.y, drillDirection.x - drillDirection.y});
+                drawSpriteRotated(
+                    sx,
+                    sy,
+                    spriteSize,
+                    spriteSize,
+                    spriteForward.x,
+                    spriteForward.y,
+                    {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
+                    droneAsset);
+            } else {
+                drawSprite(
+                    sx,
+                    sy,
+                    spriteSize,
+                    spriteSize,
+                    {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
+                    droneAsset);
+            }
         }
         const int rankLights = upgradeLevel - 1;
         for (int rankLight = 0; rankLight < rankLights; ++rankLight) {
@@ -3102,6 +3164,11 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Launch);
 
+    // After discovery, Surface Ops keeps the Ark in view as the team's base away from Earth.
+    const bool surfaceArkVisible = snapshot.screen == Screen::SurfaceExpedition
+        && snapshot.destinationTier != 0
+        && arkVisible(snapshot.arkCondition);
+
     auto drawBodySprite = [&](int assetIndex, Vec2 center, float size, float alpha) {
         if (textureReady(assetIndex)) {
             drawSprite(center.x, center.y, size, size, {1.0F, 1.0F, 1.0F, alpha}, assetIndex);
@@ -3115,7 +3182,17 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     };
 
-    if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
+    if (snapshot.debugActOneCheckpoint >= 3) {
+        const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        const int bodyAsset = destinationBodyAsset(snapshot);
+        const float bodySize = snapshot.debugActOneCheckpoint == 4 ? 0.42F : 0.31F;
+        drawRadialGlow(endpoint.x, endpoint.y, bodySize * 0.58F, {0.24F, 0.64F, 0.88F, 0.10F}, 72);
+        if (snapshot.debugActOneCheckpoint == 6 && arkVisible(snapshot.arkCondition)) {
+            // Neptune crosses in front of Straylight at the Act 1 reveal.
+            drawArkSprite({endpoint.x - 0.17F, endpoint.y - 0.05F}, 0.50F, 0.92F);
+        }
+        drawBodySprite(bodyAsset, endpoint, bodySize, 0.98F);
+    } else if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;
         const float earthY = -1.10F;
         const float earthR = 0.58F;
@@ -3160,7 +3237,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
-        if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4) {
+        if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4 && !surfaceArkVisible) {
             const Vec2 arkHome = routePoint(snapshot, 0.0F);
             drawArkSprite({arkHome.x - 0.06F, arkHome.y - 0.01F}, 0.62F, arkDamaged(snapshot.arkCondition) ? 0.82F : 0.88F);
         }
@@ -3226,7 +3303,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             drawBodySprite(SaturnAsset, {endpoint.x - radius * 2.35F, endpoint.y + radius * 1.18F}, radius * 2.45F, 0.62F);
             drawBodySprite(UranusAsset, {endpoint.x + radius * 1.94F, endpoint.y + radius * 0.90F}, radius * 1.10F, 0.58F);
             drawBodySprite(NeptuneAsset, {endpoint.x + radius * 2.40F, endpoint.y - radius * 0.70F}, radius * 1.00F, 0.52F);
-            if (arkVisible(snapshot.arkCondition)) {
+            if (arkVisible(snapshot.arkCondition) && !surfaceArkVisible) {
                 drawArkSprite({endpoint.x + radius * 3.12F, endpoint.y - radius * 1.58F}, radius * 4.80F, 0.84F);
             }
         } else if (snapshot.destinationTier == 4) {
@@ -3238,7 +3315,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             if (snapshot.screen == Screen::ArrivalFanfare) {
                 drawCircle(endpoint.x, endpoint.y, radius * (2.05F + arrivalBeat * 0.36F), {0.42F, 0.90F, 1.0F, 0.12F}, 72);
             }
-            const int outerPlanetAsset = destinationBodyAsset(snapshot.destinationTier);
+            const int outerPlanetAsset = destinationBodyAsset(snapshot);
             if (textureReady(outerPlanetAsset)) {
                 drawSprite(endpoint.x, endpoint.y, bodyRadius * 2.55F, bodyRadius * 2.55F, {1.0F, 1.0F, 1.0F, 0.96F}, outerPlanetAsset);
             } else {
@@ -3250,7 +3327,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
                 : 0.0F;
             const float bodyPulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.08F : 1.0F;
-            const int outerPlanetAsset = destinationBodyAsset(snapshot.destinationTier);
+            const int outerPlanetAsset = destinationBodyAsset(snapshot);
             if (textureReady(outerPlanetAsset)) {
                 drawSprite(endpoint.x, endpoint.y, radius * 2.55F * bodyPulse, radius * 2.55F * bodyPulse, {1.0F, 1.0F, 1.0F, 0.96F}, outerPlanetAsset);
             } else {
@@ -3261,6 +3338,11 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             drawCircle(endpoint.x, endpoint.y, radius, destination, 56);
             drawCircle(endpoint.x, endpoint.y, radius * 1.65F, {destination.r, destination.g, destination.b, 0.09F}, 64);
         }
+    }
+
+    if (surfaceArkVisible) {
+        // Keep the base clear of the left-side operations board and the lower scanner grid.
+        drawArkSprite({0.38F, -0.12F}, 0.48F, arkDamaged(snapshot.arkCondition) ? 0.86F : 0.92F);
     }
 
     drawRoute(snapshot);

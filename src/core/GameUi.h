@@ -114,6 +114,7 @@ inline constexpr std::string_view launchBlocked = "launch_blocked";
 inline constexpr std::string_view pilotIntake = "pilot_intake";
 inline constexpr std::string_view legacy = "legacy";
 inline constexpr std::string_view inventory = "inventory";
+inline constexpr std::string_view map = "map";
 inline constexpr std::string_view research = "research";
 inline constexpr std::string_view surface = "surface";
 inline constexpr std::string_view phaseBriefing = "phase_briefing";
