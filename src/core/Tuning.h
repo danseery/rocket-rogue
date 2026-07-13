@@ -684,6 +684,9 @@ inline constexpr double passiveLightRadius = 2.15;
 inline constexpr double drillRangeCells = 2.05;
 inline constexpr double drillAimDeadzoneCells = 0.75;
 inline constexpr int drillAimDirections = 8;
+inline constexpr double visualHeadingSlerpPerSecond = 5.0;
+inline constexpr double visualRecoilSmoothingPerSecond = 12.0;
+inline constexpr double upgradedVisualRecoilSmoothingPerSecond = 9.0;
 inline constexpr double baseDrillPower = 4.2;
 inline constexpr double denseMaterialDrillPowerScale = 1.45;
 inline constexpr double contactDrillPowerScale = 1.20;
@@ -699,16 +702,18 @@ inline constexpr double heatRisePerSecond = 0.10;
 inline constexpr double heatHardRockBonus = 0.08;
 inline constexpr double heatCoolingPerSecond = 0.16;
 inline constexpr double heatCoolingMultiplier = 2.0;
+inline constexpr double drillHeatCautionThreshold = 0.60;
+inline constexpr double drillHeatCriticalThreshold = 0.80;
+inline constexpr double drillHeatFlashThreshold = 1.0;
 inline constexpr double heatSlowThreshold = 0.72;
 inline constexpr double heatDamageThreshold = 0.90;
 inline constexpr double overheatedDrillSlow = 0.48;
 inline constexpr double overheatIntegrityDamagePerSecond = 0.055;
-inline constexpr double hazardPocketIntegrityDamage = 0.12;
-inline constexpr double hazardPocketRisk = 0.035;
 inline constexpr double depthHazardRisk = 0.030;
 inline constexpr double cargoExtractionRiskScale = 0.006;
 inline constexpr double maxMiningHazardDelta = 0.26;
-inline constexpr double returnZoneRadiusCells = 1.65;
+inline constexpr double returnZoneHorizontalFraction = 0.29;
+inline constexpr double returnZoneRadiusCells = 3.0;
 inline constexpr double baseCarryBufferCargo = 3.0;
 inline constexpr double tetheredArtifactCargoWeight = 4.0;
 inline constexpr double loadSpeedPenaltyPerCargo = 0.055;
@@ -717,6 +722,7 @@ inline constexpr double minLoadedSpeedMultiplier = 0.45;
 inline constexpr double maxLoadedFuelMultiplier = 2.0;
 inline constexpr double oxygenDroneDamagePerSecond = 0.055;
 inline constexpr double emergencyRecallHazardPenalty = 0.20;
+inline constexpr double miningExtractionSequenceSeconds = 3.40;
 inline constexpr double scannerRevealRadius = 5.5;
 inline constexpr double scannerProbeBonus = 2.0;
 inline constexpr double scannerCooldownSeconds = 4.0;
@@ -764,6 +770,7 @@ inline constexpr double miniDroneReturnSpeedCellsPerSecond = 5.6;
 inline constexpr double miniDroneHomeRadiusCells = 0.35;
 inline constexpr double miniDroneBrakeRadiusCells = 1.15;
 inline constexpr double miniDroneVelocityResponsePerSecond = 10.0;
+inline constexpr double miniDroneFormationResponsePerSecond = 6.0;
 inline constexpr double miniDroneTaskStopDampingPerSecond = 11.0;
 inline constexpr double miniDroneStopSpeedCellsPerSecond = 0.06;
 inline constexpr double miniDroneSameRoleSpacingCells = 0.70;
@@ -771,13 +778,151 @@ inline constexpr double miningDroneAcquireRadiusCells = 7.0;
 inline constexpr double miningDroneLeashRadiusCells = 8.5;
 inline constexpr double miningDroneReacquireRadiusCells = 4.0;
 inline constexpr double miningDroneWorkRangeCells = 0.72;
-inline constexpr double miningDroneWorkPowerScale = 8.0;
+inline constexpr double miningDroneBaseHarvestRatePerSecond = 0.12;
+inline constexpr double miningDroneUpgradeRateBonus = 0.30;
+inline constexpr int miningDroneBaseCapacityChunks = 3;
+inline constexpr int miningDroneCapacityChunksPerUpgrade = 2;
+inline constexpr double miningDroneDropoffSeconds = 0.55;
+inline constexpr int miningDroneCapacityChunks(int upgradeLevel)
+{
+    return miningDroneBaseCapacityChunks +
+        (std::clamp(upgradeLevel, 1, 3) - 1) * miningDroneCapacityChunksPerUpgrade;
+}
+inline constexpr double miningDroneMaterialWorkScale(MiningCellMaterial material)
+{
+    switch (material) {
+    case MiningCellMaterial::Regolith:
+        return 0.65;
+    case MiningCellMaterial::HardRock:
+        return 1.35;
+    case MiningCellMaterial::RareOre:
+        return 1.15;
+    case MiningCellMaterial::ExoticVein:
+        return 1.30;
+    default:
+        return 1.0;
+    }
+}
+inline constexpr double miningDroneWorkSeconds(int upgradeLevel, MiningCellMaterial material)
+{
+    const double rate = miningDroneBaseHarvestRatePerSecond *
+        (1.0 + static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * miningDroneUpgradeRateBonus);
+    return miningDroneMaterialWorkScale(material) / rate;
+}
 inline constexpr double attackDroneStandoffCells = 2.4;
-inline constexpr double attackDroneHomeRadiusCells = 1.25;
-inline constexpr double defenseDroneGuardDistanceCells = 1.75;
-inline constexpr double resourceDroneFollowDistanceCells = 1.25;
-inline constexpr double surveyDroneLeadDistanceCells = 4.2;
-inline constexpr double stabilizerDroneDockOffsetCells = 1.35;
+inline constexpr double attackDroneFieldOfViewCells = 8.0;
+inline constexpr double attackDroneShotStaggerSeconds = 0.08;
+inline constexpr double attackDroneHomeRadiusCells = 3.35;
+inline constexpr double attackDroneRigClearanceCells = 2.95;
+inline constexpr double attackDroneHomeMinimumSpacingCells = 1.80;
+inline constexpr double defenseDroneGuardDistanceCells = 2.70;
+inline constexpr double defenseDroneShieldArcOffsetCells = 0.68;
+inline constexpr double defenseDroneShieldArcRadians = 1.117010721276371;
+inline constexpr double defenseDroneBaseShieldHitPoints = 0.12;
+inline constexpr double defenseDroneShieldHitPointsPerUpgrade = 0.06;
+inline constexpr double defenseDroneBaseRechargeSeconds = 5.40;
+inline constexpr double defenseDroneRechargeRatePerUpgrade = 0.35;
+inline constexpr double defenseDroneBaseTrackingSlerpPerSecond = 0.65;
+inline constexpr double defenseDroneTrackingSlerpPerUpgrade = 0.25;
+inline constexpr double defenseDroneShieldImpactPulseSeconds = 0.34;
+inline constexpr double defenseDroneShieldHitPoints(int upgradeLevel)
+{
+    return defenseDroneBaseShieldHitPoints +
+        static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * defenseDroneShieldHitPointsPerUpgrade;
+}
+inline constexpr double defenseDroneRechargeSeconds(int upgradeLevel)
+{
+    return defenseDroneBaseRechargeSeconds /
+        (1.0 + static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * defenseDroneRechargeRatePerUpgrade);
+}
+inline constexpr double defenseDroneTrackingSlerpPerSecond(int upgradeLevel)
+{
+    return defenseDroneBaseTrackingSlerpPerSecond +
+        static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * defenseDroneTrackingSlerpPerUpgrade;
+}
+inline constexpr double resourceDroneCollectionRadiusCells = 2.05;
+inline constexpr double resourceDroneMinimumSpacingCells = 1.60;
+inline constexpr double resourceDroneCollectionEnterToleranceCells = 0.82;
+inline constexpr double resourceDroneCollectionExitToleranceCells = 1.18;
+inline constexpr int resourceDroneCapacityChunks = 8;
+inline constexpr double resourceDroneTransferSeconds = 0.62;
+inline constexpr double resourceDroneUpgradeRateBonus = 0.42;
+inline constexpr double resourceDroneDockSpacingCells = 0.85;
+inline constexpr double surveyDroneLeadDistanceCells = 3.40;
+inline constexpr double surveyDroneFormationSpacingCells = 2.40;
+inline constexpr double surveyDroneFormationArcDepthPerCell = 0.08;
+inline constexpr double surveyDroneSearchLaneHalfWidthCells = 1.35;
+inline constexpr double surveyDroneMaximumFormationHalfWidthCells = 8.5;
+inline constexpr double surveyDroneTravelSpeedCellsPerSecond = 2.60;
+inline constexpr double surveyDroneReturnSpeedCellsPerSecond = 2.85;
+inline constexpr double surveyDroneVelocityResponsePerSecond = 3.25;
+inline constexpr double surveyDroneMinimumLeadCells = 2.0;
+inline constexpr double surveyDroneMaximumLeadCells = 11.0;
+inline constexpr double surveyDroneAnchorHalfWidthCells = 5.0;
+inline constexpr double surveyDroneScanRadiusCells = 2.35;
+inline constexpr double surveyDroneScanArrivalRadiusCells = 0.65;
+inline constexpr double surveyDroneScanDwellSeconds = 0.45;
+inline constexpr double surveyDronePulseSeconds = 0.55;
+inline constexpr double surveyDroneRechargeSeconds = 3.20;
+inline constexpr double surveyDroneFormationOffsetCells(int roleIndex, int roleCount)
+{
+    const int count = std::max(1, roleCount);
+    const double centeredIndex = static_cast<double>(roleIndex) - static_cast<double>(count - 1) * 0.5;
+    return centeredIndex * surveyDroneFormationSpacingCells;
+}
+inline constexpr double surveyDroneFormationHalfWidthCells(int roleCount)
+{
+    const double firstOffset = surveyDroneFormationOffsetCells(0, std::max(1, roleCount));
+    const double outerOffset = firstOffset < 0.0 ? -firstOffset : firstOffset;
+    return std::min(
+        surveyDroneMaximumFormationHalfWidthCells,
+        std::max(surveyDroneAnchorHalfWidthCells, outerOffset + surveyDroneSearchLaneHalfWidthCells));
+}
+inline constexpr double hazardDroneAcquireRadiusCells = 8.0;
+inline constexpr double hazardDroneWorkRangeCells = 0.75;
+inline constexpr double hazardDroneHomeOffsetCells = 1.80;
+inline constexpr int hazardDroneRequiredMark(MiningElementalAffinity affinity)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::Thermal:
+    case MiningElementalAffinity::Cryo:
+    case MiningElementalAffinity::None:
+        return 1;
+    case MiningElementalAffinity::Toxic:
+        return 2;
+    case MiningElementalAffinity::Radiation:
+        return 3;
+    }
+    return 3;
+}
+inline constexpr double hazardDroneTreatmentSeconds(int upgradeLevel)
+{
+    switch (std::clamp(upgradeLevel, 1, 3)) {
+    case 1:
+        return 3.0;
+    case 2:
+        return 2.25;
+    case 3:
+        return 1.5;
+    }
+    return 3.0;
+}
+inline constexpr int hazardDroneBatchSize(int upgradeLevel)
+{
+    return std::clamp(upgradeLevel, 1, 3);
+}
+inline constexpr double hazardDroneRefinementChance(int upgradeLevel)
+{
+    switch (std::clamp(upgradeLevel, 1, 3)) {
+    case 1:
+        return 0.05;
+    case 2:
+        return 0.08;
+    case 3:
+        return 0.12;
+    }
+    return 0.05;
+}
 inline constexpr double areaControlPulseSeconds = 0.48;
 inline constexpr double enemyContactRadiusCells = 0.82;
 inline constexpr double enemyElementalRadiusCells = 1.85;
@@ -804,6 +949,8 @@ inline constexpr double elementalCryoSlowScale = 0.58;
 inline constexpr double minibossHealthScale = 1.85;
 inline constexpr double bossHealthScale = 2.65;
 inline constexpr double roomEnemyHealthScale = 1.25;
+inline constexpr double enemySpawnerArmor = 0.12;
+inline constexpr double enemySpawnerSpawnRadiusCells = 1.65;
 } // namespace mining
 
 namespace outcomes {

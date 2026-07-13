@@ -42,6 +42,8 @@ std::string_view miningMaterialName(MiningCellMaterial material);
 std::string_view miningCellFeatureName(MiningCellFeature feature);
 std::string_view miningEnemyTypeName(MiningEnemyType enemy);
 std::string_view miningElementalAffinityName(MiningElementalAffinity affinity);
+MiningEnemy createMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeature, double x, double y, MiningElementalAffinity affinity = MiningElementalAffinity::None);
+MiningEnemy createMiningEnemySpawner(double x, double y, double health, MiningEnemyType spawnType, int maxSpawns, double spawnIntervalSeconds, MiningElementalAffinity affinity = MiningElementalAffinity::None);
 bool miningMaterialSolid(MiningCellMaterial material);
 double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);

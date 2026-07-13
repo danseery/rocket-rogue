@@ -21,7 +21,7 @@
 - `mini-drone-mining.png` - Mining support drone sprite with alpha, packed on a 512x512 square.
 - `mini-drone-resource.png` - Resource support drone sprite with alpha, packed on a 512x512 square.
 - `mini-drone-survey.png` - Survey support drone sprite with alpha, packed on a 512x512 square.
-- `mini-drone-stabilizer.png` - Stabilizer support drone sprite with alpha, packed on a 512x512 square.
+- `mini-drone-hazard.png` - Hazard-remediation drone sprite with alpha, packed on a 512x512 square.
 - `mini-drone-attack.png` - Attack support drone sprite with alpha, packed on a 512x512 square.
 - `mini-drone-defense.png` - Defense support drone sprite with alpha, packed on a 512x512 square.
 - `drill-bit-sheet.png` - 6-frame horizontal drill bit animation sheet with alpha, packed as fixed 256x256 frames.

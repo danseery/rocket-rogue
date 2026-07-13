@@ -92,7 +92,8 @@ namespace drone {
 inline constexpr const char* miningDrone = "mining_drone";
 inline constexpr const char* resourceDrone = "resource_drone";
 inline constexpr const char* surveyDrone = "survey_drone";
-inline constexpr const char* stabilizerDrone = "stabilizer_drone";
+inline constexpr const char* hazardDrone = "hazard_drone";
+inline constexpr const char* legacyStabilizerDrone = "stabilizer_drone";
 inline constexpr const char* attackDrone = "attack_drone";
 inline constexpr const char* defenseDrone = "defense_drone";
 } // namespace drone

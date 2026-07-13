@@ -25,6 +25,7 @@ enum class RmlPanelMode {
     Control,
     PhaseBoard,
     ArrivalFanfare,
+    MissionStamp,
     MiningFullscreen
 };
 

@@ -239,9 +239,9 @@ ContentCatalog createDefaultContent()
         miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
         miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneBay, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneBay, {"exploration", "navigation"}),
-        miniDrone(content::drone::stabilizerDrone, "Stabilizer Drone", "Counter-thrusts hard-rock chatter so enemy hits and rough drilling cost less rig health.", Rarity::Uncommon, MiniDroneRole::Stabilizer, {.drillIntegrityRelief = 0.12, .hardRockBounceRelief = 0.28}, content::unlock::droneBay, {"engineering", "resilience"}),
+        miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig drills into them.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::droneBay, {"engineering", "remediation"}),
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
-        miniDrone(content::drone::defenseDrone, "Defense Drone", "Projects teal shield arcs, absorbs incoming fire, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
+        miniDrone(content::drone::defenseDrone, "Defense Drone", "Holds a rotating charged shield arc, recharges after a break, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
 
     catalog.researchProjects = {
@@ -437,8 +437,8 @@ std::string_view toString(MiniDroneRole role)
         return "Resource";
     case MiniDroneRole::Survey:
         return "Survey";
-    case MiniDroneRole::Stabilizer:
-        return "Stabilizer";
+    case MiniDroneRole::Hazard:
+        return "Hazard";
     case MiniDroneRole::Attack:
         return "Attack";
     case MiniDroneRole::Defense:

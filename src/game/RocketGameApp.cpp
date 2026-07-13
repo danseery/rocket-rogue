@@ -100,12 +100,50 @@ void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
         content::drone::miningDrone,
         content::drone::resourceDrone,
         content::drone::surveyDrone,
-        content::drone::stabilizerDrone,
+        content::drone::hazardDrone,
         content::drone::attackDrone,
         content::drone::defenseDrone
     };
     state.meta.equippedDroneIds.clear();
     ensureDroneBayState(state, catalog);
+}
+
+void stampDebugHazardCluster(
+    MiningRunState& mining,
+    int startX,
+    int y,
+    int count,
+    MiningElementalAffinity affinity)
+{
+    for (int offset = 0; offset < count; ++offset) {
+        MiningCell* cell = miningCellAt(mining.terrain, startX + offset, y);
+        if (cell == nullptr) {
+            continue;
+        }
+        const double toughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+        *cell = {};
+        cell->material = MiningCellMaterial::HazardPocket;
+        cell->maxToughness = toughness;
+        cell->remainingToughness = toughness;
+        cell->revealed = true;
+        cell->hazard = true;
+        cell->hazardAffinity = affinity;
+    }
+}
+
+void seedDebugHazardClusters(MiningRunState& mining)
+{
+    const int centerX = std::clamp(
+        static_cast<int>(std::floor(mining.droneX)),
+        5,
+        std::max(5, mining.terrain.width - 6));
+    const int upperY = std::clamp(static_cast<int>(std::floor(mining.droneY)) + 2, 5, mining.terrain.height - 5);
+    const int lowerY = std::min(mining.terrain.height - 3, upperY + 2);
+    stampDebugHazardCluster(mining, centerX - 3, upperY, 1, MiningElementalAffinity::Thermal);
+    stampDebugHazardCluster(mining, centerX - 1, upperY, 2, MiningElementalAffinity::Cryo);
+    stampDebugHazardCluster(mining, centerX - 3, lowerY, 3, MiningElementalAffinity::Toxic);
+    stampDebugHazardCluster(mining, centerX + 1, lowerY, 3, MiningElementalAffinity::Radiation);
+    std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 1);
 }
 
 void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random& rng, std::string_view destinationId)
@@ -461,11 +499,23 @@ void RocketGameApp::tick(double deltaSeconds)
 
         panelDirty_ = true;
     } else if (state_.screen == Screen::Mining) {
-        const bool wasActive = state_.run.mining.active;
-        updateMiningRun(state_, catalog_, deltaSeconds);
-        if (wasActive && !state_.run.mining.active) {
-            state_.statusLine = std::string(text::status::miningAborted);
-            save();
+        if (miningExtraction_.active) {
+            miningExtraction_.elapsed = std::min(
+                miningExtraction_.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
+                tuning::mining::miningExtractionSequenceSeconds);
+            if (miningExtraction_.elapsed >= tuning::mining::miningExtractionSequenceSeconds) {
+                const bool showUpgradeDraft = miningExtraction_.showUpgradeDraft;
+                miningExtraction_ = {};
+                state_.run.mining = {};
+                state_.screen = showUpgradeDraft ? Screen::SurfaceUpgrade : Screen::SurfaceExpedition;
+            }
+        } else {
+            const bool wasActive = state_.run.mining.active;
+            updateMiningRun(state_, catalog_, deltaSeconds);
+            if (wasActive && !state_.run.mining.active) {
+                state_.statusLine = std::string(text::status::miningAborted);
+                save();
+            }
         }
         panelDirty_ = true;
     } else if (state_.screen == Screen::Flyby) {
@@ -1072,22 +1122,31 @@ void RocketGameApp::upgradeDroneSlot()
 
 void RocketGameApp::miningMove(double xAxis, double yAxis)
 {
+    if (miningExtraction_.active) {
+        return;
+    }
     setMiningMove(state_, xAxis, yAxis);
 }
 
 void RocketGameApp::miningAim(double normalizedX, double normalizedY)
 {
+    if (miningExtraction_.active) {
+        return;
+    }
     setMiningAim(state_, normalizedX, normalizedY);
 }
 
 void RocketGameApp::miningDrill(bool active)
 {
+    if (miningExtraction_.active) {
+        return;
+    }
     setMiningDrilling(state_, active);
 }
 
 void RocketGameApp::miningScanner()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
 
@@ -1098,7 +1157,7 @@ void RocketGameApp::miningScanner()
 
 void RocketGameApp::miningTether()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
 
@@ -1121,7 +1180,7 @@ void RocketGameApp::miningTether()
 
 void RocketGameApp::miningRepairDrill()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
     MiningRunState& mining = state_.run.mining;
@@ -1141,7 +1200,7 @@ void RocketGameApp::miningRepairDrill()
 
 void RocketGameApp::miningRepairDrone()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
     MiningRunState& mining = state_.run.mining;
@@ -1161,7 +1220,7 @@ void RocketGameApp::miningRepairDrone()
 
 void RocketGameApp::miningStow()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
     if (!miningAtReturnZone(state_.run.mining)) {
@@ -1170,14 +1229,30 @@ void RocketGameApp::miningStow()
         return;
     }
 
+    const MiningRunState extractionVisual = state_.run.mining;
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
     if (outcome.applied) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
+        state_.run.mining = extractionVisual;
+        state_.run.mining.active = false;
+        state_.run.mining.drilling = false;
+        state_.run.mining.moveX = 0.0;
+        state_.run.mining.moveY = 0.0;
+        state_.run.mining.cargo = 0;
+        state_.run.mining.temporaryMaterials = {};
+        state_.run.mining.temporaryArtifacts.clear();
+        state_.run.mining.stowedCargo = outcome.cargoDelta;
+        state_.run.mining.stowedMaterials = outcome.materialDelta;
+        state_.run.mining.combatProjectiles.clear();
+        state_.run.mining.damageNumbers.clear();
+        miningExtraction_.active = true;
+        miningExtraction_.elapsed = 0.0;
+        miningExtraction_.showUpgradeDraft = state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable;
+        state_.screen = Screen::Mining;
     }
-    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningStowed);
+    state_.statusLine = outcome.applied
+        ? "Payload banked. Mini-drones returning to bay."
+        : std::string(text::status::miningStowed);
     save();
     panelDirty_ = true;
 }
@@ -1290,7 +1365,7 @@ void RocketGameApp::pushSurfaceAbort()
 
 void RocketGameApp::miningAbort()
 {
-    if (state_.screen != Screen::Mining) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
     if (miningAtReturnZone(state_.run.mining) && !state_.run.mining.failurePending) {
@@ -1375,10 +1450,22 @@ void RocketGameApp::debugStartMining()
     state_.run.surfaceExpedition.miningSitePrepared = true;
     state_.run.surfaceExpedition.prospectArtifacts = 1;
     applyDebugDroneLoadout();
+    if (!debugDroneLoadout_.configured) {
+        state_.meta.equippedDroneIds = {content::drone::hazardDrone};
+        for (DroneUpgradeRecord& record : state_.meta.droneUpgrades) {
+            if (record.droneId == content::drone::hazardDrone) {
+                record.level = 3;
+            }
+        }
+        ensureDroneBayState(state_, catalog_);
+    }
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
+    if (outcome.applied) {
+        seedDebugHazardClusters(state_.run.mining);
+    }
     state_.statusLine = outcome.applied
-        ? "Debug mining sandbox. Drill, tether, and stow without touching your save."
+        ? "Debug mining sandbox. Four revealed hazard clusters are live; no save data will be written."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -1438,9 +1525,16 @@ void RocketGameApp::debugStartCombatMining()
             seedEnemy(MiningEnemyType::Beetle, MiningCellFeature::MinibossLair, centerX + 4.0, centerY + 2.0, 72.0, 0.45, 1.15, 0.82, 0.0),
             seedEnemy(MiningEnemyType::Ant, MiningCellFeature::EncounterZone, centerX - 4.0, centerY + 2.0, 40.0, 0.0, 2.0, 0.62, 0.0)
         };
+        mining.enemies.push_back(createMiningEnemySpawner(
+            centerX,
+            centerY + 6.0,
+            65.0,
+            MiningEnemyType::Ant,
+            6,
+            2.5));
     }
     state_.statusLine = outcome.applied
-        ? "Debug combat mining sandbox. 4 active enemies and defense drones are live; no save data will be written."
+        ? "Debug combat mining sandbox. A targetable ant spawner and defense drones are live; no save data will be written."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -2067,7 +2161,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     if (state_.screen == Screen::Launch) {
         result.animationTime = session_.flightArmed ? session_.elapsed : session_.preflightElapsed;
     } else if (state_.screen == Screen::Mining) {
-        result.animationTime = state_.run.mining.elapsedSeconds;
+        result.animationTime = miningExtraction_.active ? miningExtraction_.elapsed : state_.run.mining.elapsedSeconds;
     } else if (state_.screen == Screen::Flyby) {
         result.animationTime = state_.run.flyby.elapsedSeconds;
     } else if (state_.screen == Screen::Orbit) {
@@ -2141,8 +2235,12 @@ RenderSnapshot RocketGameApp::snapshot() const
         ? std::clamp(session_.preflightElapsed / tuning::session::preflightBoardingSeconds, 0.0, 1.0)
         : 1.0;
 
-    if (state_.screen == Screen::Mining && state_.run.mining.active) {
+    if (state_.screen == Screen::Mining && (state_.run.mining.active || miningExtraction_.active)) {
         const MiningRunState& mining = state_.run.mining;
+        result.miningExtractionActive = miningExtraction_.active;
+        result.miningExtractionProgress = miningExtraction_.active
+            ? std::clamp(miningExtraction_.elapsed / tuning::mining::miningExtractionSequenceSeconds, 0.0, 1.0)
+            : 0.0;
         result.miningWidth = mining.terrain.width;
         result.miningHeight = mining.terrain.height;
         result.miningDroneX = mining.droneX;
@@ -2166,7 +2264,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningHazardDelta = mining.hazardDelta;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
-        result.miningScannerRadius = miningDrillStats(state_, catalog_).scannerRadius;
+        const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
+        result.miningScannerRadius = miningStats.scannerRadius;
+        result.miningBounceRelief = miningStats.hardRockBounceRelief;
         result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
@@ -2176,11 +2276,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningHullDirY = mining.hullDirY;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
         const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
-        const double pressureX = -mining.recoilX;
-        const double pressureY = -mining.recoilY;
-        const double movePressure = mining.moveX * pressureX + mining.moveY * pressureY;
-        const bool activelyPressingContact = (mining.drilling && targetDrillable) || movePressure > 0.20;
-        result.miningBounce = activelyPressingContact ? mining.contactBounce : 0.0;
+        result.miningBounce = mining.contactBounce;
         result.miningInputDrilling = mining.drilling;
         result.miningTargetDrillable = targetDrillable;
         result.miningDrilling = mining.drilling && targetDrillable;
@@ -2219,10 +2315,15 @@ RenderSnapshot RocketGameApp::snapshot() const
                 static_cast<int>(agent.behavior),
                 agent.targetCellX,
                 agent.targetCellY,
-                agent.targetEnemyIndex
+                agent.targetEnemyIndex,
+                agent.surveyPulseSeconds,
+                agent.defenseAngleRadians,
+                agent.shieldCharge,
+                agent.shieldRechargeSeconds,
+                agent.shieldImpactSeconds,
+                agent.haulMaterials
             });
         }
-        result.miningShieldActive = mining.environmentalShieldAbsorbed > 0.0 || result.miningDefenseDroneCount > 0;
         result.miningMaterials = mining.temporaryMaterials;
         result.miningStowedMaterials = mining.stowedMaterials;
         if (mining.artifact.present) {
@@ -2254,7 +2355,8 @@ RenderSnapshot RocketGameApp::snapshot() const
                     static_cast<int>(cell.material),
                     integrity,
                     cell.revealed,
-                    cell.hazard
+                    cell.hazard,
+                    static_cast<int>(cell.hazardAffinity)
                 });
             }
         }
@@ -2272,7 +2374,11 @@ RenderSnapshot RocketGameApp::snapshot() const
                 enemy.maxHealth,
                 enemy.effectRadius,
                 enemy.attackCooldownSeconds,
-                enemy.active
+                enemy.active,
+                enemy.spawn.spawned,
+                enemy.spawn.maxSpawns,
+                enemy.spawn.cooldownSeconds,
+                enemy.spawn.intervalSeconds
             });
         }
         result.miningProjectiles.reserve(mining.combatProjectiles.size());

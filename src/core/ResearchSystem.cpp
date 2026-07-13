@@ -1655,7 +1655,7 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
         content::drone::miningDrone,
         content::drone::resourceDrone,
         content::drone::surveyDrone,
-        content::drone::stabilizerDrone
+        content::drone::hazardDrone
     };
     for (std::string_view droneId : starterDrones) {
         if (catalog.findMiniDrone(droneId) != nullptr
@@ -1842,7 +1842,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     int miningDrones = 0;
     int resourceDrones = 0;
     int surveyDrones = 0;
-    int stabilizerDrones = 0;
+    int hazardDrones = 0;
     int attackDrones = 0;
     int defenseDrones = 0;
     for (const std::string& droneId : state.meta.equippedDroneIds) {
@@ -1876,8 +1876,8 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         case MiniDroneRole::Survey:
             surveyDrones += 1;
             break;
-        case MiniDroneRole::Stabilizer:
-            stabilizerDrones += 1;
+        case MiniDroneRole::Hazard:
+            hazardDrones += 1;
             break;
         case MiniDroneRole::Attack:
             attackDrones += 1;
@@ -1909,11 +1909,10 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.enemySlow += 0.04;
         addSynergy("Excavation Barrage");
     }
-    if (defenseDrones > 0 && stabilizerDrones > 0) {
-        effects.drillIntegrityRelief += 0.05;
+    if (defenseDrones > 0 && hazardDrones > 0) {
         effects.environmentalShieldRelief += 0.06;
-        effects.hardRockBounceRelief += 0.08;
-        addSynergy("Bulwark Harness");
+        effects.hazardTreatmentRateBonus += 0.15;
+        addSynergy("Containment Screen");
     }
     if (miningDrones > 0 && resourceDrones > 0) {
         effects.passiveMiningRate += 0.035;
@@ -1933,7 +1932,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.signatureDetail = std::move(detail);
         effects.signatureTier = tier;
     };
-    if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && stabilizerDrones > 0) {
+    if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && hazardDrones > 0) {
         effects.alliedCritChanceBonus += 0.05;
         effects.alliedFireRateBonus += 0.10;
         effects.sentryVolleyBonus += 1;
@@ -1944,7 +1943,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         setSignature(
             MiniDroneSignatureKind::FullSpectrumSwarm,
             "Full Spectrum Swarm",
-            "Every drone bay role is online: sentries volley, scanners paint targets, shields hold the rig, and logistics keep the dig alive.",
+            "Every drone bay role is online: sentries volley, scanners paint targets, hazards are treated, shields hold, and logistics keep the dig alive.",
             3);
     } else if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0) {
         effects.alliedCritChanceBonus += 0.06;
@@ -1966,15 +1965,15 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
             "Excavation Storm",
             "Mining, Resource, and Attack drones keep ore flowing while combat pulses punish enemies that enter the work zone.",
             2);
-    } else if (defenseDrones > 0 && stabilizerDrones > 0 && resourceDrones > 0) {
-        effects.drillIntegrityRelief += 0.06;
+    } else if (defenseDrones > 0 && hazardDrones > 0 && resourceDrones > 0) {
         effects.environmentalShieldRelief += 0.05;
         effects.reactiveArmorDamagePerSecond += 0.35;
         effects.oxygenSeconds += 10.0;
+        effects.hazardTreatmentRateBonus += 0.10;
         setSignature(
-            MiniDroneSignatureKind::FortressRig,
-            "Fortress Rig",
-            "Defense, Stabilizer, and Resource drones bias the build toward long digs: more shields, more reserve time, and harder counter-hits.",
+            MiniDroneSignatureKind::ContainmentRig,
+            "Containment Rig",
+            "Defense, Hazard, and Resource drones sustain long digs with faster treatment, stronger shields, reserve time, and counter-hits.",
             2);
     } else if (miningDrones > 0 && resourceDrones > 0 && surveyDrones > 0) {
         effects.passiveMiningRate += 0.020;
@@ -1999,6 +1998,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     effects.enemySlow = std::clamp(effects.enemySlow, 0.0, 0.45);
     effects.reactiveArmorDamagePerSecond = std::clamp(effects.reactiveArmorDamagePerSecond, 0.0, 4.0);
     effects.environmentalShieldRelief = std::clamp(effects.environmentalShieldRelief, 0.0, 0.35);
+    effects.hazardTreatmentRateBonus = std::clamp(effects.hazardTreatmentRateBonus, 0.0, 0.25);
     effects.alliedCritChanceBonus = std::clamp(effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum - tuning::mining::alliedCritChance);
     effects.alliedFireRateBonus = std::clamp(effects.alliedFireRateBonus, 0.0, tuning::mining::alliedFireRateBonusMaximum);
     effects.sentryVolleyBonus = std::clamp(effects.sentryVolleyBonus, 0, tuning::mining::alliedSentryVolleyMaximum);

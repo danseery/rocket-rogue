@@ -1,6 +1,7 @@
 #include "core/SaveData.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveSchema.h"
 #include "core/Tuning.h"
@@ -292,6 +293,8 @@ int miningEnemyTypeToInt(MiningEnemyType enemy)
         return 4;
     case MiningEnemyType::Mammal:
         return 5;
+    case MiningEnemyType::Spawner:
+        return 6;
     }
     return 0;
 }
@@ -309,6 +312,8 @@ MiningEnemyType miningEnemyTypeFromInt(int value)
         return MiningEnemyType::Elemental;
     case 5:
         return MiningEnemyType::Mammal;
+    case 6:
+        return MiningEnemyType::Spawner;
     default:
         return MiningEnemyType::None;
     }
@@ -692,7 +697,8 @@ std::string serializeMiningCells(const MiningTerrain& terrain)
             << save_schema::crewFieldDelimiter << (cell.revealed ? 1 : 0)
             << save_schema::crewFieldDelimiter << (cell.hazard ? 1 : 0)
             << save_schema::crewFieldDelimiter << miningCellFeatureToInt(cell.feature)
-            << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(cell.enemy);
+            << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(cell.enemy)
+            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(cell.hazardAffinity);
     }
     return out.str();
 }
@@ -725,6 +731,9 @@ void parseMiningCells(std::string_view text, MiningTerrain& terrain)
         }
         if (fields.size() > 6) {
             cell.enemy = miningEnemyTypeFromInt(parseInt(fields[6], 0));
+        }
+        if (fields.size() > 7) {
+            cell.hazardAffinity = miningElementalAffinityFromInt(parseInt(fields[7], 0));
         }
         terrain.cells.push_back(cell);
     }
@@ -794,7 +803,13 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.effectRadius
             << save_schema::crewFieldDelimiter << (enemy.active ? 1 : 0)
             << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(enemy.affinity)
-            << save_schema::crewFieldDelimiter << enemy.attackCooldownSeconds;
+            << save_schema::crewFieldDelimiter << enemy.attackCooldownSeconds
+            << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(enemy.spawn.enemyType)
+            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(enemy.spawn.affinity)
+            << save_schema::crewFieldDelimiter << enemy.spawn.maxSpawns
+            << save_schema::crewFieldDelimiter << enemy.spawn.spawned
+            << save_schema::crewFieldDelimiter << enemy.spawn.intervalSeconds
+            << save_schema::crewFieldDelimiter << enemy.spawn.cooldownSeconds;
     }
     return out.str();
 }
@@ -854,6 +869,24 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         if (fields.size() > 14) {
             enemy.attackCooldownSeconds = parseDouble(fields[14], enemy.attackCooldownSeconds);
         }
+        if (fields.size() > 15) {
+            enemy.spawn.enemyType = miningEnemyTypeFromInt(parseInt(fields[15], 0));
+        }
+        if (fields.size() > 16) {
+            enemy.spawn.affinity = miningElementalAffinityFromInt(parseInt(fields[16], 0));
+        }
+        if (fields.size() > 17) {
+            enemy.spawn.maxSpawns = std::max(0, parseInt(fields[17], 0));
+        }
+        if (fields.size() > 18) {
+            enemy.spawn.spawned = std::clamp(parseInt(fields[18], 0), 0, enemy.spawn.maxSpawns);
+        }
+        if (fields.size() > 19) {
+            enemy.spawn.intervalSeconds = std::max(0.0, parseDouble(fields[19], 0.0));
+        }
+        if (fields.size() > 20) {
+            enemy.spawn.cooldownSeconds = std::max(0.0, parseDouble(fields[20], 0.0));
+        }
         enemies.push_back(enemy);
     }
     return enemies;
@@ -879,7 +912,17 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << agent.targetCellY
             << save_schema::crewFieldDelimiter << agent.targetEnemyIndex
             << save_schema::crewFieldDelimiter << agent.actionCooldownSeconds
-            << save_schema::crewFieldDelimiter << (agent.finishTargetBeforeReturn ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (agent.finishTargetBeforeReturn ? 1 : 0)
+            << save_schema::crewFieldDelimiter << agent.surveyPulseSeconds
+            << save_schema::crewFieldDelimiter << agent.haulMaterials.common
+            << save_schema::crewFieldDelimiter << agent.haulMaterials.rare
+            << save_schema::crewFieldDelimiter << agent.haulMaterials.exotic
+            << save_schema::crewFieldDelimiter << agent.taskProgressSeconds
+            << save_schema::crewFieldDelimiter << agent.defenseAngleRadians
+            << save_schema::crewFieldDelimiter << (agent.defenseAngleInitialized ? 1 : 0)
+            << save_schema::crewFieldDelimiter << agent.shieldCharge
+            << save_schema::crewFieldDelimiter << agent.shieldRechargeSeconds
+            << save_schema::crewFieldDelimiter << agent.shieldImpactSeconds;
     }
     return out.str();
 }
@@ -924,6 +967,36 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         }
         if (fields.size() > 12) {
             agent.finishTargetBeforeReturn = parseInt(fields[12], 0) != 0;
+        }
+        if (fields.size() > 13) {
+            agent.surveyPulseSeconds = std::max(0.0, parseDouble(fields[13], agent.surveyPulseSeconds));
+        }
+        if (fields.size() > 14) {
+            agent.haulMaterials.common = std::max(0, parseInt(fields[14], agent.haulMaterials.common));
+        }
+        if (fields.size() > 15) {
+            agent.haulMaterials.rare = std::max(0, parseInt(fields[15], agent.haulMaterials.rare));
+        }
+        if (fields.size() > 16) {
+            agent.haulMaterials.exotic = std::max(0, parseInt(fields[16], agent.haulMaterials.exotic));
+        }
+        if (fields.size() > 17) {
+            agent.taskProgressSeconds = std::max(0.0, parseDouble(fields[17], agent.taskProgressSeconds));
+        }
+        if (fields.size() > 18) {
+            agent.defenseAngleRadians = parseDouble(fields[18], agent.defenseAngleRadians);
+        }
+        if (fields.size() > 19) {
+            agent.defenseAngleInitialized = parseInt(fields[19], 0) != 0;
+        }
+        if (fields.size() > 20) {
+            agent.shieldCharge = std::clamp(parseDouble(fields[20], agent.shieldCharge), 0.0, 1.0);
+        }
+        if (fields.size() > 21) {
+            agent.shieldRechargeSeconds = std::max(0.0, parseDouble(fields[21], agent.shieldRechargeSeconds));
+        }
+        if (fields.size() > 22) {
+            agent.shieldImpactSeconds = std::max(0.0, parseDouble(fields[22], agent.shieldImpactSeconds));
         }
         agents.push_back(agent);
     }
@@ -1103,6 +1176,85 @@ void normalizeLegacyMiningReturnZone(MiningRunState& mining)
     mining.drillIntegrity = std::clamp(mining.drillIntegrity, 0.0, 1.0);
     mining.stowedCargo = std::max(0, mining.stowedCargo);
     mining.cargo = std::max(0, mining.cargo);
+}
+
+MiningElementalAffinity legacyHazardAffinity(const MiningRunState& mining, int x)
+{
+    if (mining.destinationId == content::destination::moon ||
+        mining.destinationId == content::destination::outerPlanets) {
+        return MiningElementalAffinity::Cryo;
+    }
+    if (mining.destinationId == content::destination::mars) {
+        return MiningElementalAffinity::Thermal;
+    }
+    if (mining.destinationId == content::destination::nearbyStar) {
+        if (mining.siteProfile == SurfaceSiteProfile::FractureField) {
+            return MiningElementalAffinity::Toxic;
+        }
+        return mining.depthZone <= 0
+            ? MiningElementalAffinity::Thermal
+            : MiningElementalAffinity::Radiation;
+    }
+    if (mining.destinationId == content::destination::nearbyGalaxy) {
+        return (x / 4) % 2 == 0
+            ? MiningElementalAffinity::Radiation
+            : MiningElementalAffinity::Toxic;
+    }
+    return MiningElementalAffinity::Thermal;
+}
+
+void normalizeLegacyMiningHazards(MiningRunState& mining)
+{
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        for (int x = 0; x < mining.terrain.width; ++x) {
+            MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            if (cell == nullptr || cell->material != MiningCellMaterial::HazardPocket) {
+                continue;
+            }
+            cell->hazard = true;
+            if (cell->hazardAffinity == MiningElementalAffinity::None) {
+                cell->hazardAffinity = legacyHazardAffinity(mining, x);
+            }
+        }
+    }
+}
+
+void migrateLegacyHazardDroneRecords(MetaProgress& meta)
+{
+    auto replaceId = [](std::string& id) {
+        if (id == content::drone::legacyStabilizerDrone) {
+            id = content::drone::hazardDrone;
+        }
+    };
+    for (std::string& id : meta.ownedDroneIds) {
+        replaceId(id);
+    }
+    std::vector<std::string> uniqueOwned;
+    uniqueOwned.reserve(meta.ownedDroneIds.size());
+    for (const std::string& id : meta.ownedDroneIds) {
+        if (std::find(uniqueOwned.begin(), uniqueOwned.end(), id) == uniqueOwned.end()) {
+            uniqueOwned.push_back(id);
+        }
+    }
+    meta.ownedDroneIds = std::move(uniqueOwned);
+    for (std::string& id : meta.equippedDroneIds) {
+        replaceId(id);
+    }
+    for (DroneUpgradeRecord& record : meta.droneUpgrades) {
+        replaceId(record.droneId);
+    }
+    std::vector<DroneUpgradeRecord> merged;
+    for (const DroneUpgradeRecord& record : meta.droneUpgrades) {
+        const auto existing = std::find_if(merged.begin(), merged.end(), [&](const DroneUpgradeRecord& candidate) {
+            return candidate.droneId == record.droneId;
+        });
+        if (existing == merged.end()) {
+            merged.push_back(record);
+        } else {
+            existing->level = std::max(existing->level, record.level);
+        }
+    }
+    meta.droneUpgrades = std::move(merged);
 }
 
 std::vector<int> parseInts(std::string_view text)
@@ -1292,6 +1444,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     normalizeLegacyMiningArtifact(state.run.mining);
     normalizeLegacyMiningReturnZone(state.run.mining);
+    normalizeLegacyMiningHazards(state.run.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;
@@ -1301,6 +1454,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
     state.meta.droneUpgrades = save.droneUpgrades;
+    migrateLegacyHazardDroneRecords(state.meta);
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
         state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;

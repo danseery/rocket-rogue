@@ -147,6 +147,7 @@ inline std::string activeThreatSummary(const MiningRunState& mining)
     int beetles = 0;
     int elementals = 0;
     int mammals = 0;
+    int spawners = 0;
     int bosses = 0;
     for (const MiningEnemy& enemy : mining.enemies) {
         if (!enemy.active) {
@@ -168,6 +169,9 @@ inline std::string activeThreatSummary(const MiningRunState& mining)
         case MiningEnemyType::Mammal:
             mammals += 1;
             break;
+        case MiningEnemyType::Spawner:
+            spawners += 1;
+            break;
         case MiningEnemyType::None:
             break;
         }
@@ -187,6 +191,7 @@ inline std::string activeThreatSummary(const MiningRunState& mining)
     addPart("Beetle", beetles);
     addPart("Elemental", elementals);
     addPart("Mammal", mammals);
+    addPart("Spawner", spawners);
     addPart("Boss", bosses);
     if (parts.empty()) {
         return "None";
@@ -330,7 +335,13 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     if (mining.artifact.present) {
         presentation.details.push_back(detailPresentationRow("Artifact recovery", std::string("Expose the object, press T nearby to tether, pull it to the ship ring, and avoid drilling or bouncing it.")));
     }
-    if (mining.failurePending) {
+    if (!mining.active) {
+        presentation.commandTitle = "Extraction secured";
+        presentation.commandDetail = "Payload banked. Departure sequence in progress.";
+        presentation.actions = {
+            disabledPanelButton("Departure in progress")
+        };
+    } else if (mining.failurePending) {
         presentation.commandTitle = "Systems offline";
         presentation.commandDetail = "Recall in progress";
         presentation.actions = {

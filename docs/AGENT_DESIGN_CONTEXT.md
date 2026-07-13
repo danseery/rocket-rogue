@@ -68,7 +68,7 @@ Early drone roles:
 - Mining: passive nearby ore work.
 - Resource: oxygen/fuel reserve and run extension.
 - Survey: scanner radius, POI hints, fog-of-war reads.
-- Stabilizer: lower chatter, bounce, and drill wear.
+- Hazard: actively converts revealed Thermal/Cryo pockets at Mk I, Toxic at Mk II, and Radiation at Mk III into safe mineable terrain.
 
 Post-solar drone roles:
 

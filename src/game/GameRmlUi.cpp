@@ -585,6 +585,7 @@ struct ModalTemplate {
     std::string title;
     std::string body;
     bool autoOpen = false;
+    bool dismissible = true;
 };
 
 struct ElementButtonBinding {
@@ -641,6 +642,7 @@ std::vector<ModalTemplate> extractModals(const std::string& html)
         modal.id = attributeValue(tag, "data-modal");
         modal.title = attributeValue(tag, "data-title");
         modal.autoOpen = attributeValue(tag, "data-auto-modal") == "1";
+        modal.dismissible = attributeValue(tag, "data-modal-dismissible") != "0";
         modal.body = html.substr(tagEnd + 1, close - tagEnd - 1);
         if (!modal.id.empty()) {
             modals.push_back(std::move(modal));
@@ -742,7 +744,7 @@ std::string normalizeBooleanAttributes(std::string html)
 {
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
-        "data-flyby-run", "data-flyby-stamp", "data-orbit-run", "data-orbit-stamp",
+        "data-flyby-run", "data-orbit-run",
         "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-game-speed-settings", "data-game-speed-select",
         "data-debug-tools-settings", "data-debug-tools-toggle"
     };
@@ -1172,6 +1174,9 @@ RmlPanelMode panelModeForHtml(std::string_view html)
     if (html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         return RmlPanelMode::ArrivalFanfare;
     }
+    if (html.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos) {
+        return RmlPanelMode::MissionStamp;
+    }
     if (html.find("data-panel-mode=\"phase-board\"") != std::string_view::npos) {
         return RmlPanelMode::PhaseBoard;
     }
@@ -1188,9 +1193,9 @@ bool panelUsesMiningFullscreen(RmlPanelMode mode)
     return mode == RmlPanelMode::MiningFullscreen;
 }
 
-bool panelUsesArrivalFanfare(RmlPanelMode mode)
+bool panelUsesMissionStamp(RmlPanelMode mode)
 {
-    return mode == RmlPanelMode::ArrivalFanfare;
+    return mode == RmlPanelMode::ArrivalFanfare || mode == RmlPanelMode::MissionStamp;
 }
 
 bool panelUsesSurfaceOps(std::string_view html)
@@ -1223,6 +1228,13 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
     if (mode == RmlPanelMode::ArrivalFanfare) {
         const int width = std::clamp(viewportWidth - 48, 320, 520);
         const int height = std::clamp(viewportHeight - 48, 210, 258);
+        const int left = std::max(16, (viewportWidth - width) / 2);
+        const int top = std::max(16, (viewportHeight - height) / 2 - 24);
+        return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
+    }
+    if (mode == RmlPanelMode::MissionStamp) {
+        const int width = std::clamp(viewportWidth - 48, 320, 560);
+        const int height = std::clamp(viewportHeight - 48, 230, 270);
         const int left = std::max(16, (viewportWidth - width) / 2);
         const int top = std::max(16, (viewportHeight - height) / 2 - 24);
         return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
@@ -1261,7 +1273,7 @@ std::string panelRcss(RmlPanelMode mode)
     const Rml::Rectanglei bounds = panelBounds(mode);
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
-    const int arrivalTitleSize = panelWidth < 420 ? 34 : 46;
+    const int arrivalTitleSize = mode == RmlPanelMode::MissionStamp ? (panelWidth < 420 ? 31 : 40) : (panelWidth < 420 ? 34 : 46);
     const int left = bounds.Left();
     const int top = bounds.Top();
     const bool compactMining = panelWidth < 1220;
@@ -2532,8 +2544,8 @@ scrollbarhorizontal sliderbar {
 .phase-board-drone-ops .drone-loadout-slot.role-survey {
     border-color: rgba(183, 132, 255, 0.34);
 }
-.phase-board-drone-ops .drone-loadout-slot.role-stabilizer {
-    border-color: rgba(137, 178, 211, 0.34);
+.phase-board-drone-ops .drone-loadout-slot.role-hazard {
+    border-color: rgba(106, 224, 166, 0.42);
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-topline {
     width: 196px;
@@ -5190,9 +5202,10 @@ button {
     min-height: 34px;
 }
 .phase-board-drone-ops .drone-control-card {
-    height: 142px;
-    min-height: 142px;
+    height: 208px;
+    min-height: 208px;
     padding: 8px;
+    overflow: hidden;
 }
 .phase-board-drone-ops .drone-control-card.rarity-common {
     border-color: #31566b;
@@ -5256,13 +5269,23 @@ button {
 }
 .phase-board-drone-ops .drone-control-card .stat-grid {
     width: 184px;
-    min-height: 42px;
+    height: 104px;
+    min-height: 104px;
+    max-height: 104px;
     margin-top: 5px;
+    gap: 2px;
+    row-gap: 2px;
+    column-gap: 2px;
+    overflow: hidden;
 }
 .phase-board-drone-ops .drone-control-card .stat-chip {
-    width: 104px;
+    width: 160px;
+    max-width: 160px;
     min-height: 15px;
     padding: 2px 5px;
+}
+.phase-board-drone-ops .drone-control-card .stat-chip.wide {
+    width: 160px;
 }
 .phase-board-drone-ops .drone-control-card .card-footer {
     width: 184px;
@@ -5585,7 +5608,7 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
     const bool phaseBoard = panelUsesPhaseBoard(panelMode);
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
-    const bool arrivalFanfare = panelUsesArrivalFanfare(panelMode);
+    const bool arrivalFanfare = panelUsesMissionStamp(panelMode);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
     const bool droneOps = panelUsesDroneOps(panelHtml);
     const bool navigation = panelUsesNavigation(panelHtml);
@@ -5617,7 +5640,11 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
         document += "<div id=\"rr-modal-scrim\"></div>";
         document += "<div id=\"rr-modal\" class=\"modal-" + activeModalId + "\"><div class=\"modal-head\"><h2>";
         document += modal->title;
-        document += "</h2><button class=\"ghost\" data-ui-close-modal=\"1\">Close</button></div>";
+        document += "</h2>";
+        if (modal->dismissible) {
+            document += "<button class=\"ghost\" data-ui-close-modal=\"1\">Close</button>";
+        }
+        document += "</div>";
         document += syncSettingsControls(sanitizeRml(modal->body));
         document += "</div>";
     }

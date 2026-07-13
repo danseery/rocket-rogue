@@ -120,6 +120,31 @@ std::string button(std::string_view label, std::string_view action, std::string 
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\">" + htmlEscape(label) + "</button>";
 }
 
+std::string missionStamp(
+    std::string_view kicker,
+    std::string_view title,
+    std::string_view detail,
+    std::string_view tagOne,
+    std::string_view tagTwo,
+    std::string_view tagThree,
+    std::string_view continueAction)
+{
+    std::ostringstream out;
+    out << "<section class=\"arrival-fanfare-panel\">"
+        << "<span class=\"arrival-stamp-kicker\">" << htmlEscape(kicker) << "</span>"
+        << "<h2 class=\"arrival-stamp-title\">" << htmlEscape(title) << "</h2>"
+        << "<strong class=\"arrival-stamp-destination\">" << htmlEscape(detail) << "</strong>"
+        << "<div class=\"arrival-stamp-tags\"><span>" << htmlEscape(tagOne)
+        << "</span><span>" << htmlEscape(tagTwo) << "</span>";
+    if (!tagThree.empty()) {
+        out << "<span class=\"gold\">" << htmlEscape(tagThree) << "</span>";
+    }
+    out << "</div>"
+        << button("Click or press Space to continue", continueAction, "arrival-stamp-continue")
+        << "</section>";
+    return out.str();
+}
+
 std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
@@ -131,9 +156,10 @@ std::string modalTemplate(std::string_view modalId, std::string_view title, std:
     return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
 }
 
-std::string autoModalTemplate(std::string_view modalId, std::string_view title, std::string body)
+std::string autoModalTemplate(std::string_view modalId, std::string_view title, std::string body, bool dismissible = true)
 {
-    return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-auto-modal=\"1\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+    return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-auto-modal=\"1\" data-modal-dismissible=\"" +
+        (dismissible ? "1" : "0") + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
 }
 
 std::string disabledButton(std::string_view label)
@@ -179,6 +205,21 @@ std::string miningVitalAlertClass(
     const double pulseRate = severity == "critical" ? 1.55 : 1.15;
     return std::string(vitalClass) + " mining-alert-" + severity + " mining-alert-pulse-" +
         std::to_string(miningAlertPulseBucket(elapsedSeconds, pulseRate));
+}
+
+std::string miningDrillHeatAlertClass(double heat, double elapsedSeconds)
+{
+    if (heat >= tuning::mining::drillHeatFlashThreshold) {
+        return "mining-vital-heat mining-alert-critical mining-alert-pulse-" +
+            std::to_string(miningAlertPulseBucket(elapsedSeconds, 1.55));
+    }
+    if (heat >= tuning::mining::drillHeatCriticalThreshold) {
+        return "mining-vital-heat mining-alert-critical";
+    }
+    if (heat >= tuning::mining::drillHeatCautionThreshold) {
+        return "mining-vital-heat mining-alert-caution";
+    }
+    return "mining-vital-heat mining-alert-nominal";
 }
 
 std::string statChip(const RefitStatChip& chip)
@@ -587,8 +628,8 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade)
 std::string miniDroneControlCard(const MiniDroneCardPresentation& drone)
 {
     std::vector<PanelMetricPresentation> chips;
-    chips.reserve(std::min<std::size_t>(drone.effectChips.size(), 2));
-    for (std::size_t i = 0; i < drone.effectChips.size() && i < 2; ++i) {
+    chips.reserve(std::min<std::size_t>(drone.effectChips.size(), 4));
+    for (std::size_t i = 0; i < drone.effectChips.size() && i < 4; ++i) {
         chips.push_back(drone.effectChips[i]);
     }
 
@@ -1250,18 +1291,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const bool closeCall = !launchOutcomeAchievements(state.lastOutcome).empty();
         out << "<div data-panel-mode=\"arrival-fanfare\" data-arrival-fanfare=\"1\" data-arrival-destination=\"" << htmlEscape(destinationName)
             << "\" data-arrival-close-call=\"" << (closeCall ? "1" : "0") << "\" hidden></div>";
-        out << "<section class=\"arrival-fanfare-panel\">";
-        out << "<span class=\"arrival-stamp-kicker\">" << htmlEscape("Mission stamp") << "</span>";
-        out << "<h2 class=\"arrival-stamp-title\">" << htmlEscape("Arrival confirmed") << "</h2>";
-        out << "<strong class=\"arrival-stamp-destination\">" << htmlEscape(destinationName + " approach window open") << "</strong>";
-        out << "<div class=\"arrival-stamp-tags\"><span>" << htmlEscape("Flight data secured")
-            << "</span><span>" << htmlEscape("Approach window open") << "</span>";
-        if (closeCall) {
-            out << "<span class=\"gold\">" << htmlEscape("Close call bonus") << "</span>";
-        }
-        out << "</div>";
-        out << button("Click or press Space to continue", ui::actions::skipArrivalFanfare, "arrival-stamp-continue");
-        out << "</section>";
+        out << missionStamp(
+            "Mission stamp",
+            "Arrival confirmed",
+            destinationName + " approach window open",
+            "Flight data secured",
+            "Approach window open",
+            closeCall ? "Close call bonus" : "",
+            ui::actions::skipArrivalFanfare);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -1277,25 +1314,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const double perfectShare = flyby.perfectSeconds / activeSeconds;
         const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
 
-        out << "<div data-flyby-run=\"1\" data-flyby-completed=\"" << (flyby.completed ? "1" : "0") << "\" hidden></div>";
-        out << "<h2>" << htmlEscape("Manual Flyby") << "</h2>";
-        out << "<p class=\"phase-copy\">" << htmlEscape("Steer through " + destinationName + "'s approach corridor. Perfect timing creates a slingshot window for the next launch.") << "</p>";
-        const std::string zoneValue = flyby.collidedWithBody
-            ? "Impact"
-            : (flyby.completed ? flybyGradeLabel(grade) : flybyZoneLabel(flyby.currentZone));
-
-        out << "<div class=\"metric-grid flight-readout\">"
-            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << metric("Speed", flybySpeedLabel(flyby))
-            << metric("Zone", zoneValue)
-            << metric("Good hold", display::percent(goodShare))
-            << metric("Perfect hold", display::percent(perfectShare))
-            << metric("Reward", "x" + display::fixed(flyby.rewardBonusScale, 1))
-            << metric("Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1))
-            << "</div>";
-
         if (flyby.completed) {
-            const std::string resultTitle = flyby.collidedWithBody ? "IMPACT RECORDED" : flybyGradeLabel(grade);
+            const std::string resultTitle = flyby.collidedWithBody ? "Impact recorded" : flybyGradeLabel(grade);
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
             const double flybyFuelBoost = flyby.slingshotAwarded ? flyby.slingshotFuelBoost : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
             const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
@@ -1317,25 +1337,37 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 : (grade == FlybyGrade::Perfect
                     ? "+" + display::fixed(flybyFuelBoost, 1) + " fuel, +" + display::fixed(flybySpeedBoost, 2) + " speed"
                     : (grade == FlybyGrade::Good ? "Clean exit gate" : "Retry from approach"));
-            out << "<div data-flyby-stamp=\"1\" data-flyby-title=\"" << htmlEscape(resultTitle)
-                << "\" data-flyby-body=\"" << htmlEscape(resultBody)
-                << "\" data-flyby-tag-one=\"" << htmlEscape(tagOne)
-                << "\" data-flyby-tag-two=\"" << htmlEscape(tagTwo)
-                << "\" data-flyby-tag-three=\"" << htmlEscape(tagThree)
-                << "\" hidden></div>";
+            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" hidden></div>";
+            out << missionStamp("Flyby stamp", resultTitle, resultBody, tagOne, tagTwo, tagThree, ui::actions::flybyContinue);
+            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+            out << inventoryTemplate(state, catalog);
+            return out.str();
         }
+
+        out << "<div data-flyby-run=\"1\" data-flyby-completed=\"0\" hidden></div>";
+        out << "<h2>" << htmlEscape("Manual Flyby") << "</h2>";
+        out << "<p class=\"phase-copy\">" << htmlEscape("Steer through " + destinationName + "'s approach corridor. Perfect timing creates a slingshot window for the next launch.") << "</p>";
+        const std::string zoneValue = flyby.collidedWithBody
+            ? "Impact"
+            : flybyZoneLabel(flyby.currentZone);
+
+        out << "<div class=\"metric-grid flight-readout\">"
+            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << metric("Speed", flybySpeedLabel(flyby))
+            << metric("Zone", zoneValue)
+            << metric("Good hold", display::percent(goodShare))
+            << metric("Perfect hold", display::percent(perfectShare))
+            << metric("Reward", "x" + display::fixed(flyby.rewardBonusScale, 1))
+            << metric("Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1))
+            << "</div>";
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape("Flyby controls") << "</span><strong>"
-            << htmlEscape(flyby.completed ? "Confirm the result" : "W/S speed, A/D rotate") << "</strong></div>";
-        if (flyby.completed) {
-            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Result locked. Click the mission stamp or press Space to continue.") << "</p>";
-        } else {
-            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("W/Up faster, S/Down slower. A/Left rotates counter-clockwise; D/Right rotates clockwise. Escape aborts as a Miss.") << "</p>";
-            out << "<div class=\"actions action-row primary-actions\">"
-                << panelButton(panelActionButton("Abort flyby", ui::actions::flybyAbort, "danger"))
-                << "</div>";
-        }
+            << htmlEscape("W/S speed, A/D rotate") << "</strong></div>";
+        out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("W/Up faster, S/Down slower. A/Left rotates counter-clockwise; D/Right rotates clockwise. Escape aborts as a Miss.") << "</p>";
+        out << "<div class=\"actions action-row primary-actions\">"
+            << panelButton(panelActionButton("Abort flyby", ui::actions::flybyAbort, "danger"))
+            << "</div>";
         out << "</section>";
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
@@ -1362,10 +1394,23 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             ? tuning::orbit::perfectBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0)
             : (grade == OrbitGrade::Good ? tuning::orbit::goodBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0) : 0);
 
-        out << "<div data-orbit-run=\"1\" data-orbit-completed=\"" << (orbit.completed ? "1" : "0") << "\" hidden></div>";
+        if (orbit.completed) {
+            const std::string resultTitle = orbitGradeLabel(grade);
+            const std::string resultBody = orbitResultBody(grade);
+            const std::string tagOne = grade == OrbitGrade::Miss ? "No orbit data" : "Orbit data secured";
+            const std::string tagTwo = grade == OrbitGrade::Miss ? "No science bonus" : "+" + std::to_string(blueprintGain) + " science";
+            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits) + " credits";
+            out << "<div data-panel-mode=\"mission-stamp\" data-orbit-run=\"1\" data-orbit-completed=\"1\" hidden></div>";
+            out << missionStamp("Orbit stamp", resultTitle, resultBody, tagOne, tagTwo, tagThree, ui::actions::orbitContinue);
+            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+            out << inventoryTemplate(state, catalog);
+            return out.str();
+        }
+
+        out << "<div data-orbit-run=\"1\" data-orbit-completed=\"0\" hidden></div>";
         out << "<h2>" << htmlEscape("Orbital Research") << "</h2>";
         out << "<p class=\"phase-copy\">" << htmlEscape("Nudge the ship around " + destinationName + ". Complete one full loop inside the orbital research band before the timer closes.") << "</p>";
-        const std::string zoneValue = orbit.completed ? orbitGradeLabel(grade) : orbitZoneLabel(orbit.currentZone);
+        const std::string zoneValue = orbitZoneLabel(orbit.currentZone);
 
         out << "<div class=\"metric-grid flight-readout\">"
             << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
@@ -1376,50 +1421,32 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << metric("Reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits))
             << "</div>";
 
-        if (orbit.completed) {
-            const std::string resultTitle = orbitGradeLabel(grade);
-            const std::string resultBody = orbitResultBody(grade);
-            const std::string tagOne = grade == OrbitGrade::Miss ? "No orbit data" : "Orbit data secured";
-            const std::string tagTwo = grade == OrbitGrade::Miss ? "No science bonus" : "+" + std::to_string(blueprintGain) + " science";
-            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits) + " credits";
-            out << "<div data-orbit-stamp=\"1\" data-orbit-title=\"" << htmlEscape(resultTitle)
-                << "\" data-orbit-body=\"" << htmlEscape(resultBody)
-                << "\" data-orbit-tag-one=\"" << htmlEscape(tagOne)
-                << "\" data-orbit-tag-two=\"" << htmlEscape(tagTwo)
-                << "\" data-orbit-tag-three=\"" << htmlEscape(tagThree)
-                << "\" hidden></div>";
-        }
-
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape("Orbit controls") << "</span><strong>"
-            << htmlEscape(orbit.completed ? "Confirm the result" : "Small WASD corrections") << "</strong></div>";
-        if (orbit.completed) {
-            out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Result locked. Click the mission stamp or press Space to continue.") << "</p>";
-        } else {
-            const auto orbitControlCard = [&](std::string_view className, std::string_view key, std::string_view title, std::string_view detail) {
-                out << "<div class=\"orbit-control-card " << className << "\">"
-                    << "<div class=\"orbit-keycap\">" << htmlEscape(std::string(key)) << "</div>"
-                    << "<div><strong>" << htmlEscape(std::string(title)) << "</strong>"
-                    << "<span>" << htmlEscape(std::string(detail)) << "</span></div>"
-                    << "</div>";
-            };
-            out << "<div class=\"orbit-control-panel\">"
-                << "<div class=\"orbit-trim-scope\" aria-hidden=\"true\">"
-                << "<div class=\"orbit-trim-axis\"></div>"
-                << "<div class=\"orbit-trim-ship\"></div>"
-                << "<div class=\"orbit-trim-label\">" << htmlEscape("Trim scope") << "</div>"
-                << "</div>"
-                << "<div class=\"orbit-key-grid\">";
-            orbitControlCard("prograde", "W", "Prograde", "Up arrow");
-            orbitControlCard("retrograde", "S", "Retrograde", "Down arrow");
-            orbitControlCard("widen", "D", "Widen", "Right arrow");
-            orbitControlCard("tighten", "A", "Tighten", "Left arrow");
-            out << "</div></div>";
-            out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Escape aborts as a Miss.") << "</p>";
-            out << "<div class=\"actions action-row primary-actions\">"
-                << panelButton(panelActionButton("Abort orbit", ui::actions::orbitAbort, "danger"))
+            << htmlEscape("Small WASD corrections") << "</strong></div>";
+        const auto orbitControlCard = [&](std::string_view className, std::string_view key, std::string_view title, std::string_view detail) {
+            out << "<div class=\"orbit-control-card " << className << "\">"
+                << "<div class=\"orbit-keycap\">" << htmlEscape(std::string(key)) << "</div>"
+                << "<div><strong>" << htmlEscape(std::string(title)) << "</strong>"
+                << "<span>" << htmlEscape(std::string(detail)) << "</span></div>"
                 << "</div>";
-        }
+        };
+        out << "<div class=\"orbit-control-panel\">"
+            << "<div class=\"orbit-trim-scope\" aria-hidden=\"true\">"
+            << "<div class=\"orbit-trim-axis\"></div>"
+            << "<div class=\"orbit-trim-ship\"></div>"
+            << "<div class=\"orbit-trim-label\">" << htmlEscape("Trim scope") << "</div>"
+            << "</div>"
+            << "<div class=\"orbit-key-grid\">";
+        orbitControlCard("prograde", "W", "Prograde", "Up arrow");
+        orbitControlCard("retrograde", "S", "Retrograde", "Down arrow");
+        orbitControlCard("widen", "D", "Widen", "Right arrow");
+        orbitControlCard("tighten", "A", "Tighten", "Left arrow");
+        out << "</div></div>";
+        out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Escape aborts as a Miss.") << "</p>";
+        out << "<div class=\"actions action-row primary-actions\">"
+            << panelButton(panelActionButton("Abort orbit", ui::actions::orbitAbort, "danger"))
+            << "</div>";
         out << "</section>";
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
@@ -1733,7 +1760,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         emitVitalIfPresent(text::fuel::reserveLabel(arkKnown), "mining-vital-fuel", fuelPressure);
         emitVitalIfPresent("Next fuel", "mining-vital-fuel-cadence", mining.fuelCycleProgress, true);
         emitVitalIfPresent(text::labels::drillBit, "mining-vital-drill", drillPressure, false, mining.drillIntegrity <= 0.0);
-        emitMetricIfPresent(text::labels::drillHeat);
+        if (const PanelMetricPresentation* item = metricFor(text::labels::drillHeat)) {
+            out << metric(
+                item->label,
+                item->value,
+                miningDrillHeatAlertClass(mining.drillHeat, mining.elapsedSeconds));
+        }
         emitVitalIfPresent(text::labels::load, "mining-vital-load", loadPressure);
         out << "</div><div class=\"mining-utility-cluster\"><span>" << htmlEscape("Systems")
             << "</span>" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
@@ -1815,7 +1847,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             failureBody << "<div class=\"modal-actions actions action-row\">"
                 << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"))
                 << "</div>";
-            out << autoModalTemplate(ui::modals::miningFailure, miningPanel.failureTitle, failureBody.str());
+            out << autoModalTemplate(ui::modals::miningFailure, miningPanel.failureTitle, failureBody.str(), false);
         }
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(miningPanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());

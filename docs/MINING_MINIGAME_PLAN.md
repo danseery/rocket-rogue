@@ -75,11 +75,12 @@ Controls:
 Mining terrain is generated from the destination, surface site profile, and depth:
 
 - Regolith and hard rock define tunneling speed and bounce.
-- Baseline hard-rock contact produces a broad, floaty rebound. Shock Mounts, Recoil Braces, and Stabilizer drones reduce that impulse so upgraded rigs can hold the drill on target.
+- Baseline hard-rock contact produces a broad, floaty rebound. Shock Mounts and Recoil Braces reduce that impulse so upgraded rigs can hold the drill on target.
 - After a hard contact, thrust eases back to full speed instead of snapping forward immediately; bounce relief starts the recovery closer to full control.
 - Common ore, rare ore, exotic veins, and artifact caches produce payload.
 - Exposed artifacts can be tethered across a 6.8-cell recovery envelope, and the towline keeps a visible trailing length instead of collapsing the relic into the drone.
-- Hazard pockets add integrity damage and extraction risk.
+- Hazard pockets use the same Thermal, Cryo, Toxic, and Radiation language as elemental threats. Their effects apply only while the drill contacts them: Thermal adds heat, Cryo slows movement, Toxic damages drill integrity, and Radiation raises extraction hazard.
+- Hazard drones convert revealed pockets into safe regolith, with Mk II and Mk III treating larger adjacent clusters and unlocking Toxic and Radiation remediation.
 - Bedrock blocks excavation.
 - Deeper or post-solar terrain can add rooms, vaults, hives, miniboss lairs, and boss chambers.
 
@@ -126,7 +127,7 @@ Solar-system mining should remain enemy-free. After the Ark gravity-well disaste
 - Hostile tunnel networks, encounter rooms, hives, miniboss lairs, and boss chambers.
 - Passive base defense plus independent Attack drone targeting and Defense drone interception.
 
-The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Mini-drones execute their own role behavior automatically: Mining drones work revealed cells, Survey drones add remote scan origins, Resource drones stay close, Stabilizers dock to the rig, Attack drones hold targets, and Defense drones intercept fire.
+The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Mini-drones execute their own role behavior automatically: Mining drones work revealed cells, Survey drones add remote scan origins, Resource drones stay close, Hazard drones remediate dangerous terrain, Attack drones hold targets, and Defense drones intercept fire.
 
 ## Implementation Boundaries
 

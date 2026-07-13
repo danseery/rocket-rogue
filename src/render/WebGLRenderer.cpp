@@ -36,6 +36,7 @@ constexpr float kMiningScannerPulseSeconds = 0.9F;
 constexpr float kMiningPickupTextLifetimeSeconds = 1.45F;
 constexpr int kMiningPickupCargoMaterial = -1;
 constexpr int kMiningBankedBurstMaterial = -2;
+constexpr int kMiningHazardTreatmentBurstMaterial = -3;
 
 enum ArtAsset {
     EarthAsset = 0,
@@ -68,7 +69,7 @@ enum ArtAsset {
     MiniDroneMiningAsset = 27,
     MiniDroneResourceAsset = 28,
     MiniDroneSurveyAsset = 29,
-    MiniDroneStabilizerAsset = 30,
+    MiniDroneHazardAsset = 30,
     MiniDroneAttackAsset = 31,
     MiniDroneDefenseAsset = 32
 };
@@ -108,6 +109,37 @@ Vec2 normalize(Vec2 vector)
         return {0.0F, 1.0F};
     }
     return {vector.x / length, vector.y / length};
+}
+
+Vec2 slerpDirection(Vec2 from, Vec2 to, float amount)
+{
+    from = normalize(from);
+    to = normalize(to);
+    const float clampedAmount = std::clamp(amount, 0.0F, 1.0F);
+    const float dot = std::clamp(from.x * to.x + from.y * to.y, -1.0F, 1.0F);
+    if (dot > 0.9995F) {
+        return normalize({
+            from.x + (to.x - from.x) * clampedAmount,
+            from.y + (to.y - from.y) * clampedAmount
+        });
+    }
+    if (dot < -0.9995F) {
+        const Vec2 side {-from.y, from.x};
+        const float angle = kPi * clampedAmount;
+        return normalize({
+            from.x * std::cos(angle) + side.x * std::sin(angle),
+            from.y * std::cos(angle) + side.y * std::sin(angle)
+        });
+    }
+
+    const float angle = std::acos(dot);
+    const float sine = std::sin(angle);
+    const float fromWeight = std::sin((1.0F - clampedAmount) * angle) / sine;
+    const float toWeight = std::sin(clampedAmount * angle) / sine;
+    return normalize({
+        from.x * fromWeight + to.x * toWeight,
+        from.y * fromWeight + to.y * toWeight
+    });
 }
 
 Vec2 routeDerivative(const RouteCurve& curve, float progress)
@@ -241,9 +273,7 @@ EM_JS(double, rr_scene_left_ndc, (), {
         return -1;
     }
 
-    const flybyVisible = panel && (
-        panel.querySelector("[data-flyby-run]") ||
-        panel.querySelector("[data-flyby-stamp]"));
+    const flybyVisible = panel && panel.querySelector("[data-flyby-run]");
     const gutter = 24;
     let leftPx = 0;
     if (document.body.classList.contains("rmlui-enabled") && flybyVisible) {
@@ -427,7 +457,24 @@ float bodySpriteScale(int assetIndex)
     return 2.40F;
 }
 
-Color miningMaterialColor(int material, float integrity, bool revealed, bool hazard, int destinationTier, float light)
+Color miningHazardColor(int affinity)
+{
+    switch (static_cast<MiningElementalAffinity>(affinity)) {
+    case MiningElementalAffinity::Thermal:
+        return {1.0F, 0.32F, 0.10F, 1.0F};
+    case MiningElementalAffinity::Cryo:
+        return {0.24F, 0.78F, 1.0F, 1.0F};
+    case MiningElementalAffinity::Toxic:
+        return {0.34F, 1.0F, 0.42F, 1.0F};
+    case MiningElementalAffinity::Radiation:
+        return {0.94F, 0.28F, 0.88F, 1.0F};
+    case MiningElementalAffinity::None:
+        break;
+    }
+    return {1.0F, 0.38F, 0.16F, 1.0F};
+}
+
+Color miningMaterialColor(int material, float integrity, bool revealed, bool hazard, int hazardAffinity, int destinationTier, float light)
 {
     Color color {0.025F, 0.035F, 0.040F, 1.0F};
     const bool moon = destinationTier == 1;
@@ -463,7 +510,7 @@ Color miningMaterialColor(int material, float integrity, bool revealed, bool haz
         color = {0.78F, 0.55F, 0.18F, 1.0F};
         break;
     case 7:
-        color = {0.56F, 0.18F, 0.16F, 1.0F};
+        color = miningHazardColor(hazardAffinity);
         break;
     case 8:
         color = {0.10F, 0.11F, 0.13F, 1.0F};
@@ -508,6 +555,8 @@ Color miningEnemyColor(int type, int affinity)
         return {0.24F, 0.86F, 1.0F, 0.92F};
     case static_cast<int>(MiningEnemyType::Mammal):
         return {0.86F, 0.70F, 0.42F, 0.96F};
+    case static_cast<int>(MiningEnemyType::Spawner):
+        return {1.0F, 0.24F, 0.54F, 0.98F};
     default:
         return {1.0F, 0.28F, 0.18F, 0.90F};
     }
@@ -553,8 +602,8 @@ int miningMiniDroneAsset(int role)
         return MiniDroneResourceAsset;
     case MiniDroneRole::Survey:
         return MiniDroneSurveyAsset;
-    case MiniDroneRole::Stabilizer:
-        return MiniDroneStabilizerAsset;
+    case MiniDroneRole::Hazard:
+        return MiniDroneHazardAsset;
     }
     return MiniDroneMiningAsset;
 }
@@ -621,20 +670,23 @@ Color miningPickupGlowColor(int material)
     if (material == kMiningBankedBurstMaterial) {
         return {1.0F, 0.84F, 0.28F, 1.0F};
     }
+    if (material == kMiningHazardTreatmentBurstMaterial) {
+        return {0.32F, 1.0F, 0.72F, 1.0F};
+    }
     if (material == kMiningPickupCargoMaterial) {
         return {0.60F, 0.94F, 0.76F, 1.0F};
     }
     return miningRewardGlowColor(material);
 }
 
-Color miningScannerPingColor(int material)
+Color miningScannerPingColor(int material, int hazardAffinity = 0)
 {
     if (miningRewardMaterial(material)) {
         return miningRewardGlowColor(material);
     }
     switch (static_cast<MiningCellMaterial>(material)) {
     case MiningCellMaterial::HazardPocket:
-        return {1.0F, 0.28F, 0.16F, 1.0F};
+        return miningHazardColor(hazardAffinity);
     case MiningCellMaterial::HardRock:
         return {0.48F, 0.72F, 0.86F, 1.0F};
     case MiningCellMaterial::Regolith:
@@ -824,7 +876,7 @@ bool WebGLRenderer::initialize()
     assets_[MiniDroneMiningAsset] = {"mini_drone_mining", "assets/art/mini-drone-mining.png"};
     assets_[MiniDroneResourceAsset] = {"mini_drone_resource", "assets/art/mini-drone-resource.png"};
     assets_[MiniDroneSurveyAsset] = {"mini_drone_survey", "assets/art/mini-drone-survey.png"};
-    assets_[MiniDroneStabilizerAsset] = {"mini_drone_stabilizer", "assets/art/mini-drone-stabilizer.png"};
+    assets_[MiniDroneHazardAsset] = {"mini_drone_hazard", "assets/art/mini-drone-hazard.png"};
     assets_[MiniDroneAttackAsset] = {"mini_drone_attack", "assets/art/mini-drone-attack.png"};
     assets_[MiniDroneDefenseAsset] = {"mini_drone_defense", "assets/art/mini-drone-defense.png"};
 
@@ -901,6 +953,10 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
         previousMiningCargo_ = 0;
         previousMiningStowedCargo_ = 0;
         miningPickupBursts_.clear();
+        miningVisualHeadingInitialized_ = false;
+        miningVisualRecoilX_ = 0.0F;
+        miningVisualRecoilY_ = 0.0F;
+        miningVisualHeadingTime_ = -1.0;
     }
 
     beginFrame(snapshot);
@@ -1876,6 +1932,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         };
         std::vector<PickupCandidate> candidates;
         candidates.reserve(6);
+        std::vector<Vec2> treatmentCenters;
         for (const MiningCellSnapshot& cell : snapshot.miningCells) {
             const int index = cell.y * snapshot.miningWidth + cell.x;
             if (index < 0 || index >= cellCount || static_cast<std::size_t>(index) >= previousMiningMaterials_.size()) {
@@ -1886,6 +1943,10 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             if (bucket >= 0 && cell.material == static_cast<int>(MiningCellMaterial::Empty)) {
                 const Vec2 burstCenter = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
                 candidates.push_back({burstCenter, bucket});
+            }
+            if (previousMaterial == static_cast<int>(MiningCellMaterial::HazardPocket) &&
+                cell.material != static_cast<int>(MiningCellMaterial::HazardPocket)) {
+                treatmentCenters.push_back(cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y)));
             }
         }
 
@@ -1907,6 +1968,17 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
                 miningPickupBursts_.erase(miningPickupBursts_.begin(), miningPickupBursts_.begin() + static_cast<std::ptrdiff_t>(miningPickupBursts_.size() - 44U));
             }
         };
+        for (const Vec2& center : treatmentCenters) {
+            miningPickupBursts_.push_back({
+                center.x,
+                center.y,
+                kMiningHazardTreatmentBurstMaterial,
+                1,
+                snapshot.animationTime,
+                0.0F
+            });
+            trimPickupBursts();
+        }
         for (const PickupCandidate& candidate : candidates) {
             if (remainingCargo <= 0 || remainingCargoCandidates <= 0) {
                 continue;
@@ -1971,19 +2043,112 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
 
     drawRect((left + right) * 0.5F, (top + bottom) * 0.5F, right - left + 0.035F, top - bottom + 0.035F, {0.0F, 0.0F, 0.0F, 1.0F});
 
+    // Unexplored cells share one neutral fog treatment so the grid communicates
+    // unknown space without leaking whether rock, ore, or a tunnel lies behind it.
+    const Color unexploredFog = snapshot.destinationTier == 2
+        ? Color {0.15F, 0.085F, 0.060F, 0.68F}
+        : (snapshot.destinationTier == 1
+                  ? Color {0.13F, 0.14F, 0.15F, 0.68F}
+                  : Color {0.095F, 0.12F, 0.135F, 0.68F});
+    std::vector<float>& unexploredGridVertices = scratchVertices(snapshot.miningCells.size() * 48U);
+    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+        if (cell.revealed) {
+            continue;
+        }
+        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        appendRect(
+            unexploredGridVertices,
+            center.x,
+            center.y,
+            cellW * 0.90F,
+            cellH * 0.90F,
+            unexploredFog);
+    }
+    submit(unexploredGridVertices, 0x0004);
+
+    // Rendering and gameplay share this anchor so the visible loading pad is the
+    // exact place that enables banking, repair, and departure.
     const Vec2 shipBay = returnZone;
     const float shipGroundY = gridPoint(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY).y;
+    const float servicePulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 2.8F);
+    const float serviceRadiusX = cellW * static_cast<float>(tuning::mining::returnZoneRadiusCells);
+    const float serviceRadiusY = cellH * static_cast<float>(tuning::mining::returnZoneRadiusCells);
+    const Color serviceColor = snapshot.miningAtReturnZone
+        ? Color {0.30F, 1.0F, 0.76F, 0.54F + servicePulse * 0.14F}
+        : Color {0.28F, 0.82F, 1.0F, 0.20F + servicePulse * 0.07F};
+    drawRadialGlow(
+        shipBay.x,
+        shipBay.y,
+        std::max(serviceRadiusX, serviceRadiusY) * 1.15F,
+        {serviceColor.r, serviceColor.g, serviceColor.b, snapshot.miningAtReturnZone ? 0.055F : 0.026F},
+        36);
+    drawEllipseLine(shipBay.x, shipBay.y, serviceRadiusX, serviceRadiusY, serviceColor, 56, 0.0F, kPi * 2.0F);
+    drawEllipseLine(
+        shipBay.x,
+        shipBay.y,
+        serviceRadiusX * 0.82F,
+        serviceRadiusY * 0.82F,
+        {serviceColor.r, serviceColor.g, serviceColor.b, serviceColor.a * 0.42F},
+        56,
+        0.0F,
+        kPi * 2.0F);
+    for (const Vec2 marker : std::array<Vec2, 4> {{{-1.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, -1.0F}, {0.0F, 1.0F}}}) {
+        const Vec2 inner {
+            shipBay.x + marker.x * serviceRadiusX * 0.88F,
+            shipBay.y + marker.y * serviceRadiusY * 0.88F
+        };
+        const Vec2 outer {
+            shipBay.x + marker.x * serviceRadiusX * 1.08F,
+            shipBay.y + marker.y * serviceRadiusY * 1.08F
+        };
+        drawLine(inner.x, inner.y, outer.x, outer.y, serviceColor, snapshot.miningAtReturnZone ? 2.4F : 1.5F);
+    }
+    const float extractionProgress = static_cast<float>(std::clamp(snapshot.miningExtractionProgress, 0.0, 1.0));
+    const auto smoothExtraction = [](float value) {
+        const float clamped = std::clamp(value, 0.0F, 1.0F);
+        return clamped * clamped * (3.0F - 2.0F * clamped);
+    };
+    const float extractionClose = snapshot.miningExtractionActive
+        ? smoothExtraction((extractionProgress - 0.52F) / 0.18F)
+        : 1.0F;
+    const float extractionLaunch = snapshot.miningExtractionActive
+        ? smoothExtraction((extractionProgress - 0.70F) / 0.30F)
+        : 0.0F;
     // The packed bay sprites leave a little transparent margin below the exhaust,
     // so their visible foot sits well below the texture center.
     const float shipVisibleFootShare = 0.455F;
-    const float desiredShipSpriteSize = cellSize * 9.50F;
+    const float desiredShipSpriteSize = cellSize * 11.50F;
     const float maxShipSpriteSize = std::max(
-        cellSize * 2.0F,
+        cellSize * 7.25F,
         (top - shipGroundY - cellH * 0.85F) / (0.5F + shipVisibleFootShare));
     const float shipSpriteSize = std::min(desiredShipSpriteSize, maxShipSpriteSize);
     const float shipVisibleFootOffset = shipSpriteSize * shipVisibleFootShare;
-    const float shipSpriteY = shipGroundY + shipVisibleFootOffset;
-    if (textureReady(RocketClosedAsset)) {
+    const float shipSpriteY = shipGroundY + shipVisibleFootOffset + extractionLaunch * (top - shipGroundY + shipSpriteSize * 0.45F);
+    // The authored bay opening sits below the sprite's centerline.
+    const Vec2 extractionBay {shipBay.x, shipSpriteY - shipSpriteSize * 0.17F};
+    if (snapshot.miningExtractionActive && extractionLaunch > 0.001F) {
+        const float exhaustSize = shipSpriteSize * (0.42F + extractionLaunch * 0.78F);
+        drawRadialGlow(shipBay.x, shipSpriteY - shipSpriteSize * 0.42F, exhaustSize, {0.18F, 0.82F, 1.0F, 0.10F + extractionLaunch * 0.18F}, 36);
+        drawTriangle(
+            shipBay.x - shipSpriteSize * 0.12F,
+            shipSpriteY - shipSpriteSize * 0.28F,
+            shipBay.x + shipSpriteSize * 0.12F,
+            shipSpriteY - shipSpriteSize * 0.28F,
+            shipBay.x,
+            shipSpriteY - shipSpriteSize * (0.52F + extractionLaunch * 0.52F),
+            {0.32F, 0.90F, 1.0F, 0.58F + extractionLaunch * 0.34F});
+    }
+    if (snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
+        drawSpriteRotated(
+            shipBay.x,
+            shipSpriteY,
+            shipSpriteSize,
+            shipSpriteSize,
+            0.0F,
+            1.0F,
+            {1.0F, 1.0F, 1.0F, 1.0F - extractionClose},
+            RocketOpenAsset);
+    } else if (textureReady(RocketClosedAsset)) {
         drawSpriteRotated(
             shipBay.x,
             shipSpriteY,
@@ -2009,7 +2174,14 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(cell.x) + 0.5, static_cast<double>(cell.y) + 0.5);
         float localLight = std::clamp(1.0F - mainDistanceCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
         localLight = std::max(localLight, scannerSweepBoost(scannerDistanceCells, 0.85F) * 0.032F);
-        const Color color = miningMaterialColor(cell.material, static_cast<float>(cell.integrity), cell.revealed, cell.hazard && cell.revealed, snapshot.destinationTier, localLight);
+        const Color color = miningMaterialColor(
+            cell.material,
+            static_cast<float>(cell.integrity),
+            cell.revealed,
+            cell.hazard && cell.revealed,
+            cell.hazardAffinity,
+            snapshot.destinationTier,
+            localLight);
         appendRect(terrainVertices, center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
     }
     submit(terrainVertices, 0x0004);
@@ -2062,17 +2234,20 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
         const bool rewardCell = miningRewardMaterial(cell.material);
+        const bool hazardCell = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket);
         const bool scannerPing = scannerBoost > 0.04F && miningScannerPingMaterial(cell.material);
-        if (!rewardCell && !scannerPing) {
+        if (!rewardCell && !scannerPing && !hazardCell) {
             continue;
         }
-        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material);
+        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material, cell.hazardAffinity);
         const float integrity = static_cast<float>(std::clamp(cell.integrity, 0.0, 1.0));
         const float cracked = 1.0F - integrity;
         const float shimmer = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.8F + static_cast<float>(cell.x * 13 + cell.y * 7));
         const float baseSize = rewardCell ? 0.34F : 0.24F;
         const float size = cellSize * (baseSize + cracked * 0.22F + scannerBoost * 0.42F);
-        const float baseAlpha = rewardCell ? 0.18F + shimmer * 0.18F : 0.04F;
+        const float baseAlpha = rewardCell
+            ? 0.18F + shimmer * 0.18F
+            : (hazardCell ? 0.10F + shimmer * 0.16F : 0.04F);
         const float alpha = baseAlpha + (rewardCell ? cracked * 0.16F : 0.0F) + scannerBoost * (rewardCell ? 0.34F : 0.42F);
         appendRect(oreGlowVertices, center.x, center.y, size, size, {glow.r, glow.g, glow.b, std::min(alpha, 0.78F)});
     }
@@ -2089,18 +2264,19 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
         const bool rewardCell = miningRewardMaterial(cell.material);
+        const bool hazardCell = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket);
         const bool scannerPing = scannerBoost > 0.18F && miningScannerPingMaterial(cell.material);
-        if (!rewardCell && !scannerPing) {
+        if (!rewardCell && !scannerPing && !hazardCell) {
             continue;
         }
         const float phase = std::fmod(
             static_cast<float>(snapshot.animationTime) * 1.35F + static_cast<float>(cell.x) * 0.17F + static_cast<float>(cell.y) * 0.11F,
             1.0F);
-        const float activeWindow = scannerPing ? 0.72F : 0.42F;
+        const float activeWindow = scannerPing || hazardCell ? 0.72F : 0.42F;
         if (phase > activeWindow) {
             continue;
         }
-        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material);
+        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material, cell.hazardAffinity);
         const float flare = std::max(1.0F - phase / activeWindow, scannerPing ? scannerBoost : 0.0F);
         const float length = cellSize * ((rewardCell ? 0.34F : 0.24F) + flare * 0.44F);
         const float alpha = (rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F);
@@ -2114,7 +2290,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     activeBursts.reserve(miningPickupBursts_.size());
     for (const MiningPickupBurst& burst : miningPickupBursts_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
-        const float lifetime = burst.material == kMiningBankedBurstMaterial
+        const float lifetime = burst.material == kMiningBankedBurstMaterial || burst.material == kMiningHazardTreatmentBurstMaterial
             ? 1.05F
             : kMiningPickupTextLifetimeSeconds;
         if (age < 0.0F || age > lifetime) {
@@ -2145,7 +2321,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
         if (burst.material == kMiningBankedBurstMaterial) {
             drawMiningBankedText(burst.x, burst.y, cellSize, age);
-        } else {
+        } else if (burst.material != kMiningHazardTreatmentBurstMaterial) {
             drawMiningPickupText(burst.x + burst.textOffsetX, burst.y, cellSize, burst.material, burst.amount, age);
         }
     }
@@ -2182,6 +2358,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const Color base = miningEnemyColor(enemy.type, enemy.affinity);
         const bool rangedEnemy = enemy.type == static_cast<int>(MiningEnemyType::Flying) || enemy.type == static_cast<int>(MiningEnemyType::Elemental);
         const bool eliteEnemy = enemy.type == static_cast<int>(MiningEnemyType::Beetle) || enemy.type == static_cast<int>(MiningEnemyType::Mammal);
+        const bool spawnerEnemy = enemy.type == static_cast<int>(MiningEnemyType::Spawner);
         const float attackInterval = rangedEnemy
             ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
             : static_cast<float>(tuning::mining::enemyMeleeAttackIntervalSeconds);
@@ -2211,7 +2388,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
                 tellTip.y,
                 tellColor,
                 1.4F + attackReady * 0.8F);
-        } else {
+        } else if (!spawnerEnemy) {
             const float windupLength = std::min(cellW, cellH) * (0.74F + attackReady * 0.52F);
             const Vec2 slashStart {
                 enemyCenter.x - directionToRig.y * windupLength * 0.35F,
@@ -2223,7 +2400,16 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             };
             drawLine(slashStart.x, slashStart.y, slashEnd.x, slashEnd.y, {1.0F, 0.22F, 0.12F, 0.12F + attackReady * 0.24F}, 1.8F + attackReady * 1.2F);
         }
-        if (rangedEnemy) {
+        if (spawnerEnemy) {
+            const float spawnProgress = enemy.spawnIntervalSeconds <= 0.0
+                ? 0.0F
+                : 1.0F - std::clamp(static_cast<float>(enemy.spawnCooldownSeconds / enemy.spawnIntervalSeconds), 0.0F, 1.0F);
+            const float pulse = 0.92F + spawnProgress * 0.22F;
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.42F * pulse, cellH * 1.42F * pulse, {base.r, base.g, base.b, 0.34F});
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * 0.92F, cellH * 0.92F, {0.28F, 0.02F, 0.12F, 0.96F});
+            drawLine(enemyCenter.x - cellW * 0.72F, enemyCenter.y, enemyCenter.x + cellW * 0.72F, enemyCenter.y, base, 2.5F);
+            drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.72F, enemyCenter.x, enemyCenter.y + cellH * 0.72F, base, 2.5F);
+        } else if (rangedEnemy) {
             drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 0.82F : 0.66F), cellH * (eliteEnemy ? 0.82F : 0.66F), {base.r, base.g, base.b, 0.72F});
             drawLine(enemyCenter.x - cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y + cellH * 0.62F, base, 2.0F);
             drawLine(enemyCenter.x, enemyCenter.y + cellH * 0.62F, enemyCenter.x + cellW * 0.62F, enemyCenter.y, base, 2.0F);
@@ -2232,18 +2418,36 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         } else {
             drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 1.24F : 0.94F), cellH * (eliteEnemy ? 1.24F : 0.94F), {base.r, base.g, base.b, 0.88F});
         }
-        const float enemyCoreSize = std::min(cellW, cellH) * (0.48F + health * 0.18F);
+        const float enemyCoreSize = std::min(cellW, cellH) * (spawnerEnemy ? 0.34F : (0.48F + health * 0.18F));
         drawRect(enemyCenter.x, enemyCenter.y, enemyCoreSize, enemyCoreSize, {1.0F, 0.20F, 0.14F, 0.70F});
         drawRect(enemyCenter.x, enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F), cellH * 0.12F, {0.16F, 0.02F, 0.02F, 0.78F});
         drawRect(enemyCenter.x - cellW * (eliteEnemy ? 0.79F : 0.59F) * (1.0F - health), enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F) * health, cellH * 0.12F, {1.0F, 0.18F, 0.12F, 0.90F});
     }
 
-    Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
-    if (snapshot.miningBounce > 0.0) {
-        const float bounce = static_cast<float>(std::clamp(snapshot.miningBounce, 0.0, tuning::mining::contactBounceMaxCells));
-        drone.x += static_cast<float>(snapshot.miningRecoilX) * cellW * bounce;
-        drone.y -= static_cast<float>(snapshot.miningRecoilY) * cellH * bounce;
+    double visualHeadingTime = snapshot.animationTime;
+#ifdef __EMSCRIPTEN__
+    visualHeadingTime = emscripten_get_now() / 1000.0;
+#endif
+    const double elapsed = miningVisualHeadingTime_ < 0.0 ? 0.0 : visualHeadingTime - miningVisualHeadingTime_;
+    const float bounce = static_cast<float>(std::clamp(snapshot.miningBounce, 0.0, tuning::mining::contactBounceMaxCells));
+    const Vec2 targetVisualRecoil {
+        static_cast<float>(snapshot.miningRecoilX) * bounce,
+        static_cast<float>(snapshot.miningRecoilY) * bounce
+    };
+    if (!miningVisualHeadingInitialized_ || elapsed <= 0.0 || elapsed > 0.25) {
+        miningVisualRecoilX_ = targetVisualRecoil.x;
+        miningVisualRecoilY_ = targetVisualRecoil.y;
+    } else {
+        const double recoilUpgradeProgress = std::clamp(snapshot.miningBounceRelief / 0.55, 0.0, 1.0);
+        const double recoilSmoothing = tuning::mining::visualRecoilSmoothingPerSecond
+            + (tuning::mining::upgradedVisualRecoilSmoothingPerSecond - tuning::mining::visualRecoilSmoothingPerSecond) * recoilUpgradeProgress;
+        const float recoilResponse = 1.0F - std::exp(-static_cast<float>(recoilSmoothing * elapsed));
+        miningVisualRecoilX_ += (targetVisualRecoil.x - miningVisualRecoilX_) * recoilResponse;
+        miningVisualRecoilY_ += (targetVisualRecoil.y - miningVisualRecoilY_) * recoilResponse;
     }
+    Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+    drone.x += miningVisualRecoilX_ * cellW;
+    drone.y -= miningVisualRecoilY_ * cellH;
     if (snapshot.miningArtifact.present && (snapshot.miningArtifact.revealed || snapshot.miningArtifact.state != static_cast<int>(MiningArtifactState::Embedded))) {
         const Vec2 artifact = cellCenter(snapshot.miningArtifact.x - 0.5, snapshot.miningArtifact.y - 0.5);
         const Color artifactColor = miningArtifactColor(snapshot.miningArtifact.kind, snapshot.miningArtifact.state);
@@ -2288,16 +2492,40 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         }
         submitLines(scannerGridVertices, 1.0F);
     }
+    for (const MiningMiniDroneSnapshot* survey : surveyDrones) {
+        const float pulse = std::clamp(
+            static_cast<float>(survey->surveyPulseSeconds / tuning::mining::surveyDronePulseSeconds),
+            0.0F,
+            1.0F);
+        if (pulse <= 0.0F) {
+            continue;
+        }
+        const float progress = 1.0F - pulse;
+        const Vec2 origin = cellCenter(survey->x, survey->y);
+        const float radius = cellSize * static_cast<float>(tuning::mining::surveyDroneScanRadiusCells) *
+            (0.20F + progress * 0.80F);
+        drawCircle(origin.x, origin.y, radius, {0.32F, 0.92F, 1.0F, pulse * 0.42F}, 40);
+        drawRadialGlow(origin.x, origin.y, radius * 0.72F, {0.26F, 0.88F, 1.0F, pulse * 0.045F}, 32);
+    }
 
     const Vec2 target = gridPoint(snapshot.miningTargetX, snapshot.miningTargetY);
     const float droneSize = std::min(cellW, cellH) * 4.35F;
-    Vec2 hullDirection = normalize({
+    const Vec2 targetHullDirection = normalize({
         static_cast<float>(snapshot.miningHullDirX) * cellW,
         -static_cast<float>(snapshot.miningHullDirY) * cellH
     });
-    if (std::abs(hullDirection.x) + std::abs(hullDirection.y) < 0.001F) {
-        hullDirection = {0.0F, -1.0F};
+    if (!miningVisualHeadingInitialized_ || elapsed <= 0.0 || elapsed > 0.25) {
+        miningVisualHeadingX_ = targetHullDirection.x;
+        miningVisualHeadingY_ = targetHullDirection.y;
+        miningVisualHeadingInitialized_ = true;
+    } else {
+        const float response = 1.0F - std::exp(-static_cast<float>(tuning::mining::visualHeadingSlerpPerSecond * elapsed));
+        const Vec2 smoothed = slerpDirection({miningVisualHeadingX_, miningVisualHeadingY_}, targetHullDirection, response);
+        miningVisualHeadingX_ = smoothed.x;
+        miningVisualHeadingY_ = smoothed.y;
     }
+    miningVisualHeadingTime_ = visualHeadingTime;
+    const Vec2 hullDirection {miningVisualHeadingX_, miningVisualHeadingY_};
     const Vec2 drillDirection = hullDirection;
     const Vec2 drillOrigin {
         drone.x + drillDirection.x * droneSize * 0.18F,
@@ -2312,67 +2540,92 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     const bool alliedShotActive = std::any_of(snapshot.miningProjectiles.begin(), snapshot.miningProjectiles.end(), [](const MiningProjectileSnapshot& projectile) {
         return projectile.team == static_cast<int>(MiningCombatTeam::Allied);
     });
-    const bool enemyShotActive = std::any_of(snapshot.miningProjectiles.begin(), snapshot.miningProjectiles.end(), [](const MiningProjectileSnapshot& projectile) {
-        return projectile.team == static_cast<int>(MiningCombatTeam::Enemy);
-    });
-    float recentRigImpact = 0.0F;
-    for (const MiningDamageNumberSnapshot& number : snapshot.miningDamageNumbers) {
-        if (!number.rigDamage) {
+    const float scannerActivity = std::clamp(static_cast<float>(snapshot.miningScannerPulse) / kMiningScannerPulseSeconds, 0.0F, 1.0F);
+    for (const MiningMiniDroneSnapshot& shieldDrone : snapshot.miningMiniDrones) {
+        if (snapshot.miningExtractionActive) {
             continue;
         }
-        recentRigImpact = std::max(recentRigImpact, 1.0F - static_cast<float>(std::clamp(number.age / std::max(0.01, number.lifetime), 0.0, 1.0)));
-    }
-    const float scannerActivity = std::clamp(static_cast<float>(snapshot.miningScannerPulse) / kMiningScannerPulseSeconds, 0.0F, 1.0F);
-    const float stabilizerActivity = std::clamp(
-        static_cast<float>(snapshot.miningContactIntensity) * 0.70F
-            + std::hypot(static_cast<float>(snapshot.miningRecoilX), static_cast<float>(snapshot.miningRecoilY)) * 0.55F,
-        0.0F,
-        1.0F);
-    const float shieldActivity = std::max(enemyShotActive ? 0.48F : 0.0F, recentRigImpact);
-
-    if (snapshot.miningShieldActive && shieldActivity > 0.0F) {
-        const float shieldPulse = 0.5F + 0.5F * std::sin(animationTime * 14.0F);
-        const Color shieldColor {0.68F, 1.0F, 0.94F, 0.12F + shieldActivity * 0.28F};
-        Vec2 shieldDirection {-drillDirection.x, -drillDirection.y};
-        bool incomingDirectionFound = false;
-        for (const MiningProjectileSnapshot& projectile : snapshot.miningProjectiles) {
-            if (projectile.team != static_cast<int>(MiningCombatTeam::Enemy)) {
-                continue;
-            }
-            const Vec2 source = cellCenter(projectile.startX, projectile.startY);
-            shieldDirection = normalize({source.x - drone.x, source.y - drone.y});
-            incomingDirectionFound = true;
-            break;
+        if (shieldDrone.role != static_cast<int>(MiniDroneRole::Defense)) {
+            continue;
         }
-        if (!incomingDirectionFound) {
-            for (const MiningEnemySnapshot& enemy : snapshot.miningEnemies) {
-                if (!enemy.active) {
-                    continue;
-                }
-                const Vec2 source = cellCenter(enemy.x, enemy.y);
-                shieldDirection = normalize({source.x - drone.x, source.y - drone.y});
-                break;
-            }
-        }
-        const Vec2 shieldSide {-shieldDirection.y, shieldDirection.x};
-        for (int plate = -1; plate <= 1; ++plate) {
-            const float depth = static_cast<float>(plate) * droneSize * 0.055F;
-            const float halfSpan = droneSize * (plate == 0 ? 0.34F : 0.25F);
-            const Vec2 plateCenter {
-                drone.x + shieldDirection.x * (droneSize * 0.54F + depth),
-                drone.y + shieldDirection.y * (droneSize * 0.54F + depth)
+        const Vec2 shieldDronePosition = cellCenter(shieldDrone.x, shieldDrone.y);
+        Vec2 shieldDirection = normalize({
+            shieldDronePosition.x - drone.x,
+            shieldDronePosition.y - drone.y
+        });
+        if (std::abs(shieldDirection.x) + std::abs(shieldDirection.y) < 0.001F) {
+            shieldDirection = {
+                static_cast<float>(std::cos(shieldDrone.defenseAngleRadians)),
+                static_cast<float>(-std::sin(shieldDrone.defenseAngleRadians))
             };
-            drawLine(
-                plateCenter.x - shieldSide.x * halfSpan,
-                plateCenter.y - shieldSide.y * halfSpan,
-                plateCenter.x + shieldSide.x * halfSpan,
-                plateCenter.y + shieldSide.y * halfSpan,
-                shieldColor,
-                1.8F + shieldActivity * 1.2F + shieldPulse * 0.35F);
+        }
+        const float charge = static_cast<float>(std::clamp(shieldDrone.shieldCharge, 0.0, 1.0));
+        const float impact = std::clamp(
+            static_cast<float>(shieldDrone.shieldImpactSeconds / tuning::mining::defenseDroneShieldImpactPulseSeconds),
+            0.0F,
+            1.0F);
+        if (charge > 0.001F) {
+            const float guardRadius = std::hypot(
+                shieldDronePosition.x - drone.x,
+                shieldDronePosition.y - drone.y);
+            const float arcRadius = guardRadius + cellSize * static_cast<float>(tuning::mining::defenseDroneShieldArcOffsetCells);
+            const float centerAngle = std::atan2(shieldDirection.y, shieldDirection.x);
+            const float halfArc = static_cast<float>(tuning::mining::defenseDroneShieldArcRadians) * 0.5F;
+            const Color shieldColor = charge > 0.30F
+                ? Color {0.30F, 0.94F, 1.0F, 0.22F + charge * 0.34F + impact * 0.28F}
+                : Color {1.0F, 0.70F, 0.20F, 0.25F + charge * 0.35F + impact * 0.30F};
+            constexpr int arcSegments = 12;
+            for (int segment = 0; segment < arcSegments; ++segment) {
+                const float startT = static_cast<float>(segment) / static_cast<float>(arcSegments);
+                const float endT = static_cast<float>(segment + 1) / static_cast<float>(arcSegments);
+                const float startAngle = centerAngle - halfArc + halfArc * 2.0F * startT;
+                const float endAngle = centerAngle - halfArc + halfArc * 2.0F * endT;
+                drawLine(
+                    drone.x + std::cos(startAngle) * arcRadius,
+                    drone.y + std::sin(startAngle) * arcRadius,
+                    drone.x + std::cos(endAngle) * arcRadius,
+                    drone.y + std::sin(endAngle) * arcRadius,
+                    shieldColor,
+                    1.9F + impact * 1.8F);
+            }
+            const Vec2 arcCenter {
+                drone.x + shieldDirection.x * arcRadius,
+                drone.y + shieldDirection.y * arcRadius
+            };
+            drawRadialGlow(
+                arcCenter.x,
+                arcCenter.y,
+                cellSize * (0.46F + impact * 0.20F),
+                {shieldColor.r, shieldColor.g, shieldColor.b, 0.035F + impact * 0.075F},
+                16);
+        }
+
+        if (charge < 0.995F || shieldDrone.shieldRechargeSeconds > 0.0) {
+            const float rechargeMaximum = static_cast<float>(tuning::mining::defenseDroneRechargeSeconds(shieldDrone.upgradeLevel));
+            const float gaugeProgress = charge > 0.0F
+                ? charge
+                : 1.0F - std::clamp(static_cast<float>(shieldDrone.shieldRechargeSeconds) / std::max(0.001F, rechargeMaximum), 0.0F, 1.0F);
+            const float gaugeRadius = cellSize * 0.92F;
+            constexpr int gaugeSegments = 6;
+            for (int segment = 0; segment < gaugeSegments; ++segment) {
+                const float startAngle = -kPi * 0.5F + kPi * 2.0F * static_cast<float>(segment) / static_cast<float>(gaugeSegments) + 0.08F;
+                const float endAngle = -kPi * 0.5F + kPi * 2.0F * static_cast<float>(segment + 1) / static_cast<float>(gaugeSegments) - 0.08F;
+                const bool filled = static_cast<float>(segment + 1) / static_cast<float>(gaugeSegments) <= gaugeProgress + 0.001F;
+                const Color gaugeColor = charge > 0.0F
+                    ? (filled ? Color {0.30F, 0.94F, 1.0F, 0.90F} : Color {0.05F, 0.16F, 0.18F, 0.62F})
+                    : (filled ? Color {1.0F, 0.68F, 0.18F, 0.82F} : Color {0.18F, 0.08F, 0.06F, 0.62F});
+                drawLine(
+                    shieldDronePosition.x + std::cos(startAngle) * gaugeRadius,
+                    shieldDronePosition.y + std::sin(startAngle) * gaugeRadius,
+                    shieldDronePosition.x + std::cos(endAngle) * gaugeRadius,
+                    shieldDronePosition.y + std::sin(endAngle) * gaugeRadius,
+                    gaugeColor,
+                    2.2F);
+            }
         }
     }
 
-    for (std::size_t i = 0; i < snapshot.miningMiniDrones.size(); ++i) {
+    for (std::size_t i = 0; !snapshot.miningExtractionActive && i < snapshot.miningMiniDrones.size(); ++i) {
         const MiningMiniDroneSnapshot& agent = snapshot.miningMiniDrones[i];
         const int role = std::clamp(agent.role, 0, static_cast<int>(MiniDroneRole::Defense));
         const int upgradeLevel = std::clamp(agent.upgradeLevel, 1, 3);
@@ -2386,19 +2639,35 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             activity = behavior == MiningMiniDroneBehavior::Engaging && alliedShotActive ? 1.0F : 0.25F;
             break;
         case MiniDroneRole::Defense:
-            activity = behavior == MiningMiniDroneBehavior::Guarding ? std::max(0.32F, shieldActivity) : shieldActivity;
+            activity = behavior == MiningMiniDroneBehavior::Guarding
+                ? std::max(
+                    0.24F * static_cast<float>(std::clamp(agent.shieldCharge, 0.0, 1.0)),
+                    std::clamp(
+                        static_cast<float>(agent.shieldImpactSeconds / tuning::mining::defenseDroneShieldImpactPulseSeconds),
+                        0.0F,
+                        1.0F))
+                : 0.0F;
             break;
         case MiniDroneRole::Mining:
             activity = behavior == MiningMiniDroneBehavior::Working ? 1.0F : 0.0F;
             break;
         case MiniDroneRole::Resource:
-            activity = snapshot.miningCargo > 0 ? 0.38F : 0.0F;
+            activity = behavior == MiningMiniDroneBehavior::Working || behavior == MiningMiniDroneBehavior::Docked
+                ? 0.78F
+                : (agent.haulMaterials.common + agent.haulMaterials.rare + agent.haulMaterials.exotic > 0 ? 0.38F : 0.0F);
             break;
         case MiniDroneRole::Survey:
-            activity = scannerActivity;
+            activity = std::max(
+                scannerActivity,
+                std::clamp(
+                    static_cast<float>(agent.surveyPulseSeconds / tuning::mining::surveyDronePulseSeconds),
+                    0.0F,
+                    1.0F));
             break;
-        case MiniDroneRole::Stabilizer:
-            activity = behavior == MiningMiniDroneBehavior::Docked ? std::max(0.24F, stabilizerActivity) : stabilizerActivity;
+        case MiniDroneRole::Hazard:
+            activity = behavior == MiningMiniDroneBehavior::Working
+                ? 1.0F
+                : (behavior == MiningMiniDroneBehavior::Traveling ? 0.35F : 0.12F);
             break;
         }
         const Vec2 agentPosition = cellCenter(agent.x, agent.y);
@@ -2454,6 +2723,110 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
                     spriteSize,
                     {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
                     droneAsset);
+            }
+        }
+        if (role == static_cast<int>(MiniDroneRole::Resource) || role == static_cast<int>(MiniDroneRole::Mining)) {
+            const int commonChunks = std::max(0, agent.haulMaterials.common);
+            const int rareChunks = std::max(0, agent.haulMaterials.rare);
+            const int exoticChunks = std::max(0, agent.haulMaterials.exotic);
+            const int capacity = role == static_cast<int>(MiniDroneRole::Mining)
+                ? tuning::mining::miningDroneCapacityChunks(upgradeLevel)
+                : tuning::mining::resourceDroneCapacityChunks;
+            const float ringRadius = cellSize * 1.02F;
+            for (int slot = 0; slot < capacity; ++slot) {
+                Color chunkColor {0.05F, 0.16F, 0.18F, 0.72F};
+                if (slot < commonChunks) {
+                    chunkColor = {0.48F, 0.92F, 0.68F, 0.94F};
+                } else if (slot < commonChunks + rareChunks) {
+                    chunkColor = {1.0F, 0.74F, 0.24F, 0.96F};
+                } else if (slot < commonChunks + rareChunks + exoticChunks) {
+                    chunkColor = {0.95F, 0.28F, 0.78F, 0.96F};
+                }
+                const float slotAngle = kPi * 2.0F / static_cast<float>(capacity);
+                const float startAngle = -kPi * 0.5F + static_cast<float>(slot) * slotAngle + slotAngle * 0.12F;
+                const float middleAngle = startAngle + slotAngle * 0.38F;
+                const float endAngle = startAngle + slotAngle * 0.76F;
+                const Vec2 start {sx + std::cos(startAngle) * ringRadius, sy + std::sin(startAngle) * ringRadius};
+                const Vec2 middle {sx + std::cos(middleAngle) * ringRadius, sy + std::sin(middleAngle) * ringRadius};
+                const Vec2 end {sx + std::cos(endAngle) * ringRadius, sy + std::sin(endAngle) * ringRadius};
+                drawLine(start.x, start.y, middle.x, middle.y, chunkColor, 2.6F);
+                drawLine(middle.x, middle.y, end.x, end.y, chunkColor, 2.6F);
+            }
+        }
+        if (role == static_cast<int>(MiniDroneRole::Resource) && behavior == MiningMiniDroneBehavior::Working) {
+            Vec2 transferDirection = normalize({sx - drone.x, sy - drone.y});
+            if (std::abs(transferDirection.x) + std::abs(transferDirection.y) < 0.001F) {
+                transferDirection = {1.0F, 0.0F};
+            }
+            const Vec2 transferStart {
+                drone.x + transferDirection.x * droneSize * 0.30F,
+                drone.y + transferDirection.y * droneSize * 0.30F
+            };
+            const Vec2 transferEnd {
+                sx - transferDirection.x * cellSize * 0.48F,
+                sy - transferDirection.y * cellSize * 0.48F
+            };
+            Color transferColor {0.48F, 0.92F, 0.68F, 0.94F};
+            if (snapshot.miningMaterials.exotic > 0) {
+                transferColor = {0.95F, 0.28F, 0.78F, 0.96F};
+            } else if (snapshot.miningMaterials.rare > 0) {
+                transferColor = {1.0F, 0.74F, 0.24F, 0.96F};
+            }
+            for (int mote = 0; mote < 3; ++mote) {
+                const float progress = std::fmod(
+                    animationTime * 0.82F + static_cast<float>(i) * 0.17F + static_cast<float>(mote) / 3.0F,
+                    1.0F);
+                const float eased = progress * progress * (3.0F - 2.0F * progress);
+                const float px = transferStart.x + (transferEnd.x - transferStart.x) * eased;
+                const float py = transferStart.y + (transferEnd.y - transferStart.y) * eased;
+                const float pulse = 0.72F + 0.28F * std::sin(progress * kPi);
+                drawRadialGlow(px, py, cellSize * 0.13F, {transferColor.r, transferColor.g, transferColor.b, 0.12F * pulse}, 10);
+                drawCircle(px, py, cellSize * 0.045F * pulse, {transferColor.r, transferColor.g, transferColor.b, transferColor.a * pulse}, 8);
+            }
+        }
+        if (role == static_cast<int>(MiniDroneRole::Hazard) &&
+            behavior == MiningMiniDroneBehavior::Working &&
+            agent.targetCellX >= 0 && agent.targetCellY >= 0) {
+            const Vec2 treatmentTarget = cellCenter(agent.targetCellX, agent.targetCellY);
+            int affinity = static_cast<int>(MiningElementalAffinity::None);
+            const auto targetCell = std::find_if(snapshot.miningCells.begin(), snapshot.miningCells.end(), [&](const MiningCellSnapshot& cell) {
+                return cell.x == agent.targetCellX && cell.y == agent.targetCellY;
+            });
+            if (targetCell != snapshot.miningCells.end()) {
+                affinity = targetCell->hazardAffinity;
+            }
+            const Color treatmentColor = miningHazardColor(affinity);
+            const float beamPulse = 0.62F + activityPulse * 0.38F;
+            drawLine(
+                sx,
+                sy,
+                treatmentTarget.x,
+                treatmentTarget.y,
+                {treatmentColor.r, treatmentColor.g, treatmentColor.b, 0.18F * beamPulse},
+                5.6F);
+            drawLine(
+                sx,
+                sy,
+                treatmentTarget.x,
+                treatmentTarget.y,
+                {0.78F, 1.0F, 0.90F, 0.78F * beamPulse},
+                1.8F);
+            drawRadialGlow(
+                treatmentTarget.x,
+                treatmentTarget.y,
+                cellSize * (0.52F + activityPulse * 0.18F),
+                {treatmentColor.r, treatmentColor.g, treatmentColor.b, 0.12F + activityPulse * 0.06F},
+                14);
+            for (int mote = 0; mote < 5; ++mote) {
+                const float phase = std::fmod(animationTime * 0.72F + static_cast<float>(mote) / 5.0F, 1.0F);
+                const float angle = phase * kPi * 2.0F + static_cast<float>(mote) * 1.17F;
+                const float radius = cellSize * (0.30F + phase * 0.44F);
+                drawCircle(
+                    treatmentTarget.x + std::cos(angle) * radius,
+                    treatmentTarget.y + std::sin(angle) * radius,
+                    cellSize * 0.045F,
+                    {treatmentColor.r, treatmentColor.g, treatmentColor.b, 0.72F * (1.0F - phase)},
+                    8);
             }
         }
         const int rankLights = upgradeLevel - 1;
@@ -2512,8 +2885,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     };
     const float movementMagnitude = std::clamp(std::hypot(movement.x, movement.y) / std::max(0.0001F, cellSize), 0.0F, 1.0F);
     if (movementMagnitude > 0.04F) {
-        const Vec2 moveDirection = normalize(movement);
-        const Vec2 exhaustDirection {-moveDirection.x, -moveDirection.y};
+        const Vec2 exhaustDirection {-hullDirection.x, -hullDirection.y};
         const Vec2 engineSide {-exhaustDirection.y, exhaustDirection.x};
         const float engineStrain = std::clamp(1.0F - static_cast<float>(snapshot.miningLoadSpeedMultiplier), 0.0F, 0.55F) / 0.55F;
         const float engineAlpha = 0.26F + movementMagnitude * 0.16F + engineStrain * 0.14F;
@@ -2545,7 +2917,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         }
     }
 
-    if (textureReady(MiningDroneAsset)) {
+    if (!snapshot.miningExtractionActive && textureReady(MiningDroneAsset)) {
         drawSpriteRotated(
             drone.x,
             drone.y,
@@ -2555,12 +2927,72 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
             -hullDirection.y,
             heatTint,
             MiningDroneAsset);
-    } else {
+    } else if (!snapshot.miningExtractionActive) {
         drawCircle(drone.x, drone.y, cellW * 1.15F, {0.10F * heatTint.r, 0.14F * heatTint.g, 0.18F * heatTint.b, 1.0F}, 24);
         drawCircle(drone.x, drone.y, cellW * 0.72F, {0.28F * heatTint.r, 0.82F * heatTint.g, 0.98F * heatTint.b, 1.0F}, 20);
         drawRect(drone.x, drone.y - cellH * 0.95F, cellW * 1.0F, cellH * 0.42F, {0.82F * heatTint.r, 0.88F * heatTint.g, 0.92F * heatTint.b, 1.0F});
     }
-    if (droneHealth < 0.995F || !snapshot.miningEnemies.empty()) {
+    if (snapshot.miningExtractionActive) {
+        const float miniWindow = 0.34F;
+        for (std::size_t i = 0; i < snapshot.miningMiniDrones.size(); ++i) {
+            const MiningMiniDroneSnapshot& agent = snapshot.miningMiniDrones[i];
+            const float launchDelay = static_cast<float>(i) * 0.045F;
+            const float entry = smoothExtraction((extractionProgress - launchDelay) / miniWindow);
+            if (entry >= 0.999F) {
+                continue;
+            }
+            const Vec2 start = cellCenter(agent.x, agent.y);
+            const Vec2 position {
+                start.x + (extractionBay.x - start.x) * entry,
+                start.y + (extractionBay.y - start.y) * entry
+            };
+            const Vec2 course = normalize({extractionBay.x - start.x, extractionBay.y - start.y});
+            const float size = cellSize * 1.56F * (1.0F - entry * 0.30F);
+            const float trail = (1.0F - entry) * (0.10F + 0.08F * std::sin(static_cast<float>(i) * 1.7F + extractionProgress * 15.0F));
+            drawLine(start.x, start.y, position.x, position.y, {0.32F, 0.92F, 1.0F, std::max(0.0F, trail)}, 1.4F);
+            drawRadialGlow(position.x, position.y, size * 0.62F, {0.24F, 0.88F, 1.0F, 0.09F + (1.0F - entry) * 0.08F}, 12);
+            const int asset = miningMiniDroneAsset(agent.role);
+            if (textureReady(asset)) {
+                drawSpriteRotated(position.x, position.y, size, size, -course.x, -course.y, {1.0F, 1.0F, 1.0F, 1.0F}, asset);
+            } else {
+                drawCircle(position.x, position.y, size * 0.30F, {0.42F, 0.92F, 1.0F, 0.90F}, 12);
+            }
+        }
+
+        const float rigEntry = smoothExtraction((extractionProgress - 0.20F) / 0.36F);
+        if (rigEntry < 0.999F) {
+            const Vec2 rigPosition {
+                drone.x + (extractionBay.x - drone.x) * rigEntry,
+                drone.y + (extractionBay.y - drone.y) * rigEntry
+            };
+            const float rigSize = droneSize * (1.0F - rigEntry * 0.46F);
+            drawLine(drone.x, drone.y, rigPosition.x, rigPosition.y, {0.44F, 0.96F, 1.0F, (1.0F - rigEntry) * 0.26F}, 2.4F);
+            drawRadialGlow(rigPosition.x, rigPosition.y, rigSize * 0.84F, {0.30F, 0.94F, 1.0F, 0.16F + (1.0F - rigEntry) * 0.12F}, 20);
+            if (textureReady(MiningDroneAsset)) {
+                // Keep the cockpit dome pointed up while the rig drifts into the bay.
+                drawSpriteRotated(rigPosition.x, rigPosition.y, rigSize, rigSize, 0.0F, 1.0F, {1.0F, 1.0F, 1.0F, 1.0F}, MiningDroneAsset);
+            } else {
+                drawCircle(rigPosition.x, rigPosition.y, rigSize * 0.34F, {0.34F, 0.92F, 1.0F, 0.96F}, 16);
+            }
+        }
+
+        if (textureReady(RocketClosedAsset) && extractionClose > 0.001F) {
+            drawSpriteRotated(
+                shipBay.x,
+                shipSpriteY,
+                shipSpriteSize,
+                shipSpriteSize,
+                0.0F,
+                1.0F,
+                {1.0F, 1.0F, 1.0F, extractionClose},
+                RocketClosedAsset);
+        }
+        if (extractionLaunch > 0.001F) {
+            const float flash = (1.0F - extractionLaunch) * 0.18F;
+            drawRadialGlow(shipBay.x, shipSpriteY, shipSpriteSize * (0.72F + extractionLaunch * 0.55F), {0.34F, 0.92F, 1.0F, flash}, 36);
+        }
+    }
+    if (!snapshot.miningExtractionActive && (droneHealth < 0.995F || !snapshot.miningEnemies.empty())) {
         const float healthGaugeY = drone.y - droneSize * 0.62F;
         const float healthGaugeW = cellW * 3.4F;
         const float healthFillW = cellW * 3.1F;
@@ -2581,11 +3013,14 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         }
     }
 
-    if (textureReady(DrillBitAsset) && snapshot.miningTargetDrillable && !drillBroken) {
-        const float dx = target.x - drillOrigin.x;
-        const float dy = target.y - drillOrigin.y;
-        const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
-        const float drillH = std::clamp(contactDistance + cellSize * 0.55F, cellSize * 2.30F, cellSize * 3.75F);
+    if (!snapshot.miningExtractionActive && textureReady(DrillBitAsset) && !drillBroken) {
+        float drillH = cellSize * 2.30F;
+        if (snapshot.miningTargetDrillable) {
+            const float dx = target.x - drillOrigin.x;
+            const float dy = target.y - drillOrigin.y;
+            const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
+            drillH = std::clamp(contactDistance + cellSize * 0.55F, drillH, cellSize * 3.75F);
+        }
         const float drillW = drillH * 0.88F;
         const Vec2 bitCenter {
             drillOrigin.x + drillDirection.x * drillH * 0.5F,

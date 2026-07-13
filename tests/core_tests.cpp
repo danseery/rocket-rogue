@@ -1362,6 +1362,18 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     perfect.run.flyby.completed = true;
     perfect.run.flyby.result = FlybyGrade::Perfect;
     perfect.run.flyby.elapsedSeconds = tuning::flyby::durationSeconds - 1.0;
+    Random perfectFlybyPanelRng(703);
+    const PreparedLaunch perfectFlybyPanelLaunch = prepareLaunch(perfect, catalog, perfectFlybyPanelRng);
+    const std::string perfectFlybyHtml = buildGamePanelHtml({perfect, catalog, perfectFlybyPanelLaunch, perfectFlybyPanelLaunch});
+    require(perfectFlybyHtml.find("data-panel-mode=\"mission-stamp\"") != std::string::npos,
+        "completed flyby should use the centered RmlUi stamp mode");
+    require(perfectFlybyHtml.find("class=\"arrival-fanfare-panel\"") != std::string::npos &&
+            perfectFlybyHtml.find("Flyby stamp") != std::string::npos,
+        "completed flyby should render its mission stamp inside RmlUi");
+    require(perfectFlybyHtml.find("data-flyby-stamp") == std::string::npos,
+        "completed flyby should not emit the legacy browser-shell stamp marker");
+    require(perfectFlybyHtml.find("data-rr-action=\"flyby_continue\"") != std::string::npos,
+        "completed flyby RmlUi stamp should expose its continue action");
     completeFlybyRun(perfect, catalog);
     require(perfect.run.nextLaunchFuelBoost >= tuning::flyby::slingshotFuelBoost - 0.001, "perfect flyby should grant next-launch fuel boost");
     require(perfect.run.nextLaunchSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "perfect flyby should grant next-launch speed boost");
@@ -1675,8 +1687,17 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     Random perfectRng(723);
     const PreparedLaunch perfectLaunch = prepareLaunch(perfect, catalog, perfectRng);
     const std::string perfectOrbitHtml = buildGamePanelHtml({perfect, catalog, perfectLaunch, perfectLaunch});
-    require(perfectOrbitHtml.find("data-orbit-tag-three=\"+") != std::string::npos, "perfect orbit stamp should expose the credit reward chip");
-    require(perfectOrbitHtml.find(" credits\" hidden") != std::string::npos, "perfect orbit credit reward chip should label mission credits");
+    require(perfectOrbitHtml.find("data-panel-mode=\"mission-stamp\"") != std::string::npos,
+        "completed orbit should use the centered RmlUi stamp mode");
+    require(perfectOrbitHtml.find("class=\"arrival-fanfare-panel\"") != std::string::npos &&
+            perfectOrbitHtml.find("Orbit stamp") != std::string::npos,
+        "completed orbit should render its mission stamp inside RmlUi");
+    require(perfectOrbitHtml.find("data-orbit-stamp") == std::string::npos,
+        "completed orbit should not emit the legacy browser-shell stamp marker");
+    require(perfectOrbitHtml.find(" credits</span>") != std::string::npos,
+        "perfect orbit RmlUi stamp should label its mission-credit reward chip");
+    require(perfectOrbitHtml.find("data-rr-action=\"orbit_continue\"") != std::string::npos,
+        "completed orbit RmlUi stamp should expose its continue action");
     completeOrbitRun(perfect, catalog);
     require(perfect.meta.blueprintProgress == perfectBlueprintsBefore + tuning::orbit::perfectBlueprintGain, "perfect orbit should grant stronger science");
     require(perfect.run.credits > perfectCreditsBefore, "perfect orbit should grant credits");
@@ -2062,7 +2083,7 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     upgraded.meta.droneBaySlots = 1;
-    upgraded.meta.equippedDroneIds = {content::drone::stabilizerDrone};
+    upgraded.meta.equippedDroneIds = {content::drone::hazardDrone};
 
     Random baselineRng(1936);
     Random upgradedRng(1936);
@@ -2125,7 +2146,7 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     };
     structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     structureUpgraded.meta.droneBaySlots = 1;
-    structureUpgraded.meta.equippedDroneIds = {content::drone::stabilizerDrone};
+    structureUpgraded.meta.equippedDroneIds = {content::drone::hazardDrone};
     const auto structureLimits = scanPushLimitPair(structureUpgraded, 1940);
     require(structureLimits.first == structureLimits.second + 1, "structural support should keep scan and push depth limits in parity");
     require(structureLimits.first > baselineLimits.first, "structural support should also expand scan depth");
@@ -2263,7 +2284,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
     require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
     require(catalog.findMiniDrone(content::drone::surveyDrone) != nullptr, "survey drone id should resolve");
-    require(catalog.findMiniDrone(content::drone::stabilizerDrone) != nullptr, "stabilizer drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::hazardDrone) != nullptr, "hazard drone id should resolve");
 
     const MiningDrillStats baseline = miningDrillStats(state, catalog);
     require(std::abs(baseline.oxygenSeconds - tuning::mining::oxygenSeconds) < 0.000001, "baseline mining oxygen should use the short starter tank");
@@ -2341,6 +2362,18 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
     require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
     require(drones.drones.front().upgradeSummary.find("auto-mine") != std::string::npos, "drone tuning previews should explain the next payoff");
+    const auto hazardDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
+        return drone.title == "Hazard Drone";
+    });
+    require(hazardDrone != drones.drones.end(), "Drone Ops should show the environmental Hazard Drone");
+    require(hazardDrone->detail.find("Treats revealed") != std::string::npos, "Hazard Drone card should describe its active remediation task");
+    require(hazardDrone->upgradeSummary.find("adds Toxic") != std::string::npos, "Hazard Drone Mk II preview should name its expanded hazard ladder");
+    require(std::any_of(hazardDrone->effectChips.begin(), hazardDrone->effectChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Treatment" && chip.value.find("3.00s") != std::string::npos;
+    }), "Hazard Drone card should expose current treatment speed");
+    require(std::any_of(hazardDrone->effectChips.begin(), hazardDrone->effectChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == "Batch" && chip.value == "1 tile";
+    }), "Hazard Drone card should expose current batch capacity");
     require(!drones.buildRecipes.empty(), "Drone Ops should expose build recipes");
     require(drones.loadoutSlots.size() == 6, "Drone Ops should present the full six-slot loadout bench");
     require(std::any_of(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
@@ -2420,9 +2453,10 @@ void droneOpsPresentationExposesPersistentLoadout()
     state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::miningDrone, content::drone::resourceDrone};
     const MiniDroneLoadoutEffects excavationEffects = miniDroneLoadoutEffects(state, catalog);
     require(excavationEffects.signatureKind == MiniDroneSignatureKind::ExcavationStorm, "Excavation Storm should expose a distinct render style identity");
-    state.meta.equippedDroneIds = {content::drone::defenseDrone, content::drone::stabilizerDrone, content::drone::resourceDrone};
+    state.meta.equippedDroneIds = {content::drone::defenseDrone, content::drone::hazardDrone, content::drone::resourceDrone};
     const MiniDroneLoadoutEffects fortressEffects = miniDroneLoadoutEffects(state, catalog);
-    require(fortressEffects.signatureKind == MiniDroneSignatureKind::FortressRig, "Fortress Rig should expose a distinct render style identity");
+    require(fortressEffects.signatureKind == MiniDroneSignatureKind::ContainmentRig, "Containment Rig should expose a distinct render style identity");
+    require(fortressEffects.hazardTreatmentRateBonus > 0.0, "Containment Rig should accelerate active hazard treatment");
     state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::resourceDrone, content::drone::surveyDrone};
     const MiniDroneLoadoutEffects pathfinderEffects = miniDroneLoadoutEffects(state, catalog);
     require(pathfinderEffects.signatureKind == MiniDroneSignatureKind::RelicPathfinder, "Relic Pathfinder should expose a distinct render style identity");
@@ -2433,7 +2467,7 @@ void droneOpsPresentationExposesPersistentLoadout()
         content::drone::surveyDrone,
         content::drone::miningDrone,
         content::drone::resourceDrone,
-        content::drone::stabilizerDrone
+        content::drone::hazardDrone
     };
     const MiniDroneLoadoutEffects spectrumEffects = miniDroneLoadoutEffects(state, catalog);
     require(spectrumEffects.signatureKind == MiniDroneSignatureKind::FullSpectrumSwarm, "Full Spectrum Swarm should expose the capstone render style identity");
@@ -3113,16 +3147,42 @@ void miningTerrainIsDeterministicAndDepthScales()
     const MiningTerrain b = generateMiningTerrain(state, mars, SurfaceSiteProfile::OreShelf, 1);
     require(a.width == tuning::mining::terrainWidth && a.height == tuning::mining::terrainHeight, "mining terrain should use the active-zone dimensions");
     require(a.cells.size() == b.cells.size(), "matching mining terrain should have matching cell counts");
+    int marsHazards = 0;
     for (std::size_t i = 0; i < a.cells.size(); ++i) {
         require(a.cells[i].material == b.cells[i].material, "mining terrain generation should be deterministic");
         require(std::abs(a.cells[i].maxToughness - b.cells[i].maxToughness) < 0.000001, "mining toughness should be deterministic");
+        require(a.cells[i].hazardAffinity == b.cells[i].hazardAffinity, "mining hazard affinities should be deterministic");
+        if (a.cells[i].material == MiningCellMaterial::HazardPocket) {
+            ++marsHazards;
+            require(a.cells[i].hazardAffinity == MiningElementalAffinity::Thermal, "Mars hazards should use the Mk I thermal family");
+        }
     }
+    require(marsHazards > 0, "generated Mars terrain should include environmental hazard pockets");
     require(
         miningMaterialToughness(MiningCellMaterial::CommonOre, 2) > miningMaterialToughness(MiningCellMaterial::CommonOre, 0),
         "deeper mining zones should increase terrain toughness");
     require(std::none_of(a.cells.begin(), a.cells.end(), [](const MiningCell& cell) {
         return cell.feature != MiningCellFeature::None || cell.enemy != MiningEnemyType::None;
     }), "solar-system mining terrain should not seed hostile tunnel metadata");
+
+    GameState hostile = state;
+    hostile.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    hostile.meta.ark.condition = ArkCondition::DamagedStranded;
+    bool toxicFound = false;
+    bool radiationFound = false;
+    for (std::uint64_t seed = 1; seed <= 96 && (!toxicFound || !radiationFound); ++seed) {
+        hostile.seed = seed;
+        const MiningTerrain toxic = generateMiningTerrain(hostile, catalog.destinations[4], SurfaceSiteProfile::FractureField, 0);
+        toxicFound = toxicFound || std::any_of(toxic.cells.begin(), toxic.cells.end(), [](const MiningCell& cell) {
+            return cell.material == MiningCellMaterial::HazardPocket && cell.hazardAffinity == MiningElementalAffinity::Toxic;
+        });
+        const MiningTerrain radiation = generateMiningTerrain(hostile, catalog.destinations[4], SurfaceSiteProfile::OreShelf, 1);
+        radiationFound = radiationFound || std::any_of(radiation.cells.begin(), radiation.cells.end(), [](const MiningCell& cell) {
+            return cell.material == MiningCellMaterial::HazardPocket && cell.hazardAffinity == MiningElementalAffinity::Radiation;
+        });
+    }
+    require(toxicFound, "Khepri fracture fields should generate Mk II toxic hazards");
+    require(radiationFound, "deep Khepri terrain should generate Mk III radiation hazards");
 }
 
 void hostileMiningTerrainGeneratesPreDugEnemyStructures()
@@ -3262,6 +3322,91 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     require(defended.run.mining.temporaryMaterials.rare > 0 || defended.run.mining.temporaryMaterials.exotic > 0, "miniboss defeats should grant upgrade-grade rewards");
 }
 
+void miningEnemySpawnersAreGenericCappedAndDestructible()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91928);
+    state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
+    state.meta.unlockKeys.push_back(content::unlock::deepSpace);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::attackDrone};
+    state.run.destinationIndex = 4;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "spawner mining run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    const double spawnerX = state.run.mining.droneX + 3.0;
+    const double spawnerY = state.run.mining.droneY + 1.0;
+    state.run.mining.enemies.push_back(createMiningEnemySpawner(
+        spawnerX,
+        spawnerY,
+        1000.0,
+        MiningEnemyType::Elemental,
+        3,
+        0.16,
+        MiningElementalAffinity::Toxic));
+    require(state.run.mining.enemies.front().type == MiningEnemyType::Spawner &&
+        state.run.mining.enemies.front().health == 1000.0,
+        "enemy spawners should use normal enemy health and targeting state");
+
+    updateMiningRun(state, catalog, 0.08);
+    updateMiningRun(state, catalog, 0.06);
+    require(state.run.mining.enemies.size() == 1, "spawners should wait for their configured interval before producing an enemy");
+    updateMiningRun(state, catalog, 0.03);
+    require(state.run.mining.enemies.size() == 2, "spawners should produce the configured enemy when their interval elapses");
+    require(state.run.mining.enemies.back().type == MiningEnemyType::Elemental &&
+        state.run.mining.enemies.back().affinity == MiningElementalAffinity::Toxic,
+        "spawners should support enemy-specific configuration without type-specific spawn code");
+    for (int tick = 0; tick < 10; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.enemies.front().spawn.spawned == 3 && state.run.mining.enemies.size() == 4,
+        "spawners should stop at their configured lifetime spawn cap");
+    for (int tick = 0; tick < 50; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.enemies.front().spawn.spawned == 3 && state.run.mining.enemies.size() == 4,
+        "elapsed time should never let a spawner exceed its maximum spawn count");
+
+    const SaveData save = captureSaveData(state);
+    GameState restored = createNewGame(catalog, 919280);
+    restoreSaveData(restored, catalog, save);
+    require(!restored.run.mining.enemies.empty() && restored.run.mining.enemies.front().type == MiningEnemyType::Spawner,
+        "active enemy spawners should round trip through saves");
+    require(restored.run.mining.enemies.front().spawn.enemyType == MiningEnemyType::Elemental &&
+        restored.run.mining.enemies.front().spawn.affinity == MiningElementalAffinity::Toxic &&
+        restored.run.mining.enemies.front().spawn.maxSpawns == 3 &&
+        restored.run.mining.enemies.front().spawn.spawned == 3,
+        "spawner type, affinity, cap, and progress should round trip through saves");
+
+    state.run.mining.enemies.clear();
+    for (MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        agent.targetEnemyIndex = -1;
+        agent.actionCooldownSeconds = 0.0;
+    }
+    state.run.mining.enemies.push_back(createMiningEnemySpawner(
+        spawnerX,
+        spawnerY,
+        0.25,
+        MiningEnemyType::Ant,
+        5,
+        10.0));
+    for (int tick = 0; tick < 120 && state.run.mining.enemies.front().active; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(!state.run.mining.enemies.front().active,
+        "passive combat should target and destroy a spawner through the normal enemy damage path");
+    require(state.run.mining.enemies.front().spawn.spawned == 0,
+        "destroyed spawners should stop producing enemies immediately");
+}
+
 void rangedMiningEnemiesShootAndCombatVisualsExpire()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -3341,7 +3486,7 @@ void miningMiniDronesFollowIndependentRolePositions()
         content::drone::miningDrone,
         content::drone::resourceDrone,
         content::drone::surveyDrone,
-        content::drone::stabilizerDrone,
+        content::drone::hazardDrone,
         content::drone::attackDrone,
         content::drone::defenseDrone
     };
@@ -3373,20 +3518,168 @@ void miningMiniDronesFollowIndependentRolePositions()
     const auto survey = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
         return agent.role == MiniDroneRole::Survey;
     });
-    const auto stabilizer = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
-        return agent.role == MiniDroneRole::Stabilizer;
+    const auto hazard = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Hazard;
     });
     require(resource != state.run.mining.miniDrones.end(), "Resource drone agent should remain available");
     require(survey != state.run.mining.miniDrones.end(), "Survey drone agent should remain available");
-    require(stabilizer != state.run.mining.miniDrones.end(), "Stabilizer drone agent should remain available");
-    require(std::hypot(resource->x - state.run.mining.droneX, resource->y - state.run.mining.droneY) < 2.2,
-        "Resource drone should maintain a tight collection follow distance");
+    require(hazard != state.run.mining.miniDrones.end(), "Hazard drone agent should remain available");
+    const double resourceFollowDistance = std::hypot(resource->x - state.run.mining.droneX, resource->y - state.run.mining.droneY);
+    require(resourceFollowDistance > 1.8 && resourceFollowDistance < 2.3,
+        "Resource drone should maintain a close collection position touching the main rig perimeter");
     require(survey->y > state.run.mining.droneY + 3.0,
         "Survey drone should scout deeper than the main rig");
-    require(stabilizer->y < state.run.mining.droneY && std::abs(stabilizer->x - state.run.mining.droneX) < 0.5,
-        "Stabilizer drone should dock above the main rig");
-    require(stabilizer->behavior == MiningMiniDroneBehavior::Docked,
-        "Stabilizer drone should report its docked behavior independently");
+    require(hazard->y < state.run.mining.droneY && hazard->x > state.run.mining.droneX + 1.4,
+        "Hazard drone should hold an independent remediation formation beside the rig");
+    require(hazard->behavior == MiningMiniDroneBehavior::Following,
+        "Hazard drone should return to formation when no eligible hazard is revealed");
+}
+
+void hazardDroneTreatsAffinityLadderAndBatches()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto runFirstTreatment = [&](int level, MiningElementalAffinity affinity, int clusterSize, int expectedBatch) {
+        GameState state = createNewGame(catalog, 93000 + level * 17 + static_cast<int>(affinity));
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        ensureDroneBayState(state, catalog);
+        state.meta.droneBaySlots = 1;
+        state.meta.equippedDroneIds = {content::drone::hazardDrone};
+        for (DroneUpgradeRecord& record : state.meta.droneUpgrades) {
+            if (record.droneId == content::drone::hazardDrone) {
+                record.level = level;
+            }
+        }
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        require(startMiningRun(state, catalog).applied, "hazard treatment test run should start");
+        MiningRunState& mining = state.run.mining;
+        for (MiningCell& cell : mining.terrain.cells) {
+            if (cell.material == MiningCellMaterial::HazardPocket) {
+                cell = {MiningCellMaterial::Regolith, 1.0, 1.0, false, false};
+            }
+        }
+        const int startX = std::clamp(static_cast<int>(std::floor(mining.droneX)) + 1, 1, mining.terrain.width - clusterSize - 1);
+        const int y = std::clamp(static_cast<int>(std::floor(mining.droneY)) + 2, 1, mining.terrain.height - 2);
+        for (int offset = 0; offset < clusterSize; ++offset) {
+            MiningCell* cell = miningCellAt(mining.terrain, startX + offset, y);
+            require(cell != nullptr, "hazard treatment cluster cell should exist");
+            const double toughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+            *cell = {MiningCellMaterial::HazardPocket, toughness, toughness, true, true};
+            cell->hazardAffinity = affinity;
+        }
+        MiningCell* unsupported = miningCellAt(mining.terrain, startX, y + 1);
+        require(unsupported != nullptr, "unsupported hazard test cell should exist");
+        const double toughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+        const bool radiationSupported = level >= 3;
+        if (!radiationSupported) {
+            *unsupported = {MiningCellMaterial::HazardPocket, toughness, toughness, true, true};
+            unsupported->hazardAffinity = MiningElementalAffinity::Radiation;
+        } else {
+            *unsupported = {MiningCellMaterial::Regolith, toughness, toughness, true, false};
+        }
+
+        const MaterialInventory materialsBefore = mining.temporaryMaterials;
+        int remaining = clusterSize;
+        for (int tick = 0; tick < 240 && remaining == clusterSize; ++tick) {
+            updateMiningRun(state, catalog, 0.05);
+            remaining = 0;
+            for (int offset = 0; offset < clusterSize; ++offset) {
+                const MiningCell* cell = miningCellAt(mining.terrain, startX + offset, y);
+                remaining += cell != nullptr && cell->material == MiningCellMaterial::HazardPocket ? 1 : 0;
+            }
+        }
+        require(clusterSize - remaining == expectedBatch, "Hazard Drone should convert the Mk-specific number of adjacent tiles in its first treatment");
+        require(radiationSupported || unsupported->material == MiningCellMaterial::HazardPocket,
+            "Hazard Drone should ignore affinities above its current Mk");
+        require(mining.temporaryMaterials.common == materialsBefore.common &&
+                mining.temporaryMaterials.rare == materialsBefore.rare &&
+                mining.temporaryMaterials.exotic == materialsBefore.exotic,
+            "hazard refinement should create a mineable tile instead of granting materials directly");
+        return state;
+    };
+
+    runFirstTreatment(1, MiningElementalAffinity::Thermal, 2, 1);
+    runFirstTreatment(2, MiningElementalAffinity::Toxic, 3, 2);
+    const GameState firstMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
+    const GameState secondMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
+    require(firstMkThree.run.mining.terrain.cells.size() == secondMkThree.run.mining.terrain.cells.size() &&
+            std::equal(
+                firstMkThree.run.mining.terrain.cells.begin(),
+                firstMkThree.run.mining.terrain.cells.end(),
+                secondMkThree.run.mining.terrain.cells.begin(),
+                [](const MiningCell& lhs, const MiningCell& rhs) {
+                    return lhs.material == rhs.material && lhs.hazard == rhs.hazard && lhs.hazardAffinity == rhs.hazardAffinity;
+                }),
+        "hazard refinement results should be deterministic for the same run seed and tile coordinates");
+}
+
+void miningHazardAffinitiesApplyOnlyOnDrillContact()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto contactState = [&](MiningElementalAffinity affinity) {
+        GameState state = createNewGame(catalog, 93100 + static_cast<int>(affinity));
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        require(startMiningRun(state, catalog).applied, "hazard contact test run should start");
+        MiningRunState& mining = state.run.mining;
+        for (MiningCell& cell : mining.terrain.cells) {
+            cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+        }
+        mining.droneX = 32.0;
+        mining.droneY = 8.0;
+        MiningCell* hazard = miningCellAt(mining.terrain, 33, 8);
+        require(hazard != nullptr, "hazard contact test cell should exist");
+        *hazard = {MiningCellMaterial::HazardPocket, 100.0, 100.0, true, true};
+        hazard->hazardAffinity = affinity;
+        setMiningMove(state, 1.0, 0.0);
+        setMiningMove(state, 0.0, 0.0);
+        setMiningDrilling(state, true);
+        updateMiningRun(state, catalog, 0.10);
+        return state;
+    };
+
+    const GameState thermal = contactState(MiningElementalAffinity::Thermal);
+    require(thermal.run.mining.drillHeat > 0.0, "thermal hazard contact should add drill heat");
+    const GameState cryo = contactState(MiningElementalAffinity::Cryo);
+    require(cryo.run.mining.movementSlowSeconds > 0.0 && cryo.run.mining.movementSlowScale < 1.0,
+        "cryo hazard contact should slow the rig");
+    const GameState toxic = contactState(MiningElementalAffinity::Toxic);
+    require(toxic.run.mining.drillIntegrity < 1.0, "toxic hazard contact should damage drill integrity");
+    const GameState radiation = contactState(MiningElementalAffinity::Radiation);
+    require(radiation.run.mining.hazardDelta > 0.0, "radiation hazard contact should increase extraction hazard");
+
+    GameState nearbyOnly = contactState(MiningElementalAffinity::Thermal);
+    nearbyOnly.run.mining.drillHeat = 0.0;
+    setMiningDrilling(nearbyOnly, false);
+    updateMiningRun(nearbyOnly, catalog, 0.20);
+    require(nearbyOnly.run.mining.drillHeat <= 0.000001, "hazards should not apply exposure while the drill is not contacting them");
+}
+
+void legacyStabilizerSavesMigrateToHazardDrone()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState source = createNewGame(catalog, 93200);
+    source.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(source, catalog);
+    SaveData save = captureSaveData(source);
+    save.droneBaySlots = 3;
+    save.ownedDroneIds = {content::drone::legacyStabilizerDrone};
+    save.equippedDroneIds = {content::drone::legacyStabilizerDrone, content::drone::legacyStabilizerDrone};
+    save.droneUpgrades = {{content::drone::legacyStabilizerDrone, 3}};
+
+    GameState restored = createNewGame(catalog, 93201);
+    restoreSaveData(restored, catalog, save);
+    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::hazardDrone) != restored.meta.ownedDroneIds.end(),
+        "legacy Stabilizer ownership should migrate to the Hazard Drone");
+    require(std::count(restored.meta.equippedDroneIds.begin(), restored.meta.equippedDroneIds.end(), content::drone::hazardDrone) == 2,
+        "legacy duplicate Stabilizer loadout slots should migrate without collapsing equipped copies");
+    require(miniDroneUpgradeLevel(restored, content::drone::hazardDrone) == 3,
+        "legacy Stabilizer upgrades should migrate to the Hazard Drone");
+    require(std::none_of(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), [](const std::string& id) {
+        return id == content::drone::legacyStabilizerDrone;
+    }), "legacy Stabilizer ids should not remain in normalized ownership");
 }
 
 void miningAndSurveyDroneAgentsPerformWorldActions()
@@ -3474,8 +3767,22 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
     state.run.mining.droneX = std::min(
         static_cast<double>(state.run.mining.terrain.width - 2),
         miningAgent->x + tuning::mining::miningDroneLeashRadiusCells + 1.0);
+    miningAgent->taskProgressSeconds = 0.0;
     const int brokenBefore = state.run.mining.cellsBroken;
-    updateMiningRun(state, catalog, 0.08);
+    const double miningWorkSeconds = tuning::mining::miningDroneWorkSeconds(
+        miningAgent->upgradeLevel,
+        MiningCellMaterial::CommonOre);
+    double elapsedMiningWork = 0.0;
+    while (elapsedMiningWork + 0.08 < miningWorkSeconds) {
+        updateMiningRun(state, catalog, 0.08);
+        elapsedMiningWork += 0.08;
+    }
+    require(miningCellAt(state.run.mining.terrain, targetX, targetY)->material == MiningCellMaterial::CommonOre,
+        "Mining drones should spend their full work cycle on an assigned terrain cell");
+    for (int step = 0; step < 3 &&
+        miningCellAt(state.run.mining.terrain, targetX, targetY)->material != MiningCellMaterial::Empty; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
     require(miningCellAt(state.run.mining.terrain, targetX, targetY)->material == MiningCellMaterial::Empty,
         "Mining drone should break its assigned terrain cell instead of granting synthetic materials");
     require(state.run.mining.cellsBroken == brokenBefore + 1,
@@ -3499,6 +3806,617 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
         "Survey drone should add its own remote scanner origin to the pulse reveal");
 }
 
+void surveyDroneRunsAnchoredPriorityScanCycles()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91936);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::surveyDrone};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "survey cycle mining run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell = {};
+        cell.revealed = true;
+    }
+    const int anchorX = std::clamp(static_cast<int>(std::floor(state.run.mining.droneX)), 6, state.run.mining.terrain.width - 7);
+    const int anchorY = std::clamp(static_cast<int>(std::floor(state.run.mining.droneY)), 2, state.run.mining.terrain.height - 13);
+    state.run.mining.droneX = static_cast<double>(anchorX) + 0.5;
+    state.run.mining.droneY = static_cast<double>(anchorY) + 0.5;
+    const int artifactX = anchorX - 4;
+    const int artifactY = anchorY + 3;
+    const int exoticX = anchorX + 4;
+    const int exoticY = anchorY + 10;
+    const int rareX = anchorX - 2;
+    const int rareY = anchorY + 8;
+    *miningCellAt(state.run.mining.terrain, artifactX, artifactY) =
+        {MiningCellMaterial::ArtifactCache, 4.0, 4.0, false, false};
+    *miningCellAt(state.run.mining.terrain, exoticX, exoticY) =
+        {MiningCellMaterial::ExoticVein, 4.0, 4.0, false, false};
+    *miningCellAt(state.run.mining.terrain, rareX, rareY) =
+        {MiningCellMaterial::RareOre, 4.0, 4.0, false, false};
+
+    updateMiningRun(state, catalog, 0.05);
+    auto survey = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Survey;
+    });
+    require(survey != state.run.mining.miniDrones.end(), "survey cycle should create a Survey drone agent");
+    require(survey->targetCellX == artifactX && survey->targetCellY == artifactY,
+        "Survey drone should prioritize an anchored artifact signature over other materials");
+    require(survey->targetCellY > state.run.mining.droneY &&
+        std::abs(static_cast<double>(survey->targetCellX) + 0.5 - state.run.mining.droneX) <= tuning::mining::surveyDroneAnchorHalfWidthCells,
+        "Survey target should remain ahead of and laterally anchored to the main rig");
+
+    survey->x = static_cast<double>(artifactX) + 0.5;
+    survey->y = static_cast<double>(artifactY) + 0.5;
+    survey->velocityX = 0.0;
+    survey->velocityY = 0.0;
+    updateMiningRun(state, catalog, 0.05);
+    require(!miningCellAt(state.run.mining.terrain, artifactX, artifactY)->revealed &&
+        survey->behavior == MiningMiniDroneBehavior::Scouting && survey->taskProgressSeconds > 0.0,
+        "Survey drones should settle at a target before firing their local scan pulse");
+    for (int step = 0; step < 10 && !miningCellAt(state.run.mining.terrain, artifactX, artifactY)->revealed; ++step) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    require(miningCellAt(state.run.mining.terrain, artifactX, artifactY)->revealed,
+        "Survey drone arrival should pulse-reveal a local area");
+    require(survey->targetCellX < 0 && survey->actionCooldownSeconds > 0.0 &&
+        survey->behavior == MiningMiniDroneBehavior::Returning,
+        "Survey drone should clear its assignment and recharge while returning toward the rig");
+
+    survey->x = state.run.mining.droneX;
+    survey->y = state.run.mining.droneY + tuning::mining::surveyDroneLeadDistanceCells;
+    survey->velocityX = 0.0;
+    survey->velocityY = 0.0;
+    for (int step = 0; step < 45; ++step) {
+        updateMiningRun(state, catalog, 0.10);
+    }
+    require(survey->targetCellX == exoticX && survey->targetCellY == exoticY,
+        "recharged Survey drone should choose the next highest-value deeper anchored signature");
+    require(survey->targetCellY > artifactY,
+        "successive Survey assignments should progress deeper when the next priority signature is deeper");
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell.revealed = true;
+    }
+    survey->targetCellX = -1;
+    survey->targetCellY = -1;
+    survey->actionCooldownSeconds = 0.0;
+    survey->x = state.run.mining.droneX;
+    survey->y = state.run.mining.droneY + tuning::mining::surveyDroneLeadDistanceCells;
+    survey->velocityX = 0.0;
+    survey->velocityY = 0.0;
+    updateMiningRun(state, catalog, 0.05);
+    require(survey->behavior == MiningMiniDroneBehavior::Scouting && survey->actionCooldownSeconds > 0.0,
+        "Survey drone should pulse near the rig and recharge when no forward signature remains");
+    require(survey->surveyPulseSeconds > 0.0,
+        "autonomous Survey pulses should expose their local scanner presentation state");
+
+    const SaveData save = captureSaveData(state);
+    GameState restored = createNewGame(catalog, 91937);
+    restoreSaveData(restored, catalog, save);
+    const auto restoredSurvey = std::find_if(restored.run.mining.miniDrones.begin(), restored.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Survey;
+    });
+    require(restoredSurvey != restored.run.mining.miniDrones.end() &&
+        std::abs(restoredSurvey->surveyPulseSeconds - survey->surveyPulseSeconds) < 0.000001 &&
+        std::abs(restoredSurvey->actionCooldownSeconds - survey->actionCooldownSeconds) < 0.000001,
+        "Survey pulse and recharge state should survive an active mining save");
+}
+
+void surveyDronesMaintainCoordinatedSearchLanes()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91943);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 5;
+    state.meta.equippedDroneIds = {
+        content::drone::surveyDrone,
+        content::drone::surveyDrone,
+        content::drone::surveyDrone,
+        content::drone::surveyDrone,
+        content::drone::surveyDrone
+    };
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "coordinated Survey drone run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    std::vector<MiningMiniDroneAgent*> surveyDrones;
+    for (MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Survey) {
+            surveyDrones.push_back(&agent);
+        }
+    }
+    std::sort(surveyDrones.begin(), surveyDrones.end(), [](const MiningMiniDroneAgent* lhs, const MiningMiniDroneAgent* rhs) {
+        return lhs->roleIndex < rhs->roleIndex;
+    });
+    require(surveyDrones.size() == 5, "duplicate Survey drones should each create an independent agent");
+    for (std::size_t i = 0; i < surveyDrones.size(); ++i) {
+        const double expectedOffset = tuning::mining::surveyDroneFormationOffsetCells(
+            static_cast<int>(i),
+            static_cast<int>(surveyDrones.size()));
+        require(std::abs(surveyDrones[i]->x - (state.run.mining.droneX + expectedOffset)) < 0.000001,
+            "Survey drone idle stations should use stable count-aware formation slots");
+        if (i > 0) {
+            require(surveyDrones[i]->x - surveyDrones[i - 1]->x >=
+                tuning::mining::surveyDroneFormationSpacingCells - 0.001,
+                "idle Survey drones should remain visibly separated across the search front");
+        }
+    }
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell = {};
+        cell.revealed = true;
+    }
+    const int targetY = std::clamp(
+        static_cast<int>(std::floor(state.run.mining.droneY + 7.0)),
+        1,
+        state.run.mining.terrain.height - 2);
+    for (std::size_t i = 0; i < surveyDrones.size(); ++i) {
+        const double laneCenter = state.run.mining.droneX + tuning::mining::surveyDroneFormationOffsetCells(
+            static_cast<int>(i),
+            static_cast<int>(surveyDrones.size()));
+        const int laneX = std::clamp(
+            static_cast<int>(std::floor(laneCenter)),
+            1,
+            state.run.mining.terrain.width - 2);
+        *miningCellAt(state.run.mining.terrain, laneX, targetY) =
+            {MiningCellMaterial::CommonOre, 4.0, 4.0, false, false};
+        surveyDrones[i]->targetCellX = -1;
+        surveyDrones[i]->targetCellY = -1;
+        surveyDrones[i]->behavior = MiningMiniDroneBehavior::Following;
+        surveyDrones[i]->actionCooldownSeconds = 0.0;
+        surveyDrones[i]->velocityX = 0.0;
+        surveyDrones[i]->velocityY = 0.0;
+    }
+    std::vector<std::pair<double, double>> positionsBeforeAssignment;
+    for (const MiningMiniDroneAgent* agent : surveyDrones) {
+        positionsBeforeAssignment.push_back({agent->x, agent->y});
+    }
+    updateMiningRun(state, catalog, 0.05);
+    for (std::size_t i = 0; i < surveyDrones.size(); ++i) {
+        const double laneCenter = state.run.mining.droneX + tuning::mining::surveyDroneFormationOffsetCells(
+            static_cast<int>(i),
+            static_cast<int>(surveyDrones.size()));
+        require(surveyDrones[i]->targetCellX >= 0 &&
+            std::abs(static_cast<double>(surveyDrones[i]->targetCellX) + 0.5 - laneCenter) <=
+                tuning::mining::surveyDroneSearchLaneHalfWidthCells,
+            "Survey drones should acquire unrevealed signatures inside their assigned search lane");
+        if (i > 0) {
+            require(surveyDrones[i]->targetCellX > surveyDrones[i - 1]->targetCellX,
+                "Survey target assignments should preserve the formation's left-to-right lane order");
+        }
+        const double displacement = std::hypot(
+            surveyDrones[i]->x - positionsBeforeAssignment[i].first,
+            surveyDrones[i]->y - positionsBeforeAssignment[i].second);
+        require(displacement > 0.0 && displacement < 0.05,
+            "Survey drones should accelerate deliberately instead of snapping toward new scan targets");
+    }
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell.revealed = true;
+    }
+    for (int step = 0; step < 180; ++step) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    for (std::size_t i = 1; i < surveyDrones.size(); ++i) {
+        require(surveyDrones[i]->x - surveyDrones[i - 1]->x >=
+            tuning::mining::surveyDroneFormationSpacingCells - 0.12,
+            "idle Survey drones should settle back into their evenly spaced search formation");
+    }
+}
+
+void resourceDroneRunsTimedMaterialShuttles()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto createResourceRun = [&](std::uint64_t seed, int upgradeLevel) {
+        GameState state = createNewGame(catalog, seed);
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        ensureDroneBayState(state, catalog);
+        state.meta.droneBaySlots = 1;
+        state.meta.equippedDroneIds = {content::drone::resourceDrone};
+        state.meta.droneUpgrades = {{content::drone::resourceDrone, upgradeLevel}};
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        require(startMiningRun(state, catalog).applied, "resource shuttle mining run should start");
+        state.run.mining.enemies.clear();
+        state.run.mining.oxygenSeconds = 100.0;
+        return state;
+    };
+
+    GameState state = createResourceRun(91938, 1);
+    auto resource = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Resource;
+    });
+    require(resource != state.run.mining.miniDrones.end(), "resource shuttle should create a Resource drone agent");
+    resource->x = state.run.mining.droneX + tuning::mining::resourceDroneCollectionRadiusCells;
+    resource->y = state.run.mining.droneY;
+    resource->velocityX = 0.0;
+    resource->velocityY = 0.0;
+    resource->behavior = MiningMiniDroneBehavior::Following;
+    state.run.mining.temporaryMaterials = {.common = 4, .rare = 2, .exotic = 2};
+    state.run.mining.cargo = 4 * tuning::mining::commonCargo +
+        2 * tuning::mining::rareCargo + 2 * tuning::mining::exoticCargo;
+
+    updateMiningRun(state, catalog, 0.05);
+    require(resource->behavior == MiningMiniDroneBehavior::Working &&
+        resource->actionCooldownSeconds > 0.0 &&
+        resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic == 0,
+        "Resource drone should simulate fill time before loading its first chunk");
+    const double mk1TransferDelay = resource->actionCooldownSeconds;
+    for (int step = 0; step < 10 && resource->haulMaterials.exotic == 0; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(resource->haulMaterials.exotic == 1 && state.run.mining.temporaryMaterials.exotic == 1,
+        "Resource drone should load exactly one color-coded material chunk per transfer interval");
+    require(state.run.mining.cargo == 4 * tuning::mining::commonCargo +
+        2 * tuning::mining::rareCargo + tuning::mining::exoticCargo,
+        "loading a Resource drone should remove that chunk's cargo mass from the main rig");
+
+    const SaveData transitSave = captureSaveData(state);
+    GameState restoredTransit = createNewGame(catalog, 91939);
+    restoreSaveData(restoredTransit, catalog, transitSave);
+    const auto restoredResource = std::find_if(restoredTransit.run.mining.miniDrones.begin(), restoredTransit.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Resource;
+    });
+    require(restoredResource != restoredTransit.run.mining.miniDrones.end() &&
+        restoredResource->haulMaterials.exotic == resource->haulMaterials.exotic,
+        "Resource drone in-transit manifest should survive an active mining save");
+
+    for (int step = 0; step < 160 && resource->behavior != MiningMiniDroneBehavior::Docked; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(resource->behavior == MiningMiniDroneBehavior::Docked &&
+        resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic ==
+            tuning::mining::resourceDroneCapacityChunks,
+        "a full Resource drone should travel to and dock at the ship");
+    const int stowedBeforeUnload = state.run.mining.stowedMaterials.common +
+        state.run.mining.stowedMaterials.rare + state.run.mining.stowedMaterials.exotic;
+    for (int step = 0; step < 5; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.stowedMaterials.common + state.run.mining.stowedMaterials.rare +
+        state.run.mining.stowedMaterials.exotic == stowedBeforeUnload,
+        "Resource drone should simulate ship drop-off time before clearing a chunk");
+    for (int step = 0; step < 5; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.stowedMaterials.common + state.run.mining.stowedMaterials.rare +
+        state.run.mining.stowedMaterials.exotic == stowedBeforeUnload + 1,
+        "Resource drone should unload exactly one chunk when the drop-off interval completes");
+    for (int step = 0; step < 120 &&
+        resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic > 0; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic == 0,
+        "Resource drone should clear its manifest one chunk at a time at the ship");
+    require(state.run.mining.stowedMaterials.common == 4 &&
+        state.run.mining.stowedMaterials.rare == 2 &&
+        state.run.mining.stowedMaterials.exotic == 2,
+        "Resource drone drop-off should bank the exact transported material mix");
+
+    GameState upgraded = createResourceRun(91940, 3);
+    auto upgradedResource = std::find_if(upgraded.run.mining.miniDrones.begin(), upgraded.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Resource;
+    });
+    require(upgradedResource != upgraded.run.mining.miniDrones.end(), "upgraded Resource drone should create an agent");
+    upgradedResource->x = upgraded.run.mining.droneX + tuning::mining::resourceDroneCollectionRadiusCells;
+    upgradedResource->y = upgraded.run.mining.droneY;
+    upgradedResource->velocityX = 0.0;
+    upgradedResource->velocityY = 0.0;
+    upgraded.run.mining.temporaryMaterials.common = 1;
+    upgraded.run.mining.cargo = tuning::mining::commonCargo;
+    updateMiningRun(upgraded, catalog, 0.05);
+    require(upgradedResource->actionCooldownSeconds < mk1TransferDelay,
+        "Resource drone upgrades should reduce the per-chunk load and drop-off interval");
+}
+
+void resourceDronesCollectInMovingFormation()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91944);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 5;
+    state.meta.equippedDroneIds = {
+        content::drone::resourceDrone,
+        content::drone::resourceDrone,
+        content::drone::resourceDrone,
+        content::drone::resourceDrone,
+        content::drone::resourceDrone
+    };
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "moving Resource collection run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    std::vector<MiningMiniDroneAgent*> resourceDrones;
+    for (MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Resource) {
+            resourceDrones.push_back(&agent);
+        }
+    }
+    std::sort(resourceDrones.begin(), resourceDrones.end(), [](const MiningMiniDroneAgent* lhs, const MiningMiniDroneAgent* rhs) {
+        return lhs->roleIndex < rhs->roleIndex;
+    });
+    require(resourceDrones.size() == 5, "duplicate Resource drones should each create an independent agent");
+    for (const MiningMiniDroneAgent* agent : resourceDrones) {
+        require(std::abs(std::hypot(
+            agent->x - state.run.mining.droneX,
+            agent->y - state.run.mining.droneY) - tuning::mining::resourceDroneCollectionRadiusCells) < 0.001,
+            "Resource drones should initialize on the close collection ring");
+    }
+    for (std::size_t lhs = 0; lhs < resourceDrones.size(); ++lhs) {
+        for (std::size_t rhs = lhs + 1; rhs < resourceDrones.size(); ++rhs) {
+            require(std::hypot(
+                resourceDrones[lhs]->x - resourceDrones[rhs]->x,
+                resourceDrones[lhs]->y - resourceDrones[rhs]->y) >=
+                    tuning::mining::resourceDroneMinimumSpacingCells,
+                "Resource collection slots should prevent drones from stacking on the rig");
+        }
+    }
+
+    state.run.mining.temporaryMaterials.common = 30;
+    state.run.mining.cargo = 30 * tuning::mining::commonCargo;
+    for (int step = 0; step < 32; ++step) {
+        state.run.mining.droneX += 0.025;
+        updateMiningRun(state, catalog, 0.05);
+    }
+
+    int collectedChunks = 0;
+    for (const MiningMiniDroneAgent* agent : resourceDrones) {
+        collectedChunks += agent->haulMaterials.common;
+        require(agent->haulMaterials.common > 0 && agent->behavior == MiningMiniDroneBehavior::Working,
+            "each Resource drone should keep collecting while its moving formation tracks the rig");
+        require(std::hypot(agent->x - state.run.mining.droneX, agent->y - state.run.mining.droneY) < 2.55,
+            "Resource drones should remain attached to the rig collection perimeter while it moves");
+    }
+    require(collectedChunks > 0 && state.run.mining.temporaryMaterials.common == 30 - collectedChunks,
+        "moving Resource drones should transfer real material chunks without waiting for the rig to stop");
+    for (std::size_t lhs = 0; lhs < resourceDrones.size(); ++lhs) {
+        for (std::size_t rhs = lhs + 1; rhs < resourceDrones.size(); ++rhs) {
+            require(std::hypot(
+                resourceDrones[lhs]->x - resourceDrones[rhs]->x,
+                resourceDrones[lhs]->y - resourceDrones[rhs]->y) > 1.35,
+                "moving Resource drones should preserve their individual ring positions");
+        }
+    }
+}
+
+void miningDroneRunsTimedCapacityShuttles()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91941);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::miningDrone};
+    state.meta.droneUpgrades = {{content::drone::miningDrone, 1}};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "mining shuttle run should start");
+    state.run.mining.enemies.clear();
+    state.run.mining.oxygenSeconds = 100.0;
+
+    auto miningDrone = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Mining;
+    });
+    require(miningDrone != state.run.mining.miniDrones.end(), "mining shuttle run should create a Mining drone agent");
+    require(tuning::mining::miningDroneCapacityChunks(1) == 3 &&
+        tuning::mining::miningDroneCapacityChunks(2) == 5 &&
+        tuning::mining::miningDroneCapacityChunks(3) == 7,
+        "Mining drone upgrades should increase haul capacity from three to five to seven chunks");
+    require(
+        tuning::mining::miningDroneWorkSeconds(3, MiningCellMaterial::CommonOre) <
+            tuning::mining::miningDroneWorkSeconds(2, MiningCellMaterial::CommonOre) &&
+        tuning::mining::miningDroneWorkSeconds(2, MiningCellMaterial::CommonOre) <
+            tuning::mining::miningDroneWorkSeconds(1, MiningCellMaterial::CommonOre),
+        "Mining drone upgrades should reduce the per-cell mining cycle");
+
+    for (MiningCell& cell : state.run.mining.terrain.cells) {
+        cell = {};
+        cell.revealed = true;
+    }
+    const int targetX = std::clamp(
+        static_cast<int>(std::floor(state.run.mining.droneX)) + 1,
+        1,
+        state.run.mining.terrain.width - 2);
+    const int targetY = std::clamp(
+        static_cast<int>(std::floor(state.run.mining.droneY)) + 1,
+        1,
+        state.run.mining.terrain.height - 2);
+    *miningCellAt(state.run.mining.terrain, targetX, targetY) =
+        {MiningCellMaterial::CommonOre, 3.0, 3.0, true, false};
+    miningDrone->x = static_cast<double>(targetX) + 0.25;
+    miningDrone->y = static_cast<double>(targetY) + 0.5;
+    miningDrone->velocityX = 0.0;
+    miningDrone->velocityY = 0.0;
+    miningDrone->targetCellX = targetX;
+    miningDrone->targetCellY = targetY;
+    miningDrone->behavior = MiningMiniDroneBehavior::Working;
+    miningDrone->taskProgressSeconds = 0.0;
+
+    updateMiningRun(state, catalog, 0.10);
+    require(miningDrone->taskProgressSeconds > 0.0 &&
+        miningCellAt(state.run.mining.terrain, targetX, targetY)->material == MiningCellMaterial::CommonOre,
+        "Mining drones should visibly work over time instead of instantly breaking ore");
+    miningDrone->haulMaterials.rare = 1;
+    const SaveData activeSave = captureSaveData(state);
+    GameState restored = createNewGame(catalog, 91942);
+    restoreSaveData(restored, catalog, activeSave);
+    const auto restoredMiningDrone = std::find_if(restored.run.mining.miniDrones.begin(), restored.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Mining;
+    });
+    require(restoredMiningDrone != restored.run.mining.miniDrones.end() &&
+        std::abs(restoredMiningDrone->taskProgressSeconds - miningDrone->taskProgressSeconds) < 0.000001 &&
+        restoredMiningDrone->haulMaterials.rare == 1,
+        "Mining drone work progress and carried manifest should survive an active mining save");
+
+    const int capacity = tuning::mining::miningDroneCapacityChunks(miningDrone->upgradeLevel);
+    miningDrone->haulMaterials = {};
+    miningDrone->haulMaterials.common = capacity - 1;
+    miningDrone->taskProgressSeconds =
+        tuning::mining::miningDroneWorkSeconds(miningDrone->upgradeLevel, MiningCellMaterial::CommonOre) - 0.02;
+    updateMiningRun(state, catalog, 0.05);
+    require(miningCellAt(state.run.mining.terrain, targetX, targetY)->material == MiningCellMaterial::Empty &&
+        miningDrone->haulMaterials.common == capacity &&
+        miningDrone->behavior == MiningMiniDroneBehavior::Traveling &&
+        miningDrone->targetCellX < 0,
+        "a Mining drone should carry its completed ore and leave for the ship at capacity");
+    require(state.run.mining.temporaryMaterials.common == 0 && state.run.mining.stowedMaterials.common == 0,
+        "Mining drone ore should remain in its own manifest until ship drop-off");
+
+    for (int step = 0; step < 220 && miningDrone->behavior != MiningMiniDroneBehavior::Docked; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(miningDrone->behavior == MiningMiniDroneBehavior::Docked,
+        "a full Mining drone should travel to and dock at the ship");
+    const int stowedBeforeUnload = state.run.mining.stowedMaterials.common;
+    for (int step = 0; step < 5; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(state.run.mining.stowedMaterials.common == stowedBeforeUnload,
+        "Mining drone ship drop-off should wait for its transfer interval");
+    for (int step = 0; step < 180 && miningDrone->haulMaterials.common > 0; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(miningDrone->haulMaterials.common == 0 &&
+        state.run.mining.stowedMaterials.common == stowedBeforeUnload + capacity &&
+        miningDrone->behavior == MiningMiniDroneBehavior::Returning,
+        "Mining drones should bank every carried chunk one at a time before returning to work");
+}
+
+void defenseDronesCoordinateChargedShieldArcs()
+{
+    constexpr double pi = 3.14159265358979323846;
+    MiningRunState perimeter;
+    perimeter.terrain.width = 64;
+    perimeter.terrain.height = 64;
+    perimeter.droneX = 32.0;
+    perimeter.droneY = 20.0;
+    for (int index = 0; index < 6; ++index) {
+        const double angle = 2.0 * pi * static_cast<double>(index) / 6.0;
+        MiningMiniDroneAgent agent;
+        agent.role = MiniDroneRole::Defense;
+        agent.roleIndex = index;
+        agent.upgradeLevel = 1;
+        agent.defenseAngleRadians = angle;
+        agent.defenseAngleInitialized = true;
+        agent.x = perimeter.droneX + std::cos(angle) * tuning::mining::defenseDroneGuardDistanceCells;
+        agent.y = perimeter.droneY + std::sin(angle) * tuning::mining::defenseDroneGuardDistanceCells;
+        perimeter.miniDrones.push_back(agent);
+    }
+
+    DefenseDroneCoordinator perimeterCoordinator(perimeter);
+    perimeterCoordinator.synchronizeAssignments();
+    perimeterCoordinator.advanceFormation(0.05);
+    for (std::size_t lhs = 0; lhs < perimeter.miniDrones.size(); ++lhs) {
+        const MiningMiniDroneAgent& agent = perimeter.miniDrones[lhs];
+        const MiniDroneCoordinationPoint point = perimeterCoordinator.formationPoint(agent);
+        require(std::abs(std::hypot(point.x - perimeter.droneX, point.y - perimeter.droneY) -
+                    tuning::mining::defenseDroneGuardDistanceCells) < 0.001,
+            "Defense drones should hold a common perimeter radius around the rig");
+        for (std::size_t rhs = lhs + 1; rhs < perimeter.miniDrones.size(); ++rhs) {
+            require(std::hypot(
+                    perimeter.miniDrones[lhs].x - perimeter.miniDrones[rhs].x,
+                    perimeter.miniDrones[lhs].y - perimeter.miniDrones[rhs].y) > 1.70,
+                "six Defense drones should occupy distinct perimeter positions");
+        }
+    }
+    for (int direction = 0; direction < 24; ++direction) {
+        const double angle = 2.0 * pi * static_cast<double>(direction) / 24.0;
+        const DefenseShieldImpact impact = perimeterCoordinator.absorbIncomingDamage(
+            perimeter.droneX + std::cos(angle) * 6.0,
+            perimeter.droneY + std::sin(angle) * 6.0,
+            0.001);
+        require(impact.interceptor != nullptr && impact.remainingDamage <= 0.000001,
+            "six coordinated Defense arcs should provide continuous coverage around the rig");
+    }
+
+    MiningRunState recharge;
+    recharge.terrain.width = 64;
+    recharge.terrain.height = 64;
+    recharge.droneX = 32.0;
+    recharge.droneY = 20.0;
+    MiningMiniDroneAgent baseShield;
+    baseShield.role = MiniDroneRole::Defense;
+    baseShield.roleIndex = 0;
+    baseShield.upgradeLevel = 1;
+    baseShield.x = recharge.droneX + tuning::mining::defenseDroneGuardDistanceCells;
+    baseShield.y = recharge.droneY;
+    baseShield.defenseAngleRadians = 0.0;
+    baseShield.defenseAngleInitialized = true;
+    recharge.miniDrones.push_back(baseShield);
+    DefenseDroneCoordinator rechargeCoordinator(recharge);
+    rechargeCoordinator.synchronizeAssignments();
+    const double baseHitPoints = tuning::mining::defenseDroneShieldHitPoints(1);
+    const DefenseShieldImpact broken = rechargeCoordinator.absorbIncomingDamage(
+        recharge.droneX + 6.0,
+        recharge.droneY,
+        baseHitPoints + 0.01);
+    require(std::abs(broken.absorbedDamage - baseHitPoints) < 0.000001 &&
+            std::abs(broken.remainingDamage - 0.01) < 0.000001 &&
+            recharge.miniDrones[0].shieldCharge == 0.0,
+        "a Defense arc should absorb only its available charge and pass overflow to the rig");
+    const double baseRecharge = tuning::mining::defenseDroneRechargeSeconds(1);
+    require(std::abs(recharge.miniDrones[0].shieldRechargeSeconds - baseRecharge) < 0.000001,
+        "breaking a Defense arc should start its level-scaled recharge timer");
+    rechargeCoordinator.advanceFormation(baseRecharge - 0.05);
+    require(recharge.miniDrones[0].shieldCharge == 0.0,
+        "a broken Defense arc should remain offline until recharge completes");
+    rechargeCoordinator.advanceFormation(0.06);
+    require(recharge.miniDrones[0].shieldCharge == 1.0,
+        "a Defense arc should restore to full charge after its recharge timer");
+
+    MiningRunState upgraded = recharge;
+    upgraded.miniDrones[0].upgradeLevel = 3;
+    upgraded.miniDrones[0].shieldCharge = 1.0;
+    upgraded.miniDrones[0].shieldRechargeSeconds = 0.0;
+    DefenseDroneCoordinator upgradedCoordinator(upgraded);
+    upgradedCoordinator.synchronizeAssignments();
+    const DefenseShieldImpact upgradedHit = upgradedCoordinator.absorbIncomingDamage(
+        upgraded.droneX + 6.0,
+        upgraded.droneY,
+        baseHitPoints + 0.01);
+    require(upgradedHit.remainingDamage <= 0.000001 && upgraded.miniDrones[0].shieldCharge > 0.0,
+        "upgraded Defense arcs should have more shield hit points");
+    require(tuning::mining::defenseDroneRechargeSeconds(3) < baseRecharge,
+        "upgraded Defense arcs should recharge faster");
+
+    MiningEnemy overhead;
+    overhead.type = MiningEnemyType::Flying;
+    overhead.x = recharge.droneX;
+    overhead.y = recharge.droneY + 5.0;
+    overhead.active = true;
+    recharge.enemies = {overhead};
+    recharge.miniDrones[0].defenseAngleRadians = 0.0;
+    recharge.miniDrones[0].upgradeLevel = 1;
+    rechargeCoordinator.synchronizeAssignments();
+    rechargeCoordinator.advanceFormation(0.50);
+    const double baseTurn = recharge.miniDrones[0].defenseAngleRadians;
+    upgraded.enemies = {overhead};
+    upgraded.miniDrones[0].defenseAngleRadians = 0.0;
+    upgradedCoordinator.synchronizeAssignments();
+    upgradedCoordinator.advanceFormation(0.50);
+    require(upgraded.miniDrones[0].defenseAngleRadians > baseTurn &&
+            upgraded.miniDrones[0].defenseAngleRadians < pi * 0.5,
+        "Defense formation slerp should remain gradual while improving with drone level");
+}
+
 void attackAndDefenseDroneAgentsOwnCombatBehavior()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -3510,8 +4428,13 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     ensureDroneBayState(state, catalog);
-    state.meta.droneBaySlots = 2;
-    state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    state.meta.droneBaySlots = 4;
+    state.meta.equippedDroneIds = {
+        content::drone::attackDrone,
+        content::drone::attackDrone,
+        content::drone::attackDrone,
+        content::drone::defenseDrone
+    };
     state.run.destinationIndex = 4;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
@@ -3541,8 +4464,14 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
     });
     require(attack != state.run.mining.miniDrones.end() && defense != state.run.mining.miniDrones.end(),
         "combat loadout should create Attack and Defense agents");
-    require(attack->targetEnemyIndex == 0 && attack->behavior == MiningMiniDroneBehavior::Engaging,
-        "Attack drone should acquire and engage the closest enemy");
+    const int attackCount = static_cast<int>(std::count_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Attack;
+    }));
+    require(attackCount == 3, "combat loadout should preserve duplicate Attack drone agents");
+    require(std::all_of(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role != MiniDroneRole::Attack ||
+            (agent.targetEnemyIndex == 0 && agent.behavior == MiningMiniDroneBehavior::Engaging);
+    }), "Attack drones should coordinate on the closest shared focus target");
     const auto alliedShot = std::find_if(state.run.mining.combatProjectiles.begin(), state.run.mining.combatProjectiles.end(), [](const MiningProjectileVisual& projectile) {
         return projectile.team == MiningCombatTeam::Allied;
     });
@@ -3554,10 +4483,34 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
         return projectile.team == MiningCombatTeam::Enemy;
     });
     require(enemyShot != state.run.mining.combatProjectiles.end(), "ranged enemy should fire at the guarded rig");
-    require(std::abs(enemyShot->endX - defense->x) < 0.001 && std::abs(enemyShot->endY - defense->y) < 0.001,
-        "Defense drone should intercept ranged fire at its own world position");
+    require(std::abs(std::hypot(
+            enemyShot->endX - state.run.mining.droneX,
+            enemyShot->endY - state.run.mining.droneY) -
+        (tuning::mining::defenseDroneGuardDistanceCells + tuning::mining::defenseDroneShieldArcOffsetCells)) < 0.001,
+        "enemy projectiles should terminate at the Defense drone's outer shield arc");
+    require(defense->shieldCharge < 1.0 && defense->shieldImpactSeconds > 0.0,
+        "intercepted fire should consume the selected Defense arc and trigger impact feedback");
     require(state.run.mining.environmentalShieldAbsorbed > 0.0,
         "Defense drone interception should contribute to absorbed damage accounting");
+
+    for (int step = 0; step < 40; ++step) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    std::vector<const MiningMiniDroneAgent*> formation;
+    for (const MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Attack) {
+            formation.push_back(&agent);
+            require(std::abs(std::hypot(agent.x - state.run.mining.enemies[0].x, agent.y - state.run.mining.enemies[0].y) -
+                tuning::mining::attackDroneStandoffCells) < 0.45,
+                "Attack drones should hold their assigned standoff ring around the focus target");
+        }
+    }
+    for (std::size_t lhs = 0; lhs < formation.size(); ++lhs) {
+        for (std::size_t rhs = lhs + 1; rhs < formation.size(); ++rhs) {
+            require(std::hypot(formation[lhs]->x - formation[rhs]->x, formation[lhs]->y - formation[rhs]->y) > 1.5,
+                "Attack drone formation slots should prevent agents from stacking on one another");
+        }
+    }
 
     state.run.mining.enemies[0].x = state.run.mining.droneX + 6.0;
     state.run.mining.enemies[1].x = state.run.mining.droneX + 2.0;
@@ -3568,9 +4521,85 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
     state.run.mining.enemies[0].health = 0.01;
     attack->actionCooldownSeconds = 0.0;
     updateMiningRun(state, catalog, 0.08);
-    require(!state.run.mining.enemies[0].active && attack->behavior == MiningMiniDroneBehavior::Returning,
-        "Attack drone should finish its target and fly home before acquiring another");
+    require(!state.run.mining.enemies[0].active, "Attack drones should finish their shared focus target");
+    updateMiningRun(state, catalog, 0.08);
+    require(std::all_of(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role != MiniDroneRole::Attack ||
+            (agent.targetEnemyIndex == 1 && agent.behavior == MiningMiniDroneBehavior::Engaging);
+    }), "Attack drones should coordinate on a new visible target after the focus target dies");
 
+    state.run.mining.enemies[1].active = false;
+    for (int step = 0; step < 80; ++step) {
+        updateMiningRun(state, catalog, 0.05);
+        for (const MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+            if (agent.role != MiniDroneRole::Attack) {
+                continue;
+            }
+            require(std::hypot(agent.x - state.run.mining.droneX, agent.y - state.run.mining.droneY) >=
+                tuning::mining::attackDroneRigClearanceCells - 0.001,
+                "returning Attack drones should never cross the main rig clearance perimeter");
+        }
+    }
+    std::vector<const MiningMiniDroneAgent*> returnedAttackDrones;
+    for (const MiningMiniDroneAgent& agent : state.run.mining.miniDrones) {
+        if (agent.role == MiniDroneRole::Attack) {
+            returnedAttackDrones.push_back(&agent);
+            require(agent.behavior == MiningMiniDroneBehavior::Following,
+                "Attack drones should settle into their home perimeter when no target is visible");
+        }
+    }
+    for (std::size_t lhs = 0; lhs < returnedAttackDrones.size(); ++lhs) {
+        for (std::size_t rhs = lhs + 1; rhs < returnedAttackDrones.size(); ++rhs) {
+            require(std::hypot(
+                returnedAttackDrones[lhs]->x - returnedAttackDrones[rhs]->x,
+                returnedAttackDrones[lhs]->y - returnedAttackDrones[rhs]->y) > 1.5,
+                "returned Attack drones should occupy distinct perimeter slots");
+        }
+    }
+    double minimumFormationSpacing = 1.0e9;
+    double maximumFormationSpacing = 0.0;
+    for (std::size_t lhs = 0; lhs < returnedAttackDrones.size(); ++lhs) {
+        require(std::abs(std::hypot(
+            returnedAttackDrones[lhs]->x - state.run.mining.droneX,
+            returnedAttackDrones[lhs]->y - state.run.mining.droneY) - tuning::mining::attackDroneHomeRadiusCells) < 0.08,
+            "returned Attack drones should settle on the count-aware home radius");
+        for (std::size_t rhs = lhs + 1; rhs < returnedAttackDrones.size(); ++rhs) {
+            const double spacing = std::hypot(
+                returnedAttackDrones[lhs]->x - returnedAttackDrones[rhs]->x,
+                returnedAttackDrones[lhs]->y - returnedAttackDrones[rhs]->y);
+            minimumFormationSpacing = std::min(minimumFormationSpacing, spacing);
+            maximumFormationSpacing = std::max(maximumFormationSpacing, spacing);
+        }
+    }
+    require(maximumFormationSpacing - minimumFormationSpacing < 0.08,
+        "Attack drone home slots should be evenly spaced for the equipped drone count");
+
+    std::vector<std::pair<double, double>> positionsBeforeRigMove;
+    for (const MiningMiniDroneAgent* agent : returnedAttackDrones) {
+        positionsBeforeRigMove.push_back({agent->x, agent->y});
+    }
+    state.run.mining.droneX += 0.60;
+    updateMiningRun(state, catalog, 0.05);
+    for (std::size_t i = 0; i < returnedAttackDrones.size(); ++i) {
+        const double movement = std::hypot(
+            returnedAttackDrones[i]->x - positionsBeforeRigMove[i].first,
+            returnedAttackDrones[i]->y - positionsBeforeRigMove[i].second);
+        require(movement > 0.001 && movement < 0.30,
+            "Attack drone formation should begin following smoothly instead of mirroring the rig displacement");
+    }
+    for (int step = 0; step < 50; ++step) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    for (const MiningMiniDroneAgent* agent : returnedAttackDrones) {
+        require(std::abs(std::hypot(
+            agent->x - state.run.mining.droneX,
+            agent->y - state.run.mining.droneY) - tuning::mining::attackDroneHomeRadiusCells) < 0.08,
+            "Attack drones should smoothly settle back onto the moving rig formation");
+    }
+
+    defense->shieldCharge = 0.42;
+    defense->shieldRechargeSeconds = 1.75;
+    defense->shieldImpactSeconds = 0.18;
     const std::string serialized = serializeSaveData(captureSaveData(state));
     const auto save = deserializeSaveData(serialized);
     require(save.has_value(), "combat mini-drone save should parse");
@@ -3580,6 +4609,15 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
         "independent mini-drone agents should round trip through active mining saves");
     require(restored.run.mining.miniDrones.front().behavior == state.run.mining.miniDrones.front().behavior,
         "mini-drone behavior state should survive an active mining save");
+    const auto restoredDefense = std::find_if(
+        restored.run.mining.miniDrones.begin(),
+        restored.run.mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& agent) { return agent.role == MiniDroneRole::Defense; });
+    require(restoredDefense != restored.run.mining.miniDrones.end() &&
+            std::abs(restoredDefense->shieldCharge - 0.42) < 0.000001 &&
+            std::abs(restoredDefense->shieldRechargeSeconds - 1.75) < 0.000001 &&
+            restoredDefense->defenseAngleInitialized,
+        "Defense angle, charge, and recharge state should survive an active mining save");
 }
 
 void elementalMiningCombatAppliesAffinityAndAreaDefenses()
@@ -4075,6 +5113,12 @@ void miningBrokenDrillBitDisablesDrillingOnly()
     require(html.find("Rig health") != std::string::npos, "mining panel should show rig health separately");
     require(html.find("Emergency recall") != std::string::npos, "broken drill away from ship should still allow emergency recall");
     require(html.find("data-auto-modal=\"1\"") == std::string::npos, "broken drill bit should not open the failure modal");
+
+    state.run.mining.failurePending = true;
+    state.run.mining.failureMessage = "Drone health lost. Emergency recall fired.";
+    const std::string failureHtml = buildGamePanelHtml({state, catalog, prepared, prepared});
+    require(failureHtml.find("data-modal-dismissible=\"0\"") != std::string::npos,
+        "forced emergency-recall modal should expose only its recovery action, not a close path");
 }
 
 void miningShipRepairsUseBankedMaterialsProportionally()
@@ -4176,6 +5220,11 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(std::none_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
         return action.label == text::buttons::abortMining;
     }), "Emergency recall should not appear inside the ship radius");
+
+    state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneRadiusCells * 0.95;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
+    require(miningAtReturnZone(state.run.mining),
+        "the visible loading radius should accept a mining rig near the outer service ring");
 
     state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneRadiusCells + 1.0;
     state.run.mining.temporaryMaterials.rare = 1;
@@ -4342,6 +5391,14 @@ void activeMiningRoundTripsThroughSave()
         cell->feature = MiningCellFeature::BossChamber;
         cell->enemy = MiningEnemyType::Mammal;
     }
+    if (MiningCell* hazard = miningCellAt(state.run.mining.terrain, 21, 10)) {
+        hazard->material = MiningCellMaterial::HazardPocket;
+        hazard->maxToughness = 5.0;
+        hazard->remainingToughness = 5.0;
+        hazard->revealed = true;
+        hazard->hazard = true;
+        hazard->hazardAffinity = MiningElementalAffinity::Toxic;
+    }
 
     const std::string serialized = serializeSaveData(captureSaveData(state));
     require(serialized.find("miningFuelCycle=") != std::string::npos, "active mining saves should store normalized fuel cycle progress");
@@ -4396,6 +5453,10 @@ void activeMiningRoundTripsThroughSave()
     require(restoredCell != nullptr && std::abs(restoredCell->remainingToughness - 3.5) < 0.000001, "mining terrain toughness should round trip");
     require(restoredCell != nullptr && restoredCell->feature == MiningCellFeature::BossChamber, "mining terrain feature metadata should round trip");
     require(restoredCell != nullptr && restoredCell->enemy == MiningEnemyType::Mammal, "mining terrain enemy metadata should round trip");
+    const MiningCell* restoredHazard = miningCellAt(restored.run.mining.terrain, 21, 10);
+    require(restoredHazard != nullptr && restoredHazard->material == MiningCellMaterial::HazardPocket &&
+            restoredHazard->hazardAffinity == MiningElementalAffinity::Toxic,
+        "mining hazard affinity should round trip with active terrain");
 }
 
 void surfaceActionSummaryShowsResourceDeltas()
@@ -5639,6 +6700,9 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(
         miningHtml.find("mining-vital-fuel-cadence mining-alert-neutral") != std::string::npos,
         "next-fuel cadence should retain a neutral outline while its cycle has margin");
+    require(
+        miningHtml.find("mining-vital-heat mining-alert-nominal") != std::string::npos,
+        "drill heat should remain nominal below sixty percent");
     require(miningFuelCycleValue(0.25) == "75%", "next-fuel cadence should display normalized cycle remaining instead of seconds");
     require(miningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos, "mining HUD should keep scanner control");
     require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos, "mining HUD should keep tether control");
@@ -5665,6 +6729,30 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(
         miningCautionHtml.find("mining-vital-fuel-cadence mining-alert-caution") != std::string::npos,
         "next-fuel cadence should warn as the current fuel cycle approaches its draw");
+
+    miningState.run.mining.drillHeat = 0.60;
+    const std::string miningHeatCautionHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(
+        miningHeatCautionHtml.find("mining-vital-heat mining-alert-caution") != std::string::npos,
+        "drill heat should turn yellow at sixty percent");
+    require(
+        miningHeatCautionHtml.find("mining-vital-heat mining-alert-caution mining-alert-pulse-") == std::string::npos,
+        "yellow drill heat should not flash");
+
+    miningState.run.mining.drillHeat = 0.80;
+    const std::string miningHeatCriticalHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(
+        miningHeatCriticalHtml.find("mining-vital-heat mining-alert-critical") != std::string::npos,
+        "drill heat should turn red at eighty percent");
+    require(
+        miningHeatCriticalHtml.find("mining-vital-heat mining-alert-critical mining-alert-pulse-") == std::string::npos,
+        "sub-maximum red drill heat should not flash");
+
+    miningState.run.mining.drillHeat = 1.0;
+    const std::string miningHeatMaximumHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(
+        miningHeatMaximumHtml.find("mining-vital-heat mining-alert-critical mining-alert-pulse-") != std::string::npos,
+        "maximum drill heat should flash red");
 
     miningState.run.mining.oxygenSeconds = 1.0;
     miningState.run.mining.drillIntegrity = 0.05;
@@ -6327,7 +7415,7 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
     require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
     require(catalog.findMiniDrone(content::drone::surveyDrone) != nullptr, "survey drone id should resolve");
-    require(catalog.findMiniDrone(content::drone::stabilizerDrone) != nullptr, "stabilizer drone id should resolve");
+    require(catalog.findMiniDrone(content::drone::hazardDrone) != nullptr, "hazard drone id should resolve");
 
     MetaProgress meta;
     require(hasUnlock(meta, content::unlock::starter), "starter unlock should stay implicit");
@@ -6441,10 +7529,20 @@ int main()
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();
     hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
+    miningEnemySpawnersAreGenericCappedAndDestructible();
     rangedMiningEnemiesShootAndCombatVisualsExpire();
     attackDroneCombatCanCritAndEnemyCooldownPersists();
     miningMiniDronesFollowIndependentRolePositions();
+    hazardDroneTreatsAffinityLadderAndBatches();
+    miningHazardAffinitiesApplyOnlyOnDrillContact();
+    legacyStabilizerSavesMigrateToHazardDrone();
     miningAndSurveyDroneAgentsPerformWorldActions();
+    surveyDroneRunsAnchoredPriorityScanCycles();
+    surveyDronesMaintainCoordinatedSearchLanes();
+    resourceDroneRunsTimedMaterialShuttles();
+    resourceDronesCollectInMovingFormation();
+    miningDroneRunsTimedCapacityShuttles();
+    defenseDronesCoordinateChargedShieldArcs();
     attackAndDefenseDroneAgentsOwnCombatBehavior();
     elementalMiningCombatAppliesAffinityAndAreaDefenses();
     mammalBossChambersGrantAdvancedRewards();

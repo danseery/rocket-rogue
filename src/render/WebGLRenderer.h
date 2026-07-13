@@ -21,6 +21,7 @@ struct MiningCellSnapshot {
     double integrity = 1.0;
     bool revealed = false;
     bool hazard = false;
+    int hazardAffinity = 0;
 };
 
 struct MiningEnemySnapshot {
@@ -33,6 +34,10 @@ struct MiningEnemySnapshot {
     double effectRadius = 0.0;
     double attackCooldownSeconds = 0.0;
     bool active = true;
+    int spawned = 0;
+    int maxSpawns = 0;
+    double spawnCooldownSeconds = 0.0;
+    double spawnIntervalSeconds = 0.0;
 };
 
 struct MiningProjectileSnapshot {
@@ -57,6 +62,12 @@ struct MiningMiniDroneSnapshot {
     int targetCellX = -1;
     int targetCellY = -1;
     int targetEnemyIndex = -1;
+    double surveyPulseSeconds = 0.0;
+    double defenseAngleRadians = 0.0;
+    double shieldCharge = 1.0;
+    double shieldRechargeSeconds = 0.0;
+    double shieldImpactSeconds = 0.0;
+    MaterialInventory haulMaterials;
 };
 
 struct MiningDamageNumberSnapshot {
@@ -144,6 +155,7 @@ struct RenderSnapshot {
     double miningHullDirX = 0.0;
     double miningHullDirY = 1.0;
     double miningBounce = 0.0;
+    double miningBounceRelief = 0.0;
     bool miningInputDrilling = false;
     bool miningTargetDrillable = false;
     bool miningDrilling = false;
@@ -151,6 +163,8 @@ struct RenderSnapshot {
     int miningSharedFuelCapacity = 0;
     int miningCargo = 0;
     int miningStowedCargo = 0;
+    bool miningExtractionActive = false;
+    double miningExtractionProgress = 0.0;
     int miningSupportDroneCount = 0;
     int miningAttackDroneCount = 0;
     int miningDefenseDroneCount = 0;
@@ -160,7 +174,6 @@ struct RenderSnapshot {
     int miningTunedDroneCount = 0;
     std::vector<int> miningDroneRoles;
     std::vector<int> miningDroneUpgradeLevels;
-    bool miningShieldActive = false;
     MaterialInventory miningMaterials;
     MaterialInventory miningStowedMaterials;
     MiningArtifactSnapshot miningArtifact;
@@ -322,6 +335,12 @@ private:
     int previousMiningWidth_ = 0;
     int previousMiningHeight_ = 0;
     bool previousMiningActive_ = false;
+    float miningVisualHeadingX_ = 0.0F;
+    float miningVisualHeadingY_ = -1.0F;
+    float miningVisualRecoilX_ = 0.0F;
+    float miningVisualRecoilY_ = 0.0F;
+    double miningVisualHeadingTime_ = -1.0;
+    bool miningVisualHeadingInitialized_ = false;
     float sceneCssWidth_ = 1280.0F;
     float sceneCssHeight_ = 720.0F;
     float scenePixelLeft_ = 0.0F;

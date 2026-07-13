@@ -81,7 +81,7 @@ enum class MiniDroneSignatureKind {
     None,
     SentryKillbox,
     ExcavationStorm,
-    FortressRig,
+    ContainmentRig,
     RelicPathfinder,
     FullSpectrumSwarm
 };
@@ -100,6 +100,7 @@ struct MiniDroneLoadoutEffects {
     double enemySlow = 0.0;
     double reactiveArmorDamagePerSecond = 0.0;
     double environmentalShieldRelief = 0.0;
+    double hazardTreatmentRateBonus = 0.0;
     double alliedCritChanceBonus = 0.0;
     double alliedFireRateBonus = 0.0;
     int sentryVolleyBonus = 0;

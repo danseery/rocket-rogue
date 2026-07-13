@@ -100,7 +100,7 @@ enum class MiniDroneRole {
     Mining,
     Resource,
     Survey,
-    Stabilizer,
+    Hazard,
     Attack,
     Defense
 };
@@ -146,7 +146,8 @@ enum class MiningEnemyType {
     Flying,
     Beetle,
     Elemental,
-    Mammal
+    Mammal,
+    Spawner
 };
 
 enum class MiningElementalAffinity {
@@ -627,6 +628,7 @@ struct MiningCell {
     bool hazard = false;
     MiningCellFeature feature = MiningCellFeature::None;
     MiningEnemyType enemy = MiningEnemyType::None;
+    MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
 };
 
 struct MiningTerrain {
@@ -635,6 +637,15 @@ struct MiningTerrain {
     int depthZone = 0;
     std::vector<MiningCell> cells;
     std::vector<std::uint8_t> dirtyChunks;
+};
+
+struct MiningEnemySpawnSpec {
+    MiningEnemyType enemyType = MiningEnemyType::None;
+    MiningElementalAffinity affinity = MiningElementalAffinity::None;
+    int maxSpawns = 0;
+    int spawned = 0;
+    double intervalSeconds = 0.0;
+    double cooldownSeconds = 0.0;
 };
 
 struct MiningEnemy {
@@ -653,6 +664,7 @@ struct MiningEnemy {
     bool active = true;
     MiningElementalAffinity affinity = MiningElementalAffinity::None;
     double attackCooldownSeconds = 0.0;
+    MiningEnemySpawnSpec spawn;
 };
 
 enum class MiningCombatTeam {
@@ -706,7 +718,15 @@ struct MiningMiniDroneAgent {
     int targetCellY = -1;
     int targetEnemyIndex = -1;
     double actionCooldownSeconds = 0.0;
+    double taskProgressSeconds = 0.0;
+    double surveyPulseSeconds = 0.0;
+    double defenseAngleRadians = 0.0;
+    double shieldCharge = 1.0;
+    double shieldRechargeSeconds = 0.0;
+    double shieldImpactSeconds = 0.0;
+    MaterialInventory haulMaterials;
     bool finishTargetBeforeReturn = false;
+    bool defenseAngleInitialized = false;
 };
 
 struct MiningArtifactObject {

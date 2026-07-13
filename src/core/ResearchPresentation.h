@@ -339,14 +339,53 @@ inline MiniDroneStats scaledMiniDroneStats(MiniDroneStats stats, int upgradeLeve
     return stats;
 }
 
-inline std::vector<PanelMetricPresentation> miniDroneChips(const MiniDroneStats& stats, int upgradeLevel = 1)
+inline std::vector<PanelMetricPresentation> miniDroneChips(
+    const MiniDroneStats& stats,
+    int upgradeLevel,
+    MiniDroneRole role)
 {
     std::vector<PanelMetricPresentation> chips;
     if (upgradeLevel > 1) {
         chips.push_back(panelMetric("Upgrade", "Mk " + std::to_string(upgradeLevel)));
     }
+    if (role == MiniDroneRole::Defense) {
+        chips.push_back(panelMetric(
+            "Arc HP",
+            display::percent(tuning::mining::defenseDroneShieldHitPoints(upgradeLevel))));
+        chips.push_back(panelMetric(
+            "Recharge",
+            display::fixed(tuning::mining::defenseDroneRechargeSeconds(upgradeLevel), 1) + "s"));
+        chips.push_back(panelMetric(
+            "Tracking",
+            display::fixed(tuning::mining::defenseDroneTrackingSlerpPerSecond(upgradeLevel), 2)));
+        return chips;
+    }
+    if (role == MiniDroneRole::Hazard) {
+        const std::string conditions = upgradeLevel <= 1
+            ? "Thermal/Cryo"
+            : (upgradeLevel == 2 ? "Thermal/Cryo/Toxic" : "All 4 (Radiation)");
+        chips.push_back(panelMetric("Hazard set", conditions));
+        chips.push_back(panelMetric(
+            "Treatment",
+            display::fixed(tuning::mining::hazardDroneTreatmentSeconds(upgradeLevel), 2) + "s"));
+        chips.push_back(panelMetric(
+            "Batch",
+            std::to_string(tuning::mining::hazardDroneBatchSize(upgradeLevel)) +
+                (tuning::mining::hazardDroneBatchSize(upgradeLevel) == 1 ? " tile" : " tiles")));
+        chips.push_back(panelMetric(
+            "Refine",
+            display::percent(tuning::mining::hazardDroneRefinementChance(upgradeLevel))));
+        return chips;
+    }
     if (stats.passiveMiningRate > 0.0) {
-        chips.push_back(panelMetric("Auto-mine", "+" + display::fixed(stats.passiveMiningRate * 60.0, 1) + "/min"));
+        chips.push_back(panelMetric(
+            "Mine cycle",
+            display::fixed(
+                tuning::mining::miningDroneWorkSeconds(upgradeLevel, MiningCellMaterial::CommonOre),
+                1) + "s"));
+        chips.push_back(panelMetric(
+            "Haul",
+            std::to_string(tuning::mining::miningDroneCapacityChunks(upgradeLevel)) + " chunks"));
     }
     if (stats.oxygenSeconds > 0.0) {
         chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
@@ -422,6 +461,22 @@ inline std::string miniDroneUpgradeSummary(const MiniDrone& drone, bool owned, i
         return "Mk 3 max upgrade";
     }
     const int nextLevel = upgradeLevel + 1;
+    if (drone.role == MiniDroneRole::Defense) {
+        return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) +
+            ": arc " + display::percent(tuning::mining::defenseDroneShieldHitPoints(upgradeLevel)) +
+            " -> " + display::percent(tuning::mining::defenseDroneShieldHitPoints(nextLevel)) +
+            ", recharge " + display::fixed(tuning::mining::defenseDroneRechargeSeconds(nextLevel), 1) +
+            "s / " + materialSummary(miniDroneUpgradeCost(nextLevel));
+    }
+    if (drone.role == MiniDroneRole::Hazard) {
+        const std::string unlock = nextLevel == 2 ? "adds Toxic" : "adds Radiation";
+        return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) +
+            ": " + unlock + ", " +
+            display::fixed(tuning::mining::hazardDroneTreatmentSeconds(nextLevel), 2) + "s, " +
+            std::to_string(tuning::mining::hazardDroneBatchSize(nextLevel)) + " tiles, " +
+            display::percent(tuning::mining::hazardDroneRefinementChance(nextLevel)) + " refine / " +
+            materialSummary(miniDroneUpgradeCost(nextLevel));
+    }
     const MiniDroneStats currentStats = scaledMiniDroneStats(drone.stats, upgradeLevel);
     const MiniDroneStats nextStats = scaledMiniDroneStats(drone.stats, nextLevel);
     return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) + ": " +
@@ -434,15 +489,15 @@ inline std::string miniDroneBuildHook(MiniDroneRole role)
     case MiniDroneRole::Mining:
         return "Pairs with Attack for Excavation Barrage, Resource for Long Haul Rig, and Survey for Relic Pathfinder.";
     case MiniDroneRole::Resource:
-        return "Pairs with Mining for Long Haul Rig, Survey for Pathfinder Loop, and Defense/Stabilizer for Fortress Rig.";
+        return "Pairs with Mining for Long Haul Rig, Survey for Pathfinder Loop, and Defense/Hazard for Containment Rig.";
     case MiniDroneRole::Survey:
         return "Pairs with Attack for Targeting Grid and helps unlock Sentry Killbox or Relic Pathfinder signatures.";
-    case MiniDroneRole::Stabilizer:
-        return "Pairs with Defense for Bulwark Harness and anchors the Fortress Rig endurance signature.";
+    case MiniDroneRole::Hazard:
+        return "Pairs with Defense for Containment Screen and anchors the Containment Rig endurance signature.";
     case MiniDroneRole::Attack:
         return "Pairs with Survey for crits, Defense for volleys, and Mining for area-control excavation.";
     case MiniDroneRole::Defense:
-        return "Pairs with Attack for Killbox Screen and Stabilizer/Resource for shield-heavy endurance builds.";
+        return "Pairs with Attack for Killbox Screen and Hazard/Resource for containment-heavy endurance builds.";
     }
     return "Equip complementary roles to unlock named drone synergies.";
 }
@@ -478,7 +533,7 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         std::move(status),
         miniDroneBuildHook(drone.role),
         std::move(upgradeSummary),
-        miniDroneChips(scaledMiniDroneStats(drone.stats, upgradeLevel), upgradeLevel),
+        miniDroneChips(scaledMiniDroneStats(drone.stats, upgradeLevel), upgradeLevel, drone.role),
         std::move(action),
         std::move(upgradeAction)
     };
@@ -637,8 +692,8 @@ inline std::string miniDroneRoleClass(MiniDroneRole role)
         return "role-resource";
     case MiniDroneRole::Survey:
         return "role-survey";
-    case MiniDroneRole::Stabilizer:
-        return "role-stabilizer";
+    case MiniDroneRole::Hazard:
+        return "role-hazard";
     case MiniDroneRole::Attack:
         return "role-attack";
     case MiniDroneRole::Defense:
@@ -776,14 +831,14 @@ inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameSta
         droneBuildRecipe(state, catalog, "Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Crit chance, fire rate, and scanner paint for priority targets.", false),
         droneBuildRecipe(state, catalog, "Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Extra sentry target plus shield and retaliatory damage.", false),
         droneBuildRecipe(state, catalog, "Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Mining output and area-control pressure in the work zone.", false),
-        droneBuildRecipe(state, catalog, "Bulwark Harness", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer}, "Rig health relief, environmental shielding, and bounce control.", false),
+        droneBuildRecipe(state, catalog, "Containment Screen", {MiniDroneRole::Defense, MiniDroneRole::Hazard}, "Faster hazard treatment backed by stronger environmental shielding.", false),
         droneBuildRecipe(state, catalog, "Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "More passive excavation, oxygen, and safer extraction.", false),
         droneBuildRecipe(state, catalog, "Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scanner reach and extraction safety for artifact routes.", false),
         droneBuildRecipe(state, catalog, "Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Signature: faster volleys, better crits, and tougher shields.", true),
         droneBuildRecipe(state, catalog, "Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "Signature: ore flow stays high while combat pulses slow enemies.", true),
-        droneBuildRecipe(state, catalog, "Fortress Rig", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer, MiniDroneRole::Resource}, "Signature: long-dig endurance with shields, reserve time, and counter-hits.", true),
+        droneBuildRecipe(state, catalog, "Containment Rig", {MiniDroneRole::Defense, MiniDroneRole::Hazard, MiniDroneRole::Resource}, "Signature: fast remediation with shields, reserve time, and counter-hits.", true),
         droneBuildRecipe(state, catalog, "Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "Signature: artifact routing with wider scans and safer extraction.", true),
-        droneBuildRecipe(state, catalog, "Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Stabilizer}, "Capstone: every role online for volleys, scans, shields, logistics, and mining.", true)
+        droneBuildRecipe(state, catalog, "Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Hazard}, "Capstone: every role online for volleys, scans, remediation, shields, logistics, and mining.", true)
     };
 }
 
@@ -814,7 +869,7 @@ inline std::string droneRunPosture(const MiniDroneLoadoutEffects& effects)
         return "Killbox";
     case MiniDroneSignatureKind::ExcavationStorm:
         return "Greedy mine";
-    case MiniDroneSignatureKind::FortressRig:
+    case MiniDroneSignatureKind::ContainmentRig:
         return "Hold ground";
     case MiniDroneSignatureKind::RelicPathfinder:
         return "Artifact route";
@@ -874,8 +929,8 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
     if (effects.scannerRadius > 0.0) {
         priorities.push_back(MiniDroneRole::Survey);
     }
-    if (effects.drillIntegrityRelief > 0.0 || effects.hardRockBounceRelief > 0.0) {
-        priorities.push_back(MiniDroneRole::Stabilizer);
+    if (effects.hazardTreatmentRateBonus > 0.0) {
+        priorities.push_back(MiniDroneRole::Hazard);
     }
 
     for (MiniDroneRole role : priorities) {
@@ -904,14 +959,14 @@ inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state,
         {"Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Add scanner paint to raise crit chance and drone fire rate.", false},
         {"Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Pair cover fire with shields so close threats trigger counter-hits.", false},
         {"Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Turn ore tempo into area-control pressure around the work zone.", false},
-        {"Bulwark Harness", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer}, "Bias the rig toward shields, hard-rock control, and safer long digs.", false},
+        {"Containment Screen", {MiniDroneRole::Defense, MiniDroneRole::Hazard}, "Pair remediation with environmental shielding for safer long digs.", false},
         {"Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "Keep ore and oxygen flowing for deeper mining routes.", false},
         {"Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scout artifact paths and reduce extraction pressure.", false},
         {"Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Next logical combat signature: volleys, crits, and shield relief.", true},
         {"Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "A greedier mining signature that keeps damage pulsing while ore flows.", true},
-        {"Fortress Rig", {MiniDroneRole::Defense, MiniDroneRole::Stabilizer, MiniDroneRole::Resource}, "The endurance signature for holding position under pressure.", true},
+        {"Containment Rig", {MiniDroneRole::Defense, MiniDroneRole::Hazard, MiniDroneRole::Resource}, "The remediation and endurance signature for hazardous long digs.", true},
         {"Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "The artifact-routing signature for safer, wider recovery lines.", true},
-        {"Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Stabilizer}, "Capstone build: every role online for combat, logistics, scans, and mining.", true}
+        {"Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Hazard}, "Capstone build: every role online for combat, logistics, scans, remediation, and mining.", true}
     };
 
     const Candidate* best = nullptr;

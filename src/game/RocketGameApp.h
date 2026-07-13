@@ -124,6 +124,12 @@ private:
         double elapsed = 0.0;
     };
 
+    struct MiningExtractionState {
+        bool active = false;
+        bool showUpgradeDraft = false;
+        double elapsed = 0.0;
+    };
+
     struct ArrivalFanfareState {
         bool active = false;
         double elapsed = 0.0;
@@ -171,6 +177,7 @@ private:
     WebGLRenderer renderer_;
     GameRmlUi rmlUi_;
     LaunchSessionState session_;
+    MiningExtractionState miningExtraction_;
     double visualTimeSeconds_ = 0.0;
     bool panelDirty_ = true;
     bool debugSessionActive_ = false;
