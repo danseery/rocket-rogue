@@ -1188,6 +1188,17 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     std::ostringstream settingsBody;
     settingsBody << detailStack(settingsDetailsPresentation());
+    settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
+        << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
+        << "<p>" << htmlEscape("Choose the canvas render target. Auto follows the current display and browser scale.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Resolution") << "</span>"
+        << "<select data-resolution-select aria-label=\"Display resolution\">"
+        << "<option value=\"auto\">Auto (display)</option>"
+        << "<option value=\"1280x800\">1280 x 800 (Steam Deck)</option>"
+        << "<option value=\"1920x1080\">1920 x 1080</option>"
+        << "<option value=\"2560x1440\">2560 x 1440</option>"
+        << "<option value=\"3840x2160\">3840 x 2160</option>"
+        << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
         << "<div><h3>" << htmlEscape("Game speed") << "</h3>"
         << "<p>" << htmlEscape("Local testing multiplier. Shared builds start at 1x.") << "</p></div>"

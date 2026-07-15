@@ -69,10 +69,37 @@ EM_JS(int, rr_rml_drawing_height, (), {
 });
 
 EM_JS(double, rr_rml_density_ratio, (), {
-    const canvas = document.getElementById("canvas");
-    const cssWidth = Math.max(1, (canvas && canvas.clientWidth) || rr_rml_viewport_width());
-    const drawingWidth = Math.max(1, (canvas && canvas.width) || cssWidth);
-    return Math.max(1.0, drawingWidth / cssWidth);
+    return 1.0;
+});
+
+EM_JS(int, rr_rml_resolution_preset, (), {
+    const options = ["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"];
+    try {
+        const value = window.localStorage.getItem("rocket_rogue_resolution") || "auto";
+        const index = options.indexOf(value);
+        return index >= 0 ? index : 0;
+    } catch (error) {
+        return 0;
+    }
+});
+
+EM_JS(void, rr_rml_set_resolution_preset, (const char* value), {
+    const options = ["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"];
+    const raw = UTF8ToString(value || 0);
+    const normalized = options.includes(raw) ? raw : "auto";
+    try {
+        if (normalized === "auto") {
+            window.localStorage.removeItem("rocket_rogue_resolution");
+        } else {
+            window.localStorage.setItem("rocket_rogue_resolution", normalized);
+        }
+    } catch (error) {
+        // Keep the in-document selection even if preferences cannot be persisted.
+    }
+    document.body.dataset.renderResolution = normalized;
+    if (window.RocketBridge && typeof window.RocketBridge.setResolutionPreset === "function") {
+        window.RocketBridge.setResolutionPreset(normalized);
+    }
 });
 
 EM_JS(void, rr_rml_set_enabled, (int enabled), {
@@ -361,10 +388,12 @@ void main() {
 
     explicit operator bool() const { return program_ != 0; }
 
-    void setViewport(int width, int height)
+    void setViewport(int logicalWidth, int logicalHeight, int drawingWidth, int drawingHeight)
     {
-        viewportWidth_ = std::max(1, width);
-        viewportHeight_ = std::max(1, height);
+        logicalWidth_ = std::max(1, logicalWidth);
+        logicalHeight_ = std::max(1, logicalHeight);
+        drawingWidth_ = std::max(1, drawingWidth);
+        drawingHeight_ = std::max(1, drawingHeight);
     }
 
     void setRootClip(Rml::Rectanglei clip)
@@ -380,7 +409,7 @@ void main() {
         previousDepth_ = glIsEnabled(GL_DEPTH_TEST);
         previousCull_ = glIsEnabled(GL_CULL_FACE);
 
-        glViewport(0, 0, viewportWidth_, viewportHeight_);
+        glViewport(0, 0, drawingWidth_, drawingHeight_);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_CULL_FACE);
         glEnable(GL_BLEND);
@@ -460,8 +489,8 @@ void main() {
         }
 
         const GLfloat projection[16] = {
-            2.0F / static_cast<GLfloat>(viewportWidth_), 0.0F, 0.0F, 0.0F,
-            0.0F, -2.0F / static_cast<GLfloat>(viewportHeight_), 0.0F, 0.0F,
+            2.0F / static_cast<GLfloat>(logicalWidth_), 0.0F, 0.0F, 0.0F,
+            0.0F, -2.0F / static_cast<GLfloat>(logicalHeight_), 0.0F, 0.0F,
             0.0F, 0.0F, -1.0F, 0.0F,
             -1.0F, 1.0F, 0.0F, 1.0F,
         };
@@ -552,14 +581,18 @@ private:
     {
         Rml::Rectanglei region = scissorEnabled_ && scissorRegion_.Valid()
             ? scissorRegion_
-            : Rml::Rectanglei::FromSize({viewportWidth_, viewportHeight_});
+            : Rml::Rectanglei::FromSize({logicalWidth_, logicalHeight_});
         if (rootClip_.Valid()) {
             region = region.Intersect(rootClip_);
         }
-        const int x = region.p0.x;
-        const int y = viewportHeight_ - region.p1.y;
-        const int width = region.Width();
-        const int height = region.Height();
+        const double scaleX = static_cast<double>(drawingWidth_) / static_cast<double>(logicalWidth_);
+        const double scaleY = static_cast<double>(drawingHeight_) / static_cast<double>(logicalHeight_);
+        const int x = std::clamp(static_cast<int>(std::floor(static_cast<double>(region.p0.x) * scaleX)), 0, drawingWidth_);
+        const int right = std::clamp(static_cast<int>(std::ceil(static_cast<double>(region.p1.x) * scaleX)), x, drawingWidth_);
+        const int y = std::clamp(static_cast<int>(std::floor(static_cast<double>(logicalHeight_ - region.p1.y) * scaleY)), 0, drawingHeight_);
+        const int top = std::clamp(static_cast<int>(std::ceil(static_cast<double>(logicalHeight_ - region.p0.y) * scaleY)), y, drawingHeight_);
+        const int width = right - x;
+        const int height = top - y;
         glScissor(x, y, width, height);
     }
 
@@ -568,8 +601,10 @@ private:
     GLint translationLocation_ = -1;
     GLint textureLocation_ = -1;
     GLint hasTextureLocation_ = -1;
-    int viewportWidth_ = 1;
-    int viewportHeight_ = 1;
+    int logicalWidth_ = 1;
+    int logicalHeight_ = 1;
+    int drawingWidth_ = 1;
+    int drawingHeight_ = 1;
     bool scissorEnabled_ = false;
     Rml::Rectanglei scissorRegion_ = Rml::Rectanglei::MakeInvalid();
     Rml::Rectanglei rootClip_ = Rml::Rectanglei::MakeInvalid();
@@ -745,7 +780,8 @@ std::string normalizeBooleanAttributes(std::string html)
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
         "data-flyby-run", "data-orbit-run",
-        "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-game-speed-settings", "data-game-speed-select",
+        "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
+        "data-game-speed-settings", "data-game-speed-select",
         "data-debug-tools-settings", "data-debug-tools-toggle"
     };
 
@@ -808,6 +844,30 @@ std::string currentGameSpeedOptionValue()
         }
     }
     return "1";
+}
+
+std::string currentResolutionOptionValue()
+{
+    static constexpr const char* options[] = {
+        "auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"
+    };
+    const int index = std::clamp(rr_rml_resolution_preset(), 0, 4);
+    return options[index];
+}
+
+std::string selectCurrentResolution(std::string html)
+{
+    if (html.find("data-resolution-select") == std::string::npos) {
+        return html;
+    }
+
+    const std::string value = currentResolutionOptionValue();
+    const std::string needle = "<option value=\"" + value + "\">";
+    const std::size_t optionStart = html.find(needle);
+    if (optionStart != std::string::npos) {
+        html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
+    }
+    return html;
 }
 
 std::string selectCurrentGameSpeed(std::string html)
@@ -891,7 +951,8 @@ std::string syncCurrentCameraShakeToggle(std::string html)
 
 std::string syncSettingsControls(std::string html)
 {
-    return syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(selectCurrentGameSpeed(std::move(html)))));
+    return syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(
+        selectCurrentGameSpeed(selectCurrentResolution(std::move(html))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1244,7 +1305,7 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
     const int top = phaseBoard ? 16 : kPanelInset;
     const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, kPhaseBoardFrameWidth) : kPanelWidth + 34;
     const int height = phaseBoard
-        ? std::max(420, viewportHeight - 32)
+        ? std::max(360, viewportHeight - 64)
         : std::max(1, viewportHeight - 56);
     return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
 }
@@ -1312,20 +1373,29 @@ div, p, h1, h2, h3, aside {
 span, strong, small {
     display: block;
 }
-scrollbarvertical,
-scrollbarhorizontal,
-scrollbarcorner {
-    display: none;
-    visibility: hidden;
-    width: 0px;
-    height: 0px;
-    background-color: transparent;
+scrollbarvertical {
+    display: block;
+    width: 10px;
+    background-color: #0b1118;
     border-width: 0px;
 }
-scrollbarvertical slidertrack,
-scrollbarhorizontal slidertrack,
-scrollbarvertical sliderbar,
-scrollbarhorizontal sliderbar {
+scrollbarvertical slidertrack {
+    display: block;
+    width: 10px;
+    background-color: #111c26;
+}
+scrollbarvertical sliderbar {
+    display: block;
+    width: 8px;
+    min-height: 30px;
+    margin-left: 1px;
+    background-color: #4e6b80;
+    border-radius: 4px;
+}
+scrollbarvertical sliderarrowdec,
+scrollbarvertical sliderarrowinc,
+scrollbarhorizontal,
+scrollbarcorner {
     display: none;
     visibility: hidden;
     width: 0px;
@@ -1339,7 +1409,8 @@ scrollbarhorizontal sliderbar {
     top: )" + std::to_string(top) + R"(px;
     width: )" + std::to_string(panelWidth) + R"(px;
     height: )" + std::to_string(panelHeight) + R"(px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 14px;
     background-color: #0b1118;
     border-width: 1px;
@@ -1347,12 +1418,12 @@ scrollbarhorizontal sliderbar {
     border-radius: 8px;
 }
 #rr-panel.surface-ops-panel {
-    height: 704px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 #rr-panel.navigation-panel {
-    height: 576px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 #rr-panel.arrival-fanfare-panel-mode {
     box-sizing: border-box;
@@ -2271,7 +2342,7 @@ scrollbarhorizontal sliderbar {
 }
 .phase-board-research .ops-card p {
     min-height: 54px;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-drone-ops .drone-card p {
     width: 189px;
@@ -2279,12 +2350,12 @@ scrollbarhorizontal sliderbar {
     margin-top: 3px;
     margin-bottom: 4px;
     line-height: 1.16;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-arrival .arrival-card p {
     width: 191px;
-    max-height: 100px;
-    overflow: hidden;
+    max-height: none;
+    overflow: visible;
 }
 .phase-board-research .ops-card .module-impact {
     display: block;
@@ -2294,7 +2365,7 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 4px;
     font-size: 13px;
     line-height: 1.25;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-research .ops-card .stat-grid,
 .phase-board-drone-ops .drone-card .stat-grid {
@@ -2321,7 +2392,7 @@ scrollbarhorizontal sliderbar {
     color: #bfeef7;
     font-size: 11px;
     line-height: 1.20;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-drone-ops .drone-card .drone-upgrade-summary {
     width: 189px;
@@ -2331,7 +2402,7 @@ scrollbarhorizontal sliderbar {
     color: #ffd166;
     font-size: 11px;
     line-height: 1.15;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-drone-ops .drone-card .stat-chip {
     max-width: 92px;
@@ -2574,11 +2645,11 @@ scrollbarhorizontal sliderbar {
     font-size: 13px;
 }
 .phase-board-drone-ops .drone-loadout-slot p {
-    max-height: 18px;
+    max-height: none;
     margin-top: 2px;
     margin-bottom: 0px;
     line-height: 1.15;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-drone-ops .drone-loadout-slot .slot-role {
     min-height: 14px;
@@ -2709,7 +2780,7 @@ scrollbarhorizontal sliderbar {
     width: 196px;
 }
 .phase-board-drone-ops .drone-loadout-slot p {
-    max-height: 26px;
+    max-height: none;
 }
 .phase-board-drone-ops .drone-control-grid {
     display: flex;
@@ -2846,7 +2917,7 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 5px;
     font-size: 12px;
     line-height: 1.12;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-navigation .nav-card .stat-grid {
     width: auto;
@@ -3314,7 +3385,7 @@ scrollbarhorizontal sliderbar {
     margin-bottom: 6px;
     font-size: 12px;
     line-height: 1.22;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-surface.surface-ops-screen .surface-action-card p {
     width: 140px;
@@ -3618,7 +3689,7 @@ scrollbarhorizontal sliderbar {
     margin-top: 0px;
     margin-bottom: 10px;
     line-height: 1.28;
-    overflow: hidden;
+    overflow: visible;
 }
 .phase-board-hangar .ops-card .card-footer {
     display: flex;
@@ -5174,16 +5245,15 @@ button {
     flex-shrink: 1;
     flex-basis: 0px;
     box-sizing: border-box;
-    padding: 0 6px;
-    height: 38px;
+    padding: 6px;
+    height: auto;
     min-height: 38px;
-    line-height: 38px;
+    line-height: 1.15;
     margin-right: 0px;
     font-size: 12px;
-    white-space: nowrap;
-    overflow-wrap: normal;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow-wrap: break-word;
+    overflow: visible;
     text-align: center;
 }
 .card-footer button, .draft-card-footer button, .summary-card button, .resource-bank button {
@@ -5501,7 +5571,7 @@ button.settings-toggle:hover {
 }
 .settings-control select {
     display: block;
-    width: 184px;
+    width: 240px;
     height: 36px;
     margin-top: 6px;
 }
@@ -5554,7 +5624,7 @@ button.settings-toggle:hover {
     background-color: #1f4b62;
 }
 .settings-control select selectbox {
-    width: 184px;
+    width: 240px;
     margin-top: 2px;
     padding: 4px;
     background-color: #0c121a;
@@ -5597,12 +5667,13 @@ button.settings-toggle:hover {
 #rr-modal {
     position: absolute;
     left: 50%;
-    top: 9%;
+    top: 4%;
     width: 640px;
-    height: 78%;
-    overflow: visible;
+    height: 88%;
     margin-left: -320px;
     padding: 16px;
+    display: flex;
+    flex-direction: column;
     background-color: #0c121a;
     border-width: 1px;
     border-color: #4e6b80;
@@ -5629,8 +5700,8 @@ button.settings-toggle:hover {
     padding: 20px;
 }
 #rr-modal.modal-surface {
-    top: 8%;
-    height: 680px;
+    top: 4%;
+    height: 88%;
     padding: 20px;
 }
 #rr-modal.modal-mission_log {
@@ -5640,9 +5711,19 @@ button.settings-toggle:hover {
 }
 .modal-head {
     display: flex;
+    flex: none;
     flex-direction: row;
     justify-content: space-between;
     margin-bottom: 8px;
+}
+.modal-scroll-body {
+    display: block;
+    flex: auto;
+    min-height: 0px;
+    width: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 8px;
 }
 )";
 }
@@ -5699,9 +5780,9 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
         if (modal->dismissible) {
             document += "<button class=\"ghost\" data-ui-close-modal=\"1\">Close</button>";
         }
-        document += "</div>";
+        document += "</div><div class=\"modal-scroll-body\">";
         document += syncSettingsControls(sanitizeRml(modal->body));
-        document += "</div>";
+        document += "</div></div>";
     }
 
     document += "</body></rml>";
@@ -5713,6 +5794,7 @@ std::unique_ptr<RocketRmlRenderInterface> g_renderInterface;
 Rml::Context* g_context = nullptr;
 Rml::ElementDocument* g_document = nullptr;
 std::vector<ElementButtonBinding> g_elementButtonBindings;
+bool g_displayPreferenceChanged = false;
 
 class RmlSettingsEventListener final : public Rml::EventListener {
 public:
@@ -5720,6 +5802,11 @@ public:
     {
         Rml::Element* target = event.GetTargetElement();
         if (auto* control = dynamic_cast<Rml::ElementFormControl*>(target)) {
+            if (control->GetTagName() == "select" && control->HasAttribute("data-resolution-select")) {
+                rr_rml_set_resolution_preset(control->GetValue().c_str());
+                g_displayPreferenceChanged = true;
+                return;
+            }
             if (control->GetTagName() == "select" && control->HasAttribute("data-game-speed-select")) {
                 rr_rml_set_game_speed_multiplier(control->GetValue().c_str());
                 return;
@@ -5919,7 +6006,7 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
     Rml::LoadFontFace(normal, "rmlui-debugger-font", Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Normal);
     Rml::LoadFontFace(italic, "rmlui-debugger-font", Rml::Style::FontStyle::Italic, Rml::Style::FontWeight::Normal);
 
-    g_context = Rml::CreateContext("rocket-ui", {rr_rml_drawing_width(), rr_rml_drawing_height()});
+    g_context = Rml::CreateContext("rocket-ui", {rr_rml_viewport_width(), rr_rml_viewport_height()});
     if (!g_context) {
         return false;
     }
@@ -5947,13 +6034,24 @@ void GameRmlUi::render()
         return;
     }
 
+    const int viewportWidth = rr_rml_viewport_width();
+    const int viewportHeight = rr_rml_viewport_height();
+    if (g_displayPreferenceChanged
+        || viewportWidth != layoutViewportWidth_
+        || viewportHeight != layoutViewportHeight_) {
+        g_displayPreferenceChanged = false;
+        layoutViewportWidth_ = viewportWidth;
+        layoutViewportHeight_ = viewportHeight;
+        rebuildDocument();
+    }
+
     const int width = rr_rml_drawing_width();
     const int height = rr_rml_drawing_height();
-    g_context->SetDimensions({width, height});
+    g_context->SetDimensions({viewportWidth, viewportHeight});
     g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
-    g_renderInterface->setViewport(width, height);
+    g_renderInterface->setViewport(viewportWidth, viewportHeight, width, height);
     if (!openModalId_.empty()) {
-        g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({width, height}));
+        g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({viewportWidth, viewportHeight}));
     } else {
         g_renderInterface->setRootClip(expandedPanelClip(panelMode_));
     }
@@ -6045,7 +6143,7 @@ bool GameRmlUi::hitTest(int x, int y) const
         };
         return buttonElementAtPoint(*g_context, point) != nullptr;
     }
-    const Rml::Rectanglei bounds = panelBounds(panelMode_);
+    const Rml::Rectanglei bounds = expandedPanelClip(panelMode_);
     return x >= bounds.Left() && y >= bounds.Top() && x <= bounds.Right() && y <= bounds.Bottom();
 }
 
@@ -6139,6 +6237,8 @@ void GameRmlUi::rebuildDocument()
         g_elementButtonBindings.clear();
     }
 
+    layoutViewportWidth_ = rr_rml_viewport_width();
+    layoutViewportHeight_ = rr_rml_viewport_height();
     const std::string documentRml = buildDocumentRml(panelHtml_, openModalId_);
     rr_rml_set_modal_open(openModalId_.empty() ? 0 : 1);
     g_document = g_context->LoadDocumentFromMemory(documentRml, "rocket://panel.rml");

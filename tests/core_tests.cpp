@@ -6746,6 +6746,55 @@ void panelChromePresentationComesFromSharedHelper()
     require(reset != nullptr && reset->enabled && reset->actionId == ui::actions::resetSave && reset->cssClass == "danger", "settings presentation should expose reset-save danger action");
 }
 
+void settingsResolutionSelectorExposesSupportedPresets()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 910);
+    Random rng(910);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+
+    const std::size_t settingsButton = html.find("data-ui-modal=\"settings\"");
+    const std::size_t settingsTemplate = html.find("<template data-modal=\"settings\"");
+    const std::size_t settingsEnd = html.find("</template>", settingsTemplate);
+    const std::size_t selector = html.find("<select data-resolution-select aria-label=\"Display resolution\">");
+    const std::size_t selectorEnd = html.find("</select>", selector);
+
+    require(settingsButton != std::string::npos && settingsTemplate != std::string::npos && settingsButton < settingsTemplate,
+        "shared panel controls should keep the Settings modal reachable");
+    require(settingsEnd != std::string::npos && selector != std::string::npos && selectorEnd != std::string::npos &&
+            settingsTemplate < selector && selectorEnd < settingsEnd,
+        "resolution selector should live inside the Settings modal");
+    require(countOccurrences(html, "data-resolution-settings") == 1,
+        "settings should expose one resolution-control group");
+    require(countOccurrences(html, "data-resolution-select") == 1,
+        "settings should expose one resolution selector");
+
+    const std::string selectorHtml = html.substr(selector, selectorEnd + std::string("</select>").size() - selector);
+    const std::vector<std::string_view> presetValues {
+        "auto",
+        "1280x800",
+        "1920x1080",
+        "2560x1440",
+        "3840x2160",
+    };
+    require(countOccurrences(selectorHtml, "<option value=") == presetValues.size(),
+        "resolution selector should contain only the five supported presets");
+
+    std::size_t priorPreset = 0;
+    for (const std::string_view value : presetValues) {
+        const std::string option = "<option value=\"" + std::string(value) + "\">";
+        const std::size_t preset = selectorHtml.find(option);
+        require(preset != std::string::npos && countOccurrences(selectorHtml, option) == 1,
+            "each supported resolution preset should appear exactly once");
+        require(preset >= priorPreset, "resolution presets should remain ordered from automatic through 4K");
+        priorPreset = preset;
+    }
+
+    require(selectorHtml.find("1280 x 800 (Steam Deck)") != std::string::npos,
+        "the 1280 by 800 preset should identify the Steam Deck target");
+}
+
 void solarMapModalTracksCampaignDiscovery()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -7801,6 +7850,7 @@ int main()
     launchPanelPresentationComesFromSharedHelper();
     launchReadinessPresentationComesFromSharedHelper();
     panelChromePresentationComesFromSharedHelper();
+    settingsResolutionSelectorExposesSupportedPresets();
     solarMapModalTracksCampaignDiscovery();
     panelHtmlIncludesContextualTutorialLayer();
     surfaceHtmlPromotesMiningAction();

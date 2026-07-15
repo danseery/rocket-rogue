@@ -242,6 +242,28 @@ EM_JS(double, rr_device_pixel_ratio, (), {
     return Math.max(1, Math.min(2, ratio));
 });
 
+EM_JS(int, rr_resolution_target_packed, (), {
+    try {
+        const value = String(globalThis.localStorage.getItem("rocket_rogue_resolution") || "auto")
+            .trim()
+            .toLowerCase();
+        switch (value) {
+        case "1280x800":
+            return 1280 * 10000 + 800;
+        case "1920x1080":
+            return 1920 * 10000 + 1080;
+        case "2560x1440":
+            return 2560 * 10000 + 1440;
+        case "3840x2160":
+            return 3840 * 10000 + 2160;
+        default:
+            return 0;
+        }
+    } catch (error) {
+        return 0;
+    }
+});
+
 EM_JS(void, rr_sync_canvas_to_visual_viewport, (), {
     const canvas = document.getElementById("canvas");
     if (!canvas) {
@@ -253,12 +275,6 @@ EM_JS(void, rr_sync_canvas_to_visual_viewport, (), {
     const height = Math.max(1, Math.round((viewport && viewport.height) || globalThis.innerHeight || canvas.clientHeight || 1));
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
-    if (canvas.width !== width) {
-        canvas.width = width;
-    }
-    if (canvas.height !== height) {
-        canvas.height = height;
-    }
 });
 
 EM_JS(double, rr_scene_left_ndc, (), {
@@ -994,9 +1010,31 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     double cssWidth = 1280.0;
     double cssHeight = 720.0;
     emscripten_get_element_css_size("#canvas", &cssWidth, &cssHeight);
-    const double pixelRatio = rr_device_pixel_ratio();
-    const int drawingWidth = static_cast<int>(std::ceil(cssWidth * pixelRatio));
-    const int drawingHeight = static_cast<int>(std::ceil(cssHeight * pixelRatio));
+    cssWidth = std::isfinite(cssWidth) ? std::max(1.0, cssWidth) : 1280.0;
+    cssHeight = std::isfinite(cssHeight) ? std::max(1.0, cssHeight) : 720.0;
+
+    int drawingWidth = 1;
+    int drawingHeight = 1;
+    const int packedResolution = rr_resolution_target_packed();
+    const int targetWidth = packedResolution / 10000;
+    const int targetHeight = packedResolution % 10000;
+    if (targetWidth > 0 && targetHeight > 0) {
+        const double targetScale = std::min(
+            static_cast<double>(targetWidth) / cssWidth,
+            static_cast<double>(targetHeight) / cssHeight);
+        drawingWidth = std::clamp(
+            static_cast<int>(std::lround(cssWidth * targetScale)),
+            1,
+            targetWidth);
+        drawingHeight = std::clamp(
+            static_cast<int>(std::lround(cssHeight * targetScale)),
+            1,
+            targetHeight);
+    } else {
+        const double pixelRatio = rr_device_pixel_ratio();
+        drawingWidth = std::max(1, static_cast<int>(std::ceil(cssWidth * pixelRatio)));
+        drawingHeight = std::max(1, static_cast<int>(std::ceil(cssHeight * pixelRatio)));
+    }
     emscripten_set_canvas_element_size("#canvas", drawingWidth, drawingHeight);
     glViewport(0, 0, drawingWidth, drawingHeight);
 

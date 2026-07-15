@@ -58,6 +58,8 @@ private:
     std::vector<RmlButtonBinding> buttonBindings_;
     Rml::Element* pressedButton_ = nullptr;
     RmlPanelMode panelMode_ = RmlPanelMode::Control;
+    int layoutViewportWidth_ = 0;
+    int layoutViewportHeight_ = 0;
     bool initialized_ = false;
 };
 

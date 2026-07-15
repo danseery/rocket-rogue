@@ -44,7 +44,10 @@
       inset: 16px auto 16px 16px;
       width: min(440px, calc(100vw - 32px));
       max-height: calc(100dvh - 56px);
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
       padding: 16px;
       border: 1px solid var(--panel-border);
       border-radius: 8px;
@@ -76,6 +79,7 @@
       inset: 16px 24px 16px 24px;
       width: auto;
       max-height: calc(100dvh - 32px);
+      scroll-padding-block: 18px;
       padding: 18px;
     }
 
@@ -84,7 +88,9 @@
       width: min(784px, calc(100vw - 32px));
       min-height: min(704px, calc(100dvh - 32px));
       max-height: calc(100dvh - 32px);
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
+      scroll-padding-block: 18px 28px;
       padding: 18px 24px 28px;
     }
 
@@ -149,7 +155,8 @@
       width: 100vw;
       max-height: 100dvh;
       height: 100dvh;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: hidden;
       padding: 0;
       border: 0;
       border-radius: 0;
@@ -367,14 +374,13 @@
       font-size: 14px;
       line-height: 1.1;
       box-sizing: border-box;
-      padding: 0 8px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      padding: 6px 8px;
+      white-space: normal;
+      overflow: visible;
       text-align: center;
-      height: 38px;
+      height: auto;
       min-height: 38px;
-      overflow-wrap: normal;
+      overflow-wrap: anywhere;
     }
 
     .cockpit-hud .launch-commit-actions {
@@ -1942,8 +1948,8 @@
       color: var(--muted);
       font-size: 12px;
       line-height: 1.18;
-      max-height: 18px;
-      overflow: hidden;
+      max-height: none;
+      overflow: visible;
     }
 
     .phase-board-drone-ops .drone-loadout-slot .slot-role {
@@ -2005,7 +2011,7 @@
 
     .phase-board-drone-ops .drone-card > p:not(.drone-build-hook) {
       min-height: 58px;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-drone-ops .drone-build-hook {
@@ -2018,7 +2024,7 @@
       color: #bfeef7;
       font-size: 12px;
       line-height: 1.28;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-drone-ops .drone-card .drone-upgrade-summary {
@@ -2027,7 +2033,7 @@
       color: #ffd166;
       font-size: 12px;
       line-height: 1.25;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-drone-ops .drone-card .stat-grid {
@@ -2074,7 +2080,7 @@
     }
 
     .phase-board-drone-ops .drone-loadout-slot p {
-      max-height: 30px;
+      max-height: none;
     }
 
     .phase-board-drone-ops .drone-control-grid {
@@ -3486,7 +3492,7 @@
 
     .phase-board-hangar .ops-card .ops-detail {
       min-height: 78px;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-hangar .ops-grid {
@@ -3531,7 +3537,7 @@
 
     .phase-board-research .ops-card p {
       min-height: 56px;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .phase-board-research .ops-card .module-impact {
@@ -3595,9 +3601,10 @@
 
     .phase-board-arrival .arrival-card p {
       min-height: 0;
-      max-height: 100px;
+      max-height: none;
       margin-top: 0;
       margin-bottom: 0;
+      overflow: visible;
     }
 
     .phase-board-arrival .arrival-card .card-footer button {
@@ -3662,6 +3669,7 @@
       margin-bottom: 5px;
       font-size: 12px;
       line-height: 1.12;
+      overflow: visible;
     }
 
     .phase-board-navigation .nav-card .stat-grid {
@@ -3761,10 +3769,10 @@
 
     .phase-board-surface.surface-ops-screen .surface-action-card p {
       min-height: 72px;
-      max-height: 72px;
+      max-height: none;
       margin-top: 4px;
       line-height: 1.22;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .surface-action-card .stat-grid {
@@ -4165,6 +4173,7 @@
     }
 
     .settings-control select {
+      min-width: 220px;
       min-height: 34px;
       border: 1px solid rgba(137, 178, 211, 0.26);
       border-radius: 7px;
@@ -4321,8 +4330,10 @@
     }
 
     .modal-panel {
+      display: flex;
+      flex-direction: column;
       width: min(520px, calc(100vw - 36px));
-      max-height: min(72vh, 720px);
+      max-height: min(88dvh, 860px);
       overflow: hidden;
       padding: 16px;
       border: 1px solid var(--panel-border);
@@ -4333,10 +4344,21 @@
 
     .modal-head {
       display: flex;
+      flex: 0 0 auto;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 12px;
+    }
+
+    #modal-content {
+      min-width: 0;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+      scrollbar-width: thin;
     }
 
     .modal-head h2 {
@@ -4366,8 +4388,8 @@
 
     .modal-panel:has(.solar-map) {
       width: min(1100px, calc(100vw - 36px));
-      max-height: min(88vh, 860px);
-      overflow-y: auto;
+      max-height: min(88dvh, 860px);
+      overflow: hidden;
     }
 
     .solar-map {
@@ -5381,6 +5403,189 @@
       }
     }
 
+    @media (max-height: 850px) and (min-width: 721px) {
+      #panel {
+        inset: 10px auto 10px 16px;
+        max-height: calc(100dvh - 20px);
+        padding: 12px 16px;
+      }
+
+      #panel.phase-board-panel {
+        inset: 10px 24px;
+        max-height: calc(100dvh - 20px);
+        padding: 12px 18px 16px;
+      }
+
+      #panel.phase-board-panel.surface-ops-panel {
+        inset: 10px auto 10px 16px;
+        min-height: min(704px, calc(100dvh - 20px));
+        max-height: calc(100dvh - 20px);
+        padding: 12px 24px 16px;
+      }
+
+      #panel.phase-board-panel.navigation-panel {
+        inset: 10px auto auto 16px;
+        max-height: calc(100dvh - 20px);
+        padding: 12px 24px 16px;
+      }
+
+      .panel-head {
+        gap: 8px;
+      }
+
+      .status,
+      .panel-kpis {
+        margin-top: 8px;
+      }
+
+      .phase-board-panel > .panel-kpis {
+        margin-bottom: 8px;
+      }
+
+      .phase-titlebar {
+        gap: 10px;
+      }
+
+      .phase-titlebar p {
+        margin-top: 2px;
+        line-height: 1.25;
+      }
+
+      .phase-board-surface.surface-ops-screen {
+        gap: 4px;
+        padding-bottom: 12px;
+      }
+
+      .phase-board-surface.surface-ops-screen .surface-quickbar .surface-kpi {
+        min-height: 34px;
+        padding: 4px 6px;
+      }
+
+      .phase-board-surface.surface-ops-screen .drone-ops-callout,
+      .phase-board-surface.surface-ops-screen .surface-arena-forecast {
+        padding-top: 4px;
+        padding-bottom: 4px;
+      }
+
+      .phase-board-surface.surface-ops-screen .surface-action-card {
+        min-height: 310px;
+      }
+
+      #panel:has(.phase-board-draft-room) > .status {
+        margin-bottom: 8px;
+      }
+
+      .phase-board-draft-room {
+        margin-top: 6px;
+      }
+
+      .phase-board-draft-room .draft-hero {
+        gap: 12px;
+        margin-bottom: 10px;
+        padding: 12px;
+      }
+
+      .phase-board-draft-room .draft-hero p {
+        margin-top: 6px;
+        line-height: 1.3;
+      }
+
+      .draft-board,
+      .draft-card-grid {
+        gap: 10px;
+      }
+
+      .upgrade-draft-card {
+        min-height: 390px;
+      }
+
+      .phase-board-refit .upgrade-draft-card {
+        min-height: 372px;
+      }
+
+      .upgrade-draft-card .draft-art {
+        min-height: 90px;
+      }
+
+      .upgrade-draft-card .draft-art span {
+        width: 58px;
+        height: 58px;
+        font-size: 26px;
+      }
+
+      .draft-recovery-note {
+        margin-bottom: 10px;
+        padding: 8px 10px;
+      }
+
+      .phase-board-refit,
+      .phase-board-surface-upgrade {
+        padding-bottom: 14px;
+      }
+
+      .phase-board-refit .draft-actions,
+      .phase-board-surface-upgrade .draft-actions {
+        margin-bottom: 12px;
+      }
+
+      .modal-root {
+        padding: 10px;
+      }
+
+      .modal-panel {
+        max-height: calc(100dvh - 20px);
+        padding: 12px;
+      }
+
+      .modal-head {
+        margin-bottom: 8px;
+      }
+    }
+
+    @media (max-height: 740px) and (min-width: 721px) {
+      #panel.phase-board-panel {
+        padding-top: 10px;
+        padding-bottom: 12px;
+      }
+
+      #panel.phase-board-panel.surface-ops-panel,
+      #panel.phase-board-panel.navigation-panel {
+        padding-top: 10px;
+        padding-bottom: 12px;
+      }
+
+      .phase-board-surface.surface-ops-screen .surface-action-card {
+        min-height: 292px;
+      }
+
+      .phase-board-draft-room .draft-hero {
+        margin-bottom: 8px;
+        padding: 10px;
+      }
+
+      .upgrade-draft-card {
+        min-height: 360px;
+      }
+
+      .phase-board-refit .upgrade-draft-card {
+        min-height: 344px;
+      }
+
+      .upgrade-draft-card .draft-art {
+        min-height: 76px;
+      }
+
+      .upgrade-draft-card .draft-art span {
+        width: 52px;
+        height: 52px;
+        font-size: 24px;
+      }
+
+      .modal-panel {
+        padding: 10px;
+      }
+    }
+
     @media (max-width: 720px) {
       #panel {
         inset: auto 10px 10px 10px;
@@ -5713,12 +5918,56 @@
     const debugMiningPreview = document.getElementById("debug-mining-preview");
     let lastToastText = "";
     let lastToastAt = 0;
+    const resolutionStorageKey = "rocket_rogue_resolution";
+    const resolutionOptions = Object.freeze(["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"]);
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
     const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
     const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
+
+    function normalizedResolution(value) {
+      return resolutionOptions.includes(value) ? value : "auto";
+    }
+
+    function resolutionPreset() {
+      try {
+        return normalizedResolution(window.localStorage.getItem(resolutionStorageKey) || "auto");
+      } catch (error) {
+        return "auto";
+      }
+    }
+
+    function applyResolutionPreset(value = resolutionPreset()) {
+      const normalized = normalizedResolution(value);
+      document.body.dataset.renderResolution = normalized;
+      return normalized;
+    }
+
+    function setResolutionPreset(value) {
+      const normalized = normalizedResolution(value);
+      try {
+        if (normalized === "auto") {
+          window.localStorage.removeItem(resolutionStorageKey);
+        } else {
+          window.localStorage.setItem(resolutionStorageKey, normalized);
+        }
+      } catch (error) {
+        // The selected value still applies for this session when storage is unavailable.
+      }
+      applyResolutionPreset(normalized);
+      return normalized;
+    }
+
+    function syncResolutionControls(root = document) {
+      const resolution = applyResolutionPreset();
+      root.querySelectorAll("[data-resolution-select]").forEach((select) => {
+        select.value = resolution;
+      });
+    }
+
+    applyResolutionPreset();
 
     function normalizedGameSpeed(value) {
       const numeric = Number(value);
@@ -5885,6 +6134,7 @@
     }
 
     function syncLocalControls(root = document) {
+      syncResolutionControls(root);
       syncGameSpeedControls(root);
       syncHelpControls(root);
       syncCameraShakeControls(root);
@@ -6057,6 +6307,13 @@
       syncDebugToolsControls() {
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
+      },
+      resolutionPreset: () => resolutionPreset(),
+      setResolutionPreset: (value) => {
+        const normalized = setResolutionPreset(value);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        return normalized;
       },
       setPanel(html) {
         panel.innerHTML = html;
@@ -6710,6 +6967,15 @@
     }
 
     function handleSettingsChange(event) {
+      const resolutionSelect = closestFromEvent(event, "[data-resolution-select]");
+      if (resolutionSelect && (panel.contains(resolutionSelect) || modalRoot.contains(resolutionSelect))) {
+        setResolutionPreset(resolutionSelect.value);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        syncSceneOverlays();
+        return;
+      }
+
       const select = closestFromEvent(event, "[data-game-speed-select]");
       if (select && (panel.contains(select) || modalRoot.contains(select))) {
         setGameSpeedMultiplier(select.value);
