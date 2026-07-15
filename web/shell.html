@@ -5612,6 +5612,21 @@
             <option value="2">No drones</option>
           </select>
         </label>
+        <label class="debug-mining-field is-wide">Artifact gate
+          <select id="debug-mining-gate">
+            <option value="-1">Default rules</option>
+            <option value="0">None</option>
+            <option value="1">Hazard Cocoon</option>
+            <option value="2">Enemy-Sealed Chamber</option>
+            <option value="3">Survey Triangulation</option>
+            <option value="4">Fragile Excavation</option>
+            <option value="5">Heavy Tow</option>
+            <option value="6">Endurance Vault</option>
+            <option value="7">Shield Corridor</option>
+            <option value="8">Burrow Breach</option>
+            <option value="9">Compound Story Vault</option>
+          </select>
+        </label>
       </div>
       <div id="debug-mining-preview" class="debug-mining-preview">Select an Act and level to inspect its rules.</div>
       <div class="debug-mining-actions">
@@ -5694,6 +5709,7 @@
     const debugMiningLevel = document.getElementById("debug-mining-level");
     const debugMiningSeed = document.getElementById("debug-mining-seed");
     const debugMiningLoadout = document.getElementById("debug-mining-loadout");
+    const debugMiningGate = document.getElementById("debug-mining-gate");
     const debugMiningPreview = document.getElementById("debug-mining-preview");
     let lastToastText = "";
     let lastToastAt = 0;
@@ -6174,14 +6190,14 @@
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
       debugMining: () => rrCall("rr_debug_mining"),
       debugCombatMining: () => rrCall("rr_debug_combat_mining"),
-      debugMiningArena: (act, difficulty, seed, loadoutMode) => rrCall(
+      debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride) => rrCall(
         "rr_debug_mining_arena",
-        [act, difficulty, seed, loadoutMode],
-        ["number", "number", "number", "number"]),
-      debugMiningPreview: (act, difficulty) => rrCall(
+        [act, difficulty, seed, loadoutMode, gateOverride],
+        ["number", "number", "number", "number", "number"]),
+      debugMiningPreview: (act, difficulty, gateOverride = Number(debugMiningGate?.value ?? -1)) => rrCall(
         "rr_debug_mining_preview",
-        [act, difficulty],
-        ["number", "number"],
+        [act, difficulty, gateOverride],
+        ["number", "number", "number"],
         "string"),
       debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
       debugSurfacePush: () => rrCall("rr_debug_surface_push"),
@@ -6352,11 +6368,14 @@
       const difficulty = Math.min(10, Math.max(1, Math.trunc(Number(debugMiningLevel.value) || 1)));
       const seed = Math.min(4294967295, Math.max(1, Math.trunc(Number(debugMiningSeed.value) || 1)));
       const loadoutMode = Math.min(2, Math.max(0, Math.trunc(Number(debugMiningLoadout.value) || 0)));
+      const parsedGate = Number(debugMiningGate.value);
+      const gateOverride = Number.isFinite(parsedGate) ? Math.min(9, Math.max(-1, Math.trunc(parsedGate))) : -1;
       debugMiningAct.value = String(act);
       debugMiningLevel.value = String(difficulty);
       debugMiningSeed.value = String(seed);
       debugMiningLoadout.value = String(loadoutMode);
-      return { act, difficulty, seed, loadoutMode };
+      debugMiningGate.value = String(gateOverride);
+      return { act, difficulty, seed, loadoutMode, gateOverride };
     }
 
     function randomizeDebugMiningSeed() {
@@ -6370,16 +6389,16 @@
     }
 
     function refreshDebugMiningPreview() {
-      const { act, difficulty } = normalizedDebugMiningValues();
-      const preview = rr?.debugMiningPreview?.(act, difficulty);
+      const { act, difficulty, gateOverride } = normalizedDebugMiningValues();
+      const preview = rr?.debugMiningPreview?.(act, difficulty, gateOverride);
       debugMiningPreview.textContent = typeof preview === "string" && preview.length > 0
         ? preview
         : `Act ${act} • Level ${difficulty}\nRules preview becomes available when the game runtime is ready.`;
     }
 
     function launchDebugMiningArena() {
-      const { act, difficulty, seed, loadoutMode } = normalizedDebugMiningValues();
-      rr.debugMiningArena(act, difficulty, seed, loadoutMode);
+      const { act, difficulty, seed, loadoutMode, gateOverride } = normalizedDebugMiningValues();
+      rr.debugMiningArena(act, difficulty, seed, loadoutMode, gateOverride);
     }
 
     async function copyDebugMiningArenaId() {
@@ -6420,7 +6439,7 @@
       exit: () => rr.debugExit()
     });
 
-    [debugMiningAct, debugMiningLevel, debugMiningSeed, debugMiningLoadout].forEach((control) => {
+    [debugMiningAct, debugMiningLevel, debugMiningSeed, debugMiningLoadout, debugMiningGate].forEach((control) => {
       control.addEventListener("change", refreshDebugMiningPreview);
     });
 

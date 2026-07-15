@@ -2186,6 +2186,23 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     }
     submit(terrainVertices, 0x0004);
 
+    const float gatePulse = 0.55F + 0.35F * std::sin(static_cast<float>(snapshot.animationTime) * 4.2F);
+    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+        if (!cell.revealed || !cell.gateAssociated) {
+            continue;
+        }
+        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        const Color gateColor = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket)
+            ? Color {1.0F, 0.52F, 0.18F, 0.62F + gatePulse * 0.22F}
+            : Color {0.78F, 0.54F, 1.0F, 0.50F + gatePulse * 0.18F};
+        const float halfW = cellW * 0.47F;
+        const float halfH = cellH * 0.47F;
+        drawLine(center.x - halfW, center.y - halfH, center.x + halfW, center.y - halfH, gateColor, 1.6F);
+        drawLine(center.x + halfW, center.y - halfH, center.x + halfW, center.y + halfH, gateColor, 1.6F);
+        drawLine(center.x + halfW, center.y + halfH, center.x - halfW, center.y + halfH, gateColor, 1.6F);
+        drawLine(center.x - halfW, center.y + halfH, center.x - halfW, center.y - halfH, gateColor, 1.6F);
+    }
+
     std::vector<float>& edgeGlowVertices = scratchVertices(snapshot.miningCells.size() * 32U);
     for (const MiningCellSnapshot& cell : snapshot.miningCells) {
         if (scannerPulse <= 0.02F || !cell.revealed || cell.material != static_cast<int>(MiningCellMaterial::Empty)) {
@@ -2464,6 +2481,28 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         const float health = static_cast<float>(std::clamp(snapshot.miningArtifact.maxHealth <= 0.0 ? 0.0 : snapshot.miningArtifact.health / snapshot.miningArtifact.maxHealth, 0.0, 1.0));
         drawRect(artifact.x, artifact.y - cellH * 0.92F, cellW * 1.65F, cellH * 0.12F, {0.12F, 0.04F, 0.04F, 0.76F});
         drawRect(artifact.x - cellW * 0.825F * (1.0F - health), artifact.y - cellH * 0.92F, cellW * 1.65F * health, cellH * 0.12F, {0.34F + (1.0F - health) * 0.66F, 0.95F * health, 0.24F, 0.90F});
+        if (snapshot.miningArtifact.gateType != static_cast<int>(MiningGateType::None) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Open) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Completed)) {
+            drawEllipseLine(
+                artifact.x,
+                artifact.y,
+                cellW * (1.05F + gatePulse * 0.10F),
+                cellH * (1.05F + gatePulse * 0.10F),
+                {0.88F, 0.44F, 1.0F, 0.72F},
+                28,
+                0.0F,
+                kPi * 2.0F);
+        }
+    }
+    for (const MiningGateMarkerSnapshot& marker : snapshot.miningGateMarkers) {
+        const Vec2 center = cellCenter(marker.x - 0.5, marker.y - 0.5);
+        const Color markerColor = marker.activated
+            ? Color {0.30F, 1.0F, 0.66F, 0.82F}
+            : Color {0.46F, 0.86F, 1.0F, 0.60F + gatePulse * 0.24F};
+        drawEllipseLine(center.x, center.y, cellW * 0.72F, cellH * 0.72F, markerColor, 24, 0.0F, kPi * 2.0F);
+        drawLine(center.x - cellW * 0.44F, center.y, center.x + cellW * 0.44F, center.y, markerColor, 1.4F);
+        drawLine(center.x, center.y - cellH * 0.44F, center.x, center.y + cellH * 0.44F, markerColor, 1.4F);
     }
     if (snapshot.miningScannerPulse > 0.0) {
         std::vector<float>& scannerGridVertices = scratchVertices(384);

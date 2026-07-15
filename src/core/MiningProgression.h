@@ -8,7 +8,7 @@
 
 namespace rocket {
 
-inline constexpr int miningArenaRulesVersion = 1;
+inline constexpr int miningArenaRulesVersion = 2;
 
 struct MiningCampaignProgression {
     bool miningAvailable = false;
@@ -22,6 +22,24 @@ MiningProgressionBand miningProgressionBandForDifficulty(int difficulty);
 std::string_view miningActName(MiningAct act);
 std::string_view miningProgressionBandName(MiningProgressionBand band);
 MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& request);
+MiningGateType selectMiningGateType(const MiningArenaRules& rules);
+MiningGateDefinition resolveMiningGateDefinition(
+    const MiningArenaRules& rules,
+    MiningGateType type,
+    bool storyCritical = false);
+std::string_view miningGateName(MiningGateType type);
+std::string_view miningGateStateName(MiningGateState state);
+bool miningGateAllowed(const MiningArenaRules& rules, MiningGateType type);
+MiningStorySiteProgress* ensureMiningStorySite(
+    MetaProgress& meta,
+    std::string_view destinationId,
+    const MiningArenaRules& rules);
+const MiningStorySiteProgress* pendingMiningStorySite(
+    const MetaProgress& meta,
+    std::string_view destinationId);
+void creditExtractedMiningStoryArtifacts(
+    MetaProgress& meta,
+    const std::vector<ArtifactRecord>& artifacts);
 
 MiningCampaignProgression resolveCampaignMiningProgression(
     GameChapter chapter,

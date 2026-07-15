@@ -2870,7 +2870,7 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     state.run.surfaceExpedition.prospectArtifacts = 3;
 
     require(
-        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92929}, true).applied,
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92929, true, MiningGateType::None}, true).applied,
         "prospected artifact should start a mining run at an artifact-enabled tier");
     require(state.run.mining.artifact.present, "prospected artifact should create one physical artifact object");
     int artifactTiles = 0;
@@ -2915,7 +2915,7 @@ void miningArtifactTetherAndDestructionRules()
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.prospectArtifacts = 1;
     require(
-        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92930}, true).applied,
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92930, true, MiningGateType::None}, true).applied,
         "artifact tether test should start mining at an artifact-enabled tier");
 
     MiningArtifactObject& artifact = state.run.mining.artifact;
@@ -3007,7 +3007,7 @@ void miningArtifactSaveRoundTrips()
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.prospectArtifacts = 1;
     require(
-        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92933}, true).applied,
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92933, true, MiningGateType::None}, true).applied,
         "artifact save test should start mining at an artifact-enabled tier");
     state.run.mining.artifact.state = MiningArtifactState::Loose;
     state.run.mining.artifact.tethered = true;

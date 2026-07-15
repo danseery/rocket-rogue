@@ -8,6 +8,7 @@
 #include "core/Tuning.h"
 
 #include <string_view>
+#include <string>
 
 namespace rocket {
 
@@ -50,6 +51,9 @@ double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
+MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog);
+bool miningCapabilityReadyForGate(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
+std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
 int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
 bool miningAtReturnZone(const MiningRunState& mining);

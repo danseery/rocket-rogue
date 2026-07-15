@@ -3038,6 +3038,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
     if (outcome.cargoRecovered) {
         addMaterials(state.meta.materials, expedition.temporaryMaterials);
         applyRecoveredArtifactRewards(state, expedition.temporaryArtifacts);
+        creditExtractedMiningStoryArtifacts(state.meta, expedition.temporaryArtifacts);
         state.meta.artifacts.insert(state.meta.artifacts.end(), expedition.temporaryArtifacts.begin(), expedition.temporaryArtifacts.end());
         outcome.materialDelta = expedition.temporaryMaterials;
         outcome.artifactFound = !expedition.temporaryArtifacts.empty();

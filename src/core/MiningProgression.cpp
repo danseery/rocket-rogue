@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <sstream>
 
 namespace rocket {
 
@@ -127,6 +128,11 @@ void addReferenceRole(MiningReferenceDroneCapability& reference, MiniDroneRole r
     }
 }
 
+void allowGate(MiningArenaRules& rules, MiningGateType type)
+{
+    allow(rules.allowedGateTypes, type);
+}
+
 void applyActOneProgression(MiningArenaRules& rules, int difficulty)
 {
     rules.mechanics.movement = true;
@@ -169,23 +175,41 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
         rules.mechanics.artifactRecovery = true;
         rules.mechanics.artifactTethering = true;
         allow(rules.allowedMaterials, MiningCellMaterial::ArtifactCache);
+        allowGate(rules, MiningGateType::HazardCocoon);
+        allowGate(rules, MiningGateType::SurveyTriangulation);
+        allowGate(rules, MiningGateType::FragileExcavation);
+        if (difficulty == 8) {
+            rules.fixedStoryGate = MiningGateType::HazardCocoon;
+        }
     }
     if (difficulty >= 9) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Toxic);
+        allowGate(rules, MiningGateType::HeavyTow);
+        allowGate(rules, MiningGateType::EnduranceVault);
     }
+    rules.maximumGateLocks = 1;
 }
 
 void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
 {
     applyActOneProgression(rules, 10);
+    rules.fixedStoryGate = MiningGateType::None;
     rules.allowedAffinities[static_cast<std::size_t>(MiningElementalAffinity::Toxic)] = false;
     rules.mechanics.passiveDroneCombat = true;
     allow(rules.allowedEnemyTypes, MiningEnemyType::Ant);
     allow(rules.allowedRoomFeatures, MiningCellFeature::EncounterZone);
 
+    if (difficulty >= 2) {
+        allowGate(rules, MiningGateType::EnemySealedChamber);
+        if (difficulty <= 3) {
+            rules.fixedStoryGate = MiningGateType::EnemySealedChamber;
+        }
+    }
+
     if (difficulty >= 4) {
         allow(rules.allowedEnemyTypes, MiningEnemyType::Flying);
         allow(rules.allowedRoomFeatures, MiningCellFeature::TreasureVault);
+        allowGate(rules, MiningGateType::ShieldCorridor);
     }
     if (difficulty >= 5) {
         allow(rules.allowedEnemyTypes, MiningEnemyType::Beetle);
@@ -194,6 +218,8 @@ void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
         allow(rules.allowedMaterials, MiningCellMaterial::ExoticVein);
         allow(rules.allowedEnemyTypes, MiningEnemyType::Elemental);
         allow(rules.allowedRoomFeatures, MiningCellFeature::HiveNest);
+        allowGate(rules, MiningGateType::CompoundStoryVault);
+        rules.fixedStoryGate = MiningGateType::CompoundStoryVault;
     }
     if (difficulty >= 9) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Toxic);
@@ -203,6 +229,7 @@ void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
         allow(rules.allowedEnemyTypes, MiningEnemyType::Spawner);
         rules.maxSpawners = 1;
     }
+    rules.maximumGateLocks = 2;
 }
 
 void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
@@ -213,6 +240,10 @@ void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
     rules.maxSpawners = 0;
     allow(rules.allowedEnemyTypes, MiningEnemyType::Mammal);
     allow(rules.allowedRoomFeatures, MiningCellFeature::OrganicBurrow);
+    allowGate(rules, MiningGateType::BurrowBreach);
+    if (difficulty <= 3) {
+        rules.fixedStoryGate = MiningGateType::BurrowBreach;
+    }
     if (difficulty >= 2) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Radiation);
     }
@@ -226,7 +257,9 @@ void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
     }
     if (difficulty >= 9) {
         rules.maxSpawners = 2;
+        rules.fixedStoryGate = MiningGateType::CompoundStoryVault;
     }
+    rules.maximumGateLocks = 3;
 }
 
 void setReferenceRoles(MiningArenaRules& rules)
@@ -382,6 +415,199 @@ MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& rawRequest)
 
     setReferenceRoles(rules);
     return rules;
+}
+
+std::string_view miningGateName(MiningGateType type)
+{
+    switch (type) {
+    case MiningGateType::None: return "None";
+    case MiningGateType::HazardCocoon: return "Hazard Cocoon";
+    case MiningGateType::EnemySealedChamber: return "Enemy-Sealed Chamber";
+    case MiningGateType::SurveyTriangulation: return "Survey Triangulation";
+    case MiningGateType::FragileExcavation: return "Fragile Excavation";
+    case MiningGateType::HeavyTow: return "Heavy Tow";
+    case MiningGateType::EnduranceVault: return "Endurance Vault";
+    case MiningGateType::ShieldCorridor: return "Shield Corridor";
+    case MiningGateType::BurrowBreach: return "Burrow Breach";
+    case MiningGateType::CompoundStoryVault: return "Compound Story Vault";
+    }
+    return "None";
+}
+
+std::string_view miningGateStateName(MiningGateState state)
+{
+    switch (state) {
+    case MiningGateState::None: return "None";
+    case MiningGateState::Locked: return "Locked";
+    case MiningGateState::InProgress: return "In progress";
+    case MiningGateState::Open: return "Open";
+    case MiningGateState::Completed: return "Completed";
+    }
+    return "None";
+}
+
+bool miningGateAllowed(const MiningArenaRules& rules, MiningGateType type)
+{
+    return isAllowed(rules.allowedGateTypes, type);
+}
+
+MiningGateType selectMiningGateType(const MiningArenaRules& rules)
+{
+    if (rules.request.gateOverrideEnabled) {
+        return rules.request.gateOverride == MiningGateType::None || miningGateAllowed(rules, rules.request.gateOverride)
+            ? rules.request.gateOverride
+            : MiningGateType::None;
+    }
+    if (rules.fixedStoryGate != MiningGateType::None) {
+        return rules.fixedStoryGate;
+    }
+    std::array<MiningGateType, miningGateTypeCount> candidates {};
+    std::size_t count = 0;
+    for (int raw = static_cast<int>(MiningGateType::HazardCocoon);
+         raw <= static_cast<int>(MiningGateType::CompoundStoryVault);
+         ++raw) {
+        const auto type = static_cast<MiningGateType>(raw);
+        if (miningGateAllowed(rules, type) && type != MiningGateType::CompoundStoryVault) {
+            candidates[count++] = type;
+        }
+    }
+    if (count == 0) {
+        return MiningGateType::None;
+    }
+    const std::size_t index = static_cast<std::size_t>(mix64(rules.request.seed ^ 0x4741544553495445ULL) % count);
+    return candidates[index];
+}
+
+MiningGateDefinition resolveMiningGateDefinition(
+    const MiningArenaRules& rules,
+    MiningGateType type,
+    bool storyCritical)
+{
+    MiningGateDefinition gate;
+    gate.type = type;
+    gate.storyCritical = storyCritical;
+    gate.name = miningGateName(type);
+    switch (type) {
+    case MiningGateType::None:
+        break;
+    case MiningGateType::HazardCocoon:
+        gate.requiresHazardTreatment = true;
+        gate.hazardAffinity = rules.request.act == MiningAct::ActThree
+            ? MiningElementalAffinity::Radiation
+            : (rules.request.difficulty >= 9 ? MiningElementalAffinity::Toxic : MiningElementalAffinity::Thermal);
+        gate.requiredHazardMark = gate.hazardAffinity == MiningElementalAffinity::Radiation ? 3
+            : (gate.hazardAffinity == MiningElementalAffinity::Toxic ? 2 : 1);
+        gate.requiredCapability = gate.requiredHazardMark == 1 ? "Hazard Drone Mk I" : (gate.requiredHazardMark == 2 ? "Hazard Drone Mk II" : "Hazard Drone Mk III");
+        gate.alternatives = "Hard story lock: every shell tile must be treated.";
+        break;
+    case MiningGateType::EnemySealedChamber:
+        gate.requiresEnemyClearance = true;
+        gate.requiredCapability = "Enough passive combat strength to clear the assigned encounter";
+        gate.alternatives = "Any Attack, Defense, terrain, and utility combination that wins the room.";
+        break;
+    case MiningGateType::SurveyTriangulation:
+        gate.requiresSurveyTriangulation = true;
+        gate.requiredSurveyOrigins = 3;
+        gate.requiredCapability = "Three scanner pulses from distinct origins";
+        gate.alternatives = "Survey Drones scan efficiently; the rig can reposition and pulse manually.";
+        break;
+    case MiningGateType::FragileExcavation:
+        gate.fragileArtifact = true;
+        gate.requiredCapability = "Controlled surrounding excavation";
+        gate.alternatives = "Mining Drone, scanner information, low rebound, or careful manual excavation.";
+        break;
+    case MiningGateType::HeavyTow:
+        gate.heavyTow = true;
+        gate.requiredCapability = "Tow support and a clear return route";
+        gate.alternatives = "Resource support, tow upgrades, empty cargo, or a wide direct tunnel.";
+        break;
+    case MiningGateType::EnduranceVault:
+        gate.endurancePlacement = true;
+        gate.requiredCapability = "Extended oxygen range";
+        gate.alternatives = "Resource Drone, oxygen upgrades, shortcuts, or a pre-cleared route.";
+        break;
+    case MiningGateType::ShieldCorridor:
+        gate.shieldCorridor = true;
+        gate.requiredCapability = "Survive or clear a ranged extraction lane";
+        gate.alternatives = "Defense screen, Attack clearance, or terrain cover and a safer tunnel.";
+        break;
+    case MiningGateType::BurrowBreach:
+        gate.burrowBreach = true;
+        gate.requiredCapability = "Open the marked bedrock breach";
+        gate.alternatives = "Lure a Mammal through it, or use Survey support to find the long route.";
+        break;
+    case MiningGateType::CompoundStoryVault:
+        gate.requiresHazardTreatment = true;
+        gate.requiresEnemyClearance = true;
+        gate.hazardAffinity = rules.request.act == MiningAct::ActThree ? MiningElementalAffinity::Radiation
+            : (rules.request.difficulty >= 9 ? MiningElementalAffinity::Toxic : MiningElementalAffinity::Thermal);
+        gate.requiredHazardMark = gate.hazardAffinity == MiningElementalAffinity::Radiation ? 3
+            : (gate.hazardAffinity == MiningElementalAffinity::Toxic ? 2 : 1);
+        gate.endurancePlacement = rules.request.act == MiningAct::ActThree;
+        gate.heavyTow = rules.request.act == MiningAct::ActThree && rules.request.difficulty >= 9;
+        gate.requiredCapability = rules.request.act == MiningAct::ActThree
+            ? "Hazard treatment, encounter clearance, and extraction endurance"
+            : "Hazard treatment plus encounter clearance";
+        gate.alternatives = "A compound story lock using previously taught systems.";
+        break;
+    }
+    return gate;
+}
+
+const MiningStorySiteProgress* pendingMiningStorySite(
+    const MetaProgress& meta,
+    std::string_view destinationId)
+{
+    const auto site = std::find_if(meta.miningStorySites.begin(), meta.miningStorySites.end(), [&](const MiningStorySiteProgress& candidate) {
+        return !candidate.completed && candidate.destinationId == destinationId;
+    });
+    return site == meta.miningStorySites.end() ? nullptr : &*site;
+}
+
+MiningStorySiteProgress* ensureMiningStorySite(
+    MetaProgress& meta,
+    std::string_view destinationId,
+    const MiningArenaRules& rules)
+{
+    if (rules.fixedStoryGate == MiningGateType::None) {
+        return nullptr;
+    }
+    const auto existing = std::find_if(meta.miningStorySites.begin(), meta.miningStorySites.end(), [&](const MiningStorySiteProgress& candidate) {
+        return candidate.destinationId == destinationId && candidate.gateType == rules.fixedStoryGate;
+    });
+    if (existing != meta.miningStorySites.end()) {
+        return existing->completed ? nullptr : &*existing;
+    }
+    std::ostringstream id;
+    id << destinationId << "_story_gate_" << static_cast<int>(rules.fixedStoryGate);
+    MiningStorySiteProgress site;
+    site.siteId = id.str();
+    site.destinationId = std::string(destinationId);
+    site.act = rules.request.act;
+    site.difficulty = rules.request.difficulty;
+    site.seed = rules.request.seed;
+    site.gateType = rules.fixedStoryGate;
+    site.artifactId = site.siteId + "_artifact";
+    meta.miningStorySites.push_back(std::move(site));
+    return &meta.miningStorySites.back();
+}
+
+void creditExtractedMiningStoryArtifacts(
+    MetaProgress& meta,
+    const std::vector<ArtifactRecord>& artifacts)
+{
+    for (MiningStorySiteProgress& site : meta.miningStorySites) {
+        if (site.completed) {
+            continue;
+        }
+        const auto recovered = std::find_if(artifacts.begin(), artifacts.end(), [&](const ArtifactRecord& artifact) {
+            return artifact.id == site.artifactId;
+        });
+        if (recovered != artifacts.end()) {
+            site.discovered = true;
+            site.completed = true;
+        }
+    }
 }
 
 MiningCampaignProgression resolveCampaignMiningProgression(

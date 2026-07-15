@@ -171,14 +171,38 @@ enum class MiningProgressionBand {
     Mastery
 };
 
+enum class MiningGateType {
+    None,
+    HazardCocoon,
+    EnemySealedChamber,
+    SurveyTriangulation,
+    FragileExcavation,
+    HeavyTow,
+    EnduranceVault,
+    ShieldCorridor,
+    BurrowBreach,
+    CompoundStoryVault
+};
+
+enum class MiningGateState {
+    None,
+    Locked,
+    InProgress,
+    Open,
+    Completed
+};
+
 inline constexpr std::size_t miningActCount = 3;
 inline constexpr std::size_t miningProgressionBandCount = 4;
 inline constexpr std::size_t miningFirstClearProgressCount = miningActCount * miningProgressionBandCount;
+inline constexpr std::size_t miningGateTypeCount = 10;
 
 struct MiningArenaRequest {
     MiningAct act = MiningAct::ActOne;
     int difficulty = 1;
     std::uint64_t seed = 0;
+    bool gateOverrideEnabled = false;
+    MiningGateType gateOverride = MiningGateType::None;
 };
 
 struct MiningRewardBudget {
@@ -222,6 +246,9 @@ struct MiningArenaRules {
     std::array<bool, 7> allowedEnemyTypes {};
     std::array<bool, 5> allowedAffinities {};
     std::array<bool, 9> allowedRoomFeatures {};
+    std::array<bool, miningGateTypeCount> allowedGateTypes {};
+    MiningGateType fixedStoryGate = MiningGateType::None;
+    int maximumGateLocks = 0;
     int maxActiveEnemies = 0;
     int maxSpawners = 0;
     double terrainToughnessScale = 1.0;
@@ -241,6 +268,85 @@ struct MiningArenaMetadata {
     int difficulty = 1;
     std::uint64_t seed = 0;
     int rulesVersion = 0;
+    MiningGateType gateType = MiningGateType::None;
+    bool gateOverrideEnabled = false;
+};
+
+struct MiningGateDefinition {
+    MiningGateType type = MiningGateType::None;
+    bool storyCritical = false;
+    bool requiresHazardTreatment = false;
+    bool requiresEnemyClearance = false;
+    bool requiresSurveyTriangulation = false;
+    bool fragileArtifact = false;
+    bool heavyTow = false;
+    bool endurancePlacement = false;
+    bool shieldCorridor = false;
+    bool burrowBreach = false;
+    int requiredHazardMark = 0;
+    int requiredSurveyOrigins = 0;
+    MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
+    std::string_view name;
+    std::string_view requiredCapability;
+    std::string_view alternatives;
+};
+
+struct MiningCapabilityProfile {
+    std::array<int, 6> roleMarks {};
+    double oxygenSeconds = 30.0;
+    double scannerRadius = 0.0;
+    double artifactTowEfficiency = 0.0;
+    double drillControl = 0.0;
+    double combatDamagePerSecond = 0.0;
+    double damageRelief = 0.0;
+};
+
+struct MiningGateMarker {
+    double x = 0.0;
+    double y = 0.0;
+    bool activated = false;
+};
+
+struct MiningGateRuntime {
+    bool active = false;
+    MiningGateType type = MiningGateType::None;
+    MiningGateState state = MiningGateState::None;
+    bool storyCritical = false;
+    bool discovered = false;
+    bool completionNotified = false;
+    std::string siteId;
+    std::string artifactId;
+    MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
+    int requiredHazardMark = 0;
+    int shellTilesTotal = 0;
+    int shellTilesRemaining = 0;
+    int assignedEnemiesRemaining = 0;
+    int requiredSurveyOrigins = 0;
+    int surveyOriginsCompleted = 0;
+    bool hazardTreatmentComplete = false;
+    bool enemyClearanceComplete = false;
+    bool surveyComplete = false;
+    bool burrowBreached = false;
+    bool fragileArtifact = false;
+    bool heavyTow = false;
+    bool endurancePlacement = false;
+    bool shieldCorridor = false;
+    bool burrowBreach = false;
+    double anchorX = 0.0;
+    double anchorY = 0.0;
+    std::vector<MiningGateMarker> markers;
+};
+
+struct MiningStorySiteProgress {
+    std::string siteId;
+    std::string destinationId;
+    MiningAct act = MiningAct::ActOne;
+    int difficulty = 1;
+    std::uint64_t seed = 0;
+    MiningGateType gateType = MiningGateType::None;
+    std::string artifactId;
+    bool discovered = false;
+    bool completed = false;
 };
 
 struct MiningFirstClearProgress {
@@ -546,6 +652,7 @@ struct MetaProgress {
     std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
+    std::vector<MiningStorySiteProgress> miningStorySites;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
@@ -724,6 +831,7 @@ struct MiningCell {
     MiningCellFeature feature = MiningCellFeature::None;
     MiningEnemyType enemy = MiningEnemyType::None;
     MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
+    bool gateAssociated = false;
 };
 
 struct MiningTerrain {
@@ -760,6 +868,7 @@ struct MiningEnemy {
     MiningElementalAffinity affinity = MiningElementalAffinity::None;
     double attackCooldownSeconds = 0.0;
     MiningEnemySpawnSpec spawn;
+    bool gateAssociated = false;
 };
 
 enum class MiningCombatTeam {
@@ -917,6 +1026,7 @@ struct MiningRunState {
     std::vector<MiningProjectileVisual> combatProjectiles;
     std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;
+    MiningGateRuntime gate;
 };
 
 struct RunState {

@@ -1408,7 +1408,7 @@ void RocketGameApp::debugStartCombatMining()
     debugStartMiningArena(2, 7, 0xC0BA7701ULL, 0);
 }
 
-void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode)
+void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode, int gateOverride)
 {
     const MiningAct miningAct = act <= 1
         ? MiningAct::ActOne
@@ -1416,7 +1416,9 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
     const MiningArenaRequest request {
         miningAct,
         std::clamp(difficulty, 1, 10),
-        std::max<std::uint64_t>(1, seed)
+        std::max<std::uint64_t>(1, seed),
+        gateOverride >= 0,
+        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundStoryVault)))
     };
     const MiningArenaRules rules = resolveMiningArenaRules(request);
 
@@ -1510,12 +1512,18 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
     panelDirty_ = true;
 }
 
-std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty) const
+std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty, int gateOverride) const
 {
     const MiningAct miningAct = act <= 1
         ? MiningAct::ActOne
         : (act == 2 ? MiningAct::ActTwo : MiningAct::ActThree);
-    const MiningArenaRules rules = resolveMiningArenaRules({miningAct, std::clamp(difficulty, 1, 10), 1});
+    const MiningArenaRules rules = resolveMiningArenaRules({
+        miningAct,
+        std::clamp(difficulty, 1, 10),
+        1,
+        gateOverride >= 0,
+        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundStoryVault)))
+    });
     const auto joinNames = [](const std::vector<std::string>& names) {
         if (names.empty()) {
             return std::string("None");
@@ -1567,6 +1575,8 @@ std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty) cons
     }
 
     std::ostringstream preview;
+    const MiningGateType gateType = selectMiningGateType(rules);
+    const MiningGateDefinition gate = resolveMiningGateDefinition(rules, gateType, rules.fixedStoryGate == gateType);
     preview << miningActName(rules.request.act)
             << " • Level " << rules.request.difficulty
             << " • " << miningProgressionBandName(rules.band)
@@ -1577,6 +1587,9 @@ std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty) cons
             << "\nEnemies: " << joinNames(enemies)
             << "\nAffinities: " << joinNames(affinities)
             << "\nRooms: " << joinNames(rooms)
+            << "\nGate: " << gate.name
+            << "\nRequired: " << gate.requiredCapability
+            << "\nAlternatives: " << gate.alternatives
             << "\nRich cap: " << rules.rewardBudget.rareCap << " rare • "
             << rules.rewardBudget.exoticCap << " exotic"
             << "\nCounter: " << rules.recommendedCounters;
@@ -2380,8 +2393,13 @@ RenderSnapshot RocketGameApp::snapshot() const
                 static_cast<int>(mining.artifact.rewardType),
                 static_cast<int>(mining.artifact.state),
                 mining.artifact.tethered,
-                mining.artifact.revealed
+                mining.artifact.revealed,
+                static_cast<int>(mining.gate.type),
+                static_cast<int>(mining.gate.state)
             };
+        }
+        for (const MiningGateMarker& marker : mining.gate.markers) {
+            result.miningGateMarkers.push_back({marker.x, marker.y, marker.activated});
         }
         result.miningCells.reserve(mining.terrain.cells.size());
         for (int y = 0; y < mining.terrain.height; ++y) {
@@ -2399,7 +2417,8 @@ RenderSnapshot RocketGameApp::snapshot() const
                     integrity,
                     cell.revealed,
                     cell.hazard,
-                    static_cast<int>(cell.hazardAffinity)
+                    static_cast<int>(cell.hazardAffinity),
+                    cell.gateAssociated
                 });
             }
         }

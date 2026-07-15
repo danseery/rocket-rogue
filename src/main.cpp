@@ -632,24 +632,25 @@ void rr_debug_combat_mining()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode)
+void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode, int gateOverride)
 {
     if (g_app) {
         g_app->debugStartMiningArena(
             act,
             difficulty,
             static_cast<std::uint64_t>(std::max(1.0, seed)),
-            loadoutMode);
+            loadoutMode,
+            gateOverride);
     }
 }
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-const char* rr_debug_mining_preview(int act, int difficulty)
+const char* rr_debug_mining_preview(int act, int difficulty, int gateOverride)
 {
     g_debugMiningPreview = g_app
-        ? g_app->debugMiningArenaPreview(act, difficulty)
+        ? g_app->debugMiningArenaPreview(act, difficulty, gateOverride)
         : std::string {};
     return g_debugMiningPreview.c_str();
 }

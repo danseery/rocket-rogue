@@ -513,6 +513,7 @@ int parseInt(std::string_view text, int fallback)
 }
 
 std::uint64_t parseU64(std::string_view text, std::uint64_t fallback);
+double parseDouble(std::string_view text, double fallback);
 
 int miningActToInt(MiningAct act)
 {
@@ -544,7 +545,9 @@ std::string serializeMiningArenaMetadata(const MiningArenaMetadata& metadata)
     return std::to_string(miningActToInt(metadata.act)) + std::string(1, save_schema::crewFieldDelimiter)
         + std::to_string(metadata.difficulty) + std::string(1, save_schema::crewFieldDelimiter)
         + std::to_string(metadata.seed) + std::string(1, save_schema::crewFieldDelimiter)
-        + std::to_string(metadata.rulesVersion);
+        + std::to_string(metadata.rulesVersion) + std::string(1, save_schema::crewFieldDelimiter)
+        + std::to_string(static_cast<int>(metadata.gateType)) + std::string(1, save_schema::crewFieldDelimiter)
+        + std::to_string(metadata.gateOverrideEnabled ? 1 : 0);
 }
 
 MiningArenaMetadata parseMiningArenaMetadata(std::string_view text)
@@ -563,6 +566,12 @@ MiningArenaMetadata parseMiningArenaMetadata(std::string_view text)
     if (fields.size() > 3) {
         metadata.rulesVersion = std::max(0, parseInt(fields[3], 0));
     }
+    if (fields.size() > 4) {
+        metadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[4], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+    }
+    if (fields.size() > 5) {
+        metadata.gateOverrideEnabled = parseInt(fields[5], 0) != 0;
+    }
     return metadata;
 }
 
@@ -577,6 +586,8 @@ std::string serializeSurfaceBankedMiningArena(const SurfaceExpeditionState& expe
         << save_schema::crewFieldDelimiter << metadata.difficulty
         << save_schema::crewFieldDelimiter << metadata.seed
         << save_schema::crewFieldDelimiter << metadata.rulesVersion
+        << save_schema::crewFieldDelimiter << static_cast<int>(metadata.gateType)
+        << save_schema::crewFieldDelimiter << (metadata.gateOverrideEnabled ? 1 : 0)
         << save_schema::crewFieldDelimiter << materials.common
         << save_schema::crewFieldDelimiter << materials.rare
         << save_schema::crewFieldDelimiter << materials.exotic;
@@ -604,14 +615,20 @@ void parseSurfaceBankedMiningArena(std::string_view text, SurfaceExpeditionState
     if (fields.size() > 5) {
         expedition.bankedMiningArenaMetadata.rulesVersion = std::max(0, parseInt(fields[5], 0));
     }
-    if (fields.size() > 6) {
-        expedition.bankedMiningMaterials.common = std::max(0, parseInt(fields[6], 0));
+    const bool hasGateMetadata = fields.size() >= 11;
+    if (hasGateMetadata) {
+        expedition.bankedMiningArenaMetadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[6], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+        expedition.bankedMiningArenaMetadata.gateOverrideEnabled = parseInt(fields[7], 0) != 0;
     }
-    if (fields.size() > 7) {
-        expedition.bankedMiningMaterials.rare = std::max(0, parseInt(fields[7], 0));
+    const std::size_t materialOffset = hasGateMetadata ? 8 : 6;
+    if (fields.size() > materialOffset) {
+        expedition.bankedMiningMaterials.common = std::max(0, parseInt(fields[materialOffset], 0));
     }
-    if (fields.size() > 8) {
-        expedition.bankedMiningMaterials.exotic = std::max(0, parseInt(fields[8], 0));
+    if (fields.size() > materialOffset + 1) {
+        expedition.bankedMiningMaterials.rare = std::max(0, parseInt(fields[materialOffset + 1], 0));
+    }
+    if (fields.size() > materialOffset + 2) {
+        expedition.bankedMiningMaterials.exotic = std::max(0, parseInt(fields[materialOffset + 2], 0));
     }
 }
 
@@ -656,6 +673,132 @@ void parseMiningRewardLedger(std::string_view text, MiningRunState& mining)
     if (fields.size() > 7) {
         mining.progressionCreditEligible = parseInt(fields[7], 1) != 0;
     }
+}
+
+std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
+{
+    std::ostringstream markers;
+    for (std::size_t index = 0; index < gate.markers.size(); ++index) {
+        if (index > 0) {
+            markers << save_schema::crewRecordDelimiter;
+        }
+        markers << gate.markers[index].x << save_schema::listDelimiter
+            << gate.markers[index].y << save_schema::listDelimiter
+            << (gate.markers[index].activated ? 1 : 0);
+    }
+    std::ostringstream out;
+    out << (gate.active ? 1 : 0)
+        << save_schema::crewFieldDelimiter << static_cast<int>(gate.type)
+        << save_schema::crewFieldDelimiter << static_cast<int>(gate.state)
+        << save_schema::crewFieldDelimiter << (gate.storyCritical ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.discovered ? 1 : 0)
+        << save_schema::crewFieldDelimiter << gate.siteId
+        << save_schema::crewFieldDelimiter << gate.artifactId
+        << save_schema::crewFieldDelimiter << static_cast<int>(gate.hazardAffinity)
+        << save_schema::crewFieldDelimiter << gate.requiredHazardMark
+        << save_schema::crewFieldDelimiter << gate.shellTilesTotal
+        << save_schema::crewFieldDelimiter << gate.shellTilesRemaining
+        << save_schema::crewFieldDelimiter << gate.assignedEnemiesRemaining
+        << save_schema::crewFieldDelimiter << gate.requiredSurveyOrigins
+        << save_schema::crewFieldDelimiter << (gate.hazardTreatmentComplete ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.enemyClearanceComplete ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.surveyComplete ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.burrowBreached ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.fragileArtifact ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.heavyTow ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.endurancePlacement ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.shieldCorridor ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.burrowBreach ? 1 : 0)
+        << save_schema::crewFieldDelimiter << gate.anchorX
+        << save_schema::crewFieldDelimiter << gate.anchorY
+        << save_schema::crewFieldDelimiter << markers.str();
+    return out.str();
+}
+
+void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (fields.empty()) {
+        return;
+    }
+    gate.active = parseInt(fields[0], 0) != 0;
+    auto intAt = [&](std::size_t index, int fallback = 0) { return fields.size() > index ? parseInt(fields[index], fallback) : fallback; };
+    auto boolAt = [&](std::size_t index, bool fallback = false) { return fields.size() > index ? parseInt(fields[index], fallback ? 1 : 0) != 0 : fallback; };
+    gate.type = static_cast<MiningGateType>(std::clamp(intAt(1), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+    gate.state = static_cast<MiningGateState>(std::clamp(intAt(2), 0, static_cast<int>(MiningGateState::Completed)));
+    gate.storyCritical = boolAt(3);
+    gate.discovered = boolAt(4);
+    if (fields.size() > 5) gate.siteId = fields[5];
+    if (fields.size() > 6) gate.artifactId = fields[6];
+    gate.hazardAffinity = static_cast<MiningElementalAffinity>(std::clamp(intAt(7), 0, static_cast<int>(MiningElementalAffinity::Toxic)));
+    gate.requiredHazardMark = std::max(0, intAt(8));
+    gate.shellTilesTotal = std::max(0, intAt(9));
+    gate.shellTilesRemaining = std::max(0, intAt(10));
+    gate.assignedEnemiesRemaining = std::max(0, intAt(11));
+    gate.requiredSurveyOrigins = std::max(0, intAt(12));
+    gate.hazardTreatmentComplete = boolAt(13);
+    gate.enemyClearanceComplete = boolAt(14);
+    gate.surveyComplete = boolAt(15);
+    gate.burrowBreached = boolAt(16);
+    gate.fragileArtifact = boolAt(17);
+    gate.heavyTow = boolAt(18);
+    gate.endurancePlacement = boolAt(19);
+    gate.shieldCorridor = boolAt(20);
+    gate.burrowBreach = boolAt(21);
+    if (fields.size() > 22) gate.anchorX = parseDouble(fields[22], 0.0);
+    if (fields.size() > 23) gate.anchorY = parseDouble(fields[23], 0.0);
+    gate.markers.clear();
+    if (fields.size() > 24) {
+        for (const std::string& markerText : split(fields[24], save_schema::crewRecordDelimiter)) {
+            const std::vector<std::string> markerFields = split(markerText, save_schema::listDelimiter);
+            if (markerFields.size() < 2) continue;
+            gate.markers.push_back({
+                parseDouble(markerFields[0], 0.0),
+                parseDouble(markerFields[1], 0.0),
+                markerFields.size() > 2 && parseInt(markerFields[2], 0) != 0
+            });
+        }
+    }
+}
+
+std::string serializeMiningStorySites(const std::vector<MiningStorySiteProgress>& sites)
+{
+    std::ostringstream out;
+    for (std::size_t index = 0; index < sites.size(); ++index) {
+        if (index > 0) out << save_schema::crewRecordDelimiter;
+        const MiningStorySiteProgress& site = sites[index];
+        out << site.siteId << save_schema::crewFieldDelimiter
+            << site.destinationId << save_schema::crewFieldDelimiter
+            << miningActToInt(site.act) << save_schema::crewFieldDelimiter
+            << site.difficulty << save_schema::crewFieldDelimiter
+            << site.seed << save_schema::crewFieldDelimiter
+            << static_cast<int>(site.gateType) << save_schema::crewFieldDelimiter
+            << site.artifactId << save_schema::crewFieldDelimiter
+            << (site.discovered ? 1 : 0) << save_schema::crewFieldDelimiter
+            << (site.completed ? 1 : 0);
+    }
+    return out.str();
+}
+
+std::vector<MiningStorySiteProgress> parseMiningStorySites(std::string_view text)
+{
+    std::vector<MiningStorySiteProgress> sites;
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 7 || fields[0].empty()) continue;
+        MiningStorySiteProgress site;
+        site.siteId = fields[0];
+        site.destinationId = fields[1];
+        site.act = miningActFromInt(parseInt(fields[2], 1));
+        site.difficulty = std::clamp(parseInt(fields[3], 1), 1, 10);
+        site.seed = parseU64(fields[4], 0);
+        site.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[5], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+        site.artifactId = fields[6];
+        if (fields.size() > 7) site.discovered = parseInt(fields[7], 0) != 0;
+        if (fields.size() > 8) site.completed = parseInt(fields[8], 0) != 0;
+        sites.push_back(std::move(site));
+    }
+    return sites;
 }
 
 std::string serializeMiningFirstClearProgress(
@@ -705,8 +848,16 @@ bool parseMiningProgressionField(SaveData& save, std::string_view key, std::stri
         parseMiningRewardLedger(value, save.mining);
         return true;
     }
+    if (key == save_schema::field::miningGateRuntime) {
+        parseMiningGateRuntime(value, save.mining.gate);
+        return true;
+    }
     if (key == save_schema::field::miningFirstClearProgress) {
         save.miningFirstClearProgress = parseMiningFirstClearProgress(value);
+        return true;
+    }
+    if (key == save_schema::field::miningStorySites) {
+        save.miningStorySites = parseMiningStorySites(value);
         return true;
     }
     return false;
@@ -900,7 +1051,8 @@ std::string serializeMiningCells(const MiningTerrain& terrain)
             << save_schema::crewFieldDelimiter << (cell.hazard ? 1 : 0)
             << save_schema::crewFieldDelimiter << miningCellFeatureToInt(cell.feature)
             << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(cell.enemy)
-            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(cell.hazardAffinity);
+            << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(cell.hazardAffinity)
+            << save_schema::crewFieldDelimiter << (cell.gateAssociated ? 1 : 0);
     }
     return out.str();
 }
@@ -936,6 +1088,9 @@ void parseMiningCells(std::string_view text, MiningTerrain& terrain)
         }
         if (fields.size() > 7) {
             cell.hazardAffinity = miningElementalAffinityFromInt(parseInt(fields[7], 0));
+        }
+        if (fields.size() > 8) {
+            cell.gateAssociated = parseInt(fields[8], 0) != 0;
         }
         terrain.cells.push_back(cell);
     }
@@ -1011,7 +1166,8 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.spawn.maxSpawns
             << save_schema::crewFieldDelimiter << enemy.spawn.spawned
             << save_schema::crewFieldDelimiter << enemy.spawn.intervalSeconds
-            << save_schema::crewFieldDelimiter << enemy.spawn.cooldownSeconds;
+            << save_schema::crewFieldDelimiter << enemy.spawn.cooldownSeconds
+            << save_schema::crewFieldDelimiter << (enemy.gateAssociated ? 1 : 0);
     }
     return out.str();
 }
@@ -1088,6 +1244,9 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         }
         if (fields.size() > 20) {
             enemy.spawn.cooldownSeconds = std::max(0.0, parseDouble(fields[20], 0.0));
+        }
+        if (fields.size() > 21) {
+            enemy.gateAssociated = parseInt(fields[21], 0) != 0;
         }
         enemies.push_back(enemy);
     }
@@ -1532,6 +1691,7 @@ SaveData captureSaveData(const GameState& state)
     save.droneUpgrades = state.meta.droneUpgrades;
     save.artifacts = state.meta.artifacts;
     save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
+    save.miningStorySites = state.meta.miningStorySites;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
     save.astronautsLost = state.meta.astronautsLost;
@@ -1671,6 +1831,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     state.meta.artifacts = save.artifacts;
     state.meta.miningFirstClearProgress = save.miningFirstClearProgress;
+    state.meta.miningStorySites = save.miningStorySites;
     state.meta.furthestTier = save.furthestTier;
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
@@ -1846,6 +2007,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningActive, save.mining.active ? 1 : 0);
     writeField(out, save_schema::field::miningArenaMetadata, serializeMiningArenaMetadata(save.mining.arenaMetadata));
     writeField(out, save_schema::field::miningRewardLedger, serializeMiningRewardLedger(save.mining));
+    writeField(out, save_schema::field::miningGateRuntime, serializeMiningGateRuntime(save.mining.gate));
     writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
@@ -1894,6 +2056,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
+    writeField(out, save_schema::field::miningStorySites, serializeMiningStorySites(save.miningStorySites));
     writeField(out, save_schema::field::furthestTier, save.furthestTier);
     writeField(out, save_schema::field::shipsLost, save.shipsLost);
     writeField(out, save_schema::field::astronautsLost, save.astronautsLost);

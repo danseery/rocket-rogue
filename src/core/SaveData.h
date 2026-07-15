@@ -46,6 +46,7 @@ struct SaveData {
     std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
+    std::vector<MiningStorySiteProgress> miningStorySites;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;

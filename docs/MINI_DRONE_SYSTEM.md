@@ -1,5 +1,7 @@
 # Mini-Drone System
 
+Drone roles also act as forecastable keys for artifact sites; see [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). Capability checks communicate readiness but never rubber-band arena difficulty.
+
 This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Treat USG Notes as the primary direction: drones should support exploration, excavation, logistics, endurance, engineering, and post-solar passive combat rather than feeling like generic stat pets.
 
 ## Role In The Loop

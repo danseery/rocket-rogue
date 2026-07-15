@@ -1,5 +1,7 @@
 # Mining Mini-Game
 
+Deterministic story and optional artifact gates are specified in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). They reuse the physical artifact, scanner, hazard, towing, terrain, and passive-combat systems described here.
+
 See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current mining direction should follow `docs/reference/USG_NOTES.md` first: chunky/mobile, Straylight-inspired, fog-of-war, destructible terrain, excavation/logistics/endurance roles, and passive defense only after the solar system.
 
 See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay layer that modifies mining, scanner, logistics, oxygen, extraction, and later passive-defense behavior.

@@ -2,14 +2,17 @@
 #include "core/ContentIds.h"
 #include "core/GameState.h"
 #include "core/MiningProgression.h"
+#include "core/MiningSystem.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <tuple>
 
 using namespace rocket;
 
@@ -263,6 +266,165 @@ void progressionSaveFieldsRoundTripAndLegacyDefault()
         "legacy active arena metadata migration should not reroll serialized terrain");
 }
 
+void miningGateContractsAndRuntimeAreDeterministic()
+{
+    const MiningArenaRules actOneSeven = resolveMiningArenaRules({MiningAct::ActOne, 7, 17});
+    const MiningArenaRules actOneEight = resolveMiningArenaRules({MiningAct::ActOne, 8, 18});
+    const MiningArenaRules actTwoTwo = resolveMiningArenaRules({MiningAct::ActTwo, 2, 22});
+    const MiningArenaRules actTwoFour = resolveMiningArenaRules({MiningAct::ActTwo, 4, 24});
+    const MiningArenaRules actTwoSeven = resolveMiningArenaRules({MiningAct::ActTwo, 7, 27});
+    const MiningArenaRules actThreeOne = resolveMiningArenaRules({MiningAct::ActThree, 1, 31});
+    require(selectMiningGateType(actOneSeven) == MiningGateType::None, "locks must not appear before their underlying Act 1 mechanics are taught");
+    require(miningGateAllowed(actOneEight, MiningGateType::HazardCocoon)
+            && miningGateAllowed(actOneEight, MiningGateType::SurveyTriangulation)
+            && miningGateAllowed(actOneEight, MiningGateType::FragileExcavation),
+        "Act 1 level 8 should introduce the three artifact recovery gates");
+    require(actOneEight.fixedStoryGate == MiningGateType::HazardCocoon && actOneEight.maximumGateLocks == 1,
+        "Act 1 level 8 should anchor the one-lock Hazard Cocoon story site");
+    require(actTwoTwo.fixedStoryGate == MiningGateType::EnemySealedChamber,
+        "Act 2 level 2 should anchor the enemy-sealed story site");
+    require(miningGateAllowed(actTwoFour, MiningGateType::ShieldCorridor),
+        "Act 2 level 4 should permit shield corridor sites after ranged enemies are taught");
+    require(actTwoSeven.fixedStoryGate == MiningGateType::CompoundStoryVault && actTwoSeven.maximumGateLocks == 2,
+        "Act 2 pressure should combine exactly two previously taught locks");
+    require(actThreeOne.fixedStoryGate == MiningGateType::BurrowBreach && actThreeOne.maximumGateLocks == 3,
+        "Act 3 should introduce the burrow gate and support three-lock capstones");
+    require(!miningGateAllowed(actTwoSeven, MiningGateType::BurrowBreach),
+        "Act 2 must never leak the Act 3 Mammal gate");
+
+    const MiningArenaRules illegalOverride = resolveMiningArenaRules({
+        MiningAct::ActOne, 8, 99, true, MiningGateType::BurrowBreach
+    });
+    require(selectMiningGateType(illegalOverride) == MiningGateType::None,
+        "Arena Lab must reject an override that violates the Act roster");
+
+    const MiningGateDefinition cocoon = resolveMiningGateDefinition(actOneEight, MiningGateType::HazardCocoon, true);
+    require(cocoon.requiresHazardTreatment && cocoon.requiredHazardMark == 1,
+        "the first cocoon should be a hard Hazard Mk I lock");
+    const MiningGateDefinition toxicCocoon = resolveMiningGateDefinition(
+        resolveMiningArenaRules({MiningAct::ActTwo, 9, 29}), MiningGateType::HazardCocoon, false);
+    require(toxicCocoon.hazardAffinity == MiningElementalAffinity::Toxic && toxicCocoon.requiredHazardMark == 2,
+        "late Toxic cocoons should require Hazard Mk II");
+    const MiningGateDefinition radiationCocoon = resolveMiningGateDefinition(
+        resolveMiningArenaRules({MiningAct::ActThree, 9, 39}), MiningGateType::HazardCocoon, false);
+    require(radiationCocoon.hazardAffinity == MiningElementalAffinity::Radiation && radiationCocoon.requiredHazardMark == 3,
+        "Act 3 Radiation cocoons should require Hazard Mk III");
+
+    MiningCapabilityProfile profile;
+    require(!miningCapabilityReadyForGate(profile, cocoon), "a no-drone profile should fail the direct Hazard key forecast");
+    profile.roleMarks[static_cast<std::size_t>(MiniDroneRole::Hazard)] = 1;
+    require(miningCapabilityReadyForGate(profile, cocoon), "the matching Hazard mark should satisfy the direct key forecast");
+
+    MetaProgress meta;
+    MiningStorySiteProgress* firstSite = ensureMiningStorySite(meta, content::destination::outerPlanets, actOneEight);
+    MiningStorySiteProgress* sameSite = ensureMiningStorySite(meta, content::destination::outerPlanets, actOneEight);
+    require(firstSite != nullptr && sameSite != nullptr && firstSite->seed == sameSite->seed && firstSite->artifactId == sameSite->artifactId,
+        "story sites should retain deterministic seed and artifact identity until completion");
+    creditExtractedMiningStoryArtifacts(meta, {{"wrong", content::destination::outerPlanets, false, ArtifactKind::Story}});
+    require(!meta.miningStorySites.front().completed, "unrelated recovered artifacts must not complete a story site");
+    ArtifactRecord recovered;
+    recovered.id = meta.miningStorySites.front().artifactId;
+    recovered.kind = ArtifactKind::Story;
+    creditExtractedMiningStoryArtifacts(meta, {recovered});
+    require(meta.miningStorySites.front().completed, "only the banked site artifact should complete persistent story progress");
+
+    const ContentCatalog catalog = createDefaultContent();
+    auto prepareSurface = [](GameState& state, std::string_view destinationId) {
+        state.run.surfaceExpedition = {};
+        state.run.surfaceExpedition.active = true;
+        state.run.surfaceExpedition.destinationId = std::string(destinationId);
+        state.run.surfaceExpedition.sharedFuel = 4;
+        state.run.surfaceExpedition.sharedFuelCapacity = 4;
+        state.run.surfaceExpedition.miningSitePrepared = true;
+    };
+
+    GameState hazardState = createNewGame(catalog, 501);
+    prepareSurface(hazardState, content::destination::outerPlanets);
+    const MiningArenaRequest hazardRequest {MiningAct::ActOne, 8, 0xCAFE, true, MiningGateType::HazardCocoon};
+    require(startMiningRun(hazardState, catalog, hazardRequest, false).applied, "Hazard Cocoon debug arena should start");
+    require(hazardState.run.mining.gate.type == MiningGateType::HazardCocoon
+            && hazardState.run.mining.gate.shellTilesRemaining == 8,
+        "Hazard Cocoon should stamp eight marked, deterministic shell tiles");
+    hazardState.run.mining.droneX = hazardState.run.mining.artifact.x;
+    hazardState.run.mining.droneY = hazardState.run.mining.artifact.y;
+    toggleMiningTether(hazardState);
+    require(!hazardState.run.mining.artifact.tethered, "a locked cocoon must reject tether bypass");
+    for (MiningCell& cell : hazardState.run.mining.terrain.cells) {
+        if (cell.gateAssociated && cell.material == MiningCellMaterial::HazardPocket) {
+            cell.material = MiningCellMaterial::Regolith;
+            cell.hazard = false;
+        }
+    }
+    updateMiningRun(hazardState, catalog, 0.01);
+    require(hazardState.run.mining.gate.state == MiningGateState::Open,
+        "treating every shell tile should open the cocoon");
+
+    GameState enemyState = createNewGame(catalog, 502);
+    prepareSurface(enemyState, content::destination::nearbyStar);
+    const MiningArenaRequest enemyRequest {MiningAct::ActTwo, 2, 0xBEEF, true, MiningGateType::EnemySealedChamber};
+    require(startMiningRun(enemyState, catalog, enemyRequest, false).applied, "Enemy-Sealed Chamber debug arena should start");
+    require(enemyState.run.mining.gate.assignedEnemiesRemaining > 0, "enemy seal should own a specific encounter group");
+    for (MiningEnemy& enemy : enemyState.run.mining.enemies) {
+        if (enemy.gateAssociated) enemy.active = false;
+    }
+    updateMiningRun(enemyState, catalog, 0.01);
+    require(enemyState.run.mining.gate.state == MiningGateState::Open,
+        "enemy seal should open only after its assigned encounter is cleared");
+
+    GameState surveyState = createNewGame(catalog, 503);
+    prepareSurface(surveyState, content::destination::outerPlanets);
+    const MiningArenaRequest surveyRequest {MiningAct::ActOne, 8, 0x5151, true, MiningGateType::SurveyTriangulation};
+    require(startMiningRun(surveyState, catalog, surveyRequest, false).applied, "Survey Triangulation debug arena should start");
+    require(surveyState.run.mining.gate.markers.size() == 3, "triangulation should stamp three distinct scanner origins");
+    for (const MiningGateMarker marker : surveyState.run.mining.gate.markers) {
+        surveyState.run.mining.droneX = marker.x;
+        surveyState.run.mining.droneY = marker.y;
+        pulseMiningScanner(surveyState, catalog);
+    }
+    updateMiningRun(surveyState, catalog, 0.01);
+    require(surveyState.run.mining.gate.surveyComplete && surveyState.run.mining.gate.state == MiningGateState::Open,
+        "a no-drone rig should solve triangulation by repositioning to every marker");
+
+    GameState burrowState = createNewGame(catalog, 504);
+    prepareSurface(burrowState, content::destination::nearbyGalaxy);
+    const MiningArenaRequest burrowRequest {MiningAct::ActThree, 1, 0xB0770, true, MiningGateType::BurrowBreach};
+    require(startMiningRun(burrowState, catalog, burrowRequest, false).applied, "Burrow Breach debug arena should start");
+    const int markedBedrock = static_cast<int>(std::count_if(
+        burrowState.run.mining.terrain.cells.begin(), burrowState.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
+            return cell.gateAssociated && cell.material == MiningCellMaterial::Bedrock;
+        }));
+    require(markedBedrock == 5, "Burrow Breach should stamp a marked five-tile wall");
+    for (MiningEnemy& enemy : burrowState.run.mining.enemies) {
+        if (enemy.gateAssociated && enemy.type == MiningEnemyType::Mammal) enemy.active = false;
+    }
+    updateMiningRun(burrowState, catalog, 0.01);
+    require(std::any_of(burrowState.run.mining.enemies.begin(), burrowState.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.gateAssociated && enemy.type == MiningEnemyType::Mammal && enemy.active;
+    }), "an unopened breach should always replenish its assigned Mammal");
+
+    for (const auto [type, act, difficulty] : std::array<std::tuple<MiningGateType, MiningAct, int>, 4> {{
+             {MiningGateType::FragileExcavation, MiningAct::ActOne, 8},
+             {MiningGateType::HeavyTow, MiningAct::ActOne, 9},
+             {MiningGateType::EnduranceVault, MiningAct::ActOne, 9},
+             {MiningGateType::ShieldCorridor, MiningAct::ActTwo, 4}
+         }}) {
+        const MiningArenaRules rules = resolveMiningArenaRules({act, difficulty, 77, true, type});
+        const MiningGateDefinition definition = resolveMiningGateDefinition(rules, type, false);
+        require(selectMiningGateType(rules) == type, "every documented soft gate should be directly replayable in Arena Lab");
+        require(!definition.requiredCapability.empty() && !definition.alternatives.empty(),
+            "every soft gate should publish a direct key and systemic alternatives");
+    }
+
+    SaveData save;
+    save.mining = hazardState.run.mining;
+    save.miningStorySites = meta.miningStorySites;
+    const std::optional<SaveData> gateRoundTrip = deserializeSaveData(serializeSaveData(save));
+    require(gateRoundTrip.has_value()
+            && gateRoundTrip->mining.gate.type == MiningGateType::HazardCocoon
+            && gateRoundTrip->miningStorySites.front().artifactId == meta.miningStorySites.front().artifactId,
+        "active gate state and persistent story identity should survive save/load");
+}
+
 } // namespace
 
 int main()
@@ -271,6 +433,7 @@ int main()
     campaignMappingMatchesChapterPace();
     deterministicSeedsAndRewardProgressAreStable();
     progressionSaveFieldsRoundTripAndLegacyDefault();
+    miningGateContractsAndRuntimeAreDeterministic();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;
 }

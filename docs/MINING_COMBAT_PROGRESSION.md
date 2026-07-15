@@ -1,5 +1,7 @@
 # Mining and Combat Progression Contract
 
+Artifact-site lock progression is defined in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). Gate selection is part of the same Act/level rules request and never changes difficulty from the player's actual loadout.
+
 Status: authoritative implementation contract for mining progression, procedural arenas, combat pacing, and rich-material availability.
 
 This document defines which rules an arena may use. `resolveMiningArenaRules({act, difficulty, seed})` in `src/core/MiningProgression.cpp` is the executable source of truth. Campaign and debug entry points must both create a `MiningArenaRequest` and must not add enemies, rewards, hazards, or room features after resolving it.

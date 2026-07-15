@@ -1695,11 +1695,16 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const std::string miningRunTitle = debugArena
             ? std::string(miningActName(mining.arenaMetadata.act)) + " • Level " + std::to_string(mining.arenaMetadata.difficulty)
             : std::string("Rig health ") + miningPanel.rigHealth;
+        const std::string miningGateDetail = mining.gate.active
+            ? " | Gate " + std::string(miningGateName(mining.gate.type))
+                + " | " + std::string(miningGateStateName(mining.gate.state))
+            : std::string();
         const std::string miningRunDetail = debugArena
             ? "Seed " + std::to_string(mining.arenaMetadata.seed)
                 + " • Ruleset v" + std::to_string(mining.arenaMetadata.rulesVersion)
                 + " • Rig health " + miningPanel.rigHealth
             : state.statusLine;
+        const std::string miningRunDetailWithGate = miningRunDetail + miningGateDetail;
         const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
         const int rigHealthBucket = std::clamp(((rigHealthWidth + 5) / 10) * 10, 0, 100);
         const double oxygenPressure = miningStats.oxygenSeconds > 0.0
@@ -1767,10 +1772,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << htmlEscape(miningRunKicker) << "</span><strong>" << htmlEscape(miningRunTitle)
             << "</strong>";
         if (debugArena) {
-            out << "<strong class=\"mining-arena-metadata\">" << htmlEscape(miningRunDetail)
+            out << "<strong class=\"mining-arena-metadata\">" << htmlEscape(miningRunDetailWithGate)
                 << "</strong>";
         } else {
-            out << "<small>" << htmlEscape(miningRunDetail) << "</small>";
+            out << "<small>" << htmlEscape(miningRunDetailWithGate) << "</small>";
         }
         out << "<section class=\"mining-health-strip\"><div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section></div>";
         out << "<div class=\"metric-grid mining-vitals\">";

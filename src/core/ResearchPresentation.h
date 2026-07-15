@@ -1099,10 +1099,22 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     };
     if (state.run.surfaceExpedition.active && !state.run.surfaceExpedition.destinationId.empty()) {
         const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
+        const MiningGateType gateType = selectMiningGateType(arenaRules);
+        const MiningGateDefinition gate = resolveMiningGateDefinition(
+            arenaRules,
+            gateType,
+            arenaRules.fixedStoryGate == gateType || arenaRules.request.gateOverrideEnabled);
+        const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
         presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
+        if (gateType != MiningGateType::None) {
+            presentation.arenaTitle += " | Site: " + std::string(gate.name);
+        }
         presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
         presentation.details.insert(presentation.details.begin(), {
             detailPresentationRow("Upcoming arena", presentation.arenaTitle),
+            detailPresentationRow("Artifact site", std::string(gate.name)),
+            detailPresentationRow("Required capability", std::string(gate.requiredCapability)),
+            detailPresentationRow("Current loadout", miningGateCapabilityStatus(capability, gate)),
             detailPresentationRow("New complication", std::string(arenaRules.complication)),
             detailPresentationRow("Mineral forecast", std::string(arenaRules.mineralAvailability)),
             detailPresentationRow("Known enemy roles", std::string(arenaRules.knownEnemyRoles)),
@@ -1493,13 +1505,20 @@ inline MiningArenaRules upcomingMiningArenaRules(
         state.meta.destinationLandings,
         catalog,
         expedition.destinationId);
-    const MiningArenaRequest request = campaignMiningArenaRequest(
+    MiningArenaRequest request = campaignMiningArenaRequest(
         state.meta.chapter,
         expedition.destinationId,
         std::max(0, expedition.depth + depthOffset),
         completedHostileSorties,
         state.seed,
         landingOrdinal);
+    if (const MiningStorySiteProgress* site = pendingMiningStorySite(state.meta, expedition.destinationId)) {
+        request.act = site->act;
+        request.difficulty = site->difficulty;
+        request.seed = site->seed;
+        request.gateOverrideEnabled = true;
+        request.gateOverride = site->gateType;
+    }
     return resolveMiningArenaRules(request);
 }
 
@@ -1568,15 +1587,27 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const double extractionRisk = surfaceExtractionRisk(state);
     const bool arkKnown = arkDiscovered(state);
     const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
+    const MiningGateType gateType = selectMiningGateType(arenaRules);
+    const MiningGateDefinition gate = resolveMiningGateDefinition(
+        arenaRules,
+        gateType,
+        arenaRules.fixedStoryGate == gateType || arenaRules.request.gateOverrideEnabled);
+    const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk, arkKnown);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
     presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
+    if (gateType != MiningGateType::None) {
+        presentation.arenaTitle += " | Site: " + std::string(gate.name);
+    }
     presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
     presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkKnown);
     presentation.details.insert(presentation.details.begin(), {
         detailPresentationRow("Upcoming arena", presentation.arenaTitle),
+        detailPresentationRow("Artifact site", std::string(gate.name)),
+        detailPresentationRow("Required capability", std::string(gate.requiredCapability)),
+        detailPresentationRow("Current loadout", miningGateCapabilityStatus(capability, gate)),
         detailPresentationRow("New complication", std::string(arenaRules.complication)),
         detailPresentationRow("Mineral forecast", std::string(arenaRules.mineralAvailability)),
         detailPresentationRow("Known enemy roles", std::string(arenaRules.knownEnemyRoles)),

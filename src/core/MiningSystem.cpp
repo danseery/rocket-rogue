@@ -114,7 +114,9 @@ MiningArenaRequest miningArenaRequest(const MiningArenaMetadata& metadata)
     return {
         metadata.act,
         std::clamp(metadata.difficulty, 1, 10),
-        metadata.seed
+        metadata.seed,
+        metadata.gateOverrideEnabled,
+        metadata.gateType
     };
 }
 
@@ -665,6 +667,22 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
         return false;
     }
 
+    if (target->gateAssociated && target->material == MiningCellMaterial::HazardPocket) {
+        target->revealed = true;
+        state.statusLine = "The cocoon is drill-proof. Treat every marked tile with the required Hazard Drone.";
+        return false;
+    }
+    if (target->material == MiningCellMaterial::ArtifactCache && mining.gate.active &&
+        (mining.gate.state == MiningGateState::Locked || mining.gate.state == MiningGateState::InProgress) &&
+        (mining.gate.type == MiningGateType::HazardCocoon ||
+         mining.gate.type == MiningGateType::EnemySealedChamber ||
+         mining.gate.type == MiningGateType::SurveyTriangulation ||
+         mining.gate.type == MiningGateType::CompoundStoryVault)) {
+        target->revealed = true;
+        state.statusLine = std::string(miningGateName(mining.gate.type)) + " remains locked. Complete the site requirement first.";
+        return false;
+    }
+
     const MiningCellMaterial material = target->material;
     if (material == MiningCellMaterial::ArtifactCache) {
         damageMiningArtifact(mining, tuning::mining::artifactDrillDamagePerSecond * dt);
@@ -1038,10 +1056,12 @@ int completeHazardTreatment(
         if (!miningMaterialAllowed(arenaRules, refinedMaterial)) {
             refinedMaterial = MiningCellMaterial::CommonOre;
         }
+        const bool gateAssociated = cell->gateAssociated;
         *cell = makeCell(refinedMaterial, mining.depthZone);
         cell->revealed = true;
         cell->feature = feature;
         cell->enemy = enemy;
+        cell->gateAssociated = gateAssociated;
         markDirty(mining.terrain, candidate.x, candidate.y);
         refinedCount += refined ? 1 : 0;
     }
@@ -1867,6 +1887,9 @@ void damageMiningArtifact(MiningRunState& mining, double damage)
         return;
     }
     artifact.health = std::max(0.0, artifact.health - damage);
+    if (mining.gate.active && mining.gate.storyCritical && mining.gate.fragileArtifact) {
+        artifact.health = std::max(artifact.health, artifact.maxHealth * 0.10);
+    }
     artifact.revealed = true;
     if (artifact.health <= 0.0) {
         artifact.state = MiningArtifactState::Destroyed;
@@ -2170,6 +2193,301 @@ void spawnMiningEnemies(MiningRunState& mining, const Destination& destination, 
     (void)destination;
 }
 
+void relocateMiningArtifact(MiningRunState& mining, int x, int y, bool revealed, MiningCellFeature feature)
+{
+    if (mining.artifact.present) {
+        const int oldX = std::clamp(static_cast<int>(std::floor(mining.artifact.x)), 0, mining.terrain.width - 1);
+        const int oldY = std::clamp(static_cast<int>(std::floor(mining.artifact.y)), 0, mining.terrain.height - 1);
+        if (MiningCell* oldCell = miningCellAt(mining.terrain, oldX, oldY);
+            oldCell != nullptr && oldCell->material == MiningCellMaterial::ArtifactCache) {
+            *oldCell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
+            oldCell->revealed = true;
+            markDirty(mining.terrain, oldX, oldY);
+        }
+    }
+    MiningCell* anchor = miningCellAt(mining.terrain, x, y);
+    if (anchor == nullptr) {
+        return;
+    }
+    *anchor = makeCell(MiningCellMaterial::ArtifactCache, mining.depthZone);
+    anchor->feature = feature;
+    anchor->revealed = revealed;
+    anchor->gateAssociated = true;
+    markDirty(mining.terrain, x, y);
+    mining.artifact.present = true;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    mining.artifact.x = static_cast<double>(x) + 0.5;
+    mining.artifact.y = static_cast<double>(y) + 0.5;
+    mining.artifact.velocityX = 0.0;
+    mining.artifact.velocityY = 0.0;
+    mining.artifact.maxHealth = tuning::mining::artifactMaxHealth;
+    mining.artifact.health = mining.artifact.maxHealth;
+    mining.artifact.embedStrength = 1.0;
+    mining.artifact.tethered = false;
+    mining.artifact.revealed = revealed;
+}
+
+void stampGateHazardShell(MiningRunState& mining, const MiningGateDefinition& definition, int anchorX, int anchorY)
+{
+    constexpr std::array<std::pair<int, int>, 8> offsets {{
+        {-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}
+    }};
+    for (const auto [dx, dy] : offsets) {
+        MiningCell* cell = miningCellAt(mining.terrain, anchorX + dx, anchorY + dy);
+        if (cell == nullptr) {
+            continue;
+        }
+        *cell = makeCell(MiningCellMaterial::HazardPocket, mining.depthZone);
+        cell->hazard = true;
+        cell->hazardAffinity = definition.hazardAffinity;
+        cell->feature = MiningCellFeature::BranchTunnel;
+        cell->revealed = true;
+        cell->gateAssociated = true;
+        markDirty(mining.terrain, anchorX + dx, anchorY + dy);
+        ++mining.gate.shellTilesTotal;
+    }
+    mining.gate.shellTilesRemaining = mining.gate.shellTilesTotal;
+}
+
+void stampGateEncounter(MiningRunState& mining, const MiningArenaRules& rules, int anchorX, int anchorY, bool rangedOnly)
+{
+    mining.enemies.clear();
+    const int enemyCount = std::max(1, std::min(rules.maxActiveEnemies, rangedOnly ? 3 : 2 + rules.request.difficulty / 4));
+    for (int index = 0; index < enemyCount; ++index) {
+        MiningEnemyType type = MiningEnemyType::Ant;
+        if (rangedOnly && miningEnemyAllowed(rules, MiningEnemyType::Flying)) {
+            type = MiningEnemyType::Flying;
+        } else if (rules.request.difficulty >= 7 && miningEnemyAllowed(rules, MiningEnemyType::Elemental)) {
+            type = MiningEnemyType::Elemental;
+        } else if (rules.request.difficulty >= 5 && miningEnemyAllowed(rules, MiningEnemyType::Beetle)) {
+            type = MiningEnemyType::Beetle;
+        }
+        const MiningElementalAffinity affinity = type == MiningEnemyType::Elemental
+            ? (rules.request.act == MiningAct::ActThree ? MiningElementalAffinity::Radiation : MiningElementalAffinity::Thermal)
+            : MiningElementalAffinity::None;
+        MiningEnemy enemy = makeMiningEnemyForRules(
+            type,
+            rangedOnly ? MiningCellFeature::TreasureVault : MiningCellFeature::EncounterZone,
+            affinity,
+            static_cast<double>(anchorX - 4 + index * 2) + 0.5,
+            static_cast<double>(anchorY - 2 + index % 2) + 0.5,
+            rules);
+        enemy.gateAssociated = true;
+        mining.enemies.push_back(std::move(enemy));
+    }
+    if (rules.maxSpawners > 0 && miningEnemyAllowed(rules, MiningEnemyType::Spawner) &&
+        static_cast<int>(mining.enemies.size()) < rules.maxActiveEnemies) {
+        MiningEnemy spawner = makeMiningEnemyForRules(
+            MiningEnemyType::Spawner,
+            MiningCellFeature::HiveNest,
+            MiningElementalAffinity::None,
+            static_cast<double>(anchorX) + 3.5,
+            static_cast<double>(anchorY) - 1.5,
+            rules);
+        spawner.gateAssociated = true;
+        spawner.spawn.enemyType = miningEnemyAllowed(rules, MiningEnemyType::Elemental) ? MiningEnemyType::Elemental : MiningEnemyType::Ant;
+        spawner.spawn.affinity = spawner.spawn.enemyType == MiningEnemyType::Elemental
+            ? MiningElementalAffinity::Thermal
+            : MiningElementalAffinity::None;
+        spawner.spawn.maxSpawns = 3;
+        spawner.spawn.intervalSeconds = 5.5;
+        spawner.spawn.cooldownSeconds = 5.5;
+        mining.enemies.push_back(std::move(spawner));
+    }
+    mining.gate.assignedEnemiesRemaining = static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.gateAssociated && enemy.active;
+    }));
+}
+
+void setupMiningGate(
+    MiningRunState& mining,
+    const MiningArenaRules& rules,
+    MiningStorySiteProgress* storySite)
+{
+    const MiningGateType type = storySite != nullptr ? storySite->gateType : selectMiningGateType(rules);
+    if (type == MiningGateType::None || !miningGateAllowed(rules, type)) {
+        return;
+    }
+    const bool storyCritical = storySite != nullptr || rules.fixedStoryGate == type;
+    const MiningGateDefinition definition = resolveMiningGateDefinition(rules, type, storyCritical);
+    if (!mining.artifact.present) {
+        mining.artifact = {};
+        mining.artifact.present = true;
+        mining.artifact.id = artifactId(mining);
+        mining.artifact.kind = ArtifactKind::Boost;
+        mining.artifact.rewardType = ArtifactRewardType::BlueprintInsight;
+    }
+
+    mining.gate = {};
+    mining.gate.active = true;
+    mining.gate.type = type;
+    mining.gate.state = MiningGateState::InProgress;
+    mining.gate.storyCritical = storyCritical;
+    mining.gate.discovered = true;
+    mining.gate.siteId = storySite != nullptr
+        ? storySite->siteId
+        : mining.destinationId + "_optional_gate_" + std::to_string(static_cast<int>(type));
+    mining.gate.artifactId = storySite != nullptr ? storySite->artifactId : mining.artifact.id;
+    mining.gate.hazardAffinity = definition.hazardAffinity;
+    mining.gate.requiredHazardMark = definition.requiredHazardMark;
+    mining.gate.requiredSurveyOrigins = definition.requiredSurveyOrigins;
+    mining.gate.fragileArtifact = definition.fragileArtifact;
+    mining.gate.heavyTow = definition.heavyTow;
+    mining.gate.endurancePlacement = definition.endurancePlacement;
+    mining.gate.shieldCorridor = definition.shieldCorridor;
+    mining.gate.burrowBreach = definition.burrowBreach;
+    mining.gate.hazardTreatmentComplete = !definition.requiresHazardTreatment;
+    mining.gate.enemyClearanceComplete = !definition.requiresEnemyClearance;
+    mining.gate.surveyComplete = !definition.requiresSurveyTriangulation && !definition.burrowBreach;
+
+    const int anchorX = std::clamp(
+        definition.endurancePlacement ? mining.terrain.width * 4 / 5 : mining.terrain.width * 2 / 3,
+        8,
+        mining.terrain.width - 6);
+    const int anchorY = std::clamp(
+        definition.endurancePlacement ? mining.terrain.height - 6 : mining.terrain.height * 2 / 3,
+        9,
+        mining.terrain.height - 5);
+    mining.gate.anchorX = static_cast<double>(anchorX) + 0.5;
+    mining.gate.anchorY = static_cast<double>(anchorY) + 0.5;
+    const MiningCellFeature gateFeature = miningRoomFeatureAllowed(rules, MiningCellFeature::TreasureVault)
+        ? MiningCellFeature::TreasureVault
+        : MiningCellFeature::BranchTunnel;
+    relocateMiningArtifact(mining, anchorX, anchorY, true, gateFeature);
+    mining.artifact.id = mining.gate.artifactId;
+    if (storyCritical) {
+        mining.artifact.kind = ArtifactKind::Story;
+        mining.artifact.rewardType = ArtifactRewardType::None;
+    }
+
+    if (definition.requiresHazardTreatment) {
+        stampGateHazardShell(mining, definition, anchorX, anchorY);
+        mining.gate.state = MiningGateState::Locked;
+    }
+    if (definition.requiresEnemyClearance || definition.shieldCorridor) {
+        stampGateEncounter(mining, rules, anchorX, anchorY, definition.shieldCorridor);
+        mining.gate.state = definition.requiresEnemyClearance ? MiningGateState::Locked : MiningGateState::InProgress;
+    }
+    if (definition.requiresSurveyTriangulation) {
+        const double markerRadius = std::max(4.0, static_cast<double>(mining.terrain.width) * 0.10);
+        mining.gate.markers = {
+            {mining.gate.anchorX - markerRadius, mining.gate.anchorY - 2.0, false},
+            {mining.gate.anchorX + markerRadius, mining.gate.anchorY - 1.0, false},
+            {mining.gate.anchorX, mining.gate.anchorY + markerRadius * 0.55, false}
+        };
+        mining.gate.state = MiningGateState::Locked;
+    }
+    if (definition.burrowBreach) {
+        mining.enemies.clear();
+        const int wallX = anchorX - 4;
+        for (int dy = -2; dy <= 2; ++dy) {
+            MiningCell* wall = miningCellAt(mining.terrain, wallX, anchorY + dy);
+            if (wall == nullptr) {
+                continue;
+            }
+            *wall = makeCell(MiningCellMaterial::Bedrock, mining.depthZone);
+            wall->remainingToughness = wall->maxToughness = 1.8;
+            wall->feature = MiningCellFeature::OrganicBurrow;
+            wall->enemy = MiningEnemyType::Mammal;
+            wall->revealed = true;
+            wall->gateAssociated = true;
+            markDirty(mining.terrain, wallX, anchorY + dy);
+        }
+        MiningEnemy mammal = makeMiningEnemyForRules(
+            MiningEnemyType::Mammal,
+            MiningCellFeature::OrganicBurrow,
+            MiningElementalAffinity::None,
+            static_cast<double>(wallX - 2) + 0.5,
+            static_cast<double>(anchorY) + 0.5,
+            rules);
+        mammal.gateAssociated = true;
+        mining.enemies.push_back(std::move(mammal));
+        mining.gate.state = MiningGateState::InProgress;
+    }
+
+    if (storySite != nullptr) {
+        storySite->discovered = true;
+    }
+}
+
+bool gateHasHardLock(const MiningGateRuntime& gate)
+{
+    return gate.active && (
+        !gate.hazardTreatmentComplete ||
+        !gate.enemyClearanceComplete ||
+        !gate.surveyComplete);
+}
+
+void updateMiningGate(GameState& state, const MiningArenaRules& rules)
+{
+    MiningRunState& mining = state.run.mining;
+    MiningGateRuntime& gate = mining.gate;
+    if (!gate.active || gate.state == MiningGateState::Completed) {
+        return;
+    }
+
+    gate.shellTilesRemaining = static_cast<int>(std::count_if(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
+        return cell.gateAssociated && cell.material == MiningCellMaterial::HazardPocket;
+    }));
+    gate.hazardTreatmentComplete = gate.shellTilesRemaining == 0;
+    gate.assignedEnemiesRemaining = static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.gateAssociated && enemy.active;
+    }));
+    gate.enemyClearanceComplete = gate.assignedEnemiesRemaining == 0;
+    gate.surveyOriginsCompleted = static_cast<int>(std::count_if(gate.markers.begin(), gate.markers.end(), [](const MiningGateMarker& marker) {
+        return marker.activated;
+    }));
+    if (gate.requiredSurveyOrigins > 0) {
+        gate.surveyComplete = gate.surveyOriginsCompleted >= gate.requiredSurveyOrigins;
+    }
+
+    if (gate.burrowBreach) {
+        const bool anyWall = std::any_of(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
+            return cell.gateAssociated && cell.material == MiningCellMaterial::Bedrock;
+        });
+        gate.burrowBreached = !anyWall || gate.surveyComplete;
+        const bool hasBurrower = std::any_of(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+            return enemy.gateAssociated && enemy.type == MiningEnemyType::Mammal && enemy.active;
+        });
+        if (!gate.burrowBreached && !hasBurrower && miningEnemyAllowed(rules, MiningEnemyType::Mammal)) {
+            MiningEnemy replacement = makeMiningEnemyForRules(
+                MiningEnemyType::Mammal,
+                MiningCellFeature::OrganicBurrow,
+                MiningElementalAffinity::None,
+                gate.anchorX - 6.0,
+                gate.anchorY,
+                rules);
+            replacement.gateAssociated = true;
+            const auto reusable = std::find_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+                return enemy.gateAssociated && enemy.type == MiningEnemyType::Mammal && !enemy.active;
+            });
+            if (reusable != mining.enemies.end()) {
+                *reusable = std::move(replacement);
+            } else {
+                mining.enemies.push_back(std::move(replacement));
+            }
+        }
+        if (gate.burrowBreached) {
+            gate.surveyComplete = true;
+        }
+    }
+
+    const bool unlocked = !gateHasHardLock(gate);
+    if (unlocked && (gate.state == MiningGateState::Locked || gate.state == MiningGateState::InProgress) &&
+        (gate.type == MiningGateType::HazardCocoon || gate.type == MiningGateType::EnemySealedChamber ||
+         gate.type == MiningGateType::SurveyTriangulation || gate.type == MiningGateType::BurrowBreach ||
+         gate.type == MiningGateType::CompoundStoryVault)) {
+        gate.state = MiningGateState::Open;
+        if (!gate.completionNotified) {
+            state.statusLine = std::string(miningGateName(gate.type)) + " opened. The artifact can now be extracted.";
+            gate.completionNotified = true;
+        }
+    }
+    if (mining.artifact.state == MiningArtifactState::Delivered) {
+        gate.state = MiningGateState::Completed;
+    }
+}
+
 bool enemyIgnoresTerrain(MiningEnemyType type)
 {
     return type == MiningEnemyType::Flying;
@@ -2215,13 +2533,15 @@ void updateMiningEnemySpawners(MiningRunState& mining, const MiningArenaRules& r
                 spawnY = spawner.y;
             }
 
-            spawnedEnemies.push_back(makeMiningEnemyForRules(
+            MiningEnemy spawned = makeMiningEnemyForRules(
                 spec.enemyType,
                 spawner.sourceFeature,
                 spec.affinity,
                 spawnX,
                 spawnY,
-                rules));
+                rules);
+            spawned.gateAssociated = spawner.gateAssociated;
+            spawnedEnemies.push_back(std::move(spawned));
             spec.spawned += 1;
             activeEnemyCount += 1;
             spec.cooldownSeconds += interval;
@@ -2386,7 +2706,7 @@ std::pair<double, double> enemyMoveDirection(const MiningRunState& mining, const
 bool applyMammalBurrow(MiningRunState& mining, int x, int y, double dt)
 {
     MiningCell* target = miningCellAt(mining.terrain, x, y);
-    if (!drillableCell(target)) {
+    if (!drillableCell(target) && !(target != nullptr && target->gateAssociated && target->material == MiningCellMaterial::Bedrock)) {
         return false;
     }
 
@@ -2399,10 +2719,12 @@ bool applyMammalBurrow(MiningRunState& mining, int x, int y, double dt)
         return false;
     }
 
+    const bool gateAssociated = target->gateAssociated;
     *target = makeCell(MiningCellMaterial::Empty, mining.depthZone);
     target->feature = MiningCellFeature::OrganicBurrow;
     target->enemy = MiningEnemyType::Mammal;
     target->revealed = true;
+    target->gateAssociated = gateAssociated;
     markDirty(mining.terrain, x, y);
     return true;
 }
@@ -3179,6 +3501,69 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     return stats;
 }
 
+MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog)
+{
+    MiningCapabilityProfile profile;
+    const MiningDrillStats drill = miningDrillStats(state, catalog);
+    const MiniDroneLoadoutEffects loadout = miniDroneLoadoutEffects(state, catalog);
+    profile.oxygenSeconds = drill.oxygenSeconds;
+    profile.scannerRadius = drill.scannerRadius;
+    profile.artifactTowEfficiency = drill.artifactTowEfficiency;
+    profile.drillControl = std::clamp(
+        drill.hardRockBounceRelief + drill.integrityRelief + (1.0 - drill.heatRiseScale),
+        0.0,
+        2.0);
+    profile.combatDamagePerSecond = loadout.sentryDamagePerSecond + loadout.areaControlDamagePerSecond + loadout.reactiveArmorDamagePerSecond;
+    profile.damageRelief = std::clamp(loadout.enemyDamageRelief + loadout.environmentalShieldRelief, 0.0, 0.95);
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone)) {
+            continue;
+        }
+        const std::size_t role = static_cast<std::size_t>(drone->role);
+        if (role < profile.roleMarks.size()) {
+            profile.roleMarks[role] = std::max(profile.roleMarks[role], miniDroneUpgradeLevel(state, droneId));
+        }
+    }
+    return profile;
+}
+
+bool miningCapabilityReadyForGate(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate)
+{
+    const auto mark = [&](MiniDroneRole role) {
+        return profile.roleMarks[static_cast<std::size_t>(role)];
+    };
+    if (gate.requiresHazardTreatment && mark(MiniDroneRole::Hazard) < gate.requiredHazardMark) {
+        return false;
+    }
+    if (gate.requiresEnemyClearance && profile.combatDamagePerSecond <= 0.0 && profile.damageRelief <= 0.0) {
+        return false;
+    }
+    if (gate.requiresSurveyTriangulation && mark(MiniDroneRole::Survey) <= 0 && profile.scannerRadius < 3.0) {
+        return false;
+    }
+    if (gate.heavyTow && mark(MiniDroneRole::Resource) <= 0 && profile.artifactTowEfficiency <= 0.0) {
+        return false;
+    }
+    if (gate.endurancePlacement && mark(MiniDroneRole::Resource) <= 0 && profile.oxygenSeconds <= tuning::mining::oxygenSeconds) {
+        return false;
+    }
+    if (gate.shieldCorridor && mark(MiniDroneRole::Defense) <= 0 && mark(MiniDroneRole::Attack) <= 0) {
+        return false;
+    }
+    return true;
+}
+
+std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate)
+{
+    if (gate.type == MiningGateType::None) {
+        return "No artifact-site lock forecast.";
+    }
+    return std::string(miningCapabilityReadyForGate(profile, gate) ? "READY - " : "MISSING DIRECT KEY - ")
+        + std::string(gate.requiredCapability)
+        + ". Alternatives: " + std::string(gate.alternatives);
+}
+
 int miningCarriedCargo(const MiningRunState& mining)
 {
     return std::max(0, mining.cargo);
@@ -3262,11 +3647,12 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
     MiningLoadStats load;
     const MiningRunState& mining = state.run.mining;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
+    const double heavyTowScale = mining.gate.active && mining.gate.heavyTow ? 1.80 : 1.0;
     const double towWeight = (mining.artifact.present &&
                                  mining.artifact.tethered &&
                                  mining.artifact.state != MiningArtifactState::Delivered &&
                                  mining.artifact.state != MiningArtifactState::Destroyed)
-        ? tuning::mining::tetheredArtifactCargoWeight * std::clamp(1.0 - stats.artifactTowEfficiency, 0.20, 1.0)
+        ? tuning::mining::tetheredArtifactCargoWeight * heavyTowScale * std::clamp(1.0 - stats.artifactTowEfficiency, 0.20, 1.0)
         : 0.0;
     load.currentLoad = static_cast<double>(miningCarriedCargo(mining)) + towWeight;
     load.freeBuffer = tuning::mining::baseCarryBufferCargo + stats.storage;
@@ -3557,7 +3943,7 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
 SurfaceActionOutcome startMiningRun(
     GameState& state,
     const ContentCatalog& catalog,
-    const MiningArenaRequest& request,
+    const MiningArenaRequest& requestedArena,
     bool progressionCreditEligible)
 {
     SurfaceActionOutcome outcome;
@@ -3585,6 +3971,39 @@ SurfaceActionOutcome startMiningRun(
     outcome.fuelDelta = -1;
     outcome.message = text::fuel::miningStartedStatus(arkKnown);
 
+    MiningArenaRequest request = requestedArena;
+    MiningStorySiteProgress* storySite = nullptr;
+    if (progressionCreditEligible && !request.gateOverrideEnabled) {
+        const auto pending = std::find_if(state.meta.miningStorySites.begin(), state.meta.miningStorySites.end(), [&](const MiningStorySiteProgress& site) {
+            return !site.completed && site.destinationId == expedition.destinationId;
+        });
+        if (pending != state.meta.miningStorySites.end()) {
+            storySite = &*pending;
+            request.act = storySite->act;
+            request.difficulty = storySite->difficulty;
+            request.seed = storySite->seed;
+            request.gateOverrideEnabled = true;
+            request.gateOverride = storySite->gateType;
+        } else {
+            const MiningArenaRules candidateRules = resolveMiningArenaRules(request);
+            storySite = ensureMiningStorySite(state.meta, expedition.destinationId, candidateRules);
+            if (storySite != nullptr) {
+                request.act = storySite->act;
+                request.difficulty = storySite->difficulty;
+                request.seed = storySite->seed;
+                request.gateOverrideEnabled = true;
+                request.gateOverride = storySite->gateType;
+            } else if (candidateRules.fixedStoryGate != MiningGateType::None) {
+                const bool completedHere = std::any_of(state.meta.miningStorySites.begin(), state.meta.miningStorySites.end(), [&](const MiningStorySiteProgress& site) {
+                    return site.completed && site.destinationId == expedition.destinationId && site.gateType == candidateRules.fixedStoryGate;
+                });
+                if (completedHere) {
+                    request.gateOverrideEnabled = true;
+                    request.gateOverride = MiningGateType::None;
+                }
+            }
+        }
+    }
     const MiningArenaRules arenaRules = resolveMiningArenaRules(request);
     const bool firstClearFulfilled = progressionCreditEligible && miningFirstClearFulfilled(state.meta, arenaRules);
     const MiningRewardBudget rewardBudget = effectiveMiningRewardBudget(arenaRules, firstClearFulfilled);
@@ -3602,7 +4021,9 @@ SurfaceActionOutcome startMiningRun(
         arenaRules.request.act,
         arenaRules.request.difficulty,
         arenaRules.request.seed,
-        miningArenaRulesVersion
+        miningArenaRulesVersion,
+        storySite != nullptr ? storySite->gateType : selectMiningGateType(arenaRules),
+        true
     };
     mining.rewardBudget = rewardBudget;
     mining.progressionCreditEligible = progressionCreditEligible;
@@ -3623,7 +4044,7 @@ SurfaceActionOutcome startMiningRun(
         arenaRules);
     applySurfaceProspects(mining.terrain, expedition, arenaRules, rewardBudget);
     const bool forcedArtifact = arenaRules.mechanics.artifactRecovery && expedition.prospectArtifacts > 0;
-    if (arenaRules.mechanics.artifactRecovery) {
+    if (arenaRules.mechanics.artifactRecovery && mining.arenaMetadata.gateType == MiningGateType::None) {
         placeMiningArtifact(state, mining, *destination, forcedArtifact, forcedArtifact);
     }
     normalizeRichTerrainDeposits(
@@ -3638,6 +4059,7 @@ SurfaceActionOutcome startMiningRun(
     expedition.prospectArtifacts = 0;
     expedition.depthProspects.clear();
     spawnMiningEnemies(mining, *destination, arenaRules);
+    setupMiningGate(mining, arenaRules, storySite);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.returnZoneX = miningShipStartX(mining);
@@ -3712,6 +4134,11 @@ void toggleMiningTether(GameState& state)
     if (!mining.active || !arenaRules.mechanics.artifactTethering || !artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
         return;
     }
+    if (gateHasHardLock(mining.gate)) {
+        state.statusLine = std::string(miningGateName(mining.gate.type)) + " is still locked. Complete its marked requirements before tethering.";
+        artifact.tethered = false;
+        return;
+    }
     if (artifact.tethered) {
         const double speed = std::sqrt(artifact.velocityX * artifact.velocityX + artifact.velocityY * artifact.velocityY);
         if (speed > tuning::mining::artifactDropDamageThreshold) {
@@ -3744,10 +4171,35 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     ensureMiningMiniDroneAgents(state, catalog);
     const double scannerRadius = miningDrillStats(state, catalog).scannerRadius;
     revealAround(mining, mining.droneX, mining.droneY, scannerRadius);
+    auto activateGateMarkers = [&](double originX, double originY, double radius) {
+        for (MiningGateMarker& marker : mining.gate.markers) {
+            if (marker.activated) {
+                continue;
+            }
+            const double dx = marker.x - originX;
+            const double dy = marker.y - originY;
+            if (dx * dx + dy * dy <= radius * radius) {
+                marker.activated = true;
+            }
+        }
+    };
+    activateGateMarkers(mining.droneX, mining.droneY, scannerRadius);
+    bool surveyDronePresent = false;
     for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
         if (agent.role == MiniDroneRole::Survey) {
+            surveyDronePresent = true;
             revealAround(mining, agent.x, agent.y, scannerRadius);
+            activateGateMarkers(agent.x, agent.y, scannerRadius * 1.45);
         }
+    }
+    if (mining.gate.active && mining.gate.burrowBreach && surveyDronePresent) {
+        mining.gate.surveyComplete = true;
+        state.statusLine = "Survey Drone mapped the long natural route around the marked burrow wall.";
+    } else if (!mining.gate.markers.empty()) {
+        const int completed = static_cast<int>(std::count_if(mining.gate.markers.begin(), mining.gate.markers.end(), [](const MiningGateMarker& marker) {
+            return marker.activated;
+        }));
+        state.statusLine = "Triangulation markers: " + std::to_string(completed) + "/" + std::to_string(mining.gate.requiredSurveyOrigins) + ". Reposition for a distinct origin.";
     }
     mining.scannerPulseSeconds = 0.9;
 }
@@ -3786,8 +4238,9 @@ void updateMiningArtifact(GameState& state, double dt)
 
     if (artifact.tethered && distance > 0.001) {
         const double extension = std::max(0.0, distance - tuning::mining::artifactTetherRestLengthCells);
-        const double pullX = dx / distance * extension * tuning::mining::artifactTetherSpring;
-        const double pullY = dy / distance * extension * tuning::mining::artifactTetherSpring;
+        const double towScale = mining.gate.active && mining.gate.heavyTow ? 0.48 : 1.0;
+        const double pullX = dx / distance * extension * tuning::mining::artifactTetherSpring * towScale;
+        const double pullY = dy / distance * extension * tuning::mining::artifactTetherSpring * towScale;
         artifact.velocityX += (pullX - artifact.velocityX * tuning::mining::artifactTetherDamping) * dt;
         artifact.velocityY += (pullY - artifact.velocityY * tuning::mining::artifactTetherDamping) * dt;
     } else {
@@ -4005,6 +4458,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         dt);
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
+    updateMiningGate(state, arenaRules);
     updateMiningArtifact(state, dt);
     if (bankMiningPayloadAtShip(state, catalog)) {
         state.statusLine = std::string(text::status::miningStowed);

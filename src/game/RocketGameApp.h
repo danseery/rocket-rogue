@@ -77,8 +77,8 @@ public:
     void miningFailureAck();
     void debugStartMining();
     void debugStartCombatMining();
-    void debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode);
-    std::string debugMiningArenaPreview(int act, int difficulty) const;
+    void debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode, int gateOverride = -1);
+    std::string debugMiningArenaPreview(int act, int difficulty, int gateOverride = -1) const;
     void debugStartSurfaceScan();
     void debugStartSurfacePush();
     void debugStartFlyby();

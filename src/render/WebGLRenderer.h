@@ -22,6 +22,7 @@ struct MiningCellSnapshot {
     bool revealed = false;
     bool hazard = false;
     int hazardAffinity = 0;
+    bool gateAssociated = false;
 };
 
 struct MiningEnemySnapshot {
@@ -93,6 +94,14 @@ struct MiningArtifactSnapshot {
     int state = 0;
     bool tethered = false;
     bool revealed = false;
+    int gateType = 0;
+    int gateState = 0;
+};
+
+struct MiningGateMarkerSnapshot {
+    double x = 0.0;
+    double y = 0.0;
+    bool activated = false;
 };
 
 struct FlybyTrailPointSnapshot {
@@ -177,6 +186,7 @@ struct RenderSnapshot {
     MaterialInventory miningMaterials;
     MaterialInventory miningStowedMaterials;
     MiningArtifactSnapshot miningArtifact;
+    std::vector<MiningGateMarkerSnapshot> miningGateMarkers;
     std::vector<MiningCellSnapshot> miningCells;
     std::vector<MiningEnemySnapshot> miningEnemies;
     std::vector<MiningMiniDroneSnapshot> miningMiniDrones;
