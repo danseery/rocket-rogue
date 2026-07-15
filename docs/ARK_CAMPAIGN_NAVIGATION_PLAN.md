@@ -23,8 +23,8 @@ Chapter numbers are stable references for saves, tests, UI, and docs. Subtitles 
 - Chapter 3: Red Frontier - Mars research, surface, and mining loop.
 - Chapter 4: Breakthrough - Outer Planets and the operational Ark discovery beyond Neptune.
 - Chapter 5: Straylight / Aaru Vale - operational Straylight as the Ark home, exploring friendly Aaru Vale for fuel, search, discovery, and mining without combat.
-- Chapter 6: Arkfall - gravity-well disaster after leaving Aaru Vale; Straylight is damaged and stranded near Khepri Prime.
-- Chapter 7: Last Campfire - stranded hostile-system survival from damaged Straylight near Khepri Prime.
+- Chapter 6: Arkfall - gravity-well disaster after leaving Aaru Vale; Straylight is damaged and stranded near Khepri Prime. The emergency perimeter system grants Mk I Attack/Defense drones and brings undersized bays to three slots before Act 2 combat mining begins.
+- Chapter 7: Last Campfire - stranded hostile-system survival from damaged Straylight near Khepri Prime, with Perimeter Coordination research opening advanced combat-drone tuning and synergies.
 - Chapter 8: Void Compass - Rift Belt and deeper-route placeholder content.
 - Chapter 9: Ouroboros - future Ark repair loop.
 - Chapter 10: Ascent - future repaired-Ark and New Earth route.
@@ -45,3 +45,5 @@ Post-disaster loop:
 8. Spend resources on Ark repair, fuel systems, drone tech, shuttle upgrades, and artifact research.
 
 Enemies and combat drones belong after the gravity-well disaster. Solar-system tutorial destinations should stay enemy-free.
+
+Mining/combat progression follows `docs/MINING_COMBAT_PROGRESSION.md`: Chapters 1-5 are enemy-free Act 1, Chapters 6-7 are Act 2, and Chapters 8-10 are Act 3. Campaign and debug arenas resolve the same Act/level contract.

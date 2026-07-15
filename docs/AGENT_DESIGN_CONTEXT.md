@@ -61,7 +61,7 @@ Generic crew placeholders have been replaced with animal specialists. Training s
 
 See [MINI_DRONE_SYSTEM.md](MINI_DRONE_SYSTEM.md) for the active Drone Bay design and current implementation slice.
 
-Drone systems start as environmental mining support in the solar system. Combat drones stay locked until Perimeter Drone Network and post-solar hostile systems.
+Drone systems start as environmental mining support in the solar system. Arkfall grants the emergency Mk I Attack/Defense kit and raises undersized bays to three slots. Perimeter Drone Network research then unlocks Perimeter Coordination for Mk II/Mk III combat tuning and advanced synergies.
 
 Early drone roles:
 

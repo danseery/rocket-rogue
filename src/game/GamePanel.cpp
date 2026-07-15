@@ -1688,6 +1688,18 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const MiningDrillStats miningStats = miningDrillStats(state, catalog);
         const MiningLoadStats loadStats = miningLoadStats(state, catalog);
         const bool arkKnown = arkDiscovered(state);
+        const bool debugArena = !mining.progressionCreditEligible;
+        const std::string miningRunKicker = debugArena
+            ? "Mining Arena Lab"
+            : std::string(text::panel::sections::miningRun);
+        const std::string miningRunTitle = debugArena
+            ? std::string(miningActName(mining.arenaMetadata.act)) + " • Level " + std::to_string(mining.arenaMetadata.difficulty)
+            : std::string("Rig health ") + miningPanel.rigHealth;
+        const std::string miningRunDetail = debugArena
+            ? "Seed " + std::to_string(mining.arenaMetadata.seed)
+                + " • Ruleset v" + std::to_string(mining.arenaMetadata.rulesVersion)
+                + " • Rig health " + miningPanel.rigHealth
+            : state.statusLine;
         const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
         const int rigHealthBucket = std::clamp(((rigHealthWidth + 5) / 10) * 10, 0, 100);
         const double oxygenPressure = miningStats.oxygenSeconds > 0.0
@@ -1751,10 +1763,16 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         };
 
         out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\">";
-        out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title\"><span>"
-            << htmlEscape(text::panel::sections::miningRun) << "</span><strong>" << htmlEscape(std::string("Rig health ") + miningPanel.rigHealth)
-            << "</strong><small>" << htmlEscape(state.statusLine) << "</small>"
-            << "<section class=\"mining-health-strip\"><div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section></div>";
+        out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title" << (debugArena ? " debug-arena" : "") << "\"><span>"
+            << htmlEscape(miningRunKicker) << "</span><strong>" << htmlEscape(miningRunTitle)
+            << "</strong>";
+        if (debugArena) {
+            out << "<strong class=\"mining-arena-metadata\">" << htmlEscape(miningRunDetail)
+                << "</strong>";
+        } else {
+            out << "<small>" << htmlEscape(miningRunDetail) << "</small>";
+        }
+        out << "<section class=\"mining-health-strip\"><div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section></div>";
         out << "<div class=\"metric-grid mining-vitals\">";
         emitVitalIfPresent(text::labels::oxygen, "mining-vital-oxygen", oxygenPressure);
         emitVitalIfPresent(text::fuel::reserveLabel(arkKnown), "mining-vital-fuel", fuelPressure);
@@ -1898,7 +1916,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             }
         }
         out << "<section class=\"resource-bank drone-combat-forecast\"><div class=\"drone-forecast-copy\"><h2>" << htmlEscape("Combat forecast")
-            << "</h2><p>" << htmlEscape("Passive swarm cover during hostile mining.") << "</p></div>"
+            << "</h2><p>" << htmlEscape(dronePanel.arenaTitle.empty() ? "Passive swarm cover during hostile mining." : dronePanel.arenaTitle + " — " + dronePanel.arenaDetail) << "</p></div>"
             << "<div class=\"stat-grid chip-strip drone-forecast-stats\">" << resourceChipGrid(compactForecastChips) << "</div></section>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, "Drone Ops Details", detailStack(dronePanel.details));
@@ -2009,6 +2027,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 << "</h2><p>" << htmlEscape("Equip persistent helper drones before you launch the mining run.") << "</p></div>"
                 << panelButton(surfacePanel.droneOpsAction) << "</section>";
         }
+        out << "<section class=\"resource-bank surface-arena-forecast phase-lane phase-row\"><div><h2>" << htmlEscape(surfacePanel.arenaTitle)
+            << "</h2><p>" << htmlEscape(surfacePanel.arenaDetail) << "</p></div></section>";
         const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
             return isSurfaceMiningAction(action);
         });

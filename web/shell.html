@@ -295,6 +295,8 @@
       bottom: 12px;
       z-index: 8;
       box-sizing: border-box;
+      height: auto;
+      min-height: 0;
       width: 100%;
       max-width: 100%;
       margin-top: 16px;
@@ -2727,6 +2729,15 @@
       line-height: 1.15;
     }
 
+    .mining-run-title.debug-arena strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .mining-run-title.debug-arena .mining-arena-metadata {
+      font-size: 10px;
+    }
+
     .mining-vitals {
       position: absolute;
       top: 6px;
@@ -3065,6 +3076,7 @@
     .phase-board-surface.surface-ops-screen > .phase-titlebar,
     .phase-board-surface.surface-ops-screen > .surface-quickbar,
     .phase-board-surface.surface-ops-screen > .drone-ops-callout,
+    .phase-board-surface.surface-ops-screen > .surface-arena-forecast,
     .phase-board-surface.surface-ops-screen > .surface-actions {
       box-sizing: border-box;
       width: calc(100% - 32px);
@@ -3173,6 +3185,44 @@
       margin-left: auto;
       margin-right: 0;
       align-self: center;
+    }
+
+    .phase-board-surface.surface-ops-screen .drone-ops-callout {
+      min-height: 44px;
+      padding: 6px 10px;
+    }
+
+    .phase-board-surface.surface-ops-screen .drone-ops-callout h2 {
+      font-size: 14px;
+      line-height: 1.1;
+    }
+
+    .phase-board-surface.surface-ops-screen .drone-ops-callout p {
+      margin-top: 2px;
+      font-size: 11px;
+      line-height: 1.1;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-arena-forecast {
+      min-height: 0;
+      margin-top: 0;
+      padding: 5px 10px;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-arena-forecast > div {
+      width: 100%;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-arena-forecast h2 {
+      margin: 0 0 2px;
+      font-size: 13px;
+      line-height: 1.1;
+    }
+
+    .phase-board-surface.surface-ops-screen .surface-arena-forecast p {
+      margin-top: 0;
+      font-size: 11px;
+      line-height: 1.1;
     }
 
     .surface-command {
@@ -3650,7 +3700,7 @@
 
     .phase-board-surface.surface-ops-screen .surface-actions {
       max-width: 704px;
-      padding-bottom: 24px;
+      padding-bottom: 4px;
     }
 
     .phase-board-surface.surface-ops-screen .ops-grid {
@@ -5150,10 +5200,69 @@
       grid-column: 1 / -1;
     }
 
-    .debug-quick-launch {
+    .debug-mining-lab {
       margin-bottom: 10px;
       padding-bottom: 10px;
       border-bottom: 1px solid rgba(255, 209, 102, 0.22);
+    }
+
+    .debug-mining-fields {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .debug-mining-field {
+      display: grid;
+      min-width: 0;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .debug-mining-field.is-wide {
+      grid-column: 1 / -1;
+    }
+
+    .debug-mining-field input,
+    .debug-mining-field select {
+      box-sizing: border-box;
+      width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      padding: 5px 7px;
+      border: 1px solid rgba(79, 132, 160, 0.52);
+      border-radius: 5px;
+      background: rgba(5, 13, 19, 0.92);
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      text-transform: none;
+    }
+
+    .debug-mining-preview {
+      min-height: 72px;
+      margin: 8px 0;
+      padding: 8px;
+      border: 1px solid rgba(79, 132, 160, 0.32);
+      border-radius: 5px;
+      background: rgba(5, 13, 19, 0.72);
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: pre-line;
+    }
+
+    .debug-mining-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .debug-mining-actions .debug-mining-launch,
+    .debug-mining-actions .debug-drone-ops {
+      grid-column: 1 / -1;
     }
 
     .debug-section-heading {
@@ -5165,22 +5274,12 @@
       text-transform: uppercase;
     }
 
-    .debug-quick-actions {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 8px;
-    }
-
-    .debug-tools .debug-quick-actions button {
+    .debug-tools .debug-mining-actions button {
       min-width: 0;
       padding-right: 6px;
       padding-left: 6px;
       line-height: 1.15;
       white-space: normal;
-    }
-
-    .debug-tools .debug-quick-actions .debug-drone-ops {
-      grid-column: 1 / -1;
     }
 
     .debug-accordion {
@@ -5490,12 +5589,37 @@
         <button class="warn debug-act-one-reset" type="button" data-debug-action="act-one-start">Start at Earth Orbit</button>
       </div>
     </section>
-    <section class="debug-quick-launch" aria-label="Mining and combat shortcuts">
-      <h3 class="debug-section-heading">Mining / Combat</h3>
-      <div class="debug-quick-actions">
-        <button class="warn" type="button" data-debug-action="mining">Mining</button>
-        <button class="danger" type="button" data-debug-action="combat-mining">Combat Mining</button>
-        <button class="debug-drone-ops" type="button" data-debug-action="drone-ops">Drone Ops board</button>
+    <section class="debug-mining-lab" aria-label="Mining Arena Lab">
+      <h3 class="debug-section-heading">Mining Arena Lab</h3>
+      <div class="debug-mining-fields">
+        <label class="debug-mining-field">Act
+          <select id="debug-mining-act">
+            <option value="1">Act 1</option>
+            <option value="2">Act 2</option>
+            <option value="3">Act 3</option>
+          </select>
+        </label>
+        <label class="debug-mining-field">Level
+          <input id="debug-mining-level" type="number" min="1" max="10" step="1" value="1">
+        </label>
+        <label class="debug-mining-field is-wide">Seed
+          <input id="debug-mining-seed" type="number" min="1" max="4294967295" step="1" value="1">
+        </label>
+        <label class="debug-mining-field is-wide">Loadout
+          <select id="debug-mining-loadout">
+            <option value="0">Campaign expected</option>
+            <option value="1">Saved debug loadout</option>
+            <option value="2">No drones</option>
+          </select>
+        </label>
+      </div>
+      <div id="debug-mining-preview" class="debug-mining-preview">Select an Act and level to inspect its rules.</div>
+      <div class="debug-mining-actions">
+        <button type="button" data-debug-action="mining-randomize">Randomize</button>
+        <button type="button" data-debug-action="mining-replay">Replay seed</button>
+        <button type="button" data-debug-action="mining-copy">Copy arena ID</button>
+        <button class="warn debug-mining-launch" type="button" data-debug-action="mining-launch">Launch arena</button>
+        <button class="debug-drone-ops" type="button" data-debug-action="drone-ops">Edit saved debug loadout</button>
       </div>
     </section>
     <div class="debug-accordion" aria-label="Debug screens by game phase">
@@ -5566,6 +5690,11 @@
     const debugActOneLabel = document.getElementById("debug-act-one-label");
     const debugActOnePrevious = debugTools.querySelector("[data-debug-act-one-previous]");
     const debugActOneNext = debugTools.querySelector("[data-debug-act-one-next]");
+    const debugMiningAct = document.getElementById("debug-mining-act");
+    const debugMiningLevel = document.getElementById("debug-mining-level");
+    const debugMiningSeed = document.getElementById("debug-mining-seed");
+    const debugMiningLoadout = document.getElementById("debug-mining-loadout");
+    const debugMiningPreview = document.getElementById("debug-mining-preview");
     let lastToastText = "";
     let lastToastAt = 0;
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
@@ -5969,8 +6098,11 @@
     window.visualViewport?.addEventListener("scroll", syncSceneOverlays);
 
     function rrCall(name, args = [], sig = [], returnType = null) {
-      if (typeof Module === "undefined") {
-        return 0;
+      if (typeof Module === "undefined" || !Module.calledRun) {
+        return returnType === "string" ? "" : 0;
+      }
+      if (returnType === "string" && Module.ccall) {
+        return Module.ccall(name, returnType, sig, args);
       }
       const directExport = Module[`_${name}`];
       if (typeof directExport === "function") {
@@ -6042,6 +6174,15 @@
       miningFailureAck: () => rrCall("rr_mining_failure_ack"),
       debugMining: () => rrCall("rr_debug_mining"),
       debugCombatMining: () => rrCall("rr_debug_combat_mining"),
+      debugMiningArena: (act, difficulty, seed, loadoutMode) => rrCall(
+        "rr_debug_mining_arena",
+        [act, difficulty, seed, loadoutMode],
+        ["number", "number", "number", "number"]),
+      debugMiningPreview: (act, difficulty) => rrCall(
+        "rr_debug_mining_preview",
+        [act, difficulty],
+        ["number", "number"],
+        "string"),
       debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
       debugSurfacePush: () => rrCall("rr_debug_surface_push"),
       debugFlyby: () => rrCall("rr_debug_flyby"),
@@ -6206,12 +6347,65 @@
       debugActOneNext.disabled = !active || checkpoint >= debugActOneLabels.length - 1;
     }
 
+    function normalizedDebugMiningValues() {
+      const act = Math.min(3, Math.max(1, Math.trunc(Number(debugMiningAct.value) || 1)));
+      const difficulty = Math.min(10, Math.max(1, Math.trunc(Number(debugMiningLevel.value) || 1)));
+      const seed = Math.min(4294967295, Math.max(1, Math.trunc(Number(debugMiningSeed.value) || 1)));
+      const loadoutMode = Math.min(2, Math.max(0, Math.trunc(Number(debugMiningLoadout.value) || 0)));
+      debugMiningAct.value = String(act);
+      debugMiningLevel.value = String(difficulty);
+      debugMiningSeed.value = String(seed);
+      debugMiningLoadout.value = String(loadoutMode);
+      return { act, difficulty, seed, loadoutMode };
+    }
+
+    function randomizeDebugMiningSeed() {
+      const values = new Uint32Array(1);
+      if (window.crypto?.getRandomValues) {
+        window.crypto.getRandomValues(values);
+      } else {
+        values[0] = Math.trunc((Date.now() * 2654435761) % 4294967295);
+      }
+      debugMiningSeed.value = String(values[0] || 1);
+    }
+
+    function refreshDebugMiningPreview() {
+      const { act, difficulty } = normalizedDebugMiningValues();
+      const preview = rr?.debugMiningPreview?.(act, difficulty);
+      debugMiningPreview.textContent = typeof preview === "string" && preview.length > 0
+        ? preview
+        : `Act ${act} • Level ${difficulty}\nRules preview becomes available when the game runtime is ready.`;
+    }
+
+    function launchDebugMiningArena() {
+      const { act, difficulty, seed, loadoutMode } = normalizedDebugMiningValues();
+      rr.debugMiningArena(act, difficulty, seed, loadoutMode);
+    }
+
+    async function copyDebugMiningArenaId() {
+      const { act, difficulty, seed, loadoutMode } = normalizedDebugMiningValues();
+      const preview = rr.debugMiningPreview(act, difficulty) || `Act ${act} • Level ${difficulty}`;
+      const lines = String(preview).split("\n");
+      const report = `${lines[0]} • Seed ${seed} • Loadout ${loadoutMode}\n${lines.slice(1).join("\n")}`.trim();
+      try {
+        await navigator.clipboard.writeText(report);
+        showToast(`Arena ID copied: Act ${act}, Level ${difficulty}, Seed ${seed}`);
+      } catch (error) {
+        window.prompt("Copy this arena report:", report);
+      }
+    }
+
     const debugActions = Object.freeze({
       "act-one-start": () => rr.debugActOneStart(),
       "act-one-previous": () => rr.debugActOnePrevious(),
       "act-one-next": () => rr.debugActOneNext(),
-      mining: () => rr.debugMining(),
-      "combat-mining": () => rr.debugCombatMining(),
+      "mining-randomize": () => {
+        randomizeDebugMiningSeed();
+        refreshDebugMiningPreview();
+      },
+      "mining-replay": () => launchDebugMiningArena(),
+      "mining-copy": () => copyDebugMiningArenaId(),
+      "mining-launch": () => launchDebugMiningArena(),
       scan: () => rr.debugSurfaceScan(),
       push: () => rr.debugSurfacePush(),
       flyby: () => rr.debugFlyby(),
@@ -6224,6 +6418,10 @@
       "drone-ops": () => rr.debugDroneOps(),
       navigation: () => rr.debugNavigation(),
       exit: () => rr.debugExit()
+    });
+
+    [debugMiningAct, debugMiningLevel, debugMiningSeed, debugMiningLoadout].forEach((control) => {
+      control.addEventListener("change", refreshDebugMiningPreview);
     });
 
     const debugParams = new URLSearchParams(window.location.search);
@@ -6977,6 +7175,12 @@
 
     var Module = {
       canvas,
+      onRuntimeInitialized() {
+        randomizeDebugMiningSeed();
+        // Emscripten invokes this hook immediately before main(), so defer the
+        // preview until RocketGameApp has constructed the shared resolver.
+        window.setTimeout(refreshDebugMiningPreview, 0);
+      },
       locateFile(path, prefix) {
         const base = (prefix || "") + path;
         return path.endsWith(".wasm") ? `${base}?v=${Date.now()}` : base;

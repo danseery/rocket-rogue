@@ -3,9 +3,11 @@
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/MiniDroneCoordination.h"
+#include "core/MiningProgression.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
@@ -13,6 +15,23 @@
 #include <utility>
 
 namespace rocket {
+
+MiningTerrain generateMiningTerrainForRules(
+    const GameState& state,
+    const Destination& destination,
+    SurfaceSiteProfile profile,
+    int depthZone,
+    int width,
+    int height,
+    const MiningArenaRules& rules);
+
+void applyMiningTerrainToughnessScale(MiningTerrain& terrain, double scale);
+void normalizeRichTerrainDeposits(
+    MiningTerrain& terrain,
+    const MiningArenaRules& rules,
+    const MiningRewardBudget& budget,
+    int reservedRareGuarantees,
+    int reservedExoticGuarantees);
 
 namespace {
 
@@ -90,6 +109,40 @@ void addMiningMaterials(MaterialInventory& owned, const MaterialInventory& delta
     owned.exotic += delta.exotic;
 }
 
+MiningArenaRequest miningArenaRequest(const MiningArenaMetadata& metadata)
+{
+    return {
+        metadata.act,
+        std::clamp(metadata.difficulty, 1, 10),
+        metadata.seed
+    };
+}
+
+std::uint64_t activeMiningArenaSeed(const MiningRunState& mining)
+{
+    return mining.arenaMetadata.seed;
+}
+
+MaterialInventory claimMiningRichRewardBudget(MiningRunState& mining, MaterialInventory requested)
+{
+    requested.common = std::max(0, requested.common);
+    requested.rare = std::max(0, requested.rare);
+    requested.exotic = std::max(0, requested.exotic);
+
+    const int rareRemaining = std::max(0, mining.rewardBudget.rareCap - mining.richRewardsAwarded.rare);
+    const int exoticRemaining = std::max(0, mining.rewardBudget.exoticCap - mining.richRewardsAwarded.exotic);
+    const int rareGranted = std::min(requested.rare, rareRemaining);
+    const int exoticGranted = std::min(requested.exotic, exoticRemaining);
+    const int overflow = (requested.rare - rareGranted) + (requested.exotic - exoticGranted);
+
+    requested.common += overflow;
+    requested.rare = rareGranted;
+    requested.exotic = exoticGranted;
+    mining.richRewardsAwarded.rare += rareGranted;
+    mining.richRewardsAwarded.exotic += exoticGranted;
+    return requested;
+}
+
 void appendSurfaceLog(SurfaceExpeditionState& expedition, std::string entry)
 {
     if (entry.empty()) {
@@ -162,53 +215,59 @@ int featurePriority(MiningCellFeature feature)
     return 0;
 }
 
-MiningEnemyType hostileEnemyTypeForLane(const Destination& destination, int lane)
+MiningEnemyType hostileEnemyTypeForLane(const MiningArenaRules& rules, int lane)
 {
-    if (destination.tier >= 5 && lane % 5 == 4) {
-        return MiningEnemyType::Mammal;
+    std::array<MiningEnemyType, 5> candidates {};
+    std::size_t count = 0;
+    for (const MiningEnemyType type : {
+             MiningEnemyType::Ant,
+             MiningEnemyType::Flying,
+             MiningEnemyType::Beetle,
+             MiningEnemyType::Elemental,
+             MiningEnemyType::Mammal}) {
+        if (miningEnemyAllowed(rules, type)) {
+            candidates[count++] = type;
+        }
     }
-    switch (lane % 4) {
-    case 0:
-        return MiningEnemyType::Ant;
-    case 1:
-        return MiningEnemyType::Flying;
-    case 2:
-        return MiningEnemyType::Beetle;
-    default:
-        return MiningEnemyType::Elemental;
+    if (count == 0) {
+        return MiningEnemyType::None;
     }
+    return candidates[static_cast<std::size_t>(std::max(0, lane)) % count];
 }
 
-MiningElementalAffinity elementalAffinityForLane(const Destination& destination, SurfaceSiteProfile profile, int depthZone, int lane)
+MiningElementalAffinity elementalAffinityForLane(const MiningArenaRules& rules, SurfaceSiteProfile profile, int lane)
 {
-    if (destination.id == content::destination::moon) {
-        return MiningElementalAffinity::Cryo;
-    }
-    if (destination.id == content::destination::mars) {
-        return MiningElementalAffinity::Thermal;
-    }
-    if (destination.id == content::destination::outerPlanets) {
-        return MiningElementalAffinity::Cryo;
-    }
-    if (destination.id == content::destination::nearbyStar) {
-        if (profile == SurfaceSiteProfile::FractureField) {
-            return MiningElementalAffinity::Toxic;
+    std::array<MiningElementalAffinity, 4> candidates {};
+    std::size_t count = 0;
+    for (const MiningElementalAffinity affinity : {
+             MiningElementalAffinity::Thermal,
+             MiningElementalAffinity::Cryo,
+             MiningElementalAffinity::Toxic,
+             MiningElementalAffinity::Radiation}) {
+        if (miningAffinityAllowed(rules, affinity)) {
+            candidates[count++] = affinity;
         }
-        return depthZone <= 0 ? MiningElementalAffinity::Thermal : MiningElementalAffinity::Radiation;
     }
-    if (destination.id == content::destination::nearbyGalaxy) {
-        return lane % 2 == 0 ? MiningElementalAffinity::Radiation : MiningElementalAffinity::Toxic;
+    if (count == 0) {
+        return MiningElementalAffinity::None;
     }
-    switch ((destination.tier + depthZone + lane + static_cast<int>(profile)) % 4) {
-    case 0:
-        return MiningElementalAffinity::Thermal;
-    case 1:
-        return MiningElementalAffinity::Cryo;
-    case 2:
-        return MiningElementalAffinity::Radiation;
-    default:
-        return MiningElementalAffinity::Toxic;
+    const int offset = rules.request.difficulty + static_cast<int>(profile);
+    return candidates[static_cast<std::size_t>(std::max(0, lane + offset)) % count];
+}
+
+std::vector<MiningCellFeature> allowedSpecialRooms(const MiningArenaRules& rules)
+{
+    std::vector<MiningCellFeature> result;
+    for (const MiningCellFeature feature : {
+             MiningCellFeature::TreasureVault,
+             MiningCellFeature::HiveNest,
+             MiningCellFeature::MinibossLair,
+             MiningCellFeature::BossChamber}) {
+        if (miningRoomFeatureAllowed(rules, feature)) {
+            result.push_back(feature);
+        }
     }
+    return result;
 }
 
 void stampMiningCell(
@@ -302,13 +361,21 @@ void carveLine(
     }
 }
 
-void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, const Destination& destination, SurfaceSiteProfile profile)
+void applyHostileTunnelNetwork(
+    MiningTerrain& terrain,
+    const GameState& state,
+    const Destination& destination,
+    SurfaceSiteProfile profile,
+    const MiningArenaRules& rules)
 {
-    if (!hostileSystemActive(state) || !destinationAllowsEnemyEncounters(destination)) {
+    if (rules.maxActiveEnemies <= 0 || hostileEnemyTypeForLane(rules, 0) == MiningEnemyType::None) {
         return;
     }
+    (void)profile;
 
-    const std::uint64_t seed = hashCombine(hashCombine(state.seed, hashString(destination.id)), static_cast<std::uint64_t>(terrain.depthZone + 31));
+    const std::uint64_t seed = hashCombine(
+        hashCombine(rules.request.seed == 0 ? state.seed : rules.request.seed, hashString(destination.id)),
+        static_cast<std::uint64_t>(terrain.depthZone + 31));
     int x = terrain.width / 2;
     int y = 4;
     const int bottom = std::max(terrain.height / 2, terrain.height - 7);
@@ -322,7 +389,8 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
         y = nextY;
     }
 
-    const int branchCount = std::clamp(3 + destination.tier + terrain.depthZone, 4, 8);
+    const int branchCount = std::clamp(2 + rules.maxActiveEnemies / 2, 3, 8);
+    const std::vector<MiningCellFeature> specialRooms = allowedSpecialRooms(rules);
     for (int branch = 0; branch < branchCount; ++branch) {
         const double rowT = (static_cast<double>(branch) + 1.0) / (static_cast<double>(branchCount) + 1.0);
         const int branchY = std::clamp(6 + static_cast<int>(rowT * static_cast<double>(terrain.height - 11)), 6, terrain.height - 6);
@@ -331,30 +399,35 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
         const int length = 9 + static_cast<int>(unitHash(seed, branch, branchY, terrain.depthZone, 149) * 13.0);
         const int endX = std::clamp(startX + side * length, 4, terrain.width - 5);
         const int endY = std::clamp(branchY + static_cast<int>(std::round((unitHash(seed, branch, branchY, terrain.depthZone, 151) - 0.45) * 8.0)), 6, terrain.height - 6);
-        const MiningEnemyType enemy = hostileEnemyTypeForLane(destination, branch + terrain.depthZone);
-        const bool mammalBurrow = enemy == MiningEnemyType::Mammal;
+        const MiningEnemyType enemy = hostileEnemyTypeForLane(rules, branch + terrain.depthZone);
+        const bool mammalBurrow = enemy == MiningEnemyType::Mammal && miningRoomFeatureAllowed(rules, MiningCellFeature::OrganicBurrow);
         const MiningCellFeature branchFeature = mammalBurrow ? MiningCellFeature::OrganicBurrow : MiningCellFeature::BranchTunnel;
         const int branchRadius = mammalBurrow ? 2 : 1;
         carveLine(terrain, startX, branchY, endX, branchY, branchRadius, terrain.depthZone, branchFeature, mammalBurrow ? enemy : MiningEnemyType::None);
         carveLine(terrain, endX, branchY, endX, endY, branchRadius, terrain.depthZone, branchFeature, mammalBurrow ? enemy : MiningEnemyType::None);
 
         const int encounterX = std::clamp((startX + endX) / 2, 3, terrain.width - 4);
-        carveTunnelDisk(terrain, encounterX, branchY, mammalBurrow ? 3 : 2, terrain.depthZone, mammalBurrow ? MiningCellFeature::OrganicBurrow : MiningCellFeature::EncounterZone, enemy);
+        const MiningCellFeature encounterFeature = mammalBurrow ? MiningCellFeature::OrganicBurrow : MiningCellFeature::EncounterZone;
+        if (miningRoomFeatureAllowed(rules, encounterFeature)) {
+            carveTunnelDisk(terrain, encounterX, branchY, mammalBurrow ? 3 : 2, terrain.depthZone, encounterFeature, enemy);
+        }
 
+        if (specialRooms.empty()) {
+            continue;
+        }
         const double roomRoll = unitHash(seed, branch, endY, terrain.depthZone, 173);
-        MiningCellFeature room = MiningCellFeature::TreasureVault;
-        MiningCellMaterial reward = MiningCellMaterial::RareOre;
-        if (mammalBurrow) {
+        MiningCellFeature room = specialRooms[
+            static_cast<std::size_t>(roomRoll * static_cast<double>(specialRooms.size())) % specialRooms.size()];
+        if (mammalBurrow && miningRoomFeatureAllowed(rules, MiningCellFeature::BossChamber) && branch % 2 == 0) {
             room = MiningCellFeature::BossChamber;
+        }
+        MiningCellMaterial reward = room == MiningCellFeature::HiveNest
+            ? MiningCellMaterial::CommonOre
+            : MiningCellMaterial::RareOre;
+        if (room == MiningCellFeature::BossChamber && miningMaterialAllowed(rules, MiningCellMaterial::ExoticVein)) {
             reward = MiningCellMaterial::ExoticVein;
-        } else if (roomRoll > 0.72) {
-            room = MiningCellFeature::MinibossLair;
-            reward = terrain.depthZone >= 2 || destination.tier >= 5 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
-        } else if (roomRoll < 0.26 || profile == SurfaceSiteProfile::FractureField) {
-            room = MiningCellFeature::HiveNest;
+        } else if (!miningMaterialAllowed(rules, reward)) {
             reward = MiningCellMaterial::CommonOre;
-        } else if (profile == SurfaceSiteProfile::OreShelf) {
-            reward = MiningCellMaterial::RareOre;
         }
         const int roomHalfWidth = room == MiningCellFeature::BossChamber ? 5 : 3 + (room == MiningCellFeature::MinibossLair ? 1 : 0);
         const int roomHalfHeight = room == MiningCellFeature::BossChamber ? 3 : 2;
@@ -363,8 +436,9 @@ void applyHostileTunnelNetwork(MiningTerrain& terrain, const GameState& state, c
 }
 
 MiningCellMaterial generatedMaterial(
-    const GameState& state,
+    std::uint64_t arenaSeed,
     const Destination& destination,
+    const MiningArenaRules& rules,
     SurfaceSiteProfile profile,
     int x,
     int y,
@@ -383,7 +457,7 @@ MiningCellMaterial generatedMaterial(
     }
 
     const double depth = static_cast<double>(y + depthZone * height) / static_cast<double>(height);
-    const std::uint64_t seed = hashCombine(state.seed, hashString(destination.id));
+    const std::uint64_t seed = hashCombine(arenaSeed, hashString(destination.id));
     const double pocket = unitHash(seed, x / 3, y / 3, depthZone, 11);
     const double fleck = unitHash(seed, x, y, depthZone, 23);
     const double artifactRoll = unitHash(seed, x / 4, y / 4, depthZone, 37);
@@ -394,21 +468,28 @@ MiningCellMaterial generatedMaterial(
     const double tierBonus = static_cast<double>(destination.tier) * 0.012;
 
     if (depthZone >= 1 && artifactRoll > 0.986 - fractureArtifactBonus - tierBonus && y > height / 2) {
-        return depthZone >= 2 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
+        const MiningCellMaterial rich = depthZone >= 2 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
+        if (miningMaterialAllowed(rules, rich)) {
+            return rich;
+        }
     }
-    if (hazardRoll > 0.978 - depth * 0.010 && y > 8) {
+    if (rules.mechanics.environmentalHazards &&
+        miningMaterialAllowed(rules, MiningCellMaterial::HazardPocket) &&
+        hazardRoll > 0.978 - depth * 0.010 && y > 8) {
         return MiningCellMaterial::HazardPocket;
     }
-    if (depthZone >= 2 && pocket > 0.962 - tierBonus && y > 12) {
+    if (miningMaterialAllowed(rules, MiningCellMaterial::ExoticVein) &&
+        depthZone >= 2 && pocket > 0.962 - tierBonus && y > 12) {
         return MiningCellMaterial::ExoticVein;
     }
-    if (pocket > 0.925 - depth * 0.020 - siteOreBonus - tierBonus) {
+    if (miningMaterialAllowed(rules, MiningCellMaterial::RareOre) &&
+        pocket > 0.925 - depth * 0.020 - siteOreBonus - tierBonus) {
         return MiningCellMaterial::RareOre;
     }
     if (pocket > 0.745 - siteOreBonus - depth * 0.030 || fleck > 0.940) {
         return MiningCellMaterial::CommonOre;
     }
-    if (fleck < 0.22 + depth * 0.08) {
+    if (miningMaterialAllowed(rules, MiningCellMaterial::HardRock) && fleck < 0.22 + depth * 0.08) {
         return MiningCellMaterial::HardRock;
     }
     return MiningCellMaterial::Regolith;
@@ -893,6 +974,7 @@ int completeHazardTreatment(
     const HazardDroneCoordinator& coordinator)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
     struct Candidate {
         int x = 0;
         int y = 0;
@@ -946,15 +1028,17 @@ int completeHazardTreatment(
         const MiningCellFeature feature = cell->feature;
         const MiningEnemyType enemy = cell->enemy;
         const bool refined = unitHash(
-            state.seed,
+            activeMiningArenaSeed(mining),
             candidate.x,
             candidate.y,
             mining.depthZone,
             0x48415A415244ULL + static_cast<std::uint64_t>(agent.upgradeLevel)) <
             tuning::mining::hazardDroneRefinementChance(agent.upgradeLevel);
-        *cell = makeCell(
-            refined ? refinedHazardMaterial(affinity) : MiningCellMaterial::Regolith,
-            mining.depthZone);
+        MiningCellMaterial refinedMaterial = refined ? refinedHazardMaterial(affinity) : MiningCellMaterial::Regolith;
+        if (!miningMaterialAllowed(arenaRules, refinedMaterial)) {
+            refinedMaterial = MiningCellMaterial::CommonOre;
+        }
+        *cell = makeCell(refinedMaterial, mining.depthZone);
         cell->revealed = true;
         cell->feature = feature;
         cell->enemy = enemy;
@@ -1432,6 +1516,7 @@ std::vector<DrillFootprintCell> drillFootprintCells(const MiningRunState& mining
 bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, double dirX, double dirY, double dt)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
     const std::vector<DrillFootprintCell> cells = drillFootprintCells(mining, dirX, dirY);
     if (cells.empty()) {
         return false;
@@ -1442,8 +1527,6 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
     bool brokeAny = false;
     double maxHeatDelta = 0.0;
     double maxIntegrityExposure = 0.0;
-    double maxToxicExposure = 0.0;
-    double maxRadiationExposure = 0.0;
     for (const DrillFootprintCell& contact : cells) {
         const MiningCell* cell = miningCellAt(mining.terrain, contact.x, contact.y);
         if (cell == nullptr) {
@@ -1452,47 +1535,147 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
         const double contactDt = dt * contact.powerScale;
         touchedSoftMaterial = touchedSoftMaterial || softMiningMaterial(cell->material);
         touchedHardMaterial = touchedHardMaterial || !softMiningMaterial(cell->material);
-        double heatDelta = drillHeatDelta(cell->material, stats, contactDt);
-        if (cell->material == MiningCellMaterial::HazardPocket && cell->hazard) {
-            switch (cell->hazardAffinity) {
-            case MiningElementalAffinity::Thermal:
-                heatDelta += tuning::mining::elementalHeatRisePerSecond * contactDt;
-                break;
-            case MiningElementalAffinity::Cryo:
-                mining.movementSlowSeconds = std::max(
-                    mining.movementSlowSeconds,
-                    tuning::mining::elementalCryoSlowDurationSeconds);
-                mining.movementSlowScale = std::min(
-                    mining.movementSlowScale,
-                    tuning::mining::elementalCryoSlowScale);
-                break;
-            case MiningElementalAffinity::Toxic:
-                maxToxicExposure = std::max(maxToxicExposure, contactDt);
-                break;
-            case MiningElementalAffinity::Radiation:
-                maxRadiationExposure = std::max(maxRadiationExposure, contactDt);
-                break;
-            case MiningElementalAffinity::None:
-                break;
-            }
-        }
+        double heatDelta = arenaRules.mechanics.drillHeat ? drillHeatDelta(cell->material, stats, contactDt) : 0.0;
         maxHeatDelta = std::max(maxHeatDelta, heatDelta);
-        maxIntegrityExposure = std::max(maxIntegrityExposure, contactDt);
+        if (arenaRules.mechanics.drillIntegrity) {
+            maxIntegrityExposure = std::max(maxIntegrityExposure, contactDt);
+        }
         brokeAny = applyDrillDamage(state, stats, contact.x, contact.y, contactDt) || brokeAny;
     }
 
-    applyDrillSystemLoad(mining, stats, maxHeatDelta, maxIntegrityExposure);
-    mining.drillIntegrity = std::max(
-        0.0,
-        mining.drillIntegrity - tuning::mining::elementalToxicIntegrityDamagePerSecond * maxToxicExposure);
-    mining.hazardDelta += tuning::mining::elementalRadiationHazardPerSecond * maxRadiationExposure;
+    if (arenaRules.mechanics.drillHeat || arenaRules.mechanics.drillIntegrity) {
+        applyDrillSystemLoad(mining, stats, maxHeatDelta, maxIntegrityExposure);
+    }
     mining.contactIntensity = std::max(mining.contactIntensity, touchedHardMaterial ? 0.82 : 0.35);
     mining.recoilX = -dirX;
     mining.recoilY = -dirY;
-    if (touchedHardMaterial && !touchedSoftMaterial) {
+    if (arenaRules.mechanics.contactRebound && touchedHardMaterial && !touchedSoftMaterial) {
         triggerHardContactBounce(mining, dirX, dirY, stats.hardRockBounceRelief);
     }
     return brokeAny || !cells.empty();
+}
+
+struct EnvironmentalHazardExposure {
+    double thermal = 0.0;
+    double cryo = 0.0;
+    double toxic = 0.0;
+    double radiation = 0.0;
+
+    bool active() const
+    {
+        return thermal > 0.0 || cryo > 0.0 || toxic > 0.0 || radiation > 0.0;
+    }
+};
+
+void recordEnvironmentalHazardExposure(
+    EnvironmentalHazardExposure& exposure,
+    MiningElementalAffinity affinity,
+    double seconds)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::Thermal:
+        exposure.thermal = std::max(exposure.thermal, seconds);
+        break;
+    case MiningElementalAffinity::Cryo:
+        exposure.cryo = std::max(exposure.cryo, seconds);
+        break;
+    case MiningElementalAffinity::Toxic:
+        exposure.toxic = std::max(exposure.toxic, seconds);
+        break;
+    case MiningElementalAffinity::Radiation:
+        exposure.radiation = std::max(exposure.radiation, seconds);
+        break;
+    case MiningElementalAffinity::None:
+        break;
+    }
+}
+
+MiningElementalAffinity applyEnvironmentalHazardExposure(
+    GameState& state,
+    const ContentCatalog& catalog,
+    const MiningArenaRules& arenaRules,
+    bool drillTouchesTerrain,
+    double dt)
+{
+    MiningRunState& mining = state.run.mining;
+    if (!arenaRules.mechanics.environmentalHazards) {
+        return MiningElementalAffinity::None;
+    }
+
+    EnvironmentalHazardExposure exposure;
+    auto recordCell = [&](const MiningCell* cell, double seconds) {
+        if (cell != nullptr && cell->material == MiningCellMaterial::HazardPocket && cell->hazard) {
+            recordEnvironmentalHazardExposure(exposure, cell->hazardAffinity, seconds);
+        }
+    };
+
+    if (drillTouchesTerrain) {
+        for (const DrillFootprintCell& contact : drillFootprintCells(mining, mining.aimDirX, mining.aimDirY)) {
+            recordCell(miningCellAt(mining.terrain, contact.x, contact.y), dt * contact.powerScale);
+        }
+    }
+
+    const double radius = tuning::mining::hazardPocketExposureRadiusCells;
+    const int minX = std::max(0, static_cast<int>(std::floor(mining.droneX - radius)));
+    const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::floor(mining.droneX + radius)));
+    const int minY = std::max(0, static_cast<int>(std::floor(mining.droneY - radius)));
+    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::floor(mining.droneY + radius)));
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            const MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            if (cell == nullptr || cell->material != MiningCellMaterial::HazardPocket || !cell->hazard) {
+                continue;
+            }
+            const double dx = static_cast<double>(x) + 0.5 - mining.droneX;
+            const double dy = static_cast<double>(y) + 0.5 - mining.droneY;
+            const double distance = std::sqrt(dx * dx + dy * dy);
+            if (distance > radius) {
+                continue;
+            }
+            const double proximityScale = std::max(
+                tuning::mining::hazardPocketPeripheralExposureFloor,
+                1.0 - (1.0 - tuning::mining::hazardPocketPeripheralExposureFloor) * distance / radius);
+            recordCell(cell, dt * proximityScale);
+        }
+    }
+
+    if (!exposure.active()) {
+        return MiningElementalAffinity::None;
+    }
+
+    const MiniDroneLoadoutEffects loadout = miniDroneLoadoutEffects(state, catalog);
+    const double shieldRelief = std::clamp(loadout.environmentalShieldRelief, 0.0, 0.80);
+    const double exposureScale = 1.0 - shieldRelief;
+    MiningElementalAffinity activeAffinity = MiningElementalAffinity::None;
+    if (exposure.thermal > 0.0) {
+        const double thermalSeconds = exposure.thermal * exposureScale;
+        const double thermalDamage = tuning::mining::elementalThermalHullDamagePerSecond * thermalSeconds;
+        mining.drillHeat = std::min(1.0, mining.drillHeat + tuning::mining::elementalHeatRisePerSecond * thermalSeconds);
+        mining.droneHealth = std::max(0.0, mining.droneHealth - thermalDamage);
+        mining.environmentalShieldAbsorbed += tuning::mining::elementalThermalHullDamagePerSecond * exposure.thermal - thermalDamage;
+        mining.contactIntensity = std::max(mining.contactIntensity, 0.72);
+        activeAffinity = MiningElementalAffinity::Thermal;
+    }
+    if (exposure.cryo > 0.0) {
+        mining.movementSlowSeconds = std::max(
+            mining.movementSlowSeconds,
+            tuning::mining::elementalCryoSlowDurationSeconds * exposureScale);
+        mining.movementSlowScale = std::min(
+            mining.movementSlowScale,
+            tuning::mining::elementalCryoSlowScale + shieldRelief * 0.24);
+        activeAffinity = activeAffinity == MiningElementalAffinity::None ? MiningElementalAffinity::Cryo : activeAffinity;
+    }
+    if (exposure.toxic > 0.0) {
+        mining.drillIntegrity = std::max(
+            0.0,
+            mining.drillIntegrity - tuning::mining::elementalToxicIntegrityDamagePerSecond * exposure.toxic * exposureScale);
+        activeAffinity = activeAffinity == MiningElementalAffinity::None ? MiningElementalAffinity::Toxic : activeAffinity;
+    }
+    if (exposure.radiation > 0.0) {
+        mining.hazardDelta += tuning::mining::elementalRadiationHazardPerSecond * exposure.radiation * exposureScale;
+        activeAffinity = activeAffinity == MiningElementalAffinity::None ? MiningElementalAffinity::Radiation : activeAffinity;
+    }
+    return activeAffinity;
 }
 
 void setAimDirection(MiningRunState& mining, double dirX, double dirY)
@@ -1632,7 +1815,7 @@ bool placeMiningArtifact(GameState& state, MiningRunState& mining, const Destina
         }
         *cell = makeCell(MiningCellMaterial::ArtifactCache, mining.depthZone);
         cell->revealed = revealed;
-        cell->feature = MiningCellFeature::TreasureVault;
+        cell->feature = MiningCellFeature::BranchTunnel;
         markDirty(mining.terrain, x, y);
 
         const ArtifactKind kind = rollMiningArtifactKind(state, destination, mining.depthZone);
@@ -1744,7 +1927,7 @@ MaterialInventory brokenCellReward(
     case MiningCellMaterial::RareOre:
         gain.rare = 1;
         if (includeYieldBonuses &&
-            unitHash(state.seed, mining.cellsBroken, mining.depthZone, 0, 71) < stats.rareYieldChance) {
+            unitHash(activeMiningArenaSeed(mining), mining.cellsBroken, mining.depthZone, 0, 71) < stats.rareYieldChance) {
             gain.rare += 1;
         }
         break;
@@ -1760,18 +1943,18 @@ MaterialInventory brokenCellReward(
     }
 
     if (includeYieldBonuses && gain.common > 0 &&
-        unitHash(state.seed, mining.cellsBroken, mining.depthZone, 0, 83) < stats.oreYieldChance) {
+        unitHash(activeMiningArenaSeed(mining), mining.cellsBroken, mining.depthZone, 0, 83) < stats.oreYieldChance) {
         gain.common += 1;
     }
     if (includeYieldBonuses && gain.rare > 0 &&
-        unitHash(state.seed, mining.cellsBroken, mining.depthZone, 1, 83) < stats.oreYieldChance * 0.75) {
+        unitHash(activeMiningArenaSeed(mining), mining.cellsBroken, mining.depthZone, 1, 83) < stats.oreYieldChance * 0.75) {
         gain.rare += 1;
     }
     if (includeYieldBonuses && gain.exotic > 0 &&
-        unitHash(state.seed, mining.cellsBroken, mining.depthZone, 2, 83) < stats.oreYieldChance * 0.45) {
+        unitHash(activeMiningArenaSeed(mining), mining.cellsBroken, mining.depthZone, 2, 83) < stats.oreYieldChance * 0.45) {
         gain.exotic += 1;
     }
-    return gain;
+    return claimMiningRichRewardBudget(mining, gain);
 }
 
 MiningEnemy makeMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeature, MiningElementalAffinity affinity, double x, double y)
@@ -1861,6 +2044,24 @@ MiningEnemy makeMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeatur
     return enemy;
 }
 
+MiningEnemy makeMiningEnemyForRules(
+    MiningEnemyType type,
+    MiningCellFeature sourceFeature,
+    MiningElementalAffinity affinity,
+    double x,
+    double y,
+    const MiningArenaRules& rules)
+{
+    MiningEnemy enemy = makeMiningEnemy(type, sourceFeature, affinity, x, y);
+    if (!enemy.active || type == MiningEnemyType::None) {
+        return enemy;
+    }
+    enemy.maxHealth *= std::max(0.0, rules.enemyHealthScale);
+    enemy.health = enemy.maxHealth;
+    enemy.damagePerSecond *= std::max(0.0, rules.enemyDamageScale);
+    return enemy;
+}
+
 bool shouldSpawnEnemyAt(const MiningTerrain& terrain, int x, int y, MiningCellFeature feature)
 {
     switch (feature) {
@@ -1880,16 +2081,70 @@ bool shouldSpawnEnemyAt(const MiningTerrain& terrain, int x, int y, MiningCellFe
     }
 }
 
-void spawnMiningEnemies(MiningRunState& mining, const Destination& destination)
+void spawnMiningEnemies(MiningRunState& mining, const Destination& destination, const MiningArenaRules& rules)
 {
-    bool minibossSpawned = false;
-    bool bossSpawned = false;
-    for (int y = 0; y < mining.terrain.height && static_cast<int>(mining.enemies.size()) < tuning::mining::maxActiveEnemies; ++y) {
-        for (int x = 0; x < mining.terrain.width && static_cast<int>(mining.enemies.size()) < tuning::mining::maxActiveEnemies; ++x) {
+    if (rules.maxActiveEnemies <= 0) {
+        return;
+    }
+
+    struct EnemySpawnCandidate {
+        int x = 0;
+        int y = 0;
+        const MiningCell* cell = nullptr;
+    };
+
+    std::vector<EnemySpawnCandidate> candidates;
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        for (int x = 0; x < mining.terrain.width; ++x) {
             const MiningCell* cell = miningCellAt(mining.terrain, x, y);
-            if (cell == nullptr || cell->enemy == MiningEnemyType::None || miningMaterialSolid(cell->material)) {
+            if (cell == nullptr || cell->enemy == MiningEnemyType::None || miningMaterialSolid(cell->material) ||
+                !miningEnemyAllowed(rules, cell->enemy) || !miningRoomFeatureAllowed(rules, cell->feature)) {
                 continue;
             }
+            candidates.push_back({x, y, cell});
+        }
+    }
+
+    int spawnersPlaced = 0;
+    if (rules.maxSpawners > 0 && miningEnemyAllowed(rules, MiningEnemyType::Spawner)) {
+        for (const EnemySpawnCandidate& candidate : candidates) {
+            if (spawnersPlaced >= rules.maxSpawners || static_cast<int>(mining.enemies.size()) >= rules.maxActiveEnemies) {
+                break;
+            }
+            if (candidate.cell->feature != MiningCellFeature::HiveNest &&
+                candidate.cell->feature != MiningCellFeature::MinibossLair &&
+                candidate.cell->feature != MiningCellFeature::BossChamber) {
+                continue;
+            }
+            const MiningElementalAffinity affinity = candidate.cell->enemy == MiningEnemyType::Elemental
+                ? elementalAffinityForLane(rules, mining.siteProfile, candidate.x + candidate.y)
+                : MiningElementalAffinity::None;
+            MiningEnemy spawner = makeMiningEnemyForRules(
+                MiningEnemyType::Spawner,
+                candidate.cell->feature,
+                MiningElementalAffinity::None,
+                static_cast<double>(candidate.x) + 0.5,
+                static_cast<double>(candidate.y) + 0.5,
+                rules);
+            spawner.spawn.enemyType = candidate.cell->enemy;
+            spawner.spawn.affinity = affinity;
+            spawner.spawn.maxSpawns = std::clamp(2 + rules.request.difficulty / 3, 2, 5);
+            spawner.spawn.intervalSeconds = std::clamp(8.0 - static_cast<double>(rules.request.difficulty) * 0.35, 4.5, 7.5);
+            spawner.spawn.cooldownSeconds = spawner.spawn.intervalSeconds;
+            mining.enemies.push_back(std::move(spawner));
+            ++spawnersPlaced;
+        }
+    }
+
+    bool minibossSpawned = false;
+    bool bossSpawned = false;
+    for (const EnemySpawnCandidate& candidate : candidates) {
+        if (static_cast<int>(mining.enemies.size()) >= rules.maxActiveEnemies) {
+            break;
+        }
+        const int x = candidate.x;
+        const int y = candidate.y;
+        const MiningCell* cell = candidate.cell;
             if (cell->feature == MiningCellFeature::MinibossLair && minibossSpawned) {
                 continue;
             }
@@ -1900,13 +2155,19 @@ void spawnMiningEnemies(MiningRunState& mining, const Destination& destination)
                 continue;
             }
             const MiningElementalAffinity affinity = cell->enemy == MiningEnemyType::Elemental
-                ? elementalAffinityForLane(destination, mining.siteProfile, mining.depthZone, x + y)
+                ? elementalAffinityForLane(rules, mining.siteProfile, x + y)
                 : MiningElementalAffinity::None;
-            mining.enemies.push_back(makeMiningEnemy(cell->enemy, cell->feature, affinity, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5));
+            mining.enemies.push_back(makeMiningEnemyForRules(
+                cell->enemy,
+                cell->feature,
+                affinity,
+                static_cast<double>(x) + 0.5,
+                static_cast<double>(y) + 0.5,
+                rules));
             minibossSpawned = minibossSpawned || cell->feature == MiningCellFeature::MinibossLair;
             bossSpawned = bossSpawned || cell->feature == MiningCellFeature::BossChamber;
-        }
     }
+    (void)destination;
 }
 
 bool enemyIgnoresTerrain(MiningEnemyType type)
@@ -1924,7 +2185,7 @@ bool enemyUsesMeleeAttack(MiningEnemyType type)
     return type == MiningEnemyType::Ant || type == MiningEnemyType::Beetle || type == MiningEnemyType::Mammal;
 }
 
-void updateMiningEnemySpawners(MiningRunState& mining, double dt)
+void updateMiningEnemySpawners(MiningRunState& mining, const MiningArenaRules& rules, double dt)
 {
     int activeEnemyCount = static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
         return enemy.active;
@@ -1944,7 +2205,7 @@ void updateMiningEnemySpawners(MiningRunState& mining, double dt)
         const double interval = std::max(0.01, spec.intervalSeconds);
         spec.cooldownSeconds -= std::max(0.0, dt);
         while (spec.cooldownSeconds <= 0.0 && spec.spawned < spec.maxSpawns &&
-            activeEnemyCount < tuning::mining::maxActiveEnemies) {
+            activeEnemyCount < rules.maxActiveEnemies) {
             const double angle = static_cast<double>(spec.spawned % 8) * (kPi * 0.25);
             const double radius = tuning::mining::enemySpawnerSpawnRadiusCells;
             double spawnX = std::clamp(spawner.x + std::cos(angle) * radius, 1.0, static_cast<double>(mining.terrain.width - 2));
@@ -1954,12 +2215,13 @@ void updateMiningEnemySpawners(MiningRunState& mining, double dt)
                 spawnY = spawner.y;
             }
 
-            spawnedEnemies.push_back(makeMiningEnemy(
+            spawnedEnemies.push_back(makeMiningEnemyForRules(
                 spec.enemyType,
                 spawner.sourceFeature,
                 spec.affinity,
                 spawnX,
-                spawnY));
+                spawnY,
+                rules));
             spec.spawned += 1;
             activeEnemyCount += 1;
             spec.cooldownSeconds += interval;
@@ -2187,6 +2449,7 @@ void addEnemyDefeatReward(GameState& state, const MiningEnemy& enemy)
         gain.exotic += 2;
         state.meta.blueprintProgress += 2;
     }
+    gain = claimMiningRichRewardBudget(mining, gain);
     addMiningMaterials(mining.temporaryMaterials, gain);
     mining.cargo += materialCargo(gain);
     pushMiningCombatPopup(mining, enemy.x, enemy.y, 1.0, MiningCombatTextKind::Defeat);
@@ -2252,6 +2515,11 @@ void applyElementalContact(GameState& state, const MiningEnemy& enemy, double sh
 void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, double dt)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningArenaRules rules = resolveMiningArenaRules({
+        mining.arenaMetadata.act,
+        mining.arenaMetadata.difficulty,
+        mining.arenaMetadata.seed,
+    });
     advanceMiningCombatVisuals(mining, dt);
     mining.movementSlowSeconds = std::max(0.0, mining.movementSlowSeconds - dt);
     if (mining.movementSlowSeconds <= 0.0) {
@@ -2259,7 +2527,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
     }
     mining.alliedFireCooldownSeconds = std::max(0.0, mining.alliedFireCooldownSeconds - dt);
     mining.areaControlPulseCooldownSeconds = std::max(0.0, mining.areaControlPulseCooldownSeconds - dt);
-    updateMiningEnemySpawners(mining, dt);
+    updateMiningEnemySpawners(mining, rules, dt);
     if (mining.enemies.empty()) {
         return;
     }
@@ -2602,9 +2870,19 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     mining.depthZone += 1;
     mining.hazardDelta += tuning::mining::depthHazardRisk;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
-    mining.terrain = generateMiningTerrain(state, *destination, mining.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
+    mining.terrain = generateMiningTerrainForRules(
+        state,
+        *destination,
+        mining.siteProfile,
+        mining.depthZone,
+        stats.terrainWidth,
+        stats.terrainHeight,
+        arenaRules);
+    normalizeRichTerrainDeposits(mining.terrain, arenaRules, mining.rewardBudget, 0, 0);
+    applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
     mining.enemies.clear();
-    spawnMiningEnemies(mining, *destination);
+    spawnMiningEnemies(mining, *destination, arenaRules);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.returnZoneX = miningShipStartX(mining);
@@ -2761,24 +3039,24 @@ bool miningMaterialSolid(MiningCellMaterial material)
 
 double miningMaterialToughness(MiningCellMaterial material, int depthZone)
 {
-    const double depthScale = 1.0 + static_cast<double>(std::max(0, depthZone)) * 0.22;
+    (void)depthZone;
     switch (material) {
     case MiningCellMaterial::Empty:
         return 0.0;
     case MiningCellMaterial::Regolith:
-        return tuning::mining::regolithToughness * depthScale;
+        return tuning::mining::regolithToughness;
     case MiningCellMaterial::HardRock:
-        return tuning::mining::hardRockToughness * depthScale;
+        return tuning::mining::hardRockToughness;
     case MiningCellMaterial::CommonOre:
-        return tuning::mining::commonOreToughness * depthScale;
+        return tuning::mining::commonOreToughness;
     case MiningCellMaterial::RareOre:
-        return tuning::mining::rareOreToughness * depthScale;
+        return tuning::mining::rareOreToughness;
     case MiningCellMaterial::ExoticVein:
-        return tuning::mining::exoticVeinToughness * depthScale;
+        return tuning::mining::exoticVeinToughness;
     case MiningCellMaterial::ArtifactCache:
-        return tuning::mining::artifactCacheToughness * depthScale;
+        return tuning::mining::artifactCacheToughness;
     case MiningCellMaterial::HazardPocket:
-        return tuning::mining::regolithToughness * depthScale;
+        return tuning::mining::regolithToughness;
     case MiningCellMaterial::Bedrock:
         return tuning::mining::bedrockToughness;
     }
@@ -2896,6 +3174,7 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.storage = std::max(0.0, stats.storage);
     stats.engineEfficiency = std::clamp(stats.engineEfficiency, 0.0, 0.75);
     stats.artifactTowEfficiency = std::clamp(stats.artifactTowEfficiency, 0.0, 0.80);
+    stats.oxygenSeconds = std::clamp(stats.oxygenSeconds, 0.0, tuning::mining::maximumOxygenSeconds);
     stats.heatCoolingPerSecond *= tuning::mining::heatCoolingMultiplier;
     return stats;
 }
@@ -2946,8 +3225,9 @@ int miningDroneRepairCost(const MiningRunState& mining)
 bool repairMiningDrill(GameState& state)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
     const int cost = miningDrillRepairCost(mining);
-    if (!mining.active || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
+    if (!mining.active || !arenaRules.mechanics.fieldRepairs || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
         return false;
     }
     mining.drillIntegrity = 1.0;
@@ -2958,8 +3238,9 @@ bool repairMiningDrill(GameState& state)
 bool repairMiningDrone(GameState& state)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
     const int cost = miningDroneRepairCost(mining);
-    if (!mining.active || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
+    if (!mining.active || !arenaRules.mechanics.fieldRepairs || !miningAtReturnZone(mining) || !spendMiningRepairMaterials(mining, cost)) {
         return false;
     }
     mining.droneHealth = 1.0;
@@ -2989,6 +3270,10 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
         : 0.0;
     load.currentLoad = static_cast<double>(miningCarriedCargo(mining)) + towWeight;
     load.freeBuffer = tuning::mining::baseCarryBufferCargo + stats.storage;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
+    if (!arenaRules.mechanics.cargoDrag) {
+        return load;
+    }
     load.burden = std::max(0.0, load.currentLoad - load.freeBuffer);
     const double penaltyScale = std::clamp(1.0 - stats.engineEfficiency, 0.20, 1.0);
     load.speedMultiplier = std::clamp(
@@ -3028,7 +3313,27 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
     return true;
 }
 
-MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width, int height)
+void applyMiningTerrainToughnessScale(MiningTerrain& terrain, double scale)
+{
+    const double clampedScale = std::max(0.01, scale);
+    for (MiningCell& cell : terrain.cells) {
+        if (cell.material == MiningCellMaterial::Empty || cell.material == MiningCellMaterial::Bedrock) {
+            continue;
+        }
+        const double toughness = miningMaterialToughness(cell.material, 0) * clampedScale;
+        cell.maxToughness = toughness;
+        cell.remainingToughness = toughness;
+    }
+}
+
+MiningTerrain generateMiningTerrainForRules(
+    const GameState& state,
+    const Destination& destination,
+    SurfaceSiteProfile profile,
+    int depthZone,
+    int width,
+    int height,
+    const MiningArenaRules& rules)
 {
     MiningTerrain terrain;
     terrain.width = std::max(8, width);
@@ -3038,8 +3343,9 @@ MiningTerrain generateMiningTerrain(const GameState& state, const Destination& d
     for (int y = 0; y < terrain.height; ++y) {
         for (int x = 0; x < terrain.width; ++x) {
             const MiningCellMaterial material = generatedMaterial(
-                state,
+                rules.request.seed,
                 destination,
+                rules,
                 profile,
                 x,
                 y,
@@ -3047,19 +3353,49 @@ MiningTerrain generateMiningTerrain(const GameState& state, const Destination& d
                 terrain.width,
                 terrain.height);
             const MiningElementalAffinity affinity = material == MiningCellMaterial::HazardPocket
-                ? elementalAffinityForLane(destination, profile, terrain.depthZone, x / 4)
+                ? elementalAffinityForLane(rules, profile, x / 4)
                 : MiningElementalAffinity::None;
             terrain.cells.push_back(makeCell(material, terrain.depthZone, affinity));
         }
     }
-    applyHostileTunnelNetwork(terrain, state, destination, profile);
+    applyHostileTunnelNetwork(terrain, state, destination, profile, rules);
     const int chunksX = (terrain.width + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
     const int chunksY = (terrain.height + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
     terrain.dirtyChunks.assign(static_cast<std::size_t>(chunksX * chunksY), 1);
     return terrain;
 }
 
-void applySurfaceProspects(MiningTerrain& terrain, const SurfaceExpeditionState& expedition)
+MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width, int height)
+{
+    const MiningCampaignProgression progression = resolveCampaignMiningProgression(
+        state.meta.chapter,
+        destination.id,
+        depthZone,
+        0);
+    const MiningArenaRequest request {
+        progression.act,
+        progression.difficulty,
+        deriveMiningArenaSeed(state.seed, destination.id, 0, depthZone)
+    };
+    const MiningArenaRules rules = resolveMiningArenaRules(request);
+    MiningTerrain terrain = generateMiningTerrainForRules(
+        state,
+        destination,
+        profile,
+        depthZone,
+        width,
+        height,
+        rules);
+    normalizeRichTerrainDeposits(terrain, rules, rules.rewardBudget, 0, 0);
+    applyMiningTerrainToughnessScale(terrain, rules.terrainToughnessScale);
+    return terrain;
+}
+
+void applySurfaceProspects(
+    MiningTerrain& terrain,
+    const SurfaceExpeditionState& expedition,
+    const MiningArenaRules& rules,
+    const MiningRewardBudget& budget)
 {
     std::vector<std::pair<int, int>> occupied;
     auto alreadyOccupied = [&](int x, int y) {
@@ -3094,12 +3430,135 @@ void applySurfaceProspects(MiningTerrain& terrain, const SurfaceExpeditionState&
     const int shallowBand = std::max(7, terrain.height / 5);
     const int midBand = std::max(10, terrain.height / 2);
     const int deepBand = std::max(12, (terrain.height * 2) / 3);
-    stampProspect(MiningCellMaterial::CommonOre, expedition.prospectMaterials.common, shallowBand, 2, MiningCellFeature::BranchTunnel);
-    stampProspect(MiningCellMaterial::RareOre, expedition.prospectMaterials.rare, midBand, 2, MiningCellFeature::TreasureVault);
-    stampProspect(MiningCellMaterial::ExoticVein, expedition.prospectMaterials.exotic, deepBand, 2, MiningCellFeature::TreasureVault);
+    const int deniedRare = std::max(0, expedition.prospectMaterials.rare - budget.rareCap);
+    const int deniedExotic = std::max(0, expedition.prospectMaterials.exotic - budget.exoticCap);
+    const MiningCellFeature branchFeature = miningRoomFeatureAllowed(rules, MiningCellFeature::BranchTunnel)
+        ? MiningCellFeature::BranchTunnel
+        : MiningCellFeature::MainTunnel;
+    stampProspect(
+        MiningCellMaterial::CommonOre,
+        expedition.prospectMaterials.common + deniedRare + deniedExotic,
+        shallowBand,
+        2,
+        branchFeature);
+    if (miningMaterialAllowed(rules, MiningCellMaterial::RareOre)) {
+        stampProspect(MiningCellMaterial::RareOre, std::min(expedition.prospectMaterials.rare, budget.rareCap), midBand, 2, branchFeature);
+    }
+    if (miningMaterialAllowed(rules, MiningCellMaterial::ExoticVein)) {
+        stampProspect(MiningCellMaterial::ExoticVein, std::min(expedition.prospectMaterials.exotic, budget.exoticCap), deepBand, 2, branchFeature);
+    }
+}
+
+void normalizeRichTerrainDeposits(
+    MiningTerrain& terrain,
+    const MiningArenaRules& rules,
+    const MiningRewardBudget& budget,
+    int reservedRareGuarantees,
+    int reservedExoticGuarantees)
+{
+    int rareKept = 0;
+    int exoticKept = 0;
+    const int rareLimit = std::max(0, budget.rareCap - reservedRareGuarantees);
+    const int exoticLimit = std::max(0, budget.exoticCap - reservedExoticGuarantees);
+    for (MiningCell& cell : terrain.cells) {
+        if (cell.material == MiningCellMaterial::RareOre) {
+            const bool keep = miningMaterialAllowed(rules, cell.material) && rareKept < rareLimit;
+            if (keep) {
+                ++rareKept;
+            } else {
+                const MiningCellFeature feature = cell.feature;
+                const MiningEnemyType enemy = cell.enemy;
+                cell = makeCell(MiningCellMaterial::CommonOre, terrain.depthZone);
+                cell.feature = feature;
+                cell.enemy = enemy;
+            }
+        } else if (cell.material == MiningCellMaterial::ExoticVein) {
+            const bool keep = miningMaterialAllowed(rules, cell.material) && exoticKept < exoticLimit;
+            if (keep) {
+                ++exoticKept;
+            } else {
+                const MiningCellFeature feature = cell.feature;
+                const MiningEnemyType enemy = cell.enemy;
+                cell = makeCell(MiningCellMaterial::CommonOre, terrain.depthZone);
+                cell.feature = feature;
+                cell.enemy = enemy;
+            }
+        }
+    }
+}
+
+void stampGuaranteedRichDeposits(
+    MiningTerrain& terrain,
+    const MiningArenaRules& rules,
+    int rareGuarantees,
+    int exoticGuarantees)
+{
+    auto stampGuarantees = [&](MiningCellMaterial material, int count, int laneOffset) {
+        if (!miningMaterialAllowed(rules, material)) {
+            return;
+        }
+        for (int index = 0; index < count; ++index) {
+            const int lane = laneOffset + index;
+            const int side = unitHash(rules.request.seed, lane, rules.request.difficulty, 0, 0x47554152414E5445ULL) < 0.5 ? -1 : 1;
+            const int x = std::clamp(terrain.width / 2 + side * (2 + lane % 3), 2, terrain.width - 3);
+            const int y = std::clamp(7 + lane * 2, 5, terrain.height - 3);
+            const MiningCellFeature feature = miningRoomFeatureAllowed(rules, MiningCellFeature::BranchTunnel)
+                ? MiningCellFeature::BranchTunnel
+                : MiningCellFeature::MainTunnel;
+            stampMiningCell(terrain, x, y, terrain.depthZone, feature, MiningEnemyType::None, material);
+            if (MiningCell* cell = miningCellAt(terrain, x, y)) {
+                cell->revealed = true;
+            }
+            markDirty(terrain, x, y);
+        }
+    };
+
+    stampGuarantees(MiningCellMaterial::RareOre, rareGuarantees, 0);
+    stampGuarantees(MiningCellMaterial::ExoticVein, exoticGuarantees, rareGuarantees + 2);
+}
+
+int miningDestinationHistoryValue(
+    const std::vector<int>& history,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    for (std::size_t index = 0; index < catalog.destinations.size(); ++index) {
+        if (catalog.destinations[index].id == destinationId) {
+            return index < history.size() ? std::max(0, history[index]) : 0;
+        }
+    }
+    return 0;
 }
 
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active) {
+        return {};
+    }
+    const int completedHostileSorties = miningDestinationHistoryValue(
+        state.meta.destinationSuccesses,
+        catalog,
+        expedition.destinationId);
+    const int landingOrdinal = miningDestinationHistoryValue(
+        state.meta.destinationLandings,
+        catalog,
+        expedition.destinationId);
+    const MiningArenaRequest request = campaignMiningArenaRequest(
+        state.meta.chapter,
+        expedition.destinationId,
+        expedition.depth,
+        completedHostileSorties,
+        state.seed,
+        landingOrdinal);
+    return startMiningRun(state, catalog, request, true);
+}
+
+SurfaceActionOutcome startMiningRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    const MiningArenaRequest& request,
+    bool progressionCreditEligible)
 {
     SurfaceActionOutcome outcome;
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
@@ -3126,8 +3585,27 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     outcome.fuelDelta = -1;
     outcome.message = text::fuel::miningStartedStatus(arkKnown);
 
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(request);
+    const bool firstClearFulfilled = progressionCreditEligible && miningFirstClearFulfilled(state.meta, arenaRules);
+    const MiningRewardBudget rewardBudget = effectiveMiningRewardBudget(arenaRules, firstClearFulfilled);
+    const MiningFirstClearProgress& firstClear = miningFirstClearProgress(state.meta, arenaRules.request.act, arenaRules.band);
+    const int rareGuarantees = progressionCreditEligible
+        ? std::max(0, arenaRules.rewardBudget.rareGuarantee - firstClear.rareBanked)
+        : arenaRules.rewardBudget.rareGuarantee;
+    const int exoticGuarantees = progressionCreditEligible
+        ? std::max(0, arenaRules.rewardBudget.exoticGuarantee - firstClear.exoticBanked)
+        : arenaRules.rewardBudget.exoticGuarantee;
+
     MiningRunState mining;
     mining.active = true;
+    mining.arenaMetadata = {
+        arenaRules.request.act,
+        arenaRules.request.difficulty,
+        arenaRules.request.seed,
+        miningArenaRulesVersion
+    };
+    mining.rewardBudget = rewardBudget;
+    mining.progressionCreditEligible = progressionCreditEligible;
     mining.destinationId = expedition.destinationId;
     mining.siteProfile = expedition.siteProfile;
     mining.depthZone = expedition.depth;
@@ -3135,14 +3613,31 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.oxygenSeconds = stats.oxygenSeconds;
     mining.fuelCycleProgress = 0.0;
     mining.fuelSpent = 1;
-    mining.terrain = generateMiningTerrain(state, *destination, expedition.siteProfile, mining.depthZone, stats.terrainWidth, stats.terrainHeight);
-    applySurfaceProspects(mining.terrain, expedition);
-    const bool forcedArtifact = expedition.prospectArtifacts > 0;
-    placeMiningArtifact(state, mining, *destination, forcedArtifact, forcedArtifact);
+    mining.terrain = generateMiningTerrainForRules(
+        state,
+        *destination,
+        expedition.siteProfile,
+        mining.depthZone,
+        stats.terrainWidth,
+        stats.terrainHeight,
+        arenaRules);
+    applySurfaceProspects(mining.terrain, expedition, arenaRules, rewardBudget);
+    const bool forcedArtifact = arenaRules.mechanics.artifactRecovery && expedition.prospectArtifacts > 0;
+    if (arenaRules.mechanics.artifactRecovery) {
+        placeMiningArtifact(state, mining, *destination, forcedArtifact, forcedArtifact);
+    }
+    normalizeRichTerrainDeposits(
+        mining.terrain,
+        arenaRules,
+        rewardBudget,
+        rareGuarantees,
+        exoticGuarantees);
+    stampGuaranteedRichDeposits(mining.terrain, arenaRules, rareGuarantees, exoticGuarantees);
+    applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
     expedition.prospectMaterials = {};
     expedition.prospectArtifacts = 0;
     expedition.depthProspects.clear();
-    spawnMiningEnemies(mining, *destination);
+    spawnMiningEnemies(mining, *destination, arenaRules);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.returnZoneX = miningShipStartX(mining);
@@ -3155,6 +3650,11 @@ SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& cata
     mining.hullDirY = 1.0;
     revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
+    if (!arenaRules.mechanics.fogAndScanner) {
+        for (MiningCell& cell : mining.terrain.cells) {
+            cell.revealed = true;
+        }
+    }
     refreshTargetCell(mining);
     state.run.mining = std::move(mining);
     ensureMiningMiniDroneAgents(state, catalog);
@@ -3167,6 +3667,12 @@ void setMiningMove(GameState& state, double xAxis, double yAxis)
 {
     MiningRunState& mining = state.run.mining;
     if (!mining.active) {
+        return;
+    }
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
+    if (!arenaRules.mechanics.movement) {
+        mining.moveX = 0.0;
+        mining.moveY = 0.0;
         return;
     }
     mining.moveX = std::clamp(xAxis, -1.0, 1.0);
@@ -3193,7 +3699,8 @@ void setMiningAim(GameState& state, double, double)
 void setMiningDrilling(GameState& state, bool drilling)
 {
     if (state.run.mining.active) {
-        state.run.mining.drilling = drilling && state.run.mining.drillIntegrity > 0.0 && !state.run.mining.failurePending;
+        const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(state.run.mining.arenaMetadata));
+        state.run.mining.drilling = arenaRules.mechanics.drilling && drilling && state.run.mining.drillIntegrity > 0.0 && !state.run.mining.failurePending;
     }
 }
 
@@ -3201,7 +3708,8 @@ void toggleMiningTether(GameState& state)
 {
     MiningRunState& mining = state.run.mining;
     MiningArtifactObject& artifact = mining.artifact;
-    if (!mining.active || !artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
+    if (!mining.active || !arenaRules.mechanics.artifactTethering || !artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
         return;
     }
     if (artifact.tethered) {
@@ -3227,6 +3735,10 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
     if (!mining.active) {
+        return;
+    }
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
+    if (!arenaRules.mechanics.fogAndScanner) {
         return;
     }
     ensureMiningMiniDroneAgents(state, catalog);
@@ -3345,6 +3857,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return;
     }
     const MiningDrillStats stats = miningDrillStats(state, catalog);
+    const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
     const MiningLoadStats loadStats = miningLoadStats(state, catalog);
     auto finishAtReturnZone = [&]() {
         if (!miningAtReturnZone(mining)) {
@@ -3357,8 +3870,10 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return outcome.applied;
     };
     mining.elapsedSeconds += dt;
-    mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
-    if (mining.oxygenSeconds <= 0.0) {
+    if (arenaRules.mechanics.oxygenAndFuel) {
+        mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
+    }
+    if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds <= 0.0) {
         if (finishAtReturnZone()) {
             return;
         }
@@ -3371,9 +3886,11 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     updateMiningMiniDroneAgents(state, catalog, stats, dt);
     applyMiningEnemyCombat(state, catalog, dt);
-    mining.fuelCycleProgress +=
-        dt * tuning::mining::fuelCycleProgressPerSecond * loadStats.fuelConsumptionMultiplier;
-    if (mining.oxygenSeconds > 0.0) {
+    if (arenaRules.mechanics.oxygenAndFuel) {
+        mining.fuelCycleProgress +=
+            dt * tuning::mining::fuelCycleProgressPerSecond * loadStats.fuelConsumptionMultiplier;
+    }
+    if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds > 0.0) {
         while (mining.fuelCycleProgress >= 1.0) {
             if (state.run.surfaceExpedition.sharedFuel <= 0) {
                 if (finishAtReturnZone()) {
@@ -3438,7 +3955,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
                         ? proposed
                         : contactLimitedPosition(position, position + (proposed - position) * resistance, xAxis ? cellX : cellY);
                     position = std::clamp(limited, 1.0, xAxis ? static_cast<double>(mining.terrain.width - 2) : static_cast<double>(mining.terrain.height - 2));
-                } else {
+                } else if (arenaRules.mechanics.contactRebound) {
                     triggerHardContactBounce(mining, dirX, dirY, stats.hardRockBounceRelief);
                 }
             }
@@ -3476,10 +3993,16 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             const double dy = mining.droneY - enemy.y;
             return dx * dx + dy * dy <= enemy.effectRadius * enemy.effectRadius;
         });
-        if (!externalThermalLoad) {
+        if (arenaRules.mechanics.drillHeat && !externalThermalLoad) {
             mining.drillHeat = std::max(0.0, mining.drillHeat - stats.heatCoolingPerSecond * dt);
         }
     }
+    const MiningElementalAffinity activeHazard = applyEnvironmentalHazardExposure(
+        state,
+        catalog,
+        arenaRules,
+        drillTouchesTerrain,
+        dt);
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
     updateMiningArtifact(state, dt);
@@ -3487,6 +4010,24 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         state.statusLine = std::string(text::status::miningStowed);
     } else if (!miningAtReturnZone(mining) && miningCarriedCargo(mining) > 0) {
         state.statusLine = std::string(text::status::miningReturnToShip);
+    }
+    if (activeHazard != MiningElementalAffinity::None && mining.oxygenSeconds > 0.0) {
+        switch (activeHazard) {
+        case MiningElementalAffinity::Thermal:
+            state.statusLine = std::string(text::status::miningThermalHazard);
+            break;
+        case MiningElementalAffinity::Cryo:
+            state.statusLine = std::string(text::status::miningCryoHazard);
+            break;
+        case MiningElementalAffinity::Toxic:
+            state.statusLine = std::string(text::status::miningToxicHazard);
+            break;
+        case MiningElementalAffinity::Radiation:
+            state.statusLine = std::string(text::status::miningRadiationHazard);
+            break;
+        case MiningElementalAffinity::None:
+            break;
+        }
     }
     refreshTargetCell(mining);
 
@@ -3540,6 +4081,10 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
 
     addMiningMaterials(expedition.temporaryMaterials, mining.stowedMaterials);
+    expedition.bankedMiningArenaValid = true;
+    expedition.bankedMiningProgressionEligible = mining.progressionCreditEligible;
+    expedition.bankedMiningArenaMetadata = mining.arenaMetadata;
+    expedition.bankedMiningMaterials = mining.stowedMaterials;
     expedition.temporaryArtifacts.insert(expedition.temporaryArtifacts.end(), mining.stowedArtifacts.begin(), mining.stowedArtifacts.end());
     expedition.cargo += mining.stowedCargo;
     expedition.depth = std::max(expedition.depth, mining.depthZone);

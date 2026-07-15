@@ -1,6 +1,7 @@
 #include "core/SaveData.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveSchema.h"
@@ -10,6 +11,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <sstream>
 
 namespace rocket {
@@ -508,6 +510,206 @@ int parseInt(std::string_view text, int fallback)
     int value = fallback;
     std::from_chars(text.data(), text.data() + text.size(), value);
     return value;
+}
+
+std::uint64_t parseU64(std::string_view text, std::uint64_t fallback);
+
+int miningActToInt(MiningAct act)
+{
+    switch (act) {
+    case MiningAct::ActOne:
+        return 1;
+    case MiningAct::ActTwo:
+        return 2;
+    case MiningAct::ActThree:
+        return 3;
+    }
+    return 1;
+}
+
+MiningAct miningActFromInt(int value)
+{
+    switch (value) {
+    case 2:
+        return MiningAct::ActTwo;
+    case 3:
+        return MiningAct::ActThree;
+    default:
+        return MiningAct::ActOne;
+    }
+}
+
+std::string serializeMiningArenaMetadata(const MiningArenaMetadata& metadata)
+{
+    return std::to_string(miningActToInt(metadata.act)) + std::string(1, save_schema::crewFieldDelimiter)
+        + std::to_string(metadata.difficulty) + std::string(1, save_schema::crewFieldDelimiter)
+        + std::to_string(metadata.seed) + std::string(1, save_schema::crewFieldDelimiter)
+        + std::to_string(metadata.rulesVersion);
+}
+
+MiningArenaMetadata parseMiningArenaMetadata(std::string_view text)
+{
+    MiningArenaMetadata metadata;
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        metadata.act = miningActFromInt(parseInt(fields[0], 1));
+    }
+    if (fields.size() > 1) {
+        metadata.difficulty = std::clamp(parseInt(fields[1], 1), 1, 10);
+    }
+    if (fields.size() > 2) {
+        metadata.seed = parseU64(fields[2], 0);
+    }
+    if (fields.size() > 3) {
+        metadata.rulesVersion = std::max(0, parseInt(fields[3], 0));
+    }
+    return metadata;
+}
+
+std::string serializeSurfaceBankedMiningArena(const SurfaceExpeditionState& expedition)
+{
+    const MiningArenaMetadata& metadata = expedition.bankedMiningArenaMetadata;
+    const MaterialInventory& materials = expedition.bankedMiningMaterials;
+    std::ostringstream out;
+    out << (expedition.bankedMiningArenaValid ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (expedition.bankedMiningProgressionEligible ? 1 : 0)
+        << save_schema::crewFieldDelimiter << miningActToInt(metadata.act)
+        << save_schema::crewFieldDelimiter << metadata.difficulty
+        << save_schema::crewFieldDelimiter << metadata.seed
+        << save_schema::crewFieldDelimiter << metadata.rulesVersion
+        << save_schema::crewFieldDelimiter << materials.common
+        << save_schema::crewFieldDelimiter << materials.rare
+        << save_schema::crewFieldDelimiter << materials.exotic;
+    return out.str();
+}
+
+void parseSurfaceBankedMiningArena(std::string_view text, SurfaceExpeditionState& expedition)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        expedition.bankedMiningArenaValid = parseInt(fields[0], 0) != 0;
+    }
+    if (fields.size() > 1) {
+        expedition.bankedMiningProgressionEligible = parseInt(fields[1], 0) != 0;
+    }
+    if (fields.size() > 2) {
+        expedition.bankedMiningArenaMetadata.act = miningActFromInt(parseInt(fields[2], 1));
+    }
+    if (fields.size() > 3) {
+        expedition.bankedMiningArenaMetadata.difficulty = std::clamp(parseInt(fields[3], 1), 1, 10);
+    }
+    if (fields.size() > 4) {
+        expedition.bankedMiningArenaMetadata.seed = parseU64(fields[4], 0);
+    }
+    if (fields.size() > 5) {
+        expedition.bankedMiningArenaMetadata.rulesVersion = std::max(0, parseInt(fields[5], 0));
+    }
+    if (fields.size() > 6) {
+        expedition.bankedMiningMaterials.common = std::max(0, parseInt(fields[6], 0));
+    }
+    if (fields.size() > 7) {
+        expedition.bankedMiningMaterials.rare = std::max(0, parseInt(fields[7], 0));
+    }
+    if (fields.size() > 8) {
+        expedition.bankedMiningMaterials.exotic = std::max(0, parseInt(fields[8], 0));
+    }
+}
+
+std::string serializeMiningRewardLedger(const MiningRunState& mining)
+{
+    std::ostringstream out;
+    out << mining.rewardBudget.rareGuarantee
+        << save_schema::crewFieldDelimiter << mining.rewardBudget.exoticGuarantee
+        << save_schema::crewFieldDelimiter << mining.rewardBudget.rareCap
+        << save_schema::crewFieldDelimiter << mining.rewardBudget.exoticCap
+        << save_schema::crewFieldDelimiter << mining.richRewardsAwarded.common
+        << save_schema::crewFieldDelimiter << mining.richRewardsAwarded.rare
+        << save_schema::crewFieldDelimiter << mining.richRewardsAwarded.exotic
+        << save_schema::crewFieldDelimiter << (mining.progressionCreditEligible ? 1 : 0);
+    return out.str();
+}
+
+void parseMiningRewardLedger(std::string_view text, MiningRunState& mining)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        mining.rewardBudget.rareGuarantee = std::max(0, parseInt(fields[0], 0));
+    }
+    if (fields.size() > 1) {
+        mining.rewardBudget.exoticGuarantee = std::max(0, parseInt(fields[1], 0));
+    }
+    if (fields.size() > 2) {
+        mining.rewardBudget.rareCap = std::max(0, parseInt(fields[2], 0));
+    }
+    if (fields.size() > 3) {
+        mining.rewardBudget.exoticCap = std::max(0, parseInt(fields[3], 0));
+    }
+    if (fields.size() > 4) {
+        mining.richRewardsAwarded.common = std::max(0, parseInt(fields[4], 0));
+    }
+    if (fields.size() > 5) {
+        mining.richRewardsAwarded.rare = std::max(0, parseInt(fields[5], 0));
+    }
+    if (fields.size() > 6) {
+        mining.richRewardsAwarded.exotic = std::max(0, parseInt(fields[6], 0));
+    }
+    if (fields.size() > 7) {
+        mining.progressionCreditEligible = parseInt(fields[7], 1) != 0;
+    }
+}
+
+std::string serializeMiningFirstClearProgress(
+    const std::array<MiningFirstClearProgress, miningFirstClearProgressCount>& progress)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < progress.size(); ++i) {
+        if (i > 0) {
+            out << save_schema::listDelimiter;
+        }
+        out << std::max(0, progress[i].rareBanked)
+            << save_schema::crewFieldDelimiter
+            << std::max(0, progress[i].exoticBanked);
+    }
+    return out.str();
+}
+
+std::array<MiningFirstClearProgress, miningFirstClearProgressCount> parseMiningFirstClearProgress(
+    std::string_view text)
+{
+    std::array<MiningFirstClearProgress, miningFirstClearProgressCount> progress {};
+    const std::vector<std::string> records = split(text, save_schema::listDelimiter);
+    const std::size_t count = std::min(progress.size(), records.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::vector<std::string> fields = split(records[i], save_schema::crewFieldDelimiter);
+        if (!fields.empty()) {
+            progress[i].rareBanked = std::max(0, parseInt(fields[0], 0));
+        }
+        if (fields.size() > 1) {
+            progress[i].exoticBanked = std::max(0, parseInt(fields[1], 0));
+        }
+    }
+    return progress;
+}
+
+bool parseMiningProgressionField(SaveData& save, std::string_view key, std::string_view value)
+{
+    if (key == save_schema::field::surfaceBankedMiningArena) {
+        parseSurfaceBankedMiningArena(value, save.surfaceExpedition);
+        return true;
+    }
+    if (key == save_schema::field::miningArenaMetadata) {
+        save.mining.arenaMetadata = parseMiningArenaMetadata(value);
+        return true;
+    }
+    if (key == save_schema::field::miningRewardLedger) {
+        parseMiningRewardLedger(value, save.mining);
+        return true;
+    }
+    if (key == save_schema::field::miningFirstClearProgress) {
+        save.miningFirstClearProgress = parseMiningFirstClearProgress(value);
+        return true;
+    }
+    return false;
 }
 
 std::uint64_t parseU64(std::string_view text, std::uint64_t fallback)
@@ -1329,6 +1531,7 @@ SaveData captureSaveData(const GameState& state)
     save.equippedDroneIds = state.meta.equippedDroneIds;
     save.droneUpgrades = state.meta.droneUpgrades;
     save.artifacts = state.meta.artifacts;
+    save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
     save.astronautsLost = state.meta.astronautsLost;
@@ -1467,6 +1670,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.screen = Screen::Hangar;
     }
     state.meta.artifacts = save.artifacts;
+    state.meta.miningFirstClearProgress = save.miningFirstClearProgress;
     state.meta.furthestTier = save.furthestTier;
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
@@ -1488,6 +1692,65 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.destinationLandings = save.destinationLandings;
     state.meta.memorials = save.memorials;
     state.meta.famousLaunches = save.famousLaunches;
+    if (state.run.mining.active && state.run.mining.arenaMetadata.rulesVersion <= 0) {
+        const auto destination = std::find_if(catalog.destinations.begin(), catalog.destinations.end(), [&](const Destination& candidate) {
+            return candidate.id == state.run.mining.destinationId;
+        });
+        const int destinationIndex = destination == catalog.destinations.end()
+            ? -1
+            : static_cast<int>(std::distance(catalog.destinations.begin(), destination));
+        const int completedHostileSorties = destinationIndex >= 0
+            && static_cast<std::size_t>(destinationIndex) < state.meta.destinationSuccesses.size()
+            ? state.meta.destinationSuccesses[static_cast<std::size_t>(destinationIndex)]
+            : 0;
+        const int landingOrdinal = destinationIndex >= 0
+            && static_cast<std::size_t>(destinationIndex) < state.meta.destinationLandings.size()
+            ? state.meta.destinationLandings[static_cast<std::size_t>(destinationIndex)]
+            : 0;
+        const MiningArenaRequest request = campaignMiningArenaRequest(
+            state.meta.chapter,
+            state.run.mining.destinationId,
+            state.run.surfaceExpedition.depth,
+            completedHostileSorties,
+            state.seed,
+            landingOrdinal);
+        state.run.mining.arenaMetadata = {
+            request.act,
+            request.difficulty,
+            request.seed,
+            miningArenaRulesVersion,
+        };
+    }
+    if (state.run.mining.active) {
+        MiningRunState& mining = state.run.mining;
+        const MiningArenaRequest request {
+            mining.arenaMetadata.act,
+            mining.arenaMetadata.difficulty,
+            mining.arenaMetadata.seed
+        };
+        const MiningArenaRules rules = resolveMiningArenaRules(request);
+        const MiningRewardBudget expectedBudget = effectiveMiningRewardBudget(
+            rules,
+            miningFirstClearFulfilled(state.meta, rules));
+        const bool missingLedger =
+            mining.rewardBudget.rareGuarantee == 0 &&
+            mining.rewardBudget.exoticGuarantee == 0 &&
+            mining.rewardBudget.rareCap == 0 &&
+            mining.rewardBudget.exoticCap == 0 &&
+            (expectedBudget.rareGuarantee > 0 || expectedBudget.exoticGuarantee > 0 ||
+                expectedBudget.rareCap > 0 || expectedBudget.exoticCap > 0);
+        if (missingLedger) {
+            mining.rewardBudget = expectedBudget;
+            int rareAwarded = std::max(0, mining.temporaryMaterials.rare) + std::max(0, mining.stowedMaterials.rare);
+            int exoticAwarded = std::max(0, mining.temporaryMaterials.exotic) + std::max(0, mining.stowedMaterials.exotic);
+            for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
+                rareAwarded += std::max(0, agent.haulMaterials.rare);
+                exoticAwarded += std::max(0, agent.haulMaterials.exotic);
+            }
+            mining.richRewardsAwarded.rare = std::min(mining.rewardBudget.rareCap, rareAwarded);
+            mining.richRewardsAwarded.exotic = std::min(mining.rewardBudget.exoticCap, exoticAwarded);
+        }
+    }
     if (!save.crew.empty()) {
         for (auto& astronaut : state.run.crew) {
             const auto found = std::find_if(save.crew.begin(), save.crew.end(), [&](const Astronaut& savedAstronaut) {
@@ -1574,12 +1837,15 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
+    writeField(out, save_schema::field::surfaceBankedMiningArena, serializeSurfaceBankedMiningArena(save.surfaceExpedition));
     writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
     writeField(out, save_schema::field::surfaceUpgrades, join(save.surfaceUpgradeIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::surfaceUpgradeOffers, join(arrayToVector(save.surfaceExpedition.surfaceUpgradeOfferIds), save_schema::listDelimiter));
     writeField(out, save_schema::field::surfaceUpgradeOfferAvailable, save.surfaceExpedition.surfaceUpgradeOfferAvailable ? 1 : 0);
     writeField(out, save_schema::field::surfaceUpgradeOffersSeen, save.surfaceExpedition.surfaceUpgradeOffersSeen);
     writeField(out, save_schema::field::miningActive, save.mining.active ? 1 : 0);
+    writeField(out, save_schema::field::miningArenaMetadata, serializeMiningArenaMetadata(save.mining.arenaMetadata));
+    writeField(out, save_schema::field::miningRewardLedger, serializeMiningRewardLedger(save.mining));
     writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
@@ -1627,6 +1893,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::equippedDrones, join(save.equippedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
+    writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
     writeField(out, save_schema::field::furthestTier, save.furthestTier);
     writeField(out, save_schema::field::shipsLost, save.shipsLost);
     writeField(out, save_schema::field::astronautsLost, save.astronautsLost);
@@ -1669,6 +1936,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
 
         const std::string_view key = line.substr(0, equals);
         const std::string_view value = line.substr(equals + 1);
+
+        if (parseMiningProgressionField(save, key, value)) {
+            continue;
+        }
 
         if (key == save_schema::field::version) {
             save.version = parseInt(value, save.version);

@@ -2236,6 +2236,7 @@ void miningDepletionAtShipGracefullyEndsRun()
     auto startParkedAtShip = [&catalog](GameState& state, int seed) {
         state = createNewGame(catalog, seed);
         state.run.destinationIndex = 2;
+        state.meta.chapter = GameChapter::RedFrontier;
         startSurfaceExpedition(state, catalog);
         prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "mining run should start for depletion-at-ship test");
@@ -2336,6 +2337,28 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     ensureDroneBayState(restored, catalog);
     require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::attackDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add attack drones to the owned pool");
     require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::defenseDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add defense drones to the owned pool");
+    const auto attackIndex = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const MiniDrone& drone) {
+        return drone.role == MiniDroneRole::Attack;
+    });
+    require(attackIndex != catalog.miniDrones.end(), "default content should include an Attack drone");
+    const int attackCatalogIndex = static_cast<int>(std::distance(catalog.miniDrones.begin(), attackIndex));
+    restored.meta.materials = {.common = 99, .rare = 99, .exotic = 99};
+    require(!canUpgradeMiniDrone(restored, catalog, attackCatalogIndex), "Arkfall combat drones should stay at Mk I until perimeter coordination is researched");
+    restored.meta.droneBaySlots = std::max(restored.meta.droneBaySlots, 2);
+    restored.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    const MiniDroneLoadoutEffects uncoordinated = miniDroneLoadoutEffects(restored, catalog);
+    require(std::find(uncoordinated.synergyNames.begin(), uncoordinated.synergyNames.end(), "Killbox Screen") == uncoordinated.synergyNames.end(),
+        "Arkfall Mk I combat roles should not activate advanced formations before research");
+    restored.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
+    require(canUpgradeMiniDrone(restored, catalog, attackCatalogIndex), "Perimeter Drone Network research should unlock combat-drone tuning");
+    const MiniDroneLoadoutEffects coordinated = miniDroneLoadoutEffects(restored, catalog);
+    require(std::find(coordinated.synergyNames.begin(), coordinated.synergyNames.end(), "Killbox Screen") != coordinated.synergyNames.end(),
+        "perimeter coordination should activate named combat formations");
+
+    const ResearchProject* perimeterProject = catalog.findResearchProject(content::research::perimeterDroneNetwork);
+    require(perimeterProject != nullptr && perimeterProject->unlockKey == content::unlock::perimeterDrones &&
+            perimeterProject->rewardUnlockKey == content::unlock::perimeterCoordination,
+        "Perimeter Drone Network should consume the Arkfall kit unlock and reward advanced coordination");
 }
 
 void droneOpsPresentationExposesPersistentLoadout()
@@ -2397,6 +2420,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     }), "Drone Ops details should frame combat as passive mini-drone abilities");
 
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(state, catalog);
     drones = droneOpsPresentation(state, catalog);
     const auto attackDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
@@ -2677,6 +2701,7 @@ void enemyContactStartsBeyondSolarSystemAndCanBeMitigated()
 
     GameState nearbyStar = createNewGame(catalog, 1202);
     nearbyStar.run.destinationIndex = 4;
+    nearbyStar.meta.chapter = GameChapter::Arkfall;
     nearbyStar.meta.unlockKeys.push_back(content::unlock::deepSpace);
     startSurfaceExpedition(nearbyStar, catalog);
     nearbyStar.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
@@ -2694,6 +2719,7 @@ void enemyContactStartsBeyondSolarSystemAndCanBeMitigated()
         for (int seed = 1; seed < 8000; ++seed) {
             GameState state = createNewGame(catalog, seed);
             state.run.destinationIndex = 4;
+            state.meta.chapter = GameChapter::Arkfall;
             state.meta.unlockKeys.push_back(content::unlock::deepSpace);
             startSurfaceExpedition(state, catalog);
             state.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
@@ -2710,7 +2736,9 @@ void enemyContactStartsBeyondSolarSystemAndCanBeMitigated()
             require(outcome.eventMessage == std::string(text::status::surfaceEnemyContact), "enemy contact should use shared status text");
             require(state.run.surfaceExpedition.supply == supplyBefore + outcome.supplyDelta, "enemy contact supply delta should match expedition state");
             require(outcome.supplyDelta == -(tuning::research::surveySupplyCost + tuning::research::surfaceEnemySupplyLoss), "enemy contact should consume supply in addition to the action");
-            require(outcome.hazardDelta == tuning::research::surfaceEnemyHazardIncrease, "enemy contact should raise site hazard");
+            const MiningArenaRules contactRules = resolveMiningArenaRules({MiningAct::ActTwo, 1, 0});
+            require(std::abs(outcome.hazardDelta - tuning::research::surfaceEnemyHazardIncrease * std::max(1.0, contactRules.enemyDamageScale)) < 0.000001,
+                "enemy contact hazard should match the upcoming arena's threat scale");
             return true;
         }
         return false;
@@ -2841,7 +2869,9 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.prospectArtifacts = 3;
 
-    require(startMiningRun(state, catalog).applied, "prospected artifact should start a mining run");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92929}, true).applied,
+        "prospected artifact should start a mining run at an artifact-enabled tier");
     require(state.run.mining.artifact.present, "prospected artifact should create one physical artifact object");
     int artifactTiles = 0;
     for (const MiningCell& cell : state.run.mining.terrain.cells) {
@@ -2884,7 +2914,9 @@ void miningArtifactTetherAndDestructionRules()
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.prospectArtifacts = 1;
-    require(startMiningRun(state, catalog).applied, "artifact tether test should start mining");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92930}, true).applied,
+        "artifact tether test should start mining at an artifact-enabled tier");
 
     MiningArtifactObject& artifact = state.run.mining.artifact;
     artifact.revealed = true;
@@ -2974,7 +3006,9 @@ void miningArtifactSaveRoundTrips()
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.prospectArtifacts = 1;
-    require(startMiningRun(state, catalog).applied, "artifact save test should start mining");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92933}, true).applied,
+        "artifact save test should start mining at an artifact-enabled tier");
     state.run.mining.artifact.state = MiningArtifactState::Loose;
     state.run.mining.artifact.tethered = true;
     state.run.mining.artifact.health = 0.64;
@@ -3034,6 +3068,7 @@ void surfacePushMiniGameBanksDepthRoute()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 94201);
+    state.meta.chapter = GameChapter::RedFrontier;
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     Random rng(94202);
@@ -3142,47 +3177,42 @@ void miningTerrainIsDeterministicAndDepthScales()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91919);
-    const Destination& mars = catalog.destinations[2];
-    const MiningTerrain a = generateMiningTerrain(state, mars, SurfaceSiteProfile::OreShelf, 1);
-    const MiningTerrain b = generateMiningTerrain(state, mars, SurfaceSiteProfile::OreShelf, 1);
+    state.meta.chapter = GameChapter::Breakthrough;
+    const Destination& outerPlanets = catalog.destinations[3];
+    const MiningTerrain a = generateMiningTerrain(state, outerPlanets, SurfaceSiteProfile::OreShelf, 1);
+    const MiningTerrain b = generateMiningTerrain(state, outerPlanets, SurfaceSiteProfile::OreShelf, 1);
     require(a.width == tuning::mining::terrainWidth && a.height == tuning::mining::terrainHeight, "mining terrain should use the active-zone dimensions");
     require(a.cells.size() == b.cells.size(), "matching mining terrain should have matching cell counts");
-    int marsHazards = 0;
+    int elementalHazards = 0;
     for (std::size_t i = 0; i < a.cells.size(); ++i) {
         require(a.cells[i].material == b.cells[i].material, "mining terrain generation should be deterministic");
         require(std::abs(a.cells[i].maxToughness - b.cells[i].maxToughness) < 0.000001, "mining toughness should be deterministic");
         require(a.cells[i].hazardAffinity == b.cells[i].hazardAffinity, "mining hazard affinities should be deterministic");
         if (a.cells[i].material == MiningCellMaterial::HazardPocket) {
-            ++marsHazards;
-            require(a.cells[i].hazardAffinity == MiningElementalAffinity::Thermal, "Mars hazards should use the Mk I thermal family");
+            ++elementalHazards;
+            require(a.cells[i].hazardAffinity == MiningElementalAffinity::Thermal || a.cells[i].hazardAffinity == MiningElementalAffinity::Cryo,
+                "Act 1 Pressure hazards should stay in the Thermal/Cryo teaching set");
         }
     }
-    require(marsHazards > 0, "generated Mars terrain should include environmental hazard pockets");
-    require(
-        miningMaterialToughness(MiningCellMaterial::CommonOre, 2) > miningMaterialToughness(MiningCellMaterial::CommonOre, 0),
-        "deeper mining zones should increase terrain toughness");
+    require(elementalHazards > 0, "Act 1 Pressure terrain should include environmental hazard pockets");
+    const MiningArenaRules actOneEarly = resolveMiningArenaRules({MiningAct::ActOne, 1, 1});
+    const MiningArenaRules actOneLate = resolveMiningArenaRules({MiningAct::ActOne, 10, 1});
+    require(actOneLate.terrainToughnessScale > actOneEarly.terrainToughnessScale,
+        "arena difficulty should replace raw depth as the terrain toughness progression");
     require(std::none_of(a.cells.begin(), a.cells.end(), [](const MiningCell& cell) {
-        return cell.feature != MiningCellFeature::None || cell.enemy != MiningEnemyType::None;
-    }), "solar-system mining terrain should not seed hostile tunnel metadata");
+        return cell.enemy != MiningEnemyType::None;
+    }), "Act 1 mining terrain should not seed hostile metadata");
 
-    GameState hostile = state;
-    hostile.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
-    hostile.meta.ark.condition = ArkCondition::DamagedStranded;
-    bool toxicFound = false;
-    bool radiationFound = false;
-    for (std::uint64_t seed = 1; seed <= 96 && (!toxicFound || !radiationFound); ++seed) {
-        hostile.seed = seed;
-        const MiningTerrain toxic = generateMiningTerrain(hostile, catalog.destinations[4], SurfaceSiteProfile::FractureField, 0);
-        toxicFound = toxicFound || std::any_of(toxic.cells.begin(), toxic.cells.end(), [](const MiningCell& cell) {
-            return cell.material == MiningCellMaterial::HazardPocket && cell.hazardAffinity == MiningElementalAffinity::Toxic;
-        });
-        const MiningTerrain radiation = generateMiningTerrain(hostile, catalog.destinations[4], SurfaceSiteProfile::OreShelf, 1);
-        radiationFound = radiationFound || std::any_of(radiation.cells.begin(), radiation.cells.end(), [](const MiningCell& cell) {
-            return cell.material == MiningCellMaterial::HazardPocket && cell.hazardAffinity == MiningElementalAffinity::Radiation;
-        });
+    for (int difficulty = 1; difficulty <= 10; ++difficulty) {
+        const MiningArenaRules actTwo = resolveMiningArenaRules({MiningAct::ActTwo, difficulty, 1});
+        require(!miningAffinityAllowed(actTwo, MiningElementalAffinity::Radiation), "Act 2 should never expose Radiation");
+        require(miningAffinityAllowed(actTwo, MiningElementalAffinity::Toxic) == (difficulty >= 9),
+            "Act 2 Toxic affinity should wait for Mastery levels");
     }
-    require(toxicFound, "Khepri fracture fields should generate Mk II toxic hazards");
-    require(radiationFound, "deep Khepri terrain should generate Mk III radiation hazards");
+    require(!miningAffinityAllowed(resolveMiningArenaRules({MiningAct::ActThree, 1, 1}), MiningElementalAffinity::Radiation),
+        "Act 3 level 1 should introduce Mammals before Radiation");
+    require(miningAffinityAllowed(resolveMiningArenaRules({MiningAct::ActThree, 2, 1}), MiningElementalAffinity::Radiation),
+        "Act 3 level 2 should introduce Radiation");
 }
 
 void hostileMiningTerrainGeneratesPreDugEnemyStructures()
@@ -3191,6 +3221,7 @@ void hostileMiningTerrainGeneratesPreDugEnemyStructures()
     GameState state = createNewGame(catalog, 91920);
     state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.chapter = GameChapter::Ascent;
     const Destination& nearbyGalaxy = catalog.destinations[5];
 
     const MiningTerrain terrain = generateMiningTerrain(state, nearbyGalaxy, SurfaceSiteProfile::OreShelf, 1);
@@ -3239,12 +3270,119 @@ void hostileMiningTerrainGeneratesPreDugEnemyStructures()
     require(miningEnemyTypeName(MiningEnemyType::Elemental) == std::string_view("Elemental monsters"), "mining enemy names should cover elemental threats");
 }
 
+void actBasedMiningEnemyProgressionIsEnforced()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto startArena = [&](MiningAct act, int difficulty, std::uint64_t seed) {
+        GameState state = createNewGame(catalog, seed + 1000);
+        const int destinationIndex = act == MiningAct::ActOne ? 1 : (act == MiningAct::ActTwo ? 4 : 5);
+        state.run.destinationIndex = destinationIndex;
+        state.meta.chapter = act == MiningAct::ActOne
+            ? GameChapter::LunarProgram
+            : (act == MiningAct::ActTwo ? GameChapter::Arkfall : GameChapter::VoidCompass);
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        state.run.surfaceExpedition.sharedFuel = std::max(1, state.run.surfaceExpedition.sharedFuel);
+        const SurfaceActionOutcome outcome = startMiningRun(state, catalog, {act, difficulty, seed}, false);
+        require(outcome.applied, "explicit mining arena requests should start through the shared initializer");
+        return state;
+    };
+
+    for (const MiningAct act : {MiningAct::ActOne, MiningAct::ActTwo, MiningAct::ActThree}) {
+        for (int difficulty = 1; difficulty <= 10; ++difficulty) {
+            GameState state = startArena(act, difficulty, 88000 + static_cast<std::uint64_t>(static_cast<int>(act) * 100 + difficulty));
+            const MiningArenaRules rules = resolveMiningArenaRules({act, difficulty, state.run.mining.arenaMetadata.seed});
+            const int activeEnemies = static_cast<int>(std::count_if(state.run.mining.enemies.begin(), state.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+                return enemy.active;
+            }));
+            const int activeSpawners = static_cast<int>(std::count_if(state.run.mining.enemies.begin(), state.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+                return enemy.active && enemy.type == MiningEnemyType::Spawner;
+            }));
+            require(activeEnemies <= rules.maxActiveEnemies, "initial enemy population should respect the act/level active cap");
+            require(activeSpawners <= rules.maxSpawners, "procedural spawners should respect the act/level spawner cap");
+
+            for (const MiningCell& cell : state.run.mining.terrain.cells) {
+                require(miningRoomFeatureAllowed(rules, cell.feature), "terrain should not stamp a room before its progression gate");
+                if (cell.enemy != MiningEnemyType::None) {
+                    require(miningEnemyAllowed(rules, cell.enemy), "terrain should not stamp an enemy family before its progression gate");
+                }
+                if (cell.hazardAffinity != MiningElementalAffinity::None) {
+                    require(miningAffinityAllowed(rules, cell.hazardAffinity), "terrain should not stamp an affinity before its progression gate");
+                }
+            }
+            for (const MiningEnemy& enemy : state.run.mining.enemies) {
+                require(miningEnemyAllowed(rules, enemy.type), "spawned enemies should come from the resolved roster");
+                if (enemy.affinity != MiningElementalAffinity::None) {
+                    require(miningAffinityAllowed(rules, enemy.affinity), "spawned Elementals should use only resolved affinities");
+                }
+            }
+
+            if (act == MiningAct::ActOne) {
+                require(state.run.mining.enemies.empty(), "Act 1 should never spawn combat encounters");
+            }
+            if (act == MiningAct::ActTwo) {
+                require(std::none_of(state.run.mining.enemies.begin(), state.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+                    return enemy.type == MiningEnemyType::Mammal || enemy.affinity == MiningElementalAffinity::Radiation;
+                }), "Act 2 should exclude Mammals and Radiation");
+                require(std::none_of(state.run.mining.terrain.cells.begin(), state.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
+                    return cell.feature == MiningCellFeature::BossChamber || cell.enemy == MiningEnemyType::Mammal || cell.hazardAffinity == MiningElementalAffinity::Radiation;
+                }), "Act 2 terrain should exclude boss chambers, Mammals, and Radiation");
+                if (difficulty <= 3) {
+                    require(std::all_of(state.run.mining.enemies.begin(), state.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+                        return enemy.type == MiningEnemyType::Ant;
+                    }), "Act 2 Learn should contain only Ant melee contacts");
+                }
+                if (difficulty < 10) {
+                    require(activeSpawners == 0, "Act 2 spawners should wait until level 10");
+                }
+            }
+            if (act == MiningAct::ActThree && difficulty < 7) {
+                require(std::none_of(state.run.mining.terrain.cells.begin(), state.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
+                    return cell.feature == MiningCellFeature::BossChamber;
+                }), "Act 3 boss chambers should wait until Pressure levels");
+            }
+        }
+    }
+
+    GameState actTwoOne = startArena(MiningAct::ActTwo, 1, 991001);
+    GameState actTwoThree = startArena(MiningAct::ActTwo, 3, 991001);
+    require(!actTwoOne.run.mining.enemies.empty() && !actTwoThree.run.mining.enemies.empty(), "Act 2 Learn arenas should seed Ant contacts");
+    const MiningEnemy& earlyAnt = actTwoOne.run.mining.enemies.front();
+    const MiningEnemy& lateAnt = actTwoThree.run.mining.enemies.front();
+    require(earlyAnt.type == MiningEnemyType::Ant && lateAnt.type == MiningEnemyType::Ant, "Act 2 Learn scaling comparison should use the Ant archetype");
+    require(std::abs(earlyAnt.speed - lateAnt.speed) < 0.000001 && std::abs(earlyAnt.speed - 2.0) < 0.000001,
+        "difficulty scaling should preserve archetype-defined enemy speed");
+    require(lateAnt.maxHealth > earlyAnt.maxHealth && lateAnt.damagePerSecond > earlyAnt.damagePerSecond,
+        "Act 2 health and damage pressure should rise monotonically within the band");
+    require(std::abs(earlyAnt.maxHealth - 5.0 * 0.70) < 0.000001 && std::abs(lateAnt.maxHealth - 5.0 * 0.86) < 0.000001,
+        "Act 2 enemy health should use the progression resolver scale");
+    require(std::abs(earlyAnt.damagePerSecond - 0.62 * 0.65) < 0.000001 && std::abs(lateAnt.damagePerSecond - 0.62 * 0.79) < 0.000001,
+        "Act 2 enemy damage should use the progression resolver scale");
+
+    GameState spawnerArena = startArena(MiningAct::ActThree, 10, 991010);
+    const MiningArenaRules spawnerRules = resolveMiningArenaRules({MiningAct::ActThree, 10, 991010});
+    const int initialSpawners = static_cast<int>(std::count_if(spawnerArena.run.mining.enemies.begin(), spawnerArena.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active && enemy.type == MiningEnemyType::Spawner;
+    }));
+    require(initialSpawners > 0 && initialSpawners <= spawnerRules.maxSpawners, "Act 3 Mastery should procedurally place bounded spawners");
+    spawnerArena.run.mining.oxygenSeconds = 1000.0;
+    spawnerArena.run.mining.droneHealth = 1000.0;
+    for (int tick = 0; tick < 120; ++tick) {
+        updateMiningRun(spawnerArena, catalog, 0.5);
+    }
+    const int activeAfterSpawns = static_cast<int>(std::count_if(spawnerArena.run.mining.enemies.begin(), spawnerArena.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active;
+    }));
+    require(activeAfterSpawns <= spawnerRules.maxActiveEnemies, "reinforcement waves should never exceed the resolved active-enemy cap");
+}
+
 void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91921);
     state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.chapter = GameChapter::Arkfall;
     state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.run.destinationIndex = 4;
@@ -3270,10 +3408,12 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     GameState defended = createNewGame(catalog, 91922);
     defended.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     defended.meta.ark.condition = ArkCondition::DamagedStranded;
+    defended.meta.chapter = GameChapter::Arkfall;
     defended.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
     defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
     defended.meta.unlockKeys.push_back(content::unlock::droneBay);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    defended.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(defended, catalog);
     defended.meta.droneBaySlots = 2;
     defended.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
@@ -3328,10 +3468,12 @@ void miningEnemySpawnersAreGenericCappedAndDestructible()
     GameState state = createNewGame(catalog, 91928);
     state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     state.meta.ark.condition = ArkCondition::DamagedStranded;
+    state.meta.chapter = GameChapter::LastCampfire;
     state.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::attackDrone};
@@ -3447,6 +3589,7 @@ void attackDroneCombatCanCritAndEnemyCooldownPersists()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::attackDrone};
@@ -3622,7 +3765,13 @@ void miningHazardAffinitiesApplyOnlyOnDrillContact()
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
         prepareMiningSiteForTest(state);
-        require(startMiningRun(state, catalog).applied, "hazard contact test run should start");
+        const MiningArenaRequest request = affinity == MiningElementalAffinity::Radiation
+            ? MiningArenaRequest {MiningAct::ActThree, 2, 93100 + static_cast<std::uint64_t>(affinity)}
+            : MiningArenaRequest {
+                  MiningAct::ActOne,
+                  affinity == MiningElementalAffinity::Toxic ? 9 : 7,
+                  93100 + static_cast<std::uint64_t>(affinity)};
+        require(startMiningRun(state, catalog, request, false).applied, "hazard contact test run should start at an affinity-enabled tier");
         MiningRunState& mining = state.run.mining;
         for (MiningCell& cell : mining.terrain.cells) {
             cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
@@ -3652,9 +3801,18 @@ void miningHazardAffinitiesApplyOnlyOnDrillContact()
 
     GameState nearbyOnly = contactState(MiningElementalAffinity::Thermal);
     nearbyOnly.run.mining.drillHeat = 0.0;
+    nearbyOnly.run.mining.droneX = 32.5;
+    nearbyOnly.run.mining.droneY = 8.5;
+    MiningCell* nearbyHazard = miningCellAt(nearbyOnly.run.mining.terrain, 33, 8);
+    require(nearbyHazard != nullptr, "nearby thermal test cell should exist");
+    *nearbyHazard = {MiningCellMaterial::HazardPocket, 100.0, 100.0, true, true};
+    nearbyHazard->hazardAffinity = MiningElementalAffinity::Thermal;
+    const double healthBeforeProximity = nearbyOnly.run.mining.droneHealth;
     setMiningDrilling(nearbyOnly, false);
     updateMiningRun(nearbyOnly, catalog, 0.20);
-    require(nearbyOnly.run.mining.drillHeat <= 0.000001, "hazards should not apply exposure while the drill is not contacting them");
+    require(nearbyOnly.run.mining.drillHeat > 0.0, "nearby thermal hazards should heat the rig even while it is not drilling");
+    require(nearbyOnly.run.mining.droneHealth < healthBeforeProximity, "nearby thermal hazards should visibly damage rig health while the Hazard Drone is still treating them");
+    require(nearbyOnly.statusLine == std::string(text::status::miningThermalHazard), "thermal proximity should explain the danger and the Hazard Drone counter in the HUD");
 }
 
 void legacyStabilizerSavesMigrateToHazardDrone()
@@ -3693,7 +3851,9 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining and survey agent run should start");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 3, 91933}, false).applied,
+        "mining and survey agent run should start with scanner mechanics enabled");
     state.run.mining.enemies.clear();
     state.run.mining.oxygenSeconds = 100.0;
 
@@ -3817,7 +3977,9 @@ void surveyDroneRunsAnchoredPriorityScanCycles()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "survey cycle mining run should start");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 3, 91936}, false).applied,
+        "survey cycle mining run should start with scanner mechanics enabled");
     state.run.mining.enemies.clear();
     state.run.mining.oxygenSeconds = 100.0;
 
@@ -3927,7 +4089,9 @@ void surveyDronesMaintainCoordinatedSearchLanes()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "coordinated Survey drone run should start");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 3, 91937}, false).applied,
+        "coordinated Survey drone run should start with scanner mechanics enabled");
     state.run.mining.enemies.clear();
     state.run.mining.oxygenSeconds = 100.0;
 
@@ -4667,6 +4831,7 @@ void elementalMiningCombatAppliesAffinityAndAreaDefenses()
     defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
     defended.meta.unlockKeys.push_back(content::unlock::droneBay);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    defended.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(defended, catalog);
     defended.meta.droneBaySlots = 2;
     defended.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
@@ -4701,7 +4866,9 @@ void mammalBossChambersGrantAdvancedRewards()
     state.run.destinationIndex = 5;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mammal boss mining run should start");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActThree, 10, 91926}, false).applied,
+        "mammal boss mining run should start at the Act 3 mastery tier");
     const int blueprintBefore = state.meta.blueprintProgress;
     state.run.mining.enemies = {
         {MiningEnemyType::Mammal, MiningCellFeature::BossChamber, state.run.mining.droneX + 2.0, state.run.mining.droneY, 0.0, 0.0, 0.5, 35.0, 0.20, 0.0, 0.0, 0.0, true}
@@ -4710,8 +4877,14 @@ void mammalBossChambersGrantAdvancedRewards()
         updateMiningRun(state, catalog, 0.08);
     }
     require(state.run.mining.enemiesDefeated == 1, "passive defenses should defeat weakened mammal boss test enemies");
-    require(state.run.mining.temporaryMaterials.rare >= 5, "mammal boss chambers should grant significant rare materials");
-    require(state.run.mining.temporaryMaterials.exotic >= 3, "mammal boss chambers should grant significant exotic materials");
+    require(
+        state.run.mining.temporaryMaterials.rare > 0 &&
+            state.run.mining.temporaryMaterials.rare <= state.run.mining.rewardBudget.rareCap,
+        "mammal boss chambers should grant rare materials within the shared arena cap");
+    require(
+        state.run.mining.temporaryMaterials.exotic > 0 &&
+            state.run.mining.temporaryMaterials.exotic <= state.run.mining.rewardBudget.exoticCap,
+        "mammal boss chambers should grant exotic materials within the shared arena cap");
     require(state.meta.blueprintProgress >= blueprintBefore + 2, "mammal boss chambers should recover advanced tech progress");
 }
 
@@ -4871,7 +5044,9 @@ void miningUsesSharedFuelReserve()
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.sharedFuel = 1;
-    require(startMiningRun(state, catalog).applied, "mining should start with one shared fuel");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 2, 92934}, true).applied,
+        "mining should start with one shared fuel at an oxygen/fuel-enabled tier");
     require(state.run.surfaceExpedition.sharedFuel == 0, "deployment should spend the available shared fuel");
     require(
         state.run.mining.oxygenSeconds * tuning::mining::fuelCycleProgressPerSecond > 1.0,
@@ -4893,7 +5068,9 @@ void miningDrillFootprintCapsWearToWorstContact()
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
         prepareMiningSiteForTest(state);
-        require(startMiningRun(state, catalog).applied, "mining should start for footprint wear test");
+        require(
+            startMiningRun(state, catalog, {MiningAct::ActOne, 4, 92932}, false).applied,
+            "mining should start for footprint wear test with integrity enabled");
 
         MiningRunState& mining = state.run.mining;
         for (MiningCell& cell : mining.terrain.cells) {
@@ -4939,7 +5116,9 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining should start for movement feel test");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 4, 92931}, false).applied,
+        "mining should start for movement feel test with contact rebound enabled");
 
     MiningRunState& mining = state.run.mining;
     mining.droneX = 32.85;
@@ -4982,7 +5161,9 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(mining.droneX <= 32.90, "hard rock should resist forward movement before it breaks");
     require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
-    require(mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0, "hard contact should trigger a damped bounce impulse");
+    require(
+        mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0 || mining.contactBounceCooldown > 0.0,
+        "hard contact should trigger a damped bounce impulse");
     require(
         std::abs(tuning::mining::hardTerrainBounceImpulse - 54.0) < 0.000001 &&
             std::abs(tuning::mining::contactBounceMaxCells - 2.24) < 0.000001,
@@ -5088,7 +5269,9 @@ void miningBrokenDrillBitDisablesDrillingOnly()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining should start for drill failure test");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 4, 94949}, false).applied,
+        "mining should start for drill failure test with scanner and integrity mechanics enabled");
 
     state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneRadiusCells + 1.0;
     state.run.mining.droneY = state.run.mining.returnZoneY;
@@ -5128,7 +5311,9 @@ void miningShipRepairsUseBankedMaterialsProportionally()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining should start for ship repair test");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 4, 94950}, false).applied,
+        "mining should start for ship repair test with field repairs enabled");
 
     MiningRunState& mining = state.run.mining;
     mining.drillIntegrity = 0.0;
@@ -5187,7 +5372,9 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids, content::surfaceUpgrade::emergencyWinch};
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining should start for ship banking test");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 2, 95959}, false).applied,
+        "mining should start for ship banking test with oxygen enabled");
 
     state.run.mining.temporaryMaterials.common = 2;
     state.run.mining.cargo = 2;
@@ -5253,7 +5440,9 @@ void miningOxygenDrainsDroneHealthBeforeForcedRecall()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "mining should start for oxygen drain test");
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 2, 95960}, false).applied,
+        "mining should start for oxygen drain test with oxygen pressure enabled");
 
     state.run.mining.oxygenSeconds = 0.0;
     const double healthBefore = state.run.mining.droneHealth;
@@ -5275,7 +5464,9 @@ void miningLoadBurdenAndUpgradeRelief()
     loaded.run.destinationIndex = 2;
     startSurfaceExpedition(loaded, catalog);
     prepareMiningSiteForTest(loaded);
-    require(startMiningRun(loaded, catalog).applied, "mining should start for load burden test");
+    require(
+        startMiningRun(loaded, catalog, {MiningAct::ActOne, 5, 95961}, false).applied,
+        "mining should start for load burden test with cargo drag enabled");
 
     MiningLoadStats emptyLoad = miningLoadStats(loaded, catalog);
     loaded.run.mining.cargo = 9;
@@ -6678,7 +6869,9 @@ void panelHtmlIncludesContextualTutorialLayer()
     miningState.run.destinationIndex = 2;
     startSurfaceExpedition(miningState, catalog);
     prepareMiningSiteForTest(miningState);
-    require(startMiningRun(miningState, catalog).applied, "test mining run should start");
+    require(
+        startMiningRun(miningState, catalog, {MiningAct::ActOne, 9, 713}, false).applied,
+        "test mining run should start with the full Act 1 HUD mechanic set");
     Random miningRng(713);
     const PreparedLaunch miningLaunch = prepareLaunch(miningState, catalog, miningRng);
     const std::string miningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
@@ -6780,6 +6973,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     droneState.screen = Screen::DroneOps;
     droneState.meta.unlockKeys.push_back(content::unlock::droneBay);
     droneState.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    droneState.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(droneState, catalog);
     droneState.meta.droneBaySlots = 3;
     droneState.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
@@ -7175,8 +7369,31 @@ void arkDiscoveryAndScriptedJumpProgression()
     require(state.meta.ark.gravityWellDisaster, "gravity-well disaster should be recorded");
     require(state.meta.ark.condition == ArkCondition::DamagedStranded, "Ark should be damaged and stranded after the scripted disaster");
     require(hasUnlock(state.meta, content::unlock::deepSpace), "hostile system should unlock deep-space destinations");
+    require(hasUnlock(state.meta, content::unlock::droneBay), "Arkfall should provision the Drone Bay even when its research was skipped");
     require(hasUnlock(state.meta, content::unlock::perimeterDrones), "hostile system should unlock combat-drone tech timing");
+    require(!hasUnlock(state.meta, content::unlock::perimeterCoordination), "Arkfall should not skip the advanced combat coordination research step");
+    require(state.meta.droneBaySlots >= 3, "Arkfall should raise an undersized Drone Bay to three slots");
+    require(std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), content::drone::attackDrone) != state.meta.ownedDroneIds.end(),
+        "Arkfall should grant an Attack drone");
+    require(std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), content::drone::defenseDrone) != state.meta.ownedDroneIds.end(),
+        "Arkfall should grant a Defense drone");
+    require(miniDroneUpgradeLevel(state, content::drone::attackDrone) == 1 && miniDroneUpgradeLevel(state, content::drone::defenseDrone) == 1,
+        "Arkfall combat drones should enter service at Mk I");
+    require(state.statusLine.find("Mk I Attack and Defense drones") != std::string::npos && state.statusLine.find("3 Drone Bay slots") != std::string::npos,
+        "Arkfall status should make the emergency combat kit and bay expansion obvious");
     require(state.screen == Screen::Navigation, "gravity-well disaster should land the player on Navigation");
+
+    GameState upgraded = createNewGame(catalog, 62002);
+    upgraded.meta.ark.condition = ArkCondition::DerelictOperable;
+    upgraded.meta.ark.firstJumpComplete = true;
+    upgraded.meta.campaignMilestone = CampaignMilestone::FirstArkJumpComplete;
+    upgraded.meta.droneBaySlots = 5;
+    upgraded.meta.ownedDroneIds = {content::drone::attackDrone};
+    upgraded.meta.droneUpgrades = {{content::drone::attackDrone, 3}};
+    require(performArkJump(upgraded, catalog), "pre-upgraded Ark should still resolve the scripted disaster");
+    require(upgraded.meta.droneBaySlots == 5, "Arkfall should never shrink an already expanded Drone Bay");
+    require(miniDroneUpgradeLevel(upgraded, content::drone::attackDrone) == 3, "Arkfall should never downgrade an existing combat drone");
+    require(miniDroneUpgradeLevel(upgraded, content::drone::defenseDrone) == 1, "Arkfall should add only the missing Defense drone at Mk I");
 }
 
 void numberedChaptersAdvanceMonotonically()
@@ -7427,6 +7644,9 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(hasUnlock(meta, content::unlock::analysisLab), "research facility unlock key should resolve through shared ids");
     meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     require(hasUnlock(meta, content::unlock::perimeterDrones), "passive defense unlock key should resolve through shared ids");
+    meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
+    require(hasUnlock(meta, content::unlock::perimeterCoordination), "advanced combat coordination should resolve through shared ids");
+    require(unlockDisplayName(content::unlock::perimeterCoordination) == "Perimeter coordination", "coordination research should have player-facing unlock copy");
 }
 
 void displayFormatAndMathHelpersAreShared()
@@ -7528,6 +7748,7 @@ int main()
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
     hostileMiningTerrainGeneratesPreDugEnemyStructures();
+    actBasedMiningEnemyProgressionIsEnforced();
     hostileMiningRunSpawnsEnemiesAndPassiveDefenses();
     miningEnemySpawnersAreGenericCappedAndDestructible();
     rangedMiningEnemiesShootAndCombatVisualsExpire();

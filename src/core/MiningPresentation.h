@@ -226,6 +226,8 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
     const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
+    const MiningArenaMetadata& arena = mining.arenaMetadata;
+    const MiningArenaRules arenaRules = resolveMiningArenaRules({arena.act, arena.difficulty, arena.seed});
     const bool arkKnown = arkDiscovered(state);
     const MiningLoadStats load = miningLoadStats(state, catalog);
     const int carriedCargo = miningCarriedCargo(mining);
@@ -252,6 +254,9 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity))),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelCycleProgress)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
+        panelMetric("Arena", std::string(miningActName(arena.act)) + " L" + std::to_string(arena.difficulty)),
+        panelMetric("Seed", std::to_string(arena.seed)),
+        panelMetric("Ruleset", "v" + std::to_string(arena.rulesVersion)),
         panelMetric(text::labels::drillHeat, display::percent(mining.drillHeat)),
         panelMetric(text::labels::extractionRisk, display::signedPercent(extractionDelta)),
         panelMetric("Enemies", std::to_string(activeMiningEnemyCount(mining))),
@@ -298,6 +303,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Rig dmg", display::percent(mining.enemyDamageTaken))
     };
     presentation.details = {
+        detailPresentationRow("Arena identity", std::string(miningActName(arena.act)) + " • Level " + std::to_string(arena.difficulty) + " • Seed " + std::to_string(arena.seed) + " • Ruleset v" + std::to_string(arena.rulesVersion)),
+        detailPresentationRow("Band", std::string(miningProgressionBandName(arenaRules.band))),
+        detailPresentationRow("New complication", std::string(arenaRules.complication)),
+        detailPresentationRow("Recommended counters", std::string(arenaRules.recommendedCounters)),
         detailPresentationRow("Controls", std::string("WASD/arrows turn and thrust the forward drill; mouse hold or Space drills; E scans; T tethers artifacts; return to the ship to bank, refill oxygen, and Leave.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
         detailPresentationRow("Drill power", display::fixed(stats.power, 1)),

@@ -6,11 +6,13 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
 namespace {
 
 std::unique_ptr<rocket::RocketGameApp> g_app;
 double g_lastTimeMs = 0.0;
+std::string g_debugMiningPreview;
 
 #ifdef __EMSCRIPTEN__
 EM_JS(double, rr_game_speed_multiplier, (), {
@@ -625,6 +627,31 @@ void rr_debug_combat_mining()
     if (g_app) {
         g_app->debugStartCombatMining();
     }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode)
+{
+    if (g_app) {
+        g_app->debugStartMiningArena(
+            act,
+            difficulty,
+            static_cast<std::uint64_t>(std::max(1.0, seed)),
+            loadoutMode);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char* rr_debug_mining_preview(int act, int difficulty)
+{
+    g_debugMiningPreview = g_app
+        ? g_app->debugMiningArenaPreview(act, difficulty)
+        : std::string {};
+    return g_debugMiningPreview.c_str();
 }
 
 #ifdef __EMSCRIPTEN__

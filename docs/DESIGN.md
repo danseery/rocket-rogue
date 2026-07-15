@@ -119,9 +119,9 @@ Flight controls that modify the launch model should flow through `FlightActionSt
 
 Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
 
-Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface action kits, shared fuel, cargo, extraction risk, surface upgrades, Drone Bay state, and the solar-system enemy gate. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
+Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface action kits, shared fuel, cargo, extraction risk, surface upgrades, Drone Bay state, and progression-backed surface-contact pressure. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
 
-Mining mini-game rules should flow through `src/core/MiningSystem.*`: terrain generation, oxygen/fuel/drill timers, scanner pulses, ore/artifact recovery, hostile tunnel networks, passive drone effects, failure/stow/abort outcomes, and conversion back into `SurfaceActionOutcome`. Browser input should call `RocketGameApp` mining methods; rendering should consume snapshots rather than deciding mining outcomes.
+`src/core/MiningProgression.*` is the authoritative Act/level resolver shared by campaign mapping, Surface Ops forecasts, debug requests, terrain/reward gates, and enemy generation. `src/core/MiningSystem.*` consumes those rules for terrain generation, oxygen/fuel/drill timers, scanner pulses, unified ore/artifact rewards, hostile tunnel networks, passive drone effects, failure/stow/abort outcomes, and conversion back into `SurfaceActionOutcome`. Browser input should call `RocketGameApp` mining methods; rendering should consume snapshots rather than deciding mining outcomes.
 
 Shared game constants and player-facing copy should have one owner:
 

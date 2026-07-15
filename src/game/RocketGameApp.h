@@ -7,6 +7,7 @@
 #include "game/GameRmlUi.h"
 #include "render/WebGLRenderer.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -76,6 +77,8 @@ public:
     void miningFailureAck();
     void debugStartMining();
     void debugStartCombatMining();
+    void debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode);
+    std::string debugMiningArenaPreview(int act, int difficulty) const;
     void debugStartSurfaceScan();
     void debugStartSurfacePush();
     void debugStartFlyby();

@@ -3618,6 +3618,27 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
     };
 
     if (snapshot.debugActOneCheckpoint >= 3) {
+        // Act 1 departures still originate at Earth. Keep a small Moon companion
+        // with the distant home body so the outgoing route has a stronger sense of scale.
+        if (snapshot.debugActOneCheckpoint <= 5) {
+            const float earthX = -0.42F;
+            const float earthY = -0.91F;
+            const float earthR = 0.105F;
+            const Vec2 moon {-0.22F, -0.68F};
+            if (textureReady(EarthAsset)) {
+                drawSprite(earthX, earthY, earthR * 2.35F, earthR * 2.35F, {1.0F, 1.0F, 1.0F, 0.72F}, EarthAsset);
+            } else {
+                drawCircle(earthX, earthY, earthR * 1.18F, {0.24F, 0.62F, 0.96F, 0.06F}, 40);
+                drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.52F}, 40);
+                drawCircle(earthX - 0.03F, earthY + 0.03F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.50F}, 12);
+            }
+            drawEllipseLine(earthX, earthY, 0.44F, 0.25F, {0.40F, 0.62F, 0.78F, 0.16F}, 76, 0.08F * kPi, 0.84F * kPi);
+            if (textureReady(MoonAsset)) {
+                drawSprite(moon.x, moon.y, 0.060F, 0.060F, {1.0F, 1.0F, 1.0F, 0.54F}, MoonAsset);
+            } else {
+                drawCircle(moon.x, moon.y, 0.016F, {0.72F, 0.74F, 0.72F, 0.42F}, 22);
+            }
+        }
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
         const int bodyAsset = destinationBodyAsset(snapshot);
         const float bodySize = snapshot.debugActOneCheckpoint == 4 ? 0.42F : 0.31F;
@@ -3680,6 +3701,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
             const float earthX = -0.34F;
             const float earthY = -0.89F;
             const float earthR = 0.16F;
+            const Vec2 moon {-0.04F, -0.72F};
             if (textureReady(EarthAsset)) {
                 drawSprite(earthX, earthY, earthR * 2.30F, earthR * 2.30F, {1.0F, 1.0F, 1.0F, 0.80F}, EarthAsset);
             } else {
@@ -3687,6 +3709,12 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.62F}, 48);
                 drawCircle(earthX - 0.04F, earthY + 0.04F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.58F}, 14);
                 drawCircle(earthX + 0.05F, earthY + 0.07F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.48F}, 14);
+            }
+            if (textureReady(MoonAsset)) {
+                drawSprite(moon.x, moon.y, 0.078F, 0.078F, {1.0F, 1.0F, 1.0F, 0.68F}, MoonAsset);
+            } else {
+                drawCircle(moon.x, moon.y, 0.021F, {0.72F, 0.74F, 0.72F, 0.54F}, 28);
+                drawCircle(moon.x + 0.006F, moon.y + 0.005F, 0.006F, {0.48F, 0.50F, 0.50F, 0.28F}, 12);
             }
         } else if (snapshot.destinationTier == 3) {
             const float earthX = -0.42F;

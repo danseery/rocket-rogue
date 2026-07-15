@@ -34,7 +34,7 @@ Research outputs:
 - Module families: thermal control, pressure control, recovery systems, guidance AI, deep-range power.
 - Crew facilities: better simulators, medical bays, psychology/coaching rooms, mission analysis labs.
 - Surface tools: better drills, cargo harnesses, suit supplies, probes, hazard scanners.
-- Drone systems: Drone Bay, helper drones, and post-solar Perimeter Drone Network.
+- Drone systems: Drone Bay, helper drones, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
 - Artifact threads: story and late-game build options, intentionally undefined until the narrative direction is clearer. For now, each identified artifact adds a small capped blueprint insight bonus to future research.
 
 Design rule: research should mostly unlock variety and new decisions, not permanent raw stat inflation. Better parts can be stronger, but the reward should feel like a wider tool belt rather than a passive +10% forever.
@@ -46,7 +46,7 @@ The current POC treats research facilities and surface tools as small unlock lay
 - Surface drills improve mining yield and rare-material odds.
 - Cargo return rigs reduce extraction risk, especially when cargo gets heavy.
 - Drone Bay unlocks persistent helper drones and the Drone Ops loadout screen.
-- Perimeter Drone Network unlocks post-solar attack/defense drones and lowers hostile contact pressure.
+- Arkfall grants Mk I Attack/Defense drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
 
 These are research unlocks, not refit cards, so the player has a reason to care about Mars research even before enemy encounters exist.
 
@@ -113,7 +113,7 @@ For enemy encounters, use the Unity prototype's passive defense direction rather
 - The player survives through build planning, positioning, and extraction timing.
 - Enemy pressure competes with mining greed: stay longer for resources, or leave before the planet overwhelms the expedition.
 
-Current POC implementation: post-solar-system expeditions can trigger hostile contact as a surface event, and hostile mining terrain can contain enemy tunnels, encounter rooms, hives, miniboss lairs, and boss chambers. Contact costs action kits, can damage cargo, raises site hazard, or damages the mining drone. Perimeter Drone Network research unlocks passive attack/defense drone coverage that reduces contact risk and damage without adding direct combat controls.
+Current POC implementation: post-solar-system expeditions can trigger hostile contact as a surface event, and hostile mining terrain grows from simple encounter rooms into hives, miniboss lairs, spawners, and Act 3 boss chambers. Contact costs action kits, can damage cargo, raises site hazard, or damages the mining drone. Arkfall grants passive Mk I Attack/Defense coverage without adding direct combat controls; Perimeter Coordination research unlocks advanced combat tuning and synergies.
 
 ## Unity Prototype Takeaways
 
@@ -159,7 +159,7 @@ The current C++ WebGL prototype should keep this scope focused:
 - Solar-system surface expeditions have environmental risk only.
 - Nearby Star and later surface expeditions can trigger hostile contact events.
 - Nearby Star and later mining runs can include enemy tunnel networks and passive-defense combat pressure.
-- Perimeter Drone Network research introduces attack and defense drones for those later expeditions.
+- Arkfall introduces Mk I Attack and Defense drones for those later expeditions; Perimeter Drone Network research advances their coordination.
 
 This is enough to prove whether post-arrival phases improve the launch loop without building a second full game too early.
 

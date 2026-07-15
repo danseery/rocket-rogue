@@ -239,7 +239,7 @@ ContentCatalog createDefaultContent()
         miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
         miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneBay, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneBay, {"exploration", "navigation"}),
-        miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig drills into them.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::droneBay, {"engineering", "remediation"}),
+        miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::droneBay, {"engineering", "remediation"}),
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
         miniDrone(content::drone::defenseDrone, "Defense Drone", "Holds a rotating charged shield arc, recharges after a break, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
@@ -255,7 +255,7 @@ ContentCatalog createDefaultContent()
         researchProject(content::research::prototypeSchematic, "Prototype Schematic", "Use rare samples to unlock experimental ship components.", Rarity::Rare, 2, 4, {.common = 1, .rare = 1}, content::unlock::starter, content::unlock::thermal, {"prototype", "ship"}),
         researchProject(content::research::xenogeologyProgram, "Xenogeology Program", "Study outer-system deposits for deep-space unlocks.", Rarity::Rare, 3, 5, {.rare = 2}, content::unlock::deepSpace, content::unlock::ai, {"materials", "deep_space"}),
         researchProject(content::research::arkScaffoldProgram, "Ark Keel Program", "Lay the first orbital keel sections for a future deep-space home base.", Rarity::Prototype, 3, 6, {.common = 4, .rare = 2}, content::unlock::deepSpace, content::unlock::arkScaffold, {"ark", "home_base", "deep_space"}),
-        researchProject(content::research::perimeterDroneNetwork, "Perimeter Drone Network", "Deploy autonomous sentries so field teams can keep working under hostile contact.", Rarity::Rare, 4, 5, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::perimeterDrones, {"surface", "defense"}),
+        researchProject(content::research::perimeterDroneNetwork, "Perimeter Drone Network", "Coordinate Arkfall sentries for advanced combat tuning and named multi-drone formations.", Rarity::Rare, 4, 5, {.rare = 2, .exotic = 1}, content::unlock::perimeterDrones, content::unlock::perimeterCoordination, {"surface", "defense", "coordination"}),
         researchProject(content::research::artifactDecoding, "Artifact Decoding", "Decode recovered signals into exotic research threads.", Rarity::Prototype, 4, 7, {.rare = 2, .exotic = 1}, content::unlock::ai, content::unlock::exotic, {"artifact", "story"})
     };
 
@@ -326,6 +326,9 @@ std::string unlockDisplayName(std::string_view key)
     }
     if (key == content::unlock::perimeterDrones) {
         return "Perimeter drones";
+    }
+    if (key == content::unlock::perimeterCoordination) {
+        return "Perimeter coordination";
     }
     if (key == content::unlock::droneBay) {
         return "Drone bay";

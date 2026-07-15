@@ -1500,6 +1500,13 @@ scrollbarhorizontal sliderbar {
     font-size: 12px;
     line-height: 1.12;
 }
+.mining-run-title.debug-arena strong {
+    display: block;
+    font-size: 14px;
+}
+.mining-run-title.debug-arena .mining-arena-metadata {
+    font-size: 10px;
+}
 .mining-vitals {
     position: )" + std::string(compactMining ? "relative" : "absolute") + R"(;
     left: )" + std::to_string(miningVitalsLeft) + R"(px;
@@ -2960,6 +2967,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface .surface-quickbar,
 .phase-board-surface .surface-kpi-grid,
 .phase-board-surface .drone-ops-callout,
+.phase-board-surface .surface-arena-forecast,
 .phase-board-surface .surface-primary-action,
 .phase-board-surface .board-primary {
     width: )" + std::to_string(kPhaseContentLaneWidth) + R"(px;
@@ -3038,6 +3046,7 @@ scrollbarhorizontal sliderbar {
 .phase-board-surface.surface-ops-screen .surface-quickbar,
 .phase-board-surface.surface-ops-screen .surface-kpi-grid,
 .phase-board-surface.surface-ops-screen .drone-ops-callout,
+.phase-board-surface.surface-ops-screen .surface-arena-forecast,
 .phase-board-surface.surface-ops-screen .surface-primary-action,
 .phase-board-surface.surface-ops-screen .board-primary {
     box-sizing: border-box;
@@ -3136,6 +3145,41 @@ scrollbarhorizontal sliderbar {
     width: 140px;
     margin-left: auto;
     margin-right: 0px;
+}
+.phase-board-surface.surface-ops-screen .drone-ops-callout {
+    min-height: 44px;
+    padding: 6px 10px;
+}
+.phase-board-surface.surface-ops-screen .drone-ops-callout h2 {
+    font-size: 14px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen .drone-ops-callout p {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen .surface-arena-forecast {
+    min-height: 0px;
+    padding: 5px 10px;
+    margin-top: 0px;
+}
+.phase-board-surface.surface-ops-screen .surface-arena-forecast > div {
+    width: 100%;
+}
+.phase-board-surface.surface-ops-screen .surface-arena-forecast h2 {
+    margin-top: 0px;
+    margin-bottom: 2px;
+    font-size: 13px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen .surface-arena-forecast p {
+    margin-top: 0px;
+    font-size: 11px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen .surface-actions {
+    padding-bottom: 4px;
 }
 .phase-board-surface .surface-primary-action {
     display: flex;
@@ -4972,6 +5016,8 @@ scrollbarhorizontal sliderbar {
     width: 390px;
     margin-bottom: 12px;
     padding: 9px;
+    height: auto;
+    min-height: 0px;
 }
 .control-panel .actions {
     width: 372px;
@@ -4986,16 +5032,22 @@ scrollbarhorizontal sliderbar {
 .control-panel .flight-hud .primary-actions {
     flex-wrap: nowrap;
     width: 372px;
+    column-gap: 8px;
 }
 .control-panel .flight-hud .primary-actions button {
-    width: 176px;
+    width: auto;
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0px;
     height: 42px;
     line-height: 42px;
+    margin-right: 0px;
 }
 .control-panel .flight-hud .system-actions {
     flex-wrap: nowrap;
     width: 372px;
     margin-top: 8px;
+    column-gap: 8px;
 }
 .stat-chip, .telemetry-legend-chip, .surface-kpi {
     margin-top: 5px;
@@ -5117,13 +5169,16 @@ button {
     width: 184px;
 }
 .control-panel .flight-hud .system-actions button {
-    width: 116px;
+    width: auto;
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: 0px;
     box-sizing: border-box;
     padding: 0 6px;
     height: 38px;
     min-height: 38px;
     line-height: 38px;
-    margin-right: 8px;
+    margin-right: 0px;
     font-size: 12px;
     white-space: nowrap;
     overflow-wrap: normal;

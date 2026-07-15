@@ -14,6 +14,7 @@ inline constexpr const char* surfaceDrills = "surface_drills";
 inline constexpr const char* cargoRigs = "cargo_rigs";
 inline constexpr const char* analysisLab = "analysis_lab";
 inline constexpr const char* perimeterDrones = "perimeter_drones";
+inline constexpr const char* perimeterCoordination = "perimeter_coordination";
 inline constexpr const char* arkScaffold = "ark_scaffold";
 inline constexpr const char* droneBay = "drone_bay";
 } // namespace unlock

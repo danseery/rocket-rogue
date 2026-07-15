@@ -4,6 +4,7 @@
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <sstream>
 
@@ -1013,7 +1014,23 @@ bool performArkJump(GameState& state, const ContentCatalog& catalog)
         state.meta.navigation.selectedDestinationId = content::destination::nearbyStar;
         state.meta.ark.fuelReserve = std::max(state.meta.ark.fuelReserve, tuning::ark::hostileSystemFuelReserve);
         addUniqueId(state.meta.unlockKeys, content::unlock::deepSpace);
+        addUniqueId(state.meta.unlockKeys, content::unlock::droneBay);
         addUniqueId(state.meta.unlockKeys, content::unlock::perimeterDrones);
+        state.meta.droneBaySlots = std::max(state.meta.droneBaySlots, 3);
+        const std::array<std::string_view, 2> arkfallCombatDrones {
+            content::drone::attackDrone,
+            content::drone::defenseDrone
+        };
+        for (const std::string_view droneId : arkfallCombatDrones) {
+            addUniqueId(state.meta.ownedDroneIds, std::string(droneId));
+            const auto upgrade = std::find_if(
+                state.meta.droneUpgrades.begin(),
+                state.meta.droneUpgrades.end(),
+                [droneId](const DroneUpgradeRecord& record) { return record.droneId == droneId; });
+            if (upgrade == state.meta.droneUpgrades.end()) {
+                state.meta.droneUpgrades.push_back({std::string(droneId), 1});
+            }
+        }
         const int hostileIndex = destinationIndexForId(catalog, content::destination::nearbyStar);
         if (hostileIndex >= 0) {
             state.run.destinationIndex = hostileIndex;
@@ -1021,7 +1038,7 @@ bool performArkJump(GameState& state, const ContentCatalog& catalog)
             state.launchConfig.burnGoalMultiplier = catalog.destinations[static_cast<std::size_t>(hostileIndex)].targetMultiplier;
         }
         state.screen = Screen::Navigation;
-        state.statusLine = "Gravity well impact. The Ark is stranded; choose shuttle sorties from the local system.";
+        state.statusLine = "Gravity well impact. The Ark is stranded; Mk I Attack and Defense drones are online, with at least 3 Drone Bay slots. Choose shuttle sorties from the local system.";
         syncLaunchConfig(state, catalog);
         return true;
     }

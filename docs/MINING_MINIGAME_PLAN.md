@@ -79,8 +79,8 @@ Mining terrain is generated from the destination, surface site profile, and dept
 - After a hard contact, thrust eases back to full speed instead of snapping forward immediately; bounce relief starts the recovery closer to full control.
 - Common ore, rare ore, exotic veins, and artifact caches produce payload.
 - Exposed artifacts can be tethered across a 6.8-cell recovery envelope, and the towline keeps a visible trailing length instead of collapsing the relic into the drone.
-- Hazard pockets use the same Thermal, Cryo, Toxic, and Radiation language as elemental threats. Their effects apply only while the drill contacts them: Thermal adds heat, Cryo slows movement, Toxic damages drill integrity, and Radiation raises extraction hazard.
-- Hazard drones convert revealed pockets into safe regolith, with Mk II and Mk III treating larger adjacent clusters and unlocking Toxic and Radiation remediation.
+- Hazard pockets use the same Thermal, Cryo, Toxic, and Radiation language as elemental threats. Their effects apply while the rig is drilling or within the pocket's visible contact envelope: Thermal adds heat and damages rig plating, Cryo slows movement, Toxic damages drill integrity, and Radiation raises extraction hazard.
+- Hazard drones convert revealed pockets into safe regolith, with Mk II and Mk III treating larger adjacent clusters and unlocking Toxic and Radiation remediation. Treatment is active remediation, not immunity: route away from a pocket until the drone finishes.
 - Bedrock blocks excavation.
 - Deeper or post-solar terrain can add rooms, vaults, hives, miniboss lairs, and boss chambers.
 
@@ -108,7 +108,8 @@ Research improves mining through specific tools:
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra blueprint progress from recovered field notes.
 - Drone Bay Program: persistent helper drones and Drone Ops loadout.
-- Perimeter Drone Network: post-solar attack/defense drones and hostile-contact mitigation.
+- Arkfall emergency kit: Mk I Attack and Defense drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
+- Perimeter Drone Network: Perimeter Coordination for Mk II/Mk III combat tuning and advanced combat synergies.
 
 Surface field upgrades are temporary ship-loop upgrades selected during surface play. Current examples include:
 

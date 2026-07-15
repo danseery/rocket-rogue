@@ -11,7 +11,7 @@ Drone choices should be readable and chunky:
 - Mining Drone: acquires a nearby revealed tile, flies to it, and physically drills it. If the main rig moves beyond its leash, it finishes the current tile before returning and waits for the rig to come back into working range.
 - Resource Drone: stays close to the main rig to collect and carry material while its reserve oxygen/fuel and extraction relief remain active.
 - Survey Drone: scouts deeper than the main rig. Every scanner pulse reveals from both the main rig and each Survey drone position.
-- Hazard Drone: acquires revealed environmental pockets, flies to them, and converts them into safe mineable terrain before the main rig makes contact.
+- Hazard Drone: acquires revealed environmental pockets, flies to them, and converts them into safe mineable terrain before the main rig remains in their contact envelope.
 - Attack Drone: acquires the closest enemy, keeps that target until it is defeated, fires from its own position, and returns to the main rig before engaging again.
 - Defense Drone: moves between the main rig and the nearest threat so ranged fire terminates at the Defense drone while its shields, reactive armor, and damage relief absorb the attack.
 
@@ -39,7 +39,8 @@ The current implementation supports persistent Drone Ops loadouts plus passive h
 
 - Drone Bay Program research unlocks Drone Ops.
 - Unlocking Drone Bay seeds the four environmental drones: Mining, Resource, Survey, Hazard.
-- Attack and Defense drones remain locked behind the post-solar Perimeter Drone Network unlock.
+- Arkfall grants Mk I Attack and Defense drones and raises undersized bays to three slots without erasing stronger equipment.
+- Perimeter Drone Network research grants Perimeter Coordination, which gates Mk II/Mk III combat tuning and advanced combat synergies.
 - Mining HUD summarizes active drone support, active synergies, rig health, threat roles, bullet colors, damage text, and the current build signature.
 - Equipped drones affect mining stats, surface extraction/contact risk, oxygen, scanner reach, physical helper-drone excavation, hazard remediation, and hostile-system passive defense.
 - Pair synergies add named build payoffs such as Targeting Grid, Killbox Screen, Excavation Barrage, Containment Screen, Long Haul Rig, and Pathfinder Loop.

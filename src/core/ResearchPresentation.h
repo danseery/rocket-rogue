@@ -86,6 +86,8 @@ struct SurfaceExpeditionPresentation {
     std::string postureDetail;
     std::string postureClass;
     std::string siteDetail;
+    std::string arenaTitle;
+    std::string arenaDetail;
     std::vector<DetailPresentationRow> details;
     std::vector<PanelMetricPresentation> metrics;
     std::vector<std::string> logEntries;
@@ -143,7 +145,16 @@ struct DroneOpsPresentation {
     std::string nextSlotCost;
     std::string buildTitle;
     std::string buildDetail;
+    std::string arenaTitle;
+    std::string arenaDetail;
 };
+
+inline MiningArenaRules upcomingMiningArenaRules(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int depthOffset = 0);
+inline std::string miningArenaForecastTitle(const MiningArenaRules& rules);
+inline std::string miningArenaForecastDetail(const MiningArenaRules& rules);
 
 inline std::string materialSummary(const MaterialInventory& materials)
 {
@@ -510,19 +521,26 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
     const bool hasFreeSlot = state.meta.equippedDroneIds.size() < static_cast<std::size_t>(std::max(0, state.meta.droneBaySlots));
     const int upgradeLevel = owned ? miniDroneUpgradeLevel(state, drone.id) : 1;
     const MaterialInventory nextUpgradeCost = miniDroneUpgradeCost(upgradeLevel + 1);
+    const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
+    const bool coordinationRequired = combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination);
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
     std::string status = unlocked
         ? (equippedCount > 0 ? ("Equipped x" + std::to_string(equippedCount)) : (owned ? "Ready" : "Not owned"))
         : ("Locked: " + std::string(unlockDisplayName(drone.unlockKey)));
     PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
     std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
+    if (owned && unlocked && upgradeLevel < 3 && coordinationRequired) {
+        upgradeSummary = "Mk " + std::to_string(upgradeLevel) + " tuning locked: complete Perimeter Drone Network research";
+    }
     if (owned && unlocked) {
         action = hasFreeSlot ? panelActionButton("Add copy", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full");
         upgradeAction = upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
-            : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
+            : (coordinationRequired
+                ? disabledPanelButton("Need research")
+                : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
                 ? panelActionButton("Upgrade", ui::actions::upgradeDrone(index), "ok")
-                : disabledPanelButton("Need mats"));
+                : disabledPanelButton("Need mats")));
     }
     return {
         index,
@@ -1079,6 +1097,18 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
             ? display::fixed(effects.sentryDamagePerSecond + effects.areaControlDamagePerSecond, 1) + "/s sentry output, " + display::percent(effects.enemyDamageRelief + effects.environmentalShieldRelief) + " shield relief"
             : "Attack and Defense drones unlock after hostile surface encounters beyond the solar system.")
     };
+    if (state.run.surfaceExpedition.active && !state.run.surfaceExpedition.destinationId.empty()) {
+        const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
+        presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
+        presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
+        presentation.details.insert(presentation.details.begin(), {
+            detailPresentationRow("Upcoming arena", presentation.arenaTitle),
+            detailPresentationRow("New complication", std::string(arenaRules.complication)),
+            detailPresentationRow("Mineral forecast", std::string(arenaRules.mineralAvailability)),
+            detailPresentationRow("Known enemy roles", std::string(arenaRules.knownEnemyRoles)),
+            detailPresentationRow("Recommended counters", std::string(arenaRules.recommendedCounters))
+        });
+    }
 
     for (int index = 0; index < static_cast<int>(catalog.miniDrones.size()); ++index) {
         presentation.drones.push_back(miniDroneCardPresentation(catalog.miniDrones[static_cast<std::size_t>(index)], state, index));
@@ -1449,6 +1479,48 @@ inline std::string surfaceUpgradeNameSummary(const std::vector<std::string>& nam
     return summary;
 }
 
+inline MiningArenaRules upcomingMiningArenaRules(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int depthOffset)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const int completedHostileSorties = destinationHistoryValue(
+        state.meta.destinationSuccesses,
+        catalog,
+        expedition.destinationId);
+    const int landingOrdinal = destinationHistoryValue(
+        state.meta.destinationLandings,
+        catalog,
+        expedition.destinationId);
+    const MiningArenaRequest request = campaignMiningArenaRequest(
+        state.meta.chapter,
+        expedition.destinationId,
+        std::max(0, expedition.depth + depthOffset),
+        completedHostileSorties,
+        state.seed,
+        landingOrdinal);
+    return resolveMiningArenaRules(request);
+}
+
+inline std::string miningArenaForecastTitle(const MiningArenaRules& rules)
+{
+    return std::string(miningActName(rules.request.act))
+        + " • Level " + std::to_string(rules.request.difficulty)
+        + " • " + std::string(miningProgressionBandName(rules.band));
+}
+
+inline std::string miningArenaForecastDetail(const MiningArenaRules& rules)
+{
+    // This row shares the fixed-height Surface Ops board with the four action
+    // cards. Keep the forecast scannable in one line so those cards retain
+    // their protected footer and button lanes.
+    return "New: " + std::string(rules.complication)
+        + " • " + std::string(rules.mineralAvailability)
+        + " • " + std::string(rules.knownEnemyRoles)
+        + " • " + std::string(rules.recommendedCounters);
+}
+
 inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     const SurfaceExpeditionState& expedition,
     const MetaProgress& meta,
@@ -1495,11 +1567,21 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
     const double extractionRisk = surfaceExtractionRisk(state);
     const bool arkKnown = arkDiscovered(state);
+    const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk, arkKnown);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
+    presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
+    presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
     presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkKnown);
+    presentation.details.insert(presentation.details.begin(), {
+        detailPresentationRow("Upcoming arena", presentation.arenaTitle),
+        detailPresentationRow("New complication", std::string(arenaRules.complication)),
+        detailPresentationRow("Mineral forecast", std::string(arenaRules.mineralAvailability)),
+        detailPresentationRow("Known enemy roles", std::string(arenaRules.knownEnemyRoles)),
+        detailPresentationRow("Recommended counters", std::string(arenaRules.recommendedCounters))
+    });
     presentation.logEntries = expedition.logEntries;
     presentation.selectedUpgradeNames = upgrades.names;
     if (expedition.surfaceUpgradeOfferAvailable) {
@@ -1535,7 +1617,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     presentation.droneOpsAction = droneBayUnlocked(state)
         ? panelActionButton("Drone Ops", ui::actions::droneOps, "warn")
         : disabledPanelButton("Research Drone Bay");
-    presentation.actions.push_back(surfaceActionPreview(
+    SurfaceActionPreviewPresentation surveyPreview = surfaceActionPreview(
         text::buttons::surveySite,
         std::string(text::panel::messages::surfaceSurveyDetail),
         expedition.supply,
@@ -1543,7 +1625,9 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
         std::string(text::labels::hazard),
         surveyPayoffChips(state, tools, crew, site),
-        fieldSurfaceActionButton(state, text::buttons::surveySite, ui::actions::surveySurface, tuning::research::surveySupplyCost)));
+        fieldSurfaceActionButton(state, text::buttons::surveySite, ui::actions::surveySurface, tuning::research::surveySupplyCost));
+    surveyPreview.payoffChips.push_back(panelMetric("Arena", std::string(miningActName(arenaRules.request.act)) + " L" + std::to_string(arenaRules.request.difficulty)));
+    presentation.actions.push_back(std::move(surveyPreview));
     presentation.actions.back().availability = fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
 
     SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(
@@ -1575,6 +1659,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         pushPayoffChips(state, crew, site),
         pushSurfaceActionButton(state));
     pushPreview.availability = pushSurfaceActionAvailability(state);
+    const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
+    pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(pushPreview));
 
     presentation.actions.push_back(surfaceActionPreview(

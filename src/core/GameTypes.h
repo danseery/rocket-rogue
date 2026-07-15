@@ -158,6 +158,96 @@ enum class MiningElementalAffinity {
     Toxic
 };
 
+enum class MiningAct {
+    ActOne = 1,
+    ActTwo = 2,
+    ActThree = 3
+};
+
+enum class MiningProgressionBand {
+    Learn,
+    Combine,
+    Pressure,
+    Mastery
+};
+
+inline constexpr std::size_t miningActCount = 3;
+inline constexpr std::size_t miningProgressionBandCount = 4;
+inline constexpr std::size_t miningFirstClearProgressCount = miningActCount * miningProgressionBandCount;
+
+struct MiningArenaRequest {
+    MiningAct act = MiningAct::ActOne;
+    int difficulty = 1;
+    std::uint64_t seed = 0;
+};
+
+struct MiningRewardBudget {
+    int rareGuarantee = 0;
+    int exoticGuarantee = 0;
+    int rareCap = 0;
+    int exoticCap = 0;
+};
+
+struct MiningMechanicGates {
+    bool movement = false;
+    bool drilling = false;
+    bool returnZone = false;
+    bool fogAndScanner = false;
+    bool oxygenAndFuel = false;
+    bool drillHeat = false;
+    bool drillIntegrity = false;
+    bool contactRebound = false;
+    bool fieldRepairs = false;
+    bool cargoDrag = false;
+    bool environmentalHazards = false;
+    bool artifactRecovery = false;
+    bool artifactTethering = false;
+    bool siteAndDepthVariation = false;
+    bool passiveDroneCombat = false;
+};
+
+struct MiningReferenceDroneCapability {
+    int slots = 0;
+    int maximumMark = 0;
+    std::array<MiniDroneRole, 6> roles {};
+    std::size_t roleCount = 0;
+    std::string_view summary;
+};
+
+struct MiningArenaRules {
+    MiningArenaRequest request;
+    MiningProgressionBand band = MiningProgressionBand::Learn;
+    MiningMechanicGates mechanics;
+    std::array<bool, 9> allowedMaterials {};
+    std::array<bool, 7> allowedEnemyTypes {};
+    std::array<bool, 5> allowedAffinities {};
+    std::array<bool, 9> allowedRoomFeatures {};
+    int maxActiveEnemies = 0;
+    int maxSpawners = 0;
+    double terrainToughnessScale = 1.0;
+    double enemyHealthScale = 0.0;
+    double enemyDamageScale = 0.0;
+    MiningRewardBudget rewardBudget;
+    MiningReferenceDroneCapability referenceDrones;
+    std::string_view complication;
+    std::string_view tutorialCallout;
+    std::string_view mineralAvailability;
+    std::string_view knownEnemyRoles;
+    std::string_view recommendedCounters;
+};
+
+struct MiningArenaMetadata {
+    MiningAct act = MiningAct::ActOne;
+    int difficulty = 1;
+    std::uint64_t seed = 0;
+    int rulesVersion = 0;
+};
+
+struct MiningFirstClearProgress {
+    int rareBanked = 0;
+    int exoticBanked = 0;
+};
+
 enum class ArtifactKind {
     Boost,
     Story
@@ -455,6 +545,7 @@ struct MetaProgress {
     std::vector<std::string> equippedDroneIds;
     std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ArtifactRecord> artifacts;
+    std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
@@ -578,6 +669,10 @@ struct SurfaceExpeditionState {
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
     bool miningRunUsed = false;
+    bool bankedMiningArenaValid = false;
+    bool bankedMiningProgressionEligible = false;
+    MiningArenaMetadata bankedMiningArenaMetadata;
+    MaterialInventory bankedMiningMaterials;
     std::array<std::string, 3> surfaceUpgradeOfferIds {};
     bool surfaceUpgradeOfferAvailable = false;
     int surfaceUpgradeOffersSeen = 0;
@@ -748,10 +843,14 @@ struct MiningArtifactObject {
 
 struct MiningRunState {
     bool active = false;
+    MiningArenaMetadata arenaMetadata;
+    MiningRewardBudget rewardBudget;
+    MaterialInventory richRewardsAwarded;
+    bool progressionCreditEligible = true;
     std::string destinationId;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
-    double oxygenSeconds = 15.0;
+    double oxygenSeconds = 30.0;
     double fuelCycleProgress = 0.0;
     int fuelSpent = 0;
     double droneX = 32.0;

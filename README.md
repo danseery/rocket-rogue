@@ -11,7 +11,7 @@ Rocket Rogue is a C++20/WebGL2 proof of concept for a fictional-stakes rocket la
 - Arrival operations: flyby, orbit, and landing gates. Perfect orbit rewards show both science and mission credits.
 - Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
 - Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, and stow/abort decisions.
-- Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 15 seconds; crew, drones, and field upgrades can extend it.
+- Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
 - Drone Bay progression with mining, resource, survey, stabilizer, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
 - Ark campaign spine: Outer Planets discovery, scripted Ark jump/disaster beats, Navigation after the hostile-system stranding, and Ark fuel framing for later sorties.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.

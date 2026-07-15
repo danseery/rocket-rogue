@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
+#include "core/MiningProgression.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -44,6 +45,21 @@ MaterialInventory halvedMaterials(const MaterialInventory& materials)
         std::max(0, materials.rare / tuning::research::extractionRareLossDivisor),
         0
     };
+}
+
+int attributedRecoveredMiningMaterial(int miningBanked, int totalBanked, int totalRecovered)
+{
+    const int clampedMining = std::clamp(miningBanked, 0, std::max(0, totalBanked));
+    const int clampedRecovered = std::clamp(totalRecovered, 0, std::max(0, totalBanked));
+    if (clampedMining <= 0 || clampedRecovered <= 0 || totalBanked <= 0) {
+        return 0;
+    }
+    if (clampedRecovered >= totalBanked) {
+        return clampedMining;
+    }
+    return std::min(
+        clampedMining,
+        static_cast<int>((static_cast<long long>(clampedRecovered) * clampedMining) / totalBanked));
 }
 
 int materialCargo(const MaterialInventory& materials)
@@ -221,23 +237,52 @@ bool hasSurfaceTooling(const MetaProgress& meta)
         || hasUnlock(meta, content::unlock::perimeterDrones);
 }
 
-void applyEnemyContact(SurfaceExpeditionState& expedition, SurfaceActionOutcome& outcome, double encounterChance, Random& rng)
+MiningArenaRules activeSurfaceArenaRules(const GameState& state)
 {
+    const ContentCatalog catalog = createDefaultContent();
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const int completedHostileSorties = destinationHistoryValue(
+        state.meta.destinationSuccesses,
+        catalog,
+        expedition.destinationId);
+    const int landingOrdinal = destinationHistoryValue(
+        state.meta.destinationLandings,
+        catalog,
+        expedition.destinationId);
+    return resolveMiningArenaRules(campaignMiningArenaRequest(
+        state.meta.chapter,
+        expedition.destinationId,
+        expedition.depth,
+        completedHostileSorties,
+        state.seed,
+        landingOrdinal));
+}
+
+void applyEnemyContact(GameState& state, SurfaceActionOutcome& outcome, double encounterChance, Random& rng)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     if (!expedition.enemyEncountersEnabled || !rng.chance(encounterChance)) {
         return;
     }
 
-    const int actualSupplyLoss = std::min(tuning::research::surfaceEnemySupplyLoss, std::max(0, expedition.supply));
-    const int actualCargoLoss = std::min(tuning::research::surfaceEnemyCargoLoss, std::max(0, expedition.cargo));
+    const MiningArenaRules rules = activeSurfaceArenaRules(state);
+    const bool heavyContact = rules.request.act == MiningAct::ActThree || rules.request.difficulty >= 7;
+    const int supplyPressure = tuning::research::surfaceEnemySupplyLoss + (heavyContact ? 1 : 0);
+    const int cargoPressure = tuning::research::surfaceEnemyCargoLoss
+        + (rules.request.act == MiningAct::ActThree && rules.request.difficulty >= 7 ? 1 : 0);
+    const double hazardPressure = tuning::research::surfaceEnemyHazardIncrease
+        * std::max(1.0, rules.enemyDamageScale);
+    const int actualSupplyLoss = std::min(supplyPressure, std::max(0, expedition.supply));
+    const int actualCargoLoss = std::min(cargoPressure, std::max(0, expedition.cargo));
     expedition.supply -= actualSupplyLoss;
     expedition.cargo -= actualCargoLoss;
-    expedition.hazard += tuning::research::surfaceEnemyHazardIncrease;
+    expedition.hazard += hazardPressure;
 
     outcome.eventType = SurfaceEventType::EnemyContact;
     outcome.eventMessage = std::string(text::status::surfaceEnemyContact);
     outcome.supplyDelta -= actualSupplyLoss;
     outcome.cargoDelta -= actualCargoLoss;
-    outcome.hazardDelta += tuning::research::surfaceEnemyHazardIncrease;
+    outcome.hazardDelta += hazardPressure;
     outcome.enemyEncounter = true;
 }
 
@@ -248,7 +293,7 @@ void applySurfaceEvent(GameState& state, SurfaceActionOutcome& outcome, Random& 
         return;
     }
 
-    applyEnemyContact(expedition, outcome, surfaceEnemyEncounterChance(state), rng);
+    applyEnemyContact(state, outcome, surfaceEnemyEncounterChance(state), rng);
     if (outcome.eventType == SurfaceEventType::EnemyContact) {
         return;
     }
@@ -1751,6 +1796,10 @@ bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, 
     if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
         return false;
     }
+    const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
+    if (combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination)) {
+        return false;
+    }
     const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
     if (currentLevel >= 3) {
         return false;
@@ -1768,6 +1817,11 @@ bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index
     const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
     if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
         state.statusLine = drone.name + " is still locked.";
+        return false;
+    }
+    const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
+    if (combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination)) {
+        state.statusLine = "Complete Perimeter Drone Network research before tuning " + drone.name + ".";
         return false;
     }
     const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
@@ -1845,6 +1899,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     int hazardDrones = 0;
     int attackDrones = 0;
     int defenseDrones = 0;
+    const bool perimeterCoordination = hasUnlock(state.meta, content::unlock::perimeterCoordination);
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone)) {
@@ -1891,25 +1946,25 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     auto addSynergy = [&effects](std::string name) {
         effects.synergyNames.push_back(std::move(name));
     };
-    if (attackDrones > 0 && surveyDrones > 0) {
+    if (perimeterCoordination && attackDrones > 0 && surveyDrones > 0) {
         effects.alliedCritChanceBonus += 0.12;
         effects.alliedFireRateBonus += 0.15;
         effects.scannerRadius += 0.75;
         addSynergy("Targeting Grid");
     }
-    if (attackDrones > 0 && defenseDrones > 0) {
+    if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0) {
         effects.sentryVolleyBonus += 1;
         effects.enemyDamageRelief += 0.08;
         effects.reactiveArmorDamagePerSecond += 0.45;
         addSynergy("Killbox Screen");
     }
-    if (attackDrones > 0 && miningDrones > 0) {
+    if (perimeterCoordination && attackDrones > 0 && miningDrones > 0) {
         effects.passiveMiningRate += 0.04;
         effects.areaControlDamagePerSecond += 0.40;
         effects.enemySlow += 0.04;
         addSynergy("Excavation Barrage");
     }
-    if (defenseDrones > 0 && hazardDrones > 0) {
+    if (perimeterCoordination && defenseDrones > 0 && hazardDrones > 0) {
         effects.environmentalShieldRelief += 0.06;
         effects.hazardTreatmentRateBonus += 0.15;
         addSynergy("Containment Screen");
@@ -1932,7 +1987,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.signatureDetail = std::move(detail);
         effects.signatureTier = tier;
     };
-    if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && hazardDrones > 0) {
+    if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && hazardDrones > 0) {
         effects.alliedCritChanceBonus += 0.05;
         effects.alliedFireRateBonus += 0.10;
         effects.sentryVolleyBonus += 1;
@@ -1945,7 +2000,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
             "Full Spectrum Swarm",
             "Every drone bay role is online: sentries volley, scanners paint targets, hazards are treated, shields hold, and logistics keep the dig alive.",
             3);
-    } else if (attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0) {
+    } else if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0) {
         effects.alliedCritChanceBonus += 0.06;
         effects.alliedFireRateBonus += 0.20;
         effects.sentryVolleyBonus += 1;
@@ -1955,7 +2010,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
             "Sentry Killbox",
             "Attack, Defense, and Survey drones turn the rig into a marked killbox with faster volleys, better crits, and tougher shields.",
             2);
-    } else if (attackDrones > 0 && miningDrones > 0 && resourceDrones > 0) {
+    } else if (perimeterCoordination && attackDrones > 0 && miningDrones > 0 && resourceDrones > 0) {
         effects.passiveMiningRate += 0.045;
         effects.areaControlDamagePerSecond += 0.55;
         effects.enemySlow += 0.03;
@@ -1965,7 +2020,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
             "Excavation Storm",
             "Mining, Resource, and Attack drones keep ore flowing while combat pulses punish enemies that enter the work zone.",
             2);
-    } else if (defenseDrones > 0 && hazardDrones > 0 && resourceDrones > 0) {
+    } else if (perimeterCoordination && defenseDrones > 0 && hazardDrones > 0 && resourceDrones > 0) {
         effects.environmentalShieldRelief += 0.05;
         effects.reactiveArmorDamagePerSecond += 0.35;
         effects.oxygenSeconds += 10.0;
@@ -2283,8 +2338,12 @@ double surfaceEnemyEncounterChance(const GameState& state)
 
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, createDefaultContent());
+    const MiningArenaRules rules = activeSurfaceArenaRules(state);
+    const double progressionPressure = rules.request.act == MiningAct::ActThree
+        ? 0.14 + static_cast<double>(rules.request.difficulty) * 0.02
+        : 0.05 + static_cast<double>(rules.request.difficulty) * 0.02;
     return std::clamp(
-        tuning::research::surfaceEnemyChanceBase
+        progressionPressure
             + expedition.hazard * tuning::research::surfaceEnemyChanceHazardScale
             - tools.enemyEncounterRelief
             - drones.enemyEncounterRelief,
@@ -2994,6 +3053,24 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
         };
         outcome.artifactsLost = static_cast<int>(expedition.temporaryArtifacts.size());
         outcome.message = std::string(text::status::surfaceExtractionRough);
+    }
+
+    if (expedition.bankedMiningArenaValid && expedition.bankedMiningProgressionEligible) {
+        const MiningArenaRequest request {
+            expedition.bankedMiningArenaMetadata.act,
+            expedition.bankedMiningArenaMetadata.difficulty,
+            expedition.bankedMiningArenaMetadata.seed
+        };
+        const MiningArenaRules rules = resolveMiningArenaRules(request);
+        const int rareBanked = attributedRecoveredMiningMaterial(
+            expedition.bankedMiningMaterials.rare,
+            expedition.temporaryMaterials.rare,
+            outcome.materialDelta.rare);
+        const int exoticBanked = attributedRecoveredMiningMaterial(
+            expedition.bankedMiningMaterials.exotic,
+            expedition.temporaryMaterials.exotic,
+            outcome.materialDelta.exotic);
+        creditBankedMiningFirstClearRewards(state.meta, rules, rareBanked, exoticBanked);
     }
 
     expedition = {};

@@ -2,6 +2,7 @@
 
 #include "core/Content.h"
 #include "core/GameState.h"
+#include "core/MiningProgression.h"
 #include "core/Random.h"
 #include "core/ResearchSystem.h"
 #include "core/Tuning.h"
@@ -59,6 +60,11 @@ bool repairMiningDrill(GameState& state);
 bool repairMiningDrone(GameState& state);
 MiningTerrain generateMiningTerrain(const GameState& state, const Destination& destination, SurfaceSiteProfile profile, int depthZone, int width = tuning::mining::terrainWidth, int height = tuning::mining::terrainHeight);
 SurfaceActionOutcome startMiningRun(GameState& state, const ContentCatalog& catalog);
+SurfaceActionOutcome startMiningRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    const MiningArenaRequest& request,
+    bool progressionCreditEligible);
 void setMiningMove(GameState& state, double xAxis, double yAxis);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);

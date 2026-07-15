@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <sstream>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -106,44 +107,6 @@ void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
     };
     state.meta.equippedDroneIds.clear();
     ensureDroneBayState(state, catalog);
-}
-
-void stampDebugHazardCluster(
-    MiningRunState& mining,
-    int startX,
-    int y,
-    int count,
-    MiningElementalAffinity affinity)
-{
-    for (int offset = 0; offset < count; ++offset) {
-        MiningCell* cell = miningCellAt(mining.terrain, startX + offset, y);
-        if (cell == nullptr) {
-            continue;
-        }
-        const double toughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
-        *cell = {};
-        cell->material = MiningCellMaterial::HazardPocket;
-        cell->maxToughness = toughness;
-        cell->remainingToughness = toughness;
-        cell->revealed = true;
-        cell->hazard = true;
-        cell->hazardAffinity = affinity;
-    }
-}
-
-void seedDebugHazardClusters(MiningRunState& mining)
-{
-    const int centerX = std::clamp(
-        static_cast<int>(std::floor(mining.droneX)),
-        5,
-        std::max(5, mining.terrain.width - 6));
-    const int upperY = std::clamp(static_cast<int>(std::floor(mining.droneY)) + 2, 5, mining.terrain.height - 5);
-    const int lowerY = std::min(mining.terrain.height - 3, upperY + 2);
-    stampDebugHazardCluster(mining, centerX - 3, upperY, 1, MiningElementalAffinity::Thermal);
-    stampDebugHazardCluster(mining, centerX - 1, upperY, 2, MiningElementalAffinity::Cryo);
-    stampDebugHazardCluster(mining, centerX - 3, lowerY, 3, MiningElementalAffinity::Toxic);
-    stampDebugHazardCluster(mining, centerX + 1, lowerY, 3, MiningElementalAffinity::Radiation);
-    std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 1);
 }
 
 void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random& rng, std::string_view destinationId)
@@ -1437,107 +1400,187 @@ void RocketGameApp::debugStartOrbit()
 
 void RocketGameApp::debugStartMining()
 {
-    beginDebugSandbox("Debug mining sandbox. No payload, materials, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
-    state_.run.surfaceExpedition = {};
-    state_.run.surfaceExpedition.active = true;
-    state_.run.surfaceExpedition.destinationId = content::destination::moon;
-    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::SurveyBasin;
-    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
-    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard;
-    state_.run.surfaceExpedition.miningSitePrepared = true;
-    state_.run.surfaceExpedition.prospectArtifacts = 1;
-    applyDebugDroneLoadout();
-    if (!debugDroneLoadout_.configured) {
-        state_.meta.equippedDroneIds = {content::drone::hazardDrone};
-        for (DroneUpgradeRecord& record : state_.meta.droneUpgrades) {
-            if (record.droneId == content::drone::hazardDrone) {
-                record.level = 3;
+    debugStartMiningArena(1, 7, 0xA17E5701ULL, 0);
+}
+
+void RocketGameApp::debugStartCombatMining()
+{
+    debugStartMiningArena(2, 7, 0xC0BA7701ULL, 0);
+}
+
+void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode)
+{
+    const MiningAct miningAct = act <= 1
+        ? MiningAct::ActOne
+        : (act == 2 ? MiningAct::ActTwo : MiningAct::ActThree);
+    const MiningArenaRequest request {
+        miningAct,
+        std::clamp(difficulty, 1, 10),
+        std::max<std::uint64_t>(1, seed)
+    };
+    const MiningArenaRules rules = resolveMiningArenaRules(request);
+
+    beginDebugSandbox("Mining Arena Lab sandbox. No payload, materials, or save data will be written.");
+    state_.seed = request.seed;
+
+    std::string_view destinationId = content::destination::moon;
+    if (miningAct == MiningAct::ActOne) {
+        if (request.difficulty >= 7) {
+            destinationId = content::destination::outerPlanets;
+            state_.meta.chapter = request.difficulty >= 9 ? GameChapter::Straylight : GameChapter::Breakthrough;
+        } else if (request.difficulty >= 4) {
+            destinationId = content::destination::mars;
+            state_.meta.chapter = GameChapter::RedFrontier;
+        } else {
+            state_.meta.chapter = GameChapter::LunarProgram;
+        }
+    } else {
+        destinationId = miningAct == MiningAct::ActTwo
+            ? std::string_view(content::destination::nearbyStar)
+            : std::string_view(content::destination::nearbyGalaxy);
+        state_.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+        state_.meta.ark.condition = ArkCondition::DamagedStranded;
+        state_.meta.ark.gravityWellDisaster = true;
+        state_.meta.chapter = miningAct == MiningAct::ActTwo
+            ? (request.difficulty <= 3 ? GameChapter::Arkfall : GameChapter::LastCampfire)
+            : (request.difficulty <= 4
+                ? GameChapter::VoidCompass
+                : (request.difficulty <= 8 ? GameChapter::Ouroboros : GameChapter::Ascent));
+        addDebugUnlock(state_, content::unlock::deepSpace);
+        addDebugUnlock(state_, content::unlock::perimeterDrones);
+    }
+
+    state_.run.destinationIndex = destinationIndexForId(catalog_, destinationId);
+    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    expedition = {};
+    expedition.active = true;
+    expedition.destinationId = std::string(destinationId);
+    expedition.siteProfile = rules.band == MiningProgressionBand::Learn
+        ? SurfaceSiteProfile::SurveyBasin
+        : (rules.band == MiningProgressionBand::Combine ? SurfaceSiteProfile::OreShelf : SurfaceSiteProfile::FractureField);
+    expedition.supply = tuning::research::baseSupply + act;
+    expedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
+    expedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    expedition.hazard = tuning::research::baseHazard + static_cast<double>(request.difficulty - 1) * 0.02;
+    expedition.enemyEncountersEnabled = miningAct != MiningAct::ActOne;
+    expedition.miningSitePrepared = true;
+    expedition.prospectArtifacts = rules.mechanics.artifactRecovery ? 1 : 0;
+
+    const int normalizedLoadout = std::clamp(loadoutMode, 0, 2);
+    if (normalizedLoadout == 1) {
+        applyDebugDroneLoadout();
+    } else if (normalizedLoadout == 0 && rules.referenceDrones.slots > 0) {
+        seedDebugDroneLoadout();
+        state_.meta.droneBaySlots = rules.referenceDrones.slots;
+        state_.meta.equippedDroneIds.clear();
+        if (rules.referenceDrones.maximumMark >= 2 && miningAct != MiningAct::ActOne) {
+            addDebugUnlock(state_, content::unlock::perimeterCoordination);
+        }
+        for (std::size_t roleIndex = 0; roleIndex < rules.referenceDrones.roleCount; ++roleIndex) {
+            const MiniDroneRole role = rules.referenceDrones.roles[roleIndex];
+            const auto drone = std::find_if(catalog_.miniDrones.begin(), catalog_.miniDrones.end(), [role](const MiniDrone& candidate) {
+                return candidate.role == role;
+            });
+            if (drone == catalog_.miniDrones.end()
+                || state_.meta.equippedDroneIds.size() >= static_cast<std::size_t>(state_.meta.droneBaySlots)) {
+                continue;
+            }
+            state_.meta.equippedDroneIds.push_back(drone->id);
+            const auto upgrade = std::find_if(
+                state_.meta.droneUpgrades.begin(),
+                state_.meta.droneUpgrades.end(),
+                [&](const DroneUpgradeRecord& record) { return record.droneId == drone->id; });
+            if (upgrade != state_.meta.droneUpgrades.end()) {
+                upgrade->level = std::max(1, rules.referenceDrones.maximumMark);
             }
         }
         ensureDroneBayState(state_, catalog_);
+    } else {
+        state_.meta.equippedDroneIds.clear();
     }
 
-    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
-    if (outcome.applied) {
-        seedDebugHazardClusters(state_.run.mining);
-    }
+    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_, request, false);
     state_.statusLine = outcome.applied
-        ? "Debug mining sandbox. Four revealed hazard clusters are live; no save data will be written."
+        ? "Mining Arena Lab: Act " + std::to_string(static_cast<int>(request.act))
+            + " level " + std::to_string(request.difficulty)
+            + ", seed " + std::to_string(request.seed)
+            + ". Sandbox rewards are not saved."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
 
-void RocketGameApp::debugStartCombatMining()
+std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty) const
 {
-    beginDebugSandbox("Debug combat mining sandbox. No payload, materials, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::nearbyStar);
-    state_.run.surfaceExpedition = {};
-    state_.run.surfaceExpedition.active = true;
-    state_.run.surfaceExpedition.destinationId = content::destination::nearbyStar;
-    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::FractureField;
-    state_.run.surfaceExpedition.supply = tuning::research::baseSupply + 3;
-    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.18;
-    state_.run.surfaceExpedition.depth = 2;
-    state_.run.surfaceExpedition.enemyEncountersEnabled = true;
-    state_.run.surfaceExpedition.miningSitePrepared = true;
-    state_.run.surfaceExpedition.prospectArtifacts = 1;
-    applyDebugDroneLoadout();
+    const MiningAct miningAct = act <= 1
+        ? MiningAct::ActOne
+        : (act == 2 ? MiningAct::ActTwo : MiningAct::ActThree);
+    const MiningArenaRules rules = resolveMiningArenaRules({miningAct, std::clamp(difficulty, 1, 10), 1});
+    const auto joinNames = [](const std::vector<std::string>& names) {
+        if (names.empty()) {
+            return std::string("None");
+        }
+        std::string joined = names.front();
+        for (std::size_t index = 1; index < names.size(); ++index) {
+            joined += ", " + names[index];
+        }
+        return joined;
+    };
+    std::vector<std::string> mechanics;
+    const auto addMechanic = [&](bool enabled, std::string_view name) {
+        if (enabled) {
+            mechanics.emplace_back(name);
+        }
+    };
+    addMechanic(rules.mechanics.movement, "movement");
+    addMechanic(rules.mechanics.drilling, "drilling");
+    addMechanic(rules.mechanics.returnZone, "return zone");
+    addMechanic(rules.mechanics.fogAndScanner, "fog/scanner");
+    addMechanic(rules.mechanics.oxygenAndFuel, "oxygen/fuel");
+    addMechanic(rules.mechanics.drillHeat, "heat");
+    addMechanic(rules.mechanics.drillIntegrity, "integrity");
+    addMechanic(rules.mechanics.contactRebound, "rebound");
+    addMechanic(rules.mechanics.fieldRepairs, "repairs");
+    addMechanic(rules.mechanics.cargoDrag, "cargo drag");
+    addMechanic(rules.mechanics.environmentalHazards, "hazards");
+    addMechanic(rules.mechanics.artifactRecovery, "artifacts");
+    addMechanic(rules.mechanics.artifactTethering, "tethering");
+    addMechanic(rules.mechanics.passiveDroneCombat, "passive combat");
 
-    const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
-    if (outcome.applied) {
-        MiningRunState& mining = state_.run.mining;
-        const auto seedEnemy = [](MiningEnemyType type,
-                                  MiningCellFeature sourceFeature,
-                                  double x,
-                                  double y,
-                                  double maxHealth,
-                                  double armor,
-                                  double speed,
-                                  double damagePerSecond,
-                                  double effectRadius,
-                                  MiningElementalAffinity affinity = MiningElementalAffinity::None) {
-            MiningEnemy enemy;
-            enemy.type = type;
-            enemy.sourceFeature = sourceFeature;
-            enemy.x = x;
-            enemy.y = y;
-            enemy.health = maxHealth;
-            enemy.maxHealth = maxHealth;
-            enemy.armor = armor;
-            enemy.speed = speed;
-            enemy.damagePerSecond = damagePerSecond;
-            enemy.effectRadius = effectRadius;
-            enemy.active = true;
-            enemy.affinity = type == MiningEnemyType::Elemental ? affinity : MiningElementalAffinity::None;
-            return enemy;
-        };
-        const double centerX = std::clamp(mining.droneX, 4.0, static_cast<double>(std::max(5, mining.terrain.width - 5)));
-        const double centerY = std::clamp(mining.droneY, 4.0, static_cast<double>(std::max(5, mining.terrain.height - 5)));
-        mining.enemies = {
-            seedEnemy(MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, centerX + 2.0, centerY + 0.5, 48.0, 0.18, 1.65, 0.72, tuning::mining::enemyElementalRadiusCells, MiningElementalAffinity::Thermal),
-            seedEnemy(MiningEnemyType::Flying, MiningCellFeature::HiveNest, centerX - 2.5, centerY + 1.0, 36.0, 0.0, 3.1, 0.48, 0.0),
-            seedEnemy(MiningEnemyType::Beetle, MiningCellFeature::MinibossLair, centerX + 4.0, centerY + 2.0, 72.0, 0.45, 1.15, 0.82, 0.0),
-            seedEnemy(MiningEnemyType::Ant, MiningCellFeature::EncounterZone, centerX - 4.0, centerY + 2.0, 40.0, 0.0, 2.0, 0.62, 0.0)
-        };
-        mining.enemies.push_back(createMiningEnemySpawner(
-            centerX,
-            centerY + 6.0,
-            65.0,
-            MiningEnemyType::Ant,
-            6,
-            2.5));
+    std::vector<std::string> enemies;
+    for (const MiningEnemyType enemy : {MiningEnemyType::Ant, MiningEnemyType::Flying, MiningEnemyType::Beetle, MiningEnemyType::Elemental, MiningEnemyType::Mammal, MiningEnemyType::Spawner}) {
+        if (miningEnemyAllowed(rules, enemy)) {
+            enemies.emplace_back(miningEnemyTypeName(enemy));
+        }
     }
-    state_.statusLine = outcome.applied
-        ? "Debug combat mining sandbox. A targetable ant spawner and defense drones are live; no save data will be written."
-        : surfaceActionSummary(outcome);
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
+    std::vector<std::string> affinities;
+    for (const MiningElementalAffinity affinity : {MiningElementalAffinity::Thermal, MiningElementalAffinity::Cryo, MiningElementalAffinity::Toxic, MiningElementalAffinity::Radiation}) {
+        if (miningAffinityAllowed(rules, affinity)) {
+            affinities.emplace_back(miningElementalAffinityName(affinity));
+        }
+    }
+    std::vector<std::string> rooms;
+    for (const MiningCellFeature feature : {MiningCellFeature::MainTunnel, MiningCellFeature::BranchTunnel, MiningCellFeature::EncounterZone, MiningCellFeature::TreasureVault, MiningCellFeature::HiveNest, MiningCellFeature::MinibossLair, MiningCellFeature::OrganicBurrow, MiningCellFeature::BossChamber}) {
+        if (miningRoomFeatureAllowed(rules, feature)) {
+            rooms.emplace_back(miningCellFeatureName(feature));
+        }
+    }
+
+    std::ostringstream preview;
+    preview << miningActName(rules.request.act)
+            << " • Level " << rules.request.difficulty
+            << " • " << miningProgressionBandName(rules.band)
+            << " • Ruleset v" << miningArenaRulesVersion
+            << "\nTutorial: " << rules.tutorialCallout
+            << "\nNew: " << rules.complication
+            << "\nMechanics: " << joinNames(mechanics)
+            << "\nEnemies: " << joinNames(enemies)
+            << "\nAffinities: " << joinNames(affinities)
+            << "\nRooms: " << joinNames(rooms)
+            << "\nRich cap: " << rules.rewardBudget.rareCap << " rare • "
+            << rules.rewardBudget.exoticCap << " exotic"
+            << "\nCounter: " << rules.recommendedCounters;
+    return preview.str();
 }
 
 void RocketGameApp::debugStartSurfaceScan()
