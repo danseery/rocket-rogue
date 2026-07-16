@@ -10,7 +10,6 @@
 #include "core/Tuning.h"
 #include "core/SaveData.h"
 #include "game/GamePanel.h"
-#include "platform/WebSaveStore.h"
 
 #include <algorithm>
 #include <array>
@@ -220,6 +219,11 @@ void appendProspectMarkers(
 
 } // namespace
 
+RocketGameApp::RocketGameApp(AppServices& services)
+    : services_(services)
+{
+}
+
 PreparedLaunch RocketGameApp::currentFlightModel() const
 {
     return applyFlightActions(session_.preparedLaunch, session_.controls.actions);
@@ -277,6 +281,7 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
     session_.preparedLaunch = preparedLaunch;
     session_.flightArmed = false;
+    session_.launchQueued = false;
     session_.preflightElapsed = miningDroneTransferEnabled(state_)
         ? 0.0
         : tuning::session::preflightBoardingSeconds;
@@ -315,7 +320,7 @@ void RocketGameApp::loadSavedGameOrDefault()
     session_ = {};
     panelDirty_ = true;
 
-    if (const auto saveData = deserializeSaveData(loadBrowserSave())) {
+    if (const auto saveData = deserializeSaveData(services_.saves.load())) {
         restoreSaveData(state_, catalog_, *saveData);
         rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
         state_.statusLine = std::string(text::status::saveRestored);
@@ -370,15 +375,29 @@ bool RocketGameApp::initialize()
     catalog_ = createDefaultContent();
     loadSavedGameOrDefault();
 
-    if (!renderer_.initialize()) {
-        state_.statusLine = std::string(text::status::webglFailed);
+    if (!services_.renderer.initialize()) {
+        state_.statusLine = "OpenGL renderer initialization failed.";
+        services_.host.log(PlatformLogLevel::Error, state_.statusLine);
+        return false;
     }
-    rmlUi_.initialize([this](const std::string& action) {
+    if (!services_.ui.initialize([this](const std::string& action) {
         runUiAction(action);
-    });
+    })) {
+        state_.statusLine = "RmlUi initialization failed.";
+        services_.host.log(PlatformLogLevel::Error, state_.statusLine);
+        services_.renderer.shutdown();
+        return false;
+    }
 
     refreshPanel();
     return true;
+}
+
+void RocketGameApp::shutdown()
+{
+    releaseRealtimeInputs(true);
+    services_.ui.shutdown();
+    services_.renderer.shutdown();
 }
 
 int RocketGameApp::currentScreen() const
@@ -386,9 +405,670 @@ int RocketGameApp::currentScreen() const
     return static_cast<int>(state_.screen);
 }
 
+void RocketGameApp::setControllerPreferences(const ControllerPreferences& preferences)
+{
+    ControllerPreferences normalized = preferences;
+    normalized.stickDeadzone = std::clamp(
+        normalized.stickDeadzone,
+        controller_tuning::minimumStickDeadzone,
+        controller_tuning::maximumStickDeadzone);
+    if (controllerPreferences_.promptFamily == normalized.promptFamily
+        && controllerPreferences_.stickDeadzone == normalized.stickDeadzone
+        && controllerPreferences_.invertFlightY == normalized.invertFlightY
+        && controllerPreferences_.swapConfirmCancel == normalized.swapConfirmCancel
+        && controllerPreferences_.vibrationEnabled == normalized.vibrationEnabled) {
+        return;
+    }
+    controllerPreferences_ = normalized;
+}
+
+const ControllerPreferences& RocketGameApp::controllerPreferences() const
+{
+    return controllerPreferences_;
+}
+
+void RocketGameApp::setActiveInputSource(InputSource source)
+{
+    activeInputSource_ = source;
+    if (source != InputSource::Controller) {
+        controllerClaimedInput_ = false;
+    }
+}
+
+InputSource RocketGameApp::activeInputSource() const
+{
+    return activeInputSource_;
+}
+
+InputContext RocketGameApp::inputContext() const
+{
+    return resolvedControllerInputContext(gameplayInputContext(), pauseReason_, services_.ui.modalOpen());
+}
+
+InputContext RocketGameApp::gameplayInputContext() const
+{
+    switch (state_.screen) {
+    case Screen::Launch:
+        return session_.flightArmed ? InputContext::Launch : InputContext::Preflight;
+    case Screen::Results:
+    case Screen::ArrivalFanfare:
+        return InputContext::Stamp;
+    case Screen::Flyby:
+        return state_.run.flyby.completed ? InputContext::FlybyComplete : InputContext::FlybyActive;
+    case Screen::Orbit:
+        return state_.run.orbit.completed ? InputContext::OrbitComplete : InputContext::OrbitActive;
+    case Screen::SurfaceScan:
+        return InputContext::SurfaceScan;
+    case Screen::SurfacePush:
+        return InputContext::SurfacePush;
+    case Screen::Mining:
+        if (state_.run.mining.failurePending) {
+            return InputContext::MiningFailure;
+        }
+        return miningAtReturnZone(state_.run.mining)
+            ? InputContext::MiningService
+            : InputContext::MiningActive;
+    case Screen::Hangar:
+    case Screen::ArrivalOps:
+    case Screen::Research:
+    case Screen::SurfaceExpedition:
+    case Screen::SurfaceUpgrade:
+    case Screen::Upgrade:
+    case Screen::Legacy:
+    case Screen::DroneOps:
+    case Screen::Navigation:
+        return InputContext::Ui;
+    }
+    return InputContext::Ui;
+}
+
+PauseReason RocketGameApp::pauseReason() const
+{
+    return pauseReason_;
+}
+
+namespace {
+
+std::string_view controllerContextName(InputContext context)
+{
+    switch (context) {
+    case InputContext::Ui: return "ui";
+    case InputContext::Preflight: return "preflight";
+    case InputContext::Launch: return "launch";
+    case InputContext::FlybyActive: return "flyby_active";
+    case InputContext::FlybyComplete: return "flyby_complete";
+    case InputContext::OrbitActive: return "orbit_active";
+    case InputContext::OrbitComplete: return "orbit_complete";
+    case InputContext::SurfaceScan: return "surface_scan";
+    case InputContext::SurfacePush: return "surface_push";
+    case InputContext::MiningActive: return "mining_active";
+    case InputContext::MiningService: return "mining_service";
+    case InputContext::MiningFailure: return "mining_failure";
+    case InputContext::Stamp: return "stamp";
+    case InputContext::Paused: return "paused";
+    }
+    return "ui";
+}
+
+std::string_view controllerPauseName(PauseReason reason)
+{
+    switch (reason) {
+    case PauseReason::None: return "none";
+    case PauseReason::SystemMenu: return "system_menu";
+    case PauseReason::BlockingModal: return "blocking_modal";
+    case PauseReason::ControllerDisconnected: return "controller_disconnected";
+    case PauseReason::PageHidden: return "page_hidden";
+    case PauseReason::ControllerUiFocus: return "controller_ui_focus";
+    }
+    return "none";
+}
+
+std::string_view controllerSourceName(InputSource source)
+{
+    switch (source) {
+    case InputSource::None: return "none";
+    case InputSource::KeyboardPointer: return "keyboard_pointer";
+    case InputSource::Controller: return "controller";
+    }
+    return "none";
+}
+
+std::string_view controllerActionName(GameInputAction action)
+{
+    switch (action) {
+    case GameInputAction::ActivateFocused: return "activate_focused";
+    case GameInputAction::CancelFocused: return "cancel_focused";
+    case GameInputAction::OpenSystemMenu: return "open_system_menu";
+    case GameInputAction::OpenMap: return "open_map";
+    case GameInputAction::OpenInventory: return "open_inventory";
+    case GameInputAction::StartOrContinue: return "start_or_continue";
+    case GameInputAction::ReturnHome: return "return_home";
+    case GameInputAction::Eject: return "eject";
+    case GameInputAction::ToggleEngines: return "toggle_engines";
+    case GameInputAction::TogglePressureRelief: return "toggle_pressure_relief";
+    case GameInputAction::JettisonCargo: return "jettison_cargo";
+    case GameInputAction::Abort: return "abort";
+    case GameInputAction::PrimarySurfaceAction: return "surface_primary";
+    case GameInputAction::BankSurfaceAction: return "surface_bank";
+    case GameInputAction::MiningScan: return "mining_scan";
+    case GameInputAction::MiningTether: return "mining_tether";
+    case GameInputAction::MiningStow: return "mining_stow";
+    case GameInputAction::MiningRepairDrill: return "mining_repair_drill";
+    case GameInputAction::MiningRepairRig: return "mining_repair_rig";
+    case GameInputAction::MiningFailureAcknowledge: return "mining_failure_acknowledge";
+    case GameInputAction::EnterUiFocus: return "enter_ui_focus";
+    case GameInputAction::Count: break;
+    }
+    return "none";
+}
+
+std::string controllerJsonEscape(std::string_view value)
+{
+    std::string result;
+    result.reserve(value.size());
+    for (const char character : value) {
+        if (character == '\\' || character == '"') {
+            result.push_back('\\');
+        }
+        result.push_back(character);
+    }
+    return result;
+}
+
+} // namespace
+
+std::string RocketGameApp::controllerDebugStatusJson() const
+{
+    std::ostringstream out;
+    out << "{\"context\":\"" << controllerContextName(inputContext())
+        << "\",\"focusId\":\"" << controllerJsonEscape(services_.ui.focusedId())
+        << "\",\"lastAction\":\"" << controllerJsonEscape(lastControllerAction_)
+        << "\",\"pauseReason\":\"" << controllerPauseName(pauseReason_)
+        << "\",\"activeSource\":\"" << controllerSourceName(activeInputSource_)
+        << "\",\"connected\":" << (controllerConnected_ ? "true" : "false")
+        << ",\"resumeNeutralRequired\":" << (controllerResumeNeutralRequired_ ? "true" : "false")
+        << ",\"lastInputSeconds\":" << lastControllerInputSeconds_
+        << '}';
+    return out.str();
+}
+
+ControllerHapticCue RocketGameApp::consumePendingControllerHapticCue()
+{
+    const ControllerHapticCue cue = controllerPreferences_.vibrationEnabled
+        ? pendingHapticCue_
+        : ControllerHapticCue::None;
+    pendingHapticCue_ = ControllerHapticCue::None;
+    return cue;
+}
+
+void RocketGameApp::queueControllerHapticCue(ControllerHapticCue cue)
+{
+    if (!controllerPreferences_.vibrationEnabled
+        || !controllerConnected_
+        || activeInputSource_ != InputSource::Controller) {
+        return;
+    }
+    if (static_cast<int>(cue) > static_cast<int>(pendingHapticCue_)) {
+        pendingHapticCue_ = cue;
+    }
+}
+
+void RocketGameApp::updateControllerHapticState()
+{
+    if (state_.screen != Screen::Mining) {
+        lastMiningContactIntensity_ = 0.0;
+        lastMiningDroneHealth_ = 1.0;
+        lastMiningFailurePending_ = false;
+        return;
+    }
+
+    const MiningRunState& mining = state_.run.mining;
+    if (mining.failurePending && !lastMiningFailurePending_) {
+        queueControllerHapticCue(ControllerHapticCue::Failure);
+    } else if (mining.droneHealth + 0.0001 < lastMiningDroneHealth_) {
+        queueControllerHapticCue(ControllerHapticCue::Damage);
+    } else if (mining.drilling
+        && mining.contactIntensity >= 0.55
+        && lastMiningContactIntensity_ < 0.55) {
+        queueControllerHapticCue(ControllerHapticCue::MiningHardContact);
+    }
+    lastMiningContactIntensity_ = mining.contactIntensity;
+    lastMiningDroneHealth_ = mining.droneHealth;
+    lastMiningFailurePending_ = mining.failurePending;
+}
+
+bool RocketGameApp::realtimeControllerContext(InputContext context) const
+{
+    return context == InputContext::Preflight
+        || context == InputContext::Launch
+        || context == InputContext::FlybyActive
+        || context == InputContext::OrbitActive
+        || context == InputContext::MiningActive
+        || context == InputContext::MiningService
+        || context == InputContext::MiningFailure;
+}
+
+void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
+{
+    controllerRealtimeInput_ = {};
+    if (releaseKeyboard) {
+        keyboardRealtimeInput_ = {};
+    }
+    state_.run.flyby.inputX = 0.0;
+    state_.run.flyby.inputY = 0.0;
+    state_.run.orbit.inputX = 0.0;
+    state_.run.orbit.inputY = 0.0;
+    state_.run.mining.moveX = 0.0;
+    state_.run.mining.moveY = 0.0;
+    state_.run.mining.drilling = false;
+}
+
+void RocketGameApp::applyRealtimeInputs()
+{
+    const bool useController = activeInputSource_ == InputSource::Controller;
+    const double moveX = useController ? controllerRealtimeInput_.moveX : keyboardRealtimeInput_.moveX;
+    const double moveY = useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
+
+    switch (state_.screen) {
+    case Screen::Flyby:
+        setFlybyMove(state_, moveX, moveY);
+        break;
+    case Screen::Orbit:
+        setOrbitMove(state_, moveX, moveY);
+        break;
+    case Screen::Mining:
+        setMiningMove(state_, moveX, moveY);
+        setMiningDrilling(state_, useController ? controllerRealtimeInput_.drilling : keyboardRealtimeInput_.drilling);
+        break;
+    default:
+        break;
+    }
+}
+
+void RocketGameApp::openControllerSystemMenu(PauseReason reason)
+{
+    releaseRealtimeInputs(true);
+    if (pauseReason_ != reason) {
+        controllerResumeNeutralRequired_ = reason == PauseReason::ControllerDisconnected
+            || (reason == PauseReason::PageHidden
+                && controllerClaimedInput_
+                && activeInputSource_ == InputSource::Controller);
+    }
+    pauseReason_ = reason;
+    services_.ui.setControllerResumeBlocked(
+        controllerResumeBlocked(reason, controllerConnected_, controllerResumeNeutralRequired_),
+        controllerConnected_);
+    services_.ui.openModal("system_menu");
+}
+
+void RocketGameApp::clearControllerPause()
+{
+    pauseReason_ = PauseReason::None;
+    controllerResumeNeutralRequired_ = false;
+    services_.ui.setControllerResumeBlocked(false, controllerConnected_);
+    releaseRealtimeInputs(true);
+}
+
+void RocketGameApp::dispatchControllerAction(InputContext context, GameInputAction action)
+{
+    lastControllerAction_ = std::string(controllerActionName(action));
+    if (action != GameInputAction::EnterUiFocus && action != GameInputAction::Count) {
+        queueControllerHapticCue(ControllerHapticCue::Confirmation);
+    }
+
+    switch (action) {
+    case GameInputAction::ActivateFocused:
+        services_.ui.activateFocused();
+        break;
+    case GameInputAction::CancelFocused:
+        if (pauseReason_ == PauseReason::ControllerDisconnected || pauseReason_ == PauseReason::PageHidden) {
+            // Safety pauses require the explicit Resume control; East cannot
+            // dismiss their root menu and accidentally restart simulation.
+            break;
+        }
+        if (pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen()) {
+            clearControllerPause();
+        } else if (pauseReason_ == PauseReason::None && !services_.ui.modalOpen() && state_.screen == Screen::DroneOps) {
+            backToSurfaceOps();
+        } else {
+            services_.ui.cancel();
+        }
+        break;
+    case GameInputAction::OpenSystemMenu:
+        if (!services_.ui.modalOpen() || pauseReason_ == PauseReason::ControllerUiFocus) {
+            openControllerSystemMenu(PauseReason::SystemMenu);
+        }
+        break;
+    case GameInputAction::OpenMap:
+        services_.ui.openModal(std::string(ui::modals::map));
+        break;
+    case GameInputAction::OpenInventory:
+        services_.ui.openModal(std::string(ui::modals::inventory));
+        break;
+    case GameInputAction::StartOrContinue:
+        if (context == InputContext::Preflight) {
+            startLaunch();
+        } else if (state_.screen == Screen::ArrivalFanfare) {
+            skipArrivalFanfare();
+        } else if (state_.screen == Screen::Results) {
+            next();
+        } else if (context == InputContext::FlybyComplete) {
+            flybyContinue();
+        } else if (context == InputContext::OrbitComplete) {
+            orbitContinue();
+        }
+        break;
+    case GameInputAction::ReturnHome:
+        returnHome();
+        break;
+    case GameInputAction::Eject:
+        ejectNow();
+        break;
+    case GameInputAction::ToggleEngines:
+        cutEngines();
+        break;
+    case GameInputAction::TogglePressureRelief:
+        if (session_.controls.actions.pressureReliefOpen && !session_.controls.actions.pressureReliefFailed) {
+            closePressureReliefValve();
+        } else {
+            pressureReliefValve();
+        }
+        break;
+    case GameInputAction::JettisonCargo:
+        jettisonCargo();
+        break;
+    case GameInputAction::Abort:
+        if (context == InputContext::FlybyActive) {
+            flybyAbort();
+        } else if (context == InputContext::OrbitActive) {
+            orbitAbort();
+        } else if (context == InputContext::SurfaceScan) {
+            scanSurfaceAbort();
+        } else if (context == InputContext::SurfacePush) {
+            pushSurfaceAbort();
+        } else if (context == InputContext::MiningActive || context == InputContext::MiningService) {
+            miningAbort();
+        }
+        break;
+    case GameInputAction::PrimarySurfaceAction:
+        if (context == InputContext::SurfaceScan) {
+            scanSurfacePulse();
+        } else if (context == InputContext::SurfacePush) {
+            pushSurfaceStep();
+        }
+        break;
+    case GameInputAction::BankSurfaceAction:
+        if (context == InputContext::SurfaceScan) {
+            scanSurfaceBank();
+        } else if (context == InputContext::SurfacePush) {
+            pushSurfaceBank();
+        }
+        break;
+    case GameInputAction::MiningScan:
+        miningScanner();
+        break;
+    case GameInputAction::MiningTether:
+        miningTether();
+        break;
+    case GameInputAction::MiningStow:
+        miningStow();
+        break;
+    case GameInputAction::MiningRepairDrill:
+        miningRepairDrill();
+        break;
+    case GameInputAction::MiningRepairRig:
+        miningRepairDrone();
+        break;
+    case GameInputAction::MiningFailureAcknowledge:
+        miningFailureAck();
+        break;
+    case GameInputAction::EnterUiFocus:
+        releaseRealtimeInputs(true);
+        pauseReason_ = PauseReason::ControllerUiFocus;
+        break;
+    case GameInputAction::Count:
+        break;
+    }
+}
+
+void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
+{
+    if (context == InputContext::FlybyActive) {
+        // Flyby steering is angular: its existing keyboard convention maps A
+        // (left) to positive turn authority.
+        controllerRealtimeInput_.moveX = -input.moveX;
+        controllerRealtimeInput_.moveY = input.moveY;
+    } else if (context == InputContext::OrbitActive
+        || context == InputContext::MiningActive
+        || context == InputContext::MiningService) {
+        controllerRealtimeInput_.moveX = input.moveX;
+        controllerRealtimeInput_.moveY = input.moveY;
+    } else {
+        controllerRealtimeInput_.moveX = 0.0;
+        controllerRealtimeInput_.moveY = 0.0;
+    }
+    controllerRealtimeInput_.drilling = (context == InputContext::MiningActive || context == InputContext::MiningService)
+        && input.drilling;
+
+    // Pause transitions outrank every gameplay action. This prevents a Menu
+    // press on the same frame as a completed eject/abort hold from performing
+    // the dangerous action behind the newly opened overlay.
+    if (input.has(GameInputAction::OpenSystemMenu)) {
+        dispatchControllerAction(context, GameInputAction::OpenSystemMenu);
+        return;
+    }
+    if (input.has(GameInputAction::EnterUiFocus)) {
+        dispatchControllerAction(context, GameInputAction::EnterUiFocus);
+        if (input.navigation) {
+            services_.ui.navigate(*input.navigation);
+        }
+        return;
+    }
+    if (input.navigation) {
+        services_.ui.navigate(*input.navigation);
+    }
+    if (std::abs(input.scroll) > 0.10) {
+        services_.ui.scroll(static_cast<float>(input.scroll * 48.0));
+    }
+
+    for (std::size_t index = 0; index < gameInputActionCount; ++index) {
+        const GameInputAction action = static_cast<GameInputAction>(index);
+        if (action != GameInputAction::EnterUiFocus
+            && action != GameInputAction::OpenSystemMenu
+            && input.has(action)) {
+            dispatchControllerAction(context, action);
+        }
+    }
+    if (pauseReason_ == PauseReason::None) {
+        applyRealtimeInputs();
+    }
+}
+
+void RocketGameApp::previewSyntheticControllerInput(const ControllerFrame& frame, double realTimeSeconds)
+{
+    // Controller Lab input is intentionally preview-only. It may move focus
+    // and exercise hold/repeat routing, but it never dispatches a game action,
+    // changes realtime controls, pauses play, or reaches save-producing code.
+    services_.ui.setControllerFocusVisible(frame.connected);
+    services_.ui.setControllerPresentation(frame.connected, frame.family);
+    if (!frame.connected) {
+        syntheticInputRouter_.reset();
+        lastControllerAction_ = "synthetic_disconnect";
+        return;
+    }
+
+    if (frame.meaningfulInput) {
+        lastControllerInputSeconds_ = realTimeSeconds;
+    }
+    const InputContext context = inputContext();
+    const double focusedActivationHoldSeconds = services_.ui.focusedId() == "action:reset_save" ? 0.75 : 0.0;
+    const RoutedGameInput routed = syntheticInputRouter_.route(
+        context,
+        frame,
+        controllerPreferences_,
+        focusedActivationHoldSeconds);
+
+    if (routed.navigation) {
+        services_.ui.navigate(*routed.navigation);
+    }
+    if (std::abs(routed.scroll) > 0.10) {
+        services_.ui.scroll(static_cast<float>(routed.scroll * 48.0));
+    }
+
+    bool actionFound = false;
+    for (std::size_t index = 0; index < gameInputActionCount; ++index) {
+        const GameInputAction action = static_cast<GameInputAction>(index);
+        if (!routed.has(action)) {
+            continue;
+        }
+        lastControllerAction_ = "synthetic_" + std::string(controllerActionName(action));
+        actionFound = true;
+    }
+    if (!actionFound && frame.meaningfulInput) {
+        lastControllerAction_ = "synthetic_input";
+    }
+}
+
+void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeconds)
+{
+    if (frame.synthetic) {
+        if (!frame.pageVisible || !frame.browserFocused) {
+            const InputContext gameplayContext = gameplayInputContext();
+            if (realtimeControllerContext(gameplayContext)) {
+                openControllerSystemMenu(PauseReason::PageHidden);
+            } else {
+                releaseRealtimeInputs(true);
+            }
+            syntheticInputRouter_.reset();
+            return;
+        }
+        previewSyntheticControllerInput(frame, realTimeSeconds);
+        return;
+    }
+
+    controllerConnected_ = frame.connected;
+    const InputContext presentationContext = gameplayInputContext();
+    const bool directGameplayControls = presentationContext == InputContext::Preflight
+        || presentationContext == InputContext::Launch
+        || presentationContext == InputContext::FlybyActive
+        || presentationContext == InputContext::OrbitActive
+        || presentationContext == InputContext::MiningActive
+        || presentationContext == InputContext::MiningService;
+    const bool controllerPresentation = frame.connected && activeInputSource_ == InputSource::Controller;
+    const bool controllerFocusVisible = controllerPresentation
+        && (!directGameplayControls || pauseReason_ != PauseReason::None || services_.ui.modalOpen());
+    services_.ui.setControllerFocusVisible(controllerFocusVisible);
+    services_.ui.setControllerPresentation(controllerPresentation, frame.family);
+
+    if (state_.screen != lastInputScreen_) {
+        releaseRealtimeInputs(true);
+        if (pauseReason_ == PauseReason::ControllerUiFocus) {
+            pauseReason_ = PauseReason::None;
+        }
+        lastInputScreen_ = state_.screen;
+    }
+
+    const InputContext gameplayContext = gameplayInputContext();
+    const bool realtime = realtimeControllerContext(gameplayContext);
+
+    if (!frame.pageVisible || !frame.browserFocused) {
+        if (realtime) {
+            openControllerSystemMenu(PauseReason::PageHidden);
+        } else {
+            releaseRealtimeInputs(true);
+        }
+        controllerWasConnected_ = frame.connected;
+        return;
+    }
+
+    updateControllerHapticState();
+
+    const bool controllerLost = frame.justDisconnected || (controllerWasConnected_ && !frame.connected);
+    if (controllerLost) {
+        const bool activeControllerLost = controllerClaimedInput_ && activeInputSource_ == InputSource::Controller;
+        releaseRealtimeInputs(activeControllerLost);
+        if (!activeControllerLost && pauseReason_ == PauseReason::None) {
+            applyRealtimeInputs();
+        }
+        if (realtime && activeControllerLost) {
+            openControllerSystemMenu(PauseReason::ControllerDisconnected);
+        }
+        controllerWasConnected_ = false;
+        controllerClaimedInput_ = false;
+        return;
+    }
+
+    controllerWasConnected_ = frame.connected;
+    if (frame.meaningfulInput) {
+        controllerClaimedInput_ = true;
+        lastControllerInputSeconds_ = realTimeSeconds;
+    }
+
+    const bool safetyResumePause = pauseReason_ == PauseReason::ControllerDisconnected
+        || pauseReason_ == PauseReason::PageHidden;
+    services_.ui.setControllerResumeBlocked(
+        controllerResumeBlocked(pauseReason_, frame.connected, controllerResumeNeutralRequired_),
+        frame.connected);
+    if (safetyResumePause && controllerResumeNeutralRequired_) {
+        if (!services_.ui.modalOpen()) {
+            services_.ui.openModal("system_menu");
+        }
+        const bool neutralController = frame.connected
+            && frame.down.none()
+            && std::abs(frame.leftX) <= 0.01
+            && std::abs(frame.leftY) <= 0.01
+            && std::abs(frame.rightX) <= 0.01
+            && std::abs(frame.rightY) <= 0.01
+            && !frame.navigation;
+        if (!neutralController) {
+            controllerRealtimeInput_ = {};
+            return;
+        }
+        // Route this neutral frame so the router observes every button as
+        // released. Resume then requires a fresh confirm edge on a later frame.
+        controllerResumeNeutralRequired_ = false;
+        services_.ui.setControllerResumeBlocked(false, frame.connected);
+    }
+
+    if (pauseReason_ != PauseReason::None && pauseReason_ != PauseReason::ControllerUiFocus && !services_.ui.modalOpen()) {
+        if (controllerResumeBlocked(pauseReason_, frame.connected, controllerResumeNeutralRequired_)) {
+            services_.ui.openModal("system_menu");
+            controllerRealtimeInput_ = {};
+            return;
+        }
+        clearControllerPause();
+    }
+
+    if (pauseReason_ == PauseReason::None && services_.ui.modalOpen() && realtimeControllerContext(gameplayContext)) {
+        releaseRealtimeInputs(true);
+        pauseReason_ = PauseReason::BlockingModal;
+    }
+
+    const InputContext context = inputContext();
+    const double focusedActivationHoldSeconds = services_.ui.focusedId() == "action:reset_save" ? 0.75 : 0.0;
+    const RoutedGameInput routed = inputRouter_.route(
+        context,
+        frame,
+        controllerPreferences_,
+        focusedActivationHoldSeconds);
+    const Screen screenBeforeDispatch = state_.screen;
+    dispatchControllerInput(context, routed);
+    if (state_.screen != screenBeforeDispatch) {
+        releaseRealtimeInputs(true);
+        if (pauseReason_ == PauseReason::ControllerUiFocus) {
+            clearControllerPause();
+        }
+        lastInputScreen_ = state_.screen;
+    }
+}
+
 void RocketGameApp::tick(double deltaSeconds)
 {
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
+
+    if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
+        return;
+    }
 
     if (state_.screen == Screen::Launch) {
         if (!session_.flightArmed) {
@@ -397,8 +1077,12 @@ void RocketGameApp::tick(double deltaSeconds)
                 session_.preflightElapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
                 tuning::session::preflightBoardingSeconds);
             if (!wasReady && session_.preflightElapsed >= tuning::session::preflightBoardingSeconds) {
-                state_.statusLine = std::string(text::status::preflightReady);
-                refreshPanel();
+                if (session_.launchQueued) {
+                    startLaunch();
+                } else {
+                    state_.statusLine = std::string(text::status::preflightReady);
+                    refreshPanel();
+                }
             }
             return;
         }
@@ -534,8 +1218,8 @@ void RocketGameApp::tick(double deltaSeconds)
 
 void RocketGameApp::render()
 {
-    renderer_.render(snapshot());
-    rmlUi_.render();
+    services_.renderer.render(snapshot());
+    services_.ui.render();
 }
 
 void RocketGameApp::prepareForLaunch()
@@ -584,11 +1268,13 @@ void RocketGameApp::startLaunch()
     }
 
     if (session_.preflightElapsed < tuning::session::preflightBoardingSeconds) {
-        state_.statusLine = std::string(text::status::droneStowing);
+        session_.launchQueued = true;
+        state_.statusLine = std::string(text::status::launchQueued);
         refreshPanel();
         return;
     }
 
+    session_.launchQueued = false;
     session_.flightArmed = true;
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
@@ -792,7 +1478,9 @@ void RocketGameApp::flybyMove(double xAxis, double yAxis)
     if (state_.screen != Screen::Flyby) {
         return;
     }
-    setFlybyMove(state_, xAxis, yAxis);
+    keyboardRealtimeInput_.moveX = std::clamp(xAxis, -1.0, 1.0);
+    keyboardRealtimeInput_.moveY = std::clamp(yAxis, -1.0, 1.0);
+    applyRealtimeInputs();
 }
 
 void RocketGameApp::flybyAbort()
@@ -851,7 +1539,9 @@ void RocketGameApp::orbitMove(double xAxis, double yAxis)
     if (state_.screen != Screen::Orbit) {
         return;
     }
-    setOrbitMove(state_, xAxis, yAxis);
+    keyboardRealtimeInput_.moveX = std::clamp(xAxis, -1.0, 1.0);
+    keyboardRealtimeInput_.moveY = std::clamp(yAxis, -1.0, 1.0);
+    applyRealtimeInputs();
 }
 
 void RocketGameApp::orbitAbort()
@@ -1085,10 +1775,12 @@ void RocketGameApp::upgradeDroneSlot()
 
 void RocketGameApp::miningMove(double xAxis, double yAxis)
 {
-    if (miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
-    setMiningMove(state_, xAxis, yAxis);
+    keyboardRealtimeInput_.moveX = std::clamp(xAxis, -1.0, 1.0);
+    keyboardRealtimeInput_.moveY = std::clamp(yAxis, -1.0, 1.0);
+    applyRealtimeInputs();
 }
 
 void RocketGameApp::miningAim(double normalizedX, double normalizedY)
@@ -1101,10 +1793,11 @@ void RocketGameApp::miningAim(double normalizedX, double normalizedY)
 
 void RocketGameApp::miningDrill(bool active)
 {
-    if (miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
-    setMiningDrilling(state_, active);
+    keyboardRealtimeInput_.drilling = active;
+    applyRealtimeInputs();
 }
 
 void RocketGameApp::miningScanner()
@@ -1353,6 +2046,16 @@ void RocketGameApp::miningFailureAck()
 {
     if (state_.screen != Screen::Mining || !state_.run.mining.failurePending) {
         return;
+    }
+
+    // Controller acknowledgment is routed directly instead of activating a
+    // focused DOM/RmlUi element. Close the auto-modal and remove its safety
+    // pause here so every input source leaves the failure state consistently.
+    if (services_.ui.modalOpen()) {
+        services_.ui.closeModal();
+    }
+    if (pauseReason_ == PauseReason::BlockingModal) {
+        clearControllerPause();
     }
 
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
@@ -1987,7 +2690,12 @@ void RocketGameApp::restCrew()
 void RocketGameApp::resetSave()
 {
     debugSessionActive_ = false;
-    clearBrowserSave();
+    if (!services_.saves.clear()) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+        state_.statusLine = "Save reset failed; the previous native save was preserved.";
+        panelDirty_ = true;
+        return;
+    }
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
     session_ = {};
@@ -1997,27 +2705,42 @@ void RocketGameApp::resetSave()
 
 bool RocketGameApp::uiMouseMove(int x, int y)
 {
-    return rmlUi_.mouseMove(x, y);
+    return services_.ui.mouseMove(x, y);
 }
 
 bool RocketGameApp::uiMouseDown(int x, int y, int button)
 {
-    return rmlUi_.mouseDown(x, y, button);
+    return services_.ui.mouseDown(x, y, button);
 }
 
 bool RocketGameApp::uiMouseUp(int x, int y, int button)
 {
-    return rmlUi_.mouseUp(x, y, button);
+    return services_.ui.mouseUp(x, y, button);
 }
 
 bool RocketGameApp::uiMouseWheel(int x, int y, double deltaY)
 {
-    return rmlUi_.mouseWheel(x, y, deltaY);
+    return services_.ui.mouseWheel(x, y, deltaY);
 }
 
 bool RocketGameApp::uiHitTest(int x, int y) const
 {
-    return rmlUi_.hitTest(x, y);
+    return services_.ui.hitTest(x, y);
+}
+
+bool RocketGameApp::uiNavigate(UiDirection direction)
+{
+    return services_.ui.navigate(direction);
+}
+
+bool RocketGameApp::uiActivateFocused()
+{
+    return services_.ui.activateFocused();
+}
+
+bool RocketGameApp::uiCancel()
+{
+    return services_.ui.cancel();
 }
 
 void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
@@ -2061,7 +2784,11 @@ void RocketGameApp::save()
     if (debugSessionActive_) {
         return;
     }
-    storeBrowserSave(serializeSaveData(captureSaveData(state_)));
+    if (!services_.saves.storeAtomic(serializeSaveData(captureSaveData(state_)))) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+        state_.statusLine = "Save failed; the previous save was preserved.";
+        panelDirty_ = true;
+    }
 }
 
 void RocketGameApp::refreshPanel()
@@ -2078,13 +2805,16 @@ void RocketGameApp::refreshPanel()
         session_.returnTrip.duration,
         session_.controls.actions,
         session_.flightArmed,
+        session_.launchQueued,
         session_.controls.pressureReliefUsed,
         session_.preflightElapsed >= tuning::session::preflightBoardingSeconds,
         miningDroneTransferEnabled(state_),
         debugActOneCheckpoint_,
+        services_.saves.description(),
+        services_.renderer.description(),
     });
-    setBrowserPanelHtml(panelHtml);
-    rmlUi_.setPanelHtml(panelHtml);
+    services_.uiBridge.setPanelHtml(panelHtml);
+    services_.ui.setPanelHtml(panelHtml);
     panelDirty_ = false;
 }
 

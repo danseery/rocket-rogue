@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/GameTypes.h"
+#include "platform/AppServices.h"
 
 #include <array>
 #include <vector>
@@ -258,10 +259,14 @@ struct RenderSnapshot {
     std::vector<int> surfacePushForecastDepthOffsets;
 };
 
-class WebGLRenderer {
+class OpenGlRenderer final : public IGameRenderer {
 public:
-    bool initialize();
-    void render(const RenderSnapshot& snapshot);
+    OpenGlRenderer(IPlatformHost& host, IPreferenceStore& preferences, ITextureSource& textures);
+
+    bool initialize() override;
+    void render(const RenderSnapshot& snapshot) override;
+    void shutdown() override;
+    std::string_view description() const override;
 
 private:
     void beginFrame(const RenderSnapshot& snapshot);
@@ -305,6 +310,9 @@ private:
         std::array<float, 2> effectSize = {});
     void submitLines(const std::vector<float>& vertices, float width, bool worldSpace = true);
 
+    IPlatformHost& host_;
+    IPreferenceStore& preferences_;
+    ITextureSource& textures_;
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
     unsigned int vbo_ = 0;

@@ -1,8 +1,7 @@
 #include "game/GameRmlUi.h"
+#include "render/OpenGlApi.h"
 
 #include <utility>
-
-#ifdef __EMSCRIPTEN__
 
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Core.h>
@@ -11,6 +10,7 @@
 #include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <RmlUi/Core/Elements/ElementFormControlInput.h>
+#include <RmlUi/Core/Elements/ElementFormControlSelect.h>
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/EventListener.h>
 #include <RmlUi/Core/Log.h>
@@ -23,13 +23,12 @@
 #include <cctype>
 #include <cstddef>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include <emscripten.h>
-#include <GLES3/gl3.h>
 
 namespace rocket {
 namespace {
@@ -44,216 +43,145 @@ constexpr int kPhaseCardGap = 8;
 constexpr int kPhaseCommonButtonWidth = 132;
 constexpr int kPhaseCommonChipSlotWidth = 132;
 
-EM_JS(double, rr_rml_now_seconds, (), {
-    return performance.now() / 1000.0;
-});
+IPreferenceStore* g_preferences = nullptr;
+IPlatformHost* g_host = nullptr;
+IUiBridge* g_uiBridge = nullptr;
 
-EM_JS(int, rr_rml_viewport_width, (), {
-    const viewport = globalThis.visualViewport;
-    return Math.max(1, Math.round((viewport && viewport.width) || globalThis.innerWidth || 1));
-});
+AppPreferences currentPreferences()
+{
+    return g_preferences ? g_preferences->load() : AppPreferences {};
+}
 
-EM_JS(int, rr_rml_viewport_height, (), {
-    const viewport = globalThis.visualViewport;
-    return Math.max(1, Math.round((viewport && viewport.height) || globalThis.innerHeight || 1));
-});
+void storePreferences(AppPreferences preferences)
+{
+    if (!g_preferences || !g_uiBridge) return;
+    g_preferences->store(preferences);
+    g_uiBridge->preferencesChanged(preferences);
+}
 
-EM_JS(int, rr_rml_drawing_width, (), {
-    const canvas = document.getElementById("canvas");
-    return Math.max(1, (canvas && canvas.width) || rr_rml_viewport_width());
-});
+double rr_rml_now_seconds() { return g_host ? g_host->monotonicSeconds() : 0.0; }
+int rr_rml_viewport_width() { return g_host ? g_host->viewportMetrics().logicalWidth : 1280; }
+int rr_rml_viewport_height() { return g_host ? g_host->viewportMetrics().logicalHeight : 800; }
+int rr_rml_drawing_width() { return g_host ? g_host->viewportMetrics().drawableWidth : 1280; }
+int rr_rml_drawing_height() { return g_host ? g_host->viewportMetrics().drawableHeight : 800; }
+double rr_rml_density_ratio() { return g_host ? g_host->viewportMetrics().densityRatio : 1.0; }
 
-EM_JS(int, rr_rml_drawing_height, (), {
-    const canvas = document.getElementById("canvas");
-    return Math.max(1, (canvas && canvas.height) || rr_rml_viewport_height());
-});
+int rr_rml_resolution_preset()
+{
+    static constexpr std::string_view options[] = {"auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"};
+    const std::string value = currentPreferences().resolutionPreset;
+    for (int i = 0; i < 5; ++i) if (value == options[i]) return i;
+    return 0;
+}
 
-EM_JS(double, rr_rml_density_ratio, (), {
-    return 1.0;
-});
+void rr_rml_set_resolution_preset(const char* value)
+{
+    AppPreferences preferences = currentPreferences();
+    preferences.resolutionPreset = value ? value : "auto";
+    storePreferences(std::move(preferences));
+}
 
-EM_JS(int, rr_rml_resolution_preset, (), {
-    const options = ["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"];
-    try {
-        const value = window.localStorage.getItem("rocket_rogue_resolution") || "auto";
-        const index = options.indexOf(value);
-        return index >= 0 ? index : 0;
-    } catch (error) {
-        return 0;
-    }
-});
+int rr_rml_desktop_fullscreen_available() { return g_host && g_host->fullscreenAvailable() ? 1 : 0; }
+int rr_rml_desktop_fullscreen_enabled() { return g_host && g_host->fullscreen() ? 1 : 0; }
+void rr_rml_set_desktop_fullscreen(int enabled)
+{
+    if (!g_host || !g_host->setFullscreen(enabled != 0)) return;
+    AppPreferences preferences = currentPreferences();
+    preferences.fullscreen = enabled != 0;
+    storePreferences(std::move(preferences));
+}
 
-EM_JS(void, rr_rml_set_resolution_preset, (const char* value), {
-    const options = ["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"];
-    const raw = UTF8ToString(value || 0);
-    const normalized = options.includes(raw) ? raw : "auto";
-    try {
-        if (normalized === "auto") {
-            window.localStorage.removeItem("rocket_rogue_resolution");
-        } else {
-            window.localStorage.setItem("rocket_rogue_resolution", normalized);
-        }
-    } catch (error) {
-        // Keep the in-document selection even if preferences cannot be persisted.
+int rr_rml_controller_prompt_preference()
+{
+    switch (currentPreferences().controller.promptFamily) {
+    case ControllerPromptFamily::Xbox: return 1;
+    case ControllerPromptFamily::PlayStation: return 2;
+    case ControllerPromptFamily::SteamDeck: return 3;
+    case ControllerPromptFamily::Generic: return 4;
+    case ControllerPromptFamily::Auto:
+    default: return 0;
     }
-    document.body.dataset.renderResolution = normalized;
-    if (window.RocketBridge && typeof window.RocketBridge.setResolutionPreset === "function") {
-        window.RocketBridge.setResolutionPreset(normalized);
-    }
-});
+}
+int rr_rml_controller_deadzone_preference()
+{
+    static constexpr double options[] = {0.10, 0.15, 0.20, 0.25, 0.30, 0.35};
+    const double value = currentPreferences().controller.stickDeadzone;
+    int closest = 2;
+    for (int i = 0; i < 6; ++i) if (std::abs(options[i] - value) < std::abs(options[closest] - value)) closest = i;
+    return closest;
+}
+int rr_rml_controller_boolean_preference(int field)
+{
+    const ControllerPreferences preferences = currentPreferences().controller;
+    if (field == 0) return preferences.invertFlightY ? 1 : 0;
+    if (field == 1) return preferences.swapConfirmCancel ? 1 : 0;
+    return preferences.vibrationEnabled ? 1 : 0;
+}
+void rr_rml_set_controller_preference(const char* fieldValue, const char* rawValue)
+{
+    AppPreferences preferences = currentPreferences();
+    const std::string_view field = fieldValue ? fieldValue : "";
+    const std::string_view value = rawValue ? rawValue : "";
+    if (field == "promptFamily") {
+        if (value == "xbox") preferences.controller.promptFamily = ControllerPromptFamily::Xbox;
+        else if (value == "playstation") preferences.controller.promptFamily = ControllerPromptFamily::PlayStation;
+        else if (value == "steamdeck") preferences.controller.promptFamily = ControllerPromptFamily::SteamDeck;
+        else if (value == "generic") preferences.controller.promptFamily = ControllerPromptFamily::Generic;
+        else preferences.controller.promptFamily = ControllerPromptFamily::Auto;
+    } else if (field == "stickDeadzone") {
+        try { preferences.controller.stickDeadzone = std::stod(std::string(value)); } catch (...) {}
+    } else if (field == "invertFlightY") preferences.controller.invertFlightY = value == "true";
+    else if (field == "swapConfirmCancel") preferences.controller.swapConfirmCancel = value == "true";
+    else if (field == "vibrationEnabled") preferences.controller.vibrationEnabled = value == "true";
+    storePreferences(std::move(preferences));
+}
 
-EM_JS(void, rr_rml_set_enabled, (int enabled), {
-    document.body.classList.toggle("rmlui-enabled", enabled !== 0);
-});
-
-EM_JS(void, rr_rml_set_modal_open, (int enabled), {
-    const open = enabled !== 0;
-    document.body.classList.toggle("rmlui-modal-open", open);
-    const launchControl = document.getElementById("scene-launch-control");
-    if (launchControl) {
-        if (open) {
-            launchControl.classList.remove("is-visible");
-            launchControl.hidden = true;
-            launchControl.setAttribute("aria-hidden", "true");
-        } else {
-            launchControl.removeAttribute("aria-hidden");
-            if (window.RocketBridge && typeof window.RocketBridge.syncSceneOverlays === "function") {
-                window.RocketBridge.syncSceneOverlays();
-            }
-        }
-    }
-});
-
-EM_JS(double, rr_rml_game_speed_multiplier, (), {
-    try {
-        const raw = Number(window.localStorage.getItem("rocket_rogue_game_speed") || "1");
-        if (!Number.isFinite(raw)) {
-            return 1.0;
-        }
-        return Math.min(8.0, Math.max(0.25, raw));
-    } catch (error) {
-        return 1.0;
-    }
-});
-
-EM_JS(void, rr_rml_set_game_speed_multiplier, (const char* value), {
-    const raw = UTF8ToString(value || 0);
-    const options = ["0.5", "1", "1.5", "2", "3", "5", "8"];
-    const numeric = Number(raw);
-    const normalized = options.find((candidate) => Number(candidate) === numeric) || "1";
-    try {
-        if (normalized === "1") {
-            window.localStorage.removeItem("rocket_rogue_game_speed");
-        } else {
-            window.localStorage.setItem("rocket_rogue_game_speed", normalized);
-        }
-    } catch (error) {
-        // Ignore storage failures. The game will fall back to 1x.
-    }
-});
-
-EM_JS(int, rr_rml_debug_tools_enabled, (), {
-    try {
-        const debugTools = document.getElementById("debug-tools");
-        return window.localStorage.getItem("rocket_rogue_debug_tools") === "1"
-            || (debugTools && debugTools.classList.contains("is-visible")) ? 1 : 0;
-    } catch (error) {
-        return 0;
-    }
-});
-
-EM_JS(void, rr_rml_set_debug_tools_enabled, (int enabled), {
-    try {
-        if (enabled) {
-            window.localStorage.setItem("rocket_rogue_debug_tools", "1");
-        } else {
-            window.localStorage.removeItem("rocket_rogue_debug_tools");
-        }
-    } catch (error) {
-        // Ignore storage failures. The overlay will just stay in its current session state.
-    }
-    const debugTools = document.getElementById("debug-tools");
-    if (debugTools) {
-        debugTools.classList.toggle("is-visible", !!enabled);
-    }
-    if (window.RocketBridge && typeof window.RocketBridge.syncDebugToolsControls === "function") {
-        window.RocketBridge.syncDebugToolsControls();
-    }
-});
-
-EM_JS(int, rr_rml_help_disabled, (), {
-    try {
-        return window.localStorage.getItem("rocket_rogue_help_disabled") === "1" ? 1 : 0;
-    } catch (error) {
-        return 0;
-    }
-});
-
-EM_JS(void, rr_rml_set_help_disabled, (int disabled), {
-    try {
-        if (disabled) {
-            window.localStorage.setItem("rocket_rogue_help_disabled", "1");
-        } else {
-            window.localStorage.removeItem("rocket_rogue_help_disabled");
-        }
-    } catch (error) {
-        // Ignore storage failures. The setting will return to its default next load.
-    }
-    if (window.RocketBridge && typeof window.RocketBridge.syncSettingsControls === "function") {
-        window.RocketBridge.syncSettingsControls();
-    }
-});
-
-EM_JS(int, rr_rml_camera_shake_disabled, (), {
-    try {
-        return window.localStorage.getItem("rocket_rogue_camera_shake_disabled") === "1" ? 1 : 0;
-    } catch (error) {
-        return 0;
-    }
-});
-
-EM_JS(void, rr_rml_set_camera_shake_disabled, (int disabled), {
-    try {
-        if (disabled) {
-            window.localStorage.setItem("rocket_rogue_camera_shake_disabled", "1");
-        } else {
-            window.localStorage.removeItem("rocket_rogue_camera_shake_disabled");
-        }
-    } catch (error) {
-        // Ignore storage failures. The setting will return to its default next load.
-    }
-    if (window.RocketBridge && typeof window.RocketBridge.syncSettingsControls === "function") {
-        window.RocketBridge.syncSettingsControls();
-    }
-});
-
-EM_JS(int, rr_rml_help_topic_hidden, (const char* value), {
-    const topic = UTF8ToString(value || 0);
-    try {
-        if (window.localStorage.getItem("rocket_rogue_help_disabled") === "1") {
-            return 1;
-        }
-        const parsed = JSON.parse(window.localStorage.getItem("rocket_rogue_help_dismissed_v1") || "[]");
-        return Array.isArray(parsed) && parsed.includes(topic) ? 1 : 0;
-    } catch (error) {
-        return 0;
-    }
-});
-
-EM_JS(void, rr_rml_dismiss_help_topic, (const char* value), {
-    const topic = UTF8ToString(value || 0);
-    if (!topic) {
-        return;
-    }
-    try {
-        const parsed = JSON.parse(window.localStorage.getItem("rocket_rogue_help_dismissed_v1") || "[]");
-        const topics = new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
-        topics.add(topic);
-        window.localStorage.setItem("rocket_rogue_help_dismissed_v1", JSON.stringify(Array.from(topics)));
-    } catch (error) {
-        // Ignore storage failures. The help card will simply stay visible.
-    }
-});
+void rr_rml_dom_set_controller_presentation(int active, int family) { if (g_uiBridge) g_uiBridge->setControllerPresentation(active != 0, static_cast<ControllerFamily>(family)); }
+void rr_rml_dom_set_controller_focus_visible(int visible) { if (g_uiBridge) g_uiBridge->setControllerFocusVisible(visible != 0); }
+void rr_rml_dom_set_controller_resume_blocked(int blocked, int connected) { if (g_uiBridge) g_uiBridge->setControllerResumeBlocked(blocked != 0, connected != 0); }
+int rr_rml_dom_navigate(int direction) { return g_uiBridge && g_uiBridge->navigate(static_cast<UiDirection>(direction)) ? 1 : 0; }
+int rr_rml_dom_activate() { return g_uiBridge && g_uiBridge->activate() ? 1 : 0; }
+int rr_rml_dom_cancel() { return g_uiBridge && g_uiBridge->cancel() ? 1 : 0; }
+int rr_rml_dom_scroll(double amount) { return g_uiBridge && g_uiBridge->scroll(amount) ? 1 : 0; }
+int rr_rml_dom_modal_open() { return g_uiBridge && g_uiBridge->modalOpen() ? 1 : 0; }
+int rr_rml_dom_open_modal(const char* value) { return g_uiBridge && g_uiBridge->openModal(value ? value : "") ? 1 : 0; }
+void rr_rml_dom_close_modal() { if (g_uiBridge) g_uiBridge->closeModal(); }
+int rr_rml_dom_focused_id(char* buffer, int capacity)
+{
+    if (!buffer || capacity <= 0) return 0;
+    const std::string value = g_uiBridge ? g_uiBridge->focusedId() : std::string {};
+    const int length = std::min(capacity - 1, static_cast<int>(value.size()));
+    std::copy_n(value.data(), length, buffer);
+    buffer[length] = '\0';
+    return length;
+}
+void rr_rml_set_enabled(int enabled) { if (g_uiBridge) g_uiBridge->setRmlUiEnabled(enabled != 0); }
+void rr_rml_set_modal_open(int enabled) { if (g_uiBridge) g_uiBridge->setModalOpen(enabled != 0); }
+double rr_rml_game_speed_multiplier() { return currentPreferences().gameSpeed; }
+void rr_rml_set_game_speed_multiplier(const char* value)
+{
+    AppPreferences preferences = currentPreferences();
+    try { preferences.gameSpeed = std::clamp(std::stod(value ? value : "1"), 0.25, 8.0); } catch (...) { preferences.gameSpeed = 1.0; }
+    storePreferences(std::move(preferences));
+}
+int rr_rml_debug_tools_enabled() { return currentPreferences().debugToolsEnabled ? 1 : 0; }
+void rr_rml_set_debug_tools_enabled(int enabled) { AppPreferences p = currentPreferences(); p.debugToolsEnabled = enabled != 0; storePreferences(std::move(p)); }
+int rr_rml_help_disabled() { return currentPreferences().helpDisabled ? 1 : 0; }
+void rr_rml_set_help_disabled(int disabled) { AppPreferences p = currentPreferences(); p.helpDisabled = disabled != 0; storePreferences(std::move(p)); }
+int rr_rml_camera_shake_disabled() { return currentPreferences().cameraShakeDisabled ? 1 : 0; }
+void rr_rml_set_camera_shake_disabled(int disabled) { AppPreferences p = currentPreferences(); p.cameraShakeDisabled = disabled != 0; storePreferences(std::move(p)); }
+int rr_rml_help_topic_hidden(const char* value)
+{
+    const AppPreferences preferences = currentPreferences();
+    return preferences.helpDisabled || std::find(preferences.dismissedHelpTopics.begin(), preferences.dismissedHelpTopics.end(), value ? value : "") != preferences.dismissedHelpTopics.end();
+}
+void rr_rml_dismiss_help_topic(const char* value)
+{
+    if (!value || !*value) return;
+    AppPreferences preferences = currentPreferences();
+    if (std::find(preferences.dismissedHelpTopics.begin(), preferences.dismissedHelpTopics.end(), value) == preferences.dismissedHelpTopics.end()) preferences.dismissedHelpTopics.emplace_back(value);
+    storePreferences(std::move(preferences));
+}
 
 class RmlSystemInterface final : public Rml::SystemInterface {
 public:
@@ -264,8 +192,13 @@ public:
 
     bool LogMessage(Rml::Log::Type type, const Rml::String& message) override
     {
-        (void)type;
-        emscripten_log(EM_LOG_CONSOLE, "RmlUi: %s", message.c_str());
+        if (g_host) {
+            g_host->log(
+                type == Rml::Log::LT_ERROR || type == Rml::Log::LT_ASSERT
+                    ? PlatformLogLevel::Error
+                    : (type == Rml::Log::LT_WARNING ? PlatformLogLevel::Warning : PlatformLogLevel::Info),
+                std::string("RmlUi: ") + message);
+        }
         return true;
     }
 };
@@ -332,8 +265,11 @@ public:
 
     bool initialize()
     {
-        static constexpr const char* kVertexShader = R"(#version 300 es
-precision highp float;
+        const OpenGlDialect dialect = g_host ? g_host->openGlDialect() : OpenGlDialect::DesktopCore33;
+        const std::string shaderHeader = dialect == OpenGlDialect::WebGl2
+            ? "#version 300 es\nprecision highp float;\n"
+            : "#version 330 core\n";
+        const std::string vertexShaderSource = shaderHeader + R"(
 layout(location = 0) in vec2 a_position;
 layout(location = 1) in vec4 a_colour;
 layout(location = 2) in vec2 a_tex_coord;
@@ -348,8 +284,7 @@ void main() {
 }
 )";
 
-        static constexpr const char* kFragmentShader = R"(#version 300 es
-precision highp float;
+        const std::string fragmentShaderSource = shaderHeader + R"(
 in vec4 v_colour;
 in vec2 v_tex_coord;
 uniform sampler2D u_texture;
@@ -364,8 +299,8 @@ void main() {
 }
 )";
 
-        const GLuint vertexShader = compileShader(GL_VERTEX_SHADER, kVertexShader);
-        const GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, kFragmentShader);
+        const GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource.c_str());
+        const GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource.c_str());
         if (vertexShader == 0 || fragmentShader == 0) {
             glDeleteShader(vertexShader);
             glDeleteShader(fragmentShader);
@@ -533,7 +468,7 @@ void main() {
     Rml::TextureHandle LoadTexture(Rml::Vector2i& textureDimensions, const Rml::String& source) override
     {
         (void)textureDimensions;
-        Rml::Log::Message(Rml::Log::LT_WARNING, "RmlUi texture file loading is not available in the web build: %s", source.c_str());
+        Rml::Log::Message(Rml::Log::LT_WARNING, "RmlUi texture file loading is not used by Rocket Rogue: %s", source.c_str());
         return 0;
     }
 
@@ -621,6 +556,7 @@ struct ModalTemplate {
     std::string body;
     bool autoOpen = false;
     bool dismissible = true;
+    bool showClose = true;
 };
 
 struct ElementButtonBinding {
@@ -678,6 +614,7 @@ std::vector<ModalTemplate> extractModals(const std::string& html)
         modal.title = attributeValue(tag, "data-title");
         modal.autoOpen = attributeValue(tag, "data-auto-modal") == "1";
         modal.dismissible = attributeValue(tag, "data-modal-dismissible") != "0";
+        modal.showClose = attributeValue(tag, "data-modal-hide-close") != "1";
         modal.body = html.substr(tagEnd + 1, close - tagEnd - 1);
         if (!modal.id.empty()) {
             modals.push_back(std::move(modal));
@@ -781,6 +718,7 @@ std::string normalizeBooleanAttributes(std::string html)
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
         "data-flyby-run", "data-orbit-run",
         "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
+        "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
         "data-game-speed-settings", "data-game-speed-select",
         "data-debug-tools-settings", "data-debug-tools-toggle"
     };
@@ -885,6 +823,61 @@ std::string selectCurrentGameSpeed(std::string html)
     return html;
 }
 
+std::string selectCurrentControllerPrompt(std::string html)
+{
+    static constexpr const char* options[] = {"auto", "xbox", "playstation", "steamdeck", "generic"};
+    if (html.find("data-controller-prompt-select") == std::string::npos) {
+        return html;
+    }
+    const std::string value = options[std::clamp(rr_rml_controller_prompt_preference(), 0, 4)];
+    const std::string needle = "<option value=\"" + value + "\">";
+    const std::size_t optionStart = html.find(needle, html.find("data-controller-prompt-select"));
+    if (optionStart != std::string::npos) {
+        html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
+    }
+    return html;
+}
+
+std::string selectCurrentControllerDeadzone(std::string html)
+{
+    static constexpr const char* options[] = {"0.10", "0.15", "0.20", "0.25", "0.30", "0.35"};
+    if (html.find("data-controller-deadzone-select") == std::string::npos) {
+        return html;
+    }
+    const std::string value = options[std::clamp(rr_rml_controller_deadzone_preference(), 0, 5)];
+    const std::string needle = "<option value=\"" + value + "\">";
+    const std::size_t optionStart = html.find(needle, html.find("data-controller-deadzone-select"));
+    if (optionStart != std::string::npos) {
+        html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
+    }
+    return html;
+}
+
+std::string syncControllerToggle(std::string html, std::string_view attribute, bool enabled, std::string_view enabledLabel, std::string_view disabledLabel)
+{
+    const std::size_t attrStart = html.find(attribute);
+    if (attrStart == std::string::npos) {
+        return html;
+    }
+    const std::size_t tagEnd = html.find('>', attrStart);
+    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
+    if (tagEnd != std::string::npos && closeStart != std::string::npos) {
+        html.replace(tagEnd + 1, closeStart - tagEnd - 1, std::string(enabled ? enabledLabel : disabledLabel));
+    }
+    return html;
+}
+
+std::string syncCurrentControllerPreferences(std::string html)
+{
+    html = selectCurrentControllerDeadzone(selectCurrentControllerPrompt(std::move(html)));
+    html = syncControllerToggle(std::move(html), "data-controller-invert-toggle", rr_rml_controller_boolean_preference(0) != 0,
+        "Disable inverted Y", "Enable inverted Y");
+    html = syncControllerToggle(std::move(html), "data-controller-swap-toggle", rr_rml_controller_boolean_preference(1) != 0,
+        "Use standard confirm / cancel", "Swap confirm and cancel");
+    return syncControllerToggle(std::move(html), "data-controller-vibration-toggle", rr_rml_controller_boolean_preference(2) != 0,
+        "Disable vibration", "Enable vibration");
+}
+
 std::string syncCurrentDebugToolsToggle(std::string html)
 {
     if (html.find("data-debug-tools-toggle") == std::string::npos) {
@@ -949,10 +942,33 @@ std::string syncCurrentCameraShakeToggle(std::string html)
     return html;
 }
 
+std::string syncDesktopFullscreenToggle(std::string html)
+{
+    const std::string_view sectionMarker = "data-desktop-fullscreen-settings";
+    const std::size_t marker = html.find(sectionMarker);
+    if (marker == std::string::npos) {
+        return html;
+    }
+    if (rr_rml_desktop_fullscreen_available() == 0) {
+        const std::size_t sectionStart = html.rfind("<section", marker);
+        const std::size_t sectionEnd = html.find("</section>", marker);
+        if (sectionStart != std::string::npos && sectionEnd != std::string::npos) {
+            html.erase(sectionStart, sectionEnd + std::string_view("</section>").size() - sectionStart);
+        }
+        return html;
+    }
+    return syncControllerToggle(
+        std::move(html),
+        "data-desktop-fullscreen-toggle",
+        rr_rml_desktop_fullscreen_enabled() != 0,
+        "Exit fullscreen",
+        "Enter fullscreen");
+}
+
 std::string syncSettingsControls(std::string html)
 {
-    return syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(
-        selectCurrentGameSpeed(selectCurrentResolution(std::move(html))))));
+    return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(
+        selectCurrentGameSpeed(selectCurrentResolution(std::move(html))))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1120,6 +1136,7 @@ std::string linearizeRml(std::string html)
             const std::string modal = attributeValue(tag, "data-ui-modal");
             const std::string closeModal = attributeValue(tag, "data-ui-close-modal");
             const std::string helpDismiss = attributeValue(tag, "data-help-dismiss");
+            const std::string focusId = attributeValue(tag, "data-ui-focus-id");
             const std::string label = textFromMarkup(std::string_view(html.data() + tagEnd + 1, contentEnd - tagEnd - 1));
             if (!action.empty()) {
                 cssClass += " rr_action_" + encodeClassToken(action);
@@ -1167,6 +1184,9 @@ std::string linearizeRml(std::string html)
                 out += " rr_help_dismiss=\"" + helpDismiss + "\"";
                 out += " data-help-dismiss=\"" + helpDismiss + "\"";
             }
+            if (!focusId.empty()) {
+                out += " data-ui-focus-id=\"" + focusId + "\"";
+            }
             out += ">";
             out += label.empty() ? std::string("Continue") : label;
             out += "</button>";
@@ -1213,6 +1233,7 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
 
         const std::string_view tag(html.data() + tagStart, tagEnd - tagStart + 1);
         RmlButtonBinding binding;
+        binding.focusId = attributeValue(tag, "data-ui-focus-id");
         binding.label = textFromMarkup(std::string_view(html.data() + tagEnd + 1, closeStart - tagEnd - 1));
         binding.action = attributeValue(tag, "data-rr-action");
         binding.modal = attributeValue(tag, "data-ui-modal");
@@ -1220,7 +1241,28 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
         binding.close = !attributeValue(tag, "data-ui-close-modal").empty();
         binding.helpToggle = !attributeValue(tag, "data-help-toggle").empty();
         binding.cameraShakeToggle = !attributeValue(tag, "data-camera-shake-toggle").empty();
+        binding.desktopFullscreenToggle = !attributeValue(tag, "data-desktop-fullscreen-toggle").empty();
         binding.debugToolsToggle = !attributeValue(tag, "data-debug-tools-toggle").empty();
+        if (!attributeValue(tag, "data-controller-invert-toggle").empty()) {
+            binding.controllerSetting = "invertFlightY";
+        } else if (!attributeValue(tag, "data-controller-swap-toggle").empty()) {
+            binding.controllerSetting = "swapConfirmCancel";
+        } else if (!attributeValue(tag, "data-controller-vibration-toggle").empty()) {
+            binding.controllerSetting = "vibrationEnabled";
+        }
+        if (binding.focusId.empty()) {
+            if (!binding.action.empty()) {
+                binding.focusId = "action:" + binding.action;
+            } else if (!binding.modal.empty()) {
+                binding.focusId = "modal:" + binding.modal;
+            } else if (binding.close) {
+                binding.focusId = "modal:close";
+            } else if (!binding.helpDismiss.empty()) {
+                binding.focusId = "help-dismiss:" + binding.helpDismiss;
+            } else if (!binding.controllerSetting.empty()) {
+                binding.focusId = "setting:" + binding.controllerSetting;
+            }
+        }
         bindings.push_back(std::move(binding));
         pos = closeStart + std::string_view("</button>").size();
     }
@@ -2404,6 +2446,7 @@ scrollbarcorner {
     line-height: 1.15;
     overflow: visible;
 }
+)" + R"(
 .phase-board-drone-ops .drone-card .stat-chip {
     max-width: 92px;
     min-height: 22px;
@@ -2512,7 +2555,6 @@ scrollbarcorner {
     height: auto;
     line-height: 1.15;
     white-space: normal;
-    overflow-wrap: anywhere;
 }
 .phase-board-research .phase-advisory,
 .phase-board-drone-ops .resource-bank {
@@ -3805,6 +3847,7 @@ scrollbarcorner {
     line-height: 48px;
     text-align: center;
 }
+)" + R"(
 .phase-board-refit .upgrade-draft-card p {
     min-height: 46px;
     margin-bottom: 5px;
@@ -4256,6 +4299,7 @@ scrollbarcorner {
     font-size: 11px;
     line-height: 1.1;
 }
+)" + R"(
 .solar-map-glyph {
     display: flex;
     flex: none;
@@ -4312,7 +4356,6 @@ scrollbarcorner {
     color: #ff655f;
     background-color: #07090c;
     border-color: #5b6269;
-    border-style: dashed;
 }
 .solar-map-node.is-unknown .solar-map-glyph span {
     color: #ff655f;
@@ -4704,6 +4747,7 @@ scrollbarcorner {
 .inventory-item.rarity-rare .inventory-art span {
     color: #ffd166;
 }
+)" + R"(
 .upgrade-draft-card.rarity-prototype,
 .ops-card.rarity-prototype,
 .inventory-item.rarity-prototype {
@@ -5156,6 +5200,7 @@ scrollbarcorner {
 .phase-board-drone-ops .drone-bay-strip .stat-grid .stat-chip.wide {
     width: 106px;
 }
+)" + R"(
 h1 {
     font-size: 21px;
     margin-bottom: 4px;
@@ -5252,7 +5297,6 @@ button {
     margin-right: 0px;
     font-size: 12px;
     white-space: normal;
-    overflow-wrap: break-word;
     overflow: visible;
     text-align: center;
 }
@@ -5506,6 +5550,7 @@ button {
     padding: 2px 5px;
     font-size: 9px;
 }
+)" + R"(
 .phase-board-drone-ops .drone-loadout-slot .stat-chip.wide {
     width: 92px;
 }
@@ -5725,10 +5770,151 @@ button.settings-toggle:hover {
     overflow-y: auto;
     padding-right: 8px;
 }
+/* The lightweight web renderer does not implement RmlUi's advanced layer/filter path used by box-shadow. */
+body.controller-focus-visible .rr-controller-focus {
+    border-color: #f4c95d;
+}
+#rr-controller-prompt-bar {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: 8px;
+    height: 28px;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    padding: 4px 10px;
+    background-color: #071019e8;
+    border-width: 1px;
+    border-color: #36556a;
+    border-radius: 6px;
+    color: #b9c9d4;
+    font-size: 12px;
+}
+#rr-controller-prompt-bar strong {
+    color: #f4c95d;
+}
 )";
 }
 
-std::string buildDocumentRml(const std::string& panelHtml, const std::string& openModalId)
+ControllerFamily promptControllerFamily(ControllerFamily detected)
+{
+    switch (rr_rml_controller_prompt_preference()) {
+    case 1:
+        return ControllerFamily::Xbox;
+    case 2:
+        return ControllerFamily::PlayStation;
+    case 3:
+        return ControllerFamily::SteamDeck;
+    case 4:
+        return ControllerFamily::Generic;
+    default:
+        return detected;
+    }
+}
+
+struct ControllerPromptLabels {
+    const char* south;
+    const char* east;
+    const char* west;
+    const char* north;
+    const char* leftBumper;
+    const char* rightBumper;
+    const char* rightTrigger;
+    const char* menu;
+};
+
+ControllerPromptLabels controllerPromptLabels(ControllerFamily family)
+{
+    switch (family) {
+    case ControllerFamily::Xbox:
+        return {"A", "B", "X", "Y", "LB", "RB", "RT", "Menu"};
+    case ControllerFamily::PlayStation:
+        return {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "R2", "Options"};
+    case ControllerFamily::SteamDeck:
+        return {"A", "B", "X", "Y", "L1", "R1", "R2", "Menu"};
+    case ControllerFamily::Generic:
+    default:
+        return {"South", "East", "West", "North", "LB", "RB", "RT", "Menu"};
+    }
+}
+
+std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily family, bool modalOpen, bool modalDismissible)
+{
+    const ControllerPromptLabels labels = controllerPromptLabels(promptControllerFamily(family));
+    const bool swapConfirmCancel = rr_rml_controller_boolean_preference(1) != 0;
+    const char* confirm = swapConfirmCancel ? labels.east : labels.south;
+    const char* cancel = swapConfirmCancel ? labels.south : labels.east;
+    std::string prompt = "<div id=\"rr-controller-prompt-bar\">";
+    const auto item = [&](const char* button, const char* action) {
+        return std::string("<span><strong>") + button + "</strong> " + action + "</span>";
+    };
+    if (modalOpen) {
+        prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select");
+        if (modalDismissible) {
+            prompt += item(cancel, "Back");
+        }
+        prompt += item("R-stick", "Scroll");
+    } else if (panelHtml.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos ||
+               panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
+        prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
+    } else if (panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
+        prompt += item("L-stick", "Move / face") + item(labels.rightTrigger, "Drill") + item(labels.west, "Scan") +
+            item(labels.north, "Tether") + item(labels.leftBumper, "Drill repair") + item(labels.rightBumper, "Rig repair") +
+            item(labels.south, "Stow") + item(labels.east, "Hold: recall") + item(labels.menu, "Pause");
+    } else if (panelHtml.find("data-flyby-run") != std::string_view::npos || panelHtml.find("data-orbit-run") != std::string_view::npos) {
+        prompt += item("L-stick", "Fly") + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
+    } else if (panelHtml.find("push-minigame") != std::string_view::npos || panelHtml.find("scan-minigame") != std::string_view::npos) {
+        prompt += item(labels.south, "Pulse / push") + item(labels.west, "Bank") + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
+    } else if (panelHtml.find("data-rr-action=\"return_home\"") != std::string_view::npos) {
+        prompt += item(labels.south, "Return") + item(labels.east, "Hold: Eject") + item(labels.west, "Engines") +
+            item(labels.north, "Pressure relief") + item(labels.rightBumper, "Hold: Jettison") + item(labels.menu, "Pause");
+    } else if (panelHtml.find("data-preflight-launch") != std::string_view::npos) {
+        prompt += item(labels.south,
+            panelHtml.find("data-preflight-queued=\"1\"") != std::string_view::npos ? "Launch queued" : "Launch") +
+            item(labels.menu, "Pause");
+    } else {
+        prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(cancel, "Back") +
+            item("R-stick", "Scroll") + item(labels.menu, "Pause");
+    }
+    return prompt + "</div>";
+}
+
+std::string controllerResumeModalBody(std::string body, bool blocked, bool controllerConnected)
+{
+    if (!blocked) {
+        return body;
+    }
+    const std::size_t marker = body.find("data-controller-resume=\"1\"");
+    if (marker == std::string::npos) {
+        return body;
+    }
+    const std::size_t tagEnd = body.find('>', marker);
+    if (tagEnd == std::string::npos) {
+        return body;
+    }
+    body.insert(tagEnd, " disabled=\"1\"");
+    const std::size_t contentStart = body.find('>', marker) + 1;
+    const std::size_t contentEnd = body.find("</button>", contentStart);
+    if (contentEnd != std::string::npos) {
+        body.replace(
+            contentStart,
+            contentEnd - contentStart,
+            controllerConnected ? "Release controller" : "Reconnect controller");
+    }
+    return body;
+}
+
+std::string buildDocumentRml(
+    const std::string& panelHtml,
+    const std::string& openModalId,
+    bool controllerPresentationActive,
+    bool controllerFocusVisible,
+    bool controllerResumeBlocked,
+    bool controllerResumeConnected,
+    ControllerFamily controllerFamily)
 {
     const std::vector<ModalTemplate> modals = extractModals(panelHtml);
     std::string activeModalId = openModalId;
@@ -5751,7 +5937,11 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     const bool draftRoom = panelUsesDraftRoom(panelHtml);
     std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
 
-    std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body>";
+    std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body";
+    if (controllerFocusVisible) {
+        document += " class=\"controller-focus-visible\"";
+    }
+    document += ">";
     document += "<div id=\"rr-panel\" class=\"" +
         std::string(miningFullscreen
                 ? "mining-fullscreen-panel"
@@ -5772,17 +5962,26 @@ std::string buildDocumentRml(const std::string& panelHtml, const std::string& op
     document += body;
     document += "</div>";
 
-    if (const ModalTemplate* modal = findModal(modals, activeModalId)) {
+    const ModalTemplate* activeModal = findModal(modals, activeModalId);
+    if (activeModal) {
+        const ModalTemplate* modal = activeModal;
         document += "<div id=\"rr-modal-scrim\"></div>";
         document += "<div id=\"rr-modal\" class=\"modal-" + activeModalId + "\"><div class=\"modal-head\"><h2>";
         document += modal->title;
         document += "</h2>";
-        if (modal->dismissible) {
-            document += "<button class=\"ghost\" data-ui-close-modal=\"1\">Close</button>";
+        if (modal->dismissible && modal->showClose) {
+            document += "<button class=\"ghost\" data-ui-close-modal=\"1\" data-ui-focus-id=\"modal:close\">Close</button>";
         }
         document += "</div><div class=\"modal-scroll-body\">";
-        document += syncSettingsControls(sanitizeRml(modal->body));
+        document += syncSettingsControls(sanitizeRml(controllerResumeModalBody(
+            modal->body,
+            controllerResumeBlocked,
+            controllerResumeConnected)));
         document += "</div></div>";
+    }
+
+    if (controllerPresentationActive) {
+        document += controllerPromptBar(panelHtml, controllerFamily, activeModal != nullptr, activeModal == nullptr || activeModal->dismissible);
     }
 
     document += "</body></rml>";
@@ -5794,7 +5993,78 @@ std::unique_ptr<RocketRmlRenderInterface> g_renderInterface;
 Rml::Context* g_context = nullptr;
 Rml::ElementDocument* g_document = nullptr;
 std::vector<ElementButtonBinding> g_elementButtonBindings;
+struct FocusTarget {
+    Rml::Element* element = nullptr;
+    std::string id;
+    float centerX = 0.0f;
+    float centerY = 0.0f;
+};
+std::vector<FocusTarget> g_focusTargets;
 bool g_displayPreferenceChanged = false;
+
+enum class ControllerFocusRow {
+    None,
+    Choices,
+    Actions
+};
+
+ControllerFocusRow controllerFocusRow(const FocusTarget& target)
+{
+    if (!target.element) {
+        return ControllerFocusRow::None;
+    }
+    if (target.element->Closest(".controller-choice-row")) {
+        return ControllerFocusRow::Choices;
+    }
+    if (target.element->Closest(".controller-action-row")) {
+        return ControllerFocusRow::Actions;
+    }
+    return ControllerFocusRow::None;
+}
+
+FocusTarget* nearestControllerRowTarget(ControllerFocusRow row, float centerX)
+{
+    FocusTarget* nearest = nullptr;
+    float bestDistance = std::numeric_limits<float>::max();
+    for (FocusTarget& target : g_focusTargets) {
+        if (controllerFocusRow(target) != row) {
+            continue;
+        }
+        const float distance = std::abs(target.centerX - centerX);
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            nearest = &target;
+        }
+    }
+    return nearest;
+}
+
+FocusTarget* cycleControllerRowTarget(FocusTarget& current, UiDirection direction)
+{
+    const ControllerFocusRow row = controllerFocusRow(current);
+    if (row == ControllerFocusRow::None || (direction != UiDirection::Left && direction != UiDirection::Right)) {
+        return nullptr;
+    }
+
+    std::vector<FocusTarget*> rowTargets;
+    for (FocusTarget& target : g_focusTargets) {
+        if (controllerFocusRow(target) == row) {
+            rowTargets.push_back(&target);
+        }
+    }
+    std::sort(rowTargets.begin(), rowTargets.end(), [](const FocusTarget* lhs, const FocusTarget* rhs) {
+        return lhs->centerX < rhs->centerX;
+    });
+    const auto currentIt = std::find(rowTargets.begin(), rowTargets.end(), &current);
+    if (currentIt == rowTargets.end() || rowTargets.empty()) {
+        return nullptr;
+    }
+    const std::size_t index = static_cast<std::size_t>(std::distance(rowTargets.begin(), currentIt));
+    const std::size_t next = direction == UiDirection::Left
+        ? (index + rowTargets.size() - 1) % rowTargets.size()
+        : (index + 1) % rowTargets.size();
+    return rowTargets[next];
+}
 
 class RmlSettingsEventListener final : public Rml::EventListener {
 public:
@@ -5809,6 +6079,15 @@ public:
             }
             if (control->GetTagName() == "select" && control->HasAttribute("data-game-speed-select")) {
                 rr_rml_set_game_speed_multiplier(control->GetValue().c_str());
+                return;
+            }
+            if (control->GetTagName() == "select" && control->HasAttribute("data-controller-prompt-select")) {
+                rr_rml_set_controller_preference("promptFamily", control->GetValue().c_str());
+                g_displayPreferenceChanged = true;
+                return;
+            }
+            if (control->GetTagName() == "select" && control->HasAttribute("data-controller-deadzone-select")) {
+                rr_rml_set_controller_preference("stickDeadzone", control->GetValue().c_str());
                 return;
             }
         }
@@ -5856,8 +6135,20 @@ bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
         owner.refresh();
         return true;
     }
+    if (binding.desktopFullscreenToggle) {
+        rr_rml_set_desktop_fullscreen(rr_rml_desktop_fullscreen_enabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
     if (binding.debugToolsToggle) {
         rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
+    if (!binding.controllerSetting.empty()) {
+        int field = binding.controllerSetting == "invertFlightY" ? 0 : (binding.controllerSetting == "swapConfirmCancel" ? 1 : 2);
+        const bool current = rr_rml_controller_boolean_preference(field) != 0;
+        rr_rml_set_controller_preference(binding.controllerSetting.c_str(), current ? "false" : "true");
         owner.refresh();
         return true;
     }
@@ -5893,6 +6184,164 @@ void bindLoadedButtons(const std::string& documentRml)
     for (std::size_t index = 0; index < count; ++index) {
         g_elementButtonBindings.push_back({elements[index], bindings[index]});
     }
+}
+
+bool focusableElement(Rml::Element* element)
+{
+    if (!element || !element->IsVisible(true)) {
+        return false;
+    }
+    const Rml::String& tag = element->GetTagName();
+    if (tag != "button" && tag != "select" && !(tag == "input" && element->GetAttribute<Rml::String>("type", "") == "checkbox")) {
+        return false;
+    }
+    if (auto* control = dynamic_cast<Rml::ElementFormControl*>(element); control && control->IsDisabled()) {
+        return false;
+    }
+    const Rml::Vector2f size = element->GetBox().GetSize(Rml::BoxArea::Border);
+    return size.x > 1.0f && size.y > 1.0f;
+}
+
+std::string derivedFocusId(Rml::Element* element)
+{
+    std::string id = element->GetAttribute<Rml::String>("data-ui-focus-id", "");
+    if (!id.empty()) {
+        return id;
+    }
+    if (element->HasAttribute("data-resolution-select")) return "setting:resolution";
+    if (element->HasAttribute("data-game-speed-select")) return "setting:game_speed";
+    if (element->HasAttribute("data-controller-prompt-select")) return "setting:controller_prompt";
+    if (element->HasAttribute("data-controller-deadzone-select")) return "setting:controller_deadzone";
+    if (element->GetTagName() == "input") {
+        const std::string name = element->GetAttribute<Rml::String>("name", element->GetId());
+        if (!name.empty()) return "setting:" + name;
+    }
+    const auto bound = std::find_if(g_elementButtonBindings.begin(), g_elementButtonBindings.end(), [element](const ElementButtonBinding& entry) {
+        return entry.element == element;
+    });
+    if (bound != g_elementButtonBindings.end()) {
+        return bound->binding.focusId;
+    }
+    return {};
+}
+
+void collectFocusableElements(Rml::Element* element, std::vector<Rml::Element*>& elements)
+{
+    if (!element) {
+        return;
+    }
+    if (focusableElement(element)) {
+        elements.push_back(element);
+    }
+    const int children = element->GetNumChildren(true);
+    for (int index = 0; index < children; ++index) {
+        collectFocusableElements(element->GetChild(index), elements);
+    }
+}
+
+void collectFocusTargets(bool modalOpen)
+{
+    g_focusTargets.clear();
+    if (!g_document) {
+        return;
+    }
+    Rml::Element* root = modalOpen ? g_document->GetElementById("rr-modal") : g_document->GetElementById("rr-panel");
+    if (!root) {
+        return;
+    }
+    std::vector<Rml::Element*> elements;
+    collectFocusableElements(root, elements);
+    std::vector<std::string> seen;
+    g_focusTargets.reserve(elements.size());
+    for (Rml::Element* element : elements) {
+        std::string id = derivedFocusId(element);
+        if (id.empty()) continue;
+        const int duplicates = static_cast<int>(std::count(seen.begin(), seen.end(), id));
+        seen.push_back(id);
+        if (duplicates > 0) {
+            id += "#" + std::to_string(duplicates);
+        }
+        const Rml::Vector2f offset = element->GetAbsoluteOffset(Rml::BoxArea::Border);
+        const Rml::Vector2f size = element->GetBox().GetSize(Rml::BoxArea::Border);
+        g_focusTargets.push_back({element, std::move(id), offset.x + size.x * 0.5f, offset.y + size.y * 0.5f});
+    }
+}
+
+FocusTarget* findFocusTarget(std::string_view id)
+{
+    const auto it = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [id](const FocusTarget& target) {
+        return target.id == id;
+    });
+    return it == g_focusTargets.end() ? nullptr : &*it;
+}
+
+bool applyControllerFocus(
+    FocusTarget* target,
+    std::string& focusedId,
+    float& centerX,
+    float& centerY,
+    bool& hasCenter)
+{
+    if (!target || !target->element) {
+        return false;
+    }
+    for (FocusTarget& candidate : g_focusTargets) {
+        if (candidate.element) {
+            candidate.element->SetClass("rr-controller-focus", candidate.element == target->element);
+        }
+    }
+    target->element->Focus(true);
+    target->element->ScrollIntoView(false);
+    focusedId = target->id;
+    centerX = target->centerX;
+    centerY = target->centerY;
+    hasCenter = true;
+    return true;
+}
+
+FocusTarget* nearestFocusTarget(float centerX, float centerY)
+{
+    FocusTarget* nearest = nullptr;
+    float best = std::numeric_limits<float>::max();
+    for (FocusTarget& target : g_focusTargets) {
+        const float dx = target.centerX - centerX;
+        const float dy = target.centerY - centerY;
+        const float score = dx * dx + dy * dy;
+        if (score < best) {
+            best = score;
+            nearest = &target;
+        }
+    }
+    return nearest;
+}
+
+FocusTarget* defaultFocusTarget()
+{
+    const auto explicitDefault = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
+        return target.element && target.element->HasAttribute("data-ui-default-focus");
+    });
+    if (explicitDefault != g_focusTargets.end()) {
+        return &*explicitDefault;
+    }
+    const auto controllerChoice = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
+        return controllerFocusRow(target) == ControllerFocusRow::Choices;
+    });
+    if (controllerChoice != g_focusTargets.end()) {
+        return &*controllerChoice;
+    }
+    const auto primary = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
+        if (!target.element) return false;
+        return target.element->Closest(".primary-actions") || target.element->Closest(".draft-actions") ||
+            target.element->Closest(".final-actions") || target.element->Closest(".card-footer");
+    });
+    if (primary != g_focusTargets.end()) {
+        primary->element->SetAttribute("data-ui-default-focus", "1");
+        return &*primary;
+    }
+    const auto nonTitlebar = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
+        return target.element && !target.element->Closest(".panel-head-actions");
+    });
+    return nonTitlebar != g_focusTargets.end() ? &*nonTitlebar : (g_focusTargets.empty() ? nullptr : &g_focusTargets.front());
 }
 
 bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
@@ -5982,8 +6431,16 @@ Rml::Element* buttonElementAtPoint(Rml::Context& context, const Rml::Vector2f& p
 
 } // namespace
 
+GameRmlUi::GameRmlUi(IPreferenceStore& preferences, IPlatformHost& host, IUiBridge& uiBridge)
+    : preferences_(preferences), host_(host), uiBridge_(uiBridge)
+{
+}
+
 bool GameRmlUi::initialize(ActionHandler actionHandler)
 {
+    g_preferences = &preferences_;
+    g_host = &host_;
+    g_uiBridge = &uiBridge_;
     actionHandler_ = std::move(actionHandler);
 
     Rml::SetSystemInterface(&g_systemInterface);
@@ -6025,6 +6482,23 @@ void GameRmlUi::setPanelHtml(const std::string& html)
     panelHtml_ = html;
     panelMode_ = panelModeForHtml(panelHtml_);
     buttonBindings_ = extractButtonBindings(panelHtml_);
+    const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
+    if (!openModalId_.empty() && !findModal(modals, openModalId_)) {
+        openModalId_.clear();
+        modalStack_.clear();
+        modalFocusStack_.clear();
+    }
+    if (openModalId_.empty()) {
+        const auto autoModal = std::find_if(modals.begin(), modals.end(), [](const ModalTemplate& modal) {
+            return modal.autoOpen;
+        });
+        if (autoModal != modals.end()) {
+            modalReturnFocusId_ = focusedId_;
+            openModalId_ = autoModal->id;
+            focusedId_.clear();
+            hasLastFocusCenter_ = false;
+        }
+    }
     rebuildDocument();
 }
 
@@ -6050,7 +6524,7 @@ void GameRmlUi::render()
     g_context->SetDimensions({viewportWidth, viewportHeight});
     g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
     g_renderInterface->setViewport(viewportWidth, viewportHeight, width, height);
-    if (!openModalId_.empty()) {
+    if (!openModalId_.empty() || controllerPresentationActive_) {
         g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({viewportWidth, viewportHeight}));
     } else {
         g_renderInterface->setRootClip(expandedPanelClip(panelMode_));
@@ -6077,6 +6551,7 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
         return false;
     }
     pressedButton_ = nullptr;
+    pressedButtonAtSeconds_ = 0.0;
     const double ratio = rr_rml_density_ratio();
     const int scaledX = static_cast<int>(std::round(static_cast<double>(x) * ratio));
     const int scaledY = static_cast<int>(std::round(static_cast<double>(y) * ratio));
@@ -6087,6 +6562,9 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
     }
     if (button == 0 && overUi) {
         pressedButton_ = buttonElementAtPoint(*g_context, {static_cast<float>(scaledX), static_cast<float>(scaledY)});
+        if (pressedButton_) {
+            pressedButtonAtSeconds_ = rr_rml_now_seconds();
+        }
     }
     return overUi;
 }
@@ -6108,8 +6586,15 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     const Rml::Vector2f point {static_cast<float>(scaledX), static_cast<float>(scaledY)};
     Rml::Element* releasedButton = buttonElementAtPoint(*g_context, point);
     Rml::Element* pressedButton = pressedButton_;
+    const double pressedAt = pressedButtonAtSeconds_;
     pressedButton_ = nullptr;
+    pressedButtonAtSeconds_ = 0.0;
     if (button != 0 || !pressedButton || releasedButton != pressedButton) {
+        return true;
+    }
+    const Rml::String holdValue = pressedButton->GetAttribute<Rml::String>("data-controller-hold-seconds", "");
+    const double holdSeconds = holdValue.empty() ? 0.0 : std::max(0.0, std::atof(holdValue.c_str()));
+    if (holdSeconds > 0.0 && rr_rml_now_seconds() - pressedAt + 0.001 < holdSeconds) {
         return true;
     }
     activateButtonElement(*this, pressedButton);
@@ -6147,15 +6632,258 @@ bool GameRmlUi::hitTest(int x, int y) const
     return x >= bounds.Left() && y >= bounds.Top() && x <= bounds.Right() && y <= bounds.Bottom();
 }
 
+bool GameRmlUi::navigate(UiDirection direction)
+{
+    if (!initialized_ || !g_document) {
+        return rr_rml_dom_navigate(static_cast<int>(direction)) != 0;
+    }
+    if (g_focusTargets.empty()) {
+        collectFocusTargets(modalOpen());
+    }
+    if (g_focusTargets.empty()) {
+        return false;
+    }
+
+    FocusTarget* current = findFocusTarget(focusedId_);
+    if (!current) {
+        FocusTarget* fallback = hasLastFocusCenter_ ? nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_) : defaultFocusTarget();
+        return applyControllerFocus(fallback, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
+
+    if ((direction == UiDirection::Left || direction == UiDirection::Right)) {
+        if (auto* select = dynamic_cast<Rml::ElementFormControlSelect*>(current->element)) {
+            const int delta = direction == UiDirection::Left ? -1 : 1;
+            const int next = std::clamp(select->GetSelection() + delta, 0, std::max(0, select->GetNumOptions() - 1));
+            if (next != select->GetSelection()) {
+                select->SetSelection(next);
+                // Programmatic RmlUi selection does not emit Change on its
+                // own. Dispatch it explicitly so controller left/right has
+                // the same persistence behavior as the DOM fallback.
+                Rml::Dictionary parameters;
+                parameters["value"] = select->GetValue();
+                select->DispatchEvent(Rml::EventId::Change, parameters);
+                return true;
+            }
+        }
+    }
+
+    const ControllerFocusRow currentRow = controllerFocusRow(*current);
+    if (currentRow != ControllerFocusRow::None) {
+        if (direction == UiDirection::Left || direction == UiDirection::Right) {
+            return applyControllerFocus(
+                cycleControllerRowTarget(*current, direction),
+                focusedId_,
+                lastFocusCenterX_,
+                lastFocusCenterY_,
+                hasLastFocusCenter_);
+        }
+        const ControllerFocusRow destinationRow = direction == UiDirection::Down && currentRow == ControllerFocusRow::Choices
+            ? ControllerFocusRow::Actions
+            : (direction == UiDirection::Up && currentRow == ControllerFocusRow::Actions ? ControllerFocusRow::Choices : ControllerFocusRow::None);
+        if (destinationRow != ControllerFocusRow::None) {
+            return applyControllerFocus(
+                nearestControllerRowTarget(destinationRow, current->centerX),
+                focusedId_,
+                lastFocusCenterX_,
+                lastFocusCenterY_,
+                hasLastFocusCenter_);
+        }
+    }
+
+    FocusTarget* bestTarget = nullptr;
+    float bestScore = std::numeric_limits<float>::max();
+    for (FocusTarget& candidate : g_focusTargets) {
+        if (&candidate == current) {
+            continue;
+        }
+        const float dx = candidate.centerX - current->centerX;
+        const float dy = candidate.centerY - current->centerY;
+        const float primary = (direction == UiDirection::Left || direction == UiDirection::Right) ? std::abs(dx) : std::abs(dy);
+        const float secondary = (direction == UiDirection::Left || direction == UiDirection::Right) ? std::abs(dy) : std::abs(dx);
+        const bool ahead = (direction == UiDirection::Left && dx < -1.0f) || (direction == UiDirection::Right && dx > 1.0f) ||
+            (direction == UiDirection::Up && dy < -1.0f) || (direction == UiDirection::Down && dy > 1.0f);
+        if (!ahead) {
+            continue;
+        }
+        const float score = primary * 10.0f + secondary * 2.0f + (secondary * secondary) / std::max(1.0f, primary);
+        if (score < bestScore) {
+            bestScore = score;
+            bestTarget = &candidate;
+        }
+    }
+    return applyControllerFocus(bestTarget, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+}
+
+bool GameRmlUi::activateFocused()
+{
+    if (!initialized_ || !g_document) {
+        return rr_rml_dom_activate() != 0;
+    }
+    FocusTarget* target = findFocusTarget(focusedId_);
+    if (!target) {
+        if (!navigate(UiDirection::Down)) {
+            return false;
+        }
+        target = findFocusTarget(focusedId_);
+    }
+    if (!target) {
+        return false;
+    }
+    if (dynamic_cast<Rml::ElementFormControlSelect*>(target->element)) {
+        return true;
+    }
+    if (target->element->GetTagName() == "input" && target->element->GetAttribute<Rml::String>("type", "") == "checkbox") {
+        target->element->Click();
+        return true;
+    }
+    return activateButtonElement(*this, target->element);
+}
+
+bool GameRmlUi::cancel()
+{
+    if (!initialized_) {
+        return rr_rml_dom_cancel() != 0;
+    }
+    if (!openModalId_.empty()) {
+        const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
+        const ModalTemplate* modal = findModal(modals, openModalId_);
+        if (modal && !modal->dismissible) {
+            return false;
+        }
+        closeModal();
+        return true;
+    }
+    FocusTarget* target = findFocusTarget(focusedId_);
+    if (!target) {
+        return false;
+    }
+    target->element->SetClass("rr-controller-focus", false);
+    target->element->Blur();
+    focusedId_.clear();
+    return true;
+}
+
+bool GameRmlUi::scroll(float amount)
+{
+    if (!initialized_ || !g_document) {
+        return rr_rml_dom_scroll(amount) != 0;
+    }
+    Rml::Element* element = nullptr;
+    if (FocusTarget* target = findFocusTarget(focusedId_)) {
+        element = target->element;
+    }
+    while (element && element->GetScrollHeight() <= element->GetClientHeight() + 1.0f) {
+        element = element->GetParentNode();
+    }
+    if (!element) {
+        Rml::ElementList scrollBodies;
+        g_document->GetElementsByClassName(scrollBodies, "modal-scroll-body");
+        element = !scrollBodies.empty() ? scrollBodies.front() : g_document->GetElementById("rr-panel");
+    }
+    if (!element) {
+        return false;
+    }
+    const float pixels = std::abs(amount) <= 1.0f ? amount * 100.0f : amount;
+    element->SetScrollTop(element->GetScrollTop() + pixels);
+    return true;
+}
+
+bool GameRmlUi::modalOpen() const
+{
+    return initialized_ ? !openModalId_.empty() : rr_rml_dom_modal_open() != 0;
+}
+
+void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
+{
+    rr_rml_dom_set_controller_presentation(active ? 1 : 0, static_cast<int>(family));
+    if (controllerPresentationActive_ == active && controllerFamily_ == family) {
+        return;
+    }
+    controllerPresentationActive_ = active;
+    controllerFamily_ = family;
+    if (initialized_) {
+        rebuildDocument();
+    }
+}
+
+void GameRmlUi::setControllerFocusVisible(bool visible)
+{
+    rr_rml_dom_set_controller_focus_visible(visible ? 1 : 0);
+    if (controllerFocusVisible_ == visible) {
+        return;
+    }
+    controllerFocusVisible_ = visible;
+    if (initialized_) {
+        rebuildDocument();
+    }
+}
+
+void GameRmlUi::setControllerResumeBlocked(bool blocked, bool controllerConnected)
+{
+    rr_rml_dom_set_controller_resume_blocked(blocked ? 1 : 0, controllerConnected ? 1 : 0);
+    if (controllerResumeBlocked_ == blocked && controllerResumeConnected_ == controllerConnected) {
+        return;
+    }
+    controllerResumeBlocked_ = blocked;
+    controllerResumeConnected_ = controllerConnected;
+    if (initialized_) {
+        rebuildDocument();
+    }
+}
+
+std::string GameRmlUi::focusedId() const
+{
+    if (initialized_) {
+        return focusedId_;
+    }
+    char buffer[256] = {};
+    rr_rml_dom_focused_id(buffer, static_cast<int>(sizeof(buffer)));
+    return buffer;
+}
+
 void GameRmlUi::openModal(const std::string& id)
 {
+    if (!initialized_) {
+        rr_rml_dom_open_modal(id.c_str());
+        return;
+    }
+    if (id.empty() || id == openModalId_) {
+        return;
+    }
+    const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
+    if (!findModal(modals, id)) {
+        return;
+    }
+    if (!openModalId_.empty()) {
+        modalStack_.push_back(openModalId_);
+        modalFocusStack_.push_back(focusedId_);
+    } else {
+        modalReturnFocusId_ = focusedId_;
+    }
     openModalId_ = id;
+    focusedId_.clear();
+    hasLastFocusCenter_ = false;
     rebuildDocument();
 }
 
 void GameRmlUi::closeModal()
 {
-    openModalId_.clear();
+    if (!initialized_) {
+        rr_rml_dom_close_modal();
+        return;
+    }
+    if (!modalStack_.empty()) {
+        openModalId_ = modalStack_.back();
+        modalStack_.pop_back();
+        focusedId_ = modalFocusStack_.empty() ? std::string() : modalFocusStack_.back();
+        if (!modalFocusStack_.empty()) {
+            modalFocusStack_.pop_back();
+        }
+    } else {
+        openModalId_.clear();
+        focusedId_ = modalReturnFocusId_;
+        modalReturnFocusId_.clear();
+    }
     rebuildDocument();
 }
 
@@ -6169,6 +6897,9 @@ void GameRmlUi::dispatchAction(const std::string& action)
 {
     if (!openModalId_.empty()) {
         openModalId_.clear();
+        modalStack_.clear();
+        modalFocusStack_.clear();
+        modalReturnFocusId_.clear();
         rebuildDocument();
     }
     if (actionHandler_) {
@@ -6217,8 +6948,20 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
         refresh();
         return true;
     }
+    if (it->desktopFullscreenToggle) {
+        rr_rml_set_desktop_fullscreen(rr_rml_desktop_fullscreen_enabled() == 0 ? 1 : 0);
+        refresh();
+        return true;
+    }
     if (it->debugToolsToggle) {
         rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
+        refresh();
+        return true;
+    }
+    if (!it->controllerSetting.empty()) {
+        const int field = it->controllerSetting == "invertFlightY" ? 0 : (it->controllerSetting == "swapConfirmCancel" ? 1 : 2);
+        const bool current = rr_rml_controller_boolean_preference(field) != 0;
+        rr_rml_set_controller_preference(it->controllerSetting.c_str(), current ? "false" : "true");
         refresh();
         return true;
     }
@@ -6235,52 +6978,66 @@ void GameRmlUi::rebuildDocument()
         g_context->UnloadDocument(g_document);
         g_document = nullptr;
         g_elementButtonBindings.clear();
+        g_focusTargets.clear();
     }
 
     layoutViewportWidth_ = rr_rml_viewport_width();
     layoutViewportHeight_ = rr_rml_viewport_height();
-    const std::string documentRml = buildDocumentRml(panelHtml_, openModalId_);
+    const std::string documentRml = buildDocumentRml(
+        panelHtml_,
+        openModalId_,
+        controllerPresentationActive_,
+        controllerFocusVisible_,
+        controllerResumeBlocked_,
+        controllerResumeConnected_,
+        controllerFamily_);
     rr_rml_set_modal_open(openModalId_.empty() ? 0 : 1);
     g_document = g_context->LoadDocumentFromMemory(documentRml, "rocket://panel.rml");
     if (g_document) {
         bindLoadedButtons(documentRml);
         g_document->AddEventListener(Rml::EventId::Change, &g_settingsEventListener);
         g_document->Show();
+        g_context->Update();
+        collectFocusTargets(!openModalId_.empty());
+        if (controllerPresentationActive_ && !g_focusTargets.empty()) {
+            FocusTarget* target = findFocusTarget(focusedId_);
+            if (!target && hasLastFocusCenter_) {
+                target = nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_);
+            }
+            if (!target) {
+                target = defaultFocusTarget();
+            }
+            applyControllerFocus(target, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        }
     } else {
         g_elementButtonBindings.clear();
+        g_focusTargets.clear();
         Rml::Log::Message(Rml::Log::LT_ERROR, "Failed to load Rocket Rogue RmlUi document.");
     }
 }
 
-} // namespace rocket
-
-#else
-
-namespace rocket {
-
-bool GameRmlUi::initialize(ActionHandler actionHandler)
+void GameRmlUi::shutdown()
 {
-    actionHandler_ = std::move(actionHandler);
+    if (!initialized_) {
+        return;
+    }
+    if (g_context) {
+        if (g_document) {
+            g_context->UnloadDocument(g_document);
+            g_document = nullptr;
+        }
+        Rml::RemoveContext("rocket-ui");
+        g_context = nullptr;
+    }
+    Rml::Shutdown();
+    g_renderInterface.reset();
+    g_elementButtonBindings.clear();
+    g_focusTargets.clear();
+    rr_rml_set_enabled(0);
     initialized_ = false;
-    return false;
+    if (g_preferences == &preferences_) g_preferences = nullptr;
+    if (g_host == &host_) g_host = nullptr;
+    if (g_uiBridge == &uiBridge_) g_uiBridge = nullptr;
 }
-
-void GameRmlUi::setPanelHtml(const std::string& html)
-{
-    panelHtml_ = html;
-}
-
-void GameRmlUi::render() {}
-bool GameRmlUi::mouseMove(int, int) { return false; }
-bool GameRmlUi::mouseDown(int, int, int) { return false; }
-bool GameRmlUi::mouseUp(int, int, int) { return false; }
-bool GameRmlUi::mouseWheel(int, int, double) { return false; }
-bool GameRmlUi::hitTest(int, int) const { return false; }
-void GameRmlUi::openModal(const std::string&) {}
-void GameRmlUi::closeModal() {}
-void GameRmlUi::dispatchAction(const std::string&) {}
-void GameRmlUi::rebuildDocument() {}
 
 } // namespace rocket
-
-#endif

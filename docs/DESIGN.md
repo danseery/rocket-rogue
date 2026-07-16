@@ -110,8 +110,11 @@ Refit economy should reward recovered risk in discrete shelves:
 - `rocket_core` owns deterministic rules: content, RNG, progression, save data, flight tuning, launch resolution, and balance tests.
 - `src/game` owns browser-session orchestration. `RocketGameApp` handles screen transitions and launch controls; `GamePanel` renders mission-control HTML from a read-only context.
 - `src/render` owns WebGL2 drawing and texture upload. It should not decide gameplay outcomes.
+- `src/input` owns portable controller snapshots, preferences, source arbitration, deadzones, button edges, real-time holds/repeats, and semantic input routing. Controller difficulty never scales from the player's loadout or device.
 - `src/platform` is the small web bridge for persistence and panel updates.
 - `web/shell.html` owns browser DOM event routing and calls exported C++ functions.
+
+See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contract, device-local preference schema, pause safety rules, and verification matrix. Controller sampling happens once per browser frame before scaled simulation ticks; UI repeats and safety holds always use unscaled real time.
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 

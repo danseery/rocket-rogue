@@ -1,29 +1,14 @@
-#include "render/WebGLRenderer.h"
+#include "render/OpenGlRenderer.h"
 
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/Tuning.h"
-
-#ifdef __EMSCRIPTEN__
-#include <GLES3/gl3.h>
-#include <emscripten.h>
-#include <emscripten/html5.h>
-#endif
+#include "render/OpenGlApi.h"
 
 #include <algorithm>
 #include <cmath>
 #include <string>
 #include <utility>
-
-#ifdef __EMSCRIPTEN__
-EM_JS(int, rr_camera_shake_enabled, (), {
-    try {
-        return window.localStorage.getItem("rocket_rogue_camera_shake_disabled") === "1" ? 0 : 1;
-    } catch (error) {
-        return 1;
-    }
-});
-#endif
 
 namespace rocket {
 
@@ -178,145 +163,26 @@ Vec2 routeTangent(const RenderSnapshot& snapshot, float progress)
     return normalize(routeDerivative(curve, progress));
 }
 
-#ifdef __EMSCRIPTEN__
-EM_JS(void, rr_request_image, (const char* keyPtr, const char* pathPtr), {
-    const key = UTF8ToString(keyPtr);
-    const path = UTF8ToString(pathPtr);
-    Module.RocketArt = Module.RocketArt || {};
-    if (Module.RocketArt[key]) {
-        return;
-    }
-
-    const image = new Image();
-    const record = { image, ready: false, failed: false, width: 0, height: 0 };
-    image.onload = () => {
-        record.ready = true;
-        record.width = image.naturalWidth || image.width;
-        record.height = image.naturalHeight || image.height;
-    };
-    image.onerror = () => {
-        record.failed = true;
-    };
-    image.src = path;
-    Module.RocketArt[key] = record;
-});
-
-EM_JS(int, rr_image_ready, (const char* keyPtr), {
-    const key = UTF8ToString(keyPtr);
-    const record = Module.RocketArt && Module.RocketArt[key];
-    return record && record.ready ? 1 : 0;
-});
-
-EM_JS(int, rr_upload_image_texture, (const char* keyPtr, int textureId), {
-    const key = UTF8ToString(keyPtr);
-    const record = Module.RocketArt && Module.RocketArt[key];
-    if (!record || !record.ready || !GLctx || !GL || !GL.textures[textureId]) {
-        return 0;
-    }
-
-    const gl = GLctx;
-    gl.bindTexture(gl.TEXTURE_2D, GL.textures[textureId]);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, record.image);
-    return 1;
-});
-
-EM_JS(int, rr_image_width, (const char* keyPtr), {
-    const key = UTF8ToString(keyPtr);
-    const record = Module.RocketArt && Module.RocketArt[key];
-    return record && record.ready ? record.width : 0;
-});
-
-EM_JS(int, rr_image_height, (const char* keyPtr), {
-    const key = UTF8ToString(keyPtr);
-    const record = Module.RocketArt && Module.RocketArt[key];
-    return record && record.ready ? record.height : 0;
-});
-
-EM_JS(double, rr_device_pixel_ratio, (), {
-    const ratio = globalThis.devicePixelRatio || 1;
-    return Math.max(1, Math.min(2, ratio));
-});
-
-EM_JS(int, rr_resolution_target_packed, (), {
-    try {
-        const value = String(globalThis.localStorage.getItem("rocket_rogue_resolution") || "auto")
-            .trim()
-            .toLowerCase();
-        switch (value) {
-        case "1280x800":
-            return 1280 * 10000 + 800;
-        case "1920x1080":
-            return 1920 * 10000 + 1080;
-        case "2560x1440":
-            return 2560 * 10000 + 1440;
-        case "3840x2160":
-            return 3840 * 10000 + 2160;
-        default:
-            return 0;
-        }
-    } catch (error) {
-        return 0;
-    }
-});
-
-EM_JS(void, rr_sync_canvas_to_visual_viewport, (), {
-    const canvas = document.getElementById("canvas");
-    if (!canvas) {
-        return;
-    }
-
-    const viewport = globalThis.visualViewport;
-    const width = Math.max(1, Math.round((viewport && viewport.width) || globalThis.innerWidth || canvas.clientWidth || 1));
-    const height = Math.max(1, Math.round((viewport && viewport.height) || globalThis.innerHeight || canvas.clientHeight || 1));
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
-});
-
-EM_JS(double, rr_scene_left_ndc, (), {
-    const canvas = document.getElementById("canvas");
-    const panel = document.getElementById("panel");
-    const width = (canvas && canvas.clientWidth) || globalThis.innerWidth || 1;
-    if (width <= 720) {
-        return -1;
-    }
-
-    if (panel && panel.querySelector(".mining-fullscreen")) {
-        return -1;
-    }
-
-    const flybyVisible = panel && panel.querySelector("[data-flyby-run]");
-    const gutter = 24;
-    let leftPx = 0;
-    if (document.body.classList.contains("rmlui-enabled") && flybyVisible) {
-        leftPx = 16 + 482 + gutter;
-    } else if (panel) {
-        const rect = panel.getBoundingClientRect();
-        leftPx = Math.max(0, rect.right + gutter);
-    }
-    if (width - leftPx < 520) {
-        return -1;
-    }
-
-    return Math.max(-1, Math.min(0.45, leftPx / width * 2 - 1));
-});
-
 GLuint compileShader(GLenum type, const char* source)
 {
     const GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
-    return shader;
+    GLint ok = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
+    if (ok == GL_TRUE) {
+        return shader;
+    }
+    glDeleteShader(shader);
+    return 0;
 }
 
-GLuint createProgram()
+GLuint createProgram(OpenGlDialect dialect)
 {
-    constexpr const char* vertexSource = R"(#version 300 es
-layout(location = 0) in vec2 a_pos;
+    const std::string shaderHeader = dialect == OpenGlDialect::WebGl2
+        ? "#version 300 es\n"
+        : "#version 330 core\n";
+    const std::string vertexSource = shaderHeader + R"(layout(location = 0) in vec2 a_pos;
 layout(location = 1) in vec4 a_color;
 layout(location = 2) in vec2 a_uv;
 out vec4 v_color;
@@ -329,8 +195,9 @@ void main()
 }
 )";
 
-    constexpr const char* fragmentSource = R"(#version 300 es
-precision mediump float;
+    const std::string fragmentSource = shaderHeader
+        + (dialect == OpenGlDialect::WebGl2 ? "precision mediump float;\n" : "")
+        + R"(
 in vec4 v_color;
 in vec2 v_uv;
 uniform sampler2D u_texture;
@@ -366,8 +233,13 @@ void main()
 }
 )";
 
-    const GLuint vertex = compileShader(GL_VERTEX_SHADER, vertexSource);
-    const GLuint fragment = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
+    const GLuint vertex = compileShader(GL_VERTEX_SHADER, vertexSource.c_str());
+    const GLuint fragment = compileShader(GL_FRAGMENT_SHADER, fragmentSource.c_str());
+    if (vertex == 0 || fragment == 0) {
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+        return 0;
+    }
     const GLuint program = glCreateProgram();
     glAttachShader(program, vertex);
     glAttachShader(program, fragment);
@@ -376,7 +248,6 @@ void main()
     glDeleteShader(fragment);
     return program;
 }
-#endif
 
 void pushVertex(std::vector<float>& vertices, float x, float y, Color color, float u = 0.0F, float v = 0.0F)
 {
@@ -860,7 +731,12 @@ int pickupDigitMask(char digit)
 
 } // namespace
 
-bool WebGLRenderer::initialize()
+OpenGlRenderer::OpenGlRenderer(IPlatformHost& host, IPreferenceStore& preferences, ITextureSource& textures)
+    : host_(host), preferences_(preferences), textures_(textures)
+{
+}
+
+bool OpenGlRenderer::initialize()
 {
     assets_[EarthAsset] = {"earth", "assets/art/earth.png"};
     assets_[MoonAsset] = {"moon", "assets/art/moon.png"};
@@ -896,23 +772,11 @@ bool WebGLRenderer::initialize()
     assets_[MiniDroneAttackAsset] = {"mini_drone_attack", "assets/art/mini-drone-attack.png"};
     assets_[MiniDroneDefenseAsset] = {"mini_drone_defense", "assets/art/mini-drone-defense.png"};
 
-#ifdef __EMSCRIPTEN__
-    EmscriptenWebGLContextAttributes attributes;
-    emscripten_webgl_init_context_attributes(&attributes);
-    attributes.majorVersion = 2;
-    attributes.minorVersion = 0;
-    attributes.alpha = EM_FALSE;
-    attributes.depth = EM_FALSE;
-    attributes.stencil = EM_FALSE;
-    attributes.antialias = EM_TRUE;
-
-    const EMSCRIPTEN_WEBGL_CONTEXT_HANDLE context = emscripten_webgl_create_context("#canvas", &attributes);
-    if (context <= 0) {
+    program_ = createProgram(host_.openGlDialect());
+    if (program_ == 0) {
+        host_.log(PlatformLogLevel::Error, "Failed to compile the shared OpenGL shader program.");
         return false;
     }
-    emscripten_webgl_make_context_current(context);
-
-    program_ = createProgram();
     glGenVertexArrays(1, &vao_);
     glGenBuffers(1, &vbo_);
     glBindVertexArray(vao_);
@@ -941,19 +805,20 @@ bool WebGLRenderer::initialize()
     }
 
     for (auto& asset : assets_) {
-        rr_request_image(asset.key, asset.path);
+        textures_.request(asset.key, asset.path);
         asset.requested = true;
+        if (textures_.status(asset.key) == TextureStatus::Failed) {
+            host_.log(PlatformLogLevel::Error, textures_.lastError());
+            shutdown();
+            return false;
+        }
     }
 
     initialized_ = true;
     return true;
-#else
-    initialized_ = true;
-    return true;
-#endif
 }
 
-void WebGLRenderer::render(const RenderSnapshot& snapshot)
+void OpenGlRenderer::render(const RenderSnapshot& snapshot)
 {
     if (!initialized_) {
         return;
@@ -1002,45 +867,16 @@ void WebGLRenderer::render(const RenderSnapshot& snapshot)
     drawTelemetry(snapshot);
 }
 
-void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
+void OpenGlRenderer::beginFrame(const RenderSnapshot& snapshot)
 {
-#ifdef __EMSCRIPTEN__
-    rr_sync_canvas_to_visual_viewport();
-
-    double cssWidth = 1280.0;
-    double cssHeight = 720.0;
-    emscripten_get_element_css_size("#canvas", &cssWidth, &cssHeight);
-    cssWidth = std::isfinite(cssWidth) ? std::max(1.0, cssWidth) : 1280.0;
-    cssHeight = std::isfinite(cssHeight) ? std::max(1.0, cssHeight) : 720.0;
-
-    int drawingWidth = 1;
-    int drawingHeight = 1;
-    const int packedResolution = rr_resolution_target_packed();
-    const int targetWidth = packedResolution / 10000;
-    const int targetHeight = packedResolution % 10000;
-    if (targetWidth > 0 && targetHeight > 0) {
-        const double targetScale = std::min(
-            static_cast<double>(targetWidth) / cssWidth,
-            static_cast<double>(targetHeight) / cssHeight);
-        drawingWidth = std::clamp(
-            static_cast<int>(std::lround(cssWidth * targetScale)),
-            1,
-            targetWidth);
-        drawingHeight = std::clamp(
-            static_cast<int>(std::lround(cssHeight * targetScale)),
-            1,
-            targetHeight);
-    } else {
-        const double pixelRatio = rr_device_pixel_ratio();
-        drawingWidth = std::max(1, static_cast<int>(std::ceil(cssWidth * pixelRatio)));
-        drawingHeight = std::max(1, static_cast<int>(std::ceil(cssHeight * pixelRatio)));
-    }
-    emscripten_set_canvas_element_size("#canvas", drawingWidth, drawingHeight);
-    glViewport(0, 0, drawingWidth, drawingHeight);
+    const ViewportMetrics metrics = host_.viewportMetrics();
+    const double cssWidth = std::max(1, metrics.logicalWidth);
+    const double cssHeight = std::max(1, metrics.logicalHeight);
+    glViewport(0, 0, std::max(1, metrics.drawableWidth), std::max(1, metrics.drawableHeight));
 
     sceneCssWidth_ = std::max(1.0F, static_cast<float>(cssWidth));
     sceneCssHeight_ = std::max(1.0F, static_cast<float>(cssHeight));
-    const float sceneLeftNdc = static_cast<float>(rr_scene_left_ndc());
+    const float sceneLeftNdc = metrics.sceneLeftNdc;
     scenePixelLeft_ = (sceneLeftNdc + 1.0F) * 0.5F * sceneCssWidth_;
     scenePixelRight_ = sceneCssWidth_;
     const float sceneWidthPixels = std::max(1.0F, scenePixelRight_ - scenePixelLeft_);
@@ -1061,7 +897,7 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
         sceneWorldUnitX_ = sceneWorldUnit_;
         sceneWorldUnitY_ = sceneWorldUnit_;
     }
-    const bool cameraShakeEnabled = rr_camera_shake_enabled() != 0;
+    const bool cameraShakeEnabled = !preferences_.load().cameraShakeDisabled;
     const float launchShake = cameraShakeEnabled ? static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0)) : 0.0F;
     if (launchShake > 0.0F) {
         const float shake = launchShake * launchShake;
@@ -1090,26 +926,23 @@ void WebGLRenderer::beginFrame(const RenderSnapshot& snapshot)
     glDisable(GL_SCISSOR_TEST);
     glClearColor(0.02F + clearHeat * 0.05F + arrivalGlow, 0.03F + arrivalGlow * 0.70F, 0.05F + clearHeat * 0.02F + arrivalGlow * 0.35F, 1.0F);
     glClear(GL_COLOR_BUFFER_BIT);
-#else
-    (void)snapshot;
-#endif
 }
 
-void WebGLRenderer::drawRect(float cx, float cy, float w, float h, Color color, bool worldSpace)
+void OpenGlRenderer::drawRect(float cx, float cy, float w, float h, Color color, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(48);
     appendRect(vertices, cx, cy, w, h, color);
     submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawLine(float ax, float ay, float bx, float by, Color color, float width, bool worldSpace)
+void OpenGlRenderer::drawLine(float ax, float ay, float bx, float by, Color color, float width, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(16);
     appendLine(vertices, ax, ay, bx, by, color);
     submitLines(vertices, width, worldSpace);
 }
 
-void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace)
+void OpenGlRenderer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(24);
     pushVertex(vertices, ax, ay, color);
@@ -1118,7 +951,7 @@ void WebGLRenderer::drawTriangle(float ax, float ay, float bx, float by, float c
     submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, int segments, bool worldSpace)
+void OpenGlRenderer::drawCircle(float cx, float cy, float radius, Color color, int segments, bool worldSpace)
 {
     std::vector<float>& vertices = scratchVertices(static_cast<std::size_t>(segments) * 24);
     for (int i = 0; i < segments; ++i) {
@@ -1131,7 +964,7 @@ void WebGLRenderer::drawCircle(float cx, float cy, float radius, Color color, in
     submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments, bool worldSpace)
+void OpenGlRenderer::drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments, bool worldSpace)
 {
     Color edgeColor = centerColor;
     edgeColor.a = 0.0F;
@@ -1147,12 +980,12 @@ void WebGLRenderer::drawRadialGlow(float cx, float cy, float radius, Color cente
     submit(vertices, 0x0004, false, 0, worldSpace);
 }
 
-void WebGLRenderer::drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale)
+void OpenGlRenderer::drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale)
 {
     drawMiningOreSparkleColor(cx, cy, unitSize, miningRewardGlowColor(material), animationTime, phaseSeed, alphaScale);
 }
 
-void WebGLRenderer::drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale)
+void OpenGlRenderer::drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale)
 {
     const float activeWindow = 0.42F;
     const float phase = std::fmod(animationTime * 1.35F + phaseSeed, 1.0F);
@@ -1167,7 +1000,7 @@ void WebGLRenderer::drawMiningOreSparkleColor(float cx, float cy, float unitSize
     drawLine(cx, cy - length, cx, cy + length, {glow.r, glow.g, glow.b, alpha}, 1.4F);
 }
 
-void WebGLRenderer::drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age)
+void OpenGlRenderer::drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age)
 {
     if (amount <= 0 || age < 0.0F || age > kMiningPickupTextLifetimeSeconds) {
         return;
@@ -1234,7 +1067,7 @@ void WebGLRenderer::drawMiningPickupText(float cx, float cy, float unitSize, int
     submitLines(textVertices, 2.6F);
 }
 
-void WebGLRenderer::drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind)
+void OpenGlRenderer::drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind)
 {
     if (amount <= 0 || age < 0.0F) {
         return;
@@ -1398,7 +1231,7 @@ void WebGLRenderer::drawMiningCombatText(float cx, float cy, float unitSize, int
     submitLines(textVertices, critical ? 2.5F : 2.0F);
 }
 
-void WebGLRenderer::drawMiningBankedText(float cx, float cy, float unitSize, float age)
+void OpenGlRenderer::drawMiningBankedText(float cx, float cy, float unitSize, float age)
 {
     if (age < 0.0F || age > 1.05F) {
         return;
@@ -1467,7 +1300,7 @@ void WebGLRenderer::drawMiningBankedText(float cx, float cy, float unitSize, flo
     submitLines(textVertices, 2.3F);
 }
 
-std::vector<float>& WebGLRenderer::scratchVertices(std::size_t reserveCount)
+std::vector<float>& OpenGlRenderer::scratchVertices(std::size_t reserveCount)
 {
     vertices_.clear();
     if (vertices_.capacity() < reserveCount) {
@@ -1476,7 +1309,7 @@ std::vector<float>& WebGLRenderer::scratchVertices(std::size_t reserveCount)
     return vertices_;
 }
 
-void WebGLRenderer::appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color)
+void OpenGlRenderer::appendRect(std::vector<float>& vertices, float cx, float cy, float w, float h, Color color)
 {
     const float left = cx - w * 0.5F;
     const float right = cx + w * 0.5F;
@@ -1490,13 +1323,13 @@ void WebGLRenderer::appendRect(std::vector<float>& vertices, float cx, float cy,
     pushVertex(vertices, left, top, color);
 }
 
-void WebGLRenderer::appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color)
+void OpenGlRenderer::appendLine(std::vector<float>& vertices, float ax, float ay, float bx, float by, Color color)
 {
     pushVertex(vertices, ax, ay, color);
     pushVertex(vertices, bx, by, color);
 }
 
-bool WebGLRenderer::textureReady(int assetIndex)
+bool OpenGlRenderer::textureReady(int assetIndex)
 {
     if (assetIndex < 0 || assetIndex >= static_cast<int>(assets_.size())) {
         return false;
@@ -1507,30 +1340,28 @@ bool WebGLRenderer::textureReady(int assetIndex)
         return true;
     }
 
-#ifdef __EMSCRIPTEN__
     if (!asset.requested) {
-        rr_request_image(asset.key, asset.path);
+        textures_.request(asset.key, asset.path);
         asset.requested = true;
     }
 
-    if (rr_image_ready(asset.key) != 0 && rr_upload_image_texture(asset.key, static_cast<int>(asset.texture)) != 0) {
-        asset.width = rr_image_width(asset.key);
-        asset.height = rr_image_height(asset.key);
-        asset.ready = asset.width > 0 && asset.height > 0;
+    if (textures_.status(asset.key) == TextureStatus::Ready) {
+        asset.ready = textures_.uploadToOpenGl(asset.key, asset.texture, asset.width, asset.height)
+            && asset.width > 0
+            && asset.height > 0;
     }
-#endif
 
     return asset.ready;
 }
 
-void WebGLRenderer::warmTextures()
+void OpenGlRenderer::warmTextures()
 {
     for (int i = 0; i < static_cast<int>(assets_.size()); ++i) {
         (void)textureReady(i);
     }
 }
 
-void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
+void OpenGlRenderer::drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
 {
     if (!textureReady(assetIndex)) {
         return;
@@ -1558,7 +1389,7 @@ void WebGLRenderer::drawSprite(float cx, float cy, float w, float h, Color tint,
     submit(vertices, 0x0004, true, asset.texture, worldSpace);
 }
 
-void WebGLRenderer::drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
+void OpenGlRenderer::drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
 {
     if (!textureReady(assetIndex)) {
         return;
@@ -1595,7 +1426,7 @@ void WebGLRenderer::drawSpriteRotated(float cx, float cy, float w, float h, floa
     submit(vertices, 0x0004, true, asset.texture, worldSpace);
 }
 
-void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawFlyby(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.012F, 0.017F, 0.027F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.72F);
@@ -1781,7 +1612,7 @@ void WebGLRenderer::drawFlyby(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawOrbit(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.010F, 0.015F, 0.024F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.68F);
@@ -1897,7 +1728,7 @@ void WebGLRenderer::drawOrbit(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
     if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
@@ -2479,10 +2310,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
         drawRect(enemyCenter.x - cellW * (eliteEnemy ? 0.79F : 0.59F) * (1.0F - health), enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F) * health, cellH * 0.12F, {1.0F, 0.18F, 0.12F, 0.90F});
     }
 
-    double visualHeadingTime = snapshot.animationTime;
-#ifdef __EMSCRIPTEN__
-    visualHeadingTime = emscripten_get_now() / 1000.0;
-#endif
+    const double visualHeadingTime = host_.monotonicSeconds();
     const double elapsed = miningVisualHeadingTime_ < 0.0 ? 0.0 : visualHeadingTime - miningVisualHeadingTime_;
     const float bounce = static_cast<float>(std::clamp(snapshot.miningBounce, 0.0, tuning::mining::contactBounceMaxCells));
     const Vec2 targetVisualRecoil {
@@ -3204,7 +3032,7 @@ void WebGLRenderer::drawMining(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawSurfaceScan(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawSurfaceScan(const RenderSnapshot& snapshot)
 {
     drawBackdrop(snapshot);
     const Vec2 destination = routePoint(snapshot, 1.0F);
@@ -3286,7 +3114,7 @@ void WebGLRenderer::drawSurfaceScan(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawSurfacePush(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawSurfacePush(const RenderSnapshot& snapshot)
 {
     drawBackdrop(snapshot);
     const Vec2 destination = routePoint(snapshot, 1.0F);
@@ -3414,7 +3242,7 @@ void WebGLRenderer::drawSurfacePush(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 {
     const float left = 0.18F;
     const float right = 0.94F;
@@ -3500,7 +3328,7 @@ void WebGLRenderer::drawTelemetry(const RenderSnapshot& snapshot)
     drawCircle(heatX, heatY, 0.006F, heatColor, 16);
 }
 
-void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames)
+void OpenGlRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames)
 {
     if (!textureReady(LocalSolarBgAsset)) {
         return;
@@ -3521,7 +3349,7 @@ void WebGLRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float al
     drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, std::clamp(nextAlpha, 0.0F, 1.0F)}, LocalSolarBgAsset, nextFrame, 4, false);
 }
 
-void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawRoute(const RenderSnapshot& snapshot)
 {
     const bool arrivalFanfare = snapshot.screen == Screen::ArrivalFanfare;
     const float flash = arrivalFanfare
@@ -3569,7 +3397,7 @@ void WebGLRenderer::drawRoute(const RenderSnapshot& snapshot)
     submitLines(overburnVertices, 1.0F);
 }
 
-void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawRocket(const RenderSnapshot& snapshot)
 {
     const Vec2 route = routePoint(snapshot, static_cast<float>(snapshot.travelProgress));
     Vec2 forward = routeTangent(snapshot, static_cast<float>(snapshot.travelProgress));
@@ -3671,7 +3499,7 @@ void WebGLRenderer::drawRocket(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
+void OpenGlRenderer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Launch);
@@ -3976,7 +3804,7 @@ void WebGLRenderer::drawBackdrop(const RenderSnapshot& snapshot)
     }
 }
 
-void WebGLRenderer::drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end)
+void OpenGlRenderer::drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end)
 {
     auto& vertices = scratchVertices(static_cast<std::size_t>(segments) * 16U);
     Vec2 previous {cx + std::cos(start) * rx, cy + std::sin(start) * ry};
@@ -3990,7 +3818,7 @@ void WebGLRenderer::drawEllipseLine(float cx, float cy, float rx, float ry, Colo
     submitLines(vertices, 1.0F);
 }
 
-void WebGLRenderer::submit(
+void OpenGlRenderer::submit(
     const std::vector<float>& vertices,
     int primitive,
     bool textured,
@@ -4001,7 +3829,6 @@ void WebGLRenderer::submit(
     std::array<float, 4> effectParams,
     std::array<float, 2> effectSize)
 {
-#ifdef __EMSCRIPTEN__
     if (vertices.empty()) {
         return;
     }
@@ -4039,27 +3866,50 @@ void WebGLRenderer::submit(
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
     glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(uploadVertices->size() * sizeof(float)), uploadVertices->data(), GL_DYNAMIC_DRAW);
     glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(uploadVertices->size() / 8));
-#else
-    (void)vertices;
-    (void)primitive;
-    (void)textured;
-    (void)texture;
-    (void)worldSpace;
-    (void)effectMode;
-    (void)effectColor;
-    (void)effectParams;
-    (void)effectSize;
-#endif
 }
 
-void WebGLRenderer::submitLines(const std::vector<float>& vertices, float width, bool worldSpace)
+void OpenGlRenderer::submitLines(const std::vector<float>& vertices, float width, bool worldSpace)
 {
-#ifdef __EMSCRIPTEN__
     glLineWidth(width);
-#else
-    (void)width;
-#endif
     submit(vertices, 0x0001, false, 0, worldSpace);
+}
+
+void OpenGlRenderer::shutdown()
+{
+    if (!initialized_ && program_ == 0 && vao_ == 0 && vbo_ == 0) {
+        return;
+    }
+    std::vector<GLuint> textures;
+    textures.reserve(assets_.size());
+    for (TextureAsset& asset : assets_) {
+        if (asset.texture != 0) {
+            textures.push_back(asset.texture);
+        }
+        asset = {};
+    }
+    if (!textures.empty()) {
+        glDeleteTextures(static_cast<GLsizei>(textures.size()), textures.data());
+    }
+    if (vbo_ != 0) {
+        glDeleteBuffers(1, &vbo_);
+    }
+    if (vao_ != 0) {
+        glDeleteVertexArrays(1, &vao_);
+    }
+    if (program_ != 0) {
+        glDeleteProgram(program_);
+    }
+    program_ = 0;
+    vao_ = 0;
+    vbo_ = 0;
+    initialized_ = false;
+}
+
+std::string_view OpenGlRenderer::description() const
+{
+    return host_.openGlDialect() == OpenGlDialect::WebGl2
+        ? std::string_view("WebGL2 / Emscripten")
+        : std::string_view("OpenGL 3.3 Core / native SDL");
 }
 
 } // namespace rocket

@@ -144,7 +144,7 @@ statusLine(
     ? "available on PATH"
     : nativeCompilerViaVs
       ? `available through ${vsEnv.devCmd}`
-      : "needed for native-debug"
+      : "needed for native-debug and native-release"
 );
 statusLine(emsdkCheckout, "Emscripten SDK checkout", emsdkEnv);
 statusLine(emscriptenConfigured, "Emscripten CMake toolchain", emscriptenToolchain);
@@ -154,14 +154,14 @@ const nativeReady = cmake && ninja && nativeCompiler;
 const webReady = cmake && ninja && emsdkCheckout && emscriptenConfigured && emcc;
 
 console.log("");
-statusLine(nativeReady, "native-debug preset");
+statusLine(nativeReady, "native-debug/native-release presets");
 statusLine(webReady, "web-release preset");
 
 if (!nativeReady || !webReady) {
   console.log("");
   console.log("Workarounds:");
   if (!nativeReady) {
-    console.log("- Native build: install Visual Studio Build Tools with the C++ workload, dot-source scripts\\env-windows.ps1, or use npm.cmd run configure:native.");
+    console.log("- Native build: install Visual Studio Build Tools with the C++ workload, dot-source scripts\\env-windows.ps1, or use npm.cmd run configure:native:release.");
   }
   if (!webReady) {
     console.log("- Web build: run scripts\\install-windows.ps1, then dot-source scripts\\env-windows.ps1 before configuring web-release.");
@@ -172,4 +172,4 @@ if (!nativeReady || !webReady) {
 }
 
 console.log("");
-console.log("Both CMake build presets have the required local toolchain pieces.");
+console.log("The native and web CMake presets have the required local toolchain pieces.");

@@ -63,7 +63,8 @@ inline constexpr std::string_view miningFuelFailed = "Ark fuel reserve is dry. M
 inline constexpr std::string_view miningFuelBlocked = "Ark fuel reserve is empty. Recover fuel before deploying the mining drone.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
 inline constexpr std::string_view launchCrewBlocked = "Choose a pilot before launch.";
-inline constexpr std::string_view droneStowing = "Mining drone transfer in progress. Launch control will unlock when the bay is sealed.";
+inline constexpr std::string_view droneStowing = "Mining drone transfer in progress. Press launch now to queue the burn for bay seal.";
+inline constexpr std::string_view launchQueued = "Launch queued. The burn will begin as soon as the mining drone is secured and the bay seals.";
 inline constexpr std::string_view preflightReady = "Mining drone secured. Bay sealed and launch control online.";
 inline constexpr std::string_view preflightReadyWithoutDrone = "Flight systems checked. Bay sealed and launch control online.";
 inline constexpr std::string_view provingBurnStarted = "Proving burn underway. Return to Earth to bank data; eject only when the vehicle leaves you no choice.";
@@ -532,8 +533,8 @@ inline constexpr std::string_view surfaceBriefing = "Surface Briefing";
 } // namespace modals
 
 namespace details {
-inline constexpr std::string_view keyboard = "Keyboard";
-inline constexpr std::string_view keyboardValue = "Space/R return to Earth, E eject";
+inline constexpr std::string_view keyboard = "Input";
+inline constexpr std::string_view keyboardValue = "Context prompts for controller; keyboard and mouse remain available";
 inline constexpr std::string_view save = "Save";
 inline constexpr std::string_view saveValue = "Browser localStorage";
 inline constexpr std::string_view build = "Build";

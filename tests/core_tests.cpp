@@ -331,6 +331,7 @@ void cutEnginesTradeHeatForNavigation()
 
     const double poweredDelta = burnMultiplierDelta(launch, catalog.destinations[0], 4.0, 1.0 / 60.0);
     const double cutDelta = burnMultiplierDelta(throttled, catalog.destinations[0], 4.0, 1.0 / 60.0);
+    require(cutDelta > 0.0, "cut engines should reduce thrust without stopping flight progression");
     require(cutDelta < poweredDelta, "cut engines should slow burn progression");
 }
 
@@ -5302,6 +5303,8 @@ void miningBrokenDrillBitDisablesDrillingOnly()
     const std::string failureHtml = buildGamePanelHtml({state, catalog, prepared, prepared});
     require(failureHtml.find("data-modal-dismissible=\"0\"") != std::string::npos,
         "forced emergency-recall modal should expose only its recovery action, not a close path");
+    require(failureHtml.find("data-ui-focus-id=\"action:mining_failure_ack\" data-ui-default-focus=\"1\"") != std::string::npos,
+        "forced emergency-recall modal should explicitly focus its controller recovery action");
 }
 
 void miningShipRepairsUseBankedMaterialsProportionally()
@@ -6769,6 +6772,40 @@ void settingsResolutionSelectorExposesSupportedPresets()
         "settings should expose one resolution-control group");
     require(countOccurrences(html, "data-resolution-select") == 1,
         "settings should expose one resolution selector");
+    require(countOccurrences(html, "data-desktop-fullscreen-settings") == 1 &&
+            countOccurrences(html, "data-desktop-fullscreen-toggle") == 1 &&
+            html.find("data-ui-focus-id=\"setting:fullscreen\"") != std::string::npos,
+        "settings should expose one controller-focusable desktop fullscreen option");
+    require(countOccurrences(html, "data-controller-prompt-select") == 1 &&
+            countOccurrences(html, "data-controller-deadzone-select") == 1,
+        "settings should expose one controller prompt selector and one deadzone selector");
+    require(countOccurrences(html, "data-controller-invert-toggle") == 1 &&
+            countOccurrences(html, "data-controller-swap-toggle") == 1 &&
+            countOccurrences(html, "data-controller-vibration-toggle") == 1,
+        "settings should expose the three fixed controller comfort toggles");
+    require(countOccurrences(html, "<template data-modal=\"system_menu\"") == 1 &&
+            countOccurrences(html, "<template data-modal=\"controls\"") == 1 &&
+            countOccurrences(html, "<template data-modal=\"reset_save_confirm\"") == 1,
+        "shared utility modals should expose pause, controls, and guarded reset exactly once");
+    const std::size_t systemMenuTemplate = html.find("<template data-modal=\"system_menu\"");
+    require(systemMenuTemplate != std::string::npos &&
+            html.find("data-modal-dismissible=\"0\"", systemMenuTemplate) != std::string::npos &&
+            html.find("data-controller-resume=\"1\"", systemMenuTemplate) != std::string::npos,
+        "the system menu should require its explicit Resume control and expose it to controller safety gating");
+    const std::size_t resetTemplate = html.find("<template data-modal=\"reset_save_confirm\"");
+    const std::size_t resetCancel = html.find("data-ui-focus-id=\"reset:cancel\"", resetTemplate);
+    const std::size_t resetDanger = html.find("data-ui-focus-id=\"action:reset_save\"", resetTemplate);
+    require(resetTemplate != std::string::npos && resetCancel != std::string::npos && resetDanger != std::string::npos && resetCancel < resetDanger,
+        "reset confirmation should focus its safe Cancel action before the held danger action");
+    require(html.find("data-controller-hold-seconds=\"0.75\"", resetDanger) != std::string::npos,
+        "reset confirmation should declare its controller hold contract");
+    require(html.find("data-ui-focus-id=\"modal:settings\"") != std::string::npos &&
+            html.find("data-ui-focus-id=\"action:reset_save\"") != std::string::npos,
+        "player actions and modal triggers should expose stable semantic focus ids");
+    require(html.find("data-ui-default-focus=\"1\"") != std::string::npos,
+        "each rendered screen should expose a semantic default-focus candidate");
+    require(html.find("class=\"disabled\" disabled data-ui-focus-id") == std::string::npos,
+        "disabled controls should not enter the semantic focus graph");
 
     const std::string selectorHtml = html.substr(selector, selectorEnd + std::string("</select>").size() - selector);
     const std::vector<std::string_view> presetValues {
@@ -6838,6 +6875,8 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(launchHtml.find("<h1>Flight</h1>") != std::string::npos, "launch panel should title the current phase instead of repeating the game title");
     require(launchHtml.find("class=\"cockpit-hud flight-hud\"") != std::string::npos, "launch controls should render in a cockpit HUD");
     require(launchHtml.find("data-help-topic=\"launch-controls\"") != std::string::npos, "launch panel should introduce return/eject/mitigation help");
+    require(launchHtml.find("data-ui-focus-id=\"help-dismiss:launch-controls\"") != std::string::npos,
+        "mission help dismissal should expose a stable controller focus id");
     require(launchHtml.find("Return to Earth banks data") != std::string::npos, "launch help should mention returning to Earth");
     require(launchHtml.find("unlock the Moon route") != std::string::npos, "first launch help should keep the intro focused on return/eject");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
@@ -6872,6 +6911,14 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(boardingHtml.find("data-preflight-ready=\"0\"") != std::string::npos, "boarding panel should keep scene launch control disabled");
     require(boardingHtml.find("Securing mining drone") != std::string::npos, "boarding panel should explain the launch hold");
 
+    launchContext.launchQueued = true;
+    const std::string queuedLaunchHtml = buildGamePanelHtml(launchContext);
+    require(queuedLaunchHtml.find("data-preflight-queued=\"1\"") != std::string::npos,
+        "preflight should expose a queued controller launch to the scene overlay");
+    require(queuedLaunchHtml.find("Launch queued. The burn will begin automatically") != std::string::npos,
+        "preflight should explain that an early Cross press has been accepted");
+
+    launchContext.launchQueued = false;
     launchContext.preflightReady = true;
     const std::string preflightHtml = buildGamePanelHtml(launchContext);
     require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
@@ -6896,6 +6943,8 @@ void panelHtmlIncludesContextualTutorialLayer()
     const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
     const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
     require(arrivalHtml.find("data-help-topic=\"arrival-ops\"") != std::string::npos, "arrival ops panel should introduce flyby/orbit/land help");
+    require(arrivalHtml.find("data-ui-focus-id=\"help-dismiss:arrival-ops\"") != std::string::npos,
+        "arrival help dismissal should expose a stable controller focus id");
     require(arrivalHtml.find("Flyby is the safest scan") != std::string::npos, "arrival help should explain flyby/orbit/landing progression");
     require(arrivalHtml.find("Arrival summary") != std::string::npos, "arrival ops panel should consolidate debrief summary");
     require(arrivalHtml.find("Mission result") != std::string::npos, "arrival ops panel should include outcome metrics");
@@ -6907,7 +6956,7 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(fanfareHtml.find("data-arrival-fanfare=\"1\"") != std::string::npos, "arrival fanfare should signal the scene overlay");
     require(fanfareHtml.find("data-arrival-destination=\"Moon\"") != std::string::npos, "arrival fanfare should expose the destination to the overlay");
     require(fanfareHtml.find("Mission stamp") != std::string::npos, "arrival fanfare should render the mission stamp inside RmlUi");
-    require(fanfareHtml.find("Click or press Space to continue") != std::string::npos, "arrival fanfare should expose its RmlUi continue action");
+    require(fanfareHtml.find("Select to continue") != std::string::npos, "arrival fanfare should expose input-neutral continue copy");
     const SaveData fanfareSave = captureSaveData(arrivalState);
     require(fanfareSave.screen == Screen::ArrivalOps, "arrival fanfare should persist as approach so reloads do not resume a transient screen");
     GameState restoredArrival = createNewGame(catalog, 713);
@@ -7165,7 +7214,10 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(upgradeHtml.find("phase-board-surface-upgrade") != std::string::npos, "surface upgrade should render inside the dedicated field-upgrade board");
     require(upgradeHtml.find("draft-hero") != std::string::npos, "surface upgrade should use the same draft hero pattern as refit");
     require(upgradeHtml.find("surface-upgrade-card") != std::string::npos, "surface upgrades should render as tactile draft cards");
-    require(upgradeHtml.find("draft-actions") != std::string::npos, "surface upgrade should keep reroll and skip actions centered as a draft row");
+    require(upgradeHtml.find("draft-actions controller-action-row") != std::string::npos,
+        "surface upgrade should mark reroll and skip as a controller action row");
+    require(upgradeHtml.find("draft-card-grid controller-choice-row") != std::string::npos,
+        "surface upgrade should keep left/right navigation inside the upgrade choice row");
     require(upgradeHtml.find("phase-status") == std::string::npos, "surface upgrade should not duplicate the yellow mission status inside the board");
     const std::size_t contextStart = upgradeHtml.find("draft-context");
     const std::size_t contextEnd = upgradeHtml.find("</div></section>", contextStart);
@@ -7175,6 +7227,21 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(contextHtml.find("Extraction risk") == std::string::npos, "surface upgrade context should avoid clipped long risk labels");
     require(contextHtml.find("Site Basin") != std::string::npos, "surface upgrade context should use compact site chip text");
     require(contextHtml.find("Survey Basin") == std::string::npos, "surface upgrade context should avoid clipped long site labels");
+
+    GameState refitState = createNewGame(catalog, 722);
+    refitState.run.credits = 1000.0;
+    refitState.screen = Screen::Upgrade;
+    Random refitOfferRng(722);
+    generateModuleOffers(refitState, catalog, refitOfferRng);
+    Random refitLaunchRng(723);
+    const PreparedLaunch refitLaunch = prepareLaunch(refitState, catalog, refitLaunchRng);
+    const std::string refitHtml = buildGamePanelHtml({refitState, catalog, refitLaunch, refitLaunch});
+    require(refitHtml.find("phase-board-refit") != std::string::npos, "refit should render inside the dedicated draft board");
+    require(countOccurrences(refitHtml, "upgrade-draft-card") == 3, "refit should expose three controller-cycle choices");
+    require(refitHtml.find("draft-card-grid controller-choice-row") != std::string::npos,
+        "refit choices should use the shared controller choice row");
+    require(refitHtml.find("draft-actions controller-action-row") != std::string::npos,
+        "refit reroll and skip should use the shared controller action row");
 }
 
 void hangarHtmlShowsPilotIntakeModal()
@@ -7189,6 +7256,10 @@ void hangarHtmlShowsPilotIntakeModal()
     Random rng(715);
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
     const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("ops-grid controller-choice-row") != std::string::npos,
+        "hangar operations should keep left/right navigation inside the operation-card row");
+    require(html.find("hangar-actions controller-action-row") != std::string::npos,
+        "hangar launch controls should form the separate up/down controller action row");
     require(html.find("data-modal=\"pilot_intake\"") != std::string::npos, "hangar should expose the pilot intake modal when no crew is active");
     require(html.find("pilot-card-grid") != std::string::npos, "pilot intake should render candidate cards");
     require(html.find("pilot-portrait-placeholder") != std::string::npos, "pilot intake should reserve portrait art slots");

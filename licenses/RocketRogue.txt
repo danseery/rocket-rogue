@@ -1,0 +1,5 @@
+Rocket Rogue prototype
+Copyright (c) Rocket Rogue Team. All rights reserved.
+
+This distribution contains third-party components under the separate license
+notices included in this directory.

@@ -4,8 +4,9 @@
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
 #include "core/Random.h"
-#include "game/GameRmlUi.h"
-#include "render/WebGLRenderer.h"
+#include "input/GameInputRouter.h"
+#include "platform/AppServices.h"
+#include "render/OpenGlRenderer.h"
 
 #include <cstdint>
 #include <string>
@@ -13,12 +14,32 @@
 
 namespace rocket {
 
+enum class ControllerHapticCue {
+    None = 0,
+    Confirmation,
+    MiningHardContact,
+    Damage,
+    Failure
+};
+
 class RocketGameApp {
 public:
+    explicit RocketGameApp(AppServices& services);
+
     bool initialize();
+    void shutdown();
+    void inputFrame(const ControllerFrame& frame, double realTimeSeconds);
     void tick(double deltaSeconds);
     void render();
     int currentScreen() const;
+    void setControllerPreferences(const ControllerPreferences& preferences);
+    const ControllerPreferences& controllerPreferences() const;
+    void setActiveInputSource(InputSource source);
+    InputSource activeInputSource() const;
+    InputContext inputContext() const;
+    PauseReason pauseReason() const;
+    std::string controllerDebugStatusJson() const;
+    ControllerHapticCue consumePendingControllerHapticCue();
 
     void prepareForLaunch();
     void startLaunch();
@@ -106,6 +127,9 @@ public:
     bool uiMouseUp(int x, int y, int button);
     bool uiMouseWheel(int x, int y, double deltaY);
     bool uiHitTest(int x, int y) const;
+    bool uiNavigate(UiDirection direction);
+    bool uiActivateFocused();
+    bool uiCancel();
 
 private:
     struct ReturnTripState {
@@ -141,6 +165,7 @@ private:
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
         bool flightArmed = false;
+        bool launchQueued = false;
         double preflightElapsed = 0.0;
         double elapsed = 0.0;
         double currentMultiplier = 1.0;
@@ -173,14 +198,48 @@ private:
     void clearResultView();
     void beginSurfaceExpeditionOrRefit();
     double liveBurnMultiplier() const;
+    void applyRealtimeInputs();
+    void releaseRealtimeInputs(bool releaseKeyboard);
+    void dispatchControllerInput(InputContext context, const RoutedGameInput& input);
+    void dispatchControllerAction(InputContext context, GameInputAction action);
+    void previewSyntheticControllerInput(const ControllerFrame& frame, double realTimeSeconds);
+    void openControllerSystemMenu(PauseReason reason);
+    void clearControllerPause();
+    bool realtimeControllerContext(InputContext context) const;
+    InputContext gameplayInputContext() const;
+    void updateControllerHapticState();
+    void queueControllerHapticCue(ControllerHapticCue cue);
 
+    struct RealtimeInputState {
+        double moveX = 0.0;
+        double moveY = 0.0;
+        bool drilling = false;
+    };
+
+    AppServices& services_;
     ContentCatalog catalog_;
     GameState state_;
     Random rng_;
-    WebGLRenderer renderer_;
-    GameRmlUi rmlUi_;
+    GameInputRouter inputRouter_;
+    GameInputRouter syntheticInputRouter_;
+    ControllerPreferences controllerPreferences_;
+    InputSource activeInputSource_ = InputSource::None;
     LaunchSessionState session_;
     MiningExtractionState miningExtraction_;
+    RealtimeInputState keyboardRealtimeInput_;
+    RealtimeInputState controllerRealtimeInput_;
+    PauseReason pauseReason_ = PauseReason::None;
+    Screen lastInputScreen_ = Screen::Hangar;
+    bool controllerWasConnected_ = false;
+    bool controllerClaimedInput_ = false;
+    bool controllerConnected_ = false;
+    bool controllerResumeNeutralRequired_ = false;
+    std::string lastControllerAction_ = "none";
+    ControllerHapticCue pendingHapticCue_ = ControllerHapticCue::None;
+    double lastMiningContactIntensity_ = 0.0;
+    double lastMiningDroneHealth_ = 1.0;
+    bool lastMiningFailurePending_ = false;
+    double lastControllerInputSeconds_ = 0.0;
     double visualTimeSeconds_ = 0.0;
     bool panelDirty_ = true;
     bool debugSessionActive_ = false;

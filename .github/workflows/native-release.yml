@@ -1,0 +1,167 @@
+name: Native desktop builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "src/**"
+      - "tests/**"
+      - "third_party/**"
+      - ".github/workflows/native-release.yml"
+  push:
+    branches: [main]
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "cmake/**"
+      - "src/**"
+      - "tests/**"
+      - "third_party/**"
+      - ".github/workflows/native-release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    name: Windows x86-64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure and build Debug
+        run: |
+          cmake --preset native-debug
+          cmake --build --preset native-debug
+
+      - name: Test Debug
+        run: ctest --preset native-debug
+
+      - name: Configure, build, and test Release
+        run: |
+          cmake --preset native-release
+          cmake --build --preset native-release
+          ctest --preset native-release
+
+      - name: Package Release
+        run: cmake --build --preset package-native
+
+      - name: Verify portable archive
+        shell: pwsh
+        run: |
+          $archive = "build/packages/RocketRogue-windows-x64.zip"
+          if (-not (Test-Path -LiteralPath $archive)) { throw "Missing $archive" }
+          $listing = 7z l $archive | Out-String
+          if ($listing -match '(?i)electron|chromium|node\.exe|\.wasm(?:\s|$)|rocket_rogue\.html') {
+            throw "Browser or Electron runtime content escaped into the native archive."
+          }
+          if ($listing -notmatch 'RocketRogue\.exe' -or $listing -notmatch 'assets\\art' -or $listing -notmatch 'licenses') {
+            throw "Native archive is missing the executable, art, or licenses."
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RocketRogue-windows-x64
+          path: build/packages/RocketRogue-windows-x64.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RocketRogue-windows-x64-symbols
+          path: build/native-release/bin/RocketRogue.pdb
+          if-no-files-found: error
+
+  linux-x64:
+    name: Linux x86-64 (Steam Runtime 4 SDK)
+    runs-on: ubuntu-24.04
+    container:
+      image: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install headless smoke dependencies
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends xvfb xauth mesa-utils
+
+      - name: Configure and build Debug
+        shell: bash
+        run: |
+          cmake --preset native-debug
+          cmake --build --preset native-debug
+
+      - name: Test Debug
+        shell: bash
+        run: ctest --preset native-debug
+
+      - name: Configure, build, and test Release
+        shell: bash
+        run: |
+          cmake --preset native-release
+          cmake --build --preset native-release
+          ctest --preset native-release
+
+      - name: Verify dynamic libraries and unrelated-working-directory startup
+        shell: bash
+        run: |
+          if ldd build/native-release/bin/RocketRogue | grep -F "not found"; then
+            echo "A required dynamic library is missing." >&2
+            exit 1
+          fi
+          if ! command -v xvfb-run >/dev/null || ! command -v timeout >/dev/null; then
+            echo "The pinned Steam Runtime SDK smoke environment is missing xvfb-run or timeout." >&2
+            exit 1
+          fi
+          executable="$GITHUB_WORKSPACE/build/native-release/bin/RocketRogue"
+          cd "$RUNNER_TEMP"
+          set +e
+          LIBGL_ALWAYS_SOFTWARE=1 timeout 10s xvfb-run -a "$executable"
+          status=$?
+          set -e
+          if [ "$status" -ne 124 ]; then
+            echo "Native Linux startup smoke test exited unexpectedly with $status." >&2
+            exit 1
+          fi
+
+      - name: Split debug symbols and package Release
+        shell: bash
+        run: |
+          mkdir -p build/packages
+          objcopy --only-keep-debug build/native-release/bin/RocketRogue build/packages/RocketRogue-linux-x64.debug
+          strip --strip-debug --strip-unneeded build/native-release/bin/RocketRogue
+          objcopy --add-gnu-debuglink=build/packages/RocketRogue-linux-x64.debug build/native-release/bin/RocketRogue
+          cmake --build --preset package-native
+
+      - name: Verify portable archive
+        shell: bash
+        run: |
+          archive="build/packages/RocketRogue-linux-x64.tar.gz"
+          test -f "$archive"
+          listing="$(tar -tzf "$archive")"
+          if printf '%s\n' "$listing" | grep -Eiq 'electron|chromium|node(\.exe)?$|\.wasm$|rocket_rogue\.html$'; then
+            echo "Browser or Electron runtime content escaped into the native archive." >&2
+            exit 1
+          fi
+          printf '%s\n' "$listing" | grep -Eq '(^|/)RocketRogue$'
+          printf '%s\n' "$listing" | grep -Eq '(^|/)assets/art/'
+          printf '%s\n' "$listing" | grep -Eq '(^|/)licenses/'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RocketRogue-linux-x64
+          path: build/packages/RocketRogue-linux-x64.tar.gz
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RocketRogue-linux-x64-symbols
+          path: build/packages/RocketRogue-linux-x64.debug
+          if-no-files-found: error

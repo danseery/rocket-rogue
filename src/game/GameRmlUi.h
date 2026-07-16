@@ -1,5 +1,8 @@
 #pragma once
 
+#include "input/ControllerInput.h"
+#include "platform/AppServices.h"
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -11,13 +14,16 @@ class Element;
 namespace rocket {
 
 struct RmlButtonBinding {
+    std::string focusId;
     std::string label;
     std::string action;
     std::string modal;
     std::string helpDismiss;
+    std::string controllerSetting;
     bool close = false;
     bool helpToggle = false;
     bool cameraShakeToggle = false;
+    bool desktopFullscreenToggle = false;
     bool debugToolsToggle = false;
 };
 
@@ -29,34 +35,60 @@ enum class RmlPanelMode {
     MiningFullscreen
 };
 
-class GameRmlUi {
+class GameRmlUi final : public IGameUi {
 public:
-    using ActionHandler = std::function<void(const std::string&)>;
+    GameRmlUi(IPreferenceStore& preferences, IPlatformHost& host, IUiBridge& uiBridge);
 
-    bool initialize(ActionHandler actionHandler);
-    void setPanelHtml(const std::string& html);
-    void render();
+    bool initialize(ActionHandler actionHandler) override;
+    void setPanelHtml(const std::string& html) override;
+    void render() override;
 
-    bool mouseMove(int x, int y);
-    bool mouseDown(int x, int y, int button);
-    bool mouseUp(int x, int y, int button);
-    bool mouseWheel(int x, int y, double deltaY);
-    bool hitTest(int x, int y) const;
-    void openModal(const std::string& id);
-    void closeModal();
-    void dismissHelp(const std::string& topic);
-    void dispatchAction(const std::string& action);
-    void refresh();
-    bool activateButtonLabel(const std::string& label);
+    bool mouseMove(int x, int y) override;
+    bool mouseDown(int x, int y, int button) override;
+    bool mouseUp(int x, int y, int button) override;
+    bool mouseWheel(int x, int y, double deltaY) override;
+    bool hitTest(int x, int y) const override;
+    bool navigate(UiDirection direction) override;
+    bool activateFocused() override;
+    bool cancel() override;
+    bool scroll(float amount) override;
+    bool modalOpen() const override;
+    void setControllerPresentation(bool active, ControllerFamily family) override;
+    void setControllerFocusVisible(bool visible) override;
+    void setControllerResumeBlocked(bool blocked, bool controllerConnected) override;
+    std::string focusedId() const override;
+    void openModal(const std::string& id) override;
+    void closeModal() override;
+    void dismissHelp(const std::string& topic) override;
+    void dispatchAction(const std::string& action) override;
+    void refresh() override;
+    bool activateButtonLabel(const std::string& label) override;
+    void shutdown() override;
 
 private:
     void rebuildDocument();
 
+    IPreferenceStore& preferences_;
+    IPlatformHost& host_;
+    IUiBridge& uiBridge_;
     ActionHandler actionHandler_;
     std::string panelHtml_;
     std::string openModalId_;
+    std::vector<std::string> modalStack_;
+    std::vector<std::string> modalFocusStack_;
     std::vector<RmlButtonBinding> buttonBindings_;
+    std::string focusedId_;
+    std::string modalReturnFocusId_;
+    float lastFocusCenterX_ = 0.0f;
+    float lastFocusCenterY_ = 0.0f;
+    bool hasLastFocusCenter_ = false;
+    bool controllerPresentationActive_ = false;
+    bool controllerFocusVisible_ = false;
+    bool controllerResumeBlocked_ = false;
+    bool controllerResumeConnected_ = false;
+    ControllerFamily controllerFamily_ = ControllerFamily::Generic;
     Rml::Element* pressedButton_ = nullptr;
+    double pressedButtonAtSeconds_ = 0.0;
     RmlPanelMode panelMode_ = RmlPanelMode::Control;
     int layoutViewportWidth_ = 0;
     int layoutViewportHeight_ = 0;

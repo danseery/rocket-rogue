@@ -2,8 +2,9 @@
   "name": "rocket-rogue-poc",
   "version": "0.1.0",
   "private": true,
+  "author": "Rocket Rogue Team",
   "license": "UNLICENSED",
-  "description": "C++20/WebGL2 proof of concept for a rocket-launch roguelite.",
+  "description": "C++20 native OpenGL and WebGL2 rocket-launch roguelite.",
   "engines": {
     "node": ">=24 <25"
   },
@@ -15,8 +16,12 @@
     "configure:native": "node tools/run-cmake-preset.mjs configure native-debug",
     "build:native": "node tools/run-cmake-preset.mjs build native-debug",
     "test:native": "node tools/run-cmake-preset.mjs test native-debug",
-    "configure:web": "cmake --preset web-release",
-    "build:web": "cmake --build --preset web-release",
+    "configure:native:release": "node tools/run-cmake-preset.mjs configure native-release",
+    "build:native:release": "node tools/run-cmake-preset.mjs build native-release",
+    "test:native:release": "node tools/run-cmake-preset.mjs test native-release",
+    "package:native": "node tools/run-cmake-preset.mjs build package-native",
+    "configure:web": "node tools/run-cmake-preset.mjs configure web-release",
+    "build:web": "node tools/run-cmake-preset.mjs build web-release",
     "test:web": "node tools/run-web-tests.mjs"
   }
 }

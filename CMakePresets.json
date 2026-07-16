@@ -45,6 +45,14 @@
       "configurePreset": "native-release"
     },
     {
+      "name": "package-native",
+      "displayName": "Package Native Release",
+      "configurePreset": "native-release",
+      "targets": [
+        "package-native"
+      ]
+    },
+    {
       "name": "web-release",
       "configurePreset": "web-release"
     }

@@ -1,4 +1,9 @@
-#include "game/RocketGameApp.h"
+#include "game/GameRmlUi.h"
+#include "game/GameRunner.h"
+#include "platform/web/WebGamepadSource.h"
+#include "platform/web/WebPlatform.h"
+#include "platform/web/WebSaveStore.h"
+#include "render/OpenGlRenderer.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -10,40 +15,33 @@
 
 namespace {
 
-std::unique_ptr<rocket::RocketGameApp> g_app;
-double g_lastTimeMs = 0.0;
+rocket::RocketGameApp* g_app = nullptr;
+std::unique_ptr<rocket::WebGamepadSource> g_gamepadSource;
+std::unique_ptr<rocket::WebSaveStore> g_saveStore;
+std::unique_ptr<rocket::WebPreferenceStore> g_preferenceStore;
+std::unique_ptr<rocket::WebPlatformHost> g_platformHost;
+std::unique_ptr<rocket::WebTextureSource> g_textureSource;
+std::unique_ptr<rocket::WebUiBridge> g_uiBridge;
+std::unique_ptr<rocket::OpenGlRenderer> g_renderer;
+std::unique_ptr<rocket::GameRmlUi> g_ui;
+std::unique_ptr<rocket::AppServices> g_services;
+std::unique_ptr<rocket::GameRunner> g_runner;
 std::string g_debugMiningPreview;
+std::string g_controllerDebugStatus;
+std::string g_controllerAppDebugStatus;
 
 #ifdef __EMSCRIPTEN__
-EM_JS(double, rr_game_speed_multiplier, (), {
+EM_JS(int, rr_controller_debug_tools_enabled, (), {
     try {
-        const raw = Number(window.localStorage.getItem("rocket_rogue_game_speed") || "1");
-        if (!Number.isFinite(raw)) {
-            return 1.0;
-        }
-        return Math.min(8.0, Math.max(0.25, raw));
+        return globalThis.localStorage.getItem("rocket_rogue_debug_tools") === "1" ? 1 : 0;
     } catch (error) {
-        return 1.0;
+        return 0;
     }
 });
 
 void mainLoop()
 {
-    const double now = emscripten_get_now();
-    const double delta = g_lastTimeMs <= 0.0 ? 1.0 / 60.0 : (now - g_lastTimeMs) / 1000.0;
-    g_lastTimeMs = now;
-
-    if (g_app) {
-        double remaining = std::clamp(delta, 0.0, 0.25) * rr_game_speed_multiplier();
-        int steps = 0;
-        while (remaining > 0.0 && steps < 24) {
-            const double step = std::min(remaining, 1.0 / 30.0);
-            g_app->tick(step);
-            remaining -= step;
-            ++steps;
-        }
-        g_app->render();
-    }
+    if (g_runner) g_runner->frame();
 }
 #endif
 
@@ -913,15 +911,109 @@ int rr_rml_hit_test(int x, int y)
     return g_app && g_app->uiHitTest(x, y) ? 1 : 0;
 }
 
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char* rr_controller_debug_status()
+{
+    g_controllerDebugStatus = g_gamepadSource
+        ? g_gamepadSource->debugStatusJson()
+        : "{\"connected\":false,\"index\":-1,\"family\":\"generic\",\"id\":\"\"}";
+    return g_controllerDebugStatus.c_str();
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char* rr_controller_app_debug_status()
+{
+    g_controllerAppDebugStatus = g_app
+        ? g_app->controllerDebugStatusJson()
+        : "{\"context\":\"ui\",\"focusId\":\"\",\"lastAction\":\"\",\"pauseReason\":\"none\"}";
+    return g_controllerAppDebugStatus.c_str();
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_controller_set(
+    int connected,
+    double leftX,
+    double leftY,
+    double rightX,
+    double rightY,
+    unsigned int buttonMask)
+{
+    if (!g_gamepadSource) {
+        return;
+    }
+    if (connected == 0) {
+        g_gamepadSource->clearSyntheticSnapshot();
+        return;
+    }
+#ifdef __EMSCRIPTEN__
+    if (rr_controller_debug_tools_enabled() == 0) {
+        return;
+    }
+#endif
+
+    rocket::RawControllerSnapshot snapshot;
+    snapshot.connected = true;
+    snapshot.standardMapping = true;
+    snapshot.family = rocket::ControllerFamily::Generic;
+    snapshot.id = "Controller Lab Synthetic Gamepad";
+    snapshot.leftX = std::clamp(leftX, -1.0, 1.0);
+    snapshot.leftY = std::clamp(leftY, -1.0, 1.0);
+    snapshot.rightX = std::clamp(rightX, -1.0, 1.0);
+    snapshot.rightY = std::clamp(rightY, -1.0, 1.0);
+    for (std::size_t index = 0; index < rocket::controllerButtonCount; ++index) {
+        snapshot.buttons[index] = (buttonMask & (1u << index)) != 0 ? 1.0 : 0.0;
+    }
+    g_gamepadSource->setSyntheticSnapshot(snapshot);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_controller_clear()
+{
+    if (g_gamepadSource) {
+        g_gamepadSource->clearSyntheticSnapshot();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_controller_haptic(double durationSeconds, double weakMagnitude, double strongMagnitude)
+{
+    return g_gamepadSource
+        && g_gamepadSource->playHaptic(durationSeconds, weakMagnitude, strongMagnitude)
+        ? 1
+        : 0;
+}
+
 } // extern "C"
 
 int main()
 {
-    g_app = std::make_unique<rocket::RocketGameApp>();
-    g_app->initialize();
-
 #ifdef __EMSCRIPTEN__
-    g_lastTimeMs = emscripten_get_now();
+    g_gamepadSource = std::make_unique<rocket::WebGamepadSource>();
+    g_saveStore = std::make_unique<rocket::WebSaveStore>();
+    g_preferenceStore = std::make_unique<rocket::WebPreferenceStore>();
+    g_platformHost = std::make_unique<rocket::WebPlatformHost>(*g_gamepadSource);
+    if (!g_platformHost->createGraphicsContext()) return 1;
+    g_textureSource = std::make_unique<rocket::WebTextureSource>();
+    g_uiBridge = std::make_unique<rocket::WebUiBridge>();
+    g_renderer = std::make_unique<rocket::OpenGlRenderer>(*g_platformHost, *g_preferenceStore, *g_textureSource);
+    g_ui = std::make_unique<rocket::GameRmlUi>(*g_preferenceStore, *g_platformHost, *g_uiBridge);
+    g_services = std::make_unique<rocket::AppServices>(rocket::AppServices {
+        *g_saveStore, *g_preferenceStore, *g_platformHost, *g_gamepadSource,
+        *g_textureSource, *g_renderer, *g_ui, *g_uiBridge
+    });
+    g_runner = std::make_unique<rocket::GameRunner>(*g_services);
+    if (!g_runner->initialize()) return 1;
+    g_app = &g_runner->app();
     emscripten_set_main_loop(mainLoop, 0, 1);
 #endif
 

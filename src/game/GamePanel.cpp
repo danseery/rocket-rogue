@@ -114,10 +114,12 @@ std::string phaseTitle(Screen screen)
     }
 }
 
-std::string button(std::string_view label, std::string_view action, std::string cssClass = "")
+std::string button(std::string_view label, std::string_view action, std::string cssClass = "", bool defaultFocus = false)
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
-    return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\">" + htmlEscape(label) + "</button>";
+    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\" data-ui-focus-id=\"action:" +
+        htmlEscape(action) + "\"" + defaultAttr + ">" + htmlEscape(label) + "</button>";
 }
 
 std::string missionStamp(
@@ -140,7 +142,7 @@ std::string missionStamp(
         out << "<span class=\"gold\">" << htmlEscape(tagThree) << "</span>";
     }
     out << "</div>"
-        << button("Click or press Space to continue", continueAction, "arrival-stamp-continue")
+        << button("Select to continue", continueAction, "arrival-stamp-continue", true)
         << "</section>";
     return out.str();
 }
@@ -148,18 +150,56 @@ std::string missionStamp(
 std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
 {
     const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
-    return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
+    const std::string defaultAttr = cssClass == "ok" ? " data-ui-default-focus=\"1\"" : "";
+    return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) +
+        "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\"" + defaultAttr + ">" + htmlEscape(label) + "</button>";
 }
+
+std::string sharedUtilityModalTemplates();
 
 std::string modalTemplate(std::string_view modalId, std::string_view title, std::string body)
 {
-    return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+    std::string result = "<template data-modal=\"" + htmlEscape(modalId) + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+    if (modalId == ui::modals::settings) {
+        result += sharedUtilityModalTemplates();
+    }
+    return result;
 }
 
 std::string autoModalTemplate(std::string_view modalId, std::string_view title, std::string body, bool dismissible = true)
 {
     return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-auto-modal=\"1\" data-modal-dismissible=\"" +
         (dismissible ? "1" : "0") + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+}
+
+std::string sharedUtilityModalTemplates()
+{
+    const std::string controlsBody =
+        "<div class=\"detail-stack modal-body controller-controls\">"
+        "<div><strong>Menus</strong><span>Left stick or D-pad navigates. South selects. East goes back. Right stick scrolls.</span></div>"
+        "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
+        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort. Context prompts show Return, Eject, engine, and pressure controls.</span></div>"
+        "<div><strong>Mining</strong><span>Left stick moves and faces. Right trigger drills. West scans. North tethers. Bumpers repair.</span></div>"
+        "</div>";
+    const std::string systemMenuBody =
+        "<div class=\"modal-actions action-row system-menu-actions\">"
+        "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
+        "data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\">Resume</button>" +
+        modalButton("Controls", "controls", "ghost") +
+        modalButton("Settings", ui::modals::settings, "ghost") +
+        modalButton("Map", ui::modals::map, "ghost") +
+        modalButton("Inventory", ui::modals::inventory, "ghost") +
+        "</div>";
+    const std::string resetBody =
+        "<p class=\"modal-intro\">This permanently clears campaign progress and starts a new save.</p>"
+        "<div class=\"modal-actions action-row\">"
+        "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-ui-focus-id=\"reset:cancel\" data-ui-default-focus=\"1\">Cancel</button>"
+        "<button type=\"button\" class=\"danger\" data-rr-action=\"reset_save\" data-ui-focus-id=\"action:reset_save\" "
+        "data-controller-hold-seconds=\"0.75\">Hold to reset save</button></div>";
+
+    return "<template data-modal=\"system_menu\" data-title=\"Paused\" data-modal-dismissible=\"0\" data-modal-hide-close=\"1\">" + systemMenuBody + "</template>" +
+        "<template data-modal=\"controls\" data-title=\"Controller controls\">" + controlsBody + "</template>" +
+        "<template data-modal=\"reset_save_confirm\" data-title=\"Reset save?\" data-modal-hide-close=\"1\">" + resetBody + "</template>";
 }
 
 std::string disabledButton(std::string_view label)
@@ -432,12 +472,12 @@ std::string draftInitial(std::string_view text, std::string_view fallback)
     return text.empty() ? std::string(fallback) : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(text.front()))));
 }
 
-std::string panelButton(const PanelButtonPresentation& action)
+std::string panelButton(const PanelButtonPresentation& action, bool defaultFocus = false)
 {
     if (!action.enabled) {
         return disabledButton(action.label);
     }
-    return button(action.label, action.actionId, action.cssClass);
+    return button(action.label, action.actionId, action.cssClass, defaultFocus);
 }
 
 std::string flybyZoneLabel(int zone)
@@ -1029,7 +1069,8 @@ std::string tutorialCard(std::string_view topic, std::string_view title, std::st
 {
     return "<aside class=\"tutorial-card\" data-help-topic=\"" + htmlEscape(topic) + "\"><div><span>Mission help</span><strong>" +
         htmlEscape(title) + "</strong><p>" + htmlEscape(detail) +
-        "</p></div><button type=\"button\" class=\"ghost\" data-help-dismiss=\"" + htmlEscape(topic) + "\">Got it</button></aside>";
+        "</p></div><button type=\"button\" class=\"ghost\" data-help-dismiss=\"" + htmlEscape(topic) +
+        "\" data-ui-focus-id=\"help-dismiss:" + htmlEscape(topic) + "\">Got it</button></aside>";
 }
 
 enum class MapKnowledge {
@@ -1187,10 +1228,18 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << solarMapTemplate(context);
 
     std::ostringstream settingsBody;
-    settingsBody << detailStack(settingsDetailsPresentation());
+    std::vector<DetailPresentationRow> settingsDetails {
+        detailPresentationRow(text::panel::details::keyboard, text::panel::details::keyboardValue),
+        detailPresentationRow(text::panel::details::save, context.saveDescription),
+        detailPresentationRow(text::panel::details::build, context.renderDescription),
+    };
+    settingsDetails.push_back(detailPresentationRow(
+        "Controller",
+        std::string_view("Left stick or D-pad navigates; South selects; East goes back; Menu pauses. Context prompts show flight and mining controls.")));
+    settingsBody << detailStack(settingsDetails);
     settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
         << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
-        << "<p>" << htmlEscape("Choose the canvas render target. Auto follows the current display and browser scale.") << "</p></div>"
+        << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
         << "<label><span>" << htmlEscape("Resolution") << "</span>"
         << "<select data-resolution-select aria-label=\"Display resolution\">"
         << "<option value=\"auto\">Auto (display)</option>"
@@ -1199,11 +1248,16 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<option value=\"2560x1440\">2560 x 1440</option>"
         << "<option value=\"3840x2160\">3840 x 2160</option>"
         << "</select></label></section>";
+    settingsBody << "<section class=\"settings-control\" data-desktop-fullscreen-settings>"
+        << "<div><h3>" << htmlEscape("Fullscreen") << "</h3>"
+        << "<p>" << htmlEscape("Use the entire display in standalone PC builds. F11 and Alt+Enter use the same setting.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
+        << htmlEscape("Enter fullscreen") << "</button></section>";
     settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
         << "<div><h3>" << htmlEscape("Game speed") << "</h3>"
         << "<p>" << htmlEscape("Local testing multiplier. Shared builds start at 1x.") << "</p></div>"
         << "<label><span>" << htmlEscape("Multiplier") << "</span>"
-        << "<select data-game-speed-select aria-label=\"Game speed multiplier\">"
+        << "<select data-game-speed-select data-ui-focus-id=\"setting:game_speed\" aria-label=\"Game speed multiplier\">"
         << "<option value=\"0.5\">0.5x</option>"
         << "<option value=\"1\">1x</option>"
         << "<option value=\"1.5\">1.5x</option>"
@@ -1215,21 +1269,50 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     settingsBody << "<section class=\"settings-control\" data-help-settings>"
         << "<div><h3>" << htmlEscape("Mission help") << "</h3>"
         << "<p>" << htmlEscape("Show light tips when new systems appear.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-help-toggle=\"1\">"
+        << "<button class=\"settings-toggle\" data-help-toggle=\"1\" data-ui-focus-id=\"setting:mission_help\">"
         << htmlEscape("Hide mission help") << "</button></section>";
     settingsBody << "<section class=\"settings-control\" data-camera-shake-settings>"
         << "<div><h3>" << htmlEscape("Camera shake") << "</h3>"
         << "<p>" << htmlEscape("Keep impact and drilling screen shake enabled, or disable it for comfort.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\">"
+        << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
         << htmlEscape("Disable camera shake") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-controller-prompt-settings>"
+        << "<div><h3>" << htmlEscape("Controller prompts") << "</h3>"
+        << "<p>" << htmlEscape("Auto follows the active controller. Override labels if the detected family is wrong.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Button labels") << "</span>"
+        << "<select data-controller-prompt-select data-ui-focus-id=\"setting:controller_prompt\" aria-label=\"Controller prompt family\">"
+        << "<option value=\"auto\">Auto detect</option><option value=\"xbox\">Xbox</option>"
+        << "<option value=\"playstation\">PlayStation</option><option value=\"steamdeck\">Steam Deck</option>"
+        << "<option value=\"generic\">Generic</option></select></label></section>";
+    settingsBody << "<section class=\"settings-control\" data-controller-deadzone-settings>"
+        << "<div><h3>" << htmlEscape("Stick deadzone") << "</h3>"
+        << "<p>" << htmlEscape("Raise this if a resting stick drifts. Lower it for faster response.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Deadzone") << "</span>"
+        << "<select data-controller-deadzone-select data-ui-focus-id=\"setting:controller_deadzone\" aria-label=\"Controller stick deadzone\">"
+        << "<option value=\"0.10\">10%</option><option value=\"0.15\">15%</option><option value=\"0.20\">20% (default)</option>"
+        << "<option value=\"0.25\">25%</option><option value=\"0.30\">30%</option><option value=\"0.35\">35%</option>"
+        << "</select></label></section>";
+    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Invert flight Y") << "</h3>"
+        << "<p>" << htmlEscape("Reverse vertical stick input during flyby and orbit flight.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-controller-invert-toggle=\"1\" data-ui-focus-id=\"setting:controller_invert\">Enable inverted Y</button></section>";
+    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Confirm / cancel") << "</h3>"
+        << "<p>" << htmlEscape("Swap the positional South and East buttons for menu confirm and cancel.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-controller-swap-toggle=\"1\" data-ui-focus-id=\"setting:controller_swap\">Swap confirm and cancel</button></section>";
+    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Controller vibration") << "</h3>"
+        << "<p>" << htmlEscape("Use supported controller haptics for impacts, drilling contact, and alerts.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-controller-vibration-toggle=\"1\" data-ui-focus-id=\"setting:controller_vibration\">Disable vibration</button></section>";
     settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
         << "<div><h3>" << htmlEscape("Debug screens") << "</h3>"
         << "<p>" << htmlEscape("Show sandbox screen tools for board, mining, flyby, and orbit checks. These do not write save data.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\">"
+        << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\" data-ui-focus-id=\"setting:debug_tools\">"
         << htmlEscape("Show debug tools") << "</button></section>";
     settingsBody << "<div class=\"modal-actions action-row\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
-        settingsBody << panelButton(action);
+        if (action.actionId == ui::actions::resetSave) {
+            settingsBody << modalButton(action.label, "reset_save_confirm", action.cssClass);
+        } else {
+            settingsBody << panelButton(action);
+        }
     }
     settingsBody << "</div>";
 
@@ -1374,8 +1457,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape("Flyby controls") << "</span><strong>"
-            << htmlEscape("W/S speed, A/D rotate") << "</strong></div>";
-        out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("W/Up faster, S/Down slower. A/Left rotates counter-clockwise; D/Right rotates clockwise. Escape aborts as a Miss.") << "</p>";
+            << htmlEscape("Left stick or WASD / arrows") << "</strong></div>";
+        out << "<p class=\"cockpit-hold-copy\">" << htmlEscape("Stick up or W/Up accelerates; down or S/Down slows. Left/right or A/D rotates. Hold East or press Escape to abort as a Miss.") << "</p>";
         out << "<div class=\"actions action-row primary-actions\">"
             << panelButton(panelActionButton("Abort flyby", ui::actions::flybyAbort, "danger"))
             << "</div>";
@@ -1434,7 +1517,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape("Orbit controls") << "</span><strong>"
-            << htmlEscape("Small WASD corrections") << "</strong></div>";
+            << htmlEscape("Left stick or WASD / arrows") << "</strong></div>";
         const auto orbitControlCard = [&](std::string_view className, std::string_view key, std::string_view title, std::string_view detail) {
             out << "<div class=\"orbit-control-card " << className << "\">"
                 << "<div class=\"orbit-keycap\">" << htmlEscape(std::string(key)) << "</div>"
@@ -1449,12 +1532,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "<div class=\"orbit-trim-label\">" << htmlEscape("Trim scope") << "</div>"
             << "</div>"
             << "<div class=\"orbit-key-grid\">";
-        orbitControlCard("prograde", "W", "Prograde", "Up arrow");
-        orbitControlCard("retrograde", "S", "Retrograde", "Down arrow");
-        orbitControlCard("widen", "D", "Widen", "Right arrow");
-        orbitControlCard("tighten", "A", "Tighten", "Left arrow");
+        orbitControlCard("prograde", "Up / W", "Prograde", "Stick up");
+        orbitControlCard("retrograde", "Down / S", "Retrograde", "Stick down");
+        orbitControlCard("widen", "Right / D", "Widen", "Stick right");
+        orbitControlCard("tighten", "Left / A", "Tighten", "Stick left");
         out << "</div></div>";
-        out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Escape aborts as a Miss.") << "</p>";
+        out << "<p class=\"cockpit-hold-copy orbit-control-note\">" << htmlEscape("Complete one full loop before the insertion timer closes. Hold East or press Escape to abort as a Miss.") << "</p>";
         out << "<div class=\"actions action-row primary-actions\">"
             << panelButton(panelActionButton("Abort orbit", ui::actions::orbitAbort, "danger"))
             << "</div>";
@@ -1477,7 +1560,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             context.pressureReliefUsed);
         if (!context.flightArmed) {
             out << "<div data-preflight-launch=\"1\" data-preflight-ready=\""
-                << (context.preflightReady ? "1" : "0") << "\" hidden></div>";
+                << (context.preflightReady ? "1" : "0") << "\" data-preflight-queued=\""
+                << (context.launchQueued ? "1" : "0") << "\" hidden></div>";
         }
 
         out << "<h2>" << htmlEscape(launchPanel.sectionTitle) << "</h2>";
@@ -1514,11 +1598,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 ? "Choose the next move"
                 : (!context.droneTransferEnabled ? "Launch corridor clear" : (context.preflightReady ? "Launch corridor clear" : "Securing mining drone"))) << "</strong></div>";
         if (!context.flightArmed) {
-            const std::string_view preflightCopy = !context.droneTransferEnabled
-                ? "Bay sealed. Use the cockpit launch control beside the vehicle."
-                : (context.preflightReady
-                    ? "Drone secured and bay sealed. Use the cockpit launch control beside the vehicle."
-                    : "Drone transfer in progress. Launch control unlocks after the bay doors seal.");
+            const std::string_view preflightCopy = context.launchQueued
+                ? "Launch queued. The burn will begin automatically when the bay seals."
+                : (!context.droneTransferEnabled
+                    ? "Bay sealed. Use the cockpit launch control beside the vehicle."
+                    : (context.preflightReady
+                        ? "Drone secured and bay sealed. Use the cockpit launch control beside the vehicle."
+                        : "Drone transfer in progress. Press Cross or A now to queue launch for bay seal."));
             out << "<p class=\"cockpit-hold-copy\">" << htmlEscape(preflightCopy) << "</p>";
         } else {
             out << "<div class=\"actions action-row primary-actions\">";
@@ -1879,7 +1965,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningPanel.failureTitle)
                 << "</strong><span>" << htmlEscape(miningPanel.failureBody) << "</span></div>";
             failureBody << "<div class=\"modal-actions actions action-row\">"
-                << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"))
+                << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"), true)
                 << "</div>";
             out << autoModalTemplate(ui::modals::miningFailure, miningPanel.failureTitle, failureBody.str(), false);
         }
@@ -2094,11 +2180,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
             << htmlEscape("Choose one drone upgrade") << "</h2><p>"
             << htmlEscape("Scanner, drill, and drone tech improve future digs until the rig is lost. Take one, reroll the field research, or walk away.") << "</p></div></div>";
-        out << "<div class=\"pilot-card-grid draft-card-grid\">";
+        out << "<div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
         for (const SurfaceUpgradeCardPresentation& upgrade : surfacePanel.upgradeOffers) {
             out << surfaceUpgradeCard(upgrade);
         }
-        out << "</div><div class=\"actions action-row draft-actions\">";
+        out << "</div><div class=\"actions action-row draft-actions controller-action-row\">";
         const double rerollCost = offerRerollCost(state);
         out << panelButton(state.run.credits >= rerollCost
             ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
@@ -2123,11 +2209,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
             << htmlEscape("Choose one permanent refit") << "</h2><p>"
-            << htmlEscape("Card effects carry forward. Install one, reroll the board, or bank the credits for the next hangar window.") << "</p></div></div><div class=\"pilot-card-grid draft-card-grid\">";
+            << htmlEscape("Card effects carry forward. Install one, reroll the board, or bank the credits for the next hangar window.") << "</p></div></div><div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
         for (const RefitOfferPresentation& offer : refitWindow.offers) {
             out << refitOfferCard(offer);
         }
-        out << "</div><div class=\"actions action-row draft-actions\">";
+        out << "</div><div class=\"actions action-row draft-actions controller-action-row\">";
         out << panelButton(refitWindow.rerollAction);
         out << panelButton(refitWindow.skipAction);
         out << "</div></section>";
@@ -2179,7 +2265,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << "</div>";
 
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
-    out << "<div class=\"ops-grid\">";
+    out << "<div class=\"ops-grid controller-choice-row\">";
     for (const HangarOperationCardPresentation& card : hangarOperationCards(state, catalog)) {
         if (astronaut == nullptr && card.actionId == ui::actions::recruitCrew) {
             out << operationModalCard(card, "Choose pilot", ui::modals::pilotIntake);
@@ -2189,7 +2275,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     }
     out << "</div>";
 
-    out << "<div class=\"actions action-row hangar-actions\">";
+    out << "<div class=\"actions action-row hangar-actions controller-action-row\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
     }

@@ -29,7 +29,7 @@ usage() {
 '  --skip-native-compiler      Do not install build-essential.' \
 '  --skip-python-venv          Do not create/update .venv.' \
 '  --skip-npm-install          Do not run npm install.' \
-'  --verify-build              Configure/build native tests and web target after installing.' \
+'  --verify-build              Configure/build/test native and web targets after installing.' \
 '  -h, --help                  Show this help.' \
 '' \
 'Recommended:' \
@@ -100,7 +100,12 @@ mkdir -p "$deps_dir"
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 if [[ "$skip_system_packages" -eq 0 ]]; then
-  packages=(ca-certificates git cmake ninja-build python3 python3-venv nodejs npm)
+  packages=(
+    ca-certificates git cmake ninja-build pkg-config python3 python3-venv nodejs npm binutils
+    libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev
+    libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libudev-dev
+    libdbus-1-dev libdecor-0-dev xvfb xauth mesa-utils
+  )
   if [[ "$skip_native_compiler" -eq 0 ]]; then
     packages+=(build-essential)
   fi
@@ -155,6 +160,10 @@ if [[ "$verify_build" -eq 1 ]]; then
   run cmake --preset native-debug
   run cmake --build --preset native-debug
   run ctest --preset native-debug
+  run cmake --preset native-release
+  run cmake --build --preset native-release
+  run ctest --preset native-release
+  run cmake --build --preset package-native
   run cmake --preset web-release
   run cmake --build --preset web-release
 fi
@@ -166,7 +175,12 @@ Rocket Rogue dependencies are installed.
 For each new shell:
   source scripts/env-ubuntu.sh
 
-Build and run the browser POC:
+Build and run the native game:
+  cmake --preset native-debug
+  cmake --build --preset native-debug
+  build/native-debug/bin/RocketRogue
+
+Build and run the browser version:
   cmake --preset web-release
   cmake --build --preset web-release
   npm run serve:web

@@ -5,6 +5,7 @@
 #include "core/LaunchSimulation.h"
 
 #include <string>
+#include <string_view>
 
 namespace rocket {
 
@@ -19,10 +20,13 @@ struct PanelRenderContext {
     double returnDuration = 1.0;
     FlightActionState flightActions;
     bool flightArmed = true;
+    bool launchQueued = false;
     bool pressureReliefUsed = false;
     bool preflightReady = true;
     bool droneTransferEnabled = true;
     int debugActOneCheckpoint = -1;
+    std::string_view saveDescription = "Versioned local save data";
+    std::string_view renderDescription = "Shared OpenGL renderer";
 };
 
 std::string buildGamePanelHtml(const PanelRenderContext& context);

@@ -233,6 +233,10 @@ if ($VerifyBuild) {
     Invoke-External "cmake" @("--preset", "native-debug")
     Invoke-External "cmake" @("--build", "--preset", "native-debug")
     Invoke-External "ctest" @("--preset", "native-debug")
+    Invoke-External "cmake" @("--preset", "native-release")
+    Invoke-External "cmake" @("--build", "--preset", "native-release")
+    Invoke-External "ctest" @("--preset", "native-release")
+    Invoke-External "cmake" @("--build", "--preset", "package-native")
     Invoke-External "cmake" @("--preset", "web-release")
     Invoke-External "cmake" @("--build", "--preset", "web-release")
 }
@@ -243,7 +247,12 @@ Write-Host ""
 Write-Host "For each new PowerShell session:"
 Write-Host "  . .\scripts\env-windows.ps1"
 Write-Host ""
-Write-Host "Build and run the browser POC:"
+Write-Host "Build and run the native game:"
+Write-Host "  cmake --preset native-debug"
+Write-Host "  cmake --build --preset native-debug"
+Write-Host "  .\build\native-debug\bin\RocketRogue.exe"
+Write-Host ""
+Write-Host "Build and run the browser version:"
 Write-Host "  cmake --preset web-release"
 Write-Host "  cmake --build --preset web-release"
 Write-Host "  npm run serve:web"

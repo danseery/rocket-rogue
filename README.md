@@ -1,11 +1,12 @@
 # Rocket Rogue POC
 
-Rocket Rogue is a C++20/WebGL2 proof of concept for a fictional-stakes rocket launch roguelite. It borrows the tension of a hidden crash-point launch game, then wraps it in ship-first module management, light astronaut consequences, and persistent roguelite unlock variety.
+Rocket Rogue is a C++20/OpenGL rocket-launch roguelite with genuine native Windows and Linux applications plus a fully supported WebGL2/Emscripten build. It borrows the tension of a hidden crash-point launch game, then wraps it in ship-first module management, light astronaut consequences, and persistent roguelite unlock variety.
 
 ## What is implemented
 
 - Portable C++ core for content, deterministic RNG, launch resolution, run state, save serialization, and balance tests.
-- Web-first Emscripten app shell with WebGL2 rendering and browser localStorage persistence.
+- Native SDL 3 application with OpenGL 3.3 Core rendering, RmlUi, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
+- Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
 - Frontier ladder: prove Earth Orbit repeatedly, commit to Moon, then continue outward through Mars, Outer Planets, Nearby Star, and Nearby Galaxy.
 - Arrival operations: flyby, orbit, and landing gates. Perfect orbit rewards show both science and mission credits.
@@ -18,15 +19,16 @@ Rocket Rogue is a C++20/WebGL2 proof of concept for a fictional-stakes rocket la
 
 ## Quick prerequisites
 
-The project is cross-platform by design. The portable game rules live in `rocket_core`, while the browser target uses Emscripten and WebGL2.
+The project is cross-platform by design. Portable game rules live in `rocket_core`; shared application, UI, and OpenGL behavior live in `rocket_app`; SDL and Emscripten provide separate platform adapters.
 
 You need:
 
 - CMake 3.22+
 - Ninja
-- A C++20 compiler for native tests
+- A C++20 compiler for native builds and tests
+- An OpenGL 3.3-capable Windows or Linux system for the playable native application
 - Emscripten SDK for the browser build
-- Node.js 24 for repo scripts and the included static server
+- Node.js 24 for repo scripts, platform-boundary tests, and the included static server
 
 ## Install dependencies
 
@@ -46,9 +48,10 @@ chmod +x scripts/install-ubuntu.sh scripts/env-ubuntu.sh
 source scripts/env-ubuntu.sh
 ```
 
-Both installers keep project-local development state in ignored folders:
+Both installers keep project-local development state in ignored folders. SDL 3.4.10, FreeType 2.13.3, and the pinned RmlUi revision are built from a local source override when present or fetched reproducibly by CMake:
 
 - `.deps/emsdk` for the Emscripten SDK
+- `.deps/SDL`, `.deps/freetype`, and `.deps/RmlUi` as optional local source overrides
 - `.venv` for Python tooling
 - `node_modules` if Node dependencies are added later
 
@@ -83,6 +86,19 @@ node tools\verify-toolchain.mjs
 cmake --preset web-release
 cmake --build --preset web-release
 ```
+
+## Build the native application
+
+The native application does not contain a browser, Node, Electron, JavaScript, or WASM. On Windows PowerShell, configure, build, test, and package the x86-64 Release build with:
+
+```powershell
+npm.cmd run configure:native:release
+npm.cmd run build:native:release
+npm.cmd run test:native:release
+npm.cmd run package:native
+```
+
+The executable is written to `build/native-release/bin/RocketRogue.exe`; the portable archive is `build/packages/RocketRogue-windows-x64.zip`. The same commands without the `.cmd` suffix produce `build/native-release/bin/RocketRogue` and `build/packages/RocketRogue-linux-x64.tar.gz` on Linux. Each archive contains the executable, `assets`, and `licenses` as ordinary files. See [Desktop Builds](docs/DESKTOP_BUILDS.md) for runtime behavior, save paths, package layout, and CI validation.
 
 ### Codex desktop sandbox note
 
@@ -130,7 +146,7 @@ cmake --build build/web-release
 node tools/serve.mjs build/web-release 8080
 ```
 
-## Run core tests
+## Run native tests
 
 With a native C++20 compiler and CMake installed:
 
@@ -140,7 +156,7 @@ cmake --build --preset native-debug
 ctest --preset native-debug
 ```
 
-The Windows npm scripts import the Visual Studio developer environment automatically before running the native preset. If you call CMake directly in a fresh PowerShell session, dot-source the repo environment first:
+This suite covers the portable core, mining rules, controller routing, browser-free application services, platform-boundary enforcement, atomic native storage, preference round trips, and missing/corrupt native assets. The Windows npm scripts import the Visual Studio developer environment automatically before running the native preset. If you call CMake directly in a fresh PowerShell session, dot-source the repo environment first:
 
 ```powershell
 . .\scripts\env-windows.ps1
@@ -174,7 +190,7 @@ node tools/serve.mjs build/web-release 8080
 
 WSL is a good development target for this project. For better build performance, keep the repo under the Linux filesystem, such as `~/src/RocketGame`, instead of building from `/mnt/c` or OneDrive.
 
-Install native build tools:
+Install the native and web prerequisites with `scripts/install-ubuntu.sh`. Its native package set includes the compiler, CMake/Ninja, Mesa OpenGL headers, and SDL's X11/Wayland development headers. The minimal core toolchain is:
 
 ```bash
 sudo apt update
@@ -190,7 +206,18 @@ git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
 source ~/emsdk/emsdk_env.sh
 ```
 
-Build and serve:
+Build and test the native application:
+
+```bash
+cmake --preset native-debug
+cmake --build --preset native-debug
+ctest --preset native-debug
+cmake --preset native-release
+cmake --build --preset native-release
+cmake --build --preset package-native
+```
+
+Build and serve the web application:
 
 ```bash
 cmake --preset web-release
@@ -200,7 +227,9 @@ node tools/serve.mjs build/web-release 8080
 
 ## Controls
 
-Use the on-screen mission-control buttons:
+All player-facing screens in the native and web builds support standard-mapped Xbox, PlayStation, and Steam Deck controls. Use the left stick or D-pad for spatial menu focus, South (A/Cross) to confirm, East (B/Circle) to go back, and Menu to pause. Input-aware prompt bars show the active device family. The full contextual layout, preference schema, and release matrix live in [`docs/CONTROLLER_SUPPORT.md`](docs/CONTROLLER_SUPPORT.md).
+
+Use the on-screen mission-control buttons or their controller prompts:
 
 - Launch proving flights from the current frontier to bank flight data.
 - During flight, choose `Return home`, `Cut engines`, or `Eject`.
@@ -214,7 +243,8 @@ Use the on-screen mission-control buttons:
 - Use Push Deeper through the frontier ladder only after enough proving data is banked.
 - Successful arrivals can open flyby/orbit/landing operations. Flyby can grant next-launch slingshot boosts; orbit grants science and credit rewards; landing opens post-arrival research and Surface Ops.
 - Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
-- Mining controls: WASD/arrows move, mouse aims, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
+- Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
+- Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South stows at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.
 
 ## Deploy to Azure Static Web Apps
 
@@ -229,12 +259,14 @@ The workflow expects a GitHub Actions secret named `AZURE_STATIC_WEB_APPS_API_TO
 
 ## Portability notes
 
-The web app is Emscripten-first, but game logic is isolated in `rocket_core`. A future desktop or Steam build should add a second platform layer for windowing, save storage, input, audio, achievements, and cloud save without rewriting launch rules or progression.
+Native and web builds use the same game and presentation code through injected platform services. Emscripten/browser symbols are confined to `src/platform/web`; SDL owns native windowing, OpenGL context creation, events, gamepads, haptics, fullscreen, and shutdown. Steam services can be added behind these boundaries later without adding Steamworks or Steam Input to the current build, and a future Vulkan renderer can replace the OpenGL backend without changing gameplay.
 
 Current boundaries:
 
 - `src/core`: deterministic content, progression, save data, flight tuning, launch resolution, and tests.
-- `src/game`: browser game-state orchestration, live launch/mining controls, panel HTML generation, and render snapshots. `RocketGameApp` owns session flow; `GamePanel` owns mission-control HTML.
-- `src/render`: WebGL2 renderer and texture upload for procedural shapes plus sprite assets.
-- `src/platform`: tiny browser bridge for localStorage and panel updates.
+- `src/game`: platform-neutral application orchestration, shared fixed-step runner, live launch/mining controls, RmlUi behavior, panel HTML generation, and render snapshots.
+- `src/render`: shared OpenGL draw code with desktop GLSL 330 Core and WebGL2 GLSL ES 300 dialects.
+- `src/platform/AppServices.h`: injected save, preference, host, controller, texture, renderer, UI, and browser-mirror contracts.
+- `src/platform/sdl`: native SDL window/input/host, PNG texture loading, and atomic filesystem storage.
+- `src/platform/web`: Emscripten entry point, browser storage, DOM mirror, async browser textures, and web gamepads.
 - `web`: HTML/CSS/JS shell that forwards UI actions into exported C++ functions.

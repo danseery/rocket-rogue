@@ -17,7 +17,9 @@ const required = [
   "tools/prepare-azure-static-web-app.mjs",
   "staticwebapp.config.json",
   ".github/workflows/azure-static-web-app.yml",
+  ".github/workflows/native-release.yml",
   "docs/AZURE_STATIC_WEB_APPS.md",
+  "docs/DESKTOP_BUILDS.md",
   "src/core/GameTypes.h",
   "src/core/GameText.h",
   "src/core/Telemetry.h",
@@ -26,10 +28,15 @@ const required = [
   "src/core/GameState.cpp",
   "src/core/LaunchSimulation.cpp",
   "src/core/SaveData.cpp",
+  "src/game/GameRunner.cpp",
   "src/game/RocketGameApp.cpp",
-  "src/render/WebGLRenderer.cpp",
-  "src/platform/WebSaveStore.cpp",
-  "tests/core_tests.cpp"
+  "src/render/OpenGlRenderer.cpp",
+  "src/platform/AppServices.h",
+  "src/platform/web/WebSaveStore.cpp",
+  "src/platform/sdl/SdlPlatform.cpp",
+  "tests/core_tests.cpp",
+  "tests/app_services_tests.cpp",
+  "tests/native_platform_tests.cpp"
 ];
 
 let failed = false;
@@ -42,7 +49,7 @@ for (const file of required) {
 }
 
 const cmake = existsSync("CMakeLists.txt") ? readFileSync("CMakeLists.txt", "utf8") : "";
-for (const token of ["rocket_core", "rocket_core_tests", "rocket_rogue", "EMSCRIPTEN"]) {
+for (const token of ["rocket_core", "rocket_app", "rocket_core_tests", "rocket_rogue", "RocketRogue", "SDL3", "EMSCRIPTEN"]) {
   if (!cmake.includes(token)) {
     console.error(`CMakeLists.txt missing token: ${token}`);
     failed = true;

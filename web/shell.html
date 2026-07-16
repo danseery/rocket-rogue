@@ -4378,6 +4378,95 @@
       margin-top: 14px;
     }
 
+    body.controller-input-active.controller-focus-visible:not(.rmlui-enabled) #panel .controller-focused,
+    body.controller-input-active.controller-focus-visible:not(.rmlui-enabled) #modal-root .controller-focused {
+      outline: 3px solid #f4c95d;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 1px rgba(7, 12, 18, 0.92), 0 0 16px rgba(244, 201, 93, 0.56);
+    }
+
+    #panel .controller-hold-active,
+    #modal-root .controller-hold-active {
+      border-color: #f4c95d;
+      box-shadow: inset 0 -4px 0 #f4c95d, 0 0 12px rgba(244, 201, 93, 0.42);
+    }
+
+    .controller-prompt-bar {
+      position: fixed;
+      z-index: 18;
+      left: 50%;
+      bottom: 8px;
+      display: none;
+      max-width: calc(100vw - 32px);
+      transform: translateX(-50%);
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      min-height: 30px;
+      padding: 5px 12px;
+      border: 1px solid rgba(100, 159, 195, 0.5);
+      border-radius: 7px;
+      background: rgba(7, 16, 25, 0.94);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    body.controller-input-active:not(.rmlui-enabled) .controller-prompt-bar {
+      display: flex;
+    }
+
+    .controller-prompt-bar strong {
+      color: #f4c95d;
+    }
+
+    .debug-controller-lab {
+      display: grid;
+      gap: 8px;
+      margin: 12px 0;
+      padding: 10px;
+      border: 1px solid rgba(137, 178, 211, 0.18);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .debug-controller-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .debug-controller-status {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px 8px;
+      margin: 0;
+      font-size: 11px;
+    }
+
+    .debug-controller-status div {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 5px;
+    }
+
+    .debug-controller-status dt { color: var(--muted); }
+    .debug-controller-status dd { margin: 0; overflow-wrap: anywhere; }
+
+    .debug-controller-actions {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+    }
+
+    .debug-controller-actions button {
+      min-width: 0;
+      padding-inline: 5px;
+      font-size: 11px;
+    }
+
     .modal-panel:has(.inventory-modal) {
       width: min(1160px, calc(100vw - 36px));
     }
@@ -5842,6 +5931,32 @@
         <button class="debug-drone-ops" type="button" data-debug-action="drone-ops">Edit saved debug loadout</button>
       </div>
     </section>
+    <section class="debug-controller-lab" aria-label="Controller Lab">
+      <h3 class="debug-section-heading">Controller Lab</h3>
+      <p class="debug-controller-note">Synthetic controls preview routing and focus only; they never execute campaign actions or write save data.</p>
+      <dl class="debug-controller-status">
+        <div><dt>Device</dt><dd id="debug-controller-device">Disconnected</dd></div>
+        <div><dt>Family</dt><dd id="debug-controller-family">Generic</dd></div>
+        <div><dt>Axes</dt><dd id="debug-controller-axes">0, 0 / 0, 0</dd></div>
+        <div><dt>Buttons</dt><dd id="debug-controller-buttons">None</dd></div>
+        <div><dt>Context</dt><dd id="debug-controller-context">UI</dd></div>
+        <div><dt>Focus</dt><dd id="debug-controller-focus">None</dd></div>
+        <div><dt>Last action</dt><dd id="debug-controller-action">None</dd></div>
+        <div><dt>Pause</dt><dd id="debug-controller-pause">None</dd></div>
+      </dl>
+      <div class="debug-controller-actions" aria-label="Synthetic controller input">
+        <button type="button" data-controller-synthetic="connect">Connect</button>
+        <button type="button" data-controller-synthetic="up">D-pad Up</button>
+        <button type="button" data-controller-synthetic="down">D-pad Down</button>
+        <button type="button" data-controller-synthetic="left">D-pad Left</button>
+        <button type="button" data-controller-synthetic="right">D-pad Right</button>
+        <button type="button" data-controller-synthetic="confirm">South</button>
+        <button type="button" data-controller-synthetic="cancel">East</button>
+        <button type="button" data-controller-synthetic="hold-confirm">Hold South 0.8s</button>
+        <button type="button" data-controller-synthetic="hold-cancel">Hold East 0.8s</button>
+        <button type="button" data-controller-synthetic="disconnect">Disconnect</button>
+      </div>
+    </section>
     <div class="debug-accordion" aria-label="Debug screens by game phase">
       <section class="debug-accordion-item">
         <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-mission-prep" data-debug-menu-toggle>
@@ -5882,12 +5997,13 @@
       <button class="ghost" type="button" data-debug-action="exit">Exit debug / reload save</button>
     </div>
   </aside>
+  <aside id="controller-prompt-bar" class="controller-prompt-bar" aria-live="polite" aria-label="Controller shortcuts"></aside>
   <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
   <div id="modal-root" class="modal-root" hidden>
     <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-head">
         <h2 id="modal-title"></h2>
-        <button class="modal-close ghost" type="button" aria-label="Close">Close</button>
+        <button class="modal-close ghost" type="button" aria-label="Close" data-ui-close-modal="1" data-ui-focus-id="modal:close">Close</button>
       </div>
       <div id="modal-content"></div>
     </section>
@@ -5906,6 +6022,7 @@
     const sceneRepairDrill = document.getElementById("scene-repair-drill");
     const sceneRepairDrone = document.getElementById("scene-repair-drone");
     const telemetryChartLegend = document.getElementById("telemetry-chart-legend");
+    const controllerPromptBar = document.getElementById("controller-prompt-bar");
     const debugTools = document.getElementById("debug-tools");
     const debugActOneLabel = document.getElementById("debug-act-one-label");
     const debugActOnePrevious = debugTools.querySelector("[data-debug-act-one-previous]");
@@ -5916,6 +6033,16 @@
     const debugMiningLoadout = document.getElementById("debug-mining-loadout");
     const debugMiningGate = document.getElementById("debug-mining-gate");
     const debugMiningPreview = document.getElementById("debug-mining-preview");
+    const debugControllerFields = Object.freeze({
+      device: document.getElementById("debug-controller-device"),
+      family: document.getElementById("debug-controller-family"),
+      axes: document.getElementById("debug-controller-axes"),
+      buttons: document.getElementById("debug-controller-buttons"),
+      context: document.getElementById("debug-controller-context"),
+      focus: document.getElementById("debug-controller-focus"),
+      action: document.getElementById("debug-controller-action"),
+      pause: document.getElementById("debug-controller-pause")
+    });
     let lastToastText = "";
     let lastToastAt = 0;
     const resolutionStorageKey = "rocket_rogue_resolution";
@@ -5926,6 +6053,11 @@
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
     const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
+    const controllerPreferencesStorageKey = "rocket_rogue_controller_preferences_v1";
+    const controllerPromptFamilies = Object.freeze(["auto", "xbox", "playstation", "steamdeck", "generic"]);
+    let detectedControllerFamily = "generic";
+    let controllerResumeBlockedState = false;
+    let controllerResumeConnectedState = false;
 
     function normalizedResolution(value) {
       return resolutionOptions.includes(value) ? value : "auto";
@@ -6100,6 +6232,25 @@
       });
     }
 
+    function desktopFullscreenAvailable() {
+      return window.RocketDesktop?.available === true &&
+        typeof window.RocketDesktop.isFullscreen === "function" &&
+        typeof window.RocketDesktop.setFullscreen === "function";
+    }
+
+    function syncDesktopFullscreenControls(root = document) {
+      const available = desktopFullscreenAvailable();
+      const enabled = available && window.RocketDesktop.isFullscreen();
+      root.querySelectorAll("[data-desktop-fullscreen-settings]").forEach((section) => {
+        section.hidden = !available;
+      });
+      root.querySelectorAll("[data-desktop-fullscreen-toggle]").forEach((control) => {
+        control.hidden = !available;
+        control.textContent = enabled ? "Exit fullscreen" : "Enter fullscreen";
+        control.setAttribute("aria-pressed", enabled ? "true" : "false");
+      });
+    }
+
     function debugToolsVisible() {
       try {
         return window.localStorage.getItem(debugToolsStorageKey) === "1";
@@ -6133,12 +6284,151 @@
       });
     }
 
+    function normalizedControllerPreferences(value = {}) {
+      const promptFamily = controllerPromptFamilies.includes(value?.promptFamily) ? value.promptFamily : "auto";
+      const numericDeadzone = Number(value?.stickDeadzone);
+      return {
+        promptFamily,
+        stickDeadzone: Number.isFinite(numericDeadzone) ? Math.min(0.35, Math.max(0.10, numericDeadzone)) : 0.20,
+        invertFlightY: value?.invertFlightY === true,
+        swapConfirmCancel: value?.swapConfirmCancel === true,
+        vibrationEnabled: value?.vibrationEnabled !== false
+      };
+    }
+
+    function controllerPreferences() {
+      try {
+        return normalizedControllerPreferences(JSON.parse(window.localStorage.getItem(controllerPreferencesStorageKey) || "{}"));
+      } catch (error) {
+        return normalizedControllerPreferences();
+      }
+    }
+
+    function setControllerPreference(field, rawValue) {
+      const next = controllerPreferences();
+      if (field === "promptFamily") {
+        next.promptFamily = controllerPromptFamilies.includes(rawValue) ? rawValue : "auto";
+      } else if (field === "stickDeadzone") {
+        const value = Number(rawValue);
+        next.stickDeadzone = Number.isFinite(value) ? Math.min(0.35, Math.max(0.10, value)) : 0.20;
+      } else if (field === "invertFlightY" || field === "swapConfirmCancel" || field === "vibrationEnabled") {
+        next[field] = rawValue === true || rawValue === "true";
+      }
+      const normalized = normalizedControllerPreferences(next);
+      try {
+        window.localStorage.setItem(controllerPreferencesStorageKey, JSON.stringify(normalized));
+      } catch (error) {
+        // Keep the current rendered state when browser storage is unavailable.
+      }
+      window.dispatchEvent(new CustomEvent("rocket-controller-preferences-changed", { detail: normalized }));
+      syncControllerPreferenceControls(panel);
+      syncControllerPreferenceControls(modalRoot);
+      updateControllerPromptBar();
+      return normalized;
+    }
+
+    function syncControllerPreferenceControls(root = document) {
+      const preferences = controllerPreferences();
+      root.querySelectorAll("[data-controller-prompt-select]").forEach((control) => {
+        control.value = preferences.promptFamily;
+      });
+      root.querySelectorAll("[data-controller-deadzone-select]").forEach((control) => {
+        const options = Array.from(control.options || []);
+        const closest = options.reduce((best, option) =>
+          Math.abs(Number(option.value) - preferences.stickDeadzone) < Math.abs(Number(best.value) - preferences.stickDeadzone) ? option : best,
+        options[0] || { value: "0.20" });
+        control.value = closest.value;
+      });
+      root.querySelectorAll("[data-controller-invert-toggle]").forEach((control) => {
+        control.textContent = preferences.invertFlightY ? "Disable inverted Y" : "Enable inverted Y";
+        control.setAttribute("aria-pressed", preferences.invertFlightY ? "true" : "false");
+      });
+      root.querySelectorAll("[data-controller-swap-toggle]").forEach((control) => {
+        control.textContent = preferences.swapConfirmCancel ? "Use standard confirm / cancel" : "Swap confirm and cancel";
+        control.setAttribute("aria-pressed", preferences.swapConfirmCancel ? "true" : "false");
+      });
+      root.querySelectorAll("[data-controller-vibration-toggle]").forEach((control) => {
+        control.textContent = preferences.vibrationEnabled ? "Disable vibration" : "Enable vibration";
+        control.setAttribute("aria-pressed", preferences.vibrationEnabled ? "true" : "false");
+      });
+    }
+
+    function resolvedControllerPromptFamily() {
+      const override = controllerPreferences().promptFamily;
+      return override === "auto" ? detectedControllerFamily : override;
+    }
+
+    function controllerPromptLabels() {
+      const family = resolvedControllerPromptFamily();
+      if (family === "playstation") return { south: "Cross", east: "Circle", west: "Square", north: "Triangle", lb: "L1", rb: "R1", rt: "R2", menu: "Options" };
+      if (family === "xbox") return { south: "A", east: "B", west: "X", north: "Y", lb: "LB", rb: "RB", rt: "RT", menu: "Menu" };
+      if (family === "steamdeck") return { south: "A", east: "B", west: "X", north: "Y", lb: "L1", rb: "R1", rt: "R2", menu: "Menu" };
+      return { south: "South", east: "East", west: "West", north: "North", lb: "LB", rb: "RB", rt: "RT", menu: "Menu" };
+    }
+
+    function updateControllerPromptBar() {
+      const label = controllerPromptLabels();
+      const swapConfirmCancel = controllerPreferences().swapConfirmCancel;
+      const confirm = swapConfirmCancel ? label.east : label.south;
+      const cancel = swapConfirmCancel ? label.south : label.east;
+      const item = (button, action) => `<span><strong>${button}</strong> ${action}</span>`;
+      if (!modalRoot.hidden) {
+        controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") +
+          (modalRoot.dataset.dismissible === "0" ? "" : item(cancel, "Back")) + item("R-stick", "Scroll");
+      } else if (panel.querySelector("[data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
+        controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
+      } else if (panel.querySelector("[data-panel-mode='mining-fullscreen']")) {
+        controllerPromptBar.innerHTML = item("L-stick", "Move / face") + item(label.rt, "Drill") + item(label.west, "Scan") +
+          item(label.north, "Tether") + item(label.lb, "Drill repair") + item(label.rb, "Rig repair") + item(label.south, "Stow") +
+          item(label.east, "Hold: recall") + item(label.menu, "Pause");
+      } else if (panel.querySelector("[data-flyby-run], [data-orbit-run]")) {
+        controllerPromptBar.innerHTML = item("L-stick", "Fly") + item(label.east, "Hold: abort") + item(label.menu, "Pause");
+      } else if (panel.querySelector(".push-minigame, .scan-minigame")) {
+        controllerPromptBar.innerHTML = item(label.south, "Pulse / push") + item(label.west, "Bank") + item(label.east, "Hold: abort") + item(label.menu, "Pause");
+      } else if (panel.querySelector("[data-rr-action='return_home']")) {
+        controllerPromptBar.innerHTML = item(label.south, "Return") + item(label.east, "Hold: Eject") + item(label.west, "Engines") +
+          item(label.north, "Pressure relief") + item(label.rb, "Hold: Jettison") + item(label.menu, "Pause");
+      } else if (panel.querySelector("[data-preflight-launch]")) {
+        const queued = panel.querySelector("[data-preflight-queued='1']");
+        controllerPromptBar.innerHTML = item(label.south, queued ? "Launch queued" : "Launch") + item(label.menu, "Pause");
+      } else {
+        controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(cancel, "Back") +
+          item("R-stick", "Scroll") + item(label.menu, "Pause");
+      }
+    }
+
+    function setControllerPresentation(active, family) {
+      const families = ["generic", "xbox", "playstation", "steamdeck"];
+      detectedControllerFamily = typeof family === "number" ? (families[family] || "generic") : (families.includes(family) ? family : "generic");
+      document.body.classList.toggle("controller-input-active", Boolean(active));
+      document.body.dataset.controllerFamily = resolvedControllerPromptFamily();
+      updateControllerPromptBar();
+    }
+
+    function syncControllerResumeControls(root = document) {
+      root.querySelectorAll('[data-controller-resume="1"]').forEach((control) => {
+        control.disabled = controllerResumeBlockedState;
+        control.textContent = controllerResumeBlockedState
+          ? (controllerResumeConnectedState ? "Release controller" : "Reconnect controller")
+          : "Resume";
+      });
+    }
+
+    function setControllerResumeBlocked(blocked, connected) {
+      controllerResumeBlockedState = Boolean(blocked);
+      controllerResumeConnectedState = Boolean(connected);
+      syncControllerResumeControls(modalRoot);
+    }
+
     function syncLocalControls(root = document) {
       syncResolutionControls(root);
+      syncDesktopFullscreenControls(root);
       syncGameSpeedControls(root);
       syncHelpControls(root);
       syncCameraShakeControls(root);
       syncDebugToolsControls(root);
+      syncControllerPreferenceControls(root);
+      syncControllerResumeControls(root);
     }
 
     function sceneMetrics() {
@@ -6298,6 +6588,204 @@
       }, 7000);
     }
 
+    let controllerFocusedId = "";
+    let controllerLastFocusCenter = null;
+    let controllerActivationAuthorized = false;
+    let modalReturnFocusId = "";
+    const panelModalStack = [];
+
+    function semanticFocusId(control) {
+      if (!control) return "";
+      if (control.dataset.uiFocusId) return control.dataset.uiFocusId;
+      if (control.dataset.rrAction) return `action:${control.dataset.rrAction}`;
+      if (control.dataset.uiModal) return `modal:${control.dataset.uiModal}`;
+      if (control.dataset.uiCloseModal !== undefined) return "modal:close";
+      if (control.dataset.helpDismiss) return `help-dismiss:${control.dataset.helpDismiss}`;
+      if (control.matches("[data-resolution-select]")) return "setting:resolution";
+      if (control.matches("[data-desktop-fullscreen-toggle]")) return "setting:fullscreen";
+      if (control.matches("[data-game-speed-select]")) return "setting:game_speed";
+      if (control.matches("[data-controller-prompt-select]")) return "setting:controller_prompt";
+      if (control.matches("[data-controller-deadzone-select]")) return "setting:controller_deadzone";
+      if (control.matches("[data-help-toggle]")) return "setting:mission_help";
+      if (control.matches("[data-camera-shake-toggle]")) return "setting:camera_shake";
+      if (control.matches("[data-controller-invert-toggle]")) return "setting:controller_invert";
+      if (control.matches("[data-controller-swap-toggle]")) return "setting:controller_swap";
+      if (control.matches("[data-controller-vibration-toggle]")) return "setting:controller_vibration";
+      if (control.matches("[data-debug-tools-toggle]")) return "setting:debug_tools";
+      if (control instanceof HTMLInputElement && control.type === "checkbox") {
+        const name = control.name || control.id;
+        return name ? `setting:${name}` : "";
+      }
+      return "";
+    }
+
+    function controllerFocusTargets() {
+      const root = modalRoot.hidden ? panel : modalRoot;
+      const candidates = Array.from(root.querySelectorAll("button, select, input[type='checkbox']"));
+      const seen = new Map();
+      return candidates.flatMap((control) => {
+        const baseId = semanticFocusId(control);
+        const rect = control.getBoundingClientRect();
+        const hidden = control.disabled || control.hidden || !baseId || rect.width <= 1 || rect.height <= 1 ||
+          getComputedStyle(control).visibility === "hidden" || getComputedStyle(control).display === "none";
+        if (hidden) return [];
+        const count = seen.get(baseId) || 0;
+        seen.set(baseId, count + 1);
+        const id = count ? `${baseId}#${count}` : baseId;
+        control.dataset.controllerFocusId = id;
+        return [{
+          control,
+          id,
+          x: rect.left + rect.width * 0.5,
+          y: rect.top + rect.height * 0.5,
+          controllerRow: control.closest(".controller-choice-row") ? "choices" : (control.closest(".controller-action-row") ? "actions" : "")
+        }];
+      });
+    }
+
+    function cycleControllerRowTarget(targets, current, direction) {
+      if (!current.controllerRow || (direction !== 2 && direction !== 3)) return null;
+      const row = targets.filter((target) => target.controllerRow === current.controllerRow).sort((left, right) => left.x - right.x);
+      const index = row.indexOf(current);
+      if (index < 0 || !row.length) return null;
+      return row[(index + (direction === 2 ? row.length - 1 : 1)) % row.length];
+    }
+
+    function nearestControllerRowTarget(targets, row, x) {
+      return targets.filter((target) => target.controllerRow === row).reduce((nearest, target) => {
+        if (!nearest || Math.abs(target.x - x) < Math.abs(nearest.x - x)) return target;
+        return nearest;
+      }, null);
+    }
+
+    function applyControllerFocus(target) {
+      if (!target) return false;
+      panel.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
+      modalRoot.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
+      target.control.classList.add("controller-focused");
+      target.control.focus({ preventScroll: true });
+      target.control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      controllerFocusedId = target.id;
+      controllerLastFocusCenter = { x: target.x, y: target.y };
+      return true;
+    }
+
+    function defaultControllerFocusTarget(targets) {
+      const explicit = targets.find((target) => target.control.dataset.uiDefaultFocus !== undefined);
+      if (explicit) return explicit;
+      const controllerChoice = targets.find((target) => target.controllerRow === "choices");
+      if (controllerChoice) return controllerChoice;
+      const primary = targets.find((target) => target.control.closest(".primary-actions, .draft-actions, .final-actions, .card-footer"));
+      if (primary) {
+        primary.control.dataset.uiDefaultFocus = "1";
+        return primary;
+      }
+      return targets.find((target) => !target.control.closest(".panel-head-actions")) || targets[0];
+    }
+
+    function restoreControllerFocus(preferredId = controllerFocusedId) {
+      if (!document.body.classList.contains("controller-input-active") && !preferredId) return false;
+      const targets = controllerFocusTargets();
+      if (!targets.length) {
+        controllerFocusedId = "";
+        return false;
+      }
+      let target = targets.find((candidate) => candidate.id === preferredId);
+      if (!target && controllerLastFocusCenter) {
+        target = targets.reduce((best, candidate) => {
+          const distance = (candidate.x - controllerLastFocusCenter.x) ** 2 + (candidate.y - controllerLastFocusCenter.y) ** 2;
+          const bestDistance = (best.x - controllerLastFocusCenter.x) ** 2 + (best.y - controllerLastFocusCenter.y) ** 2;
+          return distance < bestDistance ? candidate : best;
+        }, targets[0]);
+      }
+      return applyControllerFocus(target || defaultControllerFocusTarget(targets));
+    }
+
+    function controllerNavigate(direction) {
+      const targets = controllerFocusTargets();
+      if (!targets.length) return false;
+      let current = targets.find((target) => target.id === controllerFocusedId);
+      if (!current) return restoreControllerFocus();
+      if ((direction === 2 || direction === 3) && current.control instanceof HTMLSelectElement) {
+        const delta = direction === 2 ? -1 : 1;
+        const next = Math.max(0, Math.min(current.control.options.length - 1, current.control.selectedIndex + delta));
+        if (next !== current.control.selectedIndex) {
+          current.control.selectedIndex = next;
+          current.control.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+      }
+      if (current.controllerRow) {
+        if (direction === 2 || direction === 3) {
+          return applyControllerFocus(cycleControllerRowTarget(targets, current, direction));
+        }
+        const destinationRow = direction === 1 && current.controllerRow === "choices"
+          ? "actions"
+          : (direction === 0 && current.controllerRow === "actions" ? "choices" : "");
+        if (destinationRow) {
+          return applyControllerFocus(nearestControllerRowTarget(targets, destinationRow, current.x));
+        }
+      }
+      let best = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+      targets.forEach((candidate) => {
+        if (candidate === current) return;
+        const dx = candidate.x - current.x;
+        const dy = candidate.y - current.y;
+        const ahead = (direction === 0 && dy < -1) || (direction === 1 && dy > 1) || (direction === 2 && dx < -1) || (direction === 3 && dx > 1);
+        if (!ahead) return;
+        const primary = direction >= 2 ? Math.abs(dx) : Math.abs(dy);
+        const secondary = direction >= 2 ? Math.abs(dy) : Math.abs(dx);
+        const score = primary * 10 + secondary * 2 + secondary * secondary / Math.max(1, primary);
+        if (score < bestScore) {
+          best = candidate;
+          bestScore = score;
+        }
+      });
+      return applyControllerFocus(best);
+    }
+
+    function controllerActivate() {
+      let target = controllerFocusTargets().find((candidate) => candidate.id === controllerFocusedId);
+      if (!target) {
+        if (!restoreControllerFocus()) return false;
+        target = controllerFocusTargets().find((candidate) => candidate.id === controllerFocusedId);
+      }
+      if (!target) return false;
+      if (target.control instanceof HTMLSelectElement) return true;
+      controllerActivationAuthorized = true;
+      try {
+        target.control.click();
+      } finally {
+        controllerActivationAuthorized = false;
+      }
+      return true;
+    }
+
+    function controllerCancel() {
+      if (!modalRoot.hidden) {
+        if (modalRoot.dataset.dismissible === "0") return false;
+        closePanelModal();
+        return true;
+      }
+      const current = controllerFocusTargets().find((target) => target.id === controllerFocusedId);
+      current?.control.classList.remove("controller-focused");
+      current?.control.blur();
+      const hadFocus = Boolean(current);
+      controllerFocusedId = "";
+      return hadFocus;
+    }
+
+    function controllerScroll(amount) {
+      const current = controllerFocusTargets().find((target) => target.id === controllerFocusedId)?.control;
+      let scroller = current?.parentElement || null;
+      while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) scroller = scroller.parentElement;
+      scroller ||= modalRoot.hidden ? panel : modalContent;
+      if (!scroller) return false;
+      scroller.scrollTop += Math.abs(amount) <= 1 ? amount * 100 : amount;
+      return true;
+    }
+
     window.RocketBridge = {
       syncSceneOverlays,
       syncSettingsControls() {
@@ -6308,6 +6796,18 @@
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
       },
+      controllerPreferences: () => controllerPreferences(),
+      setControllerPreference,
+      setControllerPresentation,
+      setControllerResumeBlocked,
+      controllerNavigate,
+      controllerActivate,
+      controllerCancel,
+      controllerScroll,
+      controllerModalOpen: () => !modalRoot.hidden,
+      controllerFocusedId: () => controllerFocusedId,
+      controllerOpenModal: (id) => openPanelModal(id),
+      controllerCloseModal: () => closePanelModal(),
       resolutionPreset: () => resolutionPreset(),
       setResolutionPreset: (value) => {
         const normalized = setResolutionPreset(value);
@@ -6318,6 +6818,7 @@
       setPanel(html) {
         panel.innerHTML = html;
         syncLocalControls(panel);
+        updateControllerPromptBar();
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
         const miningFullscreen = mode === "mining-fullscreen";
@@ -6335,6 +6836,8 @@
         const autoModal = panel.querySelector("template[data-auto-modal='1']");
         if (autoModal && modalRoot.hidden) {
           openPanelModal(autoModal.dataset.modal || "");
+        } else if (document.body.classList.contains("controller-input-active")) {
+          restoreControllerFocus();
         }
       },
       loadSave() {
@@ -6478,12 +6981,9 @@
       trainCrew: () => rrCall("rr_train_crew"),
       restCrew: () => rrCall("rr_rest_crew"),
       resetSave: () => {
-        if (window.confirm("Reset Rocket Rogue save data?")) {
-          closePanelModal();
-          rrCall("rr_reset_save");
-          closePanelModal();
-          syncSceneOverlays();
-        }
+        closePanelModal(true);
+        rrCall("rr_reset_save");
+        syncSceneOverlays();
       },
       rmlMouseMove: (x, y) => rrCall("rr_rml_mouse_move", [x, y], ["number", "number"], "number") === 1,
       rmlMouseDown: (x, y, button) => rrCall("rr_rml_mouse_down", [x, y, button], ["number", "number", "number"], "number") === 1,
@@ -6708,7 +7208,57 @@
       setDebugToolsVisible(debugToolsVisible());
     }
 
+    function controllerDebugJson(exportName) {
+      try {
+        return JSON.parse(rrCall(exportName, [], [], "string") || "{}");
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function refreshControllerLab() {
+      if (!debugTools.classList.contains("is-visible")) return;
+      const platform = controllerDebugJson("rr_controller_debug_status");
+      const app = controllerDebugJson("rr_controller_app_debug_status");
+      debugControllerFields.device.textContent = platform.connected ? (platform.id || `Controller ${platform.index ?? 0}`) : "Disconnected";
+      debugControllerFields.family.textContent = platform.family || "Generic";
+      const axis = (value) => Number(value || 0).toFixed(2);
+      debugControllerFields.axes.textContent = `${axis(platform.leftX)}, ${axis(platform.leftY)} / ${axis(platform.rightX)}, ${axis(platform.rightY)}`;
+      const down = Array.isArray(platform.buttons) ? platform.buttons.map((value, index) => value ? index : -1).filter((index) => index >= 0) : [];
+      debugControllerFields.buttons.textContent = down.length ? down.join(", ") : "None";
+      debugControllerFields.context.textContent = app.context || "UI";
+      debugControllerFields.focus.textContent = app.focusId || controllerFocusedId || "None";
+      debugControllerFields.action.textContent = app.lastAction || "None";
+      debugControllerFields.pause.textContent = app.pauseReason || "None";
+    }
+
+    function pulseSyntheticController(action) {
+      if (action === "disconnect") {
+        rrCall("rr_debug_controller_clear");
+        return;
+      }
+      const masks = {
+        up: 1 << 12, down: 1 << 13, left: 1 << 14, right: 1 << 15,
+        confirm: 1 << 0, cancel: 1 << 1, "hold-confirm": 1 << 0, "hold-cancel": 1 << 1
+      };
+      const mask = masks[action] || 0;
+      rrCall("rr_debug_controller_set", [1, 0, 0, 0, 0, mask], ["number", "number", "number", "number", "number", "number"]);
+      if (mask) {
+        const duration = action.startsWith("hold-") ? 850 : 90;
+        window.setTimeout(() => rrCall("rr_debug_controller_set", [1, 0, 0, 0, 0, 0],
+          ["number", "number", "number", "number", "number", "number"]), duration);
+      }
+    }
+
+    window.setInterval(refreshControllerLab, 150);
+
     debugTools.addEventListener("click", (event) => {
+      const synthetic = closestFromEvent(event, "button[data-controller-synthetic]");
+      if (synthetic && debugTools.contains(synthetic)) {
+        event.preventDefault();
+        pulseSyntheticController(synthetic.dataset.controllerSynthetic || "connect");
+        return;
+      }
       const menuToggle = closestFromEvent(event, "button[data-debug-menu-toggle]");
       if (menuToggle && debugTools.contains(menuToggle)) {
         event.preventDefault();
@@ -6748,6 +7298,7 @@
     let lastPanelAction = "";
     let lastPanelModalAt = 0;
     let lastPanelModal = "";
+    const heldPanelActions = new Map();
 
     function closestFromEvent(event, selector) {
       let target = event.target;
@@ -6757,30 +7308,55 @@
       return target && typeof target.closest === "function" ? target.closest(selector) : null;
     }
 
-    function openPanelModal(id) {
+    function openPanelModal(id, pushCurrent = true, preferredFocusId = "") {
       const template = Array.from(panel.querySelectorAll("template[data-modal]"))
         .find((candidate) => candidate.dataset.modal === id);
       if (!template) {
         return false;
       }
 
+      if (pushCurrent && !modalRoot.hidden && modalRoot.dataset.modalId && modalRoot.dataset.modalId !== id) {
+        panelModalStack.push({ id: modalRoot.dataset.modalId, focusId: controllerFocusedId });
+      } else if (modalRoot.hidden) {
+        modalReturnFocusId = controllerFocusedId;
+      }
+      controllerLastFocusCenter = null;
+
       modalTitle.textContent = template.dataset.title || "Details";
       modalContent.innerHTML = template.innerHTML;
       const dismissible = template.dataset.modalDismissible !== "0";
       modalRoot.dataset.dismissible = dismissible ? "1" : "0";
-      modalClose.hidden = !dismissible;
+      modalRoot.dataset.modalId = id;
+      modalClose.hidden = !dismissible || template.dataset.modalHideClose === "1";
       syncLocalControls(modalContent);
       modalRoot.hidden = false;
-      (dismissible ? modalClose : modalContent.querySelector("button"))?.focus();
+      updateControllerPromptBar();
+      controllerFocusedId = preferredFocusId;
+      if (document.body.classList.contains("controller-input-active")) {
+        restoreControllerFocus(preferredFocusId);
+      } else {
+        (!modalClose.hidden ? modalClose : modalContent.querySelector("button"))?.focus();
+      }
       return true;
     }
 
-    function closePanelModal() {
+    function closePanelModal(closeAll = false) {
+      if (!closeAll && panelModalStack.length) {
+        const parent = panelModalStack.pop();
+        openPanelModal(parent.id, false, parent.focusId);
+        return;
+      }
       modalRoot.hidden = true;
       delete modalRoot.dataset.dismissible;
+      delete modalRoot.dataset.modalId;
       modalClose.hidden = false;
       modalTitle.textContent = "";
       modalContent.innerHTML = "";
+      if (closeAll) panelModalStack.length = 0;
+      controllerFocusedId = modalReturnFocusId;
+      modalReturnFocusId = "";
+      updateControllerPromptBar();
+      if (document.body.classList.contains("controller-input-active")) restoreControllerFocus();
     }
 
     function openInventoryFromKey(event) {
@@ -6925,6 +7501,31 @@
       return true;
     }
 
+    function beginHeldPanelAction(button, action, holdSeconds) {
+      if (heldPanelActions.has(button)) return;
+      button.classList.add("controller-hold-active");
+      const timer = window.setTimeout(() => {
+        heldPanelActions.delete(button);
+        button.classList.remove("controller-hold-active");
+        if (!button.isConnected || button.disabled) return;
+        const ranAction = runPanelAction(action);
+        if (ranAction && modalRoot.contains(button)) closePanelModal(true);
+      }, holdSeconds * 1000);
+      heldPanelActions.set(button, timer);
+    }
+
+    function cancelHeldPanelAction(button) {
+      const timer = button && heldPanelActions.get(button);
+      if (timer === undefined) return;
+      window.clearTimeout(timer);
+      heldPanelActions.delete(button);
+      button.classList.remove("controller-hold-active");
+    }
+
+    function cancelAllHeldPanelActions() {
+      Array.from(heldPanelActions.keys()).forEach(cancelHeldPanelAction);
+    }
+
     function handlePanelAction(event) {
       const button = closestFromEvent(event, "button[data-rr-action]");
       const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
@@ -6936,13 +7537,21 @@
       event.preventDefault();
       event.stopPropagation();
 
+      const holdSeconds = Math.max(0, Number(button.dataset.controllerHoldSeconds) || 0);
+      if (holdSeconds > 0 && !controllerActivationAuthorized) {
+        if (event.type === "pointerdown" || event.type === "keydown") {
+          beginHeldPanelAction(button, action, holdSeconds);
+        }
+        return;
+      }
+
       if (event.type === "click" && performance.now() - lastPanelActionAt < 180) {
         return;
       }
 
       const ranAction = runPanelAction(action);
       if (ranAction && modalRoot.contains(button)) {
-        closePanelModal();
+        closePanelModal(true);
       }
     }
 
@@ -6984,6 +7593,18 @@
         return;
       }
 
+      const promptSelect = closestFromEvent(event, "[data-controller-prompt-select]");
+      if (promptSelect && (panel.contains(promptSelect) || modalRoot.contains(promptSelect))) {
+        setControllerPreference("promptFamily", promptSelect.value);
+        return;
+      }
+
+      const deadzoneSelect = closestFromEvent(event, "[data-controller-deadzone-select]");
+      if (deadzoneSelect && (panel.contains(deadzoneSelect) || modalRoot.contains(deadzoneSelect))) {
+        setControllerPreference("stickDeadzone", deadzoneSelect.value);
+        return;
+      }
+
       const helpToggle = closestFromEvent(event, "[data-help-toggle]");
       if (helpToggle && (panel.contains(helpToggle) || modalRoot.contains(helpToggle))) {
         const nextDisabled = "checked" in helpToggle ? !helpToggle.checked : !helpDisabled();
@@ -7011,6 +7632,18 @@
       }
     }
 
+    function handleControllerPreferenceToggle(event) {
+      const button = closestFromEvent(event,
+        "button[data-controller-invert-toggle], button[data-controller-swap-toggle], button[data-controller-vibration-toggle]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const preferences = controllerPreferences();
+      if (button.matches("[data-controller-invert-toggle]")) setControllerPreference("invertFlightY", !preferences.invertFlightY);
+      else if (button.matches("[data-controller-swap-toggle]")) setControllerPreference("swapConfirmCancel", !preferences.swapConfirmCancel);
+      else setControllerPreference("vibrationEnabled", !preferences.vibrationEnabled);
+    }
+
     function handleHelpToggle(event) {
       const button = closestFromEvent(event, "button[data-help-toggle]");
       if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
@@ -7033,6 +7666,18 @@
       setCameraShakeDisabled(!cameraShakeDisabled());
       syncLocalControls(panel);
       syncLocalControls(modalRoot);
+    }
+
+    function handleDesktopFullscreenToggle(event) {
+      const button = closestFromEvent(event, "button[data-desktop-fullscreen-toggle]");
+      if (!button || !(panel.contains(button) || modalRoot.contains(button)) || !desktopFullscreenAvailable()) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      window.RocketDesktop.setFullscreen(!window.RocketDesktop.isFullscreen());
+      syncDesktopFullscreenControls(panel);
+      syncDesktopFullscreenControls(modalRoot);
     }
 
     function handleDebugToolsToggle(event) {
@@ -7059,16 +7704,31 @@
       syncLocalControls(modalRoot);
     }
 
+    function handleModalCloseButton(event) {
+      const button = closestFromEvent(event, "button[data-ui-close-modal]");
+      if (!button || modalRoot.hidden || !modalRoot.contains(button)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      closePanelModal();
+    }
+
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
     document.addEventListener("pointerdown", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpToggle, true);
     document.addEventListener("click", handleCameraShakeToggle, true);
+    document.addEventListener("click", handleDesktopFullscreenToggle, true);
     document.addEventListener("click", handleDebugToolsToggle, true);
+    document.addEventListener("click", handleControllerPreferenceToggle, true);
     document.addEventListener("change", handleSettingsChange, true);
+    document.addEventListener("click", handleModalCloseButton, true);
     document.addEventListener("pointerdown", handlePanelAction, true);
     document.addEventListener("click", handlePanelAction, true);
+    document.addEventListener("pointerup", cancelAllHeldPanelActions, true);
+    document.addEventListener("pointercancel", cancelAllHeldPanelActions, true);
     panel.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
@@ -7076,6 +7736,19 @@
       handleModalTrigger(event);
       handlePanelAction(event);
     }, true);
+    modalRoot.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      handleModalTrigger(event);
+      handlePanelAction(event);
+    }, true);
+    window.addEventListener("keyup", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      cancelAllHeldPanelActions();
+    }, true);
+    window.RocketDesktop?.onFullscreenChanged?.(() => {
+      syncDesktopFullscreenControls(panel);
+      syncDesktopFullscreenControls(modalRoot);
+    });
     modalRoot.addEventListener("click", (event) => {
       if (performance.now() - lastPanelModalAt < 220) {
         event.preventDefault();
@@ -7094,6 +7767,11 @@
     const orbitKeys = new Set();
     const miningKeys = new Set();
     let miningPointerDown = false;
+
+    function releaseMiningDrill() {
+      miningPointerDown = false;
+      rr.miningDrill(false);
+    }
 
     function flybyMarker() {
       return panel.querySelector("[data-flyby-run]");
@@ -7225,6 +7903,16 @@
       const up = miningKeys.has("w") || miningKeys.has("arrowup");
       const down = miningKeys.has("s") || miningKeys.has("arrowdown");
       rr.miningMove((right ? 1 : 0) - (left ? 1 : 0), (down ? 1 : 0) - (up ? 1 : 0));
+    }
+
+    function releaseRealtimeInputs() {
+      flybyKeys.clear();
+      orbitKeys.clear();
+      miningKeys.clear();
+      releaseMiningDrill();
+      updateFlybyMove();
+      updateOrbitMove();
+      updateMiningMove();
     }
 
     function handleMiningKeyDown(event) {
@@ -7379,10 +8067,18 @@
         }
         return;
       }
-      miningPointerDown = false;
-      rr.miningDrill(false);
+      releaseMiningDrill();
       canvas.releasePointerCapture?.(event.pointerId);
       event.preventDefault();
+    });
+
+    canvas.addEventListener("pointercancel", (event) => {
+      releaseMiningDrill();
+      canvas.releasePointerCapture?.(event.pointerId);
+    });
+
+    canvas.addEventListener("lostpointercapture", () => {
+      releaseMiningDrill();
     });
 
     canvas.addEventListener("mousedown", (event) => {
@@ -7412,6 +8108,11 @@
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !modalRoot.hidden && modalRoot.dataset.dismissible !== "0") {
         closePanelModal();
+        return;
+      }
+      // Modal controls own the keyboard while open. Never allow a key handled
+      // by a modal (or an unrelated movement key) to reach gameplay beneath it.
+      if (!modalRoot.hidden || document.body.classList.contains("rmlui-modal-open")) {
         return;
       }
       if (panel.querySelector("[data-arrival-fanfare]") && (event.key === " " || event.key === "Enter")) {
@@ -7456,6 +8157,18 @@
       handleFlybyKeyUp(event);
       handleOrbitKeyUp(event);
       handleMiningKeyUp(event);
+    });
+
+    window.addEventListener("blur", () => {
+      cancelAllHeldPanelActions();
+      releaseRealtimeInputs();
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        cancelAllHeldPanelActions();
+        releaseRealtimeInputs();
+      }
     });
 
     var Module = {

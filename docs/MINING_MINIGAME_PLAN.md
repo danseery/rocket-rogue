@@ -58,8 +58,21 @@ Controls:
 - WASD/arrows: turn and thrust. The drill remains fixed forward.
 - Space or mouse hold: drill.
 - `E`: pulse scanner.
+- `T`: tether or release an eligible artifact.
 - `R`: stow payload.
 - Esc: abort.
+
+Standard controller:
+
+- Left stick: turn and thrust; the drill remains fixed forward.
+- Right trigger: drill.
+- West (X/Square): pulse scanner.
+- North (Y/Triangle): tether or release an eligible artifact.
+- South (A/Cross): stow while inside the ship ring, or acknowledge failure.
+- Left/right bumper: repair the drill bit/mining rig while ship service is available.
+- Hold East (B/Circle) for 0.45 seconds: emergency recall.
+
+Pressing the D-pad enters paused UI-focus mode so HUD controls remain accessible without moving or drilling the rig. Mini-drone combat remains passive; there is no weapon aim or twin-stick drill aim.
 
 ## Mining Resources
 
