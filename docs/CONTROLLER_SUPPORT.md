@@ -1,16 +1,16 @@
 # Controller Support
 
-Rocket Rogue's web/WASM build is controller-complete for player-facing play. The input layer targets controllers that expose the W3C `standard` mapping, including Xbox pads, DualShock 4, DualSense, and Steam Deck controls. Native Steam Input, gyro, touchpads, rear paddles, multiplayer, and full binding remaps remain separate platform work.
+Rocket Rogue's native Windows/Linux and web builds share one controller-complete player-facing input path. Web gamepads must expose the W3C `standard` mapping; native builds use SDL's standard gamepad mapping. Xbox pads, DualShock 4, DualSense, and Steam Deck controls resolve into the same portable snapshots, prompt families, and semantic actions. Steam Input, gyro, touchpads, rear paddles, multiplayer, and full binding remaps remain separate platform work.
 
 ## Architecture contract
 
 - `src/input/ControllerInput.*` owns portable controller types, radial deadzones, trigger hysteresis, button edges, hold timing, navigation repeat, active-pad selection, prompt-family detection, and input-source arbitration.
-- `src/platform/WebGamepadSource.*` samples Emscripten gamepads exactly once per browser animation frame. It reads controller preferences from browser-local storage and supplies a `ControllerFrame` before any scaled simulation ticks.
-- `RocketGameApp::inputFrame` resolves the authoritative input context and applies semantic controller actions. Hold and repeat clocks use unscaled browser time, so changing game speed never changes a controller gesture.
+- `src/platform/web/WebGamepadSource.*` maps Emscripten gamepads into `RawControllerSnapshot`; `src/platform/sdl/SdlPlatform.*` does the same for SDL gamepads and owns native connect/disconnect lifecycle and rumble.
+- `GameRunner::frame` samples the active `IControllerSource` exactly once per host frame before scaled fixed simulation steps. `RocketGameApp::inputFrame` resolves the authoritative context and applies semantic actions. Hold and repeat clocks use unscaled platform monotonic time, so changing game speed never changes a controller gesture.
 - `GameRmlUi` owns stable semantic focus IDs, spatial navigation, activation, cancellation, modal focus traps, scrolling, and focus restoration across document rebuilds. The browser fallback mirrors the same operations.
-- Controller preferences are device-local and separate from campaign saves under `rocket_rogue_controller_preferences_v1`.
+- Controller preferences are device-local and separate from campaign saves. Web stores them under `rocket_rogue_controller_preferences_v1`; native stores them in `preferences_v1.txt` beneath the SDL per-user preference path.
 
-The persisted preference object is:
+The shared controller preference values are shown below. Web serializes this JSON object; native stores the same fields with a `controller.` prefix in `preferences_v1.txt`.
 
 ```json
 {
@@ -48,7 +48,7 @@ The mining drill stays forward-facing and drone combat remains passive. There is
 - Focus survives per-frame Rml document rebuilds. If the prior target disappears, focus moves to the nearest enabled control in its region, then to the screen default.
 - Modals trap focus and return it to their opener. Mining Failure behaves as a blocking modal even when it opens automatically; South acknowledges it directly even if a document rebuild has not restored focus yet.
 - Select controls change with left/right; South toggles checkboxes. Focus automatically scrolls into view.
-- System menus, blocking modals, page visibility loss, and active-controller loss pause real-time simulation and clear gameplay axes, thrust, and drilling immediately. Reconnection requires explicit Resume.
+- System menus, blocking modals, host focus/visibility loss, and active-controller loss pause real-time simulation and clear gameplay axes, thrust, and drilling immediately. Reconnection requires an observed neutral frame followed by explicit Resume.
 - Entering preflight clears prior menu focus. Preflight and active launch do not expose D-pad UI focus: Cross/South always launches, queues launch, or returns according to the flight phase. Opening a modal or the system menu still pauses and takes input priority.
 - A neutral connected controller does not steal the active source or release a held keyboard input.
 
@@ -59,12 +59,12 @@ The mining drill stays forward-facing and drone combat remains passive. There is
 - Navigation repeat: 350 ms initial delay, then 120 ms.
 - Trigger press/release hysteresis: 0.35 / 0.20.
 - Launch reset-save confirmation: 0.75 s hold, with Cancel focused by default.
-- Optional haptics: confirmation, hard mining contact, damage, and failure. Unsupported browser actuators are silent no-ops.
+- Optional haptics: confirmation, hard mining contact, damage, and failure. Unsupported SDL devices and browser actuators are silent no-ops.
 
 ## Verification matrix
 
 Automated checks cover deadzones, trigger hysteresis, button edges, holds, repeats, active-pad selection, source arbitration, prompt detection/override, and disconnect release. Player-route verification should cover Hangar, Navigation, Launch, Results, Arrival, Flyby, Orbit, Research, Surface Ops, Scan, Push Deeper, Mining, Drone Ops, both drafts, Settings, Map, Inventory, and failure/confirmation modals.
 
-Before release, perform physical passes with Xbox, DualShock 4, DualSense, and Steam Deck at localhost and production HTTPS. Include disconnect/reconnect while moving and while holding RT to drill. Check prompt and focus layout at 1280x800, 1080p, 1440p, and 4K in both RmlUi and forced DOM fallback.
+Before release, perform physical passes with Xbox, DualShock 4, DualSense, and Steam Deck on native Windows/Linux plus the web build at localhost and production HTTPS. Include disconnect/reconnect while moving and while holding RT to drill. Check RmlUi prompt and focus layout at 1280x800, 1080p, 1440p, and 4K on native and web; run the forced DOM fallback matrix on web only.
 
 Developer forms remain mouse/keyboard tools. The debug Controller Lab is for inspecting devices, axes, buttons, resolved context, focus, actions, pause state, and deterministic synthetic input. Synthetic frames use a separate preview-only router: they may move focus and report the semantic action that would fire, but they never dispatch gameplay actions or touch campaign saves.

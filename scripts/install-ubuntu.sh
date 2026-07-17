@@ -10,9 +10,10 @@ repo_root="$(cd "$script_dir/.." && pwd -P)"
 deps_dir="$repo_root/.deps"
 emsdk_dir="$deps_dir/emsdk"
 venv_dir="$repo_root/.venv"
-emsdk_version="${EMSDK_VERSION:-latest}"
+emsdk_version="${EMSDK_VERSION:-6.0.0}"
 skip_system_packages=0
 skip_native_compiler=0
+web_only=0
 skip_python_venv=0
 skip_npm_install=0
 verify_build=0
@@ -24,9 +25,10 @@ usage() {
 'Installs Rocket Rogue development dependencies for Ubuntu or WSL Ubuntu.' \
 '' \
 'Options:' \
-'  --emsdk-version VERSION     Emscripten SDK version to install. Defaults to EMSDK_VERSION or latest.' \
+'  --emsdk-version VERSION     Emscripten SDK version to install. Defaults to EMSDK_VERSION or 6.0.0.' \
 '  --skip-system-packages      Do not install apt packages.' \
 '  --skip-native-compiler      Do not install build-essential.' \
+'  --web-only                  Skip all native compiler, SDL, window-system, and smoke-test packages.' \
 '  --skip-python-venv          Do not create/update .venv.' \
 '  --skip-npm-install          Do not run npm install.' \
 '  --verify-build              Configure/build/test native and web targets after installing.' \
@@ -47,6 +49,11 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --skip-native-compiler)
+      skip_native_compiler=1
+      shift
+      ;;
+    --web-only)
+      web_only=1
       skip_native_compiler=1
       shift
       ;;
@@ -101,13 +108,18 @@ export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 if [[ "$skip_system_packages" -eq 0 ]]; then
   packages=(
-    ca-certificates git cmake ninja-build pkg-config python3 python3-venv nodejs npm binutils
-    libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev
-    libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev wayland-protocols libudev-dev
-    libdbus-1-dev libdecor-0-dev xvfb xauth mesa-utils
+    ca-certificates git cmake ninja-build python3 python3-venv nodejs npm
   )
-  if [[ "$skip_native_compiler" -eq 0 ]]; then
-    packages+=(build-essential)
+  if [[ "$web_only" -eq 0 ]]; then
+    packages+=(
+      pkg-config binutils libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev
+      libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev
+      libwayland-dev wayland-protocols libudev-dev libdbus-1-dev libdecor-0-dev
+      xvfb xauth mesa-utils
+    )
+    if [[ "$skip_native_compiler" -eq 0 ]]; then
+      packages+=(build-essential)
+    fi
   fi
 
   run sudo apt-get update
@@ -156,7 +168,7 @@ fi
 require_command emcc
 run node tools/sanity-check.mjs
 
-if [[ "$verify_build" -eq 1 ]]; then
+if [[ "$verify_build" -eq 1 && "$web_only" -eq 0 ]]; then
   run cmake --preset native-debug
   run cmake --build --preset native-debug
   run ctest --preset native-debug
@@ -166,9 +178,31 @@ if [[ "$verify_build" -eq 1 ]]; then
   run cmake --build --preset package-native
   run cmake --preset web-release
   run cmake --build --preset web-release
+  run ctest --preset web-release
+elif [[ "$verify_build" -eq 1 ]]; then
+  run cmake --preset web-release
+  run cmake --build --preset web-release
+  run ctest --preset web-release
 fi
 
-cat <<EOF
+if [[ "$web_only" -eq 1 ]]; then
+  cat <<EOF
+
+Rocket Rogue web dependencies are installed.
+
+For each new shell:
+  source scripts/env-ubuntu.sh
+
+Build and run the browser version:
+  cmake --preset web-release
+  cmake --build --preset web-release
+  npm run serve:web
+
+Installed Emscripten SDK:
+  $emsdk_dir
+EOF
+else
+  cat <<EOF
 
 Rocket Rogue dependencies are installed.
 
@@ -188,3 +222,4 @@ Build and run the browser version:
 Installed Emscripten SDK:
   $emsdk_dir
 EOF
+fi

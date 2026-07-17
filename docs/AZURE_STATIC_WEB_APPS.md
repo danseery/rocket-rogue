@@ -48,7 +48,7 @@ On pushes to `main`, GitHub Actions will:
 
 1. Install the Ubuntu build dependencies and Emscripten `6.0.0`.
 2. Configure and build the web target with CMake.
-3. Run the web core tests and sanity check.
+3. Run the full web test suite and sanity check.
 4. Copy only deployable files into `dist/azure-static-web-app`.
 5. Upload that folder to Azure Static Web Apps.
 

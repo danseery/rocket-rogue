@@ -7,10 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
-#endif
 
 namespace rocket {
 namespace {
@@ -144,8 +142,6 @@ std::string jsonEscaped(std::string_view value)
     }
     return escaped;
 }
-
-#ifdef __EMSCRIPTEN__
 
 EM_JS(double, rr_controller_preference_value_js, (int field), {
     const defaults = {
@@ -365,21 +361,11 @@ std::vector<RawControllerSnapshot> sampleRawControllers()
     return snapshots;
 }
 
-#else
-
-std::vector<RawControllerSnapshot> sampleRawControllers()
-{
-    return {};
-}
-
-#endif
-
 } // namespace
 
 ControllerPreferences loadWebControllerPreferences()
 {
     ControllerPreferences preferences;
-#ifdef __EMSCRIPTEN__
     preferences.promptFamily = promptFamilyFromStorageValue(static_cast<int>(
         rr_controller_preference_value_js(static_cast<int>(PreferenceField::PromptFamily))));
     preferences.stickDeadzone = rr_controller_preference_value_js(
@@ -390,23 +376,18 @@ ControllerPreferences loadWebControllerPreferences()
         static_cast<int>(PreferenceField::SwapConfirmCancel)) != 0.0;
     preferences.vibrationEnabled = rr_controller_preference_value_js(
         static_cast<int>(PreferenceField::VibrationEnabled)) != 0.0;
-#endif
     return sanitizedPreferences(preferences);
 }
 
 void storeWebControllerPreferences(const ControllerPreferences& preferences)
 {
     const ControllerPreferences sanitized = sanitizedPreferences(preferences);
-#ifdef __EMSCRIPTEN__
     rr_store_controller_preferences_js(
         promptFamilyStorageValue(sanitized.promptFamily),
         sanitized.stickDeadzone,
         sanitized.invertFlightY ? 1 : 0,
         sanitized.swapConfirmCancel ? 1 : 0,
         sanitized.vibrationEnabled ? 1 : 0);
-#else
-    (void)sanitized;
-#endif
 }
 
 WebGamepadSource::WebGamepadSource()
@@ -416,14 +397,8 @@ WebGamepadSource::WebGamepadSource()
 
 ControllerFrame WebGamepadSource::sampleFrame(double realTimeSeconds)
 {
-    if (realTimeSeconds >= nextPreferenceRefreshSeconds_) {
-        reloadPreferences();
-        nextPreferenceRefreshSeconds_ = realTimeSeconds + 0.5;
-    }
-
     std::vector<RawControllerSnapshot> snapshots = sampleRawControllers();
     ControllerFrame frame = tracker_.update(snapshots, realTimeSeconds, preferences_);
-#ifdef __EMSCRIPTEN__
     const int environmentFlags = rr_browser_environment_flags_js();
     const bool hiddenSinceLastSample = (environmentFlags & 4) != 0;
     const bool blurredSinceLastSample = (environmentFlags & 8) != 0;
@@ -435,7 +410,6 @@ ControllerFrame WebGamepadSource::sampleFrame(double realTimeSeconds)
         InputSource::KeyboardPointer,
         keyboardPointerActivitySeconds > 0.0 ? keyboardPointerActivitySeconds : realTimeSeconds,
         keyboardPointerActivity);
-#endif
     // Only fresh physical activity may claim the live input source; held
     // controller state is still routed without dominating newer UI activity.
     sourceArbiter_.noteActivity(
@@ -469,9 +443,9 @@ ControllerFrame WebGamepadSource::sampleFrame(double realTimeSeconds)
     return lastFrame_;
 }
 
-const ControllerFrame& WebGamepadSource::lastFrame() const
+void WebGamepadSource::setPreferences(const ControllerPreferences& preferences)
 {
-    return lastFrame_;
+    preferences_ = preferences;
 }
 
 std::optional<ControllerFrame> WebGamepadSource::syntheticPreviewFrame() const
@@ -524,17 +498,6 @@ std::string WebGamepadSource::debugStatusJson() const
     return stream.str();
 }
 
-const ControllerPreferences& WebGamepadSource::preferences() const
-{
-    return preferences_;
-}
-
-void WebGamepadSource::setPreferences(const ControllerPreferences& preferences)
-{
-    preferences_ = sanitizedPreferences(preferences);
-    storeWebControllerPreferences(preferences_);
-}
-
 void WebGamepadSource::reloadPreferences()
 {
     preferences_ = loadWebControllerPreferences();
@@ -545,18 +508,11 @@ bool WebGamepadSource::playHaptic(double durationSeconds, double weakMagnitude, 
     if (!preferences_.vibrationEnabled || tracker_.activeControllerIndex() < 0) {
         return false;
     }
-#ifdef __EMSCRIPTEN__
     return rr_play_gamepad_haptic_js(
         tracker_.activeControllerIndex(),
         std::clamp(durationSeconds, 0.0, 2.0) * 1000.0,
         std::clamp(weakMagnitude, 0.0, 1.0),
         std::clamp(strongMagnitude, 0.0, 1.0)) != 0;
-#else
-    (void)durationSeconds;
-    (void)weakMagnitude;
-    (void)strongMagnitude;
-    return false;
-#endif
 }
 
 void WebGamepadSource::setSyntheticSnapshot(const RawControllerSnapshot& snapshot)

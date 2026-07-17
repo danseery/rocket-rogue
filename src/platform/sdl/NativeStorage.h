@@ -42,14 +42,15 @@ public:
 
     AppPreferences load() override;
     bool store(const AppPreferences& preferences) override;
+    std::uint64_t revision() const override;
     std::string lastError() const override;
-    const std::filesystem::path& path() const;
 
 private:
     void ensureLoaded();
 
     AtomicTextFile file_;
     AppPreferences cached_;
+    std::uint64_t revision_ = 0;
     bool loaded_ = false;
 };
 

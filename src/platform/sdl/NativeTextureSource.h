@@ -15,8 +15,7 @@ public:
     TextureStatus status(std::string_view key) const override;
     bool uploadToOpenGl(std::string_view key, unsigned int texture, int& width, int& height) override;
     std::string lastError() const override;
-
-    const std::filesystem::path& assetRoot() const;
+    TextureDiagnostics diagnostics() const override;
 
 private:
     struct TextureRecord {
@@ -31,6 +30,7 @@ private:
     std::filesystem::path assetRoot_;
     std::unordered_map<std::string, TextureRecord> records_;
     std::string lastError_;
+    TextureDiagnostics diagnostics_;
 };
 
 } // namespace rocket

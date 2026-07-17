@@ -7,6 +7,7 @@
 #include <emscripten.h>
 #include <emscripten/html5.h>
 #include <sstream>
+#include <utility>
 
 namespace rocket {
 namespace {
@@ -39,12 +40,74 @@ EM_JS(int, rr_web_bool_preference, (int field), {
         if (field === 1) return localStorage.getItem("rocket_rogue_help_disabled") === "1";
         if (field === 2) return localStorage.getItem("rocket_rogue_camera_shake_disabled") === "1";
         if (field === 3) return document.fullscreenElement ? 1 : 0;
+        if (field === 4) return localStorage.getItem("rocket_rogue_performance_stats") === "1";
     } catch (error) {}
     return 0;
 });
 
+EM_JS(void, rr_web_install_preference_revision_observer, (), {
+    const state = Module.RocketPreferenceRevisionState = Module.RocketPreferenceRevisionState || {
+        revision: 0,
+        installed: false
+    };
+    if (state.installed) return;
+    state.installed = true;
+
+    const bump = () => { state.revision += 1; };
+    const matches = (event, selector) => {
+        const target = event && event.target;
+        return !!(target && target.closest && target.closest(selector));
+    };
+    const changeSelector = [
+        "[data-resolution-select]",
+        "[data-game-speed-select]",
+        "[data-controller-prompt-select]",
+        "[data-controller-deadzone-select]",
+        "[data-help-toggle]",
+        "[data-camera-shake-toggle]",
+        "[data-debug-tools-toggle]"
+    ].join(",");
+    const clickSelector = [
+        "button[data-help-toggle]",
+        "button[data-camera-shake-toggle]",
+        "button[data-debug-tools-toggle]",
+        "button[data-controller-invert-toggle]",
+        "button[data-controller-swap-toggle]",
+        "button[data-controller-vibration-toggle]"
+    ].join(",");
+
+    document.addEventListener("change", (event) => {
+        if (matches(event, changeSelector)) bump();
+    }, true);
+    document.addEventListener("click", (event) => {
+        if (matches(event, clickSelector)) bump();
+    }, true);
+    // Help dismissal is intentionally handled on pointerdown by the browser
+    // fallback, before its synthetic click is dispatched.
+    document.addEventListener("pointerdown", (event) => {
+        if (matches(event, "[data-help-dismiss]")) bump();
+    }, true);
+    globalThis.addEventListener("storage", (event) => {
+        if (!event.key || event.key.startsWith("rocket_rogue_")) bump();
+    });
+    document.addEventListener("fullscreenchange", bump);
+});
+
+EM_JS(double, rr_web_preference_revision, (), {
+    const state = Module.RocketPreferenceRevisionState;
+    return state ? Number(state.revision) || 0 : 0;
+});
+
+EM_JS(void, rr_web_bump_preference_revision, (), {
+    const state = Module.RocketPreferenceRevisionState = Module.RocketPreferenceRevisionState || {
+        revision: 0,
+        installed: false
+    };
+    state.revision += 1;
+});
+
 EM_JS(int, rr_web_store_preferences,
-    (const char* resolutionPtr, double gameSpeed, int debugTools, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
+    (const char* resolutionPtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
         try {
             const resolution = UTF8ToString(resolutionPtr || 0) || "auto";
             const dismissed = UTF8ToString(dismissedPtr || 0) || "[]";
@@ -54,6 +117,7 @@ EM_JS(int, rr_web_store_preferences,
             else localStorage.setItem("rocket_rogue_game_speed", String(gameSpeed));
             const setFlag = (key, enabled) => enabled ? localStorage.setItem(key, "1") : localStorage.removeItem(key);
             setFlag("rocket_rogue_debug_tools", debugTools !== 0);
+            setFlag("rocket_rogue_performance_stats", performanceStats !== 0);
             setFlag("rocket_rogue_help_disabled", helpDisabled !== 0);
             setFlag("rocket_rogue_camera_shake_disabled", cameraShakeDisabled !== 0);
             localStorage.setItem("rocket_rogue_help_dismissed_v1", dismissed);
@@ -62,29 +126,38 @@ EM_JS(int, rr_web_store_preferences,
     });
 
 EM_JS(void, rr_web_sync_canvas, (), {
-    const canvas = document.getElementById("canvas");
-    if (!canvas) return;
-    const viewport = globalThis.visualViewport;
-    const width = Math.max(1, Math.round((viewport && viewport.width) || innerWidth || canvas.clientWidth || 1));
-    const height = Math.max(1, Math.round((viewport && viewport.height) || innerHeight || canvas.clientHeight || 1));
-    canvas.style.width = width + "px";
-    canvas.style.height = height + "px";
-    let targetWidth = 0, targetHeight = 0;
-    try {
-        const preset = localStorage.getItem("rocket_rogue_resolution") || "auto";
+    const sync = Module.RocketSyncCanvas = Module.RocketSyncCanvas || (() => {
+        const canvas = document.getElementById("canvas");
+        if (!canvas) return;
+        const viewport = globalThis.visualViewport;
+        const width = Math.max(1, Math.round((viewport && viewport.width) || innerWidth || canvas.clientWidth || 1));
+        const height = Math.max(1, Math.round((viewport && viewport.height) || innerHeight || canvas.clientHeight || 1));
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        let targetWidth = 0, targetHeight = 0;
+        const preset = document.body.dataset.renderResolution || "auto";
         const match = /^(1280x800|1920x1080|2560x1440|3840x2160)$/.exec(preset);
         if (match) [targetWidth, targetHeight] = match[1].split("x").map(Number);
-    } catch (error) {}
-    if (targetWidth > 0) {
-        const scale = Math.min(targetWidth / width, targetHeight / height);
-        canvas.width = Math.max(1, Math.round(width * scale));
-        canvas.height = Math.max(1, Math.round(height * scale));
-    } else {
-        const scale = Math.max(1, Math.min(2, devicePixelRatio || 1));
-        canvas.width = Math.max(1, Math.ceil(width * scale));
-        canvas.height = Math.max(1, Math.ceil(height * scale));
+        if (targetWidth > 0) {
+            const scale = Math.min(targetWidth / width, targetHeight / height);
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+        } else {
+            const scale = Math.max(1, Math.min(2, devicePixelRatio || 1));
+            canvas.width = Math.max(1, Math.ceil(width * scale));
+            canvas.height = Math.max(1, Math.ceil(height * scale));
+        }
+        Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
+    });
+    sync();
+    if (!Module.RocketCanvasSyncInstalled) {
+        Module.RocketCanvasSyncInstalled = true;
+        globalThis.addEventListener("resize", sync, {passive: true});
+        globalThis.visualViewport?.addEventListener("resize", sync, {passive: true});
     }
 });
+
+EM_JS(double, rr_web_viewport_revision, (), { return Number(Module.RocketViewportRevision || 0); });
 
 EM_JS(int, rr_web_metric, (int field), {
     const canvas = document.getElementById("canvas");
@@ -98,7 +171,7 @@ EM_JS(double, rr_web_scene_left_ndc, (), {
     const canvas = document.getElementById("canvas");
     const panel = document.getElementById("panel");
     const width = (canvas && canvas.clientWidth) || innerWidth || 1;
-    if (width <= 720 || (panel && panel.querySelector(".mining-fullscreen"))) return -1;
+    if (width <= 720 || (panel && panel.querySelector(".mining-fullscreen, [data-panel-mode='title']"))) return -1;
     const flybyVisible = panel && panel.querySelector("[data-flyby-run]");
     const left = document.body.classList.contains("rmlui-enabled") && flybyVisible
         ? 16 + 482 + 24
@@ -159,8 +232,19 @@ EM_JS(int, rr_web_upload_image, (const char* keyPtr, int textureId, int* dimensi
     return 1;
 });
 
-EM_JS(void, rr_web_set_panel, (const char* valuePtr), { if (window.RocketBridge && RocketBridge.setPanel) RocketBridge.setPanel(UTF8ToString(valuePtr)); });
-EM_JS(void, rr_web_set_rml_enabled, (int value), { document.body.classList.toggle("rmlui-enabled", value !== 0); });
+EM_JS(void, rr_web_set_panel, (const char* valuePtr), {
+    if (window.RocketBridge && RocketBridge.setPanel) RocketBridge.setPanel(UTF8ToString(valuePtr));
+    Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
+});
+EM_JS(void, rr_web_set_realtime_hud, (const char* valuePtr), {
+    if (!window.RocketBridge || !RocketBridge.setRealtimeHudState) return;
+    try { RocketBridge.setRealtimeHudState(JSON.parse(UTF8ToString(valuePtr || 0) || "[]")); }
+    catch (error) { console.warn("Rocket Rogue realtime HUD update failed", error); }
+});
+EM_JS(void, rr_web_set_rml_enabled, (int value), {
+    document.body.classList.toggle("rmlui-enabled", value !== 0);
+    Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
+});
 EM_JS(void, rr_web_set_modal_open, (int value), {
     const open = value !== 0; document.body.classList.toggle("rmlui-modal-open", open);
     const control = document.getElementById("scene-launch-control");
@@ -185,13 +269,21 @@ EM_JS(char*, rr_web_focused_id, (), {
     const value = window.RocketBridge && RocketBridge.controllerFocusedId ? String(RocketBridge.controllerFocusedId() || "") : "";
     const length = lengthBytesUTF8(value) + 1, result = _malloc(length); stringToUTF8(value, result, length); return result;
 });
-EM_JS(void, rr_web_preferences_changed, (const char* resolutionPtr, int debugTools), {
+EM_JS(void, rr_web_preferences_changed, (const char* resolutionPtr, int debugTools, int performanceStats), {
     const resolution = UTF8ToString(resolutionPtr || 0);
     document.body.dataset.renderResolution = resolution;
     const tools = document.getElementById("debug-tools"); if (tools) tools.classList.toggle("is-visible", debugTools !== 0);
+    document.body.classList.toggle("performance-stats-enabled", performanceStats !== 0);
     if (window.RocketBridge && RocketBridge.setResolutionPreset) RocketBridge.setResolutionPreset(resolution);
+    if (Module.RocketSyncCanvas) Module.RocketSyncCanvas();
     if (window.RocketBridge && RocketBridge.syncSettingsControls) RocketBridge.syncSettingsControls();
     if (window.RocketBridge && RocketBridge.syncDebugToolsControls) RocketBridge.syncDebugToolsControls();
+    if (window.RocketBridge && RocketBridge.syncPerformanceStatsControls) RocketBridge.syncPerformanceStatsControls();
+});
+EM_JS(void, rr_web_set_performance_stats, (const char* htmlPtr, int visible), {
+    if (window.RocketBridge && RocketBridge.setPerformanceStats) {
+        RocketBridge.setPerformanceStats(UTF8ToString(htmlPtr || 0), visible !== 0);
+    }
 });
 
 std::string takeJsString(char* value)
@@ -227,31 +319,108 @@ std::string encodeSimpleJsonStrings(const std::vector<std::string>& values)
     stream << ']'; return stream.str();
 }
 
+void appendJsonString(std::ostringstream& stream, std::string_view value)
+{
+    stream << '"';
+    for (const unsigned char c : value) {
+        switch (c) {
+        case '"': stream << "\\\""; break;
+        case '\\': stream << "\\\\"; break;
+        case '\b': stream << "\\b"; break;
+        case '\f': stream << "\\f"; break;
+        case '\n': stream << "\\n"; break;
+        case '\r': stream << "\\r"; break;
+        case '\t': stream << "\\t"; break;
+        default:
+            if (c < 0x20) {
+                constexpr char hex[] = "0123456789abcdef";
+                stream << "\\u00" << hex[(c >> 4) & 0xf] << hex[c & 0xf];
+            } else {
+                stream << static_cast<char>(c);
+            }
+            break;
+        }
+    }
+    stream << '"';
+}
+
+std::string encodeRealtimeHudState(const RealtimeHudState& state)
+{
+    std::ostringstream stream;
+    stream << '[';
+    for (std::size_t index = 0; index < state.patches.size(); ++index) {
+        const RealtimeHudPatch& patch = state.patches[index];
+        if (index > 0) {
+            stream << ',';
+        }
+        stream << "{\"id\":";
+        appendJsonString(stream, patch.elementId);
+        if (patch.updateText) {
+            stream << ",\"text\":";
+            appendJsonString(stream, patch.text);
+        }
+        if (patch.updateClass) {
+            stream << ",\"className\":";
+            appendJsonString(stream, patch.cssClass);
+        }
+        stream << '}';
+    }
+    stream << ']';
+    return stream.str();
+}
+
 } // namespace
+
+WebPreferenceStore::WebPreferenceStore()
+{
+    rr_web_install_preference_revision_observer();
+}
 
 AppPreferences WebPreferenceStore::load()
 {
+    const std::uint64_t currentRevision = revision();
+    if (loaded_ && observedRevision_ == currentRevision) {
+        return cached_;
+    }
+
     AppPreferences preferences;
     preferences.controller = loadWebControllerPreferences();
     preferences.resolutionPreset = takeJsString(rr_web_string_preference(0));
     preferences.gameSpeed = rr_web_number_preference(0);
     preferences.debugToolsEnabled = rr_web_bool_preference(0) != 0;
+    preferences.performanceStatsEnabled = rr_web_bool_preference(4) != 0;
     preferences.helpDisabled = rr_web_bool_preference(1) != 0;
     preferences.cameraShakeDisabled = rr_web_bool_preference(2) != 0;
     preferences.fullscreen = rr_web_bool_preference(3) != 0;
     preferences.dismissedHelpTopics = parseSimpleJsonStrings(takeJsString(rr_web_string_preference(1)));
-    return preferences;
+    cached_ = std::move(preferences);
+    observedRevision_ = currentRevision;
+    loaded_ = true;
+    return cached_;
 }
 
 bool WebPreferenceStore::store(const AppPreferences& preferences)
 {
     storeWebControllerPreferences(preferences.controller);
+    // Controller preferences use a separate JSON key, so mark the aggregate
+    // cache dirty even if a later general-preference write fails.
+    rr_web_bump_preference_revision();
+    loaded_ = false;
     const std::string dismissed = encodeSimpleJsonStrings(preferences.dismissedHelpTopics);
     if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), preferences.gameSpeed,
-            preferences.debugToolsEnabled, preferences.helpDisabled, preferences.cameraShakeDisabled, dismissed.c_str()) != 0) {
-        lastError_.clear(); return true;
+            preferences.debugToolsEnabled, preferences.performanceStatsEnabled, preferences.helpDisabled,
+            preferences.cameraShakeDisabled, dismissed.c_str()) != 0) {
+        // Reload lazily so normalization performed by the JS storage boundary
+        // remains authoritative without returning to per-frame localStorage reads.
+        lastError_.clear();
+        return true;
     }
     lastError_ = "Browser preference storage failed."; return false;
+}
+
+std::uint64_t WebPreferenceStore::revision() const
+{
+    return static_cast<std::uint64_t>(std::max(0.0, rr_web_preference_revision()));
 }
 
 std::string WebPreferenceStore::lastError() const { return lastError_; }
@@ -260,6 +429,7 @@ WebPlatformHost::WebPlatformHost(WebGamepadSource& gamepads) : gamepads_(gamepad
 
 bool WebPlatformHost::createGraphicsContext()
 {
+    rr_web_sync_canvas();
     EmscriptenWebGLContextAttributes attributes; emscripten_webgl_init_context_attributes(&attributes);
     attributes.majorVersion = 2; attributes.minorVersion = 0; attributes.alpha = EM_FALSE;
     attributes.depth = EM_FALSE; attributes.stencil = EM_FALSE; attributes.antialias = EM_TRUE;
@@ -270,8 +440,19 @@ bool WebPlatformHost::createGraphicsContext()
 double WebPlatformHost::monotonicSeconds() const { return emscripten_get_now() / 1000.0; }
 ViewportMetrics WebPlatformHost::viewportMetrics()
 {
-    rr_web_sync_canvas();
-    return {rr_web_metric(0), rr_web_metric(1), rr_web_metric(2), rr_web_metric(3), 1.0F, static_cast<float>(rr_web_scene_left_ndc())};
+    const std::uint64_t revision = static_cast<std::uint64_t>(std::max(0.0, rr_web_viewport_revision()));
+    if (revision == viewportRevision_) {
+        return cachedViewportMetrics_;
+    }
+    cachedViewportMetrics_.logicalWidth = rr_web_metric(0);
+    cachedViewportMetrics_.logicalHeight = rr_web_metric(1);
+    cachedViewportMetrics_.drawableWidth = rr_web_metric(2);
+    cachedViewportMetrics_.drawableHeight = rr_web_metric(3);
+    cachedViewportMetrics_.densityRatio = static_cast<float>(cachedViewportMetrics_.drawableWidth)
+        / static_cast<float>(std::max(1, cachedViewportMetrics_.logicalWidth));
+    cachedViewportMetrics_.sceneLeftNdc = static_cast<float>(rr_web_scene_left_ndc());
+    viewportRevision_ = revision;
+    return cachedViewportMetrics_;
 }
 bool WebPlatformHost::focused() const { return rr_web_environment(0) != 0; }
 bool WebPlatformHost::visible() const { return rr_web_environment(1) != 0; }
@@ -306,6 +487,11 @@ bool WebTextureSource::uploadToOpenGl(std::string_view key, unsigned int texture
 std::string WebTextureSource::lastError() const { return lastError_; }
 
 void WebUiBridge::setPanelHtml(std::string_view html) { const std::string copy(html); rr_web_set_panel(copy.c_str()); }
+void WebUiBridge::setRealtimeHudState(const RealtimeHudState& state)
+{
+    const std::string json = encodeRealtimeHudState(state);
+    rr_web_set_realtime_hud(json.c_str());
+}
 void WebUiBridge::setRmlUiEnabled(bool enabled) { rr_web_set_rml_enabled(enabled); }
 void WebUiBridge::setModalOpen(bool open) { rr_web_set_modal_open(open); }
 void WebUiBridge::setControllerPresentation(bool active, ControllerFamily family) { rr_web_controller_presentation(active, static_cast<int>(family)); }
@@ -319,6 +505,17 @@ bool WebUiBridge::modalOpen() const { return rr_web_ui_action(4, 0, nullptr) != 
 bool WebUiBridge::openModal(std::string_view id) { const std::string copy(id); return rr_web_ui_action(5, 0, copy.c_str()) != 0; }
 void WebUiBridge::closeModal() { rr_web_ui_action(6, 0, nullptr); }
 std::string WebUiBridge::focusedId() const { return takeJsString(rr_web_focused_id()); }
-void WebUiBridge::preferencesChanged(const AppPreferences& preferences) { rr_web_preferences_changed(preferences.resolutionPreset.c_str(), preferences.debugToolsEnabled); }
+void WebUiBridge::preferencesChanged(const AppPreferences& preferences)
+{
+    rr_web_preferences_changed(
+        preferences.resolutionPreset.c_str(),
+        preferences.debugToolsEnabled,
+        preferences.performanceStatsEnabled);
+}
+void WebUiBridge::setPerformanceStats(std::string_view html, bool visible)
+{
+    const std::string copy(html);
+    rr_web_set_performance_stats(copy.c_str(), visible ? 1 : 0);
+}
 
 } // namespace rocket

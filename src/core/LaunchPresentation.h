@@ -50,15 +50,6 @@ inline std::string launchSectionTitle(const FlightActionState& actions, bool fro
     return std::string(frontierTransfer ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight);
 }
 
-inline bool canCommitArrivalOps(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel, double currentMultiplier)
-{
-    const Destination* configuredDestination = catalog.findDestination(flightModel.config.destinationId);
-    const Destination& destination = configuredDestination == nullptr ? currentDestination(state, catalog) : *configuredDestination;
-    return !flightModel.config.frontierTransfer
-        && destination.tier >= 1
-        && currentMultiplier >= destination.targetMultiplier;
-}
-
 inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions, bool arkKnown)
 {
     std::vector<FlightActionButtonPresentation> buttons;

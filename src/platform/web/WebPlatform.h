@@ -10,11 +10,17 @@ class WebGamepadSource;
 
 class WebPreferenceStore final : public IPreferenceStore {
 public:
+    WebPreferenceStore();
+
     AppPreferences load() override;
     bool store(const AppPreferences& preferences) override;
+    std::uint64_t revision() const override;
     std::string lastError() const override;
 
 private:
+    AppPreferences cached_;
+    std::uint64_t observedRevision_ = 0;
+    bool loaded_ = false;
     std::string lastError_;
 };
 
@@ -38,6 +44,8 @@ public:
 
 private:
     WebGamepadSource& gamepads_;
+    ViewportMetrics cachedViewportMetrics_;
+    std::uint64_t viewportRevision_ = 0;
 };
 
 class WebTextureSource final : public ITextureSource {
@@ -54,6 +62,7 @@ private:
 class WebUiBridge final : public IUiBridge {
 public:
     void setPanelHtml(std::string_view html) override;
+    void setRealtimeHudState(const RealtimeHudState& state) override;
     void setRmlUiEnabled(bool enabled) override;
     void setModalOpen(bool open) override;
     void setControllerPresentation(bool active, ControllerFamily family) override;
@@ -68,6 +77,7 @@ public:
     void closeModal() override;
     std::string focusedId() const override;
     void preferencesChanged(const AppPreferences& preferences) override;
+    void setPerformanceStats(std::string_view html, bool visible) override;
 };
 
 } // namespace rocket

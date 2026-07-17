@@ -8,7 +8,7 @@
   "configurePresets": [
     {
       "name": "native-debug",
-      "displayName": "Native Debug",
+      "displayName": "Native Debug (Windows/Linux x86-64)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/native-debug",
       "cacheVariables": {
@@ -17,11 +17,21 @@
     },
     {
       "name": "native-release",
-      "displayName": "Native Release",
+      "displayName": "Native Release (Windows/Linux x86-64)",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/native-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "native-profile",
+      "displayName": "Native Profile (Windows/Linux x86-64)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/native-profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "ROCKET_PROFILE_BUILD": "ON"
       }
     },
     {
@@ -38,15 +48,22 @@
   "buildPresets": [
     {
       "name": "native-debug",
+      "displayName": "Build Native Debug (Windows/Linux x86-64)",
       "configurePreset": "native-debug"
     },
     {
       "name": "native-release",
+      "displayName": "Build Native Release (Windows/Linux x86-64)",
       "configurePreset": "native-release"
     },
     {
+      "name": "native-profile",
+      "displayName": "Build Native Profile (Windows/Linux x86-64)",
+      "configurePreset": "native-profile"
+    },
+    {
       "name": "package-native",
-      "displayName": "Package Native Release",
+      "displayName": "Package Native Release Archive (Windows/Linux x86-64)",
       "configurePreset": "native-release",
       "targets": [
         "package-native"
@@ -54,12 +71,14 @@
     },
     {
       "name": "web-release",
+      "displayName": "Build Web Release (Emscripten)",
       "configurePreset": "web-release"
     }
   ],
   "testPresets": [
     {
       "name": "native-debug",
+      "displayName": "Test Native Debug (Windows/Linux x86-64)",
       "configurePreset": "native-debug",
       "output": {
         "outputOnFailure": true
@@ -67,13 +86,23 @@
     },
     {
       "name": "native-release",
+      "displayName": "Test Native Release (Windows/Linux x86-64)",
       "configurePreset": "native-release",
       "output": {
         "outputOnFailure": true
       }
     },
     {
+      "name": "native-profile",
+      "displayName": "Test Native Profile (Windows/Linux x86-64)",
+      "configurePreset": "native-profile",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
       "name": "web-release",
+      "displayName": "Test Web Release (Emscripten)",
       "configurePreset": "web-release",
       "output": {
         "outputOnFailure": true

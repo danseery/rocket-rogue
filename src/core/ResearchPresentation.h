@@ -1329,16 +1329,6 @@ inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionS
     return projected;
 }
 
-inline SurfaceExpeditionState projectedMineExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
-{
-    SurfaceExpeditionState projected = expedition;
-    projected.supply = std::max(0, projected.supply - tuning::research::mineSupplyCost);
-    const MaterialInventory gain {.common = tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus};
-    projected.temporaryMaterials.common += gain.common;
-    projected.cargo += std::max(0, gain.common);
-    return projected;
-}
-
 inline SurfaceExpeditionState projectedPushExpedition(const SurfaceExpeditionState& expedition)
 {
     SurfaceExpeditionState projected = expedition;
@@ -1355,20 +1345,6 @@ inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& s
     chips.push_back(panelMetric("More pulses", "+1, +2..."));
     addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
     addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedSurveyExpedition(state.run.surfaceExpedition, tools, crew, site)));
-    return chips;
-}
-
-inline std::vector<PanelMetricPresentation> minePayoffChips(
-    const GameState& state,
-    const SurfaceToolEffects& tools,
-    const SurfaceCrewEffects& crew,
-    const SurfaceSiteProfileEffects& site,
-    const SurfaceUpgradeEffects& upgrades)
-{
-    std::vector<PanelMetricPresentation> chips;
-    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus);
-    addPercentChip(chips, text::labels::rareMaterials, std::min(1.0, tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus + upgrades.oreYieldChance));
-    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedMineExpedition(state.run.surfaceExpedition, tools, crew, site)));
     return chips;
 }
 

@@ -187,9 +187,11 @@ layout(location = 1) in vec4 a_color;
 layout(location = 2) in vec2 a_uv;
 out vec4 v_color;
 out vec2 v_uv;
+uniform vec2 u_positionScale;
+uniform vec2 u_positionOffset;
 void main()
 {
-    gl_Position = vec4(a_pos, 0.0, 1.0);
+    gl_Position = vec4(a_pos * u_positionScale + u_positionOffset, 0.0, 1.0);
     v_color = a_color;
     v_uv = a_uv;
 }
@@ -731,8 +733,8 @@ int pickupDigitMask(char digit)
 
 } // namespace
 
-OpenGlRenderer::OpenGlRenderer(IPlatformHost& host, IPreferenceStore& preferences, ITextureSource& textures)
-    : host_(host), preferences_(preferences), textures_(textures)
+OpenGlRenderer::OpenGlRenderer(IPlatformHost& host, ITextureSource& textures)
+    : host_(host), textures_(textures)
 {
 }
 
@@ -794,8 +796,12 @@ bool OpenGlRenderer::initialize()
     effectColorUniform_ = glGetUniformLocation(program_, "u_effectColor");
     effectParamsUniform_ = glGetUniformLocation(program_, "u_effectParams");
     effectSizeUniform_ = glGetUniformLocation(program_, "u_effectSize");
+    positionScaleUniform_ = glGetUniformLocation(program_, "u_positionScale");
+    positionOffsetUniform_ = glGetUniformLocation(program_, "u_positionOffset");
     glUniform1i(samplerUniform_, 0);
     glUniform1f(effectModeUniform_, 0.0F);
+    glUniform2f(positionScaleUniform_, 1.0F, 1.0F);
+    glUniform2f(positionOffsetUniform_, 0.0F, 0.0F);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     std::vector<GLuint> textureIds(assets_.size());
@@ -815,6 +821,11 @@ bool OpenGlRenderer::initialize()
     }
 
     initialized_ = true;
+    if (host_.openGlDialect() == OpenGlDialect::DesktopCore33) {
+        // Native textures are decoded synchronously. Upload them before the
+        // first timed frame so gameplay does not inherit a first-use stall.
+        warmTextures();
+    }
     return true;
 }
 
@@ -828,12 +839,15 @@ void OpenGlRenderer::render(const RenderSnapshot& snapshot)
         previousMiningActive_ = false;
         previousMiningWidth_ = 0;
         previousMiningHeight_ = 0;
+        currentMiningMaterials_.clear();
         previousMiningMaterials_.clear();
         previousMiningInventory_ = {};
         previousMiningStowedInventory_ = {};
         previousMiningCargo_ = 0;
         previousMiningStowedCargo_ = 0;
+        miningSurveyDrones_.clear();
         miningPickupBursts_.clear();
+        miningPickupBurstScratch_.clear();
         miningVisualHeadingInitialized_ = false;
         miningVisualRecoilX_ = 0.0F;
         miningVisualRecoilY_ = 0.0F;
@@ -842,33 +856,37 @@ void OpenGlRenderer::render(const RenderSnapshot& snapshot)
 
     beginFrame(snapshot);
     warmTextures();
-    if (snapshot.screen == Screen::Mining) {
+    if (snapshot.titleScreen) {
+        drawTitleBackdrop(snapshot);
+    } else if (snapshot.screen == Screen::Mining) {
         drawMining(snapshot);
-        return;
-    }
-    if (snapshot.screen == Screen::Flyby) {
+    } else if (snapshot.screen == Screen::Flyby) {
         drawFlyby(snapshot);
-        return;
-    }
-    if (snapshot.screen == Screen::Orbit) {
+    } else if (snapshot.screen == Screen::Orbit) {
         drawOrbit(snapshot);
-        return;
-    }
-    if (snapshot.screen == Screen::SurfaceScan) {
+    } else if (snapshot.screen == Screen::SurfaceScan) {
         drawSurfaceScan(snapshot);
-        return;
-    }
-    if (snapshot.screen == Screen::SurfacePush) {
+    } else if (snapshot.screen == Screen::SurfacePush) {
         drawSurfacePush(snapshot);
-        return;
+    } else {
+        drawBackdrop(snapshot);
+        drawRocket(snapshot);
+        drawTelemetry(snapshot);
     }
-    drawBackdrop(snapshot);
-    drawRocket(snapshot);
-    drawTelemetry(snapshot);
+    flushCommands();
 }
 
 void OpenGlRenderer::beginFrame(const RenderSnapshot& snapshot)
 {
+    diagnostics_.sceneDrawCalls = 0;
+    diagnostics_.sceneVertices = 0;
+    diagnostics_.bufferUploads = 0;
+    diagnostics_.uploadedBytes = 0;
+    diagnostics_.texturesReady = 0;
+    diagnostics_.texturesPending = 0;
+    diagnostics_.texturesFailed = 0;
+    frameVertices_.clear();
+    drawCommands_.clear();
     const ViewportMetrics metrics = host_.viewportMetrics();
     const double cssWidth = std::max(1, metrics.logicalWidth);
     const double cssHeight = std::max(1, metrics.logicalHeight);
@@ -897,7 +915,7 @@ void OpenGlRenderer::beginFrame(const RenderSnapshot& snapshot)
         sceneWorldUnitX_ = sceneWorldUnit_;
         sceneWorldUnitY_ = sceneWorldUnit_;
     }
-    const bool cameraShakeEnabled = !preferences_.load().cameraShakeDisabled;
+    const bool cameraShakeEnabled = cameraShakeEnabled_;
     const float launchShake = cameraShakeEnabled ? static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0)) : 0.0F;
     if (launchShake > 0.0F) {
         const float shake = launchShake * launchShake;
@@ -1357,7 +1375,16 @@ bool OpenGlRenderer::textureReady(int assetIndex)
 void OpenGlRenderer::warmTextures()
 {
     for (int i = 0; i < static_cast<int>(assets_.size()); ++i) {
-        (void)textureReady(i);
+        if (textureReady(i)) {
+            ++diagnostics_.texturesReady;
+            continue;
+        }
+        const TextureStatus status = textures_.status(assets_[static_cast<std::size_t>(i)].key);
+        if (status == TextureStatus::Failed) {
+            ++diagnostics_.texturesFailed;
+        } else {
+            ++diagnostics_.texturesPending;
+        }
     }
 }
 
@@ -1535,8 +1562,8 @@ void OpenGlRenderer::drawFlyby(const RenderSnapshot& snapshot)
     if (snapshot.flybyTrailPoints.size() >= 2) {
         std::vector<float>& pathVertices = scratchVertices(snapshot.flybyTrailPoints.size() * 12);
         for (std::size_t i = 1; i < snapshot.flybyTrailPoints.size(); ++i) {
-            const FlybyTrailPointSnapshot& previous = snapshot.flybyTrailPoints[i - 1];
-            const FlybyTrailPointSnapshot& current = snapshot.flybyTrailPoints[i];
+            const FlybyTrailPoint& previous = snapshot.flybyTrailPoints[i - 1];
+            const FlybyTrailPoint& current = snapshot.flybyTrailPoints[i];
             const float alpha = 0.18F + 0.34F * (static_cast<float>(i) / static_cast<float>(snapshot.flybyTrailPoints.size() - 1));
             appendLine(
                 pathVertices,
@@ -1656,8 +1683,8 @@ void OpenGlRenderer::drawOrbit(const RenderSnapshot& snapshot)
     if (snapshot.orbitTrailPoints.size() >= 2) {
         std::vector<float>& pathVertices = scratchVertices(snapshot.orbitTrailPoints.size() * 12);
         for (std::size_t i = 1; i < snapshot.orbitTrailPoints.size(); ++i) {
-            const FlybyTrailPointSnapshot& previous = snapshot.orbitTrailPoints[i - 1];
-            const FlybyTrailPointSnapshot& current = snapshot.orbitTrailPoints[i];
+            const FlybyTrailPoint& previous = snapshot.orbitTrailPoints[i - 1];
+            const FlybyTrailPoint& current = snapshot.orbitTrailPoints[i];
             const float alpha = 0.12F + 0.40F * (static_cast<float>(i) / static_cast<float>(snapshot.orbitTrailPoints.size() - 1));
             appendLine(
                 pathVertices,
@@ -1755,15 +1782,16 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
         };
     };
 
-    std::vector<const MiningMiniDroneSnapshot*> surveyDrones;
-    for (const MiningMiniDroneSnapshot& agent : snapshot.miningMiniDrones) {
-        if (agent.role == static_cast<int>(MiniDroneRole::Survey)) {
-            surveyDrones.push_back(&agent);
+    miningSurveyDrones_.clear();
+    miningSurveyDrones_.reserve(snapshot.miningMiniDrones.size());
+    for (const MiningMiniDroneAgent& agent : snapshot.miningMiniDrones) {
+        if (agent.role == MiniDroneRole::Survey) {
+            miningSurveyDrones_.push_back(&agent);
         }
     }
     auto nearestScannerDistanceCells = [&](double x, double y) {
         double nearest = std::hypot(x - snapshot.miningDroneX, y - snapshot.miningDroneY);
-        for (const MiningMiniDroneSnapshot* survey : surveyDrones) {
+        for (const MiningMiniDroneAgent* survey : miningSurveyDrones_) {
             nearest = std::min(nearest, std::hypot(x - survey->x, y - survey->y));
         }
         return static_cast<float>(nearest);
@@ -1787,12 +1815,19 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     const Vec2 returnZone = cellCenter(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY);
 
     const int cellCount = snapshot.miningWidth * snapshot.miningHeight;
-    std::vector<int> currentMiningMaterials(static_cast<std::size_t>(std::max(0, cellCount)), static_cast<int>(MiningCellMaterial::Empty));
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
-        const int index = cell.y * snapshot.miningWidth + cell.x;
-        if (index >= 0 && index < cellCount) {
-            currentMiningMaterials[static_cast<std::size_t>(index)] = cell.material;
-        }
+    const auto cellIntegrity = [](const MiningCell& cell) {
+        return cell.maxToughness <= 0.0
+            ? 1.0
+            : std::clamp(cell.remainingToughness / cell.maxToughness, 0.0, 1.0);
+    };
+    currentMiningMaterials_.assign(
+        static_cast<std::size_t>(std::max(0, cellCount)),
+        static_cast<int>(MiningCellMaterial::Empty));
+    const std::size_t renderedCellCount = std::min(
+        snapshot.miningCells.size(),
+        static_cast<std::size_t>(std::max(0, cellCount)));
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        currentMiningMaterials_[index] = static_cast<int>(snapshot.miningCells[index].material);
     }
     if (previousMiningActive_ && previousMiningWidth_ == snapshot.miningWidth && previousMiningHeight_ == snapshot.miningHeight) {
         struct PickupCandidate {
@@ -1802,20 +1837,23 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
         std::vector<PickupCandidate> candidates;
         candidates.reserve(6);
         std::vector<Vec2> treatmentCenters;
-        for (const MiningCellSnapshot& cell : snapshot.miningCells) {
-            const int index = cell.y * snapshot.miningWidth + cell.x;
-            if (index < 0 || index >= cellCount || static_cast<std::size_t>(index) >= previousMiningMaterials_.size()) {
+        for (std::size_t index = 0; index < renderedCellCount; ++index) {
+            if (index >= previousMiningMaterials_.size()) {
                 continue;
             }
-            const int previousMaterial = previousMiningMaterials_[static_cast<std::size_t>(index)];
+            const MiningCell& cell = snapshot.miningCells[index];
+            const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+            const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+            const int material = static_cast<int>(cell.material);
+            const int previousMaterial = previousMiningMaterials_[index];
             const int bucket = miningMaterialBucket(previousMaterial);
-            if (bucket >= 0 && cell.material == static_cast<int>(MiningCellMaterial::Empty)) {
-                const Vec2 burstCenter = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+            if (bucket >= 0 && cell.material == MiningCellMaterial::Empty) {
+                const Vec2 burstCenter = cellCenter(static_cast<double>(x), static_cast<double>(y));
                 candidates.push_back({burstCenter, bucket});
             }
             if (previousMaterial == static_cast<int>(MiningCellMaterial::HazardPocket) &&
-                cell.material != static_cast<int>(MiningCellMaterial::HazardPocket)) {
-                treatmentCenters.push_back(cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y)));
+                material != static_cast<int>(MiningCellMaterial::HazardPocket)) {
+                treatmentCenters.push_back(cellCenter(static_cast<double>(x), static_cast<double>(y)));
             }
         }
 
@@ -1904,7 +1942,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     previousMiningActive_ = true;
     previousMiningWidth_ = snapshot.miningWidth;
     previousMiningHeight_ = snapshot.miningHeight;
-    previousMiningMaterials_ = std::move(currentMiningMaterials);
+    previousMiningMaterials_.swap(currentMiningMaterials_);
     previousMiningInventory_ = snapshot.miningMaterials;
     previousMiningCargo_ = snapshot.miningCargo;
     previousMiningStowedInventory_ = snapshot.miningStowedMaterials;
@@ -1920,11 +1958,14 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
                   ? Color {0.13F, 0.14F, 0.15F, 0.68F}
                   : Color {0.095F, 0.12F, 0.135F, 0.68F});
     std::vector<float>& unexploredGridVertices = scratchVertices(snapshot.miningCells.size() * 48U);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
         if (cell.revealed) {
             continue;
         }
-        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
         appendRect(
             unexploredGridVertices,
             center.x,
@@ -2032,23 +2073,27 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     }
 
     std::vector<float>& terrainVertices = scratchVertices(snapshot.miningCells.size() * 48U);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
-        if (!cell.revealed || cell.material == static_cast<int>(MiningCellMaterial::Empty)) {
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
+        if (!cell.revealed || cell.material == MiningCellMaterial::Empty) {
             continue;
         }
-        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
-        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
-        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const int material = static_cast<int>(cell.material);
+        const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+        const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - snapshot.miningDroneY);
         const float mainDistanceCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
-        const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(cell.x) + 0.5, static_cast<double>(cell.y) + 0.5);
+        const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
         float localLight = std::clamp(1.0F - mainDistanceCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
         localLight = std::max(localLight, scannerSweepBoost(scannerDistanceCells, 0.85F) * 0.032F);
         const Color color = miningMaterialColor(
-            cell.material,
-            static_cast<float>(cell.integrity),
+            material,
+            static_cast<float>(cellIntegrity(cell)),
             cell.revealed,
             cell.hazard && cell.revealed,
-            cell.hazardAffinity,
+            static_cast<int>(cell.hazardAffinity),
             snapshot.destinationTier,
             localLight);
         appendRect(terrainVertices, center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
@@ -2056,12 +2101,15 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     submit(terrainVertices, 0x0004);
 
     const float gatePulse = 0.55F + 0.35F * std::sin(static_cast<float>(snapshot.animationTime) * 4.2F);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
         if (!cell.revealed || !cell.gateAssociated) {
             continue;
         }
-        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
-        const Color gateColor = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket)
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+        const Color gateColor = cell.material == MiningCellMaterial::HazardPocket
             ? Color {1.0F, 0.52F, 0.18F, 0.62F + gatePulse * 0.22F}
             : Color {0.78F, 0.54F, 1.0F, 0.50F + gatePulse * 0.18F};
         const float halfW = cellW * 0.47F;
@@ -2073,12 +2121,13 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     }
 
     std::vector<float>& edgeGlowVertices = scratchVertices(snapshot.miningCells.size() * 32U);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
-        if (scannerPulse <= 0.02F || !cell.revealed || cell.material != static_cast<int>(MiningCellMaterial::Empty)) {
+    for (std::size_t cellIndex = 0; cellIndex < renderedCellCount; ++cellIndex) {
+        const MiningCell& cell = snapshot.miningCells[cellIndex];
+        if (scannerPulse <= 0.02F || !cell.revealed || cell.material != MiningCellMaterial::Empty) {
             continue;
         }
-        const int x = cell.x;
-        const int y = cell.y;
+        const int x = static_cast<int>(cellIndex % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(cellIndex / static_cast<std::size_t>(snapshot.miningWidth));
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
         const int offsets[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
         for (const auto& offset : offsets) {
@@ -2110,25 +2159,30 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     submit(edgeGlowVertices, 0x0004);
 
     std::vector<float>& oreGlowVertices = scratchVertices(snapshot.miningCells.size() * 48U);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
         if (!cell.revealed) {
             continue;
         }
-        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
-        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
-        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const int material = static_cast<int>(cell.material);
+        const int affinity = static_cast<int>(cell.hazardAffinity);
+        const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+        const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - snapshot.miningDroneY);
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
-        const bool rewardCell = miningRewardMaterial(cell.material);
-        const bool hazardCell = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket);
-        const bool scannerPing = scannerBoost > 0.04F && miningScannerPingMaterial(cell.material);
+        const bool rewardCell = miningRewardMaterial(material);
+        const bool hazardCell = cell.material == MiningCellMaterial::HazardPocket;
+        const bool scannerPing = scannerBoost > 0.04F && miningScannerPingMaterial(material);
         if (!rewardCell && !scannerPing && !hazardCell) {
             continue;
         }
-        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material, cell.hazardAffinity);
-        const float integrity = static_cast<float>(std::clamp(cell.integrity, 0.0, 1.0));
+        const Color glow = rewardCell ? miningRewardGlowColor(material) : miningScannerPingColor(material, affinity);
+        const float integrity = static_cast<float>(cellIntegrity(cell));
         const float cracked = 1.0F - integrity;
-        const float shimmer = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.8F + static_cast<float>(cell.x * 13 + cell.y * 7));
+        const float shimmer = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.8F + static_cast<float>(x * 13 + y * 7));
         const float baseSize = rewardCell ? 0.34F : 0.24F;
         const float size = cellSize * (baseSize + cracked * 0.22F + scannerBoost * 0.42F);
         const float baseAlpha = rewardCell
@@ -2140,29 +2194,34 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     submit(oreGlowVertices, 0x0004);
 
     std::vector<float>& oreSparkVertices = scratchVertices(snapshot.miningCells.size() * 32U);
-    for (const MiningCellSnapshot& cell : snapshot.miningCells) {
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
         if (!cell.revealed) {
             continue;
         }
-        const Vec2 center = cellCenter(static_cast<double>(cell.x), static_cast<double>(cell.y));
-        const float dxCells = static_cast<float>(static_cast<double>(cell.x) + 0.5 - snapshot.miningDroneX);
-        const float dyCells = static_cast<float>(static_cast<double>(cell.y) + 0.5 - snapshot.miningDroneY);
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const int material = static_cast<int>(cell.material);
+        const int affinity = static_cast<int>(cell.hazardAffinity);
+        const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+        const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - snapshot.miningDroneX);
+        const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - snapshot.miningDroneY);
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
-        const bool rewardCell = miningRewardMaterial(cell.material);
-        const bool hazardCell = cell.material == static_cast<int>(MiningCellMaterial::HazardPocket);
-        const bool scannerPing = scannerBoost > 0.18F && miningScannerPingMaterial(cell.material);
+        const bool rewardCell = miningRewardMaterial(material);
+        const bool hazardCell = cell.material == MiningCellMaterial::HazardPocket;
+        const bool scannerPing = scannerBoost > 0.18F && miningScannerPingMaterial(material);
         if (!rewardCell && !scannerPing && !hazardCell) {
             continue;
         }
         const float phase = std::fmod(
-            static_cast<float>(snapshot.animationTime) * 1.35F + static_cast<float>(cell.x) * 0.17F + static_cast<float>(cell.y) * 0.11F,
+            static_cast<float>(snapshot.animationTime) * 1.35F + static_cast<float>(x) * 0.17F + static_cast<float>(y) * 0.11F,
             1.0F);
         const float activeWindow = scannerPing || hazardCell ? 0.72F : 0.42F;
         if (phase > activeWindow) {
             continue;
         }
-        const Color glow = rewardCell ? miningRewardGlowColor(cell.material) : miningScannerPingColor(cell.material, cell.hazardAffinity);
+        const Color glow = rewardCell ? miningRewardGlowColor(material) : miningScannerPingColor(material, affinity);
         const float flare = std::max(1.0F - phase / activeWindow, scannerPing ? scannerBoost : 0.0F);
         const float length = cellSize * ((rewardCell ? 0.34F : 0.24F) + flare * 0.44F);
         const float alpha = (rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F);
@@ -2172,8 +2231,8 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     submitLines(oreSparkVertices, 1.4F);
 
     std::vector<float>& pickupVertices = scratchVertices(miningPickupBursts_.size() * 360U);
-    std::vector<MiningPickupBurst> activeBursts;
-    activeBursts.reserve(miningPickupBursts_.size());
+    miningPickupBurstScratch_.clear();
+    miningPickupBurstScratch_.reserve(miningPickupBursts_.size());
     for (const MiningPickupBurst& burst : miningPickupBursts_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
         const float lifetime = burst.material == kMiningBankedBurstMaterial || burst.material == kMiningHazardTreatmentBurstMaterial
@@ -2182,7 +2241,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
         if (age < 0.0F || age > lifetime) {
             continue;
         }
-        activeBursts.push_back(burst);
+        miningPickupBurstScratch_.push_back(burst);
         const float t = std::clamp(age / 0.82F, 0.0F, 1.0F);
         const float fade = (1.0F - t) * (1.0F - t);
         const Color glow = miningPickupGlowColor(burst.material);
@@ -2203,7 +2262,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
         appendRect(pickupVertices, burst.x, burst.y, cellSize * (0.72F + t * 1.18F), cellSize * (0.72F + t * 1.18F), {glow.r, glow.g, glow.b, 0.075F * fade});
     }
     submit(pickupVertices, 0x0004);
-    for (const MiningPickupBurst& burst : activeBursts) {
+    for (const MiningPickupBurst& burst : miningPickupBurstScratch_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
         if (burst.material == kMiningBankedBurstMaterial) {
             drawMiningBankedText(burst.x, burst.y, cellSize, age);
@@ -2211,10 +2270,10 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             drawMiningPickupText(burst.x + burst.textOffsetX, burst.y, cellSize, burst.material, burst.amount, age);
         }
     }
-    miningPickupBursts_ = std::move(activeBursts);
+    miningPickupBursts_.swap(miningPickupBurstScratch_);
 
     const Vec2 rigCenterForTells = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
-    for (const MiningProjectileSnapshot& projectile : snapshot.miningProjectiles) {
+    for (const MiningProjectileVisual& projectile : snapshot.miningProjectiles) {
         const float t = static_cast<float>(std::clamp(projectile.lifetime <= 0.0 ? 1.0 : projectile.age / projectile.lifetime, 0.0, 1.0));
         const float fade = (1.0F - t) * (1.0F - t);
         const Vec2 start = cellCenter(projectile.startX, projectile.startY);
@@ -2223,28 +2282,34 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             start.x + (end.x - start.x) * std::min(1.0F, t * 1.35F),
             start.y + (end.y - start.y) * std::min(1.0F, t * 1.35F)
         };
-        Color shot = miningProjectileColor(projectile.team, projectile.sourceType, projectile.affinity, projectile.critical);
+        Color shot = miningProjectileColor(
+            static_cast<int>(projectile.team),
+            static_cast<int>(projectile.sourceType),
+            static_cast<int>(projectile.affinity),
+            projectile.critical);
         shot.a *= fade;
         const Vec2 tail {
             start.x + (end.x - start.x) * std::max(0.0F, std::min(1.0F, t * 1.35F - 0.18F)),
             start.y + (end.y - start.y) * std::max(0.0F, std::min(1.0F, t * 1.35F - 0.18F))
         };
-        const bool alliedShot = projectile.team == static_cast<int>(MiningCombatTeam::Allied);
+        const bool alliedShot = projectile.team == MiningCombatTeam::Allied;
         drawLine(start.x, start.y, head.x, head.y, {shot.r, shot.g, shot.b, 0.18F * fade}, projectile.critical ? 5.2F : 3.6F);
         drawLine(tail.x, tail.y, head.x, head.y, {shot.r, shot.g, shot.b, alliedShot ? 0.62F * fade : 0.54F * fade}, projectile.critical ? 3.4F : 2.4F);
         drawCircle(head.x, head.y, cellSize * (projectile.critical ? 0.28F : 0.18F), shot, 12);
     }
 
-    for (const MiningEnemySnapshot& enemy : snapshot.miningEnemies) {
+    bool activeEnemyPresent = false;
+    for (const MiningEnemy& enemy : snapshot.miningEnemies) {
         if (!enemy.active) {
             continue;
         }
+        activeEnemyPresent = true;
         const Vec2 enemyCenter = cellCenter(enemy.x, enemy.y);
         const float health = static_cast<float>(std::clamp(enemy.maxHealth <= 0.0 ? 1.0 : enemy.health / enemy.maxHealth, 0.0, 1.0));
-        const Color base = miningEnemyColor(enemy.type, enemy.affinity);
-        const bool rangedEnemy = enemy.type == static_cast<int>(MiningEnemyType::Flying) || enemy.type == static_cast<int>(MiningEnemyType::Elemental);
-        const bool eliteEnemy = enemy.type == static_cast<int>(MiningEnemyType::Beetle) || enemy.type == static_cast<int>(MiningEnemyType::Mammal);
-        const bool spawnerEnemy = enemy.type == static_cast<int>(MiningEnemyType::Spawner);
+        const Color base = miningEnemyColor(static_cast<int>(enemy.type), static_cast<int>(enemy.affinity));
+        const bool rangedEnemy = enemy.type == MiningEnemyType::Flying || enemy.type == MiningEnemyType::Elemental;
+        const bool eliteEnemy = enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal;
+        const bool spawnerEnemy = enemy.type == MiningEnemyType::Spawner;
         const float attackInterval = rangedEnemy
             ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
             : static_cast<float>(tuning::mining::enemyMeleeAttackIntervalSeconds);
@@ -2287,9 +2352,9 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             drawLine(slashStart.x, slashStart.y, slashEnd.x, slashEnd.y, {1.0F, 0.22F, 0.12F, 0.12F + attackReady * 0.24F}, 1.8F + attackReady * 1.2F);
         }
         if (spawnerEnemy) {
-            const float spawnProgress = enemy.spawnIntervalSeconds <= 0.0
+            const float spawnProgress = enemy.spawn.intervalSeconds <= 0.0
                 ? 0.0F
-                : 1.0F - std::clamp(static_cast<float>(enemy.spawnCooldownSeconds / enemy.spawnIntervalSeconds), 0.0F, 1.0F);
+                : 1.0F - std::clamp(static_cast<float>(enemy.spawn.cooldownSeconds / enemy.spawn.intervalSeconds), 0.0F, 1.0F);
             const float pulse = 0.92F + spawnProgress * 0.22F;
             drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.42F * pulse, cellH * 1.42F * pulse, {base.r, base.g, base.b, 0.34F});
             drawRect(enemyCenter.x, enemyCenter.y, cellW * 0.92F, cellH * 0.92F, {0.28F, 0.02F, 0.12F, 0.96F});
@@ -2361,7 +2426,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
                 kPi * 2.0F);
         }
     }
-    for (const MiningGateMarkerSnapshot& marker : snapshot.miningGateMarkers) {
+    for (const MiningGateMarker& marker : snapshot.miningGateMarkers) {
         const Vec2 center = cellCenter(marker.x - 0.5, marker.y - 0.5);
         const Color markerColor = marker.activated
             ? Color {0.30F, 1.0F, 0.66F, 0.82F}
@@ -2373,11 +2438,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     if (snapshot.miningScannerPulse > 0.0) {
         std::vector<float>& scannerGridVertices = scratchVertices(384);
         const int sweepCells = static_cast<int>(std::ceil(scannerRevealRadiusCells));
-        std::vector<Vec2> scannerOrigins {drone};
-        for (const MiningMiniDroneSnapshot* survey : surveyDrones) {
-            scannerOrigins.push_back(cellCenter(survey->x, survey->y));
-        }
-        for (const Vec2& scannerOrigin : scannerOrigins) {
+        const auto appendScannerGrid = [&](const Vec2& scannerOrigin) {
             for (int i = -sweepCells; i <= sweepCells; ++i) {
                 if (i % 2 != 0) {
                     continue;
@@ -2394,10 +2455,14 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
                     appendLine(scannerGridVertices, std::max(left, scannerOrigin.x - xExtent), gy, std::min(right, scannerOrigin.x + xExtent), gy, {0.40F, 0.92F, 1.0F, 0.022F * scannerPulse});
                 }
             }
+        };
+        appendScannerGrid(drone);
+        for (const MiningMiniDroneAgent* survey : miningSurveyDrones_) {
+            appendScannerGrid(cellCenter(survey->x, survey->y));
         }
         submitLines(scannerGridVertices, 1.0F);
     }
-    for (const MiningMiniDroneSnapshot* survey : surveyDrones) {
+    for (const MiningMiniDroneAgent* survey : miningSurveyDrones_) {
         const float pulse = std::clamp(
             static_cast<float>(survey->surveyPulseSeconds / tuning::mining::surveyDronePulseSeconds),
             0.0F,
@@ -2442,15 +2507,15 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     const float drillBitIntegrity = static_cast<float>(std::clamp(snapshot.miningDrillIntegrity, 0.0, 1.0));
     const bool drillBroken = drillBitIntegrity <= 0.001F;
     const float animationTime = static_cast<float>(snapshot.animationTime);
-    const bool alliedShotActive = std::any_of(snapshot.miningProjectiles.begin(), snapshot.miningProjectiles.end(), [](const MiningProjectileSnapshot& projectile) {
-        return projectile.team == static_cast<int>(MiningCombatTeam::Allied);
+    const bool alliedShotActive = std::any_of(snapshot.miningProjectiles.begin(), snapshot.miningProjectiles.end(), [](const MiningProjectileVisual& projectile) {
+        return projectile.team == MiningCombatTeam::Allied;
     });
     const float scannerActivity = std::clamp(static_cast<float>(snapshot.miningScannerPulse) / kMiningScannerPulseSeconds, 0.0F, 1.0F);
-    for (const MiningMiniDroneSnapshot& shieldDrone : snapshot.miningMiniDrones) {
+    for (const MiningMiniDroneAgent& shieldDrone : snapshot.miningMiniDrones) {
         if (snapshot.miningExtractionActive) {
             continue;
         }
-        if (shieldDrone.role != static_cast<int>(MiniDroneRole::Defense)) {
+        if (shieldDrone.role != MiniDroneRole::Defense) {
             continue;
         }
         const Vec2 shieldDronePosition = cellCenter(shieldDrone.x, shieldDrone.y);
@@ -2531,11 +2596,11 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     }
 
     for (std::size_t i = 0; !snapshot.miningExtractionActive && i < snapshot.miningMiniDrones.size(); ++i) {
-        const MiningMiniDroneSnapshot& agent = snapshot.miningMiniDrones[i];
-        const int role = std::clamp(agent.role, 0, static_cast<int>(MiniDroneRole::Defense));
+        const MiningMiniDroneAgent& agent = snapshot.miningMiniDrones[i];
+        const int role = std::clamp(static_cast<int>(agent.role), 0, static_cast<int>(MiniDroneRole::Defense));
         const int upgradeLevel = std::clamp(agent.upgradeLevel, 1, 3);
         const MiningMiniDroneBehavior behavior = static_cast<MiningMiniDroneBehavior>(std::clamp(
-            agent.behavior,
+            static_cast<int>(agent.behavior),
             static_cast<int>(MiningMiniDroneBehavior::Following),
             static_cast<int>(MiningMiniDroneBehavior::Docked)));
         float activity = 0.0F;
@@ -2588,7 +2653,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
                 behavior == MiningMiniDroneBehavior::Engaging &&
                 agent.targetEnemyIndex >= 0 && agent.targetEnemyIndex < static_cast<int>(snapshot.miningEnemies.size());
             if (attackTargeting) {
-                const MiningEnemySnapshot& targetEnemy = snapshot.miningEnemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
+                const MiningEnemy& targetEnemy = snapshot.miningEnemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
                 const Vec2 targetPosition = cellCenter(targetEnemy.x, targetEnemy.y);
                 Vec2 gunDirection = normalize({targetPosition.x - sx, targetPosition.y - sy});
                 if (std::abs(gunDirection.x) + std::abs(gunDirection.y) < 0.001F) {
@@ -2694,11 +2759,12 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             agent.targetCellX >= 0 && agent.targetCellY >= 0) {
             const Vec2 treatmentTarget = cellCenter(agent.targetCellX, agent.targetCellY);
             int affinity = static_cast<int>(MiningElementalAffinity::None);
-            const auto targetCell = std::find_if(snapshot.miningCells.begin(), snapshot.miningCells.end(), [&](const MiningCellSnapshot& cell) {
-                return cell.x == agent.targetCellX && cell.y == agent.targetCellY;
-            });
-            if (targetCell != snapshot.miningCells.end()) {
-                affinity = targetCell->hazardAffinity;
+            if (agent.targetCellX < snapshot.miningWidth && agent.targetCellY < snapshot.miningHeight) {
+                const std::size_t targetIndex = static_cast<std::size_t>(
+                    agent.targetCellY * snapshot.miningWidth + agent.targetCellX);
+                if (targetIndex < renderedCellCount) {
+                    affinity = static_cast<int>(snapshot.miningCells[targetIndex].hazardAffinity);
+                }
             }
             const Color treatmentColor = miningHazardColor(affinity);
             const float beamPulse = 0.62F + activityPulse * 0.38F;
@@ -2840,7 +2906,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
     if (snapshot.miningExtractionActive) {
         const float miniWindow = 0.34F;
         for (std::size_t i = 0; i < snapshot.miningMiniDrones.size(); ++i) {
-            const MiningMiniDroneSnapshot& agent = snapshot.miningMiniDrones[i];
+            const MiningMiniDroneAgent& agent = snapshot.miningMiniDrones[i];
             const float launchDelay = static_cast<float>(i) * 0.045F;
             const float entry = smoothExtraction((extractionProgress - launchDelay) / miniWindow);
             if (entry >= 0.999F) {
@@ -2856,7 +2922,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             const float trail = (1.0F - entry) * (0.10F + 0.08F * std::sin(static_cast<float>(i) * 1.7F + extractionProgress * 15.0F));
             drawLine(start.x, start.y, position.x, position.y, {0.32F, 0.92F, 1.0F, std::max(0.0F, trail)}, 1.4F);
             drawRadialGlow(position.x, position.y, size * 0.62F, {0.24F, 0.88F, 1.0F, 0.09F + (1.0F - entry) * 0.08F}, 12);
-            const int asset = miningMiniDroneAsset(agent.role);
+            const int asset = miningMiniDroneAsset(static_cast<int>(agent.role));
             if (textureReady(asset)) {
                 drawSpriteRotated(position.x, position.y, size, size, -course.x, -course.y, {1.0F, 1.0F, 1.0F, 1.0F}, asset);
             } else {
@@ -2897,7 +2963,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             drawRadialGlow(shipBay.x, shipSpriteY, shipSpriteSize * (0.72F + extractionLaunch * 0.55F), {0.34F, 0.92F, 1.0F, flash}, 36);
         }
     }
-    if (!snapshot.miningExtractionActive && (droneHealth < 0.995F || !snapshot.miningEnemies.empty())) {
+    if (!snapshot.miningExtractionActive && (droneHealth < 0.995F || activeEnemyPresent)) {
         const float healthGaugeY = drone.y - droneSize * 0.62F;
         const float healthGaugeW = cellW * 3.4F;
         const float healthFillW = cellW * 3.1F;
@@ -2989,7 +3055,7 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
         submit(particleVertices, 0x0004);
     }
 
-    for (const MiningDamageNumberSnapshot& number : snapshot.miningDamageNumbers) {
+    for (const MiningDamageNumber& number : snapshot.miningDamageNumbers) {
         const Vec2 label = cellCenter(number.x, number.y);
         drawMiningCombatText(
             label.x,
@@ -2997,10 +3063,10 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             cellSize,
             std::max(1, static_cast<int>(std::ceil(number.amount))),
             static_cast<float>(number.age),
-            number.team == static_cast<int>(MiningCombatTeam::Allied),
+            number.team == MiningCombatTeam::Allied,
             number.critical,
             number.rigDamage,
-            number.kind);
+            static_cast<int>(number.kind));
     }
 
     if (damagePressure > 0.01F) {
@@ -3030,6 +3096,9 @@ void OpenGlRenderer::drawMining(const RenderSnapshot& snapshot)
             {gradientWidth, frameWidth, feather, cornerRadius},
             {right - left, top - bottom});
     }
+    // The backing capacity is retained, but frame-lifetime snapshot pointers
+    // must not escape the synchronous mining render.
+    miningSurveyDrones_.clear();
 }
 
 void OpenGlRenderer::drawSurfaceScan(const RenderSnapshot& snapshot)
@@ -3285,7 +3354,6 @@ void OpenGlRenderer::drawTelemetry(const RenderSnapshot& snapshot)
 
     drawLine(left, cautionY, right, cautionY, cautionColor, 1.6F);
 
-    std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     std::vector<float>& heatGlowVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     for (int i = 1; i < snapshot.telemetryCount; ++i) {
         const float t0 = static_cast<float>(i - 1) / sampleDenominator;
@@ -3295,12 +3363,18 @@ void OpenGlRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x0 = left + t0 * width;
         const float x1 = left + t1 * width;
         appendLine(heatGlowVertices, x0, h0, x1, h1, heatGlow);
-        appendLine(heatVertices, x0, h0, x1, h1, heatColor);
     }
     submitLines(heatGlowVertices, 5.0F);
+    std::vector<float>& heatVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    for (int i = 1; i < snapshot.telemetryCount; ++i) {
+        const float t0 = static_cast<float>(i - 1) / sampleDenominator;
+        const float t1 = static_cast<float>(i) / sampleDenominator;
+        const float h0 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i - 1)]) * height;
+        const float h1 = bottom + static_cast<float>(snapshot.heatTelemetry[static_cast<std::size_t>(i)]) * height;
+        appendLine(heatVertices, left + t0 * width, h0, left + t1 * width, h1, heatColor);
+    }
     submitLines(heatVertices, 1.5F);
 
-    std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     std::vector<float>& warningGlowVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
     const Color warningColor = mix(warningSafe, warningHot, static_cast<float>(snapshot.warning));
     const Color warningGlow = {warningColor.r, warningColor.g, warningColor.b, 0.22F};
@@ -3312,9 +3386,16 @@ void OpenGlRenderer::drawTelemetry(const RenderSnapshot& snapshot)
         const float x0 = left + t0 * width;
         const float x1 = left + t1 * width;
         appendLine(warningGlowVertices, x0, y0, x1, y1, warningGlow);
-        appendLine(warningVertices, x0, y0, x1, y1, warningColor);
     }
     submitLines(warningGlowVertices, 6.0F);
+    std::vector<float>& warningVertices = scratchVertices(static_cast<std::size_t>(snapshot.telemetryCount - 1) * 16);
+    for (int i = 1; i < snapshot.telemetryCount; ++i) {
+        const float t0 = static_cast<float>(i - 1) / sampleDenominator;
+        const float t1 = static_cast<float>(i) / sampleDenominator;
+        const float y0 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i - 1)]) * height;
+        const float y1 = bottom + static_cast<float>(snapshot.telemetry[static_cast<std::size_t>(i)]) * height;
+        appendLine(warningVertices, left + t0 * width, y0, left + t1 * width, y1, warningColor);
+    }
     submitLines(warningVertices, 2.2F);
 
     const float endpointT = static_cast<float>(snapshot.telemetryCount - 1) / sampleDenominator;
@@ -3347,6 +3428,70 @@ void OpenGlRenderer::drawSolarBackground(const RenderSnapshot& snapshot, float a
         : 0.0F;
     drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, currentAlpha}, LocalSolarBgAsset, frame, 4, false);
     drawSprite(0.0F, 0.0F, 2.06F, 2.06F, {1.0F, 1.0F, 1.0F, std::clamp(nextAlpha, 0.0F, 1.0F)}, LocalSolarBgAsset, nextFrame, 4, false);
+}
+
+void OpenGlRenderer::drawTitleBackdrop(const RenderSnapshot& snapshot)
+{
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.008F, 0.014F, 0.025F, 1.0F}, false);
+    drawSolarBackground(snapshot, 0.90F, true);
+
+    // Keep title motion independent of simulation state. Bounding the input
+    // retains floating-point precision during very long menu sessions while
+    // preserving a continuous loop driven by the monotonic visual clock.
+    const float time = static_cast<float>(std::fmod(std::max(0.0, snapshot.animationTime), 600.0));
+
+    const Vec2 earth {
+        1.06F + std::sin(time * 0.055F) * 0.014F,
+        -0.58F + std::cos(time * 0.047F) * 0.012F
+    };
+    const float moonAngle = time * 0.075F + 2.15F;
+    const Vec2 moon {
+        earth.x + std::cos(moonAngle) * 0.48F,
+        earth.y + std::sin(moonAngle) * 0.27F
+    };
+
+    drawRadialGlow(earth.x, earth.y, 0.47F, {0.18F, 0.60F, 1.0F, 0.13F}, 64);
+    drawEllipseLine(earth.x, earth.y, 0.48F, 0.27F, {0.47F, 0.77F, 0.94F, 0.16F}, 80, 0.0F, kPi * 2.0F);
+    drawSprite(earth.x, earth.y, 0.68F, 0.68F, {0.84F, 0.92F, 1.0F, 0.78F}, EarthAsset);
+    drawRadialGlow(moon.x, moon.y, 0.09F, {0.70F, 0.84F, 1.0F, 0.10F}, 32);
+    drawSprite(moon.x, moon.y, 0.13F, 0.13F, {0.88F, 0.93F, 1.0F, 0.72F}, MoonAsset);
+
+    const Vec2 rocket {
+        0.64F + std::sin(time * 0.19F) * 0.035F,
+        0.31F + std::cos(time * 0.16F) * 0.024F
+    };
+    const Vec2 forward = normalize({
+        -0.12F + std::sin(time * 0.13F) * 0.025F,
+        1.0F
+    });
+    const Vec2 exhaust {
+        rocket.x - forward.x * 0.205F,
+        rocket.y - forward.y * 0.205F
+    };
+    const float thrustPulse = 0.78F + std::sin(time * 5.8F) * 0.10F;
+    const int thrustFrame = static_cast<int>(std::floor(time * 12.0F)) % 6;
+
+    drawRadialGlow(exhaust.x, exhaust.y, 0.12F, {0.16F, 0.74F, 1.0F, 0.11F}, 36);
+    drawSpriteRotated(
+        exhaust.x,
+        exhaust.y,
+        0.10F,
+        0.18F,
+        forward.x,
+        forward.y,
+        {0.82F, 0.96F, 1.0F, thrustPulse},
+        ThrustAsset,
+        thrustFrame,
+        6);
+    drawSpriteRotated(
+        rocket.x,
+        rocket.y,
+        0.36F,
+        0.36F,
+        forward.x,
+        forward.y,
+        {0.94F, 0.98F, 1.0F, 0.94F},
+        RocketClosedAsset);
 }
 
 void OpenGlRenderer::drawRoute(const RenderSnapshot& snapshot)
@@ -3827,51 +3972,143 @@ void OpenGlRenderer::submit(
     int effectMode,
     Color effectColor,
     std::array<float, 4> effectParams,
-    std::array<float, 2> effectSize)
+    std::array<float, 2> effectSize,
+    float lineWidth)
 {
     if (vertices.empty()) {
         return;
     }
 
-    const std::vector<float>* uploadVertices = &vertices;
-    if (worldSpace) {
-        projectedVertices_ = vertices;
-        const float invCssWidth = 2.0F / std::max(1.0F, sceneCssWidth_);
-        const float invCssHeight = 2.0F / std::max(1.0F, sceneCssHeight_);
-        for (std::size_t i = 0; i + 1 < projectedVertices_.size(); i += 8) {
-            const float pixelX = scenePixelCenterX_ + projectedVertices_[i] * sceneWorldUnitX_;
-            const float pixelY = scenePixelCenterY_ + projectedVertices_[i + 1] * sceneWorldUnitY_;
-            projectedVertices_[i] = pixelX * invCssWidth - 1.0F;
-            projectedVertices_[i + 1] = pixelY * invCssHeight - 1.0F;
+    const std::size_t firstVertex = frameVertices_.size() / 8U;
+    const std::size_t vertexCount = vertices.size() / 8U;
+    frameVertices_.insert(frameVertices_.end(), vertices.begin(), vertices.end());
+
+    const DrawCommand next {
+        firstVertex,
+        vertexCount,
+        primitive,
+        textured,
+        texture,
+        worldSpace,
+        lineWidth,
+        effectMode,
+        effectColor,
+        effectParams,
+        effectSize
+    };
+    const auto sameColor = [](const Color& a, const Color& b) {
+        return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+    };
+    if (!drawCommands_.empty()) {
+        DrawCommand& previous = drawCommands_.back();
+        const bool compatible = previous.firstVertex + previous.vertexCount == next.firstVertex
+            && previous.primitive == next.primitive
+            && previous.textured == next.textured
+            && previous.texture == next.texture
+            && previous.worldSpace == next.worldSpace
+            && previous.lineWidth == next.lineWidth
+            && previous.effectMode == next.effectMode
+            && sameColor(previous.effectColor, next.effectColor)
+            && previous.effectParams == next.effectParams
+            && previous.effectSize == next.effectSize;
+        if (compatible) {
+            previous.vertexCount += next.vertexCount;
+            return;
         }
-        uploadVertices = &projectedVertices_;
+    }
+    drawCommands_.push_back(next);
+}
+
+void OpenGlRenderer::submitLines(const std::vector<float>& vertices, float width, bool worldSpace)
+{
+    submit(vertices, 0x0001, false, 0, worldSpace, 0, {}, {}, {}, width);
+}
+
+void OpenGlRenderer::flushCommands()
+{
+    if (frameVertices_.empty() || drawCommands_.empty()) {
+        return;
     }
 
     glUseProgram(program_);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glUniform1f(useTextureUniform_, textured ? 1.0F : 0.0F);
-    glUniform1f(effectModeUniform_, static_cast<float>(effectMode));
-    if (effectMode != 0) {
-        glUniform4f(effectColorUniform_, effectColor.r, effectColor.g, effectColor.b, effectColor.a);
-        glUniform4f(effectParamsUniform_, effectParams[0], effectParams[1], effectParams[2], effectParams[3]);
-        glUniform2f(effectSizeUniform_, effectSize[0], effectSize[1]);
-    }
-    if (textured) {
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glUniform1i(samplerUniform_, 0);
-    }
+    glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(vao_);
     glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(uploadVertices->size() * sizeof(float)), uploadVertices->data(), GL_DYNAMIC_DRAW);
-    glDrawArrays(static_cast<GLenum>(primitive), 0, static_cast<GLsizei>(uploadVertices->size() / 8));
-}
+    glBufferData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(frameVertices_.size() * sizeof(float)),
+        frameVertices_.data(),
+        GL_DYNAMIC_DRAW);
+    diagnostics_.bufferUploads = 1;
+    diagnostics_.uploadedBytes = frameVertices_.size() * sizeof(float);
 
-void OpenGlRenderer::submitLines(const std::vector<float>& vertices, float width, bool worldSpace)
-{
-    glLineWidth(width);
-    submit(vertices, 0x0001, false, 0, worldSpace);
+    bool lastWorldSpace = false;
+    bool transformInitialized = false;
+    bool lastTextured = false;
+    bool textureModeInitialized = false;
+    unsigned int lastTexture = 0;
+    int lastEffectMode = -1;
+    float lastLineWidth = -1.0F;
+    for (const DrawCommand& command : drawCommands_) {
+        if (!transformInitialized || command.worldSpace != lastWorldSpace) {
+            if (command.worldSpace) {
+                glUniform2f(
+                    positionScaleUniform_,
+                    sceneWorldUnitX_ * 2.0F / std::max(1.0F, sceneCssWidth_),
+                    sceneWorldUnitY_ * 2.0F / std::max(1.0F, sceneCssHeight_));
+                glUniform2f(
+                    positionOffsetUniform_,
+                    scenePixelCenterX_ * 2.0F / std::max(1.0F, sceneCssWidth_) - 1.0F,
+                    scenePixelCenterY_ * 2.0F / std::max(1.0F, sceneCssHeight_) - 1.0F);
+            } else {
+                glUniform2f(positionScaleUniform_, 1.0F, 1.0F);
+                glUniform2f(positionOffsetUniform_, 0.0F, 0.0F);
+            }
+            lastWorldSpace = command.worldSpace;
+            transformInitialized = true;
+        }
+        if (!textureModeInitialized || command.textured != lastTextured) {
+            glUniform1f(useTextureUniform_, command.textured ? 1.0F : 0.0F);
+            lastTextured = command.textured;
+            textureModeInitialized = true;
+        }
+        if (command.textured && command.texture != lastTexture) {
+            glBindTexture(GL_TEXTURE_2D, command.texture);
+            lastTexture = command.texture;
+        }
+        if (command.effectMode != lastEffectMode) {
+            glUniform1f(effectModeUniform_, static_cast<float>(command.effectMode));
+            lastEffectMode = command.effectMode;
+        }
+        if (command.effectMode != 0) {
+            glUniform4f(
+                effectColorUniform_,
+                command.effectColor.r,
+                command.effectColor.g,
+                command.effectColor.b,
+                command.effectColor.a);
+            glUniform4f(
+                effectParamsUniform_,
+                command.effectParams[0],
+                command.effectParams[1],
+                command.effectParams[2],
+                command.effectParams[3]);
+            glUniform2f(effectSizeUniform_, command.effectSize[0], command.effectSize[1]);
+        }
+        if (command.primitive == 0x0001 && command.lineWidth != lastLineWidth) {
+            glLineWidth(command.lineWidth);
+            lastLineWidth = command.lineWidth;
+        }
+        glDrawArrays(
+            static_cast<GLenum>(command.primitive),
+            static_cast<GLint>(command.firstVertex),
+            static_cast<GLsizei>(command.vertexCount));
+    }
+
+    diagnostics_.sceneDrawCalls = static_cast<int>(drawCommands_.size());
+    diagnostics_.sceneVertices = static_cast<int>(frameVertices_.size() / 8U);
 }
 
 void OpenGlRenderer::shutdown()
@@ -3902,7 +4139,20 @@ void OpenGlRenderer::shutdown()
     program_ = 0;
     vao_ = 0;
     vbo_ = 0;
+    frameVertices_.clear();
+    drawCommands_.clear();
     initialized_ = false;
+    diagnostics_ = {};
+}
+
+void OpenGlRenderer::setPreferences(const AppPreferences& preferences)
+{
+    cameraShakeEnabled_ = !preferences.cameraShakeDisabled;
+}
+
+RendererDiagnostics OpenGlRenderer::diagnostics() const
+{
+    return diagnostics_;
 }
 
 std::string_view OpenGlRenderer::description() const

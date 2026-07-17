@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string]$EmsdkVersion = $(if ($env:EMSDK_VERSION) { $env:EMSDK_VERSION } else { "latest" }),
+    [string]$EmsdkVersion = $(if ($env:EMSDK_VERSION) { $env:EMSDK_VERSION } else { "6.0.0" }),
     [switch]$SkipSystemPackages,
     [switch]$SkipNativeCompiler,
     [switch]$SkipPythonVenv,
@@ -186,7 +186,7 @@ Require-Command git
 Require-Command cmake
 Require-Command ninja
 Require-Command node
-Require-Command npm
+Require-Command npm.cmd
 
 if (-not $SkipPythonVenv) {
     $python = Get-PythonLauncher
@@ -220,9 +220,9 @@ Update-ProcessPath
 
 if (-not $SkipNpmInstall) {
     if (Test-Path (Join-Path $RepoRoot "package-lock.json")) {
-        Invoke-External "npm" @("ci")
+        Invoke-External "npm.cmd" @("ci")
     } else {
-        Invoke-External "npm" @("install")
+        Invoke-External "npm.cmd" @("install")
     }
 }
 
@@ -255,7 +255,7 @@ Write-Host ""
 Write-Host "Build and run the browser version:"
 Write-Host "  cmake --preset web-release"
 Write-Host "  cmake --build --preset web-release"
-Write-Host "  npm run serve:web"
+Write-Host "  npm.cmd run serve:web"
 Write-Host ""
 Write-Host "Installed Emscripten SDK:"
 Write-Host "  $EmsdkDir"

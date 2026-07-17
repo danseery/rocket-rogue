@@ -14,6 +14,8 @@
 
 namespace rocket {
 
+struct PanelRenderContext;
+
 enum class ControllerHapticCue {
     None = 0,
     Confirmation,
@@ -30,14 +32,13 @@ public:
     void shutdown();
     void inputFrame(const ControllerFrame& frame, double realTimeSeconds);
     void tick(double deltaSeconds);
-    void render();
+    void renderScene();
+    void renderUi();
     int currentScreen() const;
     void setControllerPreferences(const ControllerPreferences& preferences);
     const ControllerPreferences& controllerPreferences() const;
     void setActiveInputSource(InputSource source);
-    InputSource activeInputSource() const;
     InputContext inputContext() const;
-    PauseReason pauseReason() const;
     std::string controllerDebugStatusJson() const;
     ControllerHapticCue consumePendingControllerHapticCue();
 
@@ -121,6 +122,8 @@ public:
     void recruitCrew(int candidateIndex);
     void trainCrew();
     void restCrew();
+    void newGame();
+    void continueGame();
     void resetSave();
     bool uiMouseMove(int x, int y);
     bool uiMouseDown(int x, int y, int button);
@@ -180,14 +183,16 @@ private:
     void completeLaunch(double burnMultiplier, RecoveryMethod method);
     void beginArrivalFanfare();
     void finishArrivalFanfare();
-    void loadSavedGameOrDefault();
+    void loadSavedGameOrDefault(bool showTitleScreen);
     void beginDebugSandbox(const std::string& statusLine);
     void seedDebugDroneLoadout();
     void captureDebugDroneLoadout();
     void applyDebugDroneLoadout();
     void applyDebugActOneCheckpoint();
     void save();
+    PanelRenderContext panelRenderContext(const PreparedLaunch& flightModel) const;
     void refreshPanel();
+    void refreshRealtimeHud();
     void runUiAction(const std::string& action);
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
@@ -241,7 +246,13 @@ private:
     bool lastMiningFailurePending_ = false;
     double lastControllerInputSeconds_ = 0.0;
     double visualTimeSeconds_ = 0.0;
+    bool titleScreenActive_ = true;
+    bool hasSavedGame_ = false;
+    std::string titleNotice_;
     bool panelDirty_ = true;
+    bool realtimeHudDirty_ = true;
+    std::uint64_t panelStructureKey_ = 0;
+    RealtimeHudState realtimeHudState_;
     bool debugSessionActive_ = false;
     int debugActOneCheckpoint_ = -1;
     struct DebugDroneLoadout {

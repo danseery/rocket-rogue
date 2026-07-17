@@ -345,6 +345,8 @@ void miningGateContractsAndRuntimeAreDeterministic()
     require(hazardState.run.mining.gate.type == MiningGateType::HazardCocoon
             && hazardState.run.mining.gate.shellTilesRemaining == 8,
         "Hazard Cocoon should stamp eight marked, deterministic shell tiles");
+    require(hazardState.run.mining.gate.derivedStateDirty,
+        "new gate runtime should require one derived-state reconciliation");
     hazardState.run.mining.droneX = hazardState.run.mining.artifact.x;
     hazardState.run.mining.droneY = hazardState.run.mining.artifact.y;
     toggleMiningTether(hazardState);
@@ -358,6 +360,11 @@ void miningGateContractsAndRuntimeAreDeterministic()
     updateMiningRun(hazardState, catalog, 0.01);
     require(hazardState.run.mining.gate.state == MiningGateState::Open,
         "treating every shell tile should open the cocoon");
+    require(!hazardState.run.mining.gate.derivedStateDirty,
+        "end-of-tick gate reconciliation should leave the derived cache clean");
+    updateMiningRun(hazardState, catalog, 0.01);
+    require(!hazardState.run.mining.gate.derivedStateDirty,
+        "a tick with no gate-affecting mutation should keep the derived cache clean");
 
     GameState enemyState = createNewGame(catalog, 502);
     prepareSurface(enemyState, content::destination::nearbyStar);
@@ -376,14 +383,21 @@ void miningGateContractsAndRuntimeAreDeterministic()
     const MiningArenaRequest surveyRequest {MiningAct::ActOne, 8, 0x5151, true, MiningGateType::SurveyTriangulation};
     require(startMiningRun(surveyState, catalog, surveyRequest, false).applied, "Survey Triangulation debug arena should start");
     require(surveyState.run.mining.gate.markers.size() == 3, "triangulation should stamp three distinct scanner origins");
+    updateMiningRun(surveyState, catalog, 0.01);
+    require(!surveyState.run.mining.gate.derivedStateDirty,
+        "initial triangulation reconciliation should clean the derived cache");
     for (const MiningGateMarker marker : surveyState.run.mining.gate.markers) {
         surveyState.run.mining.droneX = marker.x;
         surveyState.run.mining.droneY = marker.y;
         pulseMiningScanner(surveyState, catalog);
     }
+    require(surveyState.run.mining.gate.derivedStateDirty,
+        "activating a triangulation marker should invalidate gate-derived state");
     updateMiningRun(surveyState, catalog, 0.01);
     require(surveyState.run.mining.gate.surveyComplete && surveyState.run.mining.gate.state == MiningGateState::Open,
         "a no-drone rig should solve triangulation by repositioning to every marker");
+    require(!surveyState.run.mining.gate.derivedStateDirty,
+        "triangulation should resolve and clean its cache in the same simulation tick");
 
     GameState burrowState = createNewGame(catalog, 504);
     prepareSurface(burrowState, content::destination::nearbyGalaxy);
@@ -401,6 +415,11 @@ void miningGateContractsAndRuntimeAreDeterministic()
     require(std::any_of(burrowState.run.mining.enemies.begin(), burrowState.run.mining.enemies.end(), [](const MiningEnemy& enemy) {
         return enemy.gateAssociated && enemy.type == MiningEnemyType::Mammal && enemy.active;
     }), "an unopened breach should always replenish its assigned Mammal");
+    require(burrowState.run.mining.gate.derivedStateDirty,
+        "replenishing a gate-associated Mammal should invalidate enemy-derived state");
+    updateMiningRun(burrowState, catalog, 0.01);
+    require(!burrowState.run.mining.gate.derivedStateDirty,
+        "the replenished encounter should reconcile once and remain clean without another mutation");
 
     for (const auto [type, act, difficulty] : std::array<std::tuple<MiningGateType, MiningAct, int>, 4> {{
              {MiningGateType::FragileExcavation, MiningAct::ActOne, 8},
@@ -421,8 +440,9 @@ void miningGateContractsAndRuntimeAreDeterministic()
     const std::optional<SaveData> gateRoundTrip = deserializeSaveData(serializeSaveData(save));
     require(gateRoundTrip.has_value()
             && gateRoundTrip->mining.gate.type == MiningGateType::HazardCocoon
+            && gateRoundTrip->mining.gate.derivedStateDirty
             && gateRoundTrip->miningStorySites.front().artifactId == meta.miningStorySites.front().artifactId,
-        "active gate state and persistent story identity should survive save/load");
+        "active gate state and persistent story identity should survive save/load while transient derived state reloads dirty");
 }
 
 } // namespace

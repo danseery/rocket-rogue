@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "description": "C++20 native OpenGL and WebGL2 rocket-launch roguelite.",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=22 <25"
   },
   "scripts": {
     "sanity": "node tools/sanity-check.mjs",
@@ -19,6 +19,9 @@
     "configure:native:release": "node tools/run-cmake-preset.mjs configure native-release",
     "build:native:release": "node tools/run-cmake-preset.mjs build native-release",
     "test:native:release": "node tools/run-cmake-preset.mjs test native-release",
+    "configure:native:profile": "node tools/run-cmake-preset.mjs configure native-profile",
+    "build:native:profile": "node tools/run-cmake-preset.mjs build native-profile",
+    "test:native:profile": "node tools/run-cmake-preset.mjs test native-profile",
     "package:native": "node tools/run-cmake-preset.mjs build package-native",
     "configure:web": "node tools/run-cmake-preset.mjs configure web-release",
     "build:web": "node tools/run-cmake-preset.mjs build web-release",

@@ -52,6 +52,26 @@ extern "C" {
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_new_game()
+{
+    if (g_app) {
+        g_app->newGame();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_continue_game()
+{
+    if (g_app) {
+        g_app->continueGame();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_start_launch()
 {
     if (g_app) {
@@ -1005,7 +1025,7 @@ int main()
     if (!g_platformHost->createGraphicsContext()) return 1;
     g_textureSource = std::make_unique<rocket::WebTextureSource>();
     g_uiBridge = std::make_unique<rocket::WebUiBridge>();
-    g_renderer = std::make_unique<rocket::OpenGlRenderer>(*g_platformHost, *g_preferenceStore, *g_textureSource);
+    g_renderer = std::make_unique<rocket::OpenGlRenderer>(*g_platformHost, *g_textureSource);
     g_ui = std::make_unique<rocket::GameRmlUi>(*g_preferenceStore, *g_platformHost, *g_uiBridge);
     g_services = std::make_unique<rocket::AppServices>(rocket::AppServices {
         *g_saveStore, *g_preferenceStore, *g_platformHost, *g_gamepadSource,

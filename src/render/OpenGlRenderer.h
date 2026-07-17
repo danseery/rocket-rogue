@@ -4,6 +4,8 @@
 #include "platform/AppServices.h"
 
 #include <array>
+#include <cstddef>
+#include <span>
 #include <vector>
 
 namespace rocket {
@@ -13,75 +15,6 @@ struct Color {
     float g = 1.0F;
     float b = 1.0F;
     float a = 1.0F;
-};
-
-struct MiningCellSnapshot {
-    int x = 0;
-    int y = 0;
-    int material = 0;
-    double integrity = 1.0;
-    bool revealed = false;
-    bool hazard = false;
-    int hazardAffinity = 0;
-    bool gateAssociated = false;
-};
-
-struct MiningEnemySnapshot {
-    double x = 0.0;
-    double y = 0.0;
-    int type = 0;
-    int affinity = 0;
-    double health = 1.0;
-    double maxHealth = 1.0;
-    double effectRadius = 0.0;
-    double attackCooldownSeconds = 0.0;
-    bool active = true;
-    int spawned = 0;
-    int maxSpawns = 0;
-    double spawnCooldownSeconds = 0.0;
-    double spawnIntervalSeconds = 0.0;
-};
-
-struct MiningProjectileSnapshot {
-    double startX = 0.0;
-    double startY = 0.0;
-    double endX = 0.0;
-    double endY = 0.0;
-    double age = 0.0;
-    double lifetime = 0.35;
-    int team = 0;
-    int sourceType = 0;
-    int affinity = 0;
-    bool critical = false;
-};
-
-struct MiningMiniDroneSnapshot {
-    double x = 0.0;
-    double y = 0.0;
-    int role = 0;
-    int upgradeLevel = 1;
-    int behavior = 0;
-    int targetCellX = -1;
-    int targetCellY = -1;
-    int targetEnemyIndex = -1;
-    double surveyPulseSeconds = 0.0;
-    double defenseAngleRadians = 0.0;
-    double shieldCharge = 1.0;
-    double shieldRechargeSeconds = 0.0;
-    double shieldImpactSeconds = 0.0;
-    MaterialInventory haulMaterials;
-};
-
-struct MiningDamageNumberSnapshot {
-    double x = 0.0;
-    double y = 0.0;
-    double amount = 0.0;
-    double age = 0.0;
-    double lifetime = 0.90;
-    int team = 0;
-    int kind = 0;
-    bool critical = false;
-    bool rigDamage = false;
 };
 
 struct MiningArtifactSnapshot {
@@ -99,19 +32,11 @@ struct MiningArtifactSnapshot {
     int gateState = 0;
 };
 
-struct MiningGateMarkerSnapshot {
-    double x = 0.0;
-    double y = 0.0;
-    bool activated = false;
-};
-
-struct FlybyTrailPointSnapshot {
-    double x = 0.0;
-    double y = 0.0;
-};
-
 struct RenderSnapshot {
     Screen screen = Screen::Hangar;
+    // Presentation-only startup state. This does not participate in gameplay
+    // or save data; it selects the lightweight title composition below RmlUi.
+    bool titleScreen = false;
     LaunchResultType lastResult = LaunchResultType::None;
     double currentMultiplier = 1.0;
     double targetMultiplier = 1.5;
@@ -120,7 +45,6 @@ struct RenderSnapshot {
     double warning = 0.0;
     double shipDamage = 0.0;
     int destinationTier = 0;
-    int currentFrontierTier = 0;
     int debugActOneCheckpoint = -1;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool frontierTransfer = false;
@@ -140,11 +64,7 @@ struct RenderSnapshot {
     double miningDroneY = 0.0;
     double miningTargetX = 0.0;
     double miningTargetY = 0.0;
-    double miningDrillDirX = 0.0;
-    double miningDrillDirY = 1.0;
     double miningHeat = 0.0;
-    double miningOxygenSeconds = 15.0;
-    double miningFuelCycleProgress = 0.0;
     double miningDrillIntegrity = 1.0;
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
@@ -152,8 +72,6 @@ struct RenderSnapshot {
     bool miningAtReturnZone = false;
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;
-    double miningLoadFuelConsumptionMultiplier = 1.0;
-    double miningHazardDelta = 0.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
     double miningScannerRadius = 5.5;
@@ -166,57 +84,37 @@ struct RenderSnapshot {
     double miningHullDirY = 1.0;
     double miningBounce = 0.0;
     double miningBounceRelief = 0.0;
-    bool miningInputDrilling = false;
     bool miningTargetDrillable = false;
     bool miningDrilling = false;
-    int miningSharedFuel = 0;
-    int miningSharedFuelCapacity = 0;
     int miningCargo = 0;
     int miningStowedCargo = 0;
     bool miningExtractionActive = false;
     double miningExtractionProgress = 0.0;
-    int miningSupportDroneCount = 0;
-    int miningAttackDroneCount = 0;
-    int miningDefenseDroneCount = 0;
-    int miningSynergyCount = 0;
-    int miningSignatureTier = 0;
-    int miningSignatureStyle = 0;
-    int miningTunedDroneCount = 0;
-    std::vector<int> miningDroneRoles;
-    std::vector<int> miningDroneUpgradeLevels;
     MaterialInventory miningMaterials;
     MaterialInventory miningStowedMaterials;
     MiningArtifactSnapshot miningArtifact;
-    std::vector<MiningGateMarkerSnapshot> miningGateMarkers;
-    std::vector<MiningCellSnapshot> miningCells;
-    std::vector<MiningEnemySnapshot> miningEnemies;
-    std::vector<MiningMiniDroneSnapshot> miningMiniDrones;
-    std::vector<MiningProjectileSnapshot> miningProjectiles;
-    std::vector<MiningDamageNumberSnapshot> miningDamageNumbers;
-    bool flybyActive = false;
+    std::span<const MiningGateMarker> miningGateMarkers;
+    std::span<const MiningCell> miningCells;
+    std::span<const MiningEnemy> miningEnemies;
+    std::span<const MiningMiniDroneAgent> miningMiniDrones;
+    std::span<const MiningProjectileVisual> miningProjectiles;
+    std::span<const MiningDamageNumber> miningDamageNumbers;
     bool flybyCompleted = false;
     int flybyZone = 0;
     int flybyResult = 0;
-    double flybyElapsed = 0.0;
-    double flybyDuration = 1.0;
     double flybyShipX = 0.0;
     double flybyShipY = 0.0;
     double flybyVelocityX = 0.0;
     double flybyVelocityY = 0.0;
-    double flybyInputX = 0.0;
     double flybyInputY = 0.0;
     double flybyDestinationX = 0.0;
     double flybyDestinationY = 0.0;
-    double flybyIdealRadius = 0.0;
     double flybyGoodBand = 0.0;
     double flybyPerfectBand = 0.0;
-    std::vector<FlybyTrailPointSnapshot> flybyTrailPoints;
-    bool orbitActive = false;
+    std::span<const FlybyTrailPoint> flybyTrailPoints;
     bool orbitCompleted = false;
     int orbitZone = 0;
     int orbitResult = 0;
-    double orbitElapsed = 0.0;
-    double orbitDuration = 1.0;
     double orbitProgress = 0.0;
     double orbitShipX = 0.0;
     double orbitShipY = 0.0;
@@ -228,44 +126,52 @@ struct RenderSnapshot {
     double orbitTargetRadius = 0.0;
     double orbitGoodBand = 0.0;
     double orbitPerfectBand = 0.0;
-    std::vector<FlybyTrailPointSnapshot> orbitTrailPoints;
-    bool surfaceScanActive = false;
-    bool surfaceScanCompleted = false;
+    std::span<const FlybyTrailPoint> orbitTrailPoints;
     bool surfaceScanBusted = false;
     int surfaceScanPulses = 0;
     int surfaceScanMaxPulses = 1;
     double surfaceScanSignal = 0.0;
     double surfaceScanInterference = 0.0;
     double surfaceScanBustRisk = 0.0;
-    int surfaceScanCargo = 0;
     MaterialInventory surfaceScanMaterials;
     int surfaceScanArtifacts = 0;
     std::vector<MiningCellMaterial> surfaceScanPreviewMarkers;
     std::vector<int> surfaceScanPreviewDepthOffsets;
-    bool surfacePushActive = false;
-    bool surfacePushCompleted = false;
     bool surfacePushBusted = false;
     int surfacePushSteps = 0;
     int surfacePushMaxSteps = 1;
-    int surfacePushDepthGain = 0;
     double surfacePushPressure = 0.0;
     double surfacePushCollapseRisk = 0.0;
-    int surfacePushCargo = 0;
     MaterialInventory surfacePushMaterials;
     int surfacePushArtifacts = 0;
     std::vector<MiningCellMaterial> surfacePushRewardMarkers;
     std::vector<int> surfacePushRewardDepthOffsets;
     std::vector<MiningCellMaterial> surfacePushForecastMarkers;
     std::vector<int> surfacePushForecastDepthOffsets;
+
+    // These views are consumed synchronously by IGameRenderer::render(). The
+    // authoritative run state must therefore outlive that call and must not be
+    // mutated while the renderer is traversing the collections.
+    void bindMiningFrameViews(const MiningRunState& mining) noexcept
+    {
+        miningGateMarkers = mining.gate.markers;
+        miningCells = mining.terrain.cells;
+        miningEnemies = mining.enemies;
+        miningMiniDrones = mining.miniDrones;
+        miningProjectiles = mining.combatProjectiles;
+        miningDamageNumbers = mining.damageNumbers;
+    }
 };
 
 class OpenGlRenderer final : public IGameRenderer {
 public:
-    OpenGlRenderer(IPlatformHost& host, IPreferenceStore& preferences, ITextureSource& textures);
+    OpenGlRenderer(IPlatformHost& host, ITextureSource& textures);
 
     bool initialize() override;
     void render(const RenderSnapshot& snapshot) override;
     void shutdown() override;
+    void setPreferences(const AppPreferences& preferences) override;
+    RendererDiagnostics diagnostics() const override;
     std::string_view description() const override;
 
 private:
@@ -289,6 +195,7 @@ private:
     void warmTextures();
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
+    void drawTitleBackdrop(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
     void drawFlyby(const RenderSnapshot& snapshot);
     void drawOrbit(const RenderSnapshot& snapshot);
@@ -307,11 +214,12 @@ private:
         int effectMode = 0,
         Color effectColor = {},
         std::array<float, 4> effectParams = {},
-        std::array<float, 2> effectSize = {});
+        std::array<float, 2> effectSize = {},
+        float lineWidth = 1.0F);
     void submitLines(const std::vector<float>& vertices, float width, bool worldSpace = true);
+    void flushCommands();
 
     IPlatformHost& host_;
-    IPreferenceStore& preferences_;
     ITextureSource& textures_;
     unsigned int program_ = 0;
     unsigned int vao_ = 0;
@@ -322,6 +230,8 @@ private:
     int effectColorUniform_ = -1;
     int effectParamsUniform_ = -1;
     int effectSizeUniform_ = -1;
+    int positionScaleUniform_ = -1;
+    int positionOffsetUniform_ = -1;
     struct TextureAsset {
         const char* key = nullptr;
         const char* path = nullptr;
@@ -330,6 +240,20 @@ private:
         int height = 0;
         bool requested = false;
         bool ready = false;
+    };
+
+    struct DrawCommand {
+        std::size_t firstVertex = 0;
+        std::size_t vertexCount = 0;
+        int primitive = 0;
+        bool textured = false;
+        unsigned int texture = 0;
+        bool worldSpace = true;
+        float lineWidth = 1.0F;
+        int effectMode = 0;
+        Color effectColor;
+        std::array<float, 4> effectParams {};
+        std::array<float, 2> effectSize {};
     };
 
     struct MiningPickupBurst {
@@ -343,13 +267,17 @@ private:
 
     std::array<TextureAsset, 33> assets_ {};
     std::vector<float> vertices_;
-    std::vector<float> projectedVertices_;
+    std::vector<float> frameVertices_;
+    std::vector<DrawCommand> drawCommands_;
+    std::vector<int> currentMiningMaterials_;
     std::vector<int> previousMiningMaterials_;
     MaterialInventory previousMiningInventory_;
     MaterialInventory previousMiningStowedInventory_;
     int previousMiningCargo_ = 0;
     int previousMiningStowedCargo_ = 0;
+    std::vector<const MiningMiniDroneAgent*> miningSurveyDrones_;
     std::vector<MiningPickupBurst> miningPickupBursts_;
+    std::vector<MiningPickupBurst> miningPickupBurstScratch_;
     int previousMiningWidth_ = 0;
     int previousMiningHeight_ = 0;
     bool previousMiningActive_ = false;
@@ -369,6 +297,8 @@ private:
     float sceneWorldUnitX_ = 360.0F;
     float sceneWorldUnitY_ = 360.0F;
     float sceneAspect_ = 16.0F / 9.0F;
+    RendererDiagnostics diagnostics_;
+    bool cameraShakeEnabled_ = true;
     bool initialized_ = false;
 };
 

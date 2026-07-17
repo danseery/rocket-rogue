@@ -127,21 +127,21 @@ Bring forward:
 
 Adapt carefully:
 
-- Destructible terrain is exciting, but full free-form destruction is risky for this WebGL proof of concept. Start with generated rooms, deposits, and dig actions before attempting real-time terrain slicing.
+- Destructible terrain is exciting, but full free-form mesh destruction is risky for the shared native/web renderer. Keep generated cells, rooms, deposits, and dig actions authoritative before attempting real-time terrain slicing.
 - Grappling is compelling, but it may belong in the later surface action prototype rather than the first Mars research slice.
 - Weapon wheels and dual weapons may be overkill if combat is not present until another star system.
 - Physics-heavy movement needs careful camera and collision handling. The Unity summary already calls out bouncing, ghosting, and visual artifacts.
 
 Avoid for now:
 
-- Shipping Destructible2D-style mesh destruction in the C++/WebGL POC.
+- Shipping Destructible2D-style mesh destruction in the shared C++ OpenGL/WebGL application.
 - Adding enemies to Mars just because the exploration prototype has enemies.
 - Turning research into a large tech tree before the basic arrival -> research -> expedition -> extraction loop feels good.
 - Creating story artifact details before we know what artifacts mean.
 
 ## Current POC Scope
 
-The current C++ WebGL prototype should keep this scope focused:
+The current shared C++ native/web application should keep this scope focused:
 
 - Mars arrival opens research.
 - Research projects spend materials and blueprints.

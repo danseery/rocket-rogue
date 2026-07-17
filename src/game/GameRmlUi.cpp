@@ -16,6 +16,7 @@
 #include <RmlUi/Core/Log.h>
 #include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/SystemInterface.h>
+#include <RmlUi/Core/StringUtilities.h>
 
 #include "FontSource.h"
 
@@ -24,8 +25,10 @@
 #include <cstddef>
 #include <cmath>
 #include <cstdlib>
+#include <iomanip>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -166,6 +169,8 @@ void rr_rml_set_game_speed_multiplier(const char* value)
 }
 int rr_rml_debug_tools_enabled() { return currentPreferences().debugToolsEnabled ? 1 : 0; }
 void rr_rml_set_debug_tools_enabled(int enabled) { AppPreferences p = currentPreferences(); p.debugToolsEnabled = enabled != 0; storePreferences(std::move(p)); }
+int rr_rml_performance_stats_enabled() { return currentPreferences().performanceStatsEnabled ? 1 : 0; }
+void rr_rml_set_performance_stats_enabled(int enabled) { AppPreferences p = currentPreferences(); p.performanceStatsEnabled = enabled != 0; storePreferences(std::move(p)); }
 int rr_rml_help_disabled() { return currentPreferences().helpDisabled ? 1 : 0; }
 void rr_rml_set_help_disabled(int disabled) { AppPreferences p = currentPreferences(); p.helpDisabled = disabled != 0; storePreferences(std::move(p)); }
 int rr_rml_camera_shake_disabled() { return currentPreferences().cameraShakeDisabled ? 1 : 0; }
@@ -345,52 +350,84 @@ void main() {
         previousCull_ = glIsEnabled(GL_CULL_FACE);
 
         glViewport(0, 0, drawingWidth_, drawingHeight_);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_CULL_FACE);
-        glEnable(GL_BLEND);
+        if (previousDepth_) {
+            glDisable(GL_DEPTH_TEST);
+        }
+        if (previousCull_) {
+            glDisable(GL_CULL_FACE);
+        }
+        if (!previousBlend_) {
+            glEnable(GL_BLEND);
+        }
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        if (scissorEnabled_ || rootClip_.Valid()) {
-            glEnable(GL_SCISSOR_TEST);
+
+        glUseProgram(program_);
+        if (projectionWidth_ != logicalWidth_ || projectionHeight_ != logicalHeight_) {
+            const GLfloat projection[16] = {
+                2.0F / static_cast<GLfloat>(logicalWidth_), 0.0F, 0.0F, 0.0F,
+                0.0F, -2.0F / static_cast<GLfloat>(logicalHeight_), 0.0F, 0.0F,
+                0.0F, 0.0F, -1.0F, 0.0F,
+                -1.0F, 1.0F, 0.0F, 1.0F,
+            };
+            glUniformMatrix4fv(projectionLocation_, 1, GL_FALSE, projection);
+            projectionWidth_ = logicalWidth_;
+            projectionHeight_ = logicalHeight_;
+        }
+        glUniform1i(textureLocation_, 0);
+        glActiveTexture(GL_TEXTURE0);
+
+        frameActive_ = true;
+        compiledGeometryThisFrame_ = compiledGeometryPending_;
+        compiledGeometryPending_ = 0;
+        renderedGeometryThisFrame_ = 0;
+        boundTexture_ = std::numeric_limits<GLuint>::max();
+        boundVertexArray_ = std::numeric_limits<GLuint>::max();
+        hasTextureUniform_ = -1;
+        translationX_ = std::numeric_limits<float>::quiet_NaN();
+        translationY_ = std::numeric_limits<float>::quiet_NaN();
+        scissorStateKnown_ = false;
+        scissorRectangleValid_ = false;
+
+        const bool useScissor = scissorEnabled_ || rootClip_.Valid();
+        setScissorTest(useScissor);
+        if (useScissor) {
             applyScissor();
-        } else {
-            glDisable(GL_SCISSOR_TEST);
         }
     }
 
     void endFrame()
     {
-        glBindVertexArray(0);
+        if (boundVertexArray_ != 0) {
+            glBindVertexArray(0);
+        }
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        glBindTexture(GL_TEXTURE_2D, 0);
+        if (boundTexture_ != 0) {
+            glBindTexture(GL_TEXTURE_2D, 0);
+        }
         glUseProgram(0);
 
-        glDisable(GL_SCISSOR_TEST);
-        if (previousBlend_) {
-            glEnable(GL_BLEND);
-        } else {
+        setScissorTest(previousScissor_ != GL_FALSE);
+        if (!previousBlend_) {
             glDisable(GL_BLEND);
-        }
-        if (previousScissor_) {
-            glEnable(GL_SCISSOR_TEST);
-        } else {
-            glDisable(GL_SCISSOR_TEST);
         }
         if (previousDepth_) {
             glEnable(GL_DEPTH_TEST);
-        } else {
-            glDisable(GL_DEPTH_TEST);
         }
         if (previousCull_) {
             glEnable(GL_CULL_FACE);
-        } else {
-            glDisable(GL_CULL_FACE);
         }
         glViewport(previousViewport_[0], previousViewport_[1], previousViewport_[2], previousViewport_[3]);
+        frameActive_ = false;
     }
 
     Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices, Rml::Span<const int> indices) override
     {
+        if (frameActive_) {
+            ++compiledGeometryThisFrame_;
+        } else {
+            ++compiledGeometryPending_;
+        }
         auto geometry = std::make_unique<RmlGeometry>();
         geometry->indexCount = static_cast<GLsizei>(indices.size());
 
@@ -413,6 +450,7 @@ void main() {
         glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Rml::Vertex), reinterpret_cast<void*>(offsetof(Rml::Vertex, tex_coord)));
 
         glBindVertexArray(0);
+        boundVertexArray_ = 0;
         return reinterpret_cast<Rml::CompiledGeometryHandle>(geometry.release());
     }
 
@@ -423,33 +461,28 @@ void main() {
             return;
         }
 
-        const GLfloat projection[16] = {
-            2.0F / static_cast<GLfloat>(logicalWidth_), 0.0F, 0.0F, 0.0F,
-            0.0F, -2.0F / static_cast<GLfloat>(logicalHeight_), 0.0F, 0.0F,
-            0.0F, 0.0F, -1.0F, 0.0F,
-            -1.0F, 1.0F, 0.0F, 1.0F,
-        };
-
-        glUseProgram(program_);
-        glUniformMatrix4fv(projectionLocation_, 1, GL_FALSE, projection);
-        glUniform2f(translationLocation_, translation.x, translation.y);
-        glUniform1i(textureLocation_, 0);
-        glActiveTexture(GL_TEXTURE0);
-
-        if (texture != 0) {
-            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture));
-            glUniform1i(hasTextureLocation_, 1);
-        } else {
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glUniform1i(hasTextureLocation_, 0);
+        ++renderedGeometryThisFrame_;
+        if (translationX_ != translation.x || translationY_ != translation.y) {
+            glUniform2f(translationLocation_, translation.x, translation.y);
+            translationX_ = translation.x;
+            translationY_ = translation.y;
         }
 
-        if (rootClip_.Valid() || scissorEnabled_) {
-            glEnable(GL_SCISSOR_TEST);
-            applyScissor();
+        const GLuint requestedTexture = static_cast<GLuint>(texture);
+        if (boundTexture_ != requestedTexture) {
+            glBindTexture(GL_TEXTURE_2D, requestedTexture);
+            boundTexture_ = requestedTexture;
+        }
+        const int requestedHasTexture = requestedTexture != 0 ? 1 : 0;
+        if (hasTextureUniform_ != requestedHasTexture) {
+            glUniform1i(hasTextureLocation_, requestedHasTexture);
+            hasTextureUniform_ = requestedHasTexture;
         }
 
-        glBindVertexArray(geometry->vao);
+        if (boundVertexArray_ != geometry->vao) {
+            glBindVertexArray(geometry->vao);
+            boundVertexArray_ = geometry->vao;
+        }
         glDrawElements(GL_TRIANGLES, geometry->indexCount, GL_UNSIGNED_INT, nullptr);
     }
 
@@ -462,6 +495,9 @@ void main() {
         glDeleteBuffers(1, &geometry->ibo);
         glDeleteBuffers(1, &geometry->vbo);
         glDeleteVertexArrays(1, &geometry->vao);
+        if (boundVertexArray_ == geometry->vao) {
+            boundVertexArray_ = std::numeric_limits<GLuint>::max();
+        }
         delete geometry;
     }
 
@@ -483,6 +519,7 @@ void main() {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sourceDimensions.x, sourceDimensions.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, sourceData.data());
         glBindTexture(GL_TEXTURE_2D, 0);
+        boundTexture_ = 0;
         return static_cast<Rml::TextureHandle>(texture);
     }
 
@@ -490,16 +527,18 @@ void main() {
     {
         const GLuint texture = static_cast<GLuint>(textureHandle);
         glDeleteTextures(1, &texture);
+        if (boundTexture_ == texture) {
+            boundTexture_ = std::numeric_limits<GLuint>::max();
+        }
     }
 
     void EnableScissorRegion(bool enable) override
     {
         scissorEnabled_ = enable;
-        if (enable || rootClip_.Valid()) {
-            glEnable(GL_SCISSOR_TEST);
+        const bool useScissor = enable || rootClip_.Valid();
+        setScissorTest(useScissor);
+        if (useScissor) {
             applyScissor();
-        } else {
-            glDisable(GL_SCISSOR_TEST);
         }
     }
 
@@ -512,7 +551,21 @@ void main() {
     }
 
 private:
-    void applyScissor() const
+    void setScissorTest(bool enabled)
+    {
+        if (scissorStateKnown_ && scissorTestActive_ == enabled) {
+            return;
+        }
+        if (enabled) {
+            glEnable(GL_SCISSOR_TEST);
+        } else {
+            glDisable(GL_SCISSOR_TEST);
+        }
+        scissorTestActive_ = enabled;
+        scissorStateKnown_ = true;
+    }
+
+    void applyScissor()
     {
         Rml::Rectanglei region = scissorEnabled_ && scissorRegion_.Valid()
             ? scissorRegion_
@@ -528,9 +581,28 @@ private:
         const int top = std::clamp(static_cast<int>(std::ceil(static_cast<double>(logicalHeight_ - region.p0.y) * scaleY)), y, drawingHeight_);
         const int width = right - x;
         const int height = top - y;
-        glScissor(x, y, width, height);
+        if (!scissorRectangleValid_
+            || scissorX_ != x || scissorY_ != y
+            || scissorWidth_ != width || scissorHeight_ != height) {
+            glScissor(x, y, width, height);
+            scissorX_ = x;
+            scissorY_ = y;
+            scissorWidth_ = width;
+            scissorHeight_ = height;
+            scissorRectangleValid_ = true;
+        }
     }
 
+public:
+    UiDiagnostics diagnostics() const
+    {
+        UiDiagnostics diagnostics;
+        diagnostics.compiledGeometry = compiledGeometryThisFrame_;
+        diagnostics.renderedGeometry = renderedGeometryThisFrame_;
+        return diagnostics;
+    }
+
+private:
     GLuint program_ = 0;
     GLint projectionLocation_ = -1;
     GLint translationLocation_ = -1;
@@ -540,7 +612,25 @@ private:
     int logicalHeight_ = 1;
     int drawingWidth_ = 1;
     int drawingHeight_ = 1;
+    int projectionWidth_ = 0;
+    int projectionHeight_ = 0;
+    int compiledGeometryPending_ = 0;
+    int compiledGeometryThisFrame_ = 0;
+    int renderedGeometryThisFrame_ = 0;
     bool scissorEnabled_ = false;
+    bool frameActive_ = false;
+    bool scissorStateKnown_ = false;
+    bool scissorTestActive_ = false;
+    bool scissorRectangleValid_ = false;
+    int scissorX_ = 0;
+    int scissorY_ = 0;
+    int scissorWidth_ = 0;
+    int scissorHeight_ = 0;
+    GLuint boundTexture_ = std::numeric_limits<GLuint>::max();
+    GLuint boundVertexArray_ = std::numeric_limits<GLuint>::max();
+    int hasTextureUniform_ = -1;
+    float translationX_ = std::numeric_limits<float>::quiet_NaN();
+    float translationY_ = std::numeric_limits<float>::quiet_NaN();
     Rml::Rectanglei scissorRegion_ = Rml::Rectanglei::MakeInvalid();
     Rml::Rectanglei rootClip_ = Rml::Rectanglei::MakeInvalid();
     GLboolean previousBlend_ = GL_FALSE;
@@ -563,11 +653,6 @@ struct ElementButtonBinding {
     Rml::Element* element = nullptr;
     RmlButtonBinding binding;
 };
-
-bool startsWith(std::string_view text, std::string_view prefix)
-{
-    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
-}
 
 void replaceAll(std::string& text, std::string_view from, std::string_view to)
 {
@@ -720,7 +805,8 @@ std::string normalizeBooleanAttributes(std::string html)
         "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
         "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
         "data-game-speed-settings", "data-game-speed-select",
-        "data-debug-tools-settings", "data-debug-tools-toggle"
+        "data-debug-tools-settings", "data-debug-tools-toggle",
+        "data-performance-stats-settings", "data-performance-stats-toggle"
     };
 
     for (const std::string_view name : names) {
@@ -900,6 +986,16 @@ std::string syncCurrentDebugToolsToggle(std::string html)
     return html;
 }
 
+std::string syncCurrentPerformanceStatsToggle(std::string html)
+{
+    return syncControllerToggle(
+        std::move(html),
+        "data-performance-stats-toggle",
+        rr_rml_performance_stats_enabled() != 0,
+        "Hide performance stats",
+        "Show performance stats");
+}
+
 std::string syncCurrentHelpToggle(std::string html)
 {
     if (html.find("data-help-toggle") == std::string::npos) {
@@ -967,8 +1063,9 @@ std::string syncDesktopFullscreenToggle(std::string html)
 
 std::string syncSettingsControls(std::string html)
 {
-    return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(syncCurrentDebugToolsToggle(
-        selectCurrentGameSpeed(selectCurrentResolution(std::move(html))))))));
+    return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
+        syncCurrentPerformanceStatsToggle(syncCurrentDebugToolsToggle(
+            selectCurrentGameSpeed(selectCurrentResolution(std::move(html)))))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1013,205 +1110,6 @@ std::string textFromMarkup(std::string_view markup)
     return collapsedText(text);
 }
 
-std::string encodeClassToken(std::string_view value)
-{
-    std::string out;
-    out.reserve(value.size());
-    for (const char ch : value) {
-        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-') {
-            out.push_back(ch);
-        } else if (ch == ':') {
-            out += "_COLON_";
-        }
-    }
-    return out;
-}
-
-std::string decodeClassToken(std::string_view value)
-{
-    std::string out;
-    out.reserve(value.size());
-    for (std::size_t index = 0; index < value.size();) {
-        if (value.substr(index, 7) == "_COLON_") {
-            out.push_back(':');
-            index += 7;
-        } else {
-            out.push_back(value[index]);
-            ++index;
-        }
-    }
-    return out;
-}
-
-std::string classTokenValue(std::string_view classes, std::string_view prefix)
-{
-    std::size_t start = 0;
-    while (start < classes.size()) {
-        while (start < classes.size() && std::isspace(static_cast<unsigned char>(classes[start]))) {
-            ++start;
-        }
-        std::size_t end = start;
-        while (end < classes.size() && !std::isspace(static_cast<unsigned char>(classes[end]))) {
-            ++end;
-        }
-        const std::string_view token = classes.substr(start, end - start);
-        if (startsWith(token, prefix)) {
-            return decodeClassToken(token.substr(prefix.size()));
-        }
-        start = end;
-    }
-    return {};
-}
-
-std::string idTokenValue(std::string_view id, std::string_view prefix)
-{
-    if (!startsWith(id, prefix)) {
-        return {};
-    }
-    std::string_view value = id.substr(prefix.size());
-    const std::size_t suffix = value.rfind("__");
-    if (suffix != std::string_view::npos) {
-        value = value.substr(0, suffix);
-    }
-    return decodeClassToken(value);
-}
-
-void appendTextBlock(std::string& out, std::string_view tag, std::string_view text)
-{
-    const std::string collapsed = collapsedText(text);
-    if (collapsed.empty()) {
-        return;
-    }
-
-    const std::string element = (tag == "h1" || tag == "h2" || tag == "h3") ? std::string(tag) : std::string("p");
-    out += "<" + element + ">";
-    out += collapsed;
-    out += "</" + element + ">";
-}
-
-std::string linearizeRml(std::string html)
-{
-    html = removeHiddenElements(normalizeBooleanAttributes(std::move(html)));
-
-    std::string out = "<div class=\"rml-stack\">";
-    std::string textBuffer;
-    std::string blockTag = "p";
-    std::size_t pos = 0;
-    int buttonIndex = 0;
-
-    auto flush = [&]() {
-        appendTextBlock(out, blockTag, textBuffer);
-        textBuffer.clear();
-        blockTag = "p";
-    };
-
-    while (pos < html.size()) {
-        const std::size_t tagStart = html.find('<', pos);
-        if (tagStart == std::string::npos) {
-            textBuffer += html.substr(pos);
-            break;
-        }
-
-        textBuffer += html.substr(pos, tagStart - pos);
-        const std::size_t tagEnd = html.find('>', tagStart);
-        if (tagEnd == std::string::npos) {
-            break;
-        }
-
-        const std::string_view tag(html.data() + tagStart, tagEnd - tagStart + 1);
-        const bool closing = tag.size() > 2 && tag[1] == '/';
-        const std::size_t nameStart = tagStart + (closing ? 2 : 1);
-        std::size_t nameEnd = nameStart;
-        while (nameEnd < tagEnd && !std::isspace(static_cast<unsigned char>(html[nameEnd])) && html[nameEnd] != '>' && html[nameEnd] != '/') {
-            ++nameEnd;
-        }
-        const std::string name = html.substr(nameStart, nameEnd - nameStart);
-
-        if (!closing && name == "button") {
-            flush();
-            const std::size_t closeStart = html.find("</button>", tagEnd + 1);
-            const std::size_t contentEnd = closeStart == std::string::npos ? tagEnd : closeStart;
-            std::string cssClass = attributeValue(tag, "class");
-            const std::string action = attributeValue(tag, "data-rr-action");
-            const std::string modal = attributeValue(tag, "data-ui-modal");
-            const std::string closeModal = attributeValue(tag, "data-ui-close-modal");
-            const std::string helpDismiss = attributeValue(tag, "data-help-dismiss");
-            const std::string focusId = attributeValue(tag, "data-ui-focus-id");
-            const std::string label = textFromMarkup(std::string_view(html.data() + tagEnd + 1, contentEnd - tagEnd - 1));
-            if (!action.empty()) {
-                cssClass += " rr_action_" + encodeClassToken(action);
-            }
-            if (!modal.empty()) {
-                cssClass += " rr_modal_" + encodeClassToken(modal);
-            }
-            if (!closeModal.empty()) {
-                cssClass += " rr_close";
-            }
-            if (!helpDismiss.empty()) {
-                cssClass += " rr_help_dismiss";
-            }
-            std::string id;
-            if (!action.empty()) {
-                id = "rr_action_" + encodeClassToken(action);
-            } else if (!modal.empty()) {
-                id = "rr_modal_" + encodeClassToken(modal);
-            } else if (!closeModal.empty()) {
-                id = "rr_close";
-            } else if (!helpDismiss.empty()) {
-                id = "rr_help_dismiss";
-            }
-            if (!id.empty()) {
-                id += "__" + std::to_string(buttonIndex++);
-            }
-            out += "<button";
-            if (!id.empty()) {
-                out += " id=\"" + id + "\"";
-            }
-            out += " class=\"" + cssClass + "\"";
-            if (!action.empty()) {
-                out += " rr_action=\"" + action + "\"";
-                out += " data-rr-action=\"" + action + "\"";
-            }
-            if (!modal.empty()) {
-                out += " rr_modal=\"" + modal + "\"";
-                out += " data-ui-modal=\"" + modal + "\"";
-            }
-            if (!closeModal.empty()) {
-                out += " rr_close=\"1\"";
-                out += " data-ui-close-modal=\"" + closeModal + "\"";
-            }
-            if (!helpDismiss.empty()) {
-                out += " rr_help_dismiss=\"" + helpDismiss + "\"";
-                out += " data-help-dismiss=\"" + helpDismiss + "\"";
-            }
-            if (!focusId.empty()) {
-                out += " data-ui-focus-id=\"" + focusId + "\"";
-            }
-            out += ">";
-            out += label.empty() ? std::string("Continue") : label;
-            out += "</button>";
-            pos = closeStart == std::string::npos ? tagEnd + 1 : closeStart + std::string_view("</button>").size();
-            continue;
-        }
-
-        if (!closing && (name == "h1" || name == "h2" || name == "h3")) {
-            flush();
-            blockTag = name;
-        } else if (closing && (name == "h1" || name == "h2" || name == "h3" || name == "p" || name == "li" || name == "div" ||
-                                 name == "section" || name == "article")) {
-            flush();
-        } else {
-            textBuffer.push_back(' ');
-        }
-
-        pos = tagEnd + 1;
-    }
-
-    flush();
-    out += "</div>";
-    return out;
-}
-
 std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
 {
     std::vector<RmlButtonBinding> bindings;
@@ -1243,6 +1141,7 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
         binding.cameraShakeToggle = !attributeValue(tag, "data-camera-shake-toggle").empty();
         binding.desktopFullscreenToggle = !attributeValue(tag, "data-desktop-fullscreen-toggle").empty();
         binding.debugToolsToggle = !attributeValue(tag, "data-debug-tools-toggle").empty();
+        binding.performanceStatsToggle = !attributeValue(tag, "data-performance-stats-toggle").empty();
         if (!attributeValue(tag, "data-controller-invert-toggle").empty()) {
             binding.controllerSetting = "invertFlightY";
         } else if (!attributeValue(tag, "data-controller-swap-toggle").empty()) {
@@ -1271,6 +1170,9 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
 
 RmlPanelMode panelModeForHtml(std::string_view html)
 {
+    if (html.find("data-panel-mode=\"title\"") != std::string_view::npos) {
+        return RmlPanelMode::Title;
+    }
     if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
         return RmlPanelMode::MiningFullscreen;
     }
@@ -1284,6 +1186,11 @@ RmlPanelMode panelModeForHtml(std::string_view html)
         return RmlPanelMode::PhaseBoard;
     }
     return RmlPanelMode::Control;
+}
+
+bool panelUsesTitle(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::Title;
 }
 
 bool panelUsesPhaseBoard(RmlPanelMode mode)
@@ -1321,11 +1228,20 @@ bool panelUsesDraftRoom(std::string_view html)
     return html.find("phase-board-draft-room") != std::string_view::npos;
 }
 
+bool samePanelStructure(std::string_view lhs, std::string_view rhs)
+{
+    return panelModeForHtml(lhs) == panelModeForHtml(rhs)
+        && panelUsesSurfaceOps(lhs) == panelUsesSurfaceOps(rhs)
+        && panelUsesDroneOps(lhs) == panelUsesDroneOps(rhs)
+        && panelUsesNavigation(lhs) == panelUsesNavigation(rhs)
+        && panelUsesDraftRoom(lhs) == panelUsesDraftRoom(rhs);
+}
+
 Rml::Rectanglei panelBounds(RmlPanelMode mode)
 {
     const int viewportWidth = rr_rml_viewport_width();
     const int viewportHeight = rr_rml_viewport_height();
-    if (mode == RmlPanelMode::MiningFullscreen) {
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::MiningFullscreen) {
         return Rml::Rectanglei::FromPositionSize({0, 0}, {std::max(1, viewportWidth), std::max(1, viewportHeight)});
     }
     if (mode == RmlPanelMode::ArrivalFanfare) {
@@ -1355,7 +1271,7 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
 Rml::Rectanglei expandedPanelClip(RmlPanelMode mode)
 {
     const Rml::Rectanglei bounds = panelBounds(mode);
-    if (mode == RmlPanelMode::MiningFullscreen) {
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::MiningFullscreen) {
         return bounds;
     }
     return Rml::Rectanglei::FromPositionSize(
@@ -1399,6 +1315,18 @@ std::string panelRcss(RmlPanelMode mode)
     const int miningPrimaryActionWidth = compactMining ? std::min(180, miningRailWidth) : 170;
     const int miningPrimaryActionLeft = std::max(0, (miningRailWidth - miningPrimaryActionWidth) / 2);
     const int miningPrimaryActionTop = std::max(8, miningBottomHeight - 56);
+    const bool compactTitle = panelWidth < 800 || panelHeight < 680;
+    const int titleContentWidth = std::clamp(panelWidth - (compactTitle ? 48 : 120), 360, 760);
+    const int titleContentLeft = std::max(0, (panelWidth - titleContentWidth) / 2);
+    const int titleContentTop = std::max(18, (panelHeight - (compactTitle ? 510 : 590)) / 2);
+    const int titleContentPadding = compactTitle ? 22 : 34;
+    const int titleInnerWidth = std::max(1, titleContentWidth - titleContentPadding * 2 - 2);
+    const int titleLetterWidth = compactTitle ? 52 : 84;
+    const int titleLetterSize = compactTitle ? 58 : 94;
+    const int titleLockupWidth = titleLetterWidth * 6;
+    const int titleLockupLeft = std::max(0, (titleInnerWidth - titleLockupWidth) / 2);
+    const int titleMenuWidth = compactTitle ? 300 : 340;
+    const int titleMenuLeft = std::max(0, (titleInnerWidth - titleMenuWidth) / 2);
 
     return R"(
 body {
@@ -1458,6 +1386,208 @@ scrollbarcorner {
     border-width: 1px;
     border-color: #4e6b80;
     border-radius: 8px;
+}
+#rr-panel.title-screen-panel-mode {
+    left: 0px;
+    top: 0px;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+    overflow: hidden;
+    padding: 0px;
+    background-color: transparent;
+    border-width: 0px;
+    border-radius: 0px;
+}
+.title-screen {
+    position: relative;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+    overflow: hidden;
+}
+.title-content {
+    box-sizing: border-box;
+    position: absolute;
+    left: )" + std::to_string(titleContentLeft) + R"(px;
+    top: )" + std::to_string(titleContentTop) + R"(px;
+    width: )" + std::to_string(titleContentWidth) + R"(px;
+    min-height: )" + std::string(compactTitle ? "450" : "520") + R"(px;
+    padding: )" + std::string(compactTitle ? "18px 22px" : "26px 34px") + R"(;
+    text-align: center;
+    background-color: rgba(3, 10, 16, 0.76);
+    border-width: 1px;
+    border-color: rgba(71, 220, 255, 0.28);
+    border-radius: 14px;
+}
+.title-kicker {
+    width: 100%;
+    color: rgba(163, 226, 239, 0.78);
+    font-size: )" + std::string(compactTitle ? "10" : "12") + R"(px;
+    font-weight: bold;
+    line-height: 1.15;
+    text-align: center;
+    text-transform: uppercase;
+}
+.orebit-lockup {
+    position: relative;
+    left: )" + std::to_string(titleLockupLeft) + R"(px;
+    display: flex;
+    flex-direction: row;
+    width: )" + std::to_string(titleLockupWidth) + R"(px;
+    height: )" + std::string(compactTitle ? "78" : "118") + R"(px;
+    margin-top: )" + std::string(compactTitle ? "12" : "18") + R"(px;
+    margin-bottom: )" + std::string(compactTitle ? "2" : "4") + R"(px;
+}
+.orebit-letter {
+    display: block;
+    width: )" + std::to_string(titleLetterWidth) + R"(px;
+    color: #f4c95d;
+    font-size: )" + std::to_string(titleLetterSize) + R"(px;
+    font-weight: bold;
+    line-height: 1;
+    text-align: center;
+    font-effect: glow(2px #9b761e);
+    animation: orebit-letter-float 2.8s cubic-in-out infinite alternate;
+}
+.orebit-bit {
+    color: #63e5ff;
+    font-effect: glow(2px #155d78);
+}
+.orebit-letter-r { animation: 3.25s cubic-in-out infinite alternate orebit-letter-float; }
+.orebit-letter-e { animation: 2.55s cubic-in-out infinite alternate orebit-letter-float; }
+.orebit-letter-b { animation: 3.5s cubic-in-out infinite alternate orebit-letter-float; }
+.orebit-letter-i { animation: 2.7s cubic-in-out infinite alternate orebit-letter-float; }
+.orebit-letter-t { animation: 3.1s cubic-in-out infinite alternate orebit-letter-float; }
+@keyframes orebit-letter-float {
+    from {
+        transform: translateY(-5px) rotate(-1.5deg);
+        opacity: 0.88;
+    }
+    to {
+        transform: translateY(6px) rotate(1.5deg);
+        opacity: 1;
+    }
+}
+.title-tagline {
+    width: 100%;
+    margin-top: 0px;
+    color: #edf7fb;
+    font-size: )" + std::string(compactTitle ? "14" : "17") + R"(px;
+    font-weight: bold;
+    line-height: 1.15;
+    text-align: center;
+    text-transform: uppercase;
+}
+.title-divider {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    margin-top: )" + std::string(compactTitle ? "12" : "16") + R"(px;
+    margin-bottom: )" + std::string(compactTitle ? "10" : "14") + R"(px;
+}
+.title-divider span {
+    width: )" + std::to_string(std::max(22, (titleInnerWidth - 250) / 2)) + R"(px;
+    height: 1px;
+    background-color: rgba(71, 220, 255, 0.38);
+}
+.title-divider strong {
+    width: 250px;
+    color: rgba(244, 201, 93, 0.78);
+    font-size: 10px;
+    line-height: 1;
+    text-align: center;
+}
+.title-menu {
+    position: relative;
+    left: )" + std::to_string(titleMenuLeft) + R"(px;
+    display: flex;
+    flex-direction: column;
+    width: )" + std::to_string(titleMenuWidth) + R"(px;
+}
+.title-menu .title-action {
+    width: )" + std::to_string(titleMenuWidth) + R"(px;
+    min-height: )" + std::string(compactTitle ? "42" : "48") + R"(px;
+    height: auto;
+    margin-top: 7px;
+    padding: 8px 18px;
+    color: #eaf7fb;
+    font-size: )" + std::string(compactTitle ? "15" : "17") + R"(px;
+    font-weight: bold;
+    line-height: 1.1;
+    text-transform: uppercase;
+    background-color: rgba(8, 26, 36, 0.91);
+    border-width: 1px;
+    border-color: rgba(99, 229, 255, 0.42);
+    border-radius: 6px;
+}
+.title-menu .title-action:hover,
+body.controller-focus-visible .title-menu .title-action.rr-controller-focus {
+    color: #ffffff;
+    background-color: rgba(18, 59, 77, 0.96);
+    border-color: #63e5ff;
+}
+.title-menu .title-continue {
+    color: #fff0b7;
+    background-color: rgba(60, 48, 17, 0.92);
+    border-color: rgba(244, 201, 93, 0.68);
+}
+.title-menu .title-continue:hover,
+body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
+    background-color: rgba(92, 69, 19, 0.96);
+    border-color: #f4c95d;
+}
+.title-save-state {
+    width: 100%;
+    margin-top: 12px;
+    color: rgba(157, 177, 189, 0.72);
+    font-size: 10px;
+    font-weight: bold;
+    line-height: 1;
+    text-align: center;
+}
+.title-save-state.save-found { color: #7ce7b0; }
+.title-notice {
+    width: 100%;
+    margin-top: 7px;
+    color: #ffd166;
+    font-size: 11px;
+    line-height: 1.2;
+    text-align: center;
+}
+.title-footer {
+    width: 100%;
+    margin-top: )" + std::string(compactTitle ? "10" : "15") + R"(px;
+    color: rgba(127, 160, 176, 0.58);
+    font-size: 10px;
+    line-height: 1;
+    text-align: center;
+}
+.title-scanline {
+    position: absolute;
+    left: 0px;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: 1px;
+    background-color: rgba(99, 229, 255, 0.18);
+    animation: 7s linear 0s infinite orebit-scanline-sweep;
+}
+.title-scanline-a { top: 0px; }
+.title-scanline-b {
+    top: )" + std::to_string(panelHeight / 3) + R"(px;
+    animation: 10s linear infinite orebit-scanline-sweep;
+    background-color: rgba(244, 201, 93, 0.14);
+}
+@keyframes orebit-scanline-sweep {
+    from { transform: translateY(0px); opacity: 0; }
+    12% { opacity: 1; }
+    88% { opacity: 0.72; }
+    to { transform: translateY()" + std::to_string(panelHeight) + R"(px); opacity: 0; }
+}
+#rr-modal.modal-new_game_confirm {
+    top: )" + std::to_string(std::max(80, panelHeight / 2 - 135)) + R"(px;
+    width: 560px;
+    height: 230px;
+    margin-left: -296px;
+    border-color: #a77f32;
 }
 #rr-panel.surface-ops-panel {
     overflow-x: hidden;
@@ -5796,6 +5926,40 @@ body.controller-focus-visible .rr-controller-focus {
 #rr-controller-prompt-bar strong {
     color: #f4c95d;
 }
+#rr-performance-stats {
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    width: 324px;
+    padding: 10px 12px;
+    color: #d8e6ee;
+    background-color: #071019e8;
+    border-width: 1px;
+    border-color: #4e8099;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.25;
+}
+#rr-performance-stats.performance-hidden {
+    display: none;
+}
+#rr-performance-stats .performance-title {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    margin-bottom: 4px;
+    color: #f4c95d;
+    font-size: 13px;
+}
+#rr-performance-stats p {
+    margin-top: 2px;
+    margin-bottom: 0px;
+    color: #b9c9d4;
+}
+#rr-performance-stats .performance-warning {
+    color: #ff8b7d;
+    font-weight: bold;
+}
 )";
 }
 
@@ -5857,6 +6021,8 @@ std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily fam
             prompt += item(cancel, "Back");
         }
         prompt += item("R-stick", "Scroll");
+    } else if (panelHtml.find("data-panel-mode=\"title\"") != std::string_view::npos) {
+        prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(labels.menu, "Settings");
     } else if (panelHtml.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos ||
                panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
@@ -5907,6 +6073,61 @@ std::string controllerResumeModalBody(std::string body, bool blocked, bool contr
     return body;
 }
 
+std::string performanceStatsMarkup(const PerformanceStats& stats)
+{
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(1);
+    out << "<div class=\"performance-title\"><strong>" << stats.framesPerSecond
+        << " FPS</strong><span>" << stats.frameTimeMilliseconds << " ms avg</span></div>";
+    out << "<p>Frame " << stats.latestFrameTimeMilliseconds << " ms | median "
+        << stats.medianFrameTimeMilliseconds << " | p95 " << stats.p95FrameTimeMilliseconds
+        << " | p99 " << stats.p99FrameTimeMilliseconds << " ms</p>";
+    out << "<p>CPU work " << stats.cpuFrameMilliseconds << " ms | median "
+        << stats.medianCpuFrameMilliseconds << " | p95 " << stats.p95CpuFrameMilliseconds
+        << " | p99 " << stats.p99CpuFrameMilliseconds << " ms</p>";
+    out << "<p>Input " << stats.inputMilliseconds << " | Sim " << stats.simulationMilliseconds
+        << " ms (" << stats.simulationSteps << " steps)</p>";
+    out << "<p>Scene " << stats.sceneRenderMilliseconds << " | UI " << stats.uiRenderMilliseconds
+        << " | Present " << stats.presentMilliseconds << " ms</p>";
+    out << "<p>Pacing " << (stats.platform.verticalSyncActive ? "VSync" : "no VSync");
+    if (stats.platform.softwareFrameLimiterActive) {
+        out << " + software limiter";
+    }
+    out << " | Limit " << stats.platform.frameLimiterMilliseconds
+        << " | Idle " << stats.platform.idleMilliseconds << " ms</p>";
+    if (stats.platform.suspendedWakeups > 0) {
+        out << "<p>Suspended wakeups " << stats.platform.suspendedWakeups << " total / "
+            << stats.platform.suspendedWakeupsPerSecond << " per second</p>";
+    }
+    out << "<p>Scene draws " << stats.renderer.sceneDrawCalls << " | Vertices "
+        << stats.renderer.sceneVertices << "</p>";
+    out << "<p>Scene uploads " << stats.renderer.bufferUploads << " | "
+        << std::setprecision(1) << (static_cast<double>(stats.renderer.uploadedBytes) / 1024.0) << " KiB</p>";
+    out << "<p>Startup " << stats.startupMilliseconds << " ms | Decode "
+        << stats.textures.decodeMilliseconds << " ms / Upload " << stats.textures.uploadMilliseconds
+        << " ms</p>";
+    out << "<p>Textures initialized " << stats.textures.decodedTextures << " decoded / "
+        << stats.textures.uploadedTextures << " uploaded | "
+        << (static_cast<double>(stats.textures.uploadedBytes) / 1048576.0) << " MiB</p>";
+    out << "<p>UI rebuilds " << stats.ui.documentRebuilds << " doc / "
+        << stats.ui.panelRebuilds << " panel | HUD " << stats.ui.hudPatches << " patches</p>";
+    out << "<p>UI geometry "
+        << stats.ui.compiledGeometry << " compiled / " << stats.ui.renderedGeometry << " rendered</p>";
+    out << "<p>Textures " << stats.renderer.texturesReady << " ready | "
+        << stats.renderer.texturesPending << " pending";
+    if (stats.renderer.texturesFailed > 0) {
+        out << " | <span class=\"performance-warning\">" << stats.renderer.texturesFailed << " failed</span>";
+    }
+    out << "</p>";
+    out << "<p>Viewport " << stats.viewport.logicalWidth << "x" << stats.viewport.logicalHeight
+        << " -> " << stats.viewport.drawableWidth << "x" << stats.viewport.drawableHeight
+        << " @" << std::setprecision(2) << stats.viewport.densityRatio << "x</p>";
+    if (stats.simulationDeltaClamped) {
+        out << "<p class=\"performance-warning\">Simulation delta clamped after a frame stall</p>";
+    }
+    return out.str();
+}
+
 std::string buildDocumentRml(
     const std::string& panelHtml,
     const std::string& openModalId,
@@ -5914,7 +6135,9 @@ std::string buildDocumentRml(
     bool controllerFocusVisible,
     bool controllerResumeBlocked,
     bool controllerResumeConnected,
-    ControllerFamily controllerFamily)
+    ControllerFamily controllerFamily,
+    const std::string& performanceStatsHtml,
+    bool performanceStatsVisible)
 {
     const std::vector<ModalTemplate> modals = extractModals(panelHtml);
     std::string activeModalId = openModalId;
@@ -5928,6 +6151,7 @@ std::string buildDocumentRml(
     }
 
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
+    const bool titleScreen = panelUsesTitle(panelMode);
     const bool phaseBoard = panelUsesPhaseBoard(panelMode);
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
     const bool arrivalFanfare = panelUsesMissionStamp(panelMode);
@@ -5943,9 +6167,11 @@ std::string buildDocumentRml(
     }
     document += ">";
     document += "<div id=\"rr-panel\" class=\"" +
-        std::string(miningFullscreen
+        std::string(titleScreen
+                ? "title-screen-panel-mode"
+                : (miningFullscreen
                 ? "mining-fullscreen-panel"
-                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel")));
+                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel"))));
     if (surfaceOps) {
         document += " surface-ops-panel";
     }
@@ -5983,6 +6209,12 @@ std::string buildDocumentRml(
     if (controllerPresentationActive) {
         document += controllerPromptBar(panelHtml, controllerFamily, activeModal != nullptr, activeModal == nullptr || activeModal->dismissible);
     }
+
+    document += "<div id=\"rr-performance-stats\"";
+    if (!performanceStatsVisible || performanceStatsHtml.empty()) {
+        document += " class=\"performance-hidden\"";
+    }
+    document += ">" + performanceStatsHtml + "</div>";
 
     document += "</body></rml>";
     return document;
@@ -6142,6 +6374,11 @@ bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
     }
     if (binding.debugToolsToggle) {
         rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
+    if (binding.performanceStatsToggle) {
+        rr_rml_set_performance_stats_enabled(rr_rml_performance_stats_enabled() == 0 ? 1 : 0);
         owner.refresh();
         return true;
     }
@@ -6362,39 +6599,25 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
         return true;
     }
 
-    const Rml::String classNames = button->GetClassNames();
-    const Rml::String id = button->GetId();
-    const Rml::String closeModal = button->GetAttribute<Rml::String>("rr_close", button->GetAttribute<Rml::String>("data-ui-close-modal", ""));
-    if (!closeModal.empty() || button->IsClassSet("rr_close") || startsWith(id, "rr_close")) {
+    const Rml::String closeModal = button->GetAttribute<Rml::String>("data-ui-close-modal", "");
+    if (!closeModal.empty()) {
         owner.closeModal();
         return true;
     }
 
-    const Rml::String helpDismiss = button->GetAttribute<Rml::String>("rr_help_dismiss", button->GetAttribute<Rml::String>("data-help-dismiss", ""));
+    const Rml::String helpDismiss = button->GetAttribute<Rml::String>("data-help-dismiss", "");
     if (!helpDismiss.empty()) {
         owner.dismissHelp(helpDismiss);
         return true;
     }
 
-    std::string modalId = idTokenValue(id, "rr_modal_");
-    if (modalId.empty()) {
-        modalId = classTokenValue(classNames, "rr_modal_");
-    }
-    if (modalId.empty()) {
-        modalId = button->GetAttribute<Rml::String>("rr_modal", button->GetAttribute<Rml::String>("data-ui-modal", ""));
-    }
+    const std::string modalId = button->GetAttribute<Rml::String>("data-ui-modal", "");
     if (!modalId.empty()) {
         owner.openModal(modalId);
         return true;
     }
 
-    std::string action = idTokenValue(id, "rr_action_");
-    if (action.empty()) {
-        action = classTokenValue(classNames, "rr_action_");
-    }
-    if (action.empty()) {
-        action = button->GetAttribute<Rml::String>("rr_action", button->GetAttribute<Rml::String>("data-rr-action", ""));
-    }
+    const std::string action = button->GetAttribute<Rml::String>("data-rr-action", "");
     if (!action.empty()) {
         owner.dispatchAction(action);
         return true;
@@ -6479,19 +6702,37 @@ void GameRmlUi::setPanelHtml(const std::string& html)
     if (panelHtml_ == html) {
         return;
     }
+
+    const bool structureUnchanged = samePanelStructure(panelHtml_, html);
+    const RmlPanelMode nextPanelMode = panelModeForHtml(html);
+    const std::vector<ModalTemplate> modals = extractModals(html);
+    const auto autoModal = std::find_if(modals.begin(), modals.end(), [](const ModalTemplate& modal) {
+        return modal.autoOpen;
+    });
+    const bool autoModalWillOpen = openModalId_.empty() && autoModal != modals.end();
+    const bool activeModalRemainsValid = openModalId_.empty() || findModal(modals, openModalId_);
+    const ViewportMetrics viewport = host_.viewportMetrics();
+    const bool viewportUnchanged = layoutViewportWidth_ == viewport.logicalWidth
+        && layoutViewportHeight_ == viewport.logicalHeight;
+    Rml::Element* panelElement = g_document ? g_document->GetElementById("rr-panel") : nullptr;
+    const bool canUpdatePanelInPlace = initialized_ && g_context && g_document && panelElement
+        && structureUnchanged
+        && nextPanelMode == panelMode_
+        && openModalId_.empty()
+        && activeModalRemainsValid
+        && !autoModalWillOpen
+        && !g_displayPreferenceChanged
+        && viewportUnchanged;
+
     panelHtml_ = html;
-    panelMode_ = panelModeForHtml(panelHtml_);
+    panelMode_ = nextPanelMode;
     buttonBindings_ = extractButtonBindings(panelHtml_);
-    const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
     if (!openModalId_.empty() && !findModal(modals, openModalId_)) {
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
     }
     if (openModalId_.empty()) {
-        const auto autoModal = std::find_if(modals.begin(), modals.end(), [](const ModalTemplate& modal) {
-            return modal.autoOpen;
-        });
         if (autoModal != modals.end()) {
             modalReturnFocusId_ = focusedId_;
             openModalId_ = autoModal->id;
@@ -6499,7 +6740,65 @@ void GameRmlUi::setPanelHtml(const std::string& html)
             hasLastFocusCenter_ = false;
         }
     }
+
+    if (canUpdatePanelInPlace) {
+        ++pendingPanelRebuilds_;
+        pressedButton_ = nullptr;
+        pressedButtonAtSeconds_ = 0.0;
+        const std::string panelBody = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml_)));
+        panelElement->SetInnerRML(panelBody);
+
+        if (controllerPresentationActive_) {
+            Rml::Element* promptElement = g_document->GetElementById("rr-controller-prompt-bar");
+            if (promptElement) {
+                const std::string promptMarkup = controllerPromptBar(panelHtml_, controllerFamily_, false, true);
+                const std::size_t contentStart = promptMarkup.find('>');
+                const std::size_t contentEnd = promptMarkup.rfind("</div>");
+                if (contentStart != std::string::npos && contentEnd != std::string::npos && contentEnd > contentStart) {
+                    promptElement->SetInnerRML(promptMarkup.substr(contentStart + 1, contentEnd - contentStart - 1));
+                }
+            }
+        }
+
+        g_document->RemoveEventListener(Rml::EventId::Change, &g_settingsEventListener);
+        g_document->AddEventListener(Rml::EventId::Change, &g_settingsEventListener);
+        bindLoadedButtons(panelBody);
+        g_context->Update();
+        collectFocusTargets(false);
+        if (controllerPresentationActive_ && !g_focusTargets.empty()) {
+            FocusTarget* target = findFocusTarget(focusedId_);
+            if (!target && hasLastFocusCenter_) {
+                target = nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_);
+            }
+            if (!target) {
+                target = defaultFocusTarget();
+            }
+            applyControllerFocus(target, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        }
+        return;
+    }
     rebuildDocument();
+}
+
+void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
+{
+    if (!initialized_ || !g_document) {
+        return;
+    }
+
+    for (const RealtimeHudPatch& patch : state.patches) {
+        Rml::Element* element = g_document->GetElementById(patch.elementId);
+        if (!element) {
+            continue;
+        }
+        if (patch.updateText) {
+            element->SetInnerRML(Rml::StringUtilities::EncodeRml(patch.text));
+        }
+        if (patch.updateClass) {
+            element->SetAttribute("class", patch.cssClass);
+        }
+        ++pendingHudPatches_;
+    }
 }
 
 void GameRmlUi::render()
@@ -6508,8 +6807,9 @@ void GameRmlUi::render()
         return;
     }
 
-    const int viewportWidth = rr_rml_viewport_width();
-    const int viewportHeight = rr_rml_viewport_height();
+    const ViewportMetrics viewport = host_.viewportMetrics();
+    const int viewportWidth = viewport.logicalWidth;
+    const int viewportHeight = viewport.logicalHeight;
     if (g_displayPreferenceChanged
         || viewportWidth != layoutViewportWidth_
         || viewportHeight != layoutViewportHeight_) {
@@ -6519,12 +6819,12 @@ void GameRmlUi::render()
         rebuildDocument();
     }
 
-    const int width = rr_rml_drawing_width();
-    const int height = rr_rml_drawing_height();
+    const int width = viewport.drawableWidth;
+    const int height = viewport.drawableHeight;
     g_context->SetDimensions({viewportWidth, viewportHeight});
-    g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
+    g_context->SetDensityIndependentPixelRatio(viewport.densityRatio);
     g_renderInterface->setViewport(viewportWidth, viewportHeight, width, height);
-    if (!openModalId_.empty() || controllerPresentationActive_) {
+    if (!openModalId_.empty() || controllerPresentationActive_ || performanceStatsVisible_) {
         g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({viewportWidth, viewportHeight}));
     } else {
         g_renderInterface->setRootClip(expandedPanelClip(panelMode_));
@@ -6533,6 +6833,13 @@ void GameRmlUi::render()
     g_renderInterface->beginFrame();
     g_context->Render();
     g_renderInterface->endFrame();
+    uiDiagnostics_ = g_renderInterface->diagnostics();
+    uiDiagnostics_.documentRebuilds = pendingDocumentRebuilds_;
+    uiDiagnostics_.panelRebuilds = pendingPanelRebuilds_;
+    uiDiagnostics_.hudPatches = pendingHudPatches_;
+    pendingDocumentRebuilds_ = 0;
+    pendingPanelRebuilds_ = 0;
+    pendingHudPatches_ = 0;
 }
 
 bool GameRmlUi::mouseMove(int x, int y)
@@ -6958,6 +7265,11 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
         refresh();
         return true;
     }
+    if (it->performanceStatsToggle) {
+        rr_rml_set_performance_stats_enabled(rr_rml_performance_stats_enabled() == 0 ? 1 : 0);
+        refresh();
+        return true;
+    }
     if (!it->controllerSetting.empty()) {
         const int field = it->controllerSetting == "invertFlightY" ? 0 : (it->controllerSetting == "swapConfirmCancel" ? 1 : 2);
         const bool current = rr_rml_controller_boolean_preference(field) != 0;
@@ -6968,11 +7280,52 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
     return false;
 }
 
+void GameRmlUi::setPerformanceStats(const PerformanceStats& stats, bool visible)
+{
+    const std::string nextHtml = visible ? performanceStatsMarkup(stats) : std::string {};
+    uiBridge_.setPerformanceStats(nextHtml, visible);
+
+    const bool htmlChanged = nextHtml != performanceStatsHtml_;
+    const bool visibilityChanged = visible != performanceStatsVisible_;
+    if (!htmlChanged && !visibilityChanged) {
+        return;
+    }
+
+    performanceStatsHtml_ = nextHtml;
+    performanceStatsVisible_ = visible;
+    if (!initialized_ || !g_document) {
+        return;
+    }
+
+    Rml::Element* performanceElement = g_document->GetElementById("rr-performance-stats");
+    if (!performanceElement) {
+        // Older documents created before the persistent overlay container was added
+        // get repaired once. Normal statistics updates never rebuild the document.
+        rebuildDocument();
+        return;
+    }
+    if (htmlChanged) {
+        performanceElement->SetInnerRML(performanceStatsHtml_);
+    }
+    if (visibilityChanged) {
+        performanceElement->SetClass(
+            "performance-hidden",
+            !performanceStatsVisible_ || performanceStatsHtml_.empty());
+    }
+}
+
+UiDiagnostics GameRmlUi::diagnostics() const
+{
+    return uiDiagnostics_;
+}
+
 void GameRmlUi::rebuildDocument()
 {
     if (!initialized_ || !g_context) {
         return;
     }
+
+    ++pendingDocumentRebuilds_;
 
     if (g_document) {
         g_context->UnloadDocument(g_document);
@@ -6990,7 +7343,9 @@ void GameRmlUi::rebuildDocument()
         controllerFocusVisible_,
         controllerResumeBlocked_,
         controllerResumeConnected_,
-        controllerFamily_);
+        controllerFamily_,
+        performanceStatsHtml_,
+        performanceStatsVisible_);
     rr_rml_set_modal_open(openModalId_.empty() ? 0 : 1);
     g_document = g_context->LoadDocumentFromMemory(documentRml, "rocket://panel.rml");
     if (g_document) {
@@ -7034,6 +7389,8 @@ void GameRmlUi::shutdown()
     g_elementButtonBindings.clear();
     g_focusTargets.clear();
     rr_rml_set_enabled(0);
+    pendingDocumentRebuilds_ = 0;
+    uiDiagnostics_ = {};
     initialized_ = false;
     if (g_preferences == &preferences_) g_preferences = nullptr;
     if (g_host == &host_) g_host = nullptr;

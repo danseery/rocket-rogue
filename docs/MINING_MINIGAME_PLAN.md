@@ -150,7 +150,7 @@ The player should survive through build planning, movement, stow timing, and dro
 - `src/core/MiningSystem.*` owns terrain, drill stats, oxygen/fuel cadence, scanner pulses, mining enemies, stow/abort/failure outcomes, and payload conversion.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, metrics, and detail rows.
 - `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
-- `src/game/RocketGameApp.*` owns screen transitions and browser input callbacks.
-- `src/render/WebGLRenderer.*` draws mining snapshots but must not decide gameplay outcomes.
+- `src/game/RocketGameApp.*` owns screen transitions and platform-neutral mining input actions.
+- `src/render/OpenGlRenderer.*` draws mining snapshots with the shared desktop/WebGL backend but must not decide gameplay outcomes.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

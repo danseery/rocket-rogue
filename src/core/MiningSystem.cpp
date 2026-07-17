@@ -37,6 +37,11 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+void markMiningGateDerivedStateDirty(MiningRunState& mining)
+{
+    mining.gate.derivedStateDirty = true;
+}
+
 std::uint64_t hashCombine(std::uint64_t value, std::uint64_t mix)
 {
     value ^= mix + 0x9E3779B97F4A7C15ULL + (value << 6U) + (value >> 2U);
@@ -636,6 +641,7 @@ bool completeBrokenMiningCell(
     }
 
     const MiningCellMaterial brokenMaterial = target->material;
+    const bool gateAssociated = target->gateAssociated;
     *target = makeCell(MiningCellMaterial::Empty, mining.depthZone);
     target->revealed = true;
     mining.cellsBroken += 1;
@@ -656,6 +662,9 @@ bool completeBrokenMiningCell(
     }
     revealAround(mining, static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5, 1.35);
     markDirty(mining.terrain, x, y);
+    if (gateAssociated) {
+        markMiningGateDerivedStateDirty(mining);
+    }
     return true;
 }
 
@@ -1063,6 +1072,9 @@ int completeHazardTreatment(
         cell->enemy = enemy;
         cell->gateAssociated = gateAssociated;
         markDirty(mining.terrain, candidate.x, candidate.y);
+        if (gateAssociated) {
+            markMiningGateDerivedStateDirty(mining);
+        }
         refinedCount += refined ? 1 : 0;
     }
     if (batchSize > 0) {
@@ -2426,6 +2438,14 @@ void updateMiningGate(GameState& state, const MiningArenaRules& rules)
         return;
     }
 
+    if (!gate.derivedStateDirty) {
+        if (mining.artifact.state == MiningArtifactState::Delivered) {
+            gate.state = MiningGateState::Completed;
+        }
+        return;
+    }
+    gate.derivedStateDirty = false;
+
     gate.shellTilesRemaining = static_cast<int>(std::count_if(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
         return cell.gateAssociated && cell.material == MiningCellMaterial::HazardPocket;
     }));
@@ -2466,6 +2486,7 @@ void updateMiningGate(GameState& state, const MiningArenaRules& rules)
             } else {
                 mining.enemies.push_back(std::move(replacement));
             }
+            markMiningGateDerivedStateDirty(mining);
         }
         if (gate.burrowBreached) {
             gate.surveyComplete = true;
@@ -2548,7 +2569,13 @@ void updateMiningEnemySpawners(MiningRunState& mining, const MiningArenaRules& r
         }
     }
 
+    const bool spawnedGateEnemy = std::any_of(spawnedEnemies.begin(), spawnedEnemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.gateAssociated;
+    });
     mining.enemies.insert(mining.enemies.end(), spawnedEnemies.begin(), spawnedEnemies.end());
+    if (spawnedGateEnemy) {
+        markMiningGateDerivedStateDirty(mining);
+    }
 }
 
 double deterministicCombatRoll(const MiningRunState& mining, const MiningEnemy& enemy, int salt)
@@ -2726,6 +2753,9 @@ bool applyMammalBurrow(MiningRunState& mining, int x, int y, double dt)
     target->revealed = true;
     target->gateAssociated = gateAssociated;
     markDirty(mining.terrain, x, y);
+    if (gateAssociated) {
+        markMiningGateDerivedStateDirty(mining);
+    }
     return true;
 }
 
@@ -2798,6 +2828,9 @@ double applyDefenseDamage(GameState& state, MiningEnemy& enemy, double rawDamage
     }
     if (enemy.health <= 0.0 && enemy.active) {
         enemy.active = false;
+        if (enemy.gateAssociated) {
+            markMiningGateDerivedStateDirty(state.run.mining);
+        }
         state.run.mining.enemiesDefeated += 1;
         addEnemyDefeatReward(state, enemy);
     }
@@ -3205,6 +3238,7 @@ void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
     applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
     mining.enemies.clear();
     spawnMiningEnemies(mining, *destination, arenaRules);
+    markMiningGateDerivedStateDirty(mining);
     mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
     mining.droneY = 4.0;
     mining.returnZoneX = miningShipStartX(mining);
@@ -4171,6 +4205,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     ensureMiningMiniDroneAgents(state, catalog);
     const double scannerRadius = miningDrillStats(state, catalog).scannerRadius;
     revealAround(mining, mining.droneX, mining.droneY, scannerRadius);
+    bool gateStateChanged = false;
     auto activateGateMarkers = [&](double originX, double originY, double radius) {
         for (MiningGateMarker& marker : mining.gate.markers) {
             if (marker.activated) {
@@ -4180,6 +4215,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
             const double dy = marker.y - originY;
             if (dx * dx + dy * dy <= radius * radius) {
                 marker.activated = true;
+                gateStateChanged = true;
             }
         }
     };
@@ -4193,6 +4229,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
         }
     }
     if (mining.gate.active && mining.gate.burrowBreach && surveyDronePresent) {
+        gateStateChanged = gateStateChanged || !mining.gate.surveyComplete;
         mining.gate.surveyComplete = true;
         state.statusLine = "Survey Drone mapped the long natural route around the marked burrow wall.";
     } else if (!mining.gate.markers.empty()) {
@@ -4200,6 +4237,9 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
             return marker.activated;
         }));
         state.statusLine = "Triangulation markers: " + std::to_string(completed) + "/" + std::to_string(mining.gate.requiredSurveyOrigins) + ". Reposition for a distinct origin.";
+    }
+    if (gateStateChanged) {
+        markMiningGateDerivedStateDirty(mining);
     }
     mining.scannerPulseSeconds = 0.9;
 }

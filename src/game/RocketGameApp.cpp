@@ -312,27 +312,36 @@ double RocketGameApp::liveBurnMultiplier() const
         session_.returnTrip.duration);
 }
 
-void RocketGameApp::loadSavedGameOrDefault()
+void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 {
     debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
     session_ = {};
+    miningExtraction_ = {};
+    keyboardRealtimeInput_ = {};
+    controllerRealtimeInput_ = {};
+    hasSavedGame_ = false;
+    titleNotice_.clear();
     panelDirty_ = true;
 
     if (const auto saveData = deserializeSaveData(services_.saves.load())) {
         restoreSaveData(state_, catalog_, *saveData);
         rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
         state_.statusLine = std::string(text::status::saveRestored);
+        hasSavedGame_ = true;
     }
 
     ensureDroneBayState(state_, catalog_);
     migrateLegacyDeepSpaceFrontier(state_, catalog_);
     syncLaunchConfig(state_, catalog_);
+    titleScreenActive_ = showTitleScreen;
 }
 
 void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
 {
+    titleScreenActive_ = false;
+    titleNotice_.clear();
     debugSessionActive_ = true;
     debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0xD36B6D3BU);
@@ -373,7 +382,7 @@ void RocketGameApp::applyDebugDroneLoadout()
 bool RocketGameApp::initialize()
 {
     catalog_ = createDefaultContent();
-    loadSavedGameOrDefault();
+    loadSavedGameOrDefault(true);
 
     if (!services_.renderer.initialize()) {
         state_.statusLine = "OpenGL renderer initialization failed.";
@@ -435,11 +444,6 @@ void RocketGameApp::setActiveInputSource(InputSource source)
     }
 }
 
-InputSource RocketGameApp::activeInputSource() const
-{
-    return activeInputSource_;
-}
-
 InputContext RocketGameApp::inputContext() const
 {
     return resolvedControllerInputContext(gameplayInputContext(), pauseReason_, services_.ui.modalOpen());
@@ -447,6 +451,9 @@ InputContext RocketGameApp::inputContext() const
 
 InputContext RocketGameApp::gameplayInputContext() const
 {
+    if (titleScreenActive_) {
+        return InputContext::Ui;
+    }
     switch (state_.screen) {
     case Screen::Launch:
         return session_.flightArmed ? InputContext::Launch : InputContext::Preflight;
@@ -480,11 +487,6 @@ InputContext RocketGameApp::gameplayInputContext() const
         return InputContext::Ui;
     }
     return InputContext::Ui;
-}
-
-PauseReason RocketGameApp::pauseReason() const
-{
-    return pauseReason_;
 }
 
 namespace {
@@ -735,15 +737,23 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
         }
         break;
     case GameInputAction::OpenSystemMenu:
+        if (titleScreenActive_) {
+            services_.ui.openModal(std::string(ui::modals::settings));
+            break;
+        }
         if (!services_.ui.modalOpen() || pauseReason_ == PauseReason::ControllerUiFocus) {
             openControllerSystemMenu(PauseReason::SystemMenu);
         }
         break;
     case GameInputAction::OpenMap:
-        services_.ui.openModal(std::string(ui::modals::map));
+        if (!titleScreenActive_) {
+            services_.ui.openModal(std::string(ui::modals::map));
+        }
         break;
     case GameInputAction::OpenInventory:
-        services_.ui.openModal(std::string(ui::modals::inventory));
+        if (!titleScreenActive_) {
+            services_.ui.openModal(std::string(ui::modals::inventory));
+        }
         break;
     case GameInputAction::StartOrContinue:
         if (context == InputContext::Preflight) {
@@ -1064,6 +1074,9 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 
 void RocketGameApp::tick(double deltaSeconds)
 {
+    if (titleScreenActive_) {
+        return;
+    }
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
 
     if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
@@ -1144,7 +1157,9 @@ void RocketGameApp::tick(double deltaSeconds)
             }
         }
 
-        panelDirty_ = true;
+        if (state_.screen == Screen::Launch) {
+            realtimeHudDirty_ = true;
+        }
     } else if (state_.screen == Screen::Mining) {
         if (miningExtraction_.active) {
             miningExtraction_.elapsed = std::min(
@@ -1164,7 +1179,11 @@ void RocketGameApp::tick(double deltaSeconds)
                 save();
             }
         }
-        panelDirty_ = true;
+        if (state_.screen == Screen::Mining) {
+            realtimeHudDirty_ = true;
+        } else {
+            panelDirty_ = true;
+        }
     } else if (state_.screen == Screen::Flyby) {
         const bool wasCompleted = state_.run.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
@@ -1182,8 +1201,10 @@ void RocketGameApp::tick(double deltaSeconds)
                 break;
             }
             save();
+            panelDirty_ = true;
+        } else {
+            realtimeHudDirty_ = true;
         }
-        panelDirty_ = true;
     } else if (state_.screen == Screen::Orbit) {
         const bool wasCompleted = state_.run.orbit.completed;
         updateOrbitRun(state_, deltaSeconds);
@@ -1201,8 +1222,10 @@ void RocketGameApp::tick(double deltaSeconds)
                 break;
             }
             save();
+            panelDirty_ = true;
+        } else {
+            realtimeHudDirty_ = true;
         }
-        panelDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
     } else if (state_.screen == Screen::ArrivalFanfare) {
@@ -1211,20 +1234,29 @@ void RocketGameApp::tick(double deltaSeconds)
             tuning::session::arrivalFanfareSeconds);
     }
 
-    if (panelDirty_) {
-        refreshPanel();
-    }
 }
 
-void RocketGameApp::render()
+void RocketGameApp::renderScene()
 {
     services_.renderer.render(snapshot());
+}
+
+void RocketGameApp::renderUi()
+{
+    // Simulation can run several fixed steps before one presentation. Collapse
+    // all resulting panel changes into a single UI synchronization so RmlUi is
+    // never rebuilt once per simulation substep.
+    if (panelDirty_) {
+        refreshPanel();
+    } else if (realtimeHudDirty_) {
+        refreshRealtimeHud();
+    }
     services_.ui.render();
 }
 
 void RocketGameApp::prepareForLaunch()
 {
-    if (state_.screen != Screen::Hangar) {
+    if (titleScreenActive_ || state_.screen != Screen::Hangar) {
         return;
     }
 
@@ -2528,7 +2560,7 @@ void RocketGameApp::debugExit()
     debugSessionActive_ = false;
     debugActOneCheckpoint_ = -1;
     debugDroneLoadout_ = {};
-    loadSavedGameOrDefault();
+    loadSavedGameOrDefault(false);
     state_.statusLine = "Debug sandbox closed. Real save restored from local mission control.";
     refreshPanel();
 }
@@ -2692,14 +2724,66 @@ void RocketGameApp::resetSave()
     debugSessionActive_ = false;
     if (!services_.saves.clear()) {
         services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
-        state_.statusLine = "Save reset failed; the previous native save was preserved.";
+        if (titleScreenActive_) {
+            titleNotice_ = "Unable to clear the local save. Existing progress was preserved.";
+        } else {
+            state_.statusLine = "Save reset failed; the previous native save was preserved.";
+        }
         panelDirty_ = true;
         return;
     }
+    hasSavedGame_ = false;
+    titleNotice_ = titleScreenActive_ ? "Local campaign save cleared." : std::string();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
     session_ = {};
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
+    refreshPanel();
+}
+
+void RocketGameApp::newGame()
+{
+    if (!titleScreenActive_) {
+        return;
+    }
+
+    GameState freshState = createNewGame(catalog_, 0x524F434B45544ULL);
+    ensureDroneBayState(freshState, catalog_);
+    syncLaunchConfig(freshState, catalog_);
+    const std::string initialSave = serializeSaveData(captureSaveData(freshState));
+    const bool stored = services_.saves.storeAtomic(initialSave);
+    if (!stored) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+        if (hasSavedGame_) {
+            titleNotice_ = "New campaign could not replace the existing save. Your progress is still intact.";
+            panelDirty_ = true;
+            return;
+        }
+        freshState.statusLine = "New campaign started, but local save initialization failed.";
+    }
+
+    debugSessionActive_ = false;
+    debugActOneCheckpoint_ = -1;
+    state_ = std::move(freshState);
+    rng_ = Random(state_.seed);
+    session_ = {};
+    session_.returnTrip.duration = tuning::session::returnDefaultDuration;
+    miningExtraction_ = {};
+    releaseRealtimeInputs(true);
+    hasSavedGame_ = stored;
+    titleScreenActive_ = false;
+    titleNotice_.clear();
+    refreshPanel();
+}
+
+void RocketGameApp::continueGame()
+{
+    if (!titleScreenActive_ || !hasSavedGame_) {
+        return;
+    }
+    titleScreenActive_ = false;
+    titleNotice_.clear();
+    releaseRealtimeInputs(true);
     refreshPanel();
 }
 
@@ -2791,10 +2875,9 @@ void RocketGameApp::save()
     }
 }
 
-void RocketGameApp::refreshPanel()
+PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& flightModel) const
 {
-    const PreparedLaunch flightModel = currentFlightModel();
-    const std::string panelHtml = buildGamePanelHtml({
+    return {
         state_,
         catalog_,
         session_.preparedLaunch,
@@ -2812,16 +2895,48 @@ void RocketGameApp::refreshPanel()
         debugActOneCheckpoint_,
         services_.saves.description(),
         services_.renderer.description(),
-    });
+        titleScreenActive_,
+        hasSavedGame_,
+        titleNotice_,
+    };
+}
+
+void RocketGameApp::refreshPanel()
+{
+    const PreparedLaunch flightModel = currentFlightModel();
+    const PanelRenderContext context = panelRenderContext(flightModel);
+    const std::string panelHtml = buildGamePanelHtml(context);
     services_.uiBridge.setPanelHtml(panelHtml);
     services_.ui.setPanelHtml(panelHtml);
+    panelStructureKey_ = realtimePanelStructureKey(context);
     panelDirty_ = false;
+    realtimeHudDirty_ = false;
+}
+
+void RocketGameApp::refreshRealtimeHud()
+{
+    const PreparedLaunch flightModel = currentFlightModel();
+    const PanelRenderContext context = panelRenderContext(flightModel);
+    const std::uint64_t structureKey = realtimePanelStructureKey(context);
+    if (structureKey != panelStructureKey_) {
+        refreshPanel();
+        return;
+    }
+
+    buildRealtimeHudState(context, realtimeHudState_);
+    services_.uiBridge.setRealtimeHudState(realtimeHudState_);
+    services_.ui.setRealtimeHudState(realtimeHudState_);
+    realtimeHudDirty_ = false;
 }
 
 void RocketGameApp::runUiAction(const std::string& action)
 {
     int index = 0;
-    if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
+    if (action == ui::actions::newGame) {
+        newGame();
+    } else if (action == ui::actions::continueGame) {
+        continueGame();
+    } else if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
         buyOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::researchProjectPrefix, index)) {
         selectResearchProject(index);
@@ -2939,6 +3054,12 @@ void RocketGameApp::runUiAction(const std::string& action)
 RenderSnapshot RocketGameApp::snapshot() const
 {
     RenderSnapshot result;
+    if (titleScreenActive_) {
+        result.screen = Screen::Hangar;
+        result.titleScreen = true;
+        result.animationTime = services_.host.monotonicSeconds();
+        return result;
+    }
     const PreparedLaunch flightModel = currentFlightModel();
     result.screen = state_.screen;
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
@@ -3013,7 +3134,6 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
-    result.currentFrontierTier = currentFrontier.tier;
     result.debugActOneCheckpoint = debugActOneCheckpoint_;
     result.arkCondition = state_.meta.ark.condition;
     result.preflightActive = state_.screen == Screen::Launch && !session_.flightArmed && miningDroneTransferEnabled(state_);
@@ -3033,11 +3153,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDroneY = mining.droneY;
         result.miningTargetX = mining.targetTipX;
         result.miningTargetY = mining.targetTipY;
-        result.miningDrillDirX = mining.aimDirX;
-        result.miningDrillDirY = mining.aimDirY;
         result.miningHeat = mining.drillHeat;
-        result.miningOxygenSeconds = mining.oxygenSeconds;
-        result.miningFuelCycleProgress = mining.fuelCycleProgress;
         result.miningDrillIntegrity = mining.drillIntegrity;
         result.miningDroneHealth = mining.droneHealth;
         result.miningReturnZoneX = mining.returnZoneX;
@@ -3046,8 +3162,6 @@ RenderSnapshot RocketGameApp::snapshot() const
         const MiningLoadStats loadStats = miningLoadStats(state_, catalog_);
         result.miningLoad = loadStats.currentLoad;
         result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
-        result.miningLoadFuelConsumptionMultiplier = loadStats.fuelConsumptionMultiplier;
-        result.miningHazardDelta = mining.hazardDelta;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
@@ -3063,53 +3177,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
         const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
         result.miningBounce = mining.contactBounce;
-        result.miningInputDrilling = mining.drilling;
         result.miningTargetDrillable = targetDrillable;
         result.miningDrilling = mining.drilling && targetDrillable;
-        result.miningSharedFuel = state_.run.surfaceExpedition.sharedFuel;
-        result.miningSharedFuelCapacity = state_.run.surfaceExpedition.sharedFuelCapacity;
         result.miningCargo = mining.cargo;
         result.miningStowedCargo = mining.stowedCargo;
-        const MiniDroneLoadoutEffects droneEffects = miniDroneLoadoutEffects(state_, catalog_);
-        result.miningSynergyCount = static_cast<int>(droneEffects.synergyNames.size());
-        result.miningSignatureTier = droneEffects.signatureTier;
-        result.miningSignatureStyle = static_cast<int>(droneEffects.signatureKind);
-        for (const std::string& droneId : state_.meta.equippedDroneIds) {
-            const MiniDrone* drone = catalog_.findMiniDrone(droneId);
-            if (drone == nullptr) {
-                continue;
-            }
-            result.miningSupportDroneCount += 1;
-            if (miniDroneUpgradeLevel(state_, droneId) > 1) {
-                result.miningTunedDroneCount += 1;
-            }
-            result.miningDroneRoles.push_back(static_cast<int>(drone->role));
-            result.miningDroneUpgradeLevels.push_back(miniDroneUpgradeLevel(state_, droneId));
-            if (drone->role == MiniDroneRole::Attack) {
-                result.miningAttackDroneCount += 1;
-            } else if (drone->role == MiniDroneRole::Defense) {
-                result.miningDefenseDroneCount += 1;
-            }
-        }
-        result.miningMiniDrones.reserve(mining.miniDrones.size());
-        for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
-            result.miningMiniDrones.push_back({
-                agent.x,
-                agent.y,
-                static_cast<int>(agent.role),
-                agent.upgradeLevel,
-                static_cast<int>(agent.behavior),
-                agent.targetCellX,
-                agent.targetCellY,
-                agent.targetEnemyIndex,
-                agent.surveyPulseSeconds,
-                agent.defenseAngleRadians,
-                agent.shieldCharge,
-                agent.shieldRechargeSeconds,
-                agent.shieldImpactSeconds,
-                agent.haulMaterials
-            });
-        }
         result.miningMaterials = mining.temporaryMaterials;
         result.miningStowedMaterials = mining.stowedMaterials;
         if (mining.artifact.present) {
@@ -3128,115 +3199,31 @@ RenderSnapshot RocketGameApp::snapshot() const
                 static_cast<int>(mining.gate.state)
             };
         }
-        for (const MiningGateMarker& marker : mining.gate.markers) {
-            result.miningGateMarkers.push_back({marker.x, marker.y, marker.activated});
-        }
-        result.miningCells.reserve(mining.terrain.cells.size());
-        for (int y = 0; y < mining.terrain.height; ++y) {
-            for (int x = 0; x < mining.terrain.width; ++x) {
-                const std::size_t index = static_cast<std::size_t>(y * mining.terrain.width + x);
-                if (index >= mining.terrain.cells.size()) {
-                    continue;
-                }
-                const MiningCell& cell = mining.terrain.cells[index];
-                const double integrity = cell.maxToughness <= 0.0 ? 1.0 : std::clamp(cell.remainingToughness / cell.maxToughness, 0.0, 1.0);
-                result.miningCells.push_back({
-                    x,
-                    y,
-                    static_cast<int>(cell.material),
-                    integrity,
-                    cell.revealed,
-                    cell.hazard,
-                    static_cast<int>(cell.hazardAffinity),
-                    cell.gateAssociated
-                });
-            }
-        }
-        result.miningEnemies.reserve(mining.enemies.size());
-        for (const MiningEnemy& enemy : mining.enemies) {
-            if (!enemy.active) {
-                continue;
-            }
-            result.miningEnemies.push_back({
-                enemy.x,
-                enemy.y,
-                static_cast<int>(enemy.type),
-                static_cast<int>(enemy.affinity),
-                enemy.health,
-                enemy.maxHealth,
-                enemy.effectRadius,
-                enemy.attackCooldownSeconds,
-                enemy.active,
-                enemy.spawn.spawned,
-                enemy.spawn.maxSpawns,
-                enemy.spawn.cooldownSeconds,
-                enemy.spawn.intervalSeconds
-            });
-        }
-        result.miningProjectiles.reserve(mining.combatProjectiles.size());
-        for (const MiningProjectileVisual& projectile : mining.combatProjectiles) {
-            result.miningProjectiles.push_back({
-                projectile.startX,
-                projectile.startY,
-                projectile.endX,
-                projectile.endY,
-                projectile.age,
-                projectile.lifetime,
-                static_cast<int>(projectile.team),
-                static_cast<int>(projectile.sourceType),
-                static_cast<int>(projectile.affinity),
-                projectile.critical
-            });
-        }
-        result.miningDamageNumbers.reserve(mining.damageNumbers.size());
-        for (const MiningDamageNumber& number : mining.damageNumbers) {
-            result.miningDamageNumbers.push_back({
-                number.x,
-                number.y,
-                number.amount,
-                number.age,
-                number.lifetime,
-                static_cast<int>(number.team),
-                static_cast<int>(number.kind),
-                number.critical,
-                number.rigDamage
-            });
-        }
+        result.bindMiningFrameViews(mining);
     }
 
     if (state_.screen == Screen::Flyby && state_.run.flyby.active) {
         const FlybyRunState& flyby = state_.run.flyby;
-        result.flybyActive = true;
         result.flybyCompleted = flyby.completed;
         result.flybyZone = flyby.currentZone;
         result.flybyResult = static_cast<int>(flyby.result);
-        result.flybyElapsed = flyby.elapsedSeconds;
-        result.flybyDuration = flyby.durationSeconds;
         result.flybyShipX = flyby.shipX;
         result.flybyShipY = flyby.shipY;
         result.flybyVelocityX = flyby.velocityX;
         result.flybyVelocityY = flyby.velocityY;
-        result.flybyInputX = flyby.inputX;
         result.flybyInputY = flyby.inputY;
         result.flybyDestinationX = tuning::flyby::destinationX;
         result.flybyDestinationY = tuning::flyby::destinationY;
-        result.flybyIdealRadius = tuning::flyby::idealRadius;
         result.flybyGoodBand = tuning::flyby::goodBand;
         result.flybyPerfectBand = tuning::flyby::perfectBand;
-        result.flybyTrailPoints.reserve(flyby.trailPoints.size());
-        for (const FlybyTrailPoint& point : flyby.trailPoints) {
-            result.flybyTrailPoints.push_back({point.x, point.y});
-        }
+        result.flybyTrailPoints = flyby.trailPoints;
     }
 
     if (state_.screen == Screen::Orbit && state_.run.orbit.active) {
         const OrbitRunState& orbit = state_.run.orbit;
-        result.orbitActive = true;
         result.orbitCompleted = orbit.completed;
         result.orbitZone = orbit.currentZone;
         result.orbitResult = static_cast<int>(orbit.result);
-        result.orbitElapsed = orbit.elapsedSeconds;
-        result.orbitDuration = orbit.durationSeconds;
         result.orbitProgress = orbit.orbitProgress;
         result.orbitShipX = orbit.shipX;
         result.orbitShipY = orbit.shipY;
@@ -3248,23 +3235,17 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.orbitTargetRadius = orbit.targetRadius;
         result.orbitGoodBand = orbit.goodBand;
         result.orbitPerfectBand = orbit.perfectBand;
-        result.orbitTrailPoints.reserve(orbit.trailPoints.size());
-        for (const FlybyTrailPoint& point : orbit.trailPoints) {
-            result.orbitTrailPoints.push_back({point.x, point.y});
-        }
+        result.orbitTrailPoints = orbit.trailPoints;
     }
 
     if (state_.screen == Screen::SurfaceScan && (state_.run.surfaceScan.active || state_.run.surfaceScan.completed)) {
         const SurfaceScanRunState& scan = state_.run.surfaceScan;
-        result.surfaceScanActive = scan.active;
-        result.surfaceScanCompleted = scan.completed;
         result.surfaceScanBusted = scan.busted;
         result.surfaceScanPulses = scan.pulses;
         result.surfaceScanMaxPulses = std::max(1, scan.maxPulses);
         result.surfaceScanSignal = scan.signal;
         result.surfaceScanInterference = scan.interference;
         result.surfaceScanBustRisk = scan.bustRisk;
-        result.surfaceScanCargo = scan.cargo;
         result.surfaceScanMaterials = scan.temporaryMaterials;
         result.surfaceScanArtifacts = static_cast<int>(scan.temporaryArtifacts.size());
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
@@ -3274,15 +3255,11 @@ RenderSnapshot RocketGameApp::snapshot() const
 
     if (state_.screen == Screen::SurfacePush && (state_.run.surfacePush.active || state_.run.surfacePush.completed)) {
         const SurfacePushRunState& push = state_.run.surfacePush;
-        result.surfacePushActive = push.active;
-        result.surfacePushCompleted = push.completed;
         result.surfacePushBusted = push.busted;
         result.surfacePushSteps = push.steps;
         result.surfacePushMaxSteps = std::max(1, push.maxSteps);
-        result.surfacePushDepthGain = push.depthGain;
         result.surfacePushPressure = push.pressure;
         result.surfacePushCollapseRisk = push.collapseRisk;
-        result.surfacePushCargo = push.cargo;
         result.surfacePushMaterials = push.temporaryMaterials;
         result.surfacePushArtifacts = static_cast<int>(push.temporaryArtifacts.size());
         result.surfacePushRewardMarkers = push.rewardMarkers;

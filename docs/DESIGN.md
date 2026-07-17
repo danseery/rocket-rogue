@@ -8,7 +8,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 - Ship-first management through readable module slots and damage.
 - Light but painful crew consequences.
 - Roguelite persistence through unlock variety, records, memorials, and blueprints.
-- Asset-light proof of concept using WebGL primitives, browser UI, and replaceable arcade sprites.
+- Asset-light proof of concept using shared OpenGL primitives, RmlUi mission-control panels, and replaceable arcade sprites across native and web builds.
 
 ## Core loop
 
@@ -108,13 +108,15 @@ Refit economy should reward recovered risk in discrete shelves:
 ## Architecture
 
 - `rocket_core` owns deterministic rules: content, RNG, progression, save data, flight tuning, launch resolution, and balance tests.
-- `src/game` owns browser-session orchestration. `RocketGameApp` handles screen transitions and launch controls; `GamePanel` renders mission-control HTML from a read-only context.
-- `src/render` owns WebGL2 drawing and texture upload. It should not decide gameplay outcomes.
+- `rocket_app` and `src/game` own platform-neutral application orchestration. `GameRunner` samples input and advances fixed simulation steps; `RocketGameApp` handles screen transitions and live controls; `GamePanel` produces semantic mission-control markup from a read-only context; and `GameRmlUi` presents that markup on both targets.
+- `src/render` owns shared OpenGL drawing and texture upload. `OpenGlRenderer` selects GLSL 330 Core for native OpenGL 3.3 and GLSL ES 300 for WebGL2, but it must not decide gameplay outcomes or create a platform window/context.
 - `src/input` owns portable controller snapshots, preferences, source arbitration, deadzones, button edges, real-time holds/repeats, and semantic input routing. Controller difficulty never scales from the player's loadout or device.
-- `src/platform` is the small web bridge for persistence and panel updates.
-- `web/shell.html` owns browser DOM event routing and calls exported C++ functions.
+- `src/platform/AppServices.h` defines the injected save, preference, host, controller, texture, renderer, UI, and UI-bridge contracts used by the shared app.
+- `src/platform/sdl` owns native SDL window/context creation, filesystem storage, PNG decoding, keyboard/mouse events, gamepads, haptics, fullscreen, and shutdown.
+- `src/platform/web` is the only C++ boundary allowed to own Emscripten APIs, browser storage, DOM mirroring, asynchronous browser textures, and web gamepads.
+- `web/shell.html` remains the web-only DOM fallback and forwards browser actions into the Emscripten entry point. Native builds use RmlUi directly and do not ship the browser shell.
 
-See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contract, device-local preference schema, pause safety rules, and verification matrix. Controller sampling happens once per browser frame before scaled simulation ticks; UI repeats and safety holds always use unscaled real time.
+See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contract, device-local preference schema, pause safety rules, and verification matrix. `GameRunner` requests one `ControllerFrame` per host frame before scaled fixed simulation steps; UI repeats and safety holds always use the platform host's unscaled monotonic time.
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 
@@ -124,7 +126,7 @@ Hangar operation cards should be driven by `HangarOperationPreview` from `src/co
 
 Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface action kits, shared fuel, cargo, extraction risk, surface upgrades, Drone Bay state, and progression-backed surface-contact pressure. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
 
-`src/core/MiningProgression.*` is the authoritative Act/level resolver shared by campaign mapping, Surface Ops forecasts, debug requests, terrain/reward gates, and enemy generation. `src/core/MiningSystem.*` consumes those rules for terrain generation, oxygen/fuel/drill timers, scanner pulses, unified ore/artifact rewards, hostile tunnel networks, passive drone effects, failure/stow/abort outcomes, and conversion back into `SurfaceActionOutcome`. Browser input should call `RocketGameApp` mining methods; rendering should consume snapshots rather than deciding mining outcomes.
+`src/core/MiningProgression.*` is the authoritative Act/level resolver shared by campaign mapping, Surface Ops forecasts, debug requests, terrain/reward gates, and enemy generation. `src/core/MiningSystem.*` consumes those rules for terrain generation, oxygen/fuel/drill timers, scanner pulses, unified ore/artifact rewards, hostile tunnel networks, passive drone effects, failure/stow/abort outcomes, and conversion back into `SurfaceActionOutcome`. Platform input adapters should call `RocketGameApp` mining methods or dispatch shared UI actions; rendering should consume snapshots rather than deciding mining outcomes.
 
 Shared game constants and player-facing copy should have one owner:
 
@@ -152,7 +154,7 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/ContentIds.h` owns persistent content IDs and unlock keys for modules, crew facilities, frames, astronauts, and destinations. Content definitions, save migrations, tests, and scripted rewards should use these shared IDs instead of raw strings.
 - `src/core/SaveSchema.h` owns the current save header, field keys, and line-format delimiters. Serializer, parser, and migration tests should use these shared constants instead of duplicating save strings.
 - `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
-- `src/core/GameUi.h` owns stable browser panel action IDs and modal IDs. `GamePanel` should emit these data-like IDs, while `web/shell.html` maps them to exported C++ functions. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated HTML.
+- `src/core/GameUi.h` owns stable cross-platform panel action IDs and modal IDs. `GamePanel` emits these data-like IDs, RmlUi dispatches them through the shared app, and the web fallback maps them to exported C++ functions. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated markup.
 
 Telemetry equation constants live under `tuning::telemetry`: pulse profiles, early/late channel buildup, readable minimums, abort certainty, and telemetry-driven stress. Balance the feel of warning dials there before changing formula structure.
 
@@ -164,4 +166,6 @@ When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visi
 
 ## Persistence
 
-The save format is versioned and line-based for a small dependency-free POC. `SaveSchema.h` defines the header, field keys, and delimiters so save/load code and tests stay synchronized as new fields are added. The web build stores saves in `localStorage` via `RocketBridge`. Future production builds should replace this with a JSON or binary schema plus migration tests once the content stabilizes.
+The campaign save format is versioned and line-based. `SaveSchema.h` defines the header, field keys, and delimiters so serialization, missing-field defaults, and migration tests stay synchronized as fields are added. `ISaveStore` keeps the shared app independent of the storage medium: the web adapter uses browser `localStorage`, while native builds use atomic replacement of `save_v1.txt` beneath the SDL per-user preference path. Native builds intentionally start with fresh native data and do not import browser saves.
+
+Display, accessibility, debug, fullscreen, and controller settings are separate from campaign data behind `IPreferenceStore`. The web adapter persists browser-local preferences; native builds use `preferences_v1.txt` beside the native save.

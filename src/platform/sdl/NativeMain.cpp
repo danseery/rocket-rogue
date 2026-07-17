@@ -20,7 +20,7 @@ int main(int, char**)
 
         rocket::NativeTextureSource textures(rocket::SdlPlatform::executableDirectory());
         rocket::NativeUiBridge uiBridge;
-        rocket::OpenGlRenderer renderer(platform, preferences, textures);
+        rocket::OpenGlRenderer renderer(platform, textures);
         rocket::GameRmlUi ui(preferences, platform, uiBridge);
         rocket::AppServices services {
             saves,
@@ -41,8 +41,16 @@ int main(int, char**)
         bool running = true;
         while (running) {
             running = platform.processEvents(runner.app());
-            platform.applyKeyboardState(runner.app());
+            if (!running) break;
+
+            const rocket::NativeFrameDisposition disposition = platform.frameDisposition();
+            if (!rocket::nativeFrameRenders(disposition)) continue;
+            if (platform.consumeFrameClockReset()) runner.resetFrameClock();
+            if (rocket::nativeFrameAcceptsRealtimeInput(disposition)) {
+                platform.applyKeyboardState(runner.app());
+            }
             runner.frame();
+            platform.completeFrame();
         }
 
         runner.shutdown();

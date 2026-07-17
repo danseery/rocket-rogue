@@ -1,13 +1,97 @@
 #include "platform/sdl/NativeStorage.h"
 #include "platform/sdl/NativeTextureSource.h"
+#include "platform/sdl/SdlPlatform.h"
 
 #include <cassert>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 
+namespace {
+
+void nativeFrameLifecycleIsBoundedAndResetsOnResume()
+{
+    rocket::NativeFrameLifecycle lifecycle;
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::Active);
+    assert(rocket::nativeFrameAcceptsRealtimeInput(lifecycle.disposition()));
+
+    lifecycle.setFocused(false);
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::IdleTransition);
+    assert(rocket::nativeFrameRenders(lifecycle.disposition()));
+    assert(!rocket::nativeFrameWaitsForEvents(lifecycle.disposition()));
+    lifecycle.completeFrame();
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::IdlePaused);
+    assert(rocket::nativeFrameWaitsForEvents(lifecycle.disposition()));
+    assert(rocket::nativeFrameRenders(lifecycle.disposition()));
+    assert(!rocket::nativeFrameAcceptsRealtimeInput(lifecycle.disposition()));
+    assert(rocket::nativeIdleEventWaitMilliseconds >= 100);
+
+    lifecycle.setFocused(true);
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::Active);
+    assert(lifecycle.consumeFrameClockReset());
+    assert(!lifecycle.consumeFrameClockReset());
+
+    lifecycle.setVisible(false);
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::SuspendTransition);
+    assert(rocket::nativeFrameRenders(lifecycle.disposition()));
+    lifecycle.completeFrame();
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::Suspended);
+    assert(rocket::nativeFrameWaitsForEvents(lifecycle.disposition()));
+    assert(!rocket::nativeFrameRenders(lifecycle.disposition()));
+
+    lifecycle.setVisible(true);
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::Active);
+    assert(lifecycle.consumeFrameClockReset());
+
+    lifecycle.setFocused(false);
+    lifecycle.completeFrame();
+    lifecycle.setVisible(false);
+    lifecycle.completeFrame();
+    lifecycle.setVisible(true);
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::IdleTransition);
+    assert(lifecycle.consumeFrameClockReset());
+    lifecycle.completeFrame();
+    assert(lifecycle.disposition() == rocket::NativeFrameDisposition::IdlePaused);
+}
+
+void swapFailureEnablesDisplayAwareFallbackPacing()
+{
+    rocket::NativeFramePacer pacer;
+    pacer.configure(true, 60.0);
+    assert(!pacer.active());
+    assert(pacer.next(1'000'000'000ULL).delayNanoseconds == 0);
+
+    pacer.configure(false, 144.0);
+    assert(pacer.active());
+    assert(pacer.intervalNanoseconds() >= 6'900'000ULL);
+    assert(pacer.intervalNanoseconds() <= 7'000'000ULL);
+    const std::uint64_t start = 1'000'000'000ULL;
+    const rocket::NativeFramePacingDecision first = pacer.next(start);
+    assert(first.delayNanoseconds == pacer.intervalNanoseconds());
+    const rocket::NativeFramePacingDecision second = pacer.next(start + first.delayNanoseconds + 1'000'000ULL);
+    assert(second.delayNanoseconds > 0);
+    assert(second.delayNanoseconds < pacer.intervalNanoseconds());
+
+    const std::uint64_t stalled = start + pacer.intervalNanoseconds() * 20ULL;
+    assert(pacer.next(stalled).delayNanoseconds == 0);
+    const rocket::NativeFramePacingDecision afterStall = pacer.next(stalled + 1'000'000ULL);
+    assert(afterStall.delayNanoseconds > 0);
+    assert(afterStall.delayNanoseconds <= pacer.intervalNanoseconds());
+
+    pacer.configure(false, 0.0);
+    assert(pacer.active());
+    assert(pacer.intervalNanoseconds() == 0);
+    assert(pacer.next(start).delayNanoseconds == 1'000'000ULL);
+}
+
+} // namespace
+
 int main()
 {
+    nativeFrameLifecycleIsBoundedAndResetsOnResume();
+    swapFailureEnablesDisplayAwareFallbackPacing();
+
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path root = std::filesystem::temp_directory_path() / ("rocket-rogue-native-tests-" + std::to_string(suffix));
     std::filesystem::create_directories(root);
@@ -35,7 +119,11 @@ int main()
     expected.cameraShakeDisabled = true;
     expected.fullscreen = true;
     expected.dismissedHelpTopics = {"surface", "mining"};
+    const std::uint64_t preferenceRevisionBeforeStore = preferences.revision();
     assert(preferences.store(expected));
+    assert(preferences.revision() == preferenceRevisionBeforeStore + 1);
+    (void)preferences.load();
+    assert(preferences.revision() == preferenceRevisionBeforeStore + 1);
 
     rocket::NativePreferenceStore reloaded(root);
     const rocket::AppPreferences actual = reloaded.load();

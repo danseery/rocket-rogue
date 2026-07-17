@@ -3,6 +3,7 @@
 #include "render/OpenGlApi.h"
 #include "lodepng.h"
 
+#include <chrono>
 #include <utility>
 
 namespace rocket {
@@ -20,7 +21,10 @@ void NativeTextureSource::request(std::string_view key, std::string_view relativ
     TextureRecord record;
     record.path = (assetRoot_ / std::filesystem::path(relativePath)).lexically_normal();
     unsigned width = 0, height = 0;
+    const auto decodeStarted = std::chrono::steady_clock::now();
     const unsigned error = lodepng::decode(record.rgba, width, height, record.path.string());
+    diagnostics_.decodeMilliseconds += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - decodeStarted).count();
     if (error != 0 || width == 0 || height == 0) {
         record.status = TextureStatus::Failed;
         lastError_ = "Required asset is missing or corrupt: " + record.path.string();
@@ -29,6 +33,8 @@ void NativeTextureSource::request(std::string_view key, std::string_view relativ
         record.status = TextureStatus::Ready;
         record.width = static_cast<int>(width);
         record.height = static_cast<int>(height);
+        ++diagnostics_.decodedTextures;
+        diagnostics_.decodedBytes += record.rgba.size();
     }
     records_.emplace(keyCopy, std::move(record));
 }
@@ -49,6 +55,7 @@ bool NativeTextureSource::uploadToOpenGl(std::string_view key, unsigned int text
     if (record.uploaded) return true;
     if (record.rgba.empty()) return false;
 
+    const auto uploadStarted = std::chrono::steady_clock::now();
     glBindTexture(GL_TEXTURE_2D, texture);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -56,6 +63,10 @@ bool NativeTextureSource::uploadToOpenGl(std::string_view key, unsigned int text
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, record.rgba.data());
+    diagnostics_.uploadMilliseconds += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - uploadStarted).count();
+    diagnostics_.uploadedBytes += record.rgba.size();
+    ++diagnostics_.uploadedTextures;
     record.rgba.clear();
     record.rgba.shrink_to_fit();
     record.uploaded = true;
@@ -63,6 +74,6 @@ bool NativeTextureSource::uploadToOpenGl(std::string_view key, unsigned int text
 }
 
 std::string NativeTextureSource::lastError() const { return lastError_; }
-const std::filesystem::path& NativeTextureSource::assetRoot() const { return assetRoot_; }
+TextureDiagnostics NativeTextureSource::diagnostics() const { return diagnostics_; }
 
 } // namespace rocket

@@ -3,10 +3,21 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const preset = "web-release";
-const target = "rocket_core_tests";
 const testDir = join("build", preset, "tests");
-const testJs = join(testDir, `${target}.js`);
-const testWasm = join(testDir, `${target}.wasm`);
+const targets = [
+  "rocket_core_tests",
+  "rocket_mining_progression_tests",
+  "rocket_mining_economy_tests",
+  "rocket_controller_input_tests",
+  "rocket_app_services_tests"
+];
+
+function artifacts(target) {
+  return {
+    js: join(testDir, `${target}.js`),
+    wasm: join(testDir, `${target}.wasm`)
+  };
+}
 
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: process.cwd(), stdio: "inherit" });
@@ -36,21 +47,27 @@ function removeIfPresent(path, reason) {
 }
 
 function forceRelinkIfWasmMissing() {
-  if (existsSync(testJs) && !existsSync(testWasm)) {
-    removeIfPresent(
-      testJs,
-      "The Emscripten test launcher exists without its wasm sidecar, so Ninja would otherwise report no work to do."
-    );
+  for (const target of targets) {
+    const { js, wasm } = artifacts(target);
+    if (existsSync(js) && !existsSync(wasm)) {
+      removeIfPresent(
+        js,
+        "The Emscripten test launcher exists without its wasm sidecar, so Ninja would otherwise report no work to do."
+      );
+    }
   }
 }
 
 forceRelinkIfWasmMissing();
-run("cmake", ["--build", "--preset", preset, "--target", target]);
+run("cmake", ["--build", "--preset", preset, "--target", ...targets]);
 forceRelinkIfWasmMissing();
 
-if (!existsSync(testJs) || !existsSync(testWasm)) {
-  console.error(`Missing web test artifact: ${!existsSync(testJs) ? testJs : testWasm}`);
-  process.exit(1);
+for (const target of targets) {
+  const { js, wasm } = artifacts(target);
+  if (!existsSync(js) || !existsSync(wasm)) {
+    console.error(`Missing web test artifact: ${!existsSync(js) ? js : wasm}`);
+    process.exit(1);
+  }
 }
 
 run("ctest", ["--preset", preset]);

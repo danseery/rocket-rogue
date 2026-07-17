@@ -76,7 +76,6 @@ namespace surfaceUpgrade {
 inline constexpr const char* thermalDrillJackets = "thermal_drill_jackets";
 inline constexpr const char* widebandPulse = "wideband_pulse";
 inline constexpr const char* cargoSkids = "cargo_skids";
-inline constexpr const char* microDroneBay = "micro_drone_bay";
 inline constexpr const char* shockMounts = "shock_mounts";
 inline constexpr const char* oreScentArray = "ore_scent_array";
 inline constexpr const char* coolantMist = "coolant_mist";

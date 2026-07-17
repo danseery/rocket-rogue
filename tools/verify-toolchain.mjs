@@ -123,6 +123,8 @@ const emscriptenToolchain = join(repoEmsdk, "upstream", "emscripten", "cmake", "
 const cmake = commandExists("cmake");
 const ninja = commandExists("ninja");
 const node = commandExists("node");
+const nodeMajor = Number.parseInt(process.versions.node.split(".")[0], 10);
+const nodeSupported = node && nodeMajor >= 22 && nodeMajor < 25;
 const npm = isWindows ? commandExists("npm.cmd") : commandExists("npm");
 const vsEnv = visualStudioDevEnv();
 const nativeCompilerOnPath = ["cl", "clang++", "g++"].some(commandExists);
@@ -135,7 +137,7 @@ const emcc = commandExists("emcc") || commandExistsWithLocalEmsdk("emcc");
 console.log("Rocket Rogue toolchain check");
 statusLine(cmake, "CMake");
 statusLine(ninja, "Ninja");
-statusLine(node, "Node.js");
+statusLine(nodeSupported, "Node.js 22-24", node ? `running ${process.version}` : "not found");
 statusLine(npm, isWindows ? "npm.cmd" : "npm", isWindows ? "use npm.cmd in PowerShell to avoid the npm.ps1 execution-policy shim" : "");
 statusLine(
   nativeCompiler,
@@ -150,8 +152,8 @@ statusLine(emsdkCheckout, "Emscripten SDK checkout", emsdkEnv);
 statusLine(emscriptenConfigured, "Emscripten CMake toolchain", emscriptenToolchain);
 statusLine(emcc, "emcc", "needed for web-release");
 
-const nativeReady = cmake && ninja && nativeCompiler;
-const webReady = cmake && ninja && emsdkCheckout && emscriptenConfigured && emcc;
+const nativeReady = cmake && ninja && nativeCompiler && nodeSupported;
+const webReady = cmake && ninja && nodeSupported && emsdkCheckout && emscriptenConfigured && emcc;
 
 console.log("");
 statusLine(nativeReady, "native-debug/native-release presets");
@@ -160,6 +162,9 @@ statusLine(webReady, "web-release preset");
 if (!nativeReady || !webReady) {
   console.log("");
   console.log("Workarounds:");
+  if (!nodeSupported) {
+    console.log(`- Repo tooling: install Node.js 22, 23, or 24 (current runtime: ${process.version}).`);
+  }
   if (!nativeReady) {
     console.log("- Native build: install Visual Studio Build Tools with the C++ workload, dot-source scripts\\env-windows.ps1, or use npm.cmd run configure:native:release.");
   }

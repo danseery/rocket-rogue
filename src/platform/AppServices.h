@@ -2,6 +2,8 @@
 
 #include "input/ControllerInput.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -32,11 +34,89 @@ struct ViewportMetrics {
     float sceneLeftNdc = -1.0F;
 };
 
+struct RendererDiagnostics {
+    int sceneDrawCalls = 0;
+    int sceneVertices = 0;
+    int bufferUploads = 0;
+    std::size_t uploadedBytes = 0;
+    int texturesReady = 0;
+    int texturesPending = 0;
+    int texturesFailed = 0;
+};
+
+struct TextureDiagnostics {
+    double decodeMilliseconds = 0.0;
+    double uploadMilliseconds = 0.0;
+    std::size_t decodedBytes = 0;
+    std::size_t uploadedBytes = 0;
+    int decodedTextures = 0;
+    int uploadedTextures = 0;
+};
+
+struct UiDiagnostics {
+    int documentRebuilds = 0;
+    int panelRebuilds = 0;
+    int hudPatches = 0;
+    int compiledGeometry = 0;
+    int renderedGeometry = 0;
+};
+
+struct PlatformDiagnostics {
+    double frameLimiterMilliseconds = 0.0;
+    double idleMilliseconds = 0.0;
+    int suspendedWakeups = 0;
+    double suspendedWakeupsPerSecond = 0.0;
+    bool verticalSyncActive = false;
+    bool softwareFrameLimiterActive = false;
+};
+
+struct RealtimeHudPatch {
+    std::string elementId;
+    std::string text;
+    std::string cssClass;
+    bool updateText = false;
+    bool updateClass = false;
+};
+
+// Compact, presentation-only state for values that change while a realtime
+// screen is active. Element ids refer to stable nodes emitted by GamePanel;
+// changing screen structure continues to use setPanelHtml().
+struct RealtimeHudState {
+    std::vector<RealtimeHudPatch> patches;
+};
+
+struct PerformanceStats {
+    double startupMilliseconds = 0.0;
+    double framesPerSecond = 0.0;
+    double latestFrameTimeMilliseconds = 0.0;
+    double frameTimeMilliseconds = 0.0;
+    double medianFrameTimeMilliseconds = 0.0;
+    double p95FrameTimeMilliseconds = 0.0;
+    double p99FrameTimeMilliseconds = 0.0;
+    double cpuFrameMilliseconds = 0.0;
+    double medianCpuFrameMilliseconds = 0.0;
+    double p95CpuFrameMilliseconds = 0.0;
+    double p99CpuFrameMilliseconds = 0.0;
+    double inputMilliseconds = 0.0;
+    double simulationMilliseconds = 0.0;
+    double sceneRenderMilliseconds = 0.0;
+    double uiRenderMilliseconds = 0.0;
+    double presentMilliseconds = 0.0;
+    int simulationSteps = 0;
+    bool simulationDeltaClamped = false;
+    ViewportMetrics viewport;
+    RendererDiagnostics renderer;
+    TextureDiagnostics textures;
+    UiDiagnostics ui;
+    PlatformDiagnostics platform;
+};
+
 struct AppPreferences {
     ControllerPreferences controller;
     std::string resolutionPreset = "auto";
     double gameSpeed = 1.0;
     bool debugToolsEnabled = false;
+    bool performanceStatsEnabled = false;
     bool helpDisabled = false;
     bool cameraShakeDisabled = false;
     bool fullscreen = false;
@@ -58,6 +138,9 @@ public:
     virtual ~IPreferenceStore() = default;
     virtual AppPreferences load() = 0;
     virtual bool store(const AppPreferences& preferences) = 0;
+    // Cheap change token for frame-critical consumers. Implementations advance
+    // this only when their authoritative preference state may have changed.
+    virtual std::uint64_t revision() const { return 0; }
     virtual std::string lastError() const = 0;
 };
 
@@ -74,7 +157,9 @@ public:
     virtual void log(PlatformLogLevel level, std::string_view message) = 0;
     virtual bool haptic(double durationSeconds, double weakMagnitude, double strongMagnitude) = 0;
     virtual void present() = 0;
+    virtual void paceFrame() {}
     virtual OpenGlDialect openGlDialect() const = 0;
+    virtual PlatformDiagnostics diagnostics() const { return {}; }
 };
 
 class IControllerSource {
@@ -82,6 +167,7 @@ public:
     virtual ~IControllerSource() = default;
     virtual ControllerFrame sampleFrame(double realTimeSeconds) = 0;
     virtual std::optional<ControllerFrame> syntheticPreviewFrame() const { return std::nullopt; }
+    virtual void setPreferences(const ControllerPreferences&) {}
     virtual InputSource activeSource() const = 0;
     virtual void reset() = 0;
 };
@@ -103,6 +189,7 @@ public:
         int& width,
         int& height) = 0;
     virtual std::string lastError() const = 0;
+    virtual TextureDiagnostics diagnostics() const { return {}; }
 };
 
 class IGameRenderer {
@@ -111,6 +198,8 @@ public:
     virtual bool initialize() = 0;
     virtual void render(const RenderSnapshot& snapshot) = 0;
     virtual void shutdown() = 0;
+    virtual void setPreferences(const AppPreferences&) {}
+    virtual RendererDiagnostics diagnostics() const { return {}; }
     virtual std::string_view description() const { return "Shared OpenGL renderer"; }
 };
 
@@ -121,6 +210,7 @@ public:
     virtual ~IGameUi() = default;
     virtual bool initialize(ActionHandler actionHandler) = 0;
     virtual void setPanelHtml(const std::string& html) = 0;
+    virtual void setRealtimeHudState(const RealtimeHudState&) {}
     virtual void render() = 0;
     virtual bool mouseMove(int x, int y) = 0;
     virtual bool mouseDown(int x, int y, int button) = 0;
@@ -142,6 +232,8 @@ public:
     virtual void dispatchAction(const std::string& action) = 0;
     virtual void refresh() = 0;
     virtual bool activateButtonLabel(const std::string& label) = 0;
+    virtual void setPerformanceStats(const PerformanceStats&, bool) {}
+    virtual UiDiagnostics diagnostics() const { return {}; }
     virtual void shutdown() = 0;
 };
 
@@ -151,6 +243,7 @@ class IUiBridge {
 public:
     virtual ~IUiBridge() = default;
     virtual void setPanelHtml(std::string_view html) = 0;
+    virtual void setRealtimeHudState(const RealtimeHudState&) {}
     virtual void setRmlUiEnabled(bool enabled) = 0;
     virtual void setModalOpen(bool open) = 0;
     virtual void setControllerPresentation(bool active, ControllerFamily family) = 0;
@@ -165,6 +258,7 @@ public:
     virtual void closeModal() = 0;
     virtual std::string focusedId() const = 0;
     virtual void preferencesChanged(const AppPreferences& preferences) = 0;
+    virtual void setPerformanceStats(std::string_view, bool) {}
 };
 
 struct AppServices {

@@ -1,6 +1,6 @@
 # Native Desktop Builds
 
-Rocket Rogue ships genuine x86-64 Windows and Linux applications. The native executable runs the shared C++ application directly through SDL 3 and OpenGL 3.3 Core; it does not embed Chromium, Electron, Node, JavaScript, HTML, or WASM. The Emscripten/WebGL2 build remains a separate, supported target.
+Rocket Rogue ships genuine x86-64 Windows and Linux applications. The native executable runs the shared C++ application directly through SDL 3 and OpenGL 3.3 Core; it does not embed Chromium, Electron, Node, JavaScript, WASM, or a browser shell. The Emscripten/WebGL2 build remains a separate, supported target.
 
 ## Runtime architecture
 

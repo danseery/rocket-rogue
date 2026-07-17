@@ -6,6 +6,8 @@
 namespace rocket::ui {
 
 namespace actions {
+inline constexpr std::string_view newGame = "new_game";
+inline constexpr std::string_view continueGame = "continue_game";
 inline constexpr std::string_view prepareLaunch = "prepare_launch";
 inline constexpr std::string_view startLaunch = "start_launch";
 inline constexpr std::string_view ejectNow = "eject_now";

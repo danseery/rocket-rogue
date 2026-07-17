@@ -6832,6 +6832,52 @@ void settingsResolutionSelectorExposesSupportedPresets()
         "the 1280 by 800 preset should identify the Steam Deck target");
 }
 
+void titleScreenPresentationIsPortable()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 911);
+    Random rng(911);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    PanelRenderContext context {state, catalog, launch, launch};
+    context.titleScreenActive = true;
+    context.hasSavedGame = false;
+
+    const std::string freshHtml = buildGamePanelHtml(context);
+    require(countOccurrences(freshHtml, "data-panel-mode=\"title\"") == 1,
+        "the title should expose one portable title layout marker");
+    require(countOccurrences(freshHtml, "class=\"orebit-letter") == 6,
+        "OREBIT should be composed from exactly six independently animated letters");
+    std::size_t previousLetter = 0;
+    for (const char letter : std::string_view("OREBIT")) {
+        const std::string token = ">" + std::string(1, letter) + "</span>";
+        const std::size_t position = freshHtml.find(token, previousLetter);
+        require(position != std::string::npos && position >= previousLetter,
+            "title letters should retain the OREBIT reading order");
+        previousLetter = position + token.size();
+    }
+    require(countOccurrences(freshHtml, "data-rr-action=\"new_game\"") == 1,
+        "a fresh title should expose New Game exactly once");
+    require(freshHtml.find("data-rr-action=\"continue_game\"") == std::string::npos,
+        "a fresh title should omit Continue rather than render a disabled action");
+    require(freshHtml.find("data-ui-modal=\"settings\"") != std::string::npos,
+        "the title should expose a Settings trigger");
+    require(countOccurrences(freshHtml, "<template data-modal=\"settings\"") == 1,
+        "the title should carry the Settings template required by native and browser modal hosts");
+    require(freshHtml.find("data-ui-default-focus=\"1\"") != std::string::npos,
+        "the title should offer a deterministic keyboard/controller focus target");
+
+    context.hasSavedGame = true;
+    const std::string savedHtml = buildGamePanelHtml(context);
+    require(countOccurrences(savedHtml, "data-rr-action=\"continue_game\"") == 1,
+        "a title backed by a valid save should expose Continue exactly once");
+    const std::size_t newGame = savedHtml.find("data-ui-modal=\"new_game_confirm\"");
+    const std::size_t continueGame = savedHtml.find("data-rr-action=\"continue_game\"");
+    const std::size_t settings = savedHtml.find("data-ui-modal=\"settings\"");
+    require(newGame != std::string::npos && continueGame != std::string::npos && settings != std::string::npos &&
+            newGame < continueGame && continueGame < settings,
+        "title actions should remain ordered New Game, Continue, Settings");
+}
+
 void solarMapModalTracksCampaignDiscovery()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -7699,6 +7745,8 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::miningRepairDrill == "mining_repair_drill", "mining drill repair action should use a stable schema id");
     require(ui::actions::miningRepairDrone == "mining_repair_drone", "mining drone repair action should use a stable schema id");
     require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
+    require(ui::actions::newGame == "new_game", "New Game should use a stable title action id");
+    require(ui::actions::continueGame == "continue_game", "Continue should use a stable title action id");
     require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
     require(ui::modals::map == "map", "solar map modal id should stay shared and data-like");
 
@@ -7922,6 +7970,7 @@ int main()
     launchReadinessPresentationComesFromSharedHelper();
     panelChromePresentationComesFromSharedHelper();
     settingsResolutionSelectorExposesSupportedPresets();
+    titleScreenPresentationIsPortable();
     solarMapModalTracksCampaignDiscovery();
     panelHtmlIncludesContextualTutorialLayer();
     surfaceHtmlPromotesMiningAction();

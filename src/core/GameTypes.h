@@ -335,6 +335,9 @@ struct MiningGateRuntime {
     double anchorX = 0.0;
     double anchorY = 0.0;
     std::vector<MiningGateMarker> markers;
+    // Transient cache invalidation. This is intentionally omitted from save data so
+    // a restored gate recomputes its terrain/enemy/marker-derived state once.
+    bool derivedStateDirty = true;
 };
 
 struct MiningStorySiteProgress {

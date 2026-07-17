@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rocket Rogue POC</title>
+  <title>OREBIT</title>
   <style>
     :root {
       color-scheme: dark;
@@ -170,6 +170,219 @@
     #panel.mining-fullscreen-panel > .status,
     #panel.mining-fullscreen-panel > .panel-kpis {
       display: none;
+    }
+
+    #panel.title-screen-panel,
+    #panel.title-screen-panel-mode {
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      overflow: hidden;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+
+    .title-screen {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: 100%;
+      align-items: center;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .title-screen::before {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      content: "";
+      background:
+        linear-gradient(90deg, rgba(3, 8, 16, 0.88) 0%, rgba(3, 8, 16, 0.56) 42%, rgba(3, 8, 16, 0.06) 72%),
+        radial-gradient(circle at 28% 50%, rgba(41, 114, 146, 0.12), transparent 46%);
+      pointer-events: none;
+    }
+
+    .title-scanline {
+      position: absolute;
+      z-index: 0;
+      left: -10%;
+      width: 120%;
+      height: 1px;
+      opacity: 0;
+      background: linear-gradient(90deg, transparent, rgba(103, 210, 255, 0.64), transparent);
+      box-shadow: 0 0 18px rgba(103, 210, 255, 0.42);
+      pointer-events: none;
+      animation: title-scan 8s linear infinite;
+    }
+
+    .title-scanline-a { animation-delay: -1.5s; }
+    .title-scanline-b { animation-delay: -5.5s; }
+
+    .title-content {
+      position: relative;
+      z-index: 1;
+      width: min(700px, 78vw);
+      margin-left: clamp(40px, 8vw, 142px);
+      padding: 30px 34px 28px;
+      border-left: 1px solid rgba(103, 210, 255, 0.32);
+      background: linear-gradient(90deg, rgba(6, 14, 24, 0.68), rgba(6, 14, 24, 0.12) 86%, transparent);
+      box-shadow: -28px 0 64px rgba(0, 0, 0, 0.24);
+    }
+
+    .title-kicker,
+    .title-footer,
+    .title-save-state {
+      display: block;
+      color: rgba(181, 222, 239, 0.72);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.4;
+      letter-spacing: 0.14em;
+    }
+
+    .orebit-lockup {
+      display: flex;
+      width: min-content;
+      margin: 8px 0 5px;
+      align-items: center;
+      color: #f5fbff;
+      font-size: clamp(58px, 7.2vw, 108px);
+      font-weight: 900;
+      line-height: 0.96;
+      letter-spacing: 0.015em;
+      text-transform: uppercase;
+      filter: drop-shadow(0 8px 22px rgba(0, 0, 0, 0.76));
+    }
+
+    .orebit-letter {
+      display: inline-block;
+      min-width: 0.72em;
+      text-align: center;
+      transform-origin: 50% 65%;
+      animation: orebit-letter-float 3.8s ease-in-out infinite alternate;
+      will-change: transform, text-shadow;
+    }
+
+    .orebit-ore {
+      color: #ffd166;
+      text-shadow: 0 0 9px rgba(255, 209, 102, 0.55), 0 0 34px rgba(255, 157, 58, 0.22);
+    }
+
+    .orebit-bit {
+      color: #7ee6ff;
+      text-shadow: 0 0 9px rgba(103, 210, 255, 0.58), 0 0 34px rgba(57, 176, 255, 0.26);
+    }
+
+    .orebit-letter-o { animation-delay: -0.4s; }
+    .orebit-letter-r { animation-delay: -2.2s; }
+    .orebit-letter-e { animation-delay: -1.1s; }
+    .orebit-letter-b { animation-delay: -3.0s; }
+    .orebit-letter-i { animation-delay: -1.7s; }
+    .orebit-letter-t { animation-delay: -2.7s; }
+
+    .title-tagline {
+      color: rgba(237, 244, 248, 0.9);
+      font-size: clamp(13px, 1.35vw, 18px);
+      font-weight: 800;
+      letter-spacing: 0.18em;
+    }
+
+    .title-divider {
+      display: flex;
+      width: min(520px, 100%);
+      margin: 20px 0 17px;
+      align-items: center;
+      gap: 12px;
+      color: rgba(153, 206, 226, 0.66);
+      font-size: 10px;
+      letter-spacing: 0.16em;
+    }
+
+    .title-divider span {
+      height: 1px;
+      flex: 1 1 auto;
+      background: linear-gradient(90deg, rgba(103, 210, 255, 0.05), rgba(103, 210, 255, 0.5));
+    }
+
+    .title-divider span:last-child {
+      background: linear-gradient(90deg, rgba(103, 210, 255, 0.5), rgba(103, 210, 255, 0.05));
+    }
+
+    .title-menu {
+      display: grid;
+      width: min(340px, 100%);
+      gap: 9px;
+    }
+
+    .title-menu button.title-action {
+      position: relative;
+      min-height: 48px;
+      padding: 0 18px;
+      border-color: rgba(113, 204, 237, 0.32);
+      border-radius: 2px;
+      background: linear-gradient(90deg, rgba(15, 41, 56, 0.9), rgba(10, 24, 36, 0.68));
+      box-shadow: inset 3px 0 0 rgba(103, 210, 255, 0.52);
+      color: #edf8fc;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-align: left;
+      text-transform: uppercase;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .title-menu button.title-action:hover,
+    .title-menu button.title-action:focus-visible {
+      transform: translateX(7px);
+      border-color: rgba(126, 230, 255, 0.78);
+      background: linear-gradient(90deg, rgba(29, 78, 99, 0.94), rgba(11, 31, 45, 0.78));
+      outline: none;
+    }
+
+    .title-menu button.title-continue {
+      box-shadow: inset 3px 0 0 rgba(255, 209, 102, 0.72), 0 0 24px rgba(255, 209, 102, 0.07);
+    }
+
+    .title-save-state {
+      width: min(340px, 100%);
+      margin-top: 13px;
+      letter-spacing: 0.1em;
+    }
+
+    .title-save-state.save-found { color: rgba(114, 224, 168, 0.86); }
+    .title-save-state.save-empty { color: rgba(153, 169, 184, 0.68); }
+
+    .title-notice {
+      width: min(520px, 100%);
+      margin-top: 10px;
+      color: #ffd166;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .title-footer {
+      margin-top: 20px;
+      color: rgba(153, 169, 184, 0.52);
+      font-size: 9px;
+    }
+
+    @keyframes orebit-letter-float {
+      0% { transform: translateY(-4px) rotate(-1.4deg); filter: brightness(0.92); }
+      48% { transform: translateY(3px) rotate(0.7deg); filter: brightness(1.08); }
+      100% { transform: translateY(-2px) rotate(1.5deg); filter: brightness(0.98); }
+    }
+
+    @keyframes title-scan {
+      0% { top: -2%; opacity: 0; }
+      8% { opacity: 0.48; }
+      36% { opacity: 0.12; }
+      42%, 100% { top: 102%; opacity: 0; }
     }
 
     .panel-head {
@@ -5676,6 +5889,28 @@
     }
 
     @media (max-width: 720px) {
+      .title-screen {
+        align-items: center;
+        justify-content: center;
+      }
+
+      .title-content {
+        width: calc(100vw - 28px);
+        margin: 0;
+        padding: 24px 18px 22px;
+        border-left-color: rgba(103, 210, 255, 0.22);
+        background: rgba(6, 14, 24, 0.58);
+      }
+
+      .orebit-lockup {
+        font-size: clamp(47px, 15vw, 74px);
+      }
+
+      .title-menu,
+      .title-save-state {
+        width: 100%;
+      }
+
       #panel {
         inset: auto 10px 10px 10px;
         width: auto;
@@ -5800,6 +6035,13 @@
       }
     }
 
+    @media (prefers-reduced-motion: reduce) {
+      .orebit-letter,
+      .title-scanline {
+        animation: none;
+      }
+    }
+
     @media (max-width: 1100px) {
       .debug-tools.is-visible {
         display: none;
@@ -5855,7 +6097,7 @@
 <body>
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
   <aside id="panel">
-    <h1>Rocket Rogue</h1>
+    <h1>OREBIT</h1>
     <p class="status">Loading WebAssembly...</p>
   </aside>
   <button id="scene-launch-control" class="scene-launch-control" type="button">Launch</button>
@@ -6232,15 +6474,15 @@
       });
     }
 
-    function desktopFullscreenAvailable() {
-      return window.RocketDesktop?.available === true &&
-        typeof window.RocketDesktop.isFullscreen === "function" &&
-        typeof window.RocketDesktop.setFullscreen === "function";
+    function fullscreenAvailable() {
+      return document.fullscreenEnabled !== false &&
+        typeof document.documentElement.requestFullscreen === "function" &&
+        typeof document.exitFullscreen === "function";
     }
 
-    function syncDesktopFullscreenControls(root = document) {
-      const available = desktopFullscreenAvailable();
-      const enabled = available && window.RocketDesktop.isFullscreen();
+    function syncFullscreenControls(root = document) {
+      const available = fullscreenAvailable();
+      const enabled = available && document.fullscreenElement !== null;
       root.querySelectorAll("[data-desktop-fullscreen-settings]").forEach((section) => {
         section.hidden = !available;
       });
@@ -6375,6 +6617,8 @@
       if (!modalRoot.hidden) {
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") +
           (modalRoot.dataset.dismissible === "0" ? "" : item(cancel, "Back")) + item("R-stick", "Scroll");
+      } else if (panel.querySelector("[data-panel-mode='title']")) {
+        controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(label.menu, "Settings");
       } else if (panel.querySelector("[data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
         controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
       } else if (panel.querySelector("[data-panel-mode='mining-fullscreen']")) {
@@ -6422,7 +6666,7 @@
 
     function syncLocalControls(root = document) {
       syncResolutionControls(root);
-      syncDesktopFullscreenControls(root);
+      syncFullscreenControls(root);
       syncGameSpeedControls(root);
       syncHelpControls(root);
       syncCameraShakeControls(root);
@@ -6503,12 +6747,13 @@
       const orbit = Boolean(panel.querySelector("[data-orbit-run]"));
       const phaseBoard = panel.classList.contains("phase-board-panel");
       const miningFullscreen = panel.classList.contains("mining-fullscreen-panel");
+      const titleScreen = panel.classList.contains("title-screen-panel");
       const rmlModalOpen = document.body.classList.contains("rmlui-modal-open");
       const shipServiceMarker = panel.querySelector("[data-mining-ship-service]");
       const drillRepairVisible = shipServiceMarker?.dataset.drillVisible === "1";
       const droneRepairVisible = shipServiceMarker?.dataset.droneVisible === "1";
       const showShipService = Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
-      debugTools.classList.toggle("hud-suppressed", miningFullscreen);
+      debugTools.classList.toggle("hud-suppressed", miningFullscreen || titleScreen);
 
       sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard && !rmlModalOpen);
       sceneLaunchControl.hidden = !(preflight && !phaseBoard && !rmlModalOpen);
@@ -6822,9 +7067,12 @@
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
         const miningFullscreen = mode === "mining-fullscreen";
+        const titleScreen = mode === "title";
         const arrivalFanfarePanel = mode === "arrival-fanfare" || mode === "mission-stamp";
         panel.classList.toggle("phase-board-panel", phaseBoard);
         panel.classList.toggle("mining-fullscreen-panel", miningFullscreen);
+        panel.classList.toggle("title-screen-panel", titleScreen);
+        panel.classList.toggle("title-screen-panel-mode", titleScreen);
         panel.classList.toggle("arrival-fanfare-panel-mode", arrivalFanfarePanel);
         panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
         panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
@@ -6838,6 +7086,18 @@
           openPanelModal(autoModal.dataset.modal || "");
         } else if (document.body.classList.contains("controller-input-active")) {
           restoreControllerFocus();
+        }
+      },
+      setRealtimeHudState(patches) {
+        for (const patch of Array.isArray(patches) ? patches : []) {
+          const element = document.getElementById(String(patch?.id || ""));
+          if (!element) continue;
+          if (Object.prototype.hasOwnProperty.call(patch, "text")) {
+            element.textContent = String(patch.text ?? "");
+          }
+          if (Object.prototype.hasOwnProperty.call(patch, "className")) {
+            element.className = String(patch.className ?? "");
+          }
         }
       },
       loadSave() {
@@ -6885,13 +7145,15 @@
         return directExport(...args);
       }
       if (!Module.ccall) {
-        console.warn(`Rocket Rogue action bridge missing export: ${name}`);
+        console.warn(`OREBIT action bridge missing export: ${name}`);
         return 0;
       }
       return Module.ccall(name, returnType, sig, args);
     }
 
     window.rr = {
+      newGame: () => rrCall("rr_new_game"),
+      continueGame: () => rrCall("rr_continue_game"),
       prepareLaunch: () => rrCall("rr_prepare_launch"),
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
@@ -6993,6 +7255,8 @@
     };
 
     const rrActionIds = Object.freeze({
+      newGame: "new_game",
+      continueGame: "continue_game",
       prepareLaunch: "prepare_launch",
       startLaunch: "start_launch",
       ejectNow: "eject_now",
@@ -7052,6 +7316,8 @@
     });
 
     const rrActions = {
+      [rrActionIds.newGame]: () => rr.newGame(),
+      [rrActionIds.continueGame]: () => rr.continueGame(),
       [rrActionIds.prepareLaunch]: () => rr.prepareLaunch(),
       [rrActionIds.startLaunch]: () => rr.startLaunch(),
       [rrActionIds.ejectNow]: () => rr.ejectNow(),
@@ -7668,16 +7934,25 @@
       syncLocalControls(modalRoot);
     }
 
-    function handleDesktopFullscreenToggle(event) {
+    async function handleFullscreenToggle(event) {
       const button = closestFromEvent(event, "button[data-desktop-fullscreen-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button)) || !desktopFullscreenAvailable()) {
+      if (!button || !(panel.contains(button) || modalRoot.contains(button)) || !fullscreenAvailable()) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
-      window.RocketDesktop.setFullscreen(!window.RocketDesktop.isFullscreen());
-      syncDesktopFullscreenControls(panel);
-      syncDesktopFullscreenControls(modalRoot);
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch (error) {
+        console.warn("Fullscreen request was rejected.", error);
+      } finally {
+        syncFullscreenControls(panel);
+        syncFullscreenControls(modalRoot);
+      }
     }
 
     function handleDebugToolsToggle(event) {
@@ -7720,7 +7995,7 @@
     document.addEventListener("click", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpToggle, true);
     document.addEventListener("click", handleCameraShakeToggle, true);
-    document.addEventListener("click", handleDesktopFullscreenToggle, true);
+    document.addEventListener("click", handleFullscreenToggle, true);
     document.addEventListener("click", handleDebugToolsToggle, true);
     document.addEventListener("click", handleControllerPreferenceToggle, true);
     document.addEventListener("change", handleSettingsChange, true);
@@ -7745,9 +8020,9 @@
       if (event.key !== "Enter" && event.key !== " ") return;
       cancelAllHeldPanelActions();
     }, true);
-    window.RocketDesktop?.onFullscreenChanged?.(() => {
-      syncDesktopFullscreenControls(panel);
-      syncDesktopFullscreenControls(modalRoot);
+    document.addEventListener("fullscreenchange", () => {
+      syncFullscreenControls(panel);
+      syncFullscreenControls(modalRoot);
     });
     modalRoot.addEventListener("click", (event) => {
       if (performance.now() - lastPanelModalAt < 220) {
@@ -7889,7 +8164,14 @@
       mining: 12
     });
 
+    function isTitleScreenActive() {
+      return Boolean(panel.querySelector("[data-panel-mode='title']"));
+    }
+
     function isMiningActive() {
+      if (isTitleScreenActive()) {
+        return false;
+      }
       const screen = rr.currentScreen();
       if (screen >= 0) {
         return screen === rrScreenIds.mining;
@@ -8115,6 +8397,11 @@
       if (!modalRoot.hidden || document.body.classList.contains("rmlui-modal-open")) {
         return;
       }
+      // A valid save is restored into resident memory before the title appears,
+      // but no gameplay shortcut may reach that state until Continue is chosen.
+      if (isTitleScreenActive()) {
+        return;
+      }
       if (panel.querySelector("[data-arrival-fanfare]") && (event.key === " " || event.key === "Enter")) {
         rr.skipArrivalFanfare();
         event.preventDefault();
@@ -8154,6 +8441,9 @@
     });
 
     window.addEventListener("keyup", (event) => {
+      if (isTitleScreenActive()) {
+        return;
+      }
       handleFlybyKeyUp(event);
       handleOrbitKeyUp(event);
       handleMiningKeyUp(event);

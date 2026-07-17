@@ -25,9 +25,11 @@ struct RmlButtonBinding {
     bool cameraShakeToggle = false;
     bool desktopFullscreenToggle = false;
     bool debugToolsToggle = false;
+    bool performanceStatsToggle = false;
 };
 
 enum class RmlPanelMode {
+    Title,
     Control,
     PhaseBoard,
     ArrivalFanfare,
@@ -41,6 +43,7 @@ public:
 
     bool initialize(ActionHandler actionHandler) override;
     void setPanelHtml(const std::string& html) override;
+    void setRealtimeHudState(const RealtimeHudState& state) override;
     void render() override;
 
     bool mouseMove(int x, int y) override;
@@ -63,6 +66,8 @@ public:
     void dispatchAction(const std::string& action) override;
     void refresh() override;
     bool activateButtonLabel(const std::string& label) override;
+    void setPerformanceStats(const PerformanceStats& stats, bool visible) override;
+    UiDiagnostics diagnostics() const override;
     void shutdown() override;
 
 private:
@@ -79,6 +84,7 @@ private:
     std::vector<RmlButtonBinding> buttonBindings_;
     std::string focusedId_;
     std::string modalReturnFocusId_;
+    std::string performanceStatsHtml_;
     float lastFocusCenterX_ = 0.0f;
     float lastFocusCenterY_ = 0.0f;
     bool hasLastFocusCenter_ = false;
@@ -86,12 +92,17 @@ private:
     bool controllerFocusVisible_ = false;
     bool controllerResumeBlocked_ = false;
     bool controllerResumeConnected_ = false;
+    bool performanceStatsVisible_ = false;
     ControllerFamily controllerFamily_ = ControllerFamily::Generic;
     Rml::Element* pressedButton_ = nullptr;
     double pressedButtonAtSeconds_ = 0.0;
     RmlPanelMode panelMode_ = RmlPanelMode::Control;
     int layoutViewportWidth_ = 0;
     int layoutViewportHeight_ = 0;
+    int pendingDocumentRebuilds_ = 0;
+    int pendingPanelRebuilds_ = 0;
+    int pendingHudPatches_ = 0;
+    UiDiagnostics uiDiagnostics_;
     bool initialized_ = false;
 };
 

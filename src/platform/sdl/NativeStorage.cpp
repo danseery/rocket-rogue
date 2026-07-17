@@ -159,6 +159,7 @@ void NativePreferenceStore::ensureLoaded()
         else if (key == "render.resolution") cached_.resolutionPreset = std::string(value);
         else if (key == "game.speed") cached_.gameSpeed = std::clamp(parseDouble(value, 1.0), 0.25, 8.0);
         else if (key == "debug.tools") cached_.debugToolsEnabled = parseBool(value, false);
+        else if (key == "debug.performanceStats") cached_.performanceStatsEnabled = parseBool(value, false);
         else if (key == "accessibility.helpDisabled") cached_.helpDisabled = parseBool(value, false);
         else if (key == "render.cameraShakeDisabled") cached_.cameraShakeDisabled = parseBool(value, false);
         else if (key == "window.fullscreen") cached_.fullscreen = parseBool(value, false);
@@ -186,6 +187,7 @@ bool NativePreferenceStore::store(const AppPreferences& preferences)
            << "render.resolution=" << sanitizeLine(normalized.resolutionPreset) << '\n'
            << "game.speed=" << normalized.gameSpeed << '\n'
            << "debug.tools=" << boolText(normalized.debugToolsEnabled) << '\n'
+           << "debug.performanceStats=" << boolText(normalized.performanceStatsEnabled) << '\n'
            << "accessibility.helpDisabled=" << boolText(normalized.helpDisabled) << '\n'
            << "render.cameraShakeDisabled=" << boolText(normalized.cameraShakeDisabled) << '\n'
            << "window.fullscreen=" << boolText(normalized.fullscreen) << '\n';
@@ -193,10 +195,11 @@ bool NativePreferenceStore::store(const AppPreferences& preferences)
     if (!file_.store(stream.str())) return false;
     cached_ = std::move(normalized);
     loaded_ = true;
+    ++revision_;
     return true;
 }
 
+std::uint64_t NativePreferenceStore::revision() const { return revision_; }
 std::string NativePreferenceStore::lastError() const { return file_.lastError(); }
-const std::filesystem::path& NativePreferenceStore::path() const { return file_.path(); }
 
 } // namespace rocket

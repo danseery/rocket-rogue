@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <iostream>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace rocket {
@@ -42,13 +43,139 @@ bool keyDown(const bool* state, SDL_Scancode first, SDL_Scancode second)
 
 } // namespace
 
+void NativeFrameLifecycle::reset(bool visible, bool focused)
+{
+    visible_ = visible;
+    focused_ = focused;
+    idleTransitionPending_ = visible_ && !focused_;
+    suspendTransitionPending_ = !visible_;
+    frameClockResetPending_ = false;
+}
+
+void NativeFrameLifecycle::setVisible(bool visible)
+{
+    if (visible == visible_) return;
+
+    visible_ = visible;
+    if (visible_) {
+        suspendTransitionPending_ = false;
+        idleTransitionPending_ = !focused_;
+        frameClockResetPending_ = true;
+    } else {
+        idleTransitionPending_ = false;
+        suspendTransitionPending_ = true;
+    }
+}
+
+void NativeFrameLifecycle::setFocused(bool focused)
+{
+    if (focused == focused_) return;
+
+    focused_ = focused;
+    if (!visible_) {
+        idleTransitionPending_ = false;
+        return;
+    }
+    if (focused_) {
+        idleTransitionPending_ = false;
+        frameClockResetPending_ = true;
+    } else {
+        idleTransitionPending_ = true;
+    }
+}
+
+NativeFrameDisposition NativeFrameLifecycle::disposition() const
+{
+    if (!visible_) {
+        return suspendTransitionPending_
+            ? NativeFrameDisposition::SuspendTransition
+            : NativeFrameDisposition::Suspended;
+    }
+    if (!focused_) {
+        return idleTransitionPending_
+            ? NativeFrameDisposition::IdleTransition
+            : NativeFrameDisposition::IdlePaused;
+    }
+    return NativeFrameDisposition::Active;
+}
+
+void NativeFrameLifecycle::completeFrame()
+{
+    if (!visible_) {
+        suspendTransitionPending_ = false;
+    } else if (!focused_) {
+        idleTransitionPending_ = false;
+    }
+}
+
+bool NativeFrameLifecycle::consumeFrameClockReset()
+{
+    const bool pending = frameClockResetPending_;
+    frameClockResetPending_ = false;
+    return pending;
+}
+
+bool NativeFrameLifecycle::visible() const { return visible_; }
+bool NativeFrameLifecycle::focused() const { return focused_; }
+
+void NativeFramePacer::configure(bool swapIntervalEnabled, double refreshRateHz)
+{
+    active_ = !swapIntervalEnabled;
+    if (std::isfinite(refreshRateHz) && refreshRateHz >= 1.0) {
+        intervalNanoseconds_ = static_cast<std::uint64_t>(
+            std::llround(1'000'000'000.0 / refreshRateHz));
+    } else {
+        intervalNanoseconds_ = 0;
+    }
+    resetDeadline();
+}
+
+void NativeFramePacer::resetDeadline()
+{
+    nextDeadlineNanoseconds_ = 0;
+}
+
+NativeFramePacingDecision NativeFramePacer::next(std::uint64_t nowNanoseconds)
+{
+    if (!active_) return {};
+    if (intervalNanoseconds_ == 0) {
+        // A refresh rate is not always available (remote desktops are a common
+        // example). Yield for a bounded interval without inventing a 60 Hz cap.
+        return {1'000'000};
+    }
+
+    if (nextDeadlineNanoseconds_ == 0) {
+        nextDeadlineNanoseconds_ = nowNanoseconds + intervalNanoseconds_;
+    } else if (nowNanoseconds > nextDeadlineNanoseconds_
+        && nowNanoseconds - nextDeadlineNanoseconds_ > intervalNanoseconds_ * 4) {
+        // A debugger stop, window move, or another long stall must not schedule
+        // a burst of catch-up presentations.
+        nextDeadlineNanoseconds_ = nowNanoseconds + intervalNanoseconds_;
+        return {};
+    }
+
+    if (nowNanoseconds < nextDeadlineNanoseconds_) {
+        const std::uint64_t delay = nextDeadlineNanoseconds_ - nowNanoseconds;
+        nextDeadlineNanoseconds_ += intervalNanoseconds_;
+        return {delay};
+    }
+
+    const std::uint64_t missedIntervals =
+        (nowNanoseconds - nextDeadlineNanoseconds_) / intervalNanoseconds_ + 1;
+    nextDeadlineNanoseconds_ += missedIntervals * intervalNanoseconds_;
+    return {};
+}
+
+bool NativeFramePacer::active() const { return active_; }
+std::uint64_t NativeFramePacer::intervalNanoseconds() const { return intervalNanoseconds_; }
+
 SdlPlatform::SdlPlatform(IPreferenceStore& preferences) : preferences_(preferences) {}
 SdlPlatform::~SdlPlatform() { shutdown(); }
 
 bool SdlPlatform::initialize()
 {
     if (initialized_) return true;
-    SDL_SetAppMetadata("Rocket Rogue", "0.1.0", "game.rocketrogue.native");
+    SDL_SetAppMetadata("OREBIT", "0.1.0", "game.rocketrogue.native");
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_GAMEPAD)) {
         log(PlatformLogLevel::Error, std::string("SDL initialization failed: ") + SDL_GetError());
@@ -64,7 +191,7 @@ bool SdlPlatform::initialize()
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
 
     window_ = SDL_CreateWindow(
-        "Rocket Rogue",
+        "OREBIT",
         1280,
         800,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
@@ -84,7 +211,20 @@ bool SdlPlatform::initialize()
         shutdown();
         return false;
     }
-    SDL_GL_SetSwapInterval(1);
+    diagnostics_.verticalSyncActive = SDL_GL_SetSwapInterval(1);
+    if (!diagnostics_.verticalSyncActive) {
+        log(PlatformLogLevel::Warning,
+            std::string("Vertical sync is unavailable; enabling display-aware software frame pacing: ")
+                + SDL_GetError());
+    }
+
+    const SDL_WindowFlags windowFlags = SDL_GetWindowFlags(window_);
+    const bool focused = (windowFlags & SDL_WINDOW_INPUT_FOCUS) != 0;
+    const bool visible = (windowFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) == 0;
+    fullscreen_ = (windowFlags & SDL_WINDOW_FULLSCREEN) != 0;
+    frameLifecycle_.reset(visible, focused);
+    refreshViewportMetrics();
+    refreshDisplayTiming();
 
     int gamepadCount = 0;
     if (SDL_JoystickID* ids = SDL_GetGamepads(&gamepadCount)) {
@@ -92,8 +232,9 @@ bool SdlPlatform::initialize()
         SDL_free(ids);
     }
 
-    initialized_ = true;
     const AppPreferences preferences = preferences_.load();
+    controllerPreferences_ = preferences.controller;
+    initialized_ = true;
     if (preferences.fullscreen) setFullscreen(true);
     return true;
 }
@@ -103,14 +244,21 @@ void SdlPlatform::shutdown()
     if (!window_ && !glContext_ && !initialized_) return;
     for (auto& [id, gamepad] : gamepads_) {
         (void)id;
-        if (gamepad) SDL_CloseGamepad(gamepad);
+        if (gamepad.handle) SDL_CloseGamepad(gamepad.handle);
     }
     gamepads_.clear();
+    controllerSnapshots_.clear();
     if (glContext_) SDL_GL_DestroyContext(glContext_);
     glContext_ = nullptr;
     if (window_) SDL_DestroyWindow(window_);
     window_ = nullptr;
     SDL_Quit();
+    diagnostics_ = {};
+    suspendedWakeWindowStartedNanoseconds_ = 0;
+    suspendedWakeWindowCount_ = 0;
+    displayId_ = 0;
+    frameLifecycle_.reset();
+    framePacer_.configure(true, 0.0);
     initialized_ = false;
 }
 
@@ -131,76 +279,193 @@ std::filesystem::path SdlPlatform::executableDirectory()
 
 bool SdlPlatform::processEvents(RocketGameApp& app)
 {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        switch (event.type) {
-        case SDL_EVENT_QUIT:
-        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-            return false;
-        case SDL_EVENT_GAMEPAD_ADDED:
-            openGamepad(event.gdevice.which);
-            break;
-        case SDL_EVENT_GAMEPAD_REMOVED:
-            closeGamepad(event.gdevice.which);
-            break;
-        case SDL_EVENT_WINDOW_FOCUS_GAINED:
-            focused_ = true;
-            break;
-        case SDL_EVENT_WINDOW_FOCUS_LOST:
-            focused_ = false;
-            releaseRealtimeInputs(app);
-            break;
-        case SDL_EVENT_WINDOW_SHOWN:
-        case SDL_EVENT_WINDOW_RESTORED:
-            visible_ = true;
-            break;
-        case SDL_EVENT_WINDOW_HIDDEN:
-        case SDL_EVENT_WINDOW_MINIMIZED:
-        case SDL_EVENT_WINDOW_OCCLUDED:
-            visible_ = false;
-            releaseRealtimeInputs(app);
-            break;
-        case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
-            fullscreen_ = true;
-            break;
-        case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
-            fullscreen_ = false;
-            break;
-        case SDL_EVENT_KEY_DOWN:
-            noteKeyboardPointerActivity();
-            handleKeyDown(app, event.key);
-            break;
-        case SDL_EVENT_KEY_UP:
-            noteKeyboardPointerActivity();
-            if (event.key.key == SDLK_SPACE) app.miningDrill(false);
-            break;
-        case SDL_EVENT_MOUSE_MOTION:
-            noteKeyboardPointerActivity();
+    diagnostics_.idleMilliseconds = 0.0;
+    bool mouseMotionPending = false;
+    Uint64 lowCadenceWaitStarted = 0;
+
+    const auto flushMouseMotion = [&]() {
+        if (!mouseMotionPending) return;
+        mouseMotionPending = false;
+        if (!frameLifecycle_.visible()) return;
+        noteKeyboardPointerActivity();
+        app.uiMouseMove(static_cast<int>(mouseX_), static_cast<int>(mouseY_));
+    };
+
+    const auto dispatchEvent = [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_MOUSE_MOTION) {
             mouseX_ = event.motion.x;
             mouseY_ = event.motion.y;
-            app.uiMouseMove(static_cast<int>(mouseX_), static_cast<int>(mouseY_));
-            break;
-        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            noteKeyboardPointerActivity();
-            mouseX_ = event.button.x; mouseY_ = event.button.y;
-            const bool overUi = app.uiMouseDown(static_cast<int>(mouseX_), static_cast<int>(mouseY_), rmlMouseButton(event.button.button));
-            if (!overUi && event.button.button == SDL_BUTTON_LEFT && app.inputContext() == InputContext::MiningActive) app.miningDrill(true);
-            break;
+            mouseMotionPending = true;
+            return true;
         }
-        case SDL_EVENT_MOUSE_BUTTON_UP:
-            noteKeyboardPointerActivity();
-            mouseX_ = event.button.x; mouseY_ = event.button.y;
-            app.uiMouseUp(static_cast<int>(mouseX_), static_cast<int>(mouseY_), rmlMouseButton(event.button.button));
-            if (event.button.button == SDL_BUTTON_LEFT) app.miningDrill(false);
-            break;
-        case SDL_EVENT_MOUSE_WHEEL:
-            noteKeyboardPointerActivity();
-            mouseX_ = event.wheel.mouse_x; mouseY_ = event.wheel.mouse_y;
-            app.uiMouseWheel(static_cast<int>(mouseX_), static_cast<int>(mouseY_), -event.wheel.y * 90.0);
-            break;
-        default:
-            break;
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+            || event.type == SDL_EVENT_MOUSE_BUTTON_UP
+            || event.type == SDL_EVENT_MOUSE_WHEEL) {
+            // Preserve ordering at pointer-button/scroll boundaries while
+            // collapsing high-frequency motion bursts to their final point.
+            flushMouseMotion();
         }
+        return handleEvent(app, event);
+    };
+
+    SDL_Event event;
+    const NativeFrameDisposition disposition = frameDisposition();
+    if (disposition != NativeFrameDisposition::Suspended) {
+        suspendedWakeWindowStartedNanoseconds_ = 0;
+        suspendedWakeWindowCount_ = 0;
+        diagnostics_.suspendedWakeupsPerSecond = 0.0;
+    }
+    if (nativeFrameWaitsForEvents(disposition)) {
+        lowCadenceWaitStarted = SDL_GetTicksNS();
+        const bool eventAvailable = SDL_WaitEventTimeout(&event, nativeIdleEventWaitMilliseconds);
+        diagnostics_.idleMilliseconds = static_cast<double>(SDL_GetTicksNS() - lowCadenceWaitStarted) / 1'000'000.0;
+        if (disposition == NativeFrameDisposition::Suspended) {
+            ++diagnostics_.suspendedWakeups;
+            const Uint64 now = SDL_GetTicksNS();
+            if (suspendedWakeWindowStartedNanoseconds_ == 0) {
+                suspendedWakeWindowStartedNanoseconds_ = now;
+            }
+            ++suspendedWakeWindowCount_;
+            const Uint64 windowElapsed = now - suspendedWakeWindowStartedNanoseconds_;
+            if (windowElapsed >= 1'000'000'000ULL) {
+                diagnostics_.suspendedWakeupsPerSecond =
+                    static_cast<double>(suspendedWakeWindowCount_) * 1'000'000'000.0 /
+                    static_cast<double>(windowElapsed);
+                suspendedWakeWindowStartedNanoseconds_ = now;
+                suspendedWakeWindowCount_ = 0;
+            }
+        }
+        if (!eventAvailable) return true;
+        if (!dispatchEvent(event)) return false;
+    }
+
+    while (SDL_PollEvent(&event)) {
+        if (!dispatchEvent(event)) return false;
+    }
+    flushMouseMotion();
+    if (lowCadenceWaitStarted != 0 && nativeFrameWaitsForEvents(frameDisposition())) {
+        const Uint64 targetWaitNanoseconds =
+            static_cast<Uint64>(nativeIdleEventWaitMilliseconds) * 1'000'000ULL;
+        const Uint64 elapsed = SDL_GetTicksNS() - lowCadenceWaitStarted;
+        if (elapsed < targetWaitNanoseconds) {
+            SDL_DelayNS(targetWaitNanoseconds - elapsed);
+        }
+        diagnostics_.idleMilliseconds =
+            static_cast<double>(SDL_GetTicksNS() - lowCadenceWaitStarted) / 1'000'000.0;
+    }
+    return true;
+}
+
+bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
+{
+    switch (event.type) {
+    case SDL_EVENT_QUIT:
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        return false;
+    case SDL_EVENT_GAMEPAD_ADDED:
+        openGamepad(event.gdevice.which);
+        break;
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        closeGamepad(event.gdevice.which);
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        frameLifecycle_.setFocused(true);
+        framePacer_.resetDeadline();
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        frameLifecycle_.setFocused(false);
+        framePacer_.resetDeadline();
+        releaseRealtimeInputs(app);
+        break;
+    case SDL_EVENT_WINDOW_SHOWN:
+    case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_MAXIMIZED:
+    case SDL_EVENT_WINDOW_RESTORED:
+        setWindowVisible(app, true);
+        refreshViewportMetrics();
+        break;
+    case SDL_EVENT_WINDOW_HIDDEN:
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    case SDL_EVENT_WINDOW_OCCLUDED:
+        setWindowVisible(app, false);
+        break;
+    case SDL_EVENT_WINDOW_MOVED:
+        if (window_ && SDL_GetDisplayForWindow(window_) != displayId_) {
+            refreshViewportMetrics();
+            refreshDisplayTiming();
+        }
+        break;
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+        refreshViewportMetrics();
+        refreshDisplayTiming();
+        break;
+    case SDL_EVENT_WINDOW_RESIZED:
+        viewportMetrics_.logicalWidth = std::max(1, static_cast<int>(event.window.data1));
+        viewportMetrics_.logicalHeight = std::max(1, static_cast<int>(event.window.data2));
+        viewportMetrics_.densityRatio = static_cast<float>(viewportMetrics_.drawableWidth)
+            / static_cast<float>(viewportMetrics_.logicalWidth);
+        break;
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        viewportMetrics_.drawableWidth = std::max(1, static_cast<int>(event.window.data1));
+        viewportMetrics_.drawableHeight = std::max(1, static_cast<int>(event.window.data2));
+        viewportMetrics_.densityRatio = static_cast<float>(viewportMetrics_.drawableWidth)
+            / static_cast<float>(viewportMetrics_.logicalWidth);
+        break;
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+        fullscreen_ = true;
+        refreshViewportMetrics();
+        refreshDisplayTiming();
+        break;
+    case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+        fullscreen_ = false;
+        refreshViewportMetrics();
+        refreshDisplayTiming();
+        break;
+    case SDL_EVENT_KEY_DOWN:
+        noteKeyboardPointerActivity();
+        handleKeyDown(app, event.key);
+        break;
+    case SDL_EVENT_KEY_UP:
+        noteKeyboardPointerActivity();
+        if (event.key.key == SDLK_SPACE) app.miningDrill(false);
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        noteKeyboardPointerActivity();
+        mouseX_ = event.button.x;
+        mouseY_ = event.button.y;
+        const bool overUi = app.uiMouseDown(
+            static_cast<int>(mouseX_),
+            static_cast<int>(mouseY_),
+            rmlMouseButton(event.button.button));
+        if (!overUi
+            && event.button.button == SDL_BUTTON_LEFT
+            && app.inputContext() == InputContext::MiningActive) {
+            app.miningDrill(true);
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        noteKeyboardPointerActivity();
+        mouseX_ = event.button.x;
+        mouseY_ = event.button.y;
+        app.uiMouseUp(
+            static_cast<int>(mouseX_),
+            static_cast<int>(mouseY_),
+            rmlMouseButton(event.button.button));
+        if (event.button.button == SDL_BUTTON_LEFT) app.miningDrill(false);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        noteKeyboardPointerActivity();
+        mouseX_ = event.wheel.mouse_x;
+        mouseY_ = event.wheel.mouse_y;
+        app.uiMouseWheel(
+            static_cast<int>(mouseX_),
+            static_cast<int>(mouseY_),
+            -event.wheel.y * 90.0);
+        break;
+    default:
+        break;
     }
     return true;
 }
@@ -227,6 +492,21 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     default:
         break;
     }
+}
+
+NativeFrameDisposition SdlPlatform::frameDisposition() const
+{
+    return frameLifecycle_.disposition();
+}
+
+void SdlPlatform::completeFrame()
+{
+    frameLifecycle_.completeFrame();
+}
+
+bool SdlPlatform::consumeFrameClockReset()
+{
+    return frameLifecycle_.consumeFrameClockReset();
 }
 
 void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& event)
@@ -307,19 +587,90 @@ void SdlPlatform::releaseRealtimeInputs(RocketGameApp& app)
     app.miningDrill(false);
 }
 
+void SdlPlatform::setWindowVisible(RocketGameApp& app, bool visible)
+{
+    if (visible == frameLifecycle_.visible()) {
+        if (!visible) releaseRealtimeInputs(app);
+        return;
+    }
+
+    frameLifecycle_.setVisible(visible);
+    framePacer_.resetDeadline();
+    if (!visible) releaseRealtimeInputs(app);
+}
+
+void SdlPlatform::refreshViewportMetrics()
+{
+    if (!window_) return;
+
+    int logicalWidth = viewportMetrics_.logicalWidth;
+    int logicalHeight = viewportMetrics_.logicalHeight;
+    int drawableWidth = viewportMetrics_.drawableWidth;
+    int drawableHeight = viewportMetrics_.drawableHeight;
+    if (!SDL_GetWindowSize(window_, &logicalWidth, &logicalHeight)) {
+        log(PlatformLogLevel::Warning, std::string("Unable to query logical window size: ") + SDL_GetError());
+    }
+    if (!SDL_GetWindowSizeInPixels(window_, &drawableWidth, &drawableHeight)) {
+        log(PlatformLogLevel::Warning, std::string("Unable to query drawable window size: ") + SDL_GetError());
+    }
+
+    logicalWidth = std::max(1, logicalWidth);
+    logicalHeight = std::max(1, logicalHeight);
+    drawableWidth = std::max(1, drawableWidth);
+    drawableHeight = std::max(1, drawableHeight);
+    viewportMetrics_ = {
+        logicalWidth,
+        logicalHeight,
+        drawableWidth,
+        drawableHeight,
+        static_cast<float>(drawableWidth) / static_cast<float>(logicalWidth),
+        -1.0F
+    };
+}
+
+void SdlPlatform::refreshDisplayTiming()
+{
+    if (!window_) return;
+
+    displayId_ = SDL_GetDisplayForWindow(window_);
+    const SDL_DisplayMode* mode = displayId_ != 0 ? SDL_GetCurrentDisplayMode(displayId_) : nullptr;
+    if (!mode && displayId_ != 0) mode = SDL_GetDesktopDisplayMode(displayId_);
+
+    double refreshRate = 0.0;
+    if (mode) {
+        if (mode->refresh_rate_numerator > 0 && mode->refresh_rate_denominator > 0) {
+            refreshRate = static_cast<double>(mode->refresh_rate_numerator)
+                / static_cast<double>(mode->refresh_rate_denominator);
+        } else {
+            refreshRate = static_cast<double>(mode->refresh_rate);
+        }
+    }
+
+    framePacer_.configure(diagnostics_.verticalSyncActive, refreshRate);
+    diagnostics_.softwareFrameLimiterActive = framePacer_.active();
+}
+
+void SdlPlatform::applySoftwareFramePacing()
+{
+    diagnostics_.frameLimiterMilliseconds = 0.0;
+    if (!framePacer_.active() || !frameLifecycle_.visible()) return;
+
+    const Uint64 limiterStarted = SDL_GetTicksNS();
+    const NativeFramePacingDecision decision = framePacer_.next(limiterStarted);
+    if (decision.delayNanoseconds > 0) {
+        SDL_DelayPrecise(decision.delayNanoseconds);
+    }
+    diagnostics_.frameLimiterMilliseconds =
+        static_cast<double>(SDL_GetTicksNS() - limiterStarted) / 1'000'000.0;
+}
+
 double SdlPlatform::monotonicSeconds() const { return static_cast<double>(SDL_GetTicksNS()) / 1'000'000'000.0; }
 ViewportMetrics SdlPlatform::viewportMetrics()
 {
-    int width = 1280, height = 800, pixelsWidth = 1280, pixelsHeight = 800;
-    if (window_) {
-        SDL_GetWindowSize(window_, &width, &height);
-        SDL_GetWindowSizeInPixels(window_, &pixelsWidth, &pixelsHeight);
-    }
-    return {std::max(1, width), std::max(1, height), std::max(1, pixelsWidth), std::max(1, pixelsHeight),
-        static_cast<float>(pixelsWidth) / static_cast<float>(std::max(1, width)), -1.0F};
+    return viewportMetrics_;
 }
-bool SdlPlatform::focused() const { return focused_; }
-bool SdlPlatform::visible() const { return visible_; }
+bool SdlPlatform::focused() const { return frameLifecycle_.focused(); }
+bool SdlPlatform::visible() const { return frameLifecycle_.visible(); }
 bool SdlPlatform::fullscreenAvailable() const { return window_ != nullptr; }
 bool SdlPlatform::fullscreen() const { return fullscreen_; }
 bool SdlPlatform::setFullscreen(bool enabled)
@@ -346,27 +697,36 @@ bool SdlPlatform::haptic(double duration, double weak, double strong)
     const int activeIndex = controllerTracker_.activeControllerIndex();
     auto found = gamepads_.find(static_cast<SDL_JoystickID>(activeIndex));
     if (found == gamepads_.end()) return false;
-    return SDL_RumbleGamepad(found->second,
+    return SDL_RumbleGamepad(found->second.handle,
         static_cast<Uint16>(std::clamp(weak, 0.0, 1.0) * 65535.0),
         static_cast<Uint16>(std::clamp(strong, 0.0, 1.0) * 65535.0),
         static_cast<Uint32>(std::clamp(duration, 0.0, 2.0) * 1000.0));
 }
-void SdlPlatform::present() { if (window_) SDL_GL_SwapWindow(window_); }
+void SdlPlatform::present()
+{
+    diagnostics_.frameLimiterMilliseconds = 0.0;
+    if (!window_ || !frameLifecycle_.visible()) return;
+    SDL_GL_SwapWindow(window_);
+}
+void SdlPlatform::paceFrame()
+{
+    applySoftwareFramePacing();
+}
 OpenGlDialect SdlPlatform::openGlDialect() const { return OpenGlDialect::DesktopCore33; }
+PlatformDiagnostics SdlPlatform::diagnostics() const { return diagnostics_; }
 
 ControllerFrame SdlPlatform::sampleFrame(double realTimeSeconds)
 {
-    std::vector<RawControllerSnapshot> snapshots;
-    snapshots.reserve(gamepads_.size());
-    for (const auto& [id, gamepad] : gamepads_) {
-        if (!gamepad || !SDL_GamepadConnected(gamepad)) continue;
-        RawControllerSnapshot snapshot;
-        snapshot.connected = true;
-        snapshot.standardMapping = true;
-        snapshot.index = static_cast<int>(id);
+    for (RawControllerSnapshot& snapshot : controllerSnapshots_) {
+        const auto found = gamepads_.find(static_cast<SDL_JoystickID>(snapshot.index));
+        if (found == gamepads_.end() || !found->second.handle) {
+            snapshot.connected = false;
+            continue;
+        }
+        SDL_Gamepad* gamepad = found->second.handle;
+        snapshot.connected = SDL_GamepadConnected(gamepad);
         snapshot.timestamp = realTimeSeconds;
-        snapshot.id = SDL_GetGamepadName(gamepad) ? SDL_GetGamepadName(gamepad) : "SDL Gamepad";
-        snapshot.family = controllerFamilyFromId(snapshot.id);
+        if (!snapshot.connected) continue;
         snapshot.leftX = normalizedAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
         snapshot.leftY = normalizedAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
         snapshot.rightX = normalizedAxis(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX));
@@ -387,15 +747,22 @@ ControllerFrame SdlPlatform::sampleFrame(double realTimeSeconds)
         setButton(snapshot, ControllerButton::DpadDown, SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_DOWN));
         setButton(snapshot, ControllerButton::DpadLeft, SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_LEFT));
         setButton(snapshot, ControllerButton::DpadRight, SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
-        snapshots.push_back(std::move(snapshot));
     }
-    lastControllerFrame_ = controllerTracker_.update(snapshots, realTimeSeconds, preferences_.load().controller);
-    lastControllerFrame_.pageVisible = visible_;
-    lastControllerFrame_.browserFocused = focused_;
+    lastControllerFrame_ = controllerTracker_.update(
+        controllerSnapshots_,
+        realTimeSeconds,
+        controllerPreferences_);
+    lastControllerFrame_.pageVisible = frameLifecycle_.visible();
+    lastControllerFrame_.browserFocused = frameLifecycle_.focused();
     sourceArbiter_.noteActivity(InputSource::Controller,
         lastControllerFrame_.activityTimestamp > 0.0 ? lastControllerFrame_.activityTimestamp : realTimeSeconds,
         lastControllerFrame_.meaningfulActivity);
     return lastControllerFrame_;
+}
+
+void SdlPlatform::setPreferences(const ControllerPreferences& preferences)
+{
+    controllerPreferences_ = preferences;
 }
 
 InputSource SdlPlatform::activeSource() const { return sourceArbiter_.activeSource(); }
@@ -414,7 +781,13 @@ bool SdlPlatform::openGamepad(SDL_JoystickID id)
         log(PlatformLogLevel::Warning, std::string("Unable to open gamepad: ") + SDL_GetError());
         return false;
     }
-    gamepads_.emplace(id, gamepad);
+    const char* gamepadName = SDL_GetGamepadName(gamepad);
+    OpenGamepad openGamepad;
+    openGamepad.handle = gamepad;
+    openGamepad.name = gamepadName ? gamepadName : "SDL Gamepad";
+    openGamepad.family = controllerFamilyFromId(openGamepad.name);
+    gamepads_.emplace(id, std::move(openGamepad));
+    rebuildControllerSnapshots();
     return true;
 }
 
@@ -422,8 +795,24 @@ void SdlPlatform::closeGamepad(SDL_JoystickID id)
 {
     const auto found = gamepads_.find(id);
     if (found == gamepads_.end()) return;
-    SDL_CloseGamepad(found->second);
+    SDL_CloseGamepad(found->second.handle);
     gamepads_.erase(found);
+    rebuildControllerSnapshots();
+}
+
+void SdlPlatform::rebuildControllerSnapshots()
+{
+    controllerSnapshots_.clear();
+    controllerSnapshots_.reserve(gamepads_.size());
+    for (const auto& [id, gamepad] : gamepads_) {
+        RawControllerSnapshot snapshot;
+        snapshot.connected = gamepad.handle && SDL_GamepadConnected(gamepad.handle);
+        snapshot.standardMapping = true;
+        snapshot.index = static_cast<int>(id);
+        snapshot.family = gamepad.family;
+        snapshot.id = gamepad.name;
+        controllerSnapshots_.push_back(std::move(snapshot));
+    }
 }
 
 void SdlPlatform::noteKeyboardPointerActivity()

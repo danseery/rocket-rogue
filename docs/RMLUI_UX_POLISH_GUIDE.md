@@ -19,7 +19,7 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 - Use shared lane primitives before adding local layout math: `.phase-lane`, `.phase-row`, `.phase-title-row`, `.phase-action-grid`, `.phase-card-slot`, `.phase-footer-lane`, and stable chip/button slots.
 - Parent regions own alignment. Child cards fill fixed slots, and the last card or final action must not carry trailing margin.
 - Fixed-format regions reserve lanes for chips, status, and footer actions. Prefer taller cards over squeezed content, clipped chips, or buttons pushed into dividers.
-- Do not solve alignment with arbitrary one-off width, height, padding, or margin tweaks. If a screen needs a new lane width or slot size, update the shared contract and mirror it in both native RmlUi and `web/shell.html`.
+- Do not solve alignment with arbitrary one-off width, height, padding, or margin tweaks. If a screen needs a new lane width or slot size, update the shared RmlUi contract used by native and web, then mirror the behavior in the web-only fallback in `web/shell.html`.
 
 ## Readability
 
@@ -57,9 +57,9 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 
 ## Verification Path
 
-- Build the web target after RmlUi changes.
-- Reload the in-app browser with a cache-busting query string.
-- Verify at least the changed screen and one adjacent flow into or out of it.
-- Take screenshots at the actual in-app viewport and inspect for clipped right/bottom borders, wrapped button labels, overlap, and hidden click targets.
+- Build both native and web targets after shared RmlUi or panel-markup changes.
+- Verify at least the changed screen and one adjacent flow into or out of it in a native window and the web build. Reload the browser with a cache-busting query string.
+- Take screenshots at 1280x800, 1080p, 1440p, and 4K where the changed layout can vary. Inspect for clipped right/bottom borders, wrapped button labels, overlap, hidden click targets, and high-DPI drift.
+- Verify shared RmlUi behavior on native and web. Verify the forced DOM fallback separately on web; native packages do not contain it.
 - Run `git diff --check`.
-- Run the native test script when gameplay or presentation plumbing changed.
+- Run native tests when gameplay, input, or presentation plumbing changed, and web tests whenever panel markup, browser mirroring, or fallback behavior changed.

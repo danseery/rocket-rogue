@@ -1,4 +1,4 @@
-name: Native desktop builds
+name: Native Windows and Linux builds
 
 on:
   workflow_dispatch:
@@ -7,9 +7,12 @@ on:
       - "CMakeLists.txt"
       - "CMakePresets.json"
       - "cmake/**"
+      - "assets/**"
+      - "licenses/**"
       - "src/**"
       - "tests/**"
       - "third_party/**"
+      - "tools/check-platform-boundaries.mjs"
       - ".github/workflows/native-release.yml"
   push:
     branches: [main]
@@ -17,9 +20,12 @@ on:
       - "CMakeLists.txt"
       - "CMakePresets.json"
       - "cmake/**"
+      - "assets/**"
+      - "licenses/**"
       - "src/**"
       - "tests/**"
       - "third_party/**"
+      - "tools/check-platform-boundaries.mjs"
       - ".github/workflows/native-release.yml"
 
 permissions:
@@ -48,6 +54,12 @@ jobs:
           cmake --preset native-release
           cmake --build --preset native-release
           ctest --preset native-release
+
+      - name: Configure, build, and test profiler-oriented native build
+        run: |
+          cmake --preset native-profile
+          cmake --build --preset native-profile
+          ctest --preset native-profile
 
       - name: Package Release
         run: cmake --build --preset package-native
@@ -109,7 +121,14 @@ jobs:
           cmake --build --preset native-release
           ctest --preset native-release
 
-      - name: Verify dynamic libraries and unrelated-working-directory startup
+      - name: Configure, build, and test profiler-oriented native build
+        shell: bash
+        run: |
+          cmake --preset native-profile
+          cmake --build --preset native-profile
+          ctest --preset native-profile
+
+      - name: Correctness-only llvmpipe startup smoke and dynamic-library check
         shell: bash
         run: |
           if ldd build/native-release/bin/RocketRogue | grep -F "not found"; then

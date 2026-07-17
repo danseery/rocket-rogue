@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build_and_deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       EMSDK_VERSION: 6.0.0
       NODE_VERSION: 24
@@ -34,7 +34,7 @@ jobs:
       - name: Install toolchain
         run: |
           chmod +x scripts/install-ubuntu.sh scripts/env-ubuntu.sh
-          ./scripts/install-ubuntu.sh --emsdk-version "$EMSDK_VERSION" --skip-native-compiler --skip-python-venv
+          ./scripts/install-ubuntu.sh --emsdk-version "$EMSDK_VERSION" --web-only --skip-python-venv
 
       - name: Configure web build
         run: |

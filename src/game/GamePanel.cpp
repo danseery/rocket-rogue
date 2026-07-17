@@ -19,6 +19,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -53,14 +55,60 @@ std::string htmlEscape(std::string_view text)
     return out;
 }
 
+std::string metricClass(std::string_view label, std::string_view cssClass = {})
+{
+    std::string result = "metric";
+    if (label == text::labels::chapter) {
+        result += " metric-chapter";
+    }
+    if (!cssClass.empty()) {
+        result += " ";
+        result += cssClass;
+    }
+    return result;
+}
+
+void appendHudText(RealtimeHudState& state, std::string_view id, std::string value)
+{
+    state.patches.push_back({std::string(id), std::move(value), {}, true, false});
+}
+
+void appendHudClass(RealtimeHudState& state, std::string_view id, std::string value)
+{
+    state.patches.push_back({std::string(id), {}, std::move(value), false, true});
+}
+
 std::string metric(std::string_view label, std::string value, std::string_view cssClass = {})
 {
-    std::string classAttr = label == text::labels::chapter ? " metric-chapter" : "";
-    if (!cssClass.empty()) {
-        classAttr += " ";
-        classAttr += cssClass;
+    return "<div class=\"" + metricClass(label, cssClass) + "\"><strong>" + htmlEscape(value) +
+        "</strong><span>" + htmlEscape(label) + "</span></div>";
+}
+
+std::string realtimeMetric(
+    std::string_view id,
+    std::string_view label,
+    std::string value,
+    std::string_view cssClass = {})
+{
+    return "<div id=\"" + std::string(id) + "\" class=\"" + metricClass(label, cssClass) +
+        "\"><strong id=\"" + std::string(id) + "-value\">" + htmlEscape(value) +
+        "</strong><span>" + htmlEscape(label) + "</span></div>";
+}
+
+std::string realtimeIdForLabel(std::string_view prefix, std::string_view label)
+{
+    std::string result(prefix);
+    for (const unsigned char c : label) {
+        if (std::isalnum(c)) {
+            result += static_cast<char>(std::tolower(c));
+        } else if (result.empty() || result.back() != '-') {
+            result += '-';
+        }
     }
-    return "<div class=\"metric" + classAttr + "\"><strong>" + htmlEscape(value) + "</strong><span>" + htmlEscape(label) + "</span></div>";
+    while (!result.empty() && result.back() == '-') {
+        result.pop_back();
+    }
+    return result;
 }
 
 std::string compactMetric(std::string_view label, std::string value)
@@ -224,6 +272,13 @@ std::string warningButton(std::string_view label, double value)
         htmlEscape(label) + "</strong><span>" + htmlEscape(display::percent(value)) + "</span></button>";
 }
 
+std::string realtimeWarningButton(std::string_view id, std::string_view label, double value)
+{
+    return "<button id=\"" + std::string(id) + "\" type=\"button\" class=\"warning-button " +
+        warningClass(value) + "\"><strong>" + htmlEscape(label) + "</strong><span id=\"" +
+        std::string(id) + "-value\">" + htmlEscape(display::percent(value)) + "</span></button>";
+}
+
 int miningAlertPulseBucket(double elapsedSeconds, double pulsesPerSecond)
 {
     constexpr double twoPi = 6.28318530717958647692;
@@ -276,6 +331,15 @@ std::string resourceChip(const PanelMetricPresentation& chip)
     const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
     return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
         std::string(wideChip ? " wide" : "") + "\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
+}
+
+std::string realtimeResourceChip(std::string_view id, const PanelMetricPresentation& chip)
+{
+    const bool positive = chip.value.empty() || chip.value.front() != '-';
+    const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
+    return "<span id=\"" + std::string(id) + "\" class=\"stat-chip " +
+        std::string(positive ? "up" : "down") + std::string(wideChip ? " wide" : "") + "\">" +
         htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
 }
 
@@ -706,22 +770,6 @@ std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
     return out.str();
 }
 
-std::string primarySurfaceActionCard(const SurfaceActionPreviewPresentation& action)
-{
-    std::ostringstream out;
-    out << "<article class=\"surface-primary-action\">";
-    out << "<div class=\"surface-primary-copy\"><div class=\"surface-action-topline\"><span>" << htmlEscape(action.cost)
-        << "</span><span>" << htmlEscape(action.risk) << " " << htmlEscape(surfaceActionChipLabel(action.riskLabel)) << "</span></div>";
-    out << "<h3 class=\"card-title\">" << htmlEscape(action.title) << "</h3>";
-    out << "<p class=\"card-copy ops-detail\">" << htmlEscape(surfaceActionDetail(action)) << "</p>";
-    out << "<div class=\"stat-grid chip-strip\">" << surfaceActionChipGrid(action.payoffChips) << "</div></div>";
-    out << "<div class=\"surface-primary-control action-row\"><span>" << htmlEscape(action.availability) << "</span>";
-    out << panelButton(action.action);
-    out << "</div>";
-    out << "</article>";
-    return out.str();
-}
-
 std::vector<PanelMetricPresentation> materialRewardChips(const MaterialInventory& materials, int artifacts, int cargo)
 {
     std::vector<PanelMetricPresentation> chips;
@@ -919,20 +967,6 @@ std::string inventoryTemplate(const GameState& state, const ContentCatalog& cata
     return modalTemplate(ui::modals::inventory, "Inventory", inventoryBody(inventoryPresentation(state, catalog)));
 }
 
-std::string inventoryBank(const GameState& state, const ContentCatalog& catalog)
-{
-    const InventoryPresentation inventory = inventoryPresentation(state, catalog);
-    std::ostringstream out;
-    out << "<section class=\"resource-bank inventory-bank\"><div><h2>" << htmlEscape("Inventory")
-        << "</h2><p>" << htmlEscape("Recovered stock available for upgrades, research, and field work.") << "</p></div>";
-    out << "<div class=\"stat-grid\">";
-    for (const PanelMetricPresentation& metricItem : inventory.summary) {
-        out << resourceChip(metricItem);
-    }
-    out << "</div>" << modalButton("Open inventory", ui::modals::inventory, "ghost") << "</section>";
-    return out.str();
-}
-
 std::string phaseBoardOpen(std::string_view cssClass, std::string_view status, bool fullPanel = true)
 {
     (void)status;
@@ -954,17 +988,6 @@ std::string boardNote(std::string_view note)
     return "<p class=\"board-note\">" + htmlEscape(note) + "</p>";
 }
 
-std::string phaseTrack(const std::vector<PhaseStepPresentation>& steps)
-{
-    std::string out = "<ol class=\"phase-track\">";
-    for (const PhaseStepPresentation& step : steps) {
-        out += "<li class=\"" + htmlEscape(step.stateClass) + "\"><span>" + htmlEscape(step.label) +
-            "</span><strong>" + htmlEscape(step.stateLabel) + "</strong></li>";
-    }
-    out += "</ol>";
-    return out;
-}
-
 std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
 {
     std::string out = "<div class=\"debrief-phase-track\">";
@@ -974,23 +997,6 @@ std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
     }
     out += "</div>";
     return out;
-}
-
-std::string surfacePosture(const SurfaceExpeditionPresentation& surface)
-{
-    return "<article class=\"phase-advisory surface-posture " + htmlEscape(surface.postureClass) + "\"><strong>" +
-        htmlEscape(surface.postureTitle) + "</strong><span>" + htmlEscape(surface.postureDetail) + "</span></article>";
-}
-
-std::string surfaceCommandSummary(const SurfaceExpeditionPresentation& surface)
-{
-    std::ostringstream out;
-    out << "<section class=\"surface-command\">";
-    out << "<article class=\"surface-site-card\"><span>" << htmlEscape(text::labels::site) << "</span><strong>" << htmlEscape(surface.metrics[0].value)
-        << "</strong><p>" << htmlEscape(surface.siteDetail) << "</p></article>";
-    out << surfacePosture(surface);
-    out << "</section>";
-    return out.str();
 }
 
 std::string surfaceQuickbar(const SurfaceExpeditionPresentation& surface, const SurfaceExpeditionState& expedition, double extractionRisk)
@@ -1004,28 +1010,6 @@ std::string surfaceQuickbar(const SurfaceExpeditionPresentation& surface, const 
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
     out << surfaceQuickMetric(text::labels::extractionRisk, display::percent(extractionRisk), "", true);
     out << "</section>";
-    return out.str();
-}
-
-std::string surfaceKpiGrid(const SurfaceExpeditionState& expedition, double extractionRisk)
-{
-    std::ostringstream out;
-    out << "<div class=\"surface-kpi-grid\">";
-    out << compactMetric(text::labels::supply, std::to_string(expedition.supply));
-    out << compactMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
-    out << compactMetric(text::labels::cargo, std::to_string(expedition.cargo));
-    out << compactMetric(text::labels::hazard, display::percent(expedition.hazard));
-    out << compactMetric(text::labels::extractionRisk, display::percent(extractionRisk));
-    out << compactMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common));
-    out << compactMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare));
-    out << compactMetric(text::labels::artifacts, std::to_string(expedition.temporaryArtifacts.size()));
-    out << compactMetric("Prospects",
-        std::to_string(
-            std::max(0, expedition.prospectMaterials.common) +
-            std::max(0, expedition.prospectMaterials.rare) +
-            std::max(0, expedition.prospectMaterials.exotic) +
-            std::max(0, expedition.prospectArtifacts)));
-    out << "</div>";
     return out.str();
 }
 
@@ -1215,18 +1199,6 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     const PanelLayoutMode layoutMode = panelLayoutMode(state.screen);
 
     std::ostringstream out;
-    out << "<div class=\"panel-head\"><div class=\"panel-title\"><span class=\"game-mark\">" << htmlEscape(text::panel::title)
-        << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
-        << "<div class=\"panel-head-actions\">"
-        << modalButton("Map", ui::modals::map, "ghost")
-        << modalButton("Inventory", ui::modals::inventory, "ghost");
-    if (state.screen == Screen::Hangar) {
-        out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
-    }
-    out << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div></div>";
-    out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
-    out << solarMapTemplate(context);
-
     std::ostringstream settingsBody;
     std::vector<DetailPresentationRow> settingsDetails {
         detailPresentationRow(text::panel::details::keyboard, text::panel::details::keyboardValue),
@@ -1250,7 +1222,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\" data-desktop-fullscreen-settings>"
         << "<div><h3>" << htmlEscape("Fullscreen") << "</h3>"
-        << "<p>" << htmlEscape("Use the entire display in standalone PC builds. F11 and Alt+Enter use the same setting.") << "</p></div>"
+        << "<p>" << htmlEscape("Use the entire display. Native builds also support F11 and Alt+Enter.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
         << htmlEscape("Enter fullscreen") << "</button></section>";
     settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
@@ -1306,15 +1278,81 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<p>" << htmlEscape("Show sandbox screen tools for board, mining, flyby, and orbit checks. These do not write save data.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\" data-ui-focus-id=\"setting:debug_tools\">"
         << htmlEscape("Show debug tools") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-performance-stats-settings>"
+        << "<div><h3>" << htmlEscape("Performance diagnostics") << "</h3>"
+        << "<p>" << htmlEscape("Show FPS, frame pacing, CPU stage timings, drawable size, and scene rendering counters.") << "</p></div>"
+        << "<button class=\"settings-toggle\" data-performance-stats-toggle=\"1\" data-ui-focus-id=\"setting:performance_stats\">"
+        << htmlEscape("Show performance stats") << "</button></section>";
     settingsBody << "<div class=\"modal-actions action-row\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         if (action.actionId == ui::actions::resetSave) {
+            if (context.titleScreenActive && !context.hasSavedGame) {
+                continue;
+            }
             settingsBody << modalButton(action.label, "reset_save_confirm", action.cssClass);
         } else {
             settingsBody << panelButton(action);
         }
     }
     settingsBody << "</div>";
+
+    if (context.titleScreenActive) {
+        out << "<section class=\"title-screen\" data-panel-mode=\"title\">"
+            << "<div class=\"title-scanline title-scanline-a\"></div>"
+            << "<div class=\"title-scanline title-scanline-b\"></div>"
+            << "<div class=\"title-content\">"
+            << "<span class=\"title-kicker\">DEEP SPACE RECOVERY PROGRAM // SIGNAL ONLINE</span>"
+            << "<h1 class=\"orebit-lockup\" aria-label=\"OREBIT\">"
+            << "<span class=\"orebit-letter orebit-ore orebit-letter-o\">O</span>"
+            << "<span class=\"orebit-letter orebit-ore orebit-letter-r\">R</span>"
+            << "<span class=\"orebit-letter orebit-ore orebit-letter-e\">E</span>"
+            << "<span class=\"orebit-letter orebit-bit orebit-letter-b\">B</span>"
+            << "<span class=\"orebit-letter orebit-bit orebit-letter-i\">I</span>"
+            << "<span class=\"orebit-letter orebit-bit orebit-letter-t\">T</span>"
+            << "</h1>"
+            << "<p class=\"title-tagline\">DIG DEEP. FLY FAR. BRING THEM HOME.</p>"
+            << "<div class=\"title-divider\"><span></span><strong>ORE // ORBIT // RETURN</strong><span></span></div>"
+            << "<div class=\"title-menu\">";
+        if (context.hasSavedGame) {
+            out << modalButton("New Game", "new_game_confirm", "title-action title-new-game")
+                << button("Continue", ui::actions::continueGame, "title-action title-continue", true);
+        } else {
+            out << button("New Game", ui::actions::newGame, "title-action title-new-game", true);
+        }
+        out << modalButton("Settings", ui::modals::settings, "title-action title-settings")
+            << "</div>"
+            << "<span class=\"title-save-state ";
+        out << (context.hasSavedGame ? "save-found\">SAVE SIGNAL ACQUIRED" : "save-empty\">NO LOCAL SAVE DETECTED");
+        out << "</span>";
+        if (!context.titleNotice.empty()) {
+            out << "<p class=\"title-notice\">" << htmlEscape(context.titleNotice) << "</p>";
+        }
+        out << "<p class=\"title-footer\">A FRONTIER EXTRACTION ROGUELITE // BUILD 0.1</p>"
+            << "</div></section>"
+            << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        if (context.hasSavedGame) {
+            const std::string newGameBody =
+                "<p class=\"modal-intro\">Starting a new expedition replaces the current campaign save. Settings are preserved.</p>"
+                "<div class=\"modal-actions action-row\">"
+                "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-ui-focus-id=\"new-game:cancel\" data-ui-default-focus=\"1\">Keep current save</button>" +
+                button("Start New Game", ui::actions::newGame, "danger") +
+                "</div>";
+            out << modalTemplate("new_game_confirm", "Begin a new expedition?", newGameBody);
+        }
+        return out.str();
+    }
+
+    out << "<div class=\"panel-head\"><div class=\"panel-title\"><span class=\"game-mark\">" << htmlEscape(text::panel::title)
+        << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
+        << "<div class=\"panel-head-actions\">"
+        << modalButton("Map", ui::modals::map, "ghost")
+        << modalButton("Inventory", ui::modals::inventory, "ghost");
+    if (state.screen == Screen::Hangar) {
+        out << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost");
+    }
+    out << modalButton(text::buttons::settings, ui::modals::settings, "ghost") << "</div></div>";
+    out << "<p class=\"status\">" << htmlEscape(state.statusLine) << "</p>";
+    out << solarMapTemplate(context);
 
     out << "<div class=\"metric-grid panel-kpis\">";
     for (const PanelMetricPresentation& metricItem : headerMetrics) {
@@ -1446,13 +1484,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             : flybyZoneLabel(flyby.currentZone);
 
         out << "<div class=\"metric-grid flight-readout\">"
-            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << metric("Speed", flybySpeedLabel(flyby))
-            << metric("Zone", zoneValue)
-            << metric("Good hold", display::percent(goodShare))
-            << metric("Perfect hold", display::percent(perfectShare))
-            << metric("Reward", "x" + display::fixed(flyby.rewardBonusScale, 1))
-            << metric("Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1))
+            << realtimeMetric("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << realtimeMetric("rr-hud-flyby-speed", "Speed", flybySpeedLabel(flyby))
+            << realtimeMetric("rr-hud-flyby-zone", "Zone", zoneValue)
+            << realtimeMetric("rr-hud-flyby-good", "Good hold", display::percent(goodShare))
+            << realtimeMetric("rr-hud-flyby-perfect", "Perfect hold", display::percent(perfectShare))
+            << realtimeMetric("rr-hud-flyby-reward", "Reward", "x" + display::fixed(flyby.rewardBonusScale, 1))
+            << realtimeMetric("rr-hud-flyby-slingshot", "Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1))
             << "</div>";
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
@@ -1507,12 +1545,12 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const std::string zoneValue = orbitZoneLabel(orbit.currentZone);
 
         out << "<div class=\"metric-grid flight-readout\">"
-            << metric("Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << metric("Zone", zoneValue)
-            << metric("Loop", display::percent(progress))
-            << metric("Good hold", display::percent(goodShare))
-            << metric("Perfect hold", display::percent(perfectShare))
-            << metric("Reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits))
+            << realtimeMetric("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << realtimeMetric("rr-hud-orbit-zone", "Zone", zoneValue)
+            << realtimeMetric("rr-hud-orbit-loop", "Loop", display::percent(progress))
+            << realtimeMetric("rr-hud-orbit-good", "Good hold", display::percent(goodShare))
+            << realtimeMetric("rr-hud-orbit-perfect", "Perfect hold", display::percent(perfectShare))
+            << realtimeMetric("rr-hud-orbit-reward", "Reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits))
             << "</div>";
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
@@ -1566,19 +1604,28 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
         out << "<h2>" << htmlEscape(launchPanel.sectionTitle) << "</h2>";
         out << "<div class=\"metric-grid flight-readout\">";
-        for (const PanelMetricPresentation& metricItem : launchPanel.metrics) {
-            out << metric(metricItem.label, metricItem.value);
+        for (std::size_t index = 0; index < launchPanel.metrics.size(); ++index) {
+            const PanelMetricPresentation& metricItem = launchPanel.metrics[index];
+            out << realtimeMetric(
+                "rr-hud-launch-metric-" + std::to_string(index),
+                metricItem.label,
+                metricItem.value);
         }
         out << "</div>";
 
         out << "<h2>" << htmlEscape(text::panel::sections::telemetry) << "</h2>";
         out << "<div class=\"warning-grid\">";
-        for (const TelemetryChannelSample& sample : launchPanel.telemetry) {
-            out << warningButton(sample.label, sample.value);
+        for (std::size_t index = 0; index < launchPanel.telemetry.size(); ++index) {
+            const TelemetryChannelSample& sample = launchPanel.telemetry[index];
+            out << realtimeWarningButton(
+                "rr-hud-launch-telemetry-" + std::to_string(index),
+                sample.label,
+                sample.value);
         }
         out << "</div>";
         out << "<div class=\"utility-row utility-actions\">" << modalButton(text::panel::modals::telemetryDetails, ui::modals::telemetry, "ghost") << "</div>";
-        out << "<p class=\"status telemetry-status\">" << htmlEscape(launchPanel.telemetryMessage) << "</p>";
+        out << "<p id=\"rr-hud-launch-status\" class=\"status telemetry-status\">"
+            << htmlEscape(launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         const bool arkKnown = arkDiscovered(state);
         out << tutorialCard(
@@ -1790,7 +1837,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             ? "Mining Arena Lab"
             : std::string(text::panel::sections::miningRun);
         const std::string miningRunTitle = debugArena
-            ? std::string(miningActName(mining.arenaMetadata.act)) + " • Level " + std::to_string(mining.arenaMetadata.difficulty)
+            ? std::string(miningActName(mining.arenaMetadata.act)) + " \xE2\x80\xA2 Level " + std::to_string(mining.arenaMetadata.difficulty)
             : std::string("Rig health ") + miningPanel.rigHealth;
         const std::string miningGateDetail = mining.gate.active
             ? " | Gate " + std::string(miningGateName(mining.gate.type))
@@ -1798,8 +1845,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             : std::string();
         const std::string miningRunDetail = debugArena
             ? "Seed " + std::to_string(mining.arenaMetadata.seed)
-                + " • Ruleset v" + std::to_string(mining.arenaMetadata.rulesVersion)
-                + " • Rig health " + miningPanel.rigHealth
+                + " \xE2\x80\xA2 Ruleset v" + std::to_string(mining.arenaMetadata.rulesVersion)
+                + " \xE2\x80\xA2 Rig health " + miningPanel.rigHealth
             : state.statusLine;
         const std::string miningRunDetailWithGate = miningRunDetail + miningGateDetail;
         const int rigHealthWidth = static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0));
@@ -1838,7 +1885,10 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         };
         auto emitMetricIfPresent = [&out, &metricFor](std::string_view label) {
             if (const PanelMetricPresentation* item = metricFor(label)) {
-                out << metric(item->label, item->value);
+                out << realtimeMetric(
+                    realtimeIdForLabel("rr-hud-mining-", item->label),
+                    item->label,
+                    item->value);
             }
         };
         auto emitVitalIfPresent = [&out, &metricFor, &mining](
@@ -1852,7 +1902,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 if (broken) {
                     cssClass += " mining-vital-broken";
                 }
-                out << metric(
+                out << realtimeMetric(
+                    realtimeIdForLabel("rr-hud-mining-", item->label),
                     item->label,
                     item->value,
                     cssClass);
@@ -1860,28 +1911,32 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         };
         auto emitPayloadIfPresent = [&out, &payloadMetricFor](std::string_view label) {
             if (const PanelMetricPresentation* item = payloadMetricFor(label)) {
-                out << resourceChip(*item);
+                out << realtimeResourceChip(
+                    realtimeIdForLabel("rr-hud-mining-payload-", item->label),
+                    *item);
             }
         };
 
         out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\">";
         out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title" << (debugArena ? " debug-arena" : "") << "\"><span>"
-            << htmlEscape(miningRunKicker) << "</span><strong>" << htmlEscape(miningRunTitle)
+            << htmlEscape(miningRunKicker) << "</span><strong id=\"rr-hud-mining-title\">" << htmlEscape(miningRunTitle)
             << "</strong>";
         if (debugArena) {
-            out << "<strong class=\"mining-arena-metadata\">" << htmlEscape(miningRunDetailWithGate)
+            out << "<strong id=\"rr-hud-mining-detail\" class=\"mining-arena-metadata\">" << htmlEscape(miningRunDetailWithGate)
                 << "</strong>";
         } else {
-            out << "<small>" << htmlEscape(miningRunDetailWithGate) << "</small>";
+            out << "<small id=\"rr-hud-mining-detail\">" << htmlEscape(miningRunDetailWithGate) << "</small>";
         }
-        out << "<section class=\"mining-health-strip\"><div class=\"mining-health-bar\"><i class=\"health-fill-" << rigHealthBucket << "\"></i></div></section></div>";
+        out << "<section class=\"mining-health-strip\"><div class=\"mining-health-bar\"><i id=\"rr-hud-mining-health-fill\" class=\"health-fill-"
+            << rigHealthBucket << "\"></i></div></section></div>";
         out << "<div class=\"metric-grid mining-vitals\">";
         emitVitalIfPresent(text::labels::oxygen, "mining-vital-oxygen", oxygenPressure);
         emitVitalIfPresent(text::fuel::reserveLabel(arkKnown), "mining-vital-fuel", fuelPressure);
         emitVitalIfPresent("Next fuel", "mining-vital-fuel-cadence", mining.fuelCycleProgress, true);
         emitVitalIfPresent(text::labels::drillBit, "mining-vital-drill", drillPressure, false, mining.drillIntegrity <= 0.0);
         if (const PanelMetricPresentation* item = metricFor(text::labels::drillHeat)) {
-            out << metric(
+            out << realtimeMetric(
+                realtimeIdForLabel("rr-hud-mining-", item->label),
                 item->label,
                 item->value,
                 miningDrillHeatAlertClass(mining.drillHeat, mining.elapsedSeconds));
@@ -1932,8 +1987,9 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
         out << "</section>";
         if (!miningDockActions.empty()) {
-            out << "<section class=\"mining-command-dock\"><span>" << htmlEscape(miningPanel.commandTitle)
-                << "</span><strong>" << htmlEscape(miningPanel.commandDetail) << "</strong><div class=\"actions action-row system-actions\">";
+            out << "<section class=\"mining-command-dock\"><span id=\"rr-hud-mining-command-title\">"
+                << htmlEscape(miningPanel.commandTitle) << "</span><strong id=\"rr-hud-mining-command-detail\">"
+                << htmlEscape(miningPanel.commandDetail) << "</strong><div class=\"actions action-row system-actions\">";
             for (const PanelButtonPresentation* action : miningDockActions) {
                 out << panelButton(*action);
             }
@@ -2309,6 +2365,204 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     out << inventoryTemplate(state, catalog);
 
     return out.str();
+}
+
+void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& result)
+{
+    const GameState& state = context.state;
+    const ContentCatalog& catalog = context.catalog;
+    result.patches.clear();
+    result.patches.reserve(48);
+
+    const auto appendMetric = [&result](
+                                  std::string id,
+                                  std::string_view label,
+                                  std::string value,
+                                  std::string cssClass = {}) {
+        appendHudText(result, id + "-value", std::move(value));
+        appendHudClass(result, id, metricClass(label, cssClass));
+    };
+
+    if (state.screen == Screen::Flyby && !state.run.flyby.completed) {
+        const FlybyRunState& flyby = state.run.flyby;
+        const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
+        const double activeSeconds = std::max(0.01, flyby.missSeconds + flyby.goodSeconds + flyby.perfectSeconds);
+        const double goodShare = (flyby.goodSeconds + flyby.perfectSeconds) / activeSeconds;
+        const double perfectShare = flyby.perfectSeconds / activeSeconds;
+        appendMetric("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
+        appendMetric("rr-hud-flyby-speed", "Speed", flybySpeedLabel(flyby));
+        appendMetric("rr-hud-flyby-zone", "Zone", flyby.collidedWithBody ? "Impact" : flybyZoneLabel(flyby.currentZone));
+        appendMetric("rr-hud-flyby-good", "Good hold", display::percent(goodShare));
+        appendMetric("rr-hud-flyby-perfect", "Perfect hold", display::percent(perfectShare));
+        appendMetric("rr-hud-flyby-reward", "Reward", "x" + display::fixed(flyby.rewardBonusScale, 1));
+        appendMetric("rr-hud-flyby-slingshot", "Slingshot", "x" + display::fixed(flybySlingshotScale(flyby), 1));
+        return;
+    }
+
+    if (state.screen == Screen::Orbit && !state.run.orbit.completed) {
+        const OrbitRunState& orbit = state.run.orbit;
+        const double remaining = std::max(0.0, orbit.durationSeconds - orbit.elapsedSeconds);
+        const double activeSeconds = std::max(0.01, orbit.missSeconds + orbit.goodSeconds + orbit.perfectSeconds);
+        appendMetric("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
+        appendMetric("rr-hud-orbit-zone", "Zone", orbitZoneLabel(orbit.currentZone));
+        appendMetric("rr-hud-orbit-loop", "Loop", display::percent(std::clamp(orbit.orbitProgress, 0.0, 1.0)));
+        appendMetric("rr-hud-orbit-good", "Good hold", display::percent((orbit.goodSeconds + orbit.perfectSeconds) / activeSeconds));
+        appendMetric("rr-hud-orbit-perfect", "Perfect hold", display::percent(orbit.perfectSeconds / activeSeconds));
+        appendMetric("rr-hud-orbit-reward", "Reward", "Pending");
+        return;
+    }
+
+    if (state.screen == Screen::Launch) {
+        const LaunchPanelPresentation launchPanel = launchPanelPresentation(
+            state,
+            catalog,
+            context.flightModel,
+            context.currentMultiplier,
+            context.returnBurnMultiplier,
+            context.returnElapsed,
+            context.returnDuration,
+            context.flightActions,
+            context.pressureReliefUsed);
+        for (std::size_t index = 0; index < launchPanel.metrics.size(); ++index) {
+            const PanelMetricPresentation& item = launchPanel.metrics[index];
+            appendMetric("rr-hud-launch-metric-" + std::to_string(index), item.label, item.value);
+        }
+        for (std::size_t index = 0; index < launchPanel.telemetry.size(); ++index) {
+            const TelemetryChannelSample& sample = launchPanel.telemetry[index];
+            const std::string id = "rr-hud-launch-telemetry-" + std::to_string(index);
+            appendHudText(result, id + "-value", display::percent(sample.value));
+            appendHudClass(result, id, "warning-button " + warningClass(sample.value));
+        }
+        appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
+        return;
+    }
+
+    if (state.screen != Screen::Mining) {
+        return;
+    }
+
+    const MiningRunPresentation miningPanel = miningRunPresentation(state, catalog);
+    const MiningRunState& mining = state.run.mining;
+    const MiningDrillStats miningStats = miningDrillStats(state, catalog);
+    const MiningLoadStats loadStats = miningLoadStats(state, catalog);
+    const bool arkKnown = arkDiscovered(state);
+    const bool debugArena = !mining.progressionCreditEligible;
+    const std::string miningRunTitle = debugArena
+        ? std::string(miningActName(mining.arenaMetadata.act)) + " \xE2\x80\xA2 Level " + std::to_string(mining.arenaMetadata.difficulty)
+        : std::string("Rig health ") + miningPanel.rigHealth;
+    const std::string miningGateDetail = mining.gate.active
+        ? " | Gate " + std::string(miningGateName(mining.gate.type)) + " | " + std::string(miningGateStateName(mining.gate.state))
+        : std::string();
+    const std::string miningRunDetail = debugArena
+        ? "Seed " + std::to_string(mining.arenaMetadata.seed) + " \xE2\x80\xA2 Ruleset v" +
+            std::to_string(mining.arenaMetadata.rulesVersion) + " \xE2\x80\xA2 Rig health " + miningPanel.rigHealth
+        : state.statusLine;
+    appendHudText(result, "rr-hud-mining-title", miningRunTitle);
+    appendHudText(result, "rr-hud-mining-detail", miningRunDetail + miningGateDetail);
+    appendHudClass(
+        result,
+        "rr-hud-mining-health-fill",
+        "health-fill-" + std::to_string(std::clamp(
+            ((static_cast<int>(std::round(std::clamp(miningPanel.rigHealthRatio, 0.0, 1.0) * 100.0)) + 5) / 10) * 10,
+            0,
+            100)));
+
+    const double oxygenPressure = miningStats.oxygenSeconds > 0.0
+        ? std::clamp(1.0 - mining.oxygenSeconds / miningStats.oxygenSeconds, 0.0, 1.0)
+        : 1.0;
+    const double fuelPressure = state.run.surfaceExpedition.sharedFuelCapacity > 0
+        ? std::clamp(
+              1.0 - static_cast<double>(state.run.surfaceExpedition.sharedFuel) /
+                  static_cast<double>(state.run.surfaceExpedition.sharedFuelCapacity),
+              0.0,
+              1.0)
+        : 1.0;
+    const double speedLoadPressure = std::clamp(
+        (1.0 - loadStats.speedMultiplier) / (1.0 - tuning::mining::minLoadedSpeedMultiplier),
+        0.0,
+        1.0);
+    const double fuelLoadPressure = std::clamp(
+        (loadStats.fuelConsumptionMultiplier - 1.0) / (tuning::mining::maxLoadedFuelMultiplier - 1.0),
+        0.0,
+        1.0);
+
+    for (const PanelMetricPresentation& item : miningPanel.metrics) {
+        std::string cssClass;
+        if (item.label == text::labels::oxygen) {
+            cssClass = miningVitalAlertClass("mining-vital-oxygen", oxygenPressure, mining.elapsedSeconds);
+        } else if (item.label == text::fuel::reserveLabel(arkKnown)) {
+            cssClass = miningVitalAlertClass("mining-vital-fuel", fuelPressure, mining.elapsedSeconds);
+        } else if (item.label == "Next fuel") {
+            cssClass = miningVitalAlertClass("mining-vital-fuel-cadence", mining.fuelCycleProgress, mining.elapsedSeconds, true);
+        } else if (item.label == text::labels::drillBit) {
+            cssClass = miningVitalAlertClass(
+                "mining-vital-drill",
+                std::clamp(1.0 - mining.drillIntegrity, 0.0, 1.0),
+                mining.elapsedSeconds);
+            if (mining.drillIntegrity <= 0.0) {
+                cssClass += " mining-vital-broken";
+            }
+        } else if (item.label == text::labels::drillHeat) {
+            cssClass = miningDrillHeatAlertClass(mining.drillHeat, mining.elapsedSeconds);
+        } else if (item.label == text::labels::load) {
+            cssClass = miningVitalAlertClass(
+                "mining-vital-load",
+                std::max(speedLoadPressure, fuelLoadPressure),
+                mining.elapsedSeconds);
+        }
+        appendMetric(realtimeIdForLabel("rr-hud-mining-", item.label), item.label, item.value, std::move(cssClass));
+    }
+    for (const PanelMetricPresentation& item : miningPanel.payloadMetrics) {
+        const std::string id = realtimeIdForLabel("rr-hud-mining-payload-", item.label);
+        appendHudText(result, id, item.label + " " + item.value);
+        const bool positive = item.value.empty() || item.value.front() != '-';
+        const bool wideChip = item.label.size() > 8 || item.label.find(' ') != std::string::npos;
+        appendHudClass(
+            result,
+            id,
+            "stat-chip " + std::string(positive ? "up" : "down") + (wideChip ? " wide" : ""));
+    }
+    appendHudText(result, "rr-hud-mining-command-title", miningPanel.commandTitle);
+    appendHudText(result, "rr-hud-mining-command-detail", miningPanel.commandDetail);
+}
+
+std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
+{
+    const GameState& state = context.state;
+    std::ostringstream key;
+    key << static_cast<int>(state.screen) << '|';
+    if (state.screen == Screen::Launch) {
+        const LaunchPanelPresentation panel = launchPanelPresentation(
+            state,
+            context.catalog,
+            context.flightModel,
+            context.currentMultiplier,
+            context.returnBurnMultiplier,
+            context.returnElapsed,
+            context.returnDuration,
+            context.flightActions,
+            context.pressureReliefUsed);
+        key << context.flightArmed << '|' << context.launchQueued << '|' << context.preflightReady << '|';
+        for (const FlightActionButtonPresentation& action : panel.primaryActions) {
+            key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';
+        }
+        for (const FlightActionButtonPresentation& action : panel.systemActions) {
+            key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';
+        }
+    } else if (state.screen == Screen::Flyby) {
+        key << state.run.flyby.completed << '|' << state.run.flyby.collidedWithBody;
+    } else if (state.screen == Screen::Orbit) {
+        key << state.run.orbit.completed;
+    } else if (state.screen == Screen::Mining) {
+        const MiningRunPresentation panel = miningRunPresentation(state, context.catalog);
+        key << panel.failurePending << '|' << miningAtReturnZone(state.run.mining) << '|'
+            << state.run.mining.progressionCreditEligible << '|' << state.run.mining.artifact.present << '|'
+            << static_cast<int>(state.run.mining.artifact.state) << '|';
+        for (const PanelButtonPresentation& action : panel.actions) {
+            key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';
+        }
+    }
+    return static_cast<std::uint64_t>(std::hash<std::string>{}(key.str()));
 }
 
 } // namespace rocket

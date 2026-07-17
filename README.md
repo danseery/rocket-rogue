@@ -13,7 +13,7 @@ Rocket Rogue is a C++20/OpenGL rocket-launch roguelite with genuine native Windo
 - Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
 - Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, and stow/abort decisions.
 - Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
-- Drone Bay progression with mining, resource, survey, stabilizer, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
+- Drone Bay progression with mining, resource, survey, hazard, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
 - Ark campaign spine: Outer Planets discovery, scripted Ark jump/disaster beats, Navigation after the hostile-system stranding, and Ark fuel framing for later sorties.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
 
@@ -28,7 +28,7 @@ You need:
 - A C++20 compiler for native builds and tests
 - An OpenGL 3.3-capable Windows or Linux system for the playable native application
 - Emscripten SDK for the browser build
-- Node.js 24 for repo scripts, platform-boundary tests, and the included static server
+- Node.js 22-24 for repo scripts, platform-boundary tests, and the included static server (CI uses Node.js 24)
 
 ## Install dependencies
 
@@ -55,8 +55,8 @@ Both installers keep project-local development state in ignored folders. SDL 3.4
 - `.venv` for Python tooling
 - `node_modules` if Node dependencies are added later
 
-Use `EMSDK_VERSION` or the script option to install a specific SDK version instead of `latest`.
-Node dependencies are managed through `package-lock.json`; the installers use `npm ci` when the lockfile exists. The repo standard is Node 24, recorded in `.node-version` and `package.json`.
+The installers default to the same Emscripten 6.0.0 version used by deployment CI. Override it with `EMSDK_VERSION` or the script option when deliberately testing another SDK.
+Node dependencies are managed through `package-lock.json`; the installers use `npm ci` when the lockfile exists. Node 22-24 is supported, with Node 24 recorded in `.node-version` as the repo and CI default.
 
 ## Verify local toolchains
 
@@ -177,8 +177,8 @@ For Windows native development, install Visual Studio Build Tools with the C++ w
 ```powershell
 git clone https://github.com/emscripten-core/emsdk.git C:\dev\emsdk
 cd C:\dev\emsdk
-.\emsdk install latest
-.\emsdk activate latest
+.\emsdk install 6.0.0
+.\emsdk activate 6.0.0
 .\emsdk_env.ps1
 cd <repo-path>
 cmake --preset web-release
@@ -201,8 +201,8 @@ Install and activate Emscripten:
 
 ```bash
 git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
-~/emsdk/emsdk install latest
-~/emsdk/emsdk activate latest
+~/emsdk/emsdk install 6.0.0
+~/emsdk/emsdk activate 6.0.0
 source ~/emsdk/emsdk_env.sh
 ```
 
