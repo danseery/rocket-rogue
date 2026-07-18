@@ -133,6 +133,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Linux runner prerequisites
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends lsb-release
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
