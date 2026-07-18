@@ -8,7 +8,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 - Ship-first management through readable module slots and damage.
 - Light but painful crew consequences.
 - Roguelite persistence through unlock variety, records, memorials, and blueprints.
-- Asset-light proof of concept using shared OpenGL primitives, RmlUi mission-control panels, and replaceable arcade sprites across native and web builds.
+- Asset-light proof of concept using backend-neutral procedural primitives, RmlUi mission-control panels, and replaceable arcade sprites across native Vulkan and WebGL2 builds.
 
 ## Core loop
 
@@ -109,10 +109,10 @@ Refit economy should reward recovered risk in discrete shelves:
 
 - `rocket_core` owns deterministic rules: content, RNG, progression, save data, flight tuning, launch resolution, and balance tests.
 - `rocket_app` and `src/game` own platform-neutral application orchestration. `GameRunner` samples input and advances fixed simulation steps; `RocketGameApp` handles screen transitions and live controls; `GamePanel` produces semantic mission-control markup from a read-only context; and `GameRmlUi` presents that markup on both targets.
-- `src/render` owns shared OpenGL drawing and texture upload. `OpenGlRenderer` selects GLSL 330 Core for native OpenGL 3.3 and GLSL ES 300 for WebGL2, but it must not decide gameplay outcomes or create a platform window/context.
+- `src/render` owns backend-neutral `SceneComposer`/`ScenePacket` generation plus the direct Vulkan 1.3 native backend and WebGL2 browser backend. Render code must not decide gameplay outcomes or create platform windows; native Vulkan and RmlUi share the SDL-created surface, device, frame command buffer, and synchronization.
 - `src/input` owns portable controller snapshots, preferences, source arbitration, deadzones, button edges, real-time holds/repeats, and semantic input routing. Controller difficulty never scales from the player's loadout or device.
 - `src/platform/AppServices.h` defines the injected save, preference, host, controller, texture, renderer, UI, and UI-bridge contracts used by the shared app.
-- `src/platform/sdl` owns native SDL window/context creation, filesystem storage, PNG decoding, keyboard/mouse events, gamepads, haptics, fullscreen, and shutdown.
+- `src/platform/sdl` owns native SDL window and Vulkan surface creation, filesystem storage, PNG decoding, keyboard/mouse events, gamepads, haptics, fullscreen, and shutdown.
 - `src/platform/web` is the only C++ boundary allowed to own Emscripten APIs, browser storage, DOM mirroring, asynchronous browser textures, and web gamepads.
 - `web/shell.html` remains the web-only DOM fallback and forwards browser actions into the Emscripten entry point. Native builds use RmlUi directly and do not ship the browser shell.
 

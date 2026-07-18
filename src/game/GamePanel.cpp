@@ -1225,6 +1225,17 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<p>" << htmlEscape("Use the entire display. Native builds also support F11 and Alt+Enter.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
         << htmlEscape("Enter fullscreen") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-frame-limit-settings>"
+        << "<div><h3>" << htmlEscape("Frame rate") << "</h3>"
+        << "<p>" << htmlEscape("Choose stable, refresh-compatible pacing. Balanced favors 40 or 45 FPS; Battery targets 30 FPS.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Frame limit") << "</span>"
+        << "<select data-frame-limit-select data-ui-focus-id=\"setting:frame_limit\" aria-label=\"Frame rate limit\">"
+        << "<option value=\"platform_default\">Platform default</option>"
+        << "<option value=\"smooth60\">Smooth (60 FPS)</option>"
+        << "<option value=\"balanced\">Balanced (40 / 45 FPS)</option>"
+        << "<option value=\"battery30\">Battery (30 FPS)</option>"
+        << "<option value=\"display\">Display refresh</option>"
+        << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
         << "<div><h3>" << htmlEscape("Game speed") << "</h3>"
         << "<p>" << htmlEscape("Local testing multiplier. Shared builds start at 1x.") << "</p></div>"

@@ -6291,6 +6291,8 @@
     const resolutionOptions = Object.freeze(["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"]);
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
     const gameSpeedOptions = Object.freeze(["0.5", "1", "1.5", "2", "3", "5", "8"]);
+    const frameLimitStorageKey = "rocket_rogue_frame_limit_mode";
+    const frameLimitOptions = Object.freeze(["platform_default", "smooth60", "balanced", "battery30", "display"]);
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
     const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
@@ -6382,6 +6384,39 @@
       const speed = normalizedGameSpeed(String(gameSpeedMultiplier()));
       root.querySelectorAll("[data-game-speed-select]").forEach((select) => {
         select.value = gameSpeedOptions.includes(speed) ? speed : "1";
+      });
+    }
+
+    function normalizedFrameLimitMode(value) {
+      return frameLimitOptions.includes(value) ? value : "platform_default";
+    }
+
+    function frameLimitMode() {
+      try {
+        return normalizedFrameLimitMode(window.localStorage.getItem(frameLimitStorageKey) || "platform_default");
+      } catch (error) {
+        return "platform_default";
+      }
+    }
+
+    function setFrameLimitMode(value) {
+      const normalized = normalizedFrameLimitMode(value);
+      try {
+        if (normalized === "platform_default") {
+          window.localStorage.removeItem(frameLimitStorageKey);
+        } else {
+          window.localStorage.setItem(frameLimitStorageKey, normalized);
+        }
+      } catch (error) {
+        // The selected value still applies for this session when storage is unavailable.
+      }
+      return normalized;
+    }
+
+    function syncFrameLimitControls(root = document) {
+      const mode = frameLimitMode();
+      root.querySelectorAll("[data-frame-limit-select]").forEach((select) => {
+        select.value = mode;
       });
     }
 
@@ -6667,6 +6702,7 @@
     function syncLocalControls(root = document) {
       syncResolutionControls(root);
       syncFullscreenControls(root);
+      syncFrameLimitControls(root);
       syncGameSpeedControls(root);
       syncHelpControls(root);
       syncCameraShakeControls(root);
@@ -6848,6 +6884,7 @@
       if (control.dataset.helpDismiss) return `help-dismiss:${control.dataset.helpDismiss}`;
       if (control.matches("[data-resolution-select]")) return "setting:resolution";
       if (control.matches("[data-desktop-fullscreen-toggle]")) return "setting:fullscreen";
+      if (control.matches("[data-frame-limit-select]")) return "setting:frame_limit";
       if (control.matches("[data-game-speed-select]")) return "setting:game_speed";
       if (control.matches("[data-controller-prompt-select]")) return "setting:controller_prompt";
       if (control.matches("[data-controller-deadzone-select]")) return "setting:controller_deadzone";
@@ -7854,6 +7891,14 @@
       const select = closestFromEvent(event, "[data-game-speed-select]");
       if (select && (panel.contains(select) || modalRoot.contains(select))) {
         setGameSpeedMultiplier(select.value);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        return;
+      }
+
+      const frameLimitSelect = closestFromEvent(event, "[data-frame-limit-select]");
+      if (frameLimitSelect && (panel.contains(frameLimitSelect) || modalRoot.contains(frameLimitSelect))) {
+        setFrameLimitMode(frameLimitSelect.value);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
         return;

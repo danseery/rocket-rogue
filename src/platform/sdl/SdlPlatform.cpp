@@ -1,7 +1,8 @@
 #include "platform/sdl/SdlPlatform.h"
 
 #include "game/RocketGameApp.h"
-#include "render/OpenGlApi.h"
+
+#include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -169,10 +170,13 @@ NativeFramePacingDecision NativeFramePacer::next(std::uint64_t nowNanoseconds)
 bool NativeFramePacer::active() const { return active_; }
 std::uint64_t NativeFramePacer::intervalNanoseconds() const { return intervalNanoseconds_; }
 
-SdlPlatform::SdlPlatform(IPreferenceStore& preferences) : preferences_(preferences) {}
+SdlPlatform::SdlPlatform(IPreferenceStore& preferences, bool benchmarkMode)
+    : preferences_(preferences), benchmarkMode_(benchmarkMode)
+{
+}
 SdlPlatform::~SdlPlatform() { shutdown(); }
 
-bool SdlPlatform::initialize()
+bool SdlPlatform::initialize(int initialWidth, int initialHeight)
 {
     if (initialized_) return true;
     SDL_SetAppMetadata("OREBIT", "0.1.0", "game.rocketrogue.native");
@@ -182,44 +186,31 @@ bool SdlPlatform::initialize()
         return false;
     }
 
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);
-    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
+    if (!SDL_Vulkan_LoadLibrary(nullptr)) {
+        log(PlatformLogLevel::Error, std::string("Vulkan loader is unavailable: ") + SDL_GetError());
+        shutdown();
+        return false;
+    }
+    vulkanLibraryLoaded_ = true;
 
     window_ = SDL_CreateWindow(
         "OREBIT",
-        1280,
-        800,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        std::max(320, initialWidth),
+        std::max(200, initialHeight),
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window_) {
         log(PlatformLogLevel::Error, std::string("Window creation failed: ") + SDL_GetError());
         shutdown();
         return false;
     }
-    glContext_ = SDL_GL_CreateContext(window_);
-    if (!glContext_ || !SDL_GL_MakeCurrent(window_, glContext_)) {
-        log(PlatformLogLevel::Error, std::string("OpenGL 3.3 context creation failed: ") + SDL_GetError());
-        shutdown();
-        return false;
-    }
-    if (!loadDesktopOpenGl(reinterpret_cast<OpenGlProcLoader>(SDL_GL_GetProcAddress))) {
-        log(PlatformLogLevel::Error, "Unable to load required OpenGL 3.3 Core functions.");
-        shutdown();
-        return false;
-    }
-    diagnostics_.verticalSyncActive = SDL_GL_SetSwapInterval(1);
-    if (!diagnostics_.verticalSyncActive) {
-        log(PlatformLogLevel::Warning,
-            std::string("Vertical sync is unavailable; enabling display-aware software frame pacing: ")
-                + SDL_GetError());
-    }
+    // FIFO presentation is owned by the Vulkan backend. SDL never introduces
+    // an independent software limiter in the Vulkan-only native build.
+    diagnostics_.verticalSyncActive = true;
 
     const SDL_WindowFlags windowFlags = SDL_GetWindowFlags(window_);
-    const bool focused = (windowFlags & SDL_WINDOW_INPUT_FOCUS) != 0;
+    const bool focused = nativeEffectiveFocus(
+        (windowFlags & SDL_WINDOW_INPUT_FOCUS) != 0,
+        benchmarkMode_);
     const bool visible = (windowFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) == 0;
     fullscreen_ = (windowFlags & SDL_WINDOW_FULLSCREEN) != 0;
     frameLifecycle_.reset(visible, focused);
@@ -241,22 +232,24 @@ bool SdlPlatform::initialize()
 
 void SdlPlatform::shutdown()
 {
-    if (!window_ && !glContext_ && !initialized_) return;
+    if (!window_ && !vulkanLibraryLoaded_ && !initialized_) return;
     for (auto& [id, gamepad] : gamepads_) {
         (void)id;
         if (gamepad.handle) SDL_CloseGamepad(gamepad.handle);
     }
     gamepads_.clear();
     controllerSnapshots_.clear();
-    if (glContext_) SDL_GL_DestroyContext(glContext_);
-    glContext_ = nullptr;
     if (window_) SDL_DestroyWindow(window_);
     window_ = nullptr;
+    if (vulkanLibraryLoaded_) SDL_Vulkan_UnloadLibrary();
+    vulkanLibraryLoaded_ = false;
     SDL_Quit();
     diagnostics_ = {};
     suspendedWakeWindowStartedNanoseconds_ = 0;
     suspendedWakeWindowCount_ = 0;
     displayId_ = 0;
+    displayRefreshRateHz_ = 0.0;
+    graphicsRebuildRequested_ = false;
     frameLifecycle_.reset();
     framePacer_.configure(true, 0.0);
     initialized_ = false;
@@ -292,6 +285,15 @@ bool SdlPlatform::processEvents(RocketGameApp& app)
     };
 
     const auto dispatchEvent = [&](const SDL_Event& event) {
+        if (benchmarkMode_
+            && (event.type == SDL_EVENT_MOUSE_MOTION
+                || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
+                || event.type == SDL_EVENT_MOUSE_BUTTON_UP
+                || event.type == SDL_EVENT_MOUSE_WHEEL
+                || event.type == SDL_EVENT_KEY_DOWN
+                || event.type == SDL_EVENT_KEY_UP)) {
+            return true;
+        }
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             mouseX_ = event.motion.x;
             mouseY_ = event.motion.y;
@@ -369,11 +371,11 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
         closeGamepad(event.gdevice.which);
         break;
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
-        frameLifecycle_.setFocused(true);
+        frameLifecycle_.setFocused(nativeEffectiveFocus(true, benchmarkMode_));
         framePacer_.resetDeadline();
         break;
     case SDL_EVENT_WINDOW_FOCUS_LOST:
-        frameLifecycle_.setFocused(false);
+        frameLifecycle_.setFocused(nativeEffectiveFocus(false, benchmarkMode_));
         framePacer_.resetDeadline();
         releaseRealtimeInputs(app);
         break;
@@ -383,6 +385,7 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
     case SDL_EVENT_WINDOW_RESTORED:
         setWindowVisible(app, true);
         refreshViewportMetrics();
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_WINDOW_HIDDEN:
     case SDL_EVENT_WINDOW_MINIMIZED:
@@ -393,34 +396,40 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
         if (window_ && SDL_GetDisplayForWindow(window_) != displayId_) {
             refreshViewportMetrics();
             refreshDisplayTiming();
+            graphicsRebuildRequested_ = true;
         }
         break;
     case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
         refreshViewportMetrics();
         refreshDisplayTiming();
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_WINDOW_RESIZED:
         viewportMetrics_.logicalWidth = std::max(1, static_cast<int>(event.window.data1));
         viewportMetrics_.logicalHeight = std::max(1, static_cast<int>(event.window.data2));
         viewportMetrics_.densityRatio = static_cast<float>(viewportMetrics_.drawableWidth)
             / static_cast<float>(viewportMetrics_.logicalWidth);
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         viewportMetrics_.drawableWidth = std::max(1, static_cast<int>(event.window.data1));
         viewportMetrics_.drawableHeight = std::max(1, static_cast<int>(event.window.data2));
         viewportMetrics_.densityRatio = static_cast<float>(viewportMetrics_.drawableWidth)
             / static_cast<float>(viewportMetrics_.logicalWidth);
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
         fullscreen_ = true;
         refreshViewportMetrics();
         refreshDisplayTiming();
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
         fullscreen_ = false;
         refreshViewportMetrics();
         refreshDisplayTiming();
+        graphicsRebuildRequested_ = true;
         break;
     case SDL_EVENT_KEY_DOWN:
         noteKeyboardPointerActivity();
@@ -472,6 +481,7 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
 
 void SdlPlatform::applyKeyboardState(RocketGameApp& app)
 {
+    if (benchmarkMode_) return;
     const bool* state = SDL_GetKeyboardState(nullptr);
     const bool left = keyDown(state, SDL_SCANCODE_A, SDL_SCANCODE_LEFT);
     const bool right = keyDown(state, SDL_SCANCODE_D, SDL_SCANCODE_RIGHT);
@@ -508,6 +518,15 @@ bool SdlPlatform::consumeFrameClockReset()
 {
     return frameLifecycle_.consumeFrameClockReset();
 }
+
+bool SdlPlatform::consumeGraphicsRebuildRequest()
+{
+    const bool requested = graphicsRebuildRequested_;
+    graphicsRebuildRequested_ = false;
+    return requested;
+}
+
+SDL_Window* SdlPlatform::window() const noexcept { return window_; }
 
 void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& event)
 {
@@ -646,6 +665,7 @@ void SdlPlatform::refreshDisplayTiming()
         }
     }
 
+    displayRefreshRateHz_ = refreshRate;
     framePacer_.configure(diagnostics_.verticalSyncActive, refreshRate);
     diagnostics_.softwareFrameLimiterActive = framePacer_.active();
 }
@@ -665,6 +685,7 @@ void SdlPlatform::applySoftwareFramePacing()
 }
 
 double SdlPlatform::monotonicSeconds() const { return static_cast<double>(SDL_GetTicksNS()) / 1'000'000'000.0; }
+double SdlPlatform::displayRefreshRateHz() const { return displayRefreshRateHz_; }
 ViewportMetrics SdlPlatform::viewportMetrics()
 {
     return viewportMetrics_;
@@ -680,6 +701,7 @@ bool SdlPlatform::setFullscreen(bool enabled)
         return false;
     }
     fullscreen_ = enabled;
+    graphicsRebuildRequested_ = true;
     AppPreferences preferences = preferences_.load();
     preferences.fullscreen = enabled;
     if (!preferences_.store(preferences)) log(PlatformLogLevel::Warning, preferences_.lastError());
@@ -702,21 +724,19 @@ bool SdlPlatform::haptic(double duration, double weak, double strong)
         static_cast<Uint16>(std::clamp(strong, 0.0, 1.0) * 65535.0),
         static_cast<Uint32>(std::clamp(duration, 0.0, 2.0) * 1000.0));
 }
-void SdlPlatform::present()
-{
-    diagnostics_.frameLimiterMilliseconds = 0.0;
-    if (!window_ || !frameLifecycle_.visible()) return;
-    SDL_GL_SwapWindow(window_);
-}
 void SdlPlatform::paceFrame()
 {
-    applySoftwareFramePacing();
 }
-OpenGlDialect SdlPlatform::openGlDialect() const { return OpenGlDialect::DesktopCore33; }
 PlatformDiagnostics SdlPlatform::diagnostics() const { return diagnostics_; }
 
 ControllerFrame SdlPlatform::sampleFrame(double realTimeSeconds)
 {
+    if (benchmarkMode_) {
+        lastControllerFrame_ = {};
+        lastControllerFrame_.pageVisible = frameLifecycle_.visible();
+        lastControllerFrame_.browserFocused = true;
+        return lastControllerFrame_;
+    }
     for (RawControllerSnapshot& snapshot : controllerSnapshots_) {
         const auto found = gamepads_.find(static_cast<SDL_JoystickID>(snapshot.index));
         if (found == gamepads_.end() || !found->second.handle) {

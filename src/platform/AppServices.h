@@ -1,11 +1,13 @@
 #pragma once
 
 #include "input/ControllerInput.h"
+#include "platform/FrameLimitPolicy.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,11 +20,6 @@ enum class PlatformLogLevel {
     Info,
     Warning,
     Error
-};
-
-enum class OpenGlDialect {
-    WebGl2,
-    DesktopCore33
 };
 
 struct ViewportMetrics {
@@ -42,6 +39,21 @@ struct RendererDiagnostics {
     int texturesReady = 0;
     int texturesPending = 0;
     int texturesFailed = 0;
+    double gpuFrameMilliseconds = 0.0;
+    // CPU time deliberately spent waiting for frame retirement/swapchain
+    // acquisition or an explicit presentation deadline. Benchmark CPU work
+    // excludes this pacing time so FIFO blocking is comparable with GL VSync.
+    double limiterIdleMilliseconds = 0.0;
+    double presentIntervalMilliseconds = 0.0;
+    // The gameplay simulation cadence requested by the selected frame-limit
+    // mode. Presentation may resolve to a refresh-compatible divisor while
+    // deterministic benchmark simulation remains fixed to this nominal rate.
+    double nominalTargetFramesPerSecond = 0.0;
+    double targetFramesPerSecond = 0.0;
+    int missedRefreshes = 0;
+    int pipelineCreationsThisFrame = 0;
+    std::size_t deviceMemoryBytes = 0;
+    bool softwareFrameLimiterActive = false;
 };
 
 struct TextureDiagnostics {
@@ -114,6 +126,7 @@ struct PerformanceStats {
 struct AppPreferences {
     ControllerPreferences controller;
     std::string resolutionPreset = "auto";
+    FrameLimitMode frameLimitMode = FrameLimitMode::PlatformDefault;
     double gameSpeed = 1.0;
     bool debugToolsEnabled = false;
     bool performanceStatsEnabled = false;
@@ -148,6 +161,7 @@ class IPlatformHost {
 public:
     virtual ~IPlatformHost() = default;
     virtual double monotonicSeconds() const = 0;
+    virtual double displayRefreshRateHz() const { return 0.0; }
     virtual ViewportMetrics viewportMetrics() = 0;
     virtual bool focused() const = 0;
     virtual bool visible() const = 0;
@@ -156,9 +170,7 @@ public:
     virtual bool setFullscreen(bool enabled) = 0;
     virtual void log(PlatformLogLevel level, std::string_view message) = 0;
     virtual bool haptic(double durationSeconds, double weakMagnitude, double strongMagnitude) = 0;
-    virtual void present() = 0;
     virtual void paceFrame() {}
-    virtual OpenGlDialect openGlDialect() const = 0;
     virtual PlatformDiagnostics diagnostics() const { return {}; }
 };
 
@@ -178,18 +190,33 @@ enum class TextureStatus {
     Failed
 };
 
+struct DecodedImageView {
+    int width = 0;
+    int height = 0;
+    std::span<const std::uint8_t> rgba;
+
+    constexpr bool valid() const noexcept
+    {
+        return width > 0 && height > 0
+            && rgba.size() == static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
+    }
+};
+
 class ITextureSource {
 public:
     virtual ~ITextureSource() = default;
     virtual void request(std::string_view key, std::string_view relativePath) = 0;
     virtual TextureStatus status(std::string_view key) const = 0;
-    virtual bool uploadToOpenGl(
-        std::string_view key,
-        unsigned int texture,
-        int& width,
-        int& height) = 0;
+    virtual std::optional<DecodedImageView> decodedImage(std::string_view) const { return std::nullopt; }
+    virtual void releaseDecodedImage(std::string_view) {}
     virtual std::string lastError() const = 0;
     virtual TextureDiagnostics diagnostics() const { return {}; }
+};
+
+enum class GraphicsFrameStatus {
+    Ready,
+    Skipped,
+    Fatal
 };
 
 class IGameRenderer {
@@ -197,10 +224,15 @@ public:
     virtual ~IGameRenderer() = default;
     virtual bool initialize() = 0;
     virtual void render(const RenderSnapshot& snapshot) = 0;
+    // Explicit-API backends finish the shared scene/UI command buffer and
+    // present here. WebGL leaves this as a no-op because the browser commits
+    // the immediate-mode commands from its main-loop callback.
+    virtual GraphicsFrameStatus endFrameAndPresent() { return GraphicsFrameStatus::Ready; }
+    virtual GraphicsFrameStatus frameStatus() const { return GraphicsFrameStatus::Ready; }
     virtual void shutdown() = 0;
     virtual void setPreferences(const AppPreferences&) {}
     virtual RendererDiagnostics diagnostics() const { return {}; }
-    virtual std::string_view description() const { return "Shared OpenGL renderer"; }
+    virtual std::string_view description() const { return "Graphics renderer"; }
 };
 
 class IGameUi {

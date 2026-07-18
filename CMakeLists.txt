@@ -2,10 +2,11 @@ cmake_minimum_required(VERSION 3.22)
 
 project(RocketRoguePoc
     VERSION 0.1.0
-    DESCRIPTION "A C++20/OpenGL rocket-launch roguelite"
-    LANGUAGES CXX)
+    DESCRIPTION "A C++20/Vulkan and WebGL2 rocket-launch roguelite"
+    LANGUAGES C CXX)
 
 option(ROCKET_PROFILE_BUILD "Keep optimized native builds profiler-friendly" OFF)
+set(ROCKET_STEAMWORKS_SDK_ROOT "" CACHE PATH "Optional Steamworks SDK root for Deck runtime detection")
 
 if(MSVC)
     add_compile_options(/EHsc)
@@ -102,8 +103,9 @@ add_library(rocket_app
     src/game/GameRmlUi.cpp
     src/game/GameRunner.cpp
     src/game/RocketGameApp.cpp
-    src/render/OpenGlApi.cpp
-    src/render/OpenGlRenderer.cpp)
+    src/performance/PerformanceMetrics.cpp
+    src/render/FrameCapture.cpp
+    src/render/SceneComposer.cpp)
 target_link_libraries(rocket_app PUBLIC rocket_core PRIVATE rmlui_core)
 target_include_directories(rocket_app PUBLIC
     src
@@ -111,6 +113,10 @@ target_include_directories(rocket_app PUBLIC
     PRIVATE "${ROCKET_RMLUI_SOURCE_DIR}/Source/Debugger")
 target_compile_definitions(rocket_app PRIVATE RMLUI_STATIC_LIB)
 if(EMSCRIPTEN)
+    target_sources(rocket_app PRIVATE
+        src/render/GlRmlRenderHost.cpp
+        src/render/OpenGlApi.cpp
+        src/render/OpenGlRenderer.cpp)
     target_compile_definitions(rocket_app PUBLIC ROCKET_OPENGL_ES)
     target_compile_options(rocket_app PRIVATE -sUSE_FREETYPE=1)
 endif()
@@ -136,12 +142,27 @@ add_executable(rocket_app_services_tests tests/app_services_tests.cpp)
 target_link_libraries(rocket_app_services_tests PRIVATE rocket_app)
 set_target_properties(rocket_app_services_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
+add_executable(rocket_performance_metrics_tests tests/performance_metrics_tests.cpp)
+target_link_libraries(rocket_performance_metrics_tests PRIVATE rocket_app)
+set_target_properties(rocket_performance_metrics_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+
+add_executable(rocket_frame_capture_tests tests/frame_capture_tests.cpp)
+target_link_libraries(rocket_frame_capture_tests PRIVATE rocket_app)
+set_target_properties(rocket_frame_capture_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+
+add_executable(rocket_scene_atlas_tests tests/scene_atlas_tests.cpp)
+target_include_directories(rocket_scene_atlas_tests PRIVATE src)
+set_target_properties(rocket_scene_atlas_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+
 set(ROCKET_TEST_TARGETS
     rocket_core_tests
     rocket_mining_progression_tests
     rocket_mining_economy_tests
     rocket_controller_input_tests
-    rocket_app_services_tests)
+    rocket_app_services_tests
+    rocket_performance_metrics_tests
+    rocket_frame_capture_tests
+    rocket_scene_atlas_tests)
 foreach(test_target IN LISTS ROCKET_TEST_TARGETS)
     # The lightweight tests use assert() for both execution and verification. Keep
     # those checks live in Release/RelWithDebInfo so optimized test runs exercise
@@ -168,12 +189,18 @@ if(EMSCRIPTEN)
     add_test(NAME rocket_mining_economy_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_mining_economy_tests>")
     add_test(NAME rocket_controller_input_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_controller_input_tests>")
     add_test(NAME rocket_app_services_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_app_services_tests>")
+    add_test(NAME rocket_performance_metrics_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_performance_metrics_tests>")
+    add_test(NAME rocket_frame_capture_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_frame_capture_tests>")
+    add_test(NAME rocket_scene_atlas_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_scene_atlas_tests>")
 else()
     add_test(NAME rocket_core_tests COMMAND rocket_core_tests)
     add_test(NAME rocket_mining_progression_tests COMMAND rocket_mining_progression_tests)
     add_test(NAME rocket_mining_economy_tests COMMAND rocket_mining_economy_tests)
     add_test(NAME rocket_controller_input_tests COMMAND rocket_controller_input_tests)
     add_test(NAME rocket_app_services_tests COMMAND rocket_app_services_tests)
+    add_test(NAME rocket_performance_metrics_tests COMMAND rocket_performance_metrics_tests)
+    add_test(NAME rocket_frame_capture_tests COMMAND rocket_frame_capture_tests)
+    add_test(NAME rocket_scene_atlas_tests COMMAND rocket_scene_atlas_tests)
 endif()
 
 find_program(ROCKET_NODE_EXECUTABLE NAMES node node.exe)
@@ -197,7 +224,10 @@ if(EMSCRIPTEN)
 
     add_custom_target(copy_rocket_assets
         COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "${CMAKE_CURRENT_BINARY_DIR}/assets"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scene-atlas"
+            "${CMAKE_CURRENT_BINARY_DIR}/assets/scene-atlas"
         COMMENT "Copying Rocket Rogue web assets")
     add_dependencies(rocket_rogue copy_rocket_assets)
 
@@ -219,6 +249,47 @@ else()
             "CMAKE_SYSTEM_PROCESSOR is '${CMAKE_SYSTEM_PROCESSOR}'.")
     endif()
 
+    # Native rendering uses a pinned loader shim and headers. The Vulkan loader
+    # itself is deliberately not linked or packaged; SDL loads the driver's
+    # system/Steam Runtime loader and volk resolves functions through it.
+    FetchContent_Declare(vulkan_headers
+        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+        GIT_TAG 8864cdc896bbc2a9b6eb36b3218fc9ef57908d77
+        GIT_SHALLOW FALSE)
+    FetchContent_MakeAvailable(vulkan_headers)
+    set(ROCKET_VULKAN_HEADERS_LICENSE "${vulkan_headers_SOURCE_DIR}/LICENSE.md")
+
+    set(VOLK_PULL_IN_VULKAN OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(volk_source
+        GIT_REPOSITORY https://github.com/zeux/volk.git
+        GIT_TAG 3ca312a4f38baa63d8006b6905abbeeb89c8087d
+        GIT_SHALLOW FALSE)
+    FetchContent_MakeAvailable(volk_source)
+    target_link_libraries(volk PUBLIC Vulkan::Headers)
+    set(ROCKET_VOLK_LICENSE "${volk_source_SOURCE_DIR}/LICENSE.md")
+
+    set(VMA_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    set(VMA_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(VMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(vma_source
+        GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+        GIT_TAG 1d8f600fd424278486eade7ed3e877c99f0846b1
+        GIT_SHALLOW FALSE)
+    FetchContent_MakeAvailable(vma_source)
+    set(ROCKET_VMA_LICENSE "${vma_source_SOURCE_DIR}/LICENSE.txt")
+
+    target_sources(rocket_app PRIVATE
+        src/performance/BenchmarkScenarioDriver.cpp
+        src/render/VulkanRmlRenderHost.cpp
+        src/render/vulkan/VmaImplementation.cpp
+        src/render/vulkan/VulkanGraphicsBackend.cpp
+        src/render/vulkan/VulkanPolicy.cpp)
+    target_compile_definitions(rocket_app PRIVATE VK_NO_PROTOTYPES)
+    target_link_libraries(rocket_app PUBLIC
+        volk::volk
+        Vulkan::Headers
+        GPUOpen::VulkanMemoryAllocator)
+
     set(ROCKET_SDL_SOURCE_DIR "${CMAKE_SOURCE_DIR}/.deps/SDL" CACHE PATH "Optional local SDL 3.4.10 source tree")
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
@@ -229,14 +300,16 @@ else()
     set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
     set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
     set(SDL_GPU OFF CACHE BOOL "" FORCE)
+    set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
     set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
     set(SDL_RENDER OFF CACHE BOOL "" FORCE)
     set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
     set(SDL_TRAY OFF CACHE BOOL "" FORCE)
-    set(SDL_VULKAN OFF CACHE BOOL "" FORCE)
+    set(SDL_VULKAN ON CACHE BOOL "" FORCE)
     if(EXISTS "${ROCKET_SDL_SOURCE_DIR}/CMakeLists.txt")
         add_subdirectory("${ROCKET_SDL_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/sdl" EXCLUDE_FROM_ALL)
         set(ROCKET_SDL_LICENSE "${ROCKET_SDL_SOURCE_DIR}/LICENSE.txt")
+        set(ROCKET_SDL_INCLUDE_DIR "${ROCKET_SDL_SOURCE_DIR}/include")
     else()
         FetchContent_Declare(SDL3
             GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
@@ -244,24 +317,66 @@ else()
             GIT_SHALLOW TRUE)
         FetchContent_MakeAvailable(SDL3)
         set(ROCKET_SDL_LICENSE "${SDL3_SOURCE_DIR}/LICENSE.txt")
+        set(ROCKET_SDL_INCLUDE_DIR "${SDL3_SOURCE_DIR}/include")
     endif()
+    target_include_directories(rocket_app PRIVATE "${ROCKET_SDL_INCLUDE_DIR}")
 
     add_library(rocket_platform_sdl
+        src/performance/NativeBenchmarkOptions.cpp
+        src/platform/FrameLimitPolicy.cpp
         src/platform/sdl/NativeStorage.cpp
         src/platform/sdl/NativeTextureSource.cpp
         src/platform/sdl/SdlPlatform.cpp
+        src/platform/steam/SteamPlatformService.cpp
         third_party/lodepng/lodepng.cpp)
     target_include_directories(rocket_platform_sdl PUBLIC src third_party/lodepng "${ROCKET_RMLUI_SOURCE_DIR}/Backends")
     target_link_libraries(rocket_platform_sdl PUBLIC rocket_core SDL3::SDL3-static)
+    target_compile_definitions(rocket_platform_sdl PRIVATE VK_NO_PROTOTYPES)
+    target_link_libraries(rocket_platform_sdl PRIVATE Vulkan::Headers)
+
+    set(ROCKET_STEAM_RUNTIME "")
+    if(ROCKET_STEAMWORKS_SDK_ROOT)
+        set(ROCKET_STEAMWORKS_INCLUDE "${ROCKET_STEAMWORKS_SDK_ROOT}/public")
+        if(WIN32)
+            set(ROCKET_STEAMWORKS_LIBRARY "${ROCKET_STEAMWORKS_SDK_ROOT}/redistributable_bin/win64/steam_api64.lib")
+            set(ROCKET_STEAM_RUNTIME "${ROCKET_STEAMWORKS_SDK_ROOT}/redistributable_bin/win64/steam_api64.dll")
+        else()
+            set(ROCKET_STEAMWORKS_LIBRARY "${ROCKET_STEAMWORKS_SDK_ROOT}/redistributable_bin/linux64/libsteam_api.so")
+            set(ROCKET_STEAM_RUNTIME "${ROCKET_STEAMWORKS_LIBRARY}")
+        endif()
+        if(NOT EXISTS "${ROCKET_STEAMWORKS_INCLUDE}/steam/steam_api.h"
+            OR NOT EXISTS "${ROCKET_STEAMWORKS_LIBRARY}"
+            OR NOT EXISTS "${ROCKET_STEAM_RUNTIME}")
+            message(FATAL_ERROR "ROCKET_STEAMWORKS_SDK_ROOT does not contain the expected public headers and 64-bit redistributables")
+        endif()
+        target_compile_definitions(rocket_platform_sdl PUBLIC ROCKET_STEAMWORKS_ENABLED=1)
+        target_include_directories(rocket_platform_sdl PRIVATE "${ROCKET_STEAMWORKS_INCLUDE}")
+        target_link_libraries(rocket_platform_sdl PRIVATE "${ROCKET_STEAMWORKS_LIBRARY}")
+    endif()
 
     add_executable(RocketRogue src/platform/sdl/NativeMain.cpp)
     target_link_libraries(RocketRogue PRIVATE rocket_app rocket_platform_sdl)
+    if(ROCKET_STEAMWORKS_SDK_ROOT AND UNIX AND NOT APPLE)
+        # The packaged optional Steamworks runtime lives beside the executable.
+        # Keep that package relocatable instead of depending on the SDK path
+        # from the build machine.
+        set_target_properties(RocketRogue PROPERTIES
+            BUILD_RPATH "$ORIGIN"
+            BUILD_RPATH_USE_ORIGIN TRUE
+            INSTALL_RPATH "$ORIGIN")
+    endif()
     set_target_properties(RocketRogue PROPERTIES
         OUTPUT_NAME "RocketRogue"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
     add_custom_target(copy_native_assets
         COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:RocketRogue>/assets"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:RocketRogue>/assets"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RocketRogue>/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/scene-atlas"
+            "$<TARGET_FILE_DIR:RocketRogue>/assets/scene-atlas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets/shaders"
+            "$<TARGET_FILE_DIR:RocketRogue>/assets/shaders"
         COMMENT "Copying native Rocket Rogue assets")
     add_dependencies(RocketRogue copy_native_assets)
 
@@ -274,6 +389,53 @@ else()
     endif()
     set_target_properties(rocket_native_platform_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
     add_test(NAME rocket_native_platform_tests COMMAND rocket_native_platform_tests)
+
+    add_executable(rocket_native_benchmark_options_tests tests/native_benchmark_options_tests.cpp)
+    target_link_libraries(rocket_native_benchmark_options_tests PRIVATE rocket_platform_sdl rocket_app)
+    add_executable(rocket_frame_limit_policy_tests tests/frame_limit_policy_tests.cpp)
+    target_link_libraries(rocket_frame_limit_policy_tests PRIVATE rocket_platform_sdl)
+    foreach(test_target rocket_native_benchmark_options_tests rocket_frame_limit_policy_tests)
+        if(MSVC)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endif()
+        set_target_properties(${test_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    endforeach()
+    add_test(NAME rocket_native_benchmark_options_tests COMMAND rocket_native_benchmark_options_tests)
+    add_test(NAME rocket_frame_limit_policy_tests COMMAND rocket_frame_limit_policy_tests)
+
+    add_executable(rocket_scene_composer_tests tests/scene_composer_tests.cpp)
+    target_link_libraries(rocket_scene_composer_tests PRIVATE rocket_app)
+    if(MSVC)
+        target_compile_options(rocket_scene_composer_tests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(rocket_scene_composer_tests PRIVATE -UNDEBUG)
+    endif()
+    set_target_properties(rocket_scene_composer_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    add_test(NAME rocket_scene_composer_tests COMMAND rocket_scene_composer_tests)
+
+    add_executable(rocket_vulkan_policy_tests tests/vulkan_policy_tests.cpp)
+    target_link_libraries(rocket_vulkan_policy_tests PRIVATE rocket_app)
+    add_executable(rocket_benchmark_scenario_driver_tests tests/benchmark_scenario_driver_tests.cpp)
+    target_link_libraries(rocket_benchmark_scenario_driver_tests PRIVATE rocket_app)
+    foreach(test_target rocket_vulkan_policy_tests rocket_benchmark_scenario_driver_tests)
+        if(MSVC)
+            target_compile_options(${test_target} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endif()
+        set_target_properties(${test_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+    endforeach()
+    add_test(NAME rocket_vulkan_policy_tests COMMAND rocket_vulkan_policy_tests)
+    add_test(NAME rocket_benchmark_scenario_driver_tests COMMAND rocket_benchmark_scenario_driver_tests)
+
+    if(ROCKET_NODE_EXECUTABLE)
+        add_test(NAME rocket_vulkan_shader_tool_tests
+            COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build-vulkan-shaders.test.mjs")
+        add_test(NAME rocket_native_benchmark_summary_tool_tests
+            COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/summarize-native-benchmarks.test.mjs")
+    endif()
 
     if(WIN32)
         set(ROCKET_PACKAGE_NAME "RocketRogue-windows-x64.zip")
@@ -294,6 +456,10 @@ else()
             -DROCKET_LODEPNG_LICENSE=${CMAKE_SOURCE_DIR}/third_party/lodepng/LICENSE.txt
             -DROCKET_SDL_LICENSE=${ROCKET_SDL_LICENSE}
             -DROCKET_FREETYPE_LICENSE=${ROCKET_FREETYPE_LICENSE}
+            -DROCKET_VULKAN_HEADERS_LICENSE=${ROCKET_VULKAN_HEADERS_LICENSE}
+            -DROCKET_VOLK_LICENSE=${ROCKET_VOLK_LICENSE}
+            -DROCKET_VMA_LICENSE=${ROCKET_VMA_LICENSE}
+            -DROCKET_STEAM_RUNTIME=${ROCKET_STEAM_RUNTIME}
             -P ${CMAKE_SOURCE_DIR}/cmake/PackageNative.cmake
         DEPENDS RocketRogue
         COMMENT "Creating ${ROCKET_PACKAGE_NAME}")

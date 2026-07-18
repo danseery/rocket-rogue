@@ -10,6 +10,12 @@ const requiredFiles = [
   "rocket_rogue.wasm"
 ];
 
+const requiredSceneAtlasFiles = [
+  "scene-atlas-0.png",
+  "scene-atlas-1.png",
+  "scene-atlas.json"
+];
+
 function copyDirectory(source, target) {
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(source)) {
@@ -48,6 +54,18 @@ for (const file of requiredFiles) {
 
 if (!existsSync(join(buildDir, "assets"))) {
   console.error(`Missing copied assets directory: ${join(buildDir, "assets")}`);
+  process.exit(1);
+}
+for (const file of requiredSceneAtlasFiles) {
+  const path = join(buildDir, "assets", "scene-atlas", file);
+  if (!existsSync(path)) {
+    console.error(`Missing generated scene atlas asset: ${path}`);
+    process.exit(1);
+  }
+}
+if (existsSync(join(buildDir, "assets", "art"))) {
+  console.error("Web build still contains source art in addition to the generated scene atlas.");
+  console.error("Rebuild the web target so only runtime atlas assets are deployed.");
   process.exit(1);
 }
 

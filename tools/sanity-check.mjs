@@ -94,8 +94,29 @@ for (const token of ["requestFullscreen", "exitFullscreen", "fullscreenchange"])
     failed = true;
   }
 }
+for (const token of [
+  "rocket_rogue_frame_limit_mode",
+  "data-frame-limit-select",
+  "setFrameLimitMode",
+  "syncFrameLimitControls"
+]) {
+  if (!webShell.includes(token)) {
+    console.error(`web frame-limit preference missing token: ${token}`);
+    failed = true;
+  }
+}
 
 const gameRmlUi = existsSync("src/game/GameRmlUi.cpp") ? readFileSync("src/game/GameRmlUi.cpp", "utf8") : "";
+for (const token of [
+  "data-frame-limit-select",
+  "rr_rml_set_frame_limit_preference",
+  "selectCurrentFrameLimit"
+]) {
+  if (!gameRmlUi.includes(token)) {
+    console.error(`native RmlUi frame-limit preference missing token: ${token}`);
+    failed = true;
+  }
+}
 for (const token of [
   "RmlPanelMode::Title",
   ".title-screen",

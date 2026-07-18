@@ -4,7 +4,7 @@
   "private": true,
   "author": "Rocket Rogue Team",
   "license": "UNLICENSED",
-  "description": "C++20 native OpenGL and WebGL2 rocket-launch roguelite.",
+  "description": "C++20 native Vulkan 1.3 and WebGL2 rocket-launch roguelite.",
   "engines": {
     "node": ">=22 <25"
   },
@@ -23,6 +23,9 @@
     "build:native:profile": "node tools/run-cmake-preset.mjs build native-profile",
     "test:native:profile": "node tools/run-cmake-preset.mjs test native-profile",
     "package:native": "node tools/run-cmake-preset.mjs build package-native",
+    "shaders:vulkan": "node tools/build-vulkan-shaders.mjs",
+    "check:shaders:vulkan": "node tools/build-vulkan-shaders.mjs --check",
+    "summarize:benchmarks": "node tools/summarize-native-benchmarks.mjs",
     "configure:web": "node tools/run-cmake-preset.mjs configure web-release",
     "build:web": "node tools/run-cmake-preset.mjs build web-release",
     "test:web": "node tools/run-web-tests.mjs"

@@ -13,7 +13,8 @@ public:
 
     void request(std::string_view key, std::string_view relativePath) override;
     TextureStatus status(std::string_view key) const override;
-    bool uploadToOpenGl(std::string_view key, unsigned int texture, int& width, int& height) override;
+    std::optional<DecodedImageView> decodedImage(std::string_view key) const override;
+    void releaseDecodedImage(std::string_view key) override;
     std::string lastError() const override;
     TextureDiagnostics diagnostics() const override;
 

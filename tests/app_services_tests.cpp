@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <functional>
 
 namespace {
 
@@ -67,13 +68,10 @@ public:
     bool setFullscreen(bool enabled) override { fullscreenValue = enabled; return true; }
     void log(rocket::PlatformLogLevel, std::string_view) override {}
     bool haptic(double, double, double) override { ++hapticCount; return true; }
-    void present() override { ++presentCount; }
-    rocket::OpenGlDialect openGlDialect() const override { return rocket::OpenGlDialect::DesktopCore33; }
     mutable double now = 1.0;
     rocket::ViewportMetrics metrics {1280, 800, 2560, 1600, 2.0F, -1.0F};
     bool fullscreenValue = false;
     int hapticCount = 0;
-    int presentCount = 0;
 };
 
 class FakeController final : public rocket::IControllerSource {
@@ -101,7 +99,6 @@ class FakeTextureSource final : public rocket::ITextureSource {
 public:
     void request(std::string_view, std::string_view) override {}
     rocket::TextureStatus status(std::string_view) const override { return rocket::TextureStatus::Ready; }
-    bool uploadToOpenGl(std::string_view, unsigned int, int&, int&) override { return true; }
     std::string lastError() const override { return {}; }
 };
 
@@ -154,12 +151,18 @@ public:
         preferences = next;
         ++preferenceUpdateCount;
     }
+    rocket::GraphicsFrameStatus endFrameAndPresent() override
+    {
+        ++presentCount;
+        return rocket::GraphicsFrameStatus::Ready;
+    }
     void shutdown() override { shutdownCalled = true; }
     rocket::AppPreferences preferences;
     bool initialized = false;
     bool shutdownCalled = false;
     int renderCount = 0;
     int preferenceUpdateCount = 0;
+    int presentCount = 0;
     double animationTime = 0.0;
     double shipDamage = 0.0;
     double miningHeat = 0.0;
@@ -179,7 +182,11 @@ public:
         hud = value;
         ++hudSetCount;
     }
-    void render() override { ++renderCount; }
+    void render() override
+    {
+        ++renderCount;
+        if (renderTimingHook) renderTimingHook();
+    }
     bool mouseMove(int, int) override { return false; }
     bool mouseDown(int, int, int) override { return false; }
     bool mouseUp(int, int, int) override { return false; }
@@ -200,6 +207,13 @@ public:
     void dispatchAction(const std::string& action) override { if (actionHandler) actionHandler(action); }
     void refresh() override {}
     bool activateButtonLabel(const std::string&) override { return false; }
+    void setPerformanceStats(const rocket::PerformanceStats& stats, bool visible) override
+    {
+        lastPerformanceStats = stats;
+        performanceStatsVisible = visible;
+        ++performanceStatsSetCount;
+        if (visible && performanceStatsTimingHook) performanceStatsTimingHook();
+    }
     void shutdown() override { shutdownCalled = true; }
     ActionHandler actionHandler;
     std::string html;
@@ -207,7 +221,12 @@ public:
     int renderCount = 0;
     int panelSetCount = 0;
     int hudSetCount = 0;
+    int performanceStatsSetCount = 0;
+    bool performanceStatsVisible = false;
     rocket::RealtimeHudState hud;
+    rocket::PerformanceStats lastPerformanceStats;
+    std::function<void()> renderTimingHook;
+    std::function<void()> performanceStatsTimingHook;
 };
 
 class FakeUiBridge final : public rocket::IUiBridge {
@@ -316,6 +335,35 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Performance-overlay publication can consume time immediately and defer
+    // geometry/layout work until the following UI render. Neither cost belongs
+    // in the gameplay frame or CPU percentiles reported by that overlay.
+    {
+        AppFixture fixture;
+        fixture.preferences.value.performanceStatsEnabled = true;
+        bool deferredOverlayWork = false;
+        fixture.ui.performanceStatsTimingHook = [&]() {
+            fixture.host.now += 0.050;
+            deferredOverlayWork = true;
+        };
+        fixture.ui.renderTimingHook = [&]() {
+            if (!deferredOverlayWork) return;
+            fixture.host.now += 0.080;
+            deferredOverlayWork = false;
+        };
+
+        assert(fixture.runner.initialize());
+        for (int frame = 0; frame < 30 && fixture.ui.performanceStatsSetCount < 2; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.ui.performanceStatsSetCount >= 2);
+        assert(fixture.ui.performanceStatsVisible);
+        assert(fixture.ui.lastPerformanceStats.p95FrameTimeMilliseconds < 20.0);
+        assert(fixture.ui.lastPerformanceStats.p95CpuFrameMilliseconds < 1.0);
+        fixture.runner.shutdown();
+    }
+
     // A valid save is restored once and held motionless behind the animated
     // title. Continue only dismisses the title; it does not rewrite progress.
     {
@@ -411,7 +459,7 @@ int main()
     runner.frame();
     assert(renderer.renderCount == 1);
     assert(ui.renderCount == 1);
-    assert(host.presentCount == 1);
+    assert(renderer.presentCount == 1);
     assert(host.hapticCount == 1);
     assert(controllers.preferenceUpdateCount == 1);
     assert(renderer.preferenceUpdateCount == 1);
@@ -439,6 +487,18 @@ int main()
     assert(preferences.loadCount == 3);
     assert(controllers.preferenceUpdateCount == 2);
     assert(renderer.preferenceUpdateCount == 2);
+
+    // Frame pacing is a renderer/platform preference only. Changing it must
+    // reach the renderer without perturbing controller or gameplay state.
+    rocket::AppPreferences frameLimitedPreferences = changedPreferences;
+    frameLimitedPreferences.frameLimitMode = rocket::FrameLimitMode::Battery30;
+    assert(preferences.store(frameLimitedPreferences));
+    host.now += 1.0 / 60.0;
+    runner.frame();
+    assert(preferences.loadCount == 4);
+    assert(controllers.preferenceUpdateCount == 2);
+    assert(renderer.preferenceUpdateCount == 3);
+    assert(renderer.preferences.frameLimitMode == rocket::FrameLimitMode::Battery30);
 
     runner.app().debugStartFlyby();
     host.now += 1.0 / 60.0;

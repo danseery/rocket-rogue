@@ -6,7 +6,7 @@
 #include "core/Random.h"
 #include "input/GameInputRouter.h"
 #include "platform/AppServices.h"
-#include "render/OpenGlRenderer.h"
+#include "render/RenderSnapshot.h"
 
 #include <cstdint>
 #include <string>
@@ -41,6 +41,7 @@ public:
     InputContext inputContext() const;
     std::string controllerDebugStatusJson() const;
     ControllerHapticCue consumePendingControllerHapticCue();
+    std::uint64_t deterministicStateHash() const;
 
     void prepareForLaunch();
     void startLaunch();
@@ -105,11 +106,13 @@ public:
     void debugStartSurfacePush();
     void debugStartFlyby();
     void debugStartOrbit();
+    void debugShowTitle();
     void debugShowHangar();
     void debugShowResults();
     void debugShowArrivalOps();
     void debugShowResearch();
     void debugShowSurfaceUpgrade();
+    void debugShowSurfaceOps();
     void debugShowDroneOps();
     void debugShowNavigation();
     void debugStartActOneFlow();

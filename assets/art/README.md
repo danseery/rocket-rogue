@@ -1,10 +1,10 @@
 # Rocket Rogue Art Asset Inventory
 
-The committed PNGs are 90s arcade-style proof-of-concept sprites derived from provided GenAI source images. They are decoded through the platform texture source and drawn by the shared `OpenGlRenderer`: browser builds load them asynchronously, while native builds decode them from the packaged `assets/art` directory.
+The committed PNGs are 90s arcade-style proof-of-concept sprites derived from provided GenAI source images. They are authoring inputs for the generated scene atlas shared by native Vulkan and browser WebGL2. Runtime packages contain the atlas pages instead of duplicating these source files.
 
 ## Registered runtime textures
 
-`src/render/OpenGlRenderer.cpp` currently registers all 33 textures in this section. A missing or corrupt registered texture is a startup error in native builds.
+`scene-textures.json` declares all 33 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
@@ -44,4 +44,29 @@ To clean residual chroma from an already packed sprite without changing its layo
 tools/import-chroma-sprite.py source.png destination.png --preserve-layout
 ```
 
-When adding or replacing a runtime texture, update this inventory and the asset table/size in `src/render/OpenGlRenderer.cpp` and `src/render/OpenGlRenderer.h` together. Verify both the web asynchronous loader and native PNG decoder paths.
+When adding or replacing a runtime texture, update this inventory and `scene-textures.json`, regenerate the atlas, and verify both the web asynchronous loader and native PNG decoder paths.
+
+## Generated scene atlas
+
+`scene-textures.json` is the canonical offline atlas manifest for the 33 registered
+scene textures. `tools/build-scene-atlas.py` splits the four sprite sheets on their
+declared frame grids, preserves every source pixel, extrudes each frame edge by two
+pixels, and packs the frames into WebGL2-safe pages no larger than 4096 pixels on
+either axis. RmlUi textures and generated font textures are intentionally outside
+this atlas.
+
+Run the generator from the repository root after changing a registered source:
+
+```text
+.venv/Scripts/python.exe tools/build-scene-atlas.py
+```
+
+On Linux, use `.venv/bin/python`. The committed outputs live under
+`assets/scene-atlas`, and `src/render/SceneAtlas.generated.h` exposes the same page
+and frame layout to native Vulkan and WebGL2. Verify determinism, source coverage,
+frame layout, and edge extrusion with:
+
+```text
+.venv/Scripts/python.exe tools/build-scene-atlas.test.py
+.venv/Scripts/python.exe tools/build-scene-atlas.py --check
+```

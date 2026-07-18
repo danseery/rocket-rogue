@@ -2244,7 +2244,7 @@ void stampGateHazardShell(MiningRunState& mining, const MiningGateDefinition& de
     constexpr std::array<std::pair<int, int>, 8> offsets {{
         {-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}
     }};
-    for (const auto [dx, dy] : offsets) {
+    for (const auto& [dx, dy] : offsets) {
         MiningCell* cell = miningCellAt(mining.terrain, anchorX + dx, anchorY + dy);
         if (cell == nullptr) {
             continue;

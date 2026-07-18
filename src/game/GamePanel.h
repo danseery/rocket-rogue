@@ -28,7 +28,7 @@ struct PanelRenderContext {
     bool droneTransferEnabled = true;
     int debugActOneCheckpoint = -1;
     std::string_view saveDescription = "Versioned local save data";
-    std::string_view renderDescription = "Shared OpenGL renderer";
+    std::string_view renderDescription = "Shared scene renderer";
     bool titleScreenActive = false;
     bool hasSavedGame = false;
     std::string_view titleNotice;

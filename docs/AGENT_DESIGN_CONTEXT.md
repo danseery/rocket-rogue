@@ -85,7 +85,7 @@ Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering,
 
 ## Implementation Bias
 
-Prefer incremental systems that hook into the shared C++ application and preserve parity between native OpenGL and WebGL2 builds:
+Prefer incremental systems that hook into the shared C++ application and preserve parity between native Vulkan 1.3 and WebGL2 builds:
 
 - Add content types and presentation helpers before new architecture.
 - Keep save compatibility with missing-field defaults.

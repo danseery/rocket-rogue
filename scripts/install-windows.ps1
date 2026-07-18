@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$EmsdkVersion = $(if ($env:EMSDK_VERSION) { $env:EMSDK_VERSION } else { "6.0.0" }),
+    [string]$VulkanSdkVersion = "1.4.350.0",
     [switch]$SkipSystemPackages,
     [switch]$SkipNativeCompiler,
     [switch]$SkipPythonVenv,
@@ -167,6 +168,10 @@ if (-not $SkipSystemPackages) {
     Install-WingetPackage -Id "Ninja-build.Ninja" -Name "Ninja"
     Install-WingetPackage -Id "Python.Python.3.12" -Name "Python 3"
     Install-WingetPackage -Id "OpenJS.NodeJS.LTS" -Name "Node.js LTS"
+    Install-WingetPackage `
+        -Id "KhronosGroup.VulkanSDK" `
+        -Name "Vulkan SDK" `
+        -OverrideArgs @("--version", $VulkanSdkVersion)
 
     if (-not $SkipNativeCompiler) {
         Install-WingetPackage `

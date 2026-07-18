@@ -39,6 +39,14 @@ constexpr bool nativeFrameAcceptsRealtimeInput(NativeFrameDisposition dispositio
     return disposition == NativeFrameDisposition::Active;
 }
 
+// Benchmark windows must not depend on whether the desktop window manager
+// grants foreground focus. This policy is used only by the save-isolated CLI;
+// ordinary gameplay retains focus-loss release and pause semantics.
+constexpr bool nativeEffectiveFocus(bool windowFocused, bool benchmarkMode)
+{
+    return windowFocused || benchmarkMode;
+}
+
 class NativeFrameLifecycle {
 public:
     void reset(bool visible = true, bool focused = true);
@@ -78,21 +86,24 @@ private:
 
 class SdlPlatform final : public IPlatformHost, public IControllerSource {
 public:
-    explicit SdlPlatform(IPreferenceStore& preferences);
+    explicit SdlPlatform(IPreferenceStore& preferences, bool benchmarkMode = false);
     ~SdlPlatform() override;
 
-    bool initialize();
+    bool initialize(int initialWidth = 1280, int initialHeight = 800);
     void shutdown();
     bool processEvents(RocketGameApp& app);
     void applyKeyboardState(RocketGameApp& app);
     NativeFrameDisposition frameDisposition() const;
     void completeFrame();
     bool consumeFrameClockReset();
+    bool consumeGraphicsRebuildRequest();
+    SDL_Window* window() const noexcept;
 
     static std::filesystem::path preferenceDirectory();
     static std::filesystem::path executableDirectory();
 
     double monotonicSeconds() const override;
+    double displayRefreshRateHz() const override;
     ViewportMetrics viewportMetrics() override;
     bool focused() const override;
     bool visible() const override;
@@ -101,9 +112,7 @@ public:
     bool setFullscreen(bool enabled) override;
     void log(PlatformLogLevel level, std::string_view message) override;
     bool haptic(double durationSeconds, double weakMagnitude, double strongMagnitude) override;
-    void present() override;
     void paceFrame() override;
-    OpenGlDialect openGlDialect() const override;
     PlatformDiagnostics diagnostics() const override;
 
     ControllerFrame sampleFrame(double realTimeSeconds) override;
@@ -132,7 +141,6 @@ private:
 
     IPreferenceStore& preferences_;
     SDL_Window* window_ = nullptr;
-    SDL_GLContext glContext_ = nullptr;
     std::unordered_map<SDL_JoystickID, OpenGamepad> gamepads_;
     std::vector<RawControllerSnapshot> controllerSnapshots_;
     ControllerTracker controllerTracker_;
@@ -146,8 +154,12 @@ private:
     std::uint64_t suspendedWakeWindowStartedNanoseconds_ = 0;
     int suspendedWakeWindowCount_ = 0;
     SDL_DisplayID displayId_ = 0;
+    double displayRefreshRateHz_ = 0.0;
     bool initialized_ = false;
+    bool vulkanLibraryLoaded_ = false;
     bool fullscreen_ = false;
+    bool graphicsRebuildRequested_ = false;
+    bool benchmarkMode_ = false;
     float mouseX_ = 0.0F;
     float mouseY_ = 0.0F;
 };

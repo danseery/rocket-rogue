@@ -49,6 +49,27 @@ ControllerPromptFamily parsePrompt(std::string_view value)
     return ControllerPromptFamily::Auto;
 }
 
+std::string frameLimitName(FrameLimitMode mode)
+{
+    switch (mode) {
+    case FrameLimitMode::Smooth60: return "smooth60";
+    case FrameLimitMode::Balanced: return "balanced";
+    case FrameLimitMode::Battery30: return "battery30";
+    case FrameLimitMode::Display: return "display";
+    case FrameLimitMode::PlatformDefault:
+    default: return "platform_default";
+    }
+}
+
+FrameLimitMode parseFrameLimit(std::string_view value)
+{
+    if (value == "smooth60") return FrameLimitMode::Smooth60;
+    if (value == "balanced") return FrameLimitMode::Balanced;
+    if (value == "battery30") return FrameLimitMode::Battery30;
+    if (value == "display") return FrameLimitMode::Display;
+    return FrameLimitMode::PlatformDefault;
+}
+
 std::string sanitizeLine(std::string value)
 {
     value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
@@ -157,6 +178,7 @@ void NativePreferenceStore::ensureLoaded()
         else if (key == "controller.swapConfirmCancel") cached_.controller.swapConfirmCancel = parseBool(value, false);
         else if (key == "controller.vibrationEnabled") cached_.controller.vibrationEnabled = parseBool(value, true);
         else if (key == "render.resolution") cached_.resolutionPreset = std::string(value);
+        else if (key == "render.frameLimitMode") cached_.frameLimitMode = parseFrameLimit(value);
         else if (key == "game.speed") cached_.gameSpeed = std::clamp(parseDouble(value, 1.0), 0.25, 8.0);
         else if (key == "debug.tools") cached_.debugToolsEnabled = parseBool(value, false);
         else if (key == "debug.performanceStats") cached_.performanceStatsEnabled = parseBool(value, false);
@@ -185,6 +207,7 @@ bool NativePreferenceStore::store(const AppPreferences& preferences)
            << "controller.swapConfirmCancel=" << boolText(normalized.controller.swapConfirmCancel) << '\n'
            << "controller.vibrationEnabled=" << boolText(normalized.controller.vibrationEnabled) << '\n'
            << "render.resolution=" << sanitizeLine(normalized.resolutionPreset) << '\n'
+           << "render.frameLimitMode=" << frameLimitName(normalized.frameLimitMode) << '\n'
            << "game.speed=" << normalized.gameSpeed << '\n'
            << "debug.tools=" << boolText(normalized.debugToolsEnabled) << '\n'
            << "debug.performanceStats=" << boolText(normalized.performanceStatsEnabled) << '\n'

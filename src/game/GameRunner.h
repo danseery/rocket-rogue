@@ -1,10 +1,10 @@
 #pragma once
 
 #include "game/RocketGameApp.h"
+#include "performance/PerformanceMetrics.h"
 #include "platform/AppServices.h"
 
-#include <array>
-#include <cstddef>
+#include <optional>
 
 namespace rocket {
 
@@ -14,6 +14,9 @@ public:
 
     bool initialize();
     void frame();
+    // Benchmark-only deterministic frame advancement. Shipping gameplay keeps
+    // using the monotonic frame delta through frame().
+    void frameForBenchmark(double fixedDeltaSeconds);
     void resetFrameClock();
     void shutdown();
 
@@ -21,30 +24,16 @@ public:
     const RocketGameApp& app() const;
 
 private:
-    static constexpr std::size_t performanceSampleCapacity_ = 120;
-
-    struct SampleSummary {
-        double average = 0.0;
-        double median = 0.0;
-        double p95 = 0.0;
-        double p99 = 0.0;
-    };
-
     void dispatchPendingHaptic();
+    void frameWithDelta(std::optional<double> fixedDeltaSeconds);
     void refreshPreferences(bool force);
     void resetPerformanceSamples();
-    void recordPerformanceSample(double deltaSeconds, double cpuMilliseconds);
-    SampleSummary summarizeSamples(
-        const std::array<double, performanceSampleCapacity_>& samples) const;
 
     AppServices& services_;
     RocketGameApp app_;
     AppPreferences cachedPreferences_;
     std::uint64_t preferenceRevision_ = 0;
-    std::array<double, performanceSampleCapacity_> performanceFrameSamples_ {};
-    std::array<double, performanceSampleCapacity_> performanceCpuSamples_ {};
-    std::size_t performanceSampleCount_ = 0;
-    std::size_t performanceSampleCursor_ = 0;
+    performance::RollingFrameTimingSamples performanceSamples_;
     double lastFrameSeconds_ = 0.0;
     double lastPerformancePublishSeconds_ = 0.0;
     double startupMilliseconds_ = 0.0;

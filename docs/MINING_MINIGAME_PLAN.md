@@ -151,6 +151,6 @@ The player should survive through build planning, movement, stow timing, and dro
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, metrics, and detail rows.
 - `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral mining input actions.
-- `src/render/OpenGlRenderer.*` draws mining snapshots with the shared desktop/WebGL backend but must not decide gameplay outcomes.
+- `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, but must not decide gameplay outcomes.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

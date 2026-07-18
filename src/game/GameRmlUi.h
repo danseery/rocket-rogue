@@ -13,6 +13,8 @@ class Element;
 
 namespace rocket {
 
+class IRmlRenderHost;
+
 struct RmlButtonBinding {
     std::string focusId;
     std::string label;
@@ -39,7 +41,11 @@ enum class RmlPanelMode {
 
 class GameRmlUi final : public IGameUi {
 public:
-    GameRmlUi(IPreferenceStore& preferences, IPlatformHost& host, IUiBridge& uiBridge);
+    GameRmlUi(
+        IPreferenceStore& preferences,
+        IPlatformHost& host,
+        IUiBridge& uiBridge,
+        IRmlRenderHost& renderHost);
 
     bool initialize(ActionHandler actionHandler) override;
     void setPanelHtml(const std::string& html) override;
@@ -76,6 +82,7 @@ private:
     IPreferenceStore& preferences_;
     IPlatformHost& host_;
     IUiBridge& uiBridge_;
+    IRmlRenderHost& renderHost_;
     ActionHandler actionHandler_;
     std::string panelHtml_;
     std::string openModalId_;

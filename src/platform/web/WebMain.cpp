@@ -4,6 +4,7 @@
 #include "platform/web/WebPlatform.h"
 #include "platform/web/WebSaveStore.h"
 #include "render/OpenGlRenderer.h"
+#include "render/GlRmlRenderHost.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -22,7 +23,8 @@ std::unique_ptr<rocket::WebPreferenceStore> g_preferenceStore;
 std::unique_ptr<rocket::WebPlatformHost> g_platformHost;
 std::unique_ptr<rocket::WebTextureSource> g_textureSource;
 std::unique_ptr<rocket::WebUiBridge> g_uiBridge;
-std::unique_ptr<rocket::OpenGlRenderer> g_renderer;
+std::unique_ptr<rocket::WebGlGraphicsBackend> g_renderer;
+std::unique_ptr<rocket::WebGlRmlRenderHost> g_rmlRenderHost;
 std::unique_ptr<rocket::GameRmlUi> g_ui;
 std::unique_ptr<rocket::AppServices> g_services;
 std::unique_ptr<rocket::GameRunner> g_runner;
@@ -1025,8 +1027,10 @@ int main()
     if (!g_platformHost->createGraphicsContext()) return 1;
     g_textureSource = std::make_unique<rocket::WebTextureSource>();
     g_uiBridge = std::make_unique<rocket::WebUiBridge>();
-    g_renderer = std::make_unique<rocket::OpenGlRenderer>(*g_platformHost, *g_textureSource);
-    g_ui = std::make_unique<rocket::GameRmlUi>(*g_preferenceStore, *g_platformHost, *g_uiBridge);
+    g_renderer = std::make_unique<rocket::WebGlGraphicsBackend>(*g_platformHost, *g_textureSource);
+    g_rmlRenderHost = std::make_unique<rocket::WebGlRmlRenderHost>();
+    g_ui = std::make_unique<rocket::GameRmlUi>(
+        *g_preferenceStore, *g_platformHost, *g_uiBridge, *g_rmlRenderHost);
     g_services = std::make_unique<rocket::AppServices>(rocket::AppServices {
         *g_saveStore, *g_preferenceStore, *g_platformHost, *g_gamepadSource,
         *g_textureSource, *g_renderer, *g_ui, *g_uiBridge

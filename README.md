@@ -1,11 +1,11 @@
 # Rocket Rogue POC
 
-Rocket Rogue is a C++20/OpenGL rocket-launch roguelite with genuine native Windows and Linux applications plus a fully supported WebGL2/Emscripten build. It borrows the tension of a hidden crash-point launch game, then wraps it in ship-first module management, light astronaut consequences, and persistent roguelite unlock variety.
+Rocket Rogue is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications for Windows and Linux plus a fully supported WebGL2/Emscripten build. It borrows the tension of a hidden crash-point launch game, then wraps it in ship-first module management, light astronaut consequences, and persistent roguelite unlock variety.
 
 ## What is implemented
 
 - Portable C++ core for content, deterministic RNG, launch resolution, run state, save serialization, and balance tests.
-- Native SDL 3 application with OpenGL 3.3 Core rendering, RmlUi, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
+- Native SDL 3 application with direct Vulkan 1.3 rendering, a Vulkan RmlUi host, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
 - Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
 - Frontier ladder: prove Earth Orbit repeatedly, commit to Moon, then continue outward through Mars, Outer Planets, Nearby Star, and Nearby Galaxy.
@@ -19,16 +19,20 @@ Rocket Rogue is a C++20/OpenGL rocket-launch roguelite with genuine native Windo
 
 ## Quick prerequisites
 
-The project is cross-platform by design. Portable game rules live in `rocket_core`; shared application, UI, and OpenGL behavior live in `rocket_app`; SDL and Emscripten provide separate platform adapters.
+The project is cross-platform by design. Portable game rules live in `rocket_core`; shared application, UI, and backend-neutral scene composition live in `rocket_app`; SDL/Vulkan and Emscripten/WebGL2 provide separate native and browser backends.
 
 You need:
 
 - CMake 3.22+
 - Ninja
 - A C++20 compiler for native builds and tests
-- An OpenGL 3.3-capable Windows or Linux system for the playable native application
+- A 64-bit Windows or Linux system with a Vulkan 1.3-capable GPU and current vendor driver for the playable native application
 - Emscripten SDK for the browser build
 - Node.js 22-24 for repo scripts, platform-boundary tests, and the included static server (CI uses Node.js 24)
+
+Native builds fetch pinned Vulkan-Headers, Volk, and Vulkan Memory Allocator sources through CMake, so a Vulkan SDK is not needed for an ordinary build. Shader authors additionally need `glslc` and `spirv-val` from a Vulkan SDK (or distro packages) to regenerate and validate the committed SPIR-V.
+
+Steamworks is optional. A Steam packaging build can configure `ROCKET_STEAMWORKS_SDK_ROOT` to initialize Steam before Vulkan and use `ISteamUtils::IsSteamRunningOnSteamDeck()` for the Deck default frame limit. Ordinary desktop and CI builds compile a no-SDK service and gain no Steam runtime dependency.
 
 ## Install dependencies
 
@@ -48,7 +52,7 @@ chmod +x scripts/install-ubuntu.sh scripts/env-ubuntu.sh
 source scripts/env-ubuntu.sh
 ```
 
-Both installers keep project-local development state in ignored folders. SDL 3.4.10, FreeType 2.13.3, and the pinned RmlUi revision are built from a local source override when present or fetched reproducibly by CMake:
+Both installers keep project-local development state in ignored folders. SDL 3.4.10, FreeType 2.13.3, and the pinned RmlUi revision use a local source override when available or are fetched reproducibly by CMake. Vulkan-Headers, Volk, and Vulkan Memory Allocator are fetched at exact commits for native builds:
 
 - `.deps/emsdk` for the Emscripten SDK
 - `.deps/SDL`, `.deps/freetype`, and `.deps/RmlUi` as optional local source overrides
@@ -99,6 +103,21 @@ npm.cmd run package:native
 ```
 
 The executable is written to `build/native-release/bin/RocketRogue.exe`; the portable archive is `build/packages/RocketRogue-windows-x64.zip`. The same commands without the `.cmd` suffix produce `build/native-release/bin/RocketRogue` and `build/packages/RocketRogue-linux-x64.tar.gz` on Linux. Each archive contains the executable, `assets`, and `licenses` as ordinary files. See [Desktop Builds](docs/DESKTOP_BUILDS.md) for runtime behavior, save paths, package layout, and CI validation.
+
+The portable archive includes the generated Vulkan SPIR-V and licenses for Vulkan-Headers, Volk, and Vulkan Memory Allocator. It deliberately does not include a Vulkan loader; Windows GPU drivers and the Linux/Steam Runtime supply it.
+
+### Regenerate Vulkan shaders
+
+Vulkan GLSL 450 sources and their generated SPIR-V live together under `assets/shaders`. After changing a native shader, run:
+
+```powershell
+npm.cmd run shaders:vulkan
+npm.cmd run check:shaders:vulkan
+```
+
+The check recompiles for Vulkan 1.3, validates each module with `spirv-val` when available, and byte-compares the result with the packaged files. Runtime shader compilation is not part of the native application.
+
+The save-isolated native benchmark CLI, three-run matrix, JSON metrics, and acceptance thresholds are documented in [Native performance benchmarks](docs/PERFORMANCE_BENCHMARKS.md).
 
 ### Codex desktop sandbox note
 
@@ -190,7 +209,7 @@ node tools/serve.mjs build/web-release 8080
 
 WSL is a good development target for this project. For better build performance, keep the repo under the Linux filesystem, such as `~/src/RocketGame`, instead of building from `/mnt/c` or OneDrive.
 
-Install the native and web prerequisites with `scripts/install-ubuntu.sh`. Its native package set includes the compiler, CMake/Ninja, Mesa OpenGL headers, and SDL's X11/Wayland development headers. The minimal core toolchain is:
+Install the native and web prerequisites with `scripts/install-ubuntu.sh`. Its native package set includes the compiler, CMake/Ninja, Mesa Vulkan drivers, Vulkan validation and shader tools, and SDL's X11/Wayland development headers. The minimal core toolchain is:
 
 ```bash
 sudo apt update
@@ -259,13 +278,13 @@ The workflow expects a GitHub Actions secret named `AZURE_STATIC_WEB_APPS_API_TO
 
 ## Portability notes
 
-Native and web builds use the same game and presentation code through injected platform services. Emscripten/browser symbols are confined to `src/platform/web`; SDL owns native windowing, OpenGL context creation, events, gamepads, haptics, fullscreen, and shutdown. Steam services can be added behind these boundaries later without adding Steamworks or Steam Input to the current build, and a future Vulkan renderer can replace the OpenGL backend without changing gameplay.
+Native and web builds use the same game state and backend-neutral scene composition through injected platform services. Emscripten/browser symbols are confined to `src/platform/web`; SDL owns native windowing, Vulkan surface creation, events, gamepads, haptics, fullscreen, and shutdown. Steam services can be added behind these boundaries without adding Steamworks or Steam Input to the current build.
 
 Current boundaries:
 
 - `src/core`: deterministic content, progression, save data, flight tuning, launch resolution, and tests.
 - `src/game`: platform-neutral application orchestration, shared fixed-step runner, live launch/mining controls, RmlUi behavior, panel HTML generation, and render snapshots.
-- `src/render`: shared OpenGL draw code with desktop GLSL 330 Core and WebGL2 GLSL ES 300 dialects.
+- `src/render`: `SceneComposer` and immutable `ScenePacket` data shared by the direct Vulkan 1.3 native backend and the WebGL2 browser backend, plus backend-specific RmlUi render hosts.
 - `src/platform/AppServices.h`: injected save, preference, host, controller, texture, renderer, UI, and browser-mirror contracts.
 - `src/platform/sdl`: native SDL window/input/host, PNG texture loading, and atomic filesystem storage.
 - `src/platform/web`: Emscripten entry point, browser storage, DOM mirror, async browser textures, and web gamepads.

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -17,6 +18,7 @@ EM_JS(char*, rr_web_string_preference, (int field), {
     try {
         if (field === 0) value = localStorage.getItem("rocket_rogue_resolution") || "auto";
         else if (field === 1) value = localStorage.getItem("rocket_rogue_help_dismissed_v1") || "[]";
+        else if (field === 2) value = localStorage.getItem("rocket_rogue_frame_limit_mode") || "platform_default";
     } catch (error) {}
     const length = lengthBytesUTF8(value) + 1;
     const result = _malloc(length);
@@ -60,6 +62,7 @@ EM_JS(void, rr_web_install_preference_revision_observer, (), {
     };
     const changeSelector = [
         "[data-resolution-select]",
+        "[data-frame-limit-select]",
         "[data-game-speed-select]",
         "[data-controller-prompt-select]",
         "[data-controller-deadzone-select]",
@@ -107,14 +110,17 @@ EM_JS(void, rr_web_bump_preference_revision, (), {
 });
 
 EM_JS(int, rr_web_store_preferences,
-    (const char* resolutionPtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
+    (const char* resolutionPtr, const char* frameLimitPtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
         try {
             const resolution = UTF8ToString(resolutionPtr || 0) || "auto";
+            const frameLimit = UTF8ToString(frameLimitPtr || 0) || "platform_default";
             const dismissed = UTF8ToString(dismissedPtr || 0) || "[]";
             if (resolution === "auto") localStorage.removeItem("rocket_rogue_resolution");
             else localStorage.setItem("rocket_rogue_resolution", resolution);
             if (Number(gameSpeed) === 1) localStorage.removeItem("rocket_rogue_game_speed");
             else localStorage.setItem("rocket_rogue_game_speed", String(gameSpeed));
+            if (frameLimit === "platform_default") localStorage.removeItem("rocket_rogue_frame_limit_mode");
+            else localStorage.setItem("rocket_rogue_frame_limit_mode", frameLimit);
             const setFlag = (key, enabled) => enabled ? localStorage.setItem(key, "1") : localStorage.removeItem(key);
             setFlag("rocket_rogue_debug_tools", debugTools !== 0);
             setFlag("rocket_rogue_performance_stats", performanceStats !== 0);
@@ -217,19 +223,34 @@ EM_JS(int, rr_web_image_status, (const char* keyPtr), {
     return record && record.failed ? -1 : (record && record.ready ? 1 : 0);
 });
 
-EM_JS(int, rr_web_upload_image, (const char* keyPtr, int textureId, int* dimensions), {
+EM_JS(int, rr_web_image_dimensions, (const char* keyPtr, int* dimensions), {
     const record = Module.RocketArt && Module.RocketArt[UTF8ToString(keyPtr)];
-    if (!record || !record.ready || !GLctx || !GL || !GL.textures[textureId]) return 0;
-    GLctx.bindTexture(GLctx.TEXTURE_2D, GL.textures[textureId]);
-    GLctx.pixelStorei(GLctx.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_WRAP_S, GLctx.CLAMP_TO_EDGE);
-    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_WRAP_T, GLctx.CLAMP_TO_EDGE);
-    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MIN_FILTER, GLctx.NEAREST);
-    GLctx.texParameteri(GLctx.TEXTURE_2D, GLctx.TEXTURE_MAG_FILTER, GLctx.NEAREST);
-    GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA, GLctx.RGBA, GLctx.UNSIGNED_BYTE, record.image);
+    if (!record || !record.ready || record.width <= 0 || record.height <= 0) return 0;
     HEAP32[dimensions >> 2] = record.width;
     HEAP32[(dimensions + 4) >> 2] = record.height;
     return 1;
+});
+
+EM_JS(int, rr_web_decode_image_rgba, (const char* keyPtr, unsigned char* destination, int capacity), {
+    const record = Module.RocketArt && Module.RocketArt[UTF8ToString(keyPtr)];
+    if (!record || !record.ready || record.width <= 0 || record.height <= 0) return 0;
+    const required = record.width * record.height * 4;
+    if (!destination || capacity < required) return 0;
+    try {
+        const canvas = document.createElement("canvas");
+        canvas.width = record.width;
+        canvas.height = record.height;
+        const context = canvas.getContext("2d", {alpha: true, willReadFrequently: true});
+        if (!context) return 0;
+        context.clearRect(0, 0, record.width, record.height);
+        context.drawImage(record.image, 0, 0);
+        const pixels = context.getImageData(0, 0, record.width, record.height).data;
+        HEAPU8.set(pixels, destination);
+        return 1;
+    } catch (error) {
+        console.warn("OREBIT image decode failed", error);
+        return 0;
+    }
 });
 
 EM_JS(void, rr_web_set_panel, (const char* valuePtr), {
@@ -291,6 +312,27 @@ std::string takeJsString(char* value)
     const std::string result = value ? value : "";
     std::free(value);
     return result;
+}
+
+FrameLimitMode parseFrameLimitMode(std::string_view value)
+{
+    if (value == "smooth60") return FrameLimitMode::Smooth60;
+    if (value == "balanced") return FrameLimitMode::Balanced;
+    if (value == "battery30") return FrameLimitMode::Battery30;
+    if (value == "display") return FrameLimitMode::Display;
+    return FrameLimitMode::PlatformDefault;
+}
+
+const char* frameLimitModeName(FrameLimitMode mode)
+{
+    switch (mode) {
+    case FrameLimitMode::Smooth60: return "smooth60";
+    case FrameLimitMode::Balanced: return "balanced";
+    case FrameLimitMode::Battery30: return "battery30";
+    case FrameLimitMode::Display: return "display";
+    case FrameLimitMode::PlatformDefault:
+    default: return "platform_default";
+    }
 }
 
 std::vector<std::string> parseSimpleJsonStrings(const std::string& json)
@@ -386,6 +428,7 @@ AppPreferences WebPreferenceStore::load()
     AppPreferences preferences;
     preferences.controller = loadWebControllerPreferences();
     preferences.resolutionPreset = takeJsString(rr_web_string_preference(0));
+    preferences.frameLimitMode = parseFrameLimitMode(takeJsString(rr_web_string_preference(2)));
     preferences.gameSpeed = rr_web_number_preference(0);
     preferences.debugToolsEnabled = rr_web_bool_preference(0) != 0;
     preferences.performanceStatsEnabled = rr_web_bool_preference(4) != 0;
@@ -407,7 +450,7 @@ bool WebPreferenceStore::store(const AppPreferences& preferences)
     rr_web_bump_preference_revision();
     loaded_ = false;
     const std::string dismissed = encodeSimpleJsonStrings(preferences.dismissedHelpTopics);
-    if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), preferences.gameSpeed,
+    if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), frameLimitModeName(preferences.frameLimitMode), preferences.gameSpeed,
             preferences.debugToolsEnabled, preferences.performanceStatsEnabled, preferences.helpDisabled,
             preferences.cameraShakeDisabled, dismissed.c_str()) != 0) {
         // Reload lazily so normalization performed by the JS storage boundary
@@ -465,8 +508,6 @@ void WebPlatformHost::log(PlatformLogLevel level, std::string_view message)
     emscripten_log(level == PlatformLogLevel::Error ? EM_LOG_ERROR : (level == PlatformLogLevel::Warning ? EM_LOG_WARN : EM_LOG_CONSOLE), "%s", copy.c_str());
 }
 bool WebPlatformHost::haptic(double duration, double weak, double strong) { return gamepads_.playHaptic(duration, weak, strong); }
-void WebPlatformHost::present() {}
-OpenGlDialect WebPlatformHost::openGlDialect() const { return OpenGlDialect::WebGl2; }
 
 void WebTextureSource::request(std::string_view key, std::string_view path)
 {
@@ -478,12 +519,44 @@ TextureStatus WebTextureSource::status(std::string_view key) const
     if (status < 0) { lastError_ = "Required web asset failed to load: " + copy; return TextureStatus::Failed; }
     return status > 0 ? TextureStatus::Ready : TextureStatus::Pending;
 }
-bool WebTextureSource::uploadToOpenGl(std::string_view key, unsigned int texture, int& width, int& height)
+std::optional<DecodedImageView> WebTextureSource::decodedImage(std::string_view key) const
 {
-    int dimensions[2] = {}; const std::string copy(key);
-    if (rr_web_upload_image(copy.c_str(), static_cast<int>(texture), dimensions) == 0) return false;
-    width = dimensions[0]; height = dimensions[1]; return true;
+    const std::string copy(key);
+    if (const auto found = decodedImages_.find(copy); found != decodedImages_.end()) {
+        return DecodedImageView {found->second.width, found->second.height, found->second.rgba};
+    }
+    if (status(key) != TextureStatus::Ready) {
+        return std::nullopt;
+    }
+
+    int dimensions[2] = {};
+    if (rr_web_image_dimensions(copy.c_str(), dimensions) == 0
+        || dimensions[0] <= 0 || dimensions[1] <= 0) {
+        lastError_ = "Required web asset has invalid dimensions: " + copy;
+        return std::nullopt;
+    }
+
+    const std::size_t byteCount = static_cast<std::size_t>(dimensions[0])
+        * static_cast<std::size_t>(dimensions[1]) * 4U;
+    if (byteCount > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        lastError_ = "Required web asset is too large to decode: " + copy;
+        return std::nullopt;
+    }
+
+    DecodedImage image;
+    image.width = dimensions[0];
+    image.height = dimensions[1];
+    image.rgba.resize(byteCount);
+    if (rr_web_decode_image_rgba(copy.c_str(), image.rgba.data(), static_cast<int>(byteCount)) == 0) {
+        lastError_ = "Required web asset could not be decoded to RGBA: " + copy;
+        return std::nullopt;
+    }
+
+    auto [found, inserted] = decodedImages_.emplace(copy, std::move(image));
+    (void)inserted;
+    return DecodedImageView {found->second.width, found->second.height, found->second.rgba};
 }
+void WebTextureSource::releaseDecodedImage(std::string_view key) { decodedImages_.erase(std::string(key)); }
 std::string WebTextureSource::lastError() const { return lastError_; }
 
 void WebUiBridge::setPanelHtml(std::string_view html) { const std::string copy(html); rr_web_set_panel(copy.c_str()); }

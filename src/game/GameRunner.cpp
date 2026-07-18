@@ -2,9 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <utility>
-#include <vector>
 
 namespace rocket {
 namespace {
@@ -22,6 +20,7 @@ bool sameAppPreferences(const AppPreferences& lhs, const AppPreferences& rhs)
 {
     return sameControllerPreferences(lhs.controller, rhs.controller)
         && lhs.resolutionPreset == rhs.resolutionPreset
+        && lhs.frameLimitMode == rhs.frameLimitMode
         && lhs.gameSpeed == rhs.gameSpeed
         && lhs.debugToolsEnabled == rhs.debugToolsEnabled
         && lhs.performanceStatsEnabled == rhs.performanceStatsEnabled
@@ -60,13 +59,25 @@ bool GameRunner::initialize()
 
 void GameRunner::frame()
 {
+    frameWithDelta(std::nullopt);
+}
+
+void GameRunner::frameForBenchmark(double fixedDeltaSeconds)
+{
+    if (!std::isfinite(fixedDeltaSeconds) || fixedDeltaSeconds < 0.0) return;
+    frameWithDelta(std::clamp(fixedDeltaSeconds, 0.0, 0.25));
+}
+
+void GameRunner::frameWithDelta(std::optional<double> fixedDeltaSeconds)
+{
     if (!initialized_) {
         return;
     }
 
     const double frameStarted = services_.host.monotonicSeconds();
     const double now = frameStarted;
-    const double delta = lastFrameSeconds_ <= 0.0 ? 1.0 / 60.0 : now - lastFrameSeconds_;
+    const double measuredDelta = lastFrameSeconds_ <= 0.0 ? 1.0 / 60.0 : now - lastFrameSeconds_;
+    const double delta = fixedDeltaSeconds.value_or(measuredDelta);
     lastFrameSeconds_ = now;
 
     refreshPreferences(false);
@@ -99,28 +110,27 @@ void GameRunner::frame()
     const double sceneFinished = performanceEnabled ? services_.host.monotonicSeconds() : simulationFinished;
     app_.renderUi();
     const double uiFinished = performanceEnabled ? services_.host.monotonicSeconds() : sceneFinished;
-    services_.host.present();
+    services_.renderer.endFrameAndPresent();
     const double presentFinished = performanceEnabled ? services_.host.monotonicSeconds() : uiFinished;
     services_.host.paceFrame();
 
     if (performanceEnabled) {
         const double cpuMilliseconds = std::max(0.0, uiFinished - frameStarted) * 1000.0;
-        recordPerformanceSample(delta, cpuMilliseconds);
+        performanceSamples_.record({delta * 1000.0, cpuMilliseconds});
         if (performanceVisibilityChanged || presentFinished - lastPerformancePublishSeconds_ >= 0.25) {
-            const SampleSummary frameSummary = summarizeSamples(performanceFrameSamples_);
-            const SampleSummary cpuSummary = summarizeSamples(performanceCpuSamples_);
+            const performance::FrameTimingSummary summary = performanceSamples_.summarize();
             PerformanceStats stats;
             stats.startupMilliseconds = startupMilliseconds_;
-            stats.framesPerSecond = frameSummary.average > 0.0 ? 1000.0 / frameSummary.average : 0.0;
+            stats.framesPerSecond = summary.frame.average > 0.0 ? 1000.0 / summary.frame.average : 0.0;
             stats.latestFrameTimeMilliseconds = std::max(0.0, std::min(delta, 1.0)) * 1000.0;
-            stats.frameTimeMilliseconds = frameSummary.average;
-            stats.medianFrameTimeMilliseconds = frameSummary.median;
-            stats.p95FrameTimeMilliseconds = frameSummary.p95;
-            stats.p99FrameTimeMilliseconds = frameSummary.p99;
+            stats.frameTimeMilliseconds = summary.frame.average;
+            stats.medianFrameTimeMilliseconds = summary.frame.median;
+            stats.p95FrameTimeMilliseconds = summary.frame.p95;
+            stats.p99FrameTimeMilliseconds = summary.frame.p99;
             stats.cpuFrameMilliseconds = cpuMilliseconds;
-            stats.medianCpuFrameMilliseconds = cpuSummary.median;
-            stats.p95CpuFrameMilliseconds = cpuSummary.p95;
-            stats.p99CpuFrameMilliseconds = cpuSummary.p99;
+            stats.medianCpuFrameMilliseconds = summary.cpu.median;
+            stats.p95CpuFrameMilliseconds = summary.cpu.p95;
+            stats.p99CpuFrameMilliseconds = summary.cpu.p99;
             stats.inputMilliseconds = std::max(0.0, inputFinished - frameStarted) * 1000.0;
             stats.simulationMilliseconds = std::max(0.0, simulationFinished - inputFinished) * 1000.0;
             stats.sceneRenderMilliseconds = std::max(0.0, sceneFinished - simulationFinished) * 1000.0;
@@ -134,7 +144,13 @@ void GameRunner::frame()
             stats.ui = services_.ui.diagnostics();
             stats.platform = services_.host.diagnostics();
             services_.ui.setPerformanceStats(stats, true);
-            lastPerformancePublishSeconds_ = presentFinished;
+            // Publication occurs after this frame's sample. Its immediate work
+            // contaminates the next start-to-start interval; deferred RmlUi work
+            // contaminates the following render's CPU time and the interval after
+            // it. Quarantine those metrics independently so the ordinary CPU work
+            // in that latter frame remains represented.
+            performanceSamples_.quarantineOverlayPublication();
+            lastPerformancePublishSeconds_ = services_.host.monotonicSeconds();
         }
     } else if (performanceVisibilityChanged) {
         services_.ui.setPerformanceStats({}, false);
@@ -233,48 +249,8 @@ void GameRunner::dispatchPendingHaptic()
 
 void GameRunner::resetPerformanceSamples()
 {
-    performanceFrameSamples_.fill(0.0);
-    performanceCpuSamples_.fill(0.0);
-    performanceSampleCount_ = 0;
-    performanceSampleCursor_ = 0;
+    performanceSamples_.reset();
     lastPerformancePublishSeconds_ = 0.0;
-}
-
-void GameRunner::recordPerformanceSample(double deltaSeconds, double cpuMilliseconds)
-{
-    if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0 || deltaSeconds > 1.0
-        || !std::isfinite(cpuMilliseconds) || cpuMilliseconds < 0.0) {
-        return;
-    }
-    performanceFrameSamples_[performanceSampleCursor_] = deltaSeconds * 1000.0;
-    performanceCpuSamples_[performanceSampleCursor_] = cpuMilliseconds;
-    performanceSampleCursor_ = (performanceSampleCursor_ + 1) % performanceSampleCapacity_;
-    performanceSampleCount_ = std::min(performanceSampleCount_ + 1, performanceSampleCapacity_);
-}
-
-GameRunner::SampleSummary GameRunner::summarizeSamples(
-    const std::array<double, performanceSampleCapacity_>& samples) const
-{
-    SampleSummary result;
-    if (performanceSampleCount_ == 0) {
-        return result;
-    }
-    std::vector<double> sorted(
-        samples.begin(),
-        samples.begin() + static_cast<std::ptrdiff_t>(performanceSampleCount_));
-    result.average = std::accumulate(sorted.begin(), sorted.end(), 0.0) /
-        static_cast<double>(sorted.size());
-    std::sort(sorted.begin(), sorted.end());
-    const auto percentile = [&sorted](double quantile) {
-        const std::size_t index = std::min(
-            sorted.size() - 1,
-            static_cast<std::size_t>(std::ceil(static_cast<double>(sorted.size()) * quantile)) - 1);
-        return sorted[index];
-    };
-    result.median = percentile(0.50);
-    result.p95 = percentile(0.95);
-    result.p99 = percentile(0.99);
-    return result;
 }
 
 } // namespace rocket

@@ -112,7 +112,8 @@ if [[ "$skip_system_packages" -eq 0 ]]; then
   )
   if [[ "$web_only" -eq 0 ]]; then
     packages+=(
-      pkg-config binutils libgl1-mesa-dev libx11-dev libxext-dev libxrandr-dev
+      pkg-config binutils mesa-vulkan-drivers vulkan-tools vulkan-validationlayers
+      glslc spirv-tools libx11-dev libxext-dev libxrandr-dev
       libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev
       libwayland-dev wayland-protocols libudev-dev libdbus-1-dev libdecor-0-dev
       xvfb xauth mesa-utils

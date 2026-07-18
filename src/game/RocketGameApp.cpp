@@ -385,7 +385,7 @@ bool RocketGameApp::initialize()
     loadSavedGameOrDefault(true);
 
     if (!services_.renderer.initialize()) {
-        state_.statusLine = "OpenGL renderer initialization failed.";
+        state_.statusLine = "Graphics renderer initialization failed.";
         services_.host.log(PlatformLogLevel::Error, state_.statusLine);
         return false;
     }
@@ -412,6 +412,20 @@ void RocketGameApp::shutdown()
 int RocketGameApp::currentScreen() const
 {
     return static_cast<int>(state_.screen);
+}
+
+std::uint64_t RocketGameApp::deterministicStateHash() const
+{
+    // Hash the same canonical payload used by the versioned save path. This
+    // keeps benchmark determinism checks aligned with authoritative gameplay
+    // state without adding renderer-only fields or changing the save format.
+    const std::string payload = serializeSaveData(captureSaveData(state_));
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char byte : payload) {
+        hash ^= static_cast<std::uint64_t>(byte);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
 }
 
 void RocketGameApp::setControllerPreferences(const ControllerPreferences& preferences)
@@ -2371,6 +2385,14 @@ void RocketGameApp::debugStartSurfacePush()
     panelDirty_ = true;
 }
 
+void RocketGameApp::debugShowTitle()
+{
+    debugSessionActive_ = false;
+    debugDroneLoadout_ = {};
+    loadSavedGameOrDefault(true);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugShowHangar()
 {
     beginDebugSandbox("Debug Hangar board. No save data will be written.");
@@ -2425,6 +2447,17 @@ void RocketGameApp::debugShowSurfaceUpgrade()
     generateSurfaceUpgradeOffers(state_, catalog_, rng_);
     state_.screen = Screen::SurfaceUpgrade;
     state_.statusLine = "Debug Surface Upgrade board. Inspect draft cards without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::debugShowSurfaceOps()
+{
+    beginDebugSandbox("Debug Surface Ops board. No materials, artifacts, or save data will be written.");
+    seedDebugResearchAccess(state_);
+    seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::mars);
+    state_.screen = Screen::SurfaceExpedition;
+    state_.statusLine = "Debug Surface Ops board. Inspect expedition choices without touching your save.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }

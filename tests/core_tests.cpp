@@ -6772,6 +6772,16 @@ void settingsResolutionSelectorExposesSupportedPresets()
         "settings should expose one resolution-control group");
     require(countOccurrences(html, "data-resolution-select") == 1,
         "settings should expose one resolution selector");
+    require(countOccurrences(html, "data-frame-limit-settings") == 1 &&
+            countOccurrences(html, "data-frame-limit-select") == 1 &&
+            html.find("data-ui-focus-id=\"setting:frame_limit\"") != std::string::npos,
+        "settings should expose one controller-focusable frame-limit selector");
+    require(html.find("<option value=\"platform_default\">Platform default</option>") != std::string::npos &&
+            html.find("<option value=\"smooth60\">Smooth (60 FPS)</option>") != std::string::npos &&
+            html.find("<option value=\"balanced\">Balanced (40 / 45 FPS)</option>") != std::string::npos &&
+            html.find("<option value=\"battery30\">Battery (30 FPS)</option>") != std::string::npos &&
+            html.find("<option value=\"display\">Display refresh</option>") != std::string::npos,
+        "frame-limit selector should expose every supported pacing mode");
     require(countOccurrences(html, "data-desktop-fullscreen-settings") == 1 &&
             countOccurrences(html, "data-desktop-fullscreen-toggle") == 1 &&
             html.find("data-ui-focus-id=\"setting:fullscreen\"") != std::string::npos,

@@ -1,0 +1,1658 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": 1,
+  "maxPageSize": 4096,
+  "packingPageSize": 3776,
+  "padding": 2,
+  "pageCount": 2,
+  "textureCount": 33,
+  "frameCount": 53,
+  "pages": [
+    {
+      "index": 0,
+      "key": "scene_atlas_0",
+      "path": "assets/scene-atlas/scene-atlas-0.png",
+      "width": 3774,
+      "height": 3774,
+      "pixelSha256": "33c49604a96376ed745c373dbb256d0bbcadc4e8063c6ac93c9b54cc482873d4"
+    },
+    {
+      "index": 1,
+      "key": "scene_atlas_1",
+      "path": "assets/scene-atlas/scene-atlas-1.png",
+      "width": 3744,
+      "height": 3668,
+      "pixelSha256": "4538c32e3b47b5a0edfb6208f4f2ef46b9028fecf1bb4a3eda678fae52ada4c6"
+    }
+  ],
+  "textures": [
+    {
+      "textureId": "Earth",
+      "key": "earth",
+      "source": "assets/art/earth.png",
+      "sourceSha256": "3fadfdfbbc49b86459b46a8db2189e6ab05f82cc5a59c5e443484cb2220313a8",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2638,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 2636,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Moon",
+      "key": "moon",
+      "source": "assets/art/moon.png",
+      "sourceSha256": "13ccc4b244b57c98e9f9249e19fef40fb0b68c4a45973923213d3b03ee5b6bd7",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2066,
+            "y": 2574,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2064,
+            "y": 2572,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Mars",
+      "key": "mars",
+      "source": "assets/art/mars.png",
+      "sourceSha256": "31fdbe9da77093141c84d686edcb5a8f433b3b09f3d4561bbc6389718b95a9cb",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 518,
+            "y": 2638,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 516,
+            "y": 2636,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "RocketClosed",
+      "key": "rocket_bay_closed",
+      "source": "assets/art/rocket-bay-closed.png",
+      "sourceSha256": "5734f62522c3d8016e8850ef62c2a249684888a1fbf558666fe1271b11f2ec5e",
+      "width": 1024,
+      "height": 1024,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1024,
+      "frameHeight": 1024,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1024,
+            "height": 1024
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 2,
+            "width": 1024,
+            "height": 1024
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 0,
+            "width": 1028,
+            "height": 1028
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Explosion",
+      "key": "explosion",
+      "source": "assets/art/explosion-sheet.png",
+      "sourceSha256": "cfad228dae0f24114d0e08573abbf61facade92a4b28e545753b414dd229cf3d",
+      "width": 1024,
+      "height": 128,
+      "columns": 8,
+      "rows": 1,
+      "frameWidth": 128,
+      "frameHeight": 128,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 2,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 0,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 1,
+          "page": 1,
+          "sourceRect": {
+            "x": 128,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 134,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 132,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 2,
+          "page": 1,
+          "sourceRect": {
+            "x": 256,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 266,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 264,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 3,
+          "page": 1,
+          "sourceRect": {
+            "x": 384,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 398,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 396,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 4,
+          "page": 1,
+          "sourceRect": {
+            "x": 512,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 530,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 528,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 5,
+          "page": 1,
+          "sourceRect": {
+            "x": 640,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 662,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 660,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 6,
+          "page": 1,
+          "sourceRect": {
+            "x": 768,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 794,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 792,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 7,
+          "page": 1,
+          "sourceRect": {
+            "x": 896,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 926,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 924,
+            "width": 132,
+            "height": 132
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Thrust",
+      "key": "thrust",
+      "source": "assets/art/thrust-sheet.png",
+      "sourceSha256": "3feb914be5a62fa091f4930b19dfec0f7d0552a00602301a10fc6abe4f677c51",
+      "width": 768,
+      "height": 128,
+      "columns": 6,
+      "rows": 1,
+      "frameWidth": 128,
+      "frameHeight": 128,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1058,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1056,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 1,
+          "page": 1,
+          "sourceRect": {
+            "x": 128,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1190,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1188,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 2,
+          "page": 1,
+          "sourceRect": {
+            "x": 256,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1322,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1320,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 3,
+          "page": 1,
+          "sourceRect": {
+            "x": 384,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1454,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1452,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 4,
+          "page": 1,
+          "sourceRect": {
+            "x": 512,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1586,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1584,
+            "width": 132,
+            "height": 132
+          }
+        },
+        {
+          "index": 5,
+          "page": 1,
+          "sourceRect": {
+            "x": 640,
+            "y": 0,
+            "width": 128,
+            "height": 128
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1718,
+            "width": 128,
+            "height": 128
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1716,
+            "width": 132,
+            "height": 132
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiningDrone",
+      "key": "mining_drone",
+      "source": "assets/art/mining-drone.png",
+      "sourceSha256": "0cf9ed1473196ef05d70c754b234d3a76306f2adf0b7856af60935da1c022587",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 3098,
+            "y": 2058,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 3096,
+            "y": 2056,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "DrillBit",
+      "key": "drill_bit",
+      "source": "assets/art/drill-bit-sheet.png",
+      "sourceSha256": "a522764515261fa0048562a7fb9b7fc331064ad2fcb9a8e5131146fb0e4644df",
+      "width": 672,
+      "height": 112,
+      "columns": 6,
+      "rows": 1,
+      "frameWidth": 112,
+      "frameHeight": 112,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1850,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1848,
+            "width": 116,
+            "height": 116
+          }
+        },
+        {
+          "index": 1,
+          "page": 1,
+          "sourceRect": {
+            "x": 112,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 1966,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 1964,
+            "width": 116,
+            "height": 116
+          }
+        },
+        {
+          "index": 2,
+          "page": 1,
+          "sourceRect": {
+            "x": 224,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 2082,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 2080,
+            "width": 116,
+            "height": 116
+          }
+        },
+        {
+          "index": 3,
+          "page": 1,
+          "sourceRect": {
+            "x": 336,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 2198,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 2196,
+            "width": 116,
+            "height": 116
+          }
+        },
+        {
+          "index": 4,
+          "page": 1,
+          "sourceRect": {
+            "x": 448,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 2314,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 2312,
+            "width": 116,
+            "height": 116
+          }
+        },
+        {
+          "index": 5,
+          "page": 1,
+          "sourceRect": {
+            "x": 560,
+            "y": 0,
+            "width": 112,
+            "height": 112
+          },
+          "atlasRect": {
+            "x": 3614,
+            "y": 2430,
+            "width": 112,
+            "height": 112
+          },
+          "paddedRect": {
+            "x": 3612,
+            "y": 2428,
+            "width": 116,
+            "height": 116
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "LocalSolarBackground",
+      "key": "local_solar_bg",
+      "source": "assets/art/local-solar-bg-sheet.png",
+      "sourceSha256": "66478f08e7bcc3f8c6beca15b19a9f47da5b4f67773e0de49332baabe045ddbe",
+      "width": 4096,
+      "height": 576,
+      "columns": 4,
+      "rows": 1,
+      "frameWidth": 1024,
+      "frameHeight": 576,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1024,
+            "height": 576
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2058,
+            "width": 1024,
+            "height": 576
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 2056,
+            "width": 1028,
+            "height": 580
+          }
+        },
+        {
+          "index": 1,
+          "page": 1,
+          "sourceRect": {
+            "x": 1024,
+            "y": 0,
+            "width": 1024,
+            "height": 576
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 1260,
+            "width": 1024,
+            "height": 576
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 1258,
+            "width": 1028,
+            "height": 580
+          }
+        },
+        {
+          "index": 2,
+          "page": 1,
+          "sourceRect": {
+            "x": 2048,
+            "y": 0,
+            "width": 1024,
+            "height": 576
+          },
+          "atlasRect": {
+            "x": 1030,
+            "y": 1260,
+            "width": 1024,
+            "height": 576
+          },
+          "paddedRect": {
+            "x": 1028,
+            "y": 1258,
+            "width": 1028,
+            "height": 580
+          }
+        },
+        {
+          "index": 3,
+          "page": 1,
+          "sourceRect": {
+            "x": 3072,
+            "y": 0,
+            "width": 1024,
+            "height": 576
+          },
+          "atlasRect": {
+            "x": 1030,
+            "y": 1840,
+            "width": 1024,
+            "height": 576
+          },
+          "paddedRect": {
+            "x": 1028,
+            "y": 1838,
+            "width": 1028,
+            "height": 580
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Mercury",
+      "key": "mercury",
+      "source": "assets/art/mercury.png",
+      "sourceSha256": "d026077f2b9bced6c1343ee9488215b6d75b23d060880e6a4e6bfbf756c5c805",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 518,
+            "y": 3154,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 516,
+            "y": 3152,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Venus",
+      "key": "venus",
+      "source": "assets/art/venus.png",
+      "sourceSha256": "57781caa62e0778f34b005b04d7847caa6b8d3913b5786af1a171ab5512540a1",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2582,
+            "y": 3090,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2580,
+            "y": 3088,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Jupiter",
+      "key": "jupiter",
+      "source": "assets/art/jupiter.png",
+      "sourceSha256": "1bf88a8a2d488f839c31e861ae547332a0a80deb513ad7b23cc1d880276e9208",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 3154,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 3152,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Saturn",
+      "key": "saturn",
+      "source": "assets/art/saturn.png",
+      "sourceSha256": "b0c0de2e9f5d2fadcf0c3ccab0ea0b58023e7865911edc62cf718f74efe6d29d",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2582,
+            "y": 2574,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2580,
+            "y": 2572,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Uranus",
+      "key": "uranus",
+      "source": "assets/art/uranus.png",
+      "sourceSha256": "d4feb19a8bf54aa13a18b4212b5bd6a3cf96a1a280b72cbd58f56151b142f234",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 3098,
+            "y": 2574,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 3096,
+            "y": 2572,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Neptune",
+      "key": "neptune",
+      "source": "assets/art/neptune.png",
+      "sourceSha256": "90eb79b0bbe551728edab97cb85b8c4e404e480fa494ab1374f7166ddac1eee2",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2066,
+            "y": 3090,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2064,
+            "y": 3088,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "ArkOperational",
+      "key": "straylight_ark_operational",
+      "source": "assets/art/straylight-ark-operational.png",
+      "sourceSha256": "7cc29b8eeacac893e688c7a9ad2484973ffef090ef93c51bf43c80307728e843",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 1260,
+            "y": 2,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 1258,
+            "y": 0,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "ArkDamaged",
+      "key": "straylight_ark_damaged",
+      "source": "assets/art/straylight-ark-damaged.png",
+      "sourceSha256": "c2a35be8f679189de97f65a48bffc2bbc0125229d70fcc9889e1452c426fdee5",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet01",
+      "key": "outer_planet_01",
+      "source": "assets/art/outer-system-planet-01.png",
+      "sourceSha256": "bcbbd4d150b31f6899fa51cd6a733794030fb9637ae263036936e194911d6b73",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet02",
+      "key": "outer_planet_02",
+      "source": "assets/art/outer-system-planet-02.png",
+      "sourceSha256": "feb5949c8557fb975f505e073c110f078970fbbab3615fd1e87cdf355961c421",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 1260,
+            "y": 2,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 1258,
+            "y": 0,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet03",
+      "key": "outer_planet_03",
+      "source": "assets/art/outer-system-planet-03.png",
+      "sourceSha256": "92d78f045e86b64319ee57005861bf5fd5ee1eaeddd8d484c2d119ec42e593b0",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 2,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 0,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet04",
+      "key": "outer_planet_04",
+      "source": "assets/art/outer-system-planet-04.png",
+      "sourceSha256": "3d52d59dc8bb42c9422a663a44bd5a27739dab9bba8e29850558aa8a4db4a105",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 1260,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 1258,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet05",
+      "key": "outer_planet_05",
+      "source": "assets/art/outer-system-planet-05.png",
+      "sourceSha256": "4a948d85155e62174c79e9c80af06fd74e078464c0450cbc5a9764813ddc0bd5",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2518,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 2516,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet06",
+      "key": "outer_planet_06",
+      "source": "assets/art/outer-system-planet-06.png",
+      "sourceSha256": "99f6feaaf61cd9783db5bfbe523ab2d62670239ce67a4be44a438aacce5a1812",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 1260,
+            "y": 1260,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 1258,
+            "y": 1258,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet07",
+      "key": "outer_planet_07",
+      "source": "assets/art/outer-system-planet-07.png",
+      "sourceSha256": "2c08a0e52b045e4ba6153efd2402c613459602fc69181ba11eed05c6797ad284",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 1260,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 1258,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet08",
+      "key": "outer_planet_08",
+      "source": "assets/art/outer-system-planet-08.png",
+      "sourceSha256": "7d8cc81cf2f84b27b1280a10a0cedd6228625c0cff9441d1b43951b4b58e6bdd",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 1260,
+            "y": 2518,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 1258,
+            "y": 2516,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "OuterPlanet09",
+      "key": "outer_planet_09",
+      "source": "assets/art/outer-system-planet-09.png",
+      "sourceSha256": "fee6f48666fbf0385c5413fbd895ebbe09450d4071e44ae331e853a128e5fdbc",
+      "width": 1254,
+      "height": 1254,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1254,
+      "frameHeight": 1254,
+      "frames": [
+        {
+          "index": 0,
+          "page": 0,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1254,
+            "height": 1254
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 2518,
+            "width": 1254,
+            "height": 1254
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 2516,
+            "width": 1258,
+            "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "RocketOpen",
+      "key": "rocket_bay_open",
+      "source": "assets/art/rocket-bay-open.png",
+      "sourceSha256": "2facbbc5bf0932723da6555559c86d841b88bfca7df94f6c480122868ea2da68",
+      "width": 1024,
+      "height": 1024,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1024,
+      "frameHeight": 1024,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1024,
+            "height": 1024
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 1030,
+            "width": 1024,
+            "height": 1024
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 1028,
+            "width": 1028,
+            "height": 1028
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneMining",
+      "key": "mini_drone_mining",
+      "source": "assets/art/mini-drone-mining.png",
+      "sourceSha256": "2f0996b1f4837239fccf97783c9365f4be963f1eec089ddadf8d6642ecfd0932",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 1550,
+            "y": 2936,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 1548,
+            "y": 2934,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneResource",
+      "key": "mini_drone_resource",
+      "source": "assets/art/mini-drone-resource.png",
+      "sourceSha256": "44dcb6c059202f0e889e2957814f1e277b5e9efbcfb10ff90799d603bdb9f076",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2066,
+            "y": 2058,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2064,
+            "y": 2056,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneSurvey",
+      "key": "mini_drone_survey",
+      "source": "assets/art/mini-drone-survey.png",
+      "sourceSha256": "29ac38d0fc5cf07e190c4172d0fde07bdb0910772b2feb8d8a3e7688c30e591c",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2582,
+            "y": 2058,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2580,
+            "y": 2056,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneHazard",
+      "key": "mini_drone_hazard",
+      "source": "assets/art/mini-drone-hazard.png",
+      "sourceSha256": "f61eea5ce0f283f8ecb36cdcc7e79eba7fcc80ca1d3ee32895bf0eb79c81586c",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 1550,
+            "y": 2420,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 1548,
+            "y": 2418,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneAttack",
+      "key": "mini_drone_attack",
+      "source": "assets/art/mini-drone-attack.png",
+      "sourceSha256": "aa3f45c6a1ea14ba787304e08ee5d819372d409daba7c13822513558973cf624",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 1034,
+            "y": 2420,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 1032,
+            "y": 2418,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "MiniDroneDefense",
+      "key": "mini_drone_defense",
+      "source": "assets/art/mini-drone-defense.png",
+      "sourceSha256": "40b129369fe5007963664de4c802a400b5b6015f292c6a0ea2e86d98ac14f26d",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 1034,
+            "y": 2936,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 1032,
+            "y": 2934,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    }
+  ]
+}

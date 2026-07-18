@@ -1,6 +1,5 @@
 #include "platform/sdl/NativeTextureSource.h"
 
-#include "render/OpenGlApi.h"
 #include "lodepng.h"
 
 #include <chrono>
@@ -45,32 +44,24 @@ TextureStatus NativeTextureSource::status(std::string_view key) const
     return found == records_.end() ? TextureStatus::Pending : found->second.status;
 }
 
-bool NativeTextureSource::uploadToOpenGl(std::string_view key, unsigned int texture, int& width, int& height)
+std::optional<DecodedImageView> NativeTextureSource::decodedImage(std::string_view key) const
 {
-    auto found = records_.find(std::string(key));
-    if (found == records_.end() || found->second.status != TextureStatus::Ready) return false;
-    TextureRecord& record = found->second;
-    width = record.width;
-    height = record.height;
-    if (record.uploaded) return true;
-    if (record.rgba.empty()) return false;
+    const auto found = records_.find(std::string(key));
+    if (found == records_.end() || found->second.status != TextureStatus::Ready
+        || found->second.rgba.empty()) {
+        return std::nullopt;
+    }
+    const TextureRecord& record = found->second;
+    return DecodedImageView {record.width, record.height, record.rgba};
+}
 
-    const auto uploadStarted = std::chrono::steady_clock::now();
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, record.rgba.data());
-    diagnostics_.uploadMilliseconds += std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - uploadStarted).count();
-    diagnostics_.uploadedBytes += record.rgba.size();
-    ++diagnostics_.uploadedTextures;
-    record.rgba.clear();
-    record.rgba.shrink_to_fit();
-    record.uploaded = true;
-    return true;
+void NativeTextureSource::releaseDecodedImage(std::string_view key)
+{
+    const auto found = records_.find(std::string(key));
+    if (found == records_.end()) return;
+    found->second.rgba.clear();
+    found->second.rgba.shrink_to_fit();
+    found->second.uploaded = true;
 }
 
 std::string NativeTextureSource::lastError() const { return lastError_; }

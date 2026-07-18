@@ -134,7 +134,7 @@ Adapt carefully:
 
 Avoid for now:
 
-- Shipping Destructible2D-style mesh destruction in the shared C++ OpenGL/WebGL application.
+- Shipping Destructible2D-style free-form mesh destruction in the shared C++ Vulkan/WebGL2 application before the scene-packet and terrain-revision costs are measured.
 - Adding enemies to Mars just because the exploration prototype has enemies.
 - Turning research into a large tech tree before the basic arrival -> research -> expedition -> extraction loop feels good.
 - Creating story artifact details before we know what artifacts mean.

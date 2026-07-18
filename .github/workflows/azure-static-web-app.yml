@@ -26,6 +26,18 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
+      - name: Use Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify committed scene atlas
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python tools/build-scene-atlas.test.py
+          python tools/build-scene-atlas.py --check
+
       - name: Capture Node.js 24 path
         run: |
           echo "NODE24_BIN=$(dirname "$(command -v node)")" >> "$GITHUB_ENV"

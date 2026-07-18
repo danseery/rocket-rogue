@@ -7,11 +7,16 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 namespace {
 
 void nativeFrameLifecycleIsBoundedAndResetsOnResume()
 {
+    assert(!rocket::nativeEffectiveFocus(false, false));
+    assert(rocket::nativeEffectiveFocus(true, false));
+    assert(rocket::nativeEffectiveFocus(false, true));
+
     rocket::NativeFrameLifecycle lifecycle;
     assert(lifecycle.disposition() == rocket::NativeFrameDisposition::Active);
     assert(rocket::nativeFrameAcceptsRealtimeInput(lifecycle.disposition()));
@@ -113,6 +118,7 @@ int main()
     expected.controller.swapConfirmCancel = true;
     expected.controller.vibrationEnabled = false;
     expected.resolutionPreset = "2560x1440";
+    expected.frameLimitMode = rocket::FrameLimitMode::Balanced;
     expected.gameSpeed = 1.5;
     expected.debugToolsEnabled = true;
     expected.helpDisabled = true;
@@ -133,9 +139,36 @@ int main()
     assert(actual.controller.swapConfirmCancel);
     assert(!actual.controller.vibrationEnabled);
     assert(actual.resolutionPreset == expected.resolutionPreset);
+    assert(actual.frameLimitMode == expected.frameLimitMode);
     assert(actual.gameSpeed == expected.gameSpeed);
     assert(actual.debugToolsEnabled && actual.helpDisabled && actual.cameraShakeDisabled && actual.fullscreen);
     assert(actual.dismissedHelpTopics == expected.dismissedHelpTopics);
+
+    const rocket::FrameLimitMode frameLimitModes[] = {
+        rocket::FrameLimitMode::PlatformDefault,
+        rocket::FrameLimitMode::Smooth60,
+        rocket::FrameLimitMode::Balanced,
+        rocket::FrameLimitMode::Battery30,
+        rocket::FrameLimitMode::Display,
+    };
+    for (std::size_t index = 0; index < std::size(frameLimitModes); ++index) {
+        const std::filesystem::path modeRoot = root / ("frame-limit-" + std::to_string(index));
+        rocket::NativePreferenceStore modeStore(modeRoot);
+        rocket::AppPreferences modePreferences;
+        modePreferences.frameLimitMode = frameLimitModes[index];
+        assert(modeStore.store(modePreferences));
+        rocket::NativePreferenceStore modeReloaded(modeRoot);
+        assert(modeReloaded.load().frameLimitMode == frameLimitModes[index]);
+    }
+
+    const std::filesystem::path legacyRoot = root / "legacy-preferences";
+    std::filesystem::create_directories(legacyRoot);
+    {
+        std::ofstream legacyPreferences(legacyRoot / "preferences_v1.txt");
+        legacyPreferences << "render.resolution=1920x1080\n";
+    }
+    rocket::NativePreferenceStore legacyPreferences(legacyRoot);
+    assert(legacyPreferences.load().frameLimitMode == rocket::FrameLimitMode::PlatformDefault);
 
     rocket::NativeTextureSource textures(root);
     textures.request("missing", "assets/art/does-not-exist.png");

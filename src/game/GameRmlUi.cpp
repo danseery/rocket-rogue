@@ -1,5 +1,5 @@
 #include "game/GameRmlUi.h"
-#include "render/OpenGlApi.h"
+#include "game/IRmlRenderHost.h"
 
 #include <utility>
 
@@ -14,7 +14,6 @@
 #include <RmlUi/Core/Event.h>
 #include <RmlUi/Core/EventListener.h>
 #include <RmlUi/Core/Log.h>
-#include <RmlUi/Core/RenderInterface.h>
 #include <RmlUi/Core/SystemInterface.h>
 #include <RmlUi/Core/StringUtilities.h>
 
@@ -91,6 +90,30 @@ void rr_rml_set_desktop_fullscreen(int enabled)
     if (!g_host || !g_host->setFullscreen(enabled != 0)) return;
     AppPreferences preferences = currentPreferences();
     preferences.fullscreen = enabled != 0;
+    storePreferences(std::move(preferences));
+}
+
+int rr_rml_frame_limit_preference()
+{
+    switch (currentPreferences().frameLimitMode) {
+    case FrameLimitMode::Smooth60: return 1;
+    case FrameLimitMode::Balanced: return 2;
+    case FrameLimitMode::Battery30: return 3;
+    case FrameLimitMode::Display: return 4;
+    case FrameLimitMode::PlatformDefault:
+    default: return 0;
+    }
+}
+
+void rr_rml_set_frame_limit_preference(const char* rawValue)
+{
+    AppPreferences preferences = currentPreferences();
+    const std::string_view value = rawValue ? rawValue : "";
+    if (value == "smooth60") preferences.frameLimitMode = FrameLimitMode::Smooth60;
+    else if (value == "balanced") preferences.frameLimitMode = FrameLimitMode::Balanced;
+    else if (value == "battery30") preferences.frameLimitMode = FrameLimitMode::Battery30;
+    else if (value == "display") preferences.frameLimitMode = FrameLimitMode::Display;
+    else preferences.frameLimitMode = FrameLimitMode::PlatformDefault;
     storePreferences(std::move(preferences));
 }
 
@@ -208,437 +231,6 @@ public:
     }
 };
 
-GLuint compileShader(GLenum type, const char* source)
-{
-    const GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
-    glCompileShader(shader);
-
-    GLint ok = GL_FALSE;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
-    if (ok == GL_TRUE) {
-        return shader;
-    }
-
-    char log[1024] = {};
-    GLsizei length = 0;
-    glGetShaderInfoLog(shader, sizeof(log), &length, log);
-    Rml::Log::Message(Rml::Log::LT_ERROR, "RmlUi shader compile failed: %s", log);
-    glDeleteShader(shader);
-    return 0;
-}
-
-GLuint linkProgram(GLuint vertexShader, GLuint fragmentShader)
-{
-    const GLuint program = glCreateProgram();
-    glAttachShader(program, vertexShader);
-    glAttachShader(program, fragmentShader);
-    glBindAttribLocation(program, 0, "a_position");
-    glBindAttribLocation(program, 1, "a_colour");
-    glBindAttribLocation(program, 2, "a_tex_coord");
-    glLinkProgram(program);
-
-    GLint ok = GL_FALSE;
-    glGetProgramiv(program, GL_LINK_STATUS, &ok);
-    if (ok == GL_TRUE) {
-        return program;
-    }
-
-    char log[1024] = {};
-    GLsizei length = 0;
-    glGetProgramInfoLog(program, sizeof(log), &length, log);
-    Rml::Log::Message(Rml::Log::LT_ERROR, "RmlUi shader link failed: %s", log);
-    glDeleteProgram(program);
-    return 0;
-}
-
-struct RmlGeometry {
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    GLuint ibo = 0;
-    GLsizei indexCount = 0;
-};
-
-class RocketRmlRenderInterface final : public Rml::RenderInterface {
-public:
-    ~RocketRmlRenderInterface() override
-    {
-        if (program_ != 0) {
-            glDeleteProgram(program_);
-        }
-    }
-
-    bool initialize()
-    {
-        const OpenGlDialect dialect = g_host ? g_host->openGlDialect() : OpenGlDialect::DesktopCore33;
-        const std::string shaderHeader = dialect == OpenGlDialect::WebGl2
-            ? "#version 300 es\nprecision highp float;\n"
-            : "#version 330 core\n";
-        const std::string vertexShaderSource = shaderHeader + R"(
-layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec4 a_colour;
-layout(location = 2) in vec2 a_tex_coord;
-uniform mat4 u_projection;
-uniform vec2 u_translation;
-out vec4 v_colour;
-out vec2 v_tex_coord;
-void main() {
-    v_colour = a_colour;
-    v_tex_coord = a_tex_coord;
-    gl_Position = u_projection * vec4(a_position + u_translation, 0.0, 1.0);
-}
-)";
-
-        const std::string fragmentShaderSource = shaderHeader + R"(
-in vec4 v_colour;
-in vec2 v_tex_coord;
-uniform sampler2D u_texture;
-uniform int u_has_texture;
-out vec4 frag_colour;
-void main() {
-    vec4 colour = v_colour;
-    if (u_has_texture != 0) {
-        colour *= texture(u_texture, v_tex_coord);
-    }
-    frag_colour = colour;
-}
-)";
-
-        const GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource.c_str());
-        const GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource.c_str());
-        if (vertexShader == 0 || fragmentShader == 0) {
-            glDeleteShader(vertexShader);
-            glDeleteShader(fragmentShader);
-            return false;
-        }
-
-        program_ = linkProgram(vertexShader, fragmentShader);
-        glDeleteShader(vertexShader);
-        glDeleteShader(fragmentShader);
-        if (program_ == 0) {
-            return false;
-        }
-
-        projectionLocation_ = glGetUniformLocation(program_, "u_projection");
-        translationLocation_ = glGetUniformLocation(program_, "u_translation");
-        textureLocation_ = glGetUniformLocation(program_, "u_texture");
-        hasTextureLocation_ = glGetUniformLocation(program_, "u_has_texture");
-        return true;
-    }
-
-    explicit operator bool() const { return program_ != 0; }
-
-    void setViewport(int logicalWidth, int logicalHeight, int drawingWidth, int drawingHeight)
-    {
-        logicalWidth_ = std::max(1, logicalWidth);
-        logicalHeight_ = std::max(1, logicalHeight);
-        drawingWidth_ = std::max(1, drawingWidth);
-        drawingHeight_ = std::max(1, drawingHeight);
-    }
-
-    void setRootClip(Rml::Rectanglei clip)
-    {
-        rootClip_ = clip;
-    }
-
-    void beginFrame()
-    {
-        glGetIntegerv(GL_VIEWPORT, previousViewport_);
-        previousBlend_ = glIsEnabled(GL_BLEND);
-        previousScissor_ = glIsEnabled(GL_SCISSOR_TEST);
-        previousDepth_ = glIsEnabled(GL_DEPTH_TEST);
-        previousCull_ = glIsEnabled(GL_CULL_FACE);
-
-        glViewport(0, 0, drawingWidth_, drawingHeight_);
-        if (previousDepth_) {
-            glDisable(GL_DEPTH_TEST);
-        }
-        if (previousCull_) {
-            glDisable(GL_CULL_FACE);
-        }
-        if (!previousBlend_) {
-            glEnable(GL_BLEND);
-        }
-        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-        glUseProgram(program_);
-        if (projectionWidth_ != logicalWidth_ || projectionHeight_ != logicalHeight_) {
-            const GLfloat projection[16] = {
-                2.0F / static_cast<GLfloat>(logicalWidth_), 0.0F, 0.0F, 0.0F,
-                0.0F, -2.0F / static_cast<GLfloat>(logicalHeight_), 0.0F, 0.0F,
-                0.0F, 0.0F, -1.0F, 0.0F,
-                -1.0F, 1.0F, 0.0F, 1.0F,
-            };
-            glUniformMatrix4fv(projectionLocation_, 1, GL_FALSE, projection);
-            projectionWidth_ = logicalWidth_;
-            projectionHeight_ = logicalHeight_;
-        }
-        glUniform1i(textureLocation_, 0);
-        glActiveTexture(GL_TEXTURE0);
-
-        frameActive_ = true;
-        compiledGeometryThisFrame_ = compiledGeometryPending_;
-        compiledGeometryPending_ = 0;
-        renderedGeometryThisFrame_ = 0;
-        boundTexture_ = std::numeric_limits<GLuint>::max();
-        boundVertexArray_ = std::numeric_limits<GLuint>::max();
-        hasTextureUniform_ = -1;
-        translationX_ = std::numeric_limits<float>::quiet_NaN();
-        translationY_ = std::numeric_limits<float>::quiet_NaN();
-        scissorStateKnown_ = false;
-        scissorRectangleValid_ = false;
-
-        const bool useScissor = scissorEnabled_ || rootClip_.Valid();
-        setScissorTest(useScissor);
-        if (useScissor) {
-            applyScissor();
-        }
-    }
-
-    void endFrame()
-    {
-        if (boundVertexArray_ != 0) {
-            glBindVertexArray(0);
-        }
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        if (boundTexture_ != 0) {
-            glBindTexture(GL_TEXTURE_2D, 0);
-        }
-        glUseProgram(0);
-
-        setScissorTest(previousScissor_ != GL_FALSE);
-        if (!previousBlend_) {
-            glDisable(GL_BLEND);
-        }
-        if (previousDepth_) {
-            glEnable(GL_DEPTH_TEST);
-        }
-        if (previousCull_) {
-            glEnable(GL_CULL_FACE);
-        }
-        glViewport(previousViewport_[0], previousViewport_[1], previousViewport_[2], previousViewport_[3]);
-        frameActive_ = false;
-    }
-
-    Rml::CompiledGeometryHandle CompileGeometry(Rml::Span<const Rml::Vertex> vertices, Rml::Span<const int> indices) override
-    {
-        if (frameActive_) {
-            ++compiledGeometryThisFrame_;
-        } else {
-            ++compiledGeometryPending_;
-        }
-        auto geometry = std::make_unique<RmlGeometry>();
-        geometry->indexCount = static_cast<GLsizei>(indices.size());
-
-        glGenVertexArrays(1, &geometry->vao);
-        glBindVertexArray(geometry->vao);
-
-        glGenBuffers(1, &geometry->vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, geometry->vbo);
-        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Rml::Vertex), vertices.data(), GL_STATIC_DRAW);
-
-        glGenBuffers(1, &geometry->ibo);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ibo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(int), indices.data(), GL_STATIC_DRAW);
-
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Rml::Vertex), reinterpret_cast<void*>(offsetof(Rml::Vertex, position)));
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Rml::Vertex), reinterpret_cast<void*>(offsetof(Rml::Vertex, colour)));
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Rml::Vertex), reinterpret_cast<void*>(offsetof(Rml::Vertex, tex_coord)));
-
-        glBindVertexArray(0);
-        boundVertexArray_ = 0;
-        return reinterpret_cast<Rml::CompiledGeometryHandle>(geometry.release());
-    }
-
-    void RenderGeometry(Rml::CompiledGeometryHandle handle, Rml::Vector2f translation, Rml::TextureHandle texture) override
-    {
-        auto* geometry = reinterpret_cast<RmlGeometry*>(handle);
-        if (!geometry || geometry->indexCount == 0) {
-            return;
-        }
-
-        ++renderedGeometryThisFrame_;
-        if (translationX_ != translation.x || translationY_ != translation.y) {
-            glUniform2f(translationLocation_, translation.x, translation.y);
-            translationX_ = translation.x;
-            translationY_ = translation.y;
-        }
-
-        const GLuint requestedTexture = static_cast<GLuint>(texture);
-        if (boundTexture_ != requestedTexture) {
-            glBindTexture(GL_TEXTURE_2D, requestedTexture);
-            boundTexture_ = requestedTexture;
-        }
-        const int requestedHasTexture = requestedTexture != 0 ? 1 : 0;
-        if (hasTextureUniform_ != requestedHasTexture) {
-            glUniform1i(hasTextureLocation_, requestedHasTexture);
-            hasTextureUniform_ = requestedHasTexture;
-        }
-
-        if (boundVertexArray_ != geometry->vao) {
-            glBindVertexArray(geometry->vao);
-            boundVertexArray_ = geometry->vao;
-        }
-        glDrawElements(GL_TRIANGLES, geometry->indexCount, GL_UNSIGNED_INT, nullptr);
-    }
-
-    void ReleaseGeometry(Rml::CompiledGeometryHandle handle) override
-    {
-        auto* geometry = reinterpret_cast<RmlGeometry*>(handle);
-        if (!geometry) {
-            return;
-        }
-        glDeleteBuffers(1, &geometry->ibo);
-        glDeleteBuffers(1, &geometry->vbo);
-        glDeleteVertexArrays(1, &geometry->vao);
-        if (boundVertexArray_ == geometry->vao) {
-            boundVertexArray_ = std::numeric_limits<GLuint>::max();
-        }
-        delete geometry;
-    }
-
-    Rml::TextureHandle LoadTexture(Rml::Vector2i& textureDimensions, const Rml::String& source) override
-    {
-        (void)textureDimensions;
-        Rml::Log::Message(Rml::Log::LT_WARNING, "RmlUi texture file loading is not used by Rocket Rogue: %s", source.c_str());
-        return 0;
-    }
-
-    Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> sourceData, Rml::Vector2i sourceDimensions) override
-    {
-        GLuint texture = 0;
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sourceDimensions.x, sourceDimensions.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, sourceData.data());
-        glBindTexture(GL_TEXTURE_2D, 0);
-        boundTexture_ = 0;
-        return static_cast<Rml::TextureHandle>(texture);
-    }
-
-    void ReleaseTexture(Rml::TextureHandle textureHandle) override
-    {
-        const GLuint texture = static_cast<GLuint>(textureHandle);
-        glDeleteTextures(1, &texture);
-        if (boundTexture_ == texture) {
-            boundTexture_ = std::numeric_limits<GLuint>::max();
-        }
-    }
-
-    void EnableScissorRegion(bool enable) override
-    {
-        scissorEnabled_ = enable;
-        const bool useScissor = enable || rootClip_.Valid();
-        setScissorTest(useScissor);
-        if (useScissor) {
-            applyScissor();
-        }
-    }
-
-    void SetScissorRegion(Rml::Rectanglei region) override
-    {
-        scissorRegion_ = region;
-        if (scissorEnabled_) {
-            applyScissor();
-        }
-    }
-
-private:
-    void setScissorTest(bool enabled)
-    {
-        if (scissorStateKnown_ && scissorTestActive_ == enabled) {
-            return;
-        }
-        if (enabled) {
-            glEnable(GL_SCISSOR_TEST);
-        } else {
-            glDisable(GL_SCISSOR_TEST);
-        }
-        scissorTestActive_ = enabled;
-        scissorStateKnown_ = true;
-    }
-
-    void applyScissor()
-    {
-        Rml::Rectanglei region = scissorEnabled_ && scissorRegion_.Valid()
-            ? scissorRegion_
-            : Rml::Rectanglei::FromSize({logicalWidth_, logicalHeight_});
-        if (rootClip_.Valid()) {
-            region = region.Intersect(rootClip_);
-        }
-        const double scaleX = static_cast<double>(drawingWidth_) / static_cast<double>(logicalWidth_);
-        const double scaleY = static_cast<double>(drawingHeight_) / static_cast<double>(logicalHeight_);
-        const int x = std::clamp(static_cast<int>(std::floor(static_cast<double>(region.p0.x) * scaleX)), 0, drawingWidth_);
-        const int right = std::clamp(static_cast<int>(std::ceil(static_cast<double>(region.p1.x) * scaleX)), x, drawingWidth_);
-        const int y = std::clamp(static_cast<int>(std::floor(static_cast<double>(logicalHeight_ - region.p1.y) * scaleY)), 0, drawingHeight_);
-        const int top = std::clamp(static_cast<int>(std::ceil(static_cast<double>(logicalHeight_ - region.p0.y) * scaleY)), y, drawingHeight_);
-        const int width = right - x;
-        const int height = top - y;
-        if (!scissorRectangleValid_
-            || scissorX_ != x || scissorY_ != y
-            || scissorWidth_ != width || scissorHeight_ != height) {
-            glScissor(x, y, width, height);
-            scissorX_ = x;
-            scissorY_ = y;
-            scissorWidth_ = width;
-            scissorHeight_ = height;
-            scissorRectangleValid_ = true;
-        }
-    }
-
-public:
-    UiDiagnostics diagnostics() const
-    {
-        UiDiagnostics diagnostics;
-        diagnostics.compiledGeometry = compiledGeometryThisFrame_;
-        diagnostics.renderedGeometry = renderedGeometryThisFrame_;
-        return diagnostics;
-    }
-
-private:
-    GLuint program_ = 0;
-    GLint projectionLocation_ = -1;
-    GLint translationLocation_ = -1;
-    GLint textureLocation_ = -1;
-    GLint hasTextureLocation_ = -1;
-    int logicalWidth_ = 1;
-    int logicalHeight_ = 1;
-    int drawingWidth_ = 1;
-    int drawingHeight_ = 1;
-    int projectionWidth_ = 0;
-    int projectionHeight_ = 0;
-    int compiledGeometryPending_ = 0;
-    int compiledGeometryThisFrame_ = 0;
-    int renderedGeometryThisFrame_ = 0;
-    bool scissorEnabled_ = false;
-    bool frameActive_ = false;
-    bool scissorStateKnown_ = false;
-    bool scissorTestActive_ = false;
-    bool scissorRectangleValid_ = false;
-    int scissorX_ = 0;
-    int scissorY_ = 0;
-    int scissorWidth_ = 0;
-    int scissorHeight_ = 0;
-    GLuint boundTexture_ = std::numeric_limits<GLuint>::max();
-    GLuint boundVertexArray_ = std::numeric_limits<GLuint>::max();
-    int hasTextureUniform_ = -1;
-    float translationX_ = std::numeric_limits<float>::quiet_NaN();
-    float translationY_ = std::numeric_limits<float>::quiet_NaN();
-    Rml::Rectanglei scissorRegion_ = Rml::Rectanglei::MakeInvalid();
-    Rml::Rectanglei rootClip_ = Rml::Rectanglei::MakeInvalid();
-    GLboolean previousBlend_ = GL_FALSE;
-    GLboolean previousScissor_ = GL_FALSE;
-    GLboolean previousDepth_ = GL_FALSE;
-    GLboolean previousCull_ = GL_FALSE;
-    GLint previousViewport_[4] = {};
-};
 
 struct ModalTemplate {
     std::string id;
@@ -804,6 +396,7 @@ std::string normalizeBooleanAttributes(std::string html)
         "data-flyby-run", "data-orbit-run",
         "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
         "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
+        "data-frame-limit-settings", "data-frame-limit-select",
         "data-game-speed-settings", "data-game-speed-select",
         "data-debug-tools-settings", "data-debug-tools-toggle",
         "data-performance-stats-settings", "data-performance-stats-toggle"
@@ -879,6 +472,14 @@ std::string currentResolutionOptionValue()
     return options[index];
 }
 
+std::string currentFrameLimitOptionValue()
+{
+    static constexpr const char* options[] = {
+        "platform_default", "smooth60", "balanced", "battery30", "display"
+    };
+    return options[std::clamp(rr_rml_frame_limit_preference(), 0, 4)];
+}
+
 std::string selectCurrentResolution(std::string html)
 {
     if (html.find("data-resolution-select") == std::string::npos) {
@@ -903,6 +504,22 @@ std::string selectCurrentGameSpeed(std::string html)
     const std::string value = currentGameSpeedOptionValue();
     const std::string needle = "<option value=\"" + value + "\">";
     const std::size_t optionStart = html.find(needle);
+    if (optionStart != std::string::npos) {
+        html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
+    }
+    return html;
+}
+
+std::string selectCurrentFrameLimit(std::string html)
+{
+    const std::size_t selectStart = html.find("data-frame-limit-select");
+    if (selectStart == std::string::npos) {
+        return html;
+    }
+
+    const std::string value = currentFrameLimitOptionValue();
+    const std::string needle = "<option value=\"" + value + "\">";
+    const std::size_t optionStart = html.find(needle, selectStart);
     if (optionStart != std::string::npos) {
         html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
     }
@@ -1065,7 +682,7 @@ std::string syncSettingsControls(std::string html)
 {
     return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
         syncCurrentPerformanceStatsToggle(syncCurrentDebugToolsToggle(
-            selectCurrentGameSpeed(selectCurrentResolution(std::move(html)))))))));
+            selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html))))))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1228,13 +845,68 @@ bool panelUsesDraftRoom(std::string_view html)
     return html.find("phase-board-draft-room") != std::string_view::npos;
 }
 
+enum class NativeSceneOverlayMode {
+    None,
+    PreflightLaunch,
+    TelemetryLegend,
+};
+
+NativeSceneOverlayMode nativeSceneOverlayMode(std::string_view html)
+{
+    if (html.find("data-preflight-launch") != std::string_view::npos) {
+        return NativeSceneOverlayMode::PreflightLaunch;
+    }
+
+    const bool flight = html.find("class=\"cockpit-hud flight-hud\"") != std::string_view::npos;
+    const bool debrief = html.find("phase-board-results") != std::string_view::npos;
+    const bool flyby = html.find("data-flyby-run") != std::string_view::npos;
+    const bool orbit = html.find("data-orbit-run") != std::string_view::npos;
+    return (flight || debrief) && !flyby && !orbit
+        ? NativeSceneOverlayMode::TelemetryLegend
+        : NativeSceneOverlayMode::None;
+}
+
+bool nativePreflightLaunchReady(std::string_view html)
+{
+    return html.find("data-preflight-ready=\"1\"") != std::string_view::npos;
+}
+
+std::string nativeSceneOverlayMarkup(std::string_view panelHtml)
+{
+    switch (nativeSceneOverlayMode(panelHtml)) {
+    case NativeSceneOverlayMode::PreflightLaunch: {
+        const bool ready = nativePreflightLaunchReady(panelHtml);
+        std::string markup = "<button id=\"rr-scene-launch-control\" class=\"native-scene-launch-control\" "
+            "data-rr-action=\"start_launch\" data-ui-focus-id=\"action:start_launch\"";
+        if (!ready) {
+            markup += " disabled=\"1\"";
+        }
+        markup += ">";
+        markup += ready ? "Launch" : "Securing Drone";
+        markup += "</button>";
+        return markup;
+    }
+    case NativeSceneOverlayMode::TelemetryLegend:
+        return R"(<div id="rr-telemetry-chart-legend" class="native-telemetry-chart-legend">
+<div class="native-telemetry-legend-chip warn"><span class="swatch"></span><strong>Warning</strong></div>
+<div class="native-telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong></div>
+<div class="native-telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong></div>
+</div>)";
+    case NativeSceneOverlayMode::None:
+    default:
+        return {};
+    }
+}
+
 bool samePanelStructure(std::string_view lhs, std::string_view rhs)
 {
     return panelModeForHtml(lhs) == panelModeForHtml(rhs)
         && panelUsesSurfaceOps(lhs) == panelUsesSurfaceOps(rhs)
         && panelUsesDroneOps(lhs) == panelUsesDroneOps(rhs)
         && panelUsesNavigation(lhs) == panelUsesNavigation(rhs)
-        && panelUsesDraftRoom(lhs) == panelUsesDraftRoom(rhs);
+        && panelUsesDraftRoom(lhs) == panelUsesDraftRoom(rhs)
+        && nativeSceneOverlayMode(lhs) == nativeSceneOverlayMode(rhs)
+        && nativePreflightLaunchReady(lhs) == nativePreflightLaunchReady(rhs);
 }
 
 Rml::Rectanglei panelBounds(RmlPanelMode mode)
@@ -1290,6 +962,8 @@ const ModalTemplate* findModal(const std::vector<ModalTemplate>& modals, std::st
 std::string panelRcss(RmlPanelMode mode)
 {
     const Rml::Rectanglei bounds = panelBounds(mode);
+    const int viewportWidth = std::max(1, rr_rml_viewport_width());
+    const int viewportHeight = std::max(1, rr_rml_viewport_height());
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
     const int arrivalTitleSize = mode == RmlPanelMode::MissionStamp ? (panelWidth < 420 ? 31 : 40) : (panelWidth < 420 ? 34 : 46);
@@ -1327,6 +1001,18 @@ std::string panelRcss(RmlPanelMode mode)
     const int titleLockupLeft = std::max(0, (titleInnerWidth - titleLockupWidth) / 2);
     const int titleMenuWidth = compactTitle ? 300 : 340;
     const int titleMenuLeft = std::max(0, (titleInnerWidth - titleMenuWidth) / 2);
+    // Keep native RmlUi scene controls in the same world-space projection as
+    // SceneComposer. Telemetry is authored at x=[0.18, 0.94], y=-0.58.
+    const float nativeSceneUnit = std::max(1.0F, static_cast<float>(std::min(viewportWidth, viewportHeight)) * 0.46F);
+    const int nativeSceneCenterX = viewportWidth / 2;
+    const int nativeSceneCenterY = viewportHeight / 2;
+    const int nativeLaunchCenterX = nativeSceneCenterX - static_cast<int>(0.18F * nativeSceneUnit);
+    const int nativeLaunchCenterY = nativeSceneCenterY + static_cast<int>(0.50F * nativeSceneUnit);
+    const int nativeTelemetryLeft = nativeSceneCenterX + static_cast<int>(0.18F * nativeSceneUnit);
+    const int nativeTelemetryRight = nativeSceneCenterX + static_cast<int>(0.94F * nativeSceneUnit);
+    const int nativeTelemetryTop = nativeSceneCenterY + static_cast<int>(0.58F * nativeSceneUnit);
+    const int nativeLegendTop = std::max(8, nativeTelemetryTop - 34);
+    const int nativeTelemetryWidth = std::max(1, nativeTelemetryRight - nativeTelemetryLeft);
 
     return R"(
 body {
@@ -1386,6 +1072,90 @@ scrollbarcorner {
     border-width: 1px;
     border-color: #4e6b80;
     border-radius: 8px;
+}
+#rr-scene-launch-control {
+    position: fixed;
+    z-index: 8;
+    left: )" + std::to_string(nativeLaunchCenterX - 98) + R"(px;
+    top: )" + std::to_string(nativeLaunchCenterY - 31) + R"(px;
+    width: 196px;
+    height: 62px;
+    padding: 0px 16px;
+    color: #edfdf4;
+    background-color: #1d6e53;
+    border-width: 1px;
+    border-color: #7ae4ad;
+    border-radius: 9px;
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    text-transform: uppercase;
+}
+#rr-scene-launch-control:disabled {
+    color: #9eafb4;
+    background-color: #13252a;
+    border-color: #34566a;
+}
+#rr-telemetry-chart-legend {
+    position: fixed;
+    z-index: 7;
+    left: )" + std::to_string(nativeTelemetryLeft) + R"(px;
+    top: )" + std::to_string(nativeLegendTop) + R"(px;
+    width: )" + std::to_string(nativeTelemetryWidth) + R"(px;
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    pointer-events: none;
+}
+.native-telemetry-legend-chip {
+    box-sizing: border-box;
+    flex: 1 1 0px;
+    min-width: 0px;
+    height: 24px;
+    padding: 3px 4px;
+    background-color: rgba(9, 16, 24, 0.82);
+    border-width: 1px;
+    border-color: rgba(137, 178, 211, 0.26);
+    border-radius: 6px;
+}
+.native-telemetry-legend-chip .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 4px;
+    vertical-align: middle;
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.18);
+    border-radius: 5px;
+}
+.native-telemetry-legend-chip strong {
+    display: inline-block;
+    color: #e7f5f8;
+    font-size: 9px;
+    line-height: 14px;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
+.native-telemetry-legend-chip.warn {
+    border-color: rgba(97, 220, 255, 0.40);
+}
+.native-telemetry-legend-chip.warn .swatch {
+    background-color: #55d9ff;
+}
+.native-telemetry-legend-chip.heat {
+    border-color: rgba(255, 196, 96, 0.40);
+}
+.native-telemetry-legend-chip.heat .swatch {
+    background-color: #ffc45b;
+}
+.native-telemetry-legend-chip.threshold {
+    border-color: rgba(255, 209, 102, 0.40);
+}
+.native-telemetry-legend-chip.threshold .swatch {
+    height: 3px;
+    margin-top: 4px;
+    margin-bottom: 3px;
+    background-color: #ffd166;
 }
 #rr-panel.title-screen-panel-mode {
     left: 0px;
@@ -6089,11 +5859,11 @@ std::string performanceStatsMarkup(const PerformanceStats& stats)
         << " ms (" << stats.simulationSteps << " steps)</p>";
     out << "<p>Scene " << stats.sceneRenderMilliseconds << " | UI " << stats.uiRenderMilliseconds
         << " | Present " << stats.presentMilliseconds << " ms</p>";
-    out << "<p>Pacing " << (stats.platform.verticalSyncActive ? "VSync" : "no VSync");
-    if (stats.platform.softwareFrameLimiterActive) {
+    out << "<p>Pacing " << (stats.platform.verticalSyncActive ? "FIFO/VSync" : "no VSync");
+    if (stats.platform.softwareFrameLimiterActive || stats.renderer.softwareFrameLimiterActive) {
         out << " + software limiter";
     }
-    out << " | Limit " << stats.platform.frameLimiterMilliseconds
+    out << " | Limit " << (stats.platform.frameLimiterMilliseconds + stats.renderer.limiterIdleMilliseconds)
         << " | Idle " << stats.platform.idleMilliseconds << " ms</p>";
     if (stats.platform.suspendedWakeups > 0) {
         out << "<p>Suspended wakeups " << stats.platform.suspendedWakeups << " total / "
@@ -6101,8 +5871,14 @@ std::string performanceStatsMarkup(const PerformanceStats& stats)
     }
     out << "<p>Scene draws " << stats.renderer.sceneDrawCalls << " | Vertices "
         << stats.renderer.sceneVertices << "</p>";
+    out << "<p>GPU " << stats.renderer.gpuFrameMilliseconds << " ms | Queue-present return "
+        << stats.renderer.presentIntervalMilliseconds << " ms | Target "
+        << stats.renderer.targetFramesPerSecond << " FPS | Deadline misses "
+        << stats.renderer.missedRefreshes << "</p>";
     out << "<p>Scene uploads " << stats.renderer.bufferUploads << " | "
         << std::setprecision(1) << (static_cast<double>(stats.renderer.uploadedBytes) / 1024.0) << " KiB</p>";
+    out << "<p>Pipeline events " << stats.renderer.pipelineCreationsThisFrame << " | Device memory "
+        << (static_cast<double>(stats.renderer.deviceMemoryBytes) / 1048576.0) << " MiB</p>";
     out << "<p>Startup " << stats.startupMilliseconds << " ms | Decode "
         << stats.textures.decodeMilliseconds << " ms / Upload " << stats.textures.uploadMilliseconds
         << " ms</p>";
@@ -6187,6 +5963,7 @@ std::string buildDocumentRml(
     document += "\">";
     document += body;
     document += "</div>";
+    document += nativeSceneOverlayMarkup(panelHtml);
 
     const ModalTemplate* activeModal = findModal(modals, activeModalId);
     if (activeModal) {
@@ -6221,7 +5998,6 @@ std::string buildDocumentRml(
 }
 
 RmlSystemInterface g_systemInterface;
-std::unique_ptr<RocketRmlRenderInterface> g_renderInterface;
 Rml::Context* g_context = nullptr;
 Rml::ElementDocument* g_document = nullptr;
 std::vector<ElementButtonBinding> g_elementButtonBindings;
@@ -6311,6 +6087,10 @@ public:
             }
             if (control->GetTagName() == "select" && control->HasAttribute("data-game-speed-select")) {
                 rr_rml_set_game_speed_multiplier(control->GetValue().c_str());
+                return;
+            }
+            if (control->GetTagName() == "select" && control->HasAttribute("data-frame-limit-select")) {
+                rr_rml_set_frame_limit_preference(control->GetValue().c_str());
                 return;
             }
             if (control->GetTagName() == "select" && control->HasAttribute("data-controller-prompt-select")) {
@@ -6446,6 +6226,7 @@ std::string derivedFocusId(Rml::Element* element)
         return id;
     }
     if (element->HasAttribute("data-resolution-select")) return "setting:resolution";
+    if (element->HasAttribute("data-frame-limit-select")) return "setting:frame_limit";
     if (element->HasAttribute("data-game-speed-select")) return "setting:game_speed";
     if (element->HasAttribute("data-controller-prompt-select")) return "setting:controller_prompt";
     if (element->HasAttribute("data-controller-deadzone-select")) return "setting:controller_deadzone";
@@ -6654,8 +6435,12 @@ Rml::Element* buttonElementAtPoint(Rml::Context& context, const Rml::Vector2f& p
 
 } // namespace
 
-GameRmlUi::GameRmlUi(IPreferenceStore& preferences, IPlatformHost& host, IUiBridge& uiBridge)
-    : preferences_(preferences), host_(host), uiBridge_(uiBridge)
+GameRmlUi::GameRmlUi(
+    IPreferenceStore& preferences,
+    IPlatformHost& host,
+    IUiBridge& uiBridge,
+    IRmlRenderHost& renderHost)
+    : preferences_(preferences), host_(host), uiBridge_(uiBridge), renderHost_(renderHost)
 {
 }
 
@@ -6668,16 +6453,13 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
 
     Rml::SetSystemInterface(&g_systemInterface);
 
-    g_renderInterface = std::make_unique<RocketRmlRenderInterface>();
-    if (!g_renderInterface->initialize()) {
+    if (!renderHost_.initialize()) {
         return false;
     }
-    if (!*g_renderInterface) {
-        return false;
-    }
-    Rml::SetRenderInterface(g_renderInterface.get());
+    Rml::SetRenderInterface(&renderHost_.renderInterface());
 
     if (!Rml::Initialise()) {
+        renderHost_.shutdown();
         return false;
     }
 
@@ -6688,6 +6470,8 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
 
     g_context = Rml::CreateContext("rocket-ui", {rr_rml_viewport_width(), rr_rml_viewport_height()});
     if (!g_context) {
+        Rml::Shutdown();
+        renderHost_.shutdown();
         return false;
     }
     g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
@@ -6803,7 +6587,7 @@ void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
 
 void GameRmlUi::render()
 {
-    if (!initialized_ || !g_context || !g_renderInterface) {
+    if (!initialized_ || !g_context) {
         return;
     }
 
@@ -6819,21 +6603,28 @@ void GameRmlUi::render()
         rebuildDocument();
     }
 
-    const int width = viewport.drawableWidth;
-    const int height = viewport.drawableHeight;
     g_context->SetDimensions({viewportWidth, viewportHeight});
     g_context->SetDensityIndependentPixelRatio(viewport.densityRatio);
-    g_renderInterface->setViewport(viewportWidth, viewportHeight, width, height);
-    if (!openModalId_.empty() || controllerPresentationActive_ || performanceStatsVisible_) {
-        g_renderInterface->setRootClip(Rml::Rectanglei::FromSize({viewportWidth, viewportHeight}));
+    renderHost_.setViewport({
+        viewportWidth,
+        viewportHeight,
+        viewport.drawableWidth,
+        viewport.drawableHeight,
+    });
+    Rml::Rectanglei rootClip;
+    if (!openModalId_.empty() || controllerPresentationActive_ || performanceStatsVisible_
+        || nativeSceneOverlayMode(panelHtml_) != NativeSceneOverlayMode::None) {
+        rootClip = Rml::Rectanglei::FromSize({viewportWidth, viewportHeight});
     } else {
-        g_renderInterface->setRootClip(expandedPanelClip(panelMode_));
+        rootClip = expandedPanelClip(panelMode_);
     }
+    renderHost_.setRootClip({rootClip.Left(), rootClip.Top(), rootClip.Right(), rootClip.Bottom()});
     g_context->Update();
-    g_renderInterface->beginFrame();
-    g_context->Render();
-    g_renderInterface->endFrame();
-    uiDiagnostics_ = g_renderInterface->diagnostics();
+    if (renderHost_.beginFrame()) {
+        g_context->Render();
+        renderHost_.endFrame();
+    }
+    uiDiagnostics_ = renderHost_.diagnostics();
     uiDiagnostics_.documentRebuilds = pendingDocumentRebuilds_;
     uiDiagnostics_.panelRebuilds = pendingPanelRebuilds_;
     uiDiagnostics_.hudPatches = pendingHudPatches_;
@@ -7385,7 +7176,7 @@ void GameRmlUi::shutdown()
         g_context = nullptr;
     }
     Rml::Shutdown();
-    g_renderInterface.reset();
+    renderHost_.shutdown();
     g_elementButtonBindings.clear();
     g_focusTargets.clear();
     rr_rml_set_enabled(0);

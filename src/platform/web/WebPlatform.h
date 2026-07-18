@@ -3,6 +3,8 @@
 #include "platform/AppServices.h"
 
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace rocket {
 
@@ -39,8 +41,6 @@ public:
     bool setFullscreen(bool enabled) override;
     void log(PlatformLogLevel level, std::string_view message) override;
     bool haptic(double durationSeconds, double weakMagnitude, double strongMagnitude) override;
-    void present() override;
-    OpenGlDialect openGlDialect() const override;
 
 private:
     WebGamepadSource& gamepads_;
@@ -52,10 +52,18 @@ class WebTextureSource final : public ITextureSource {
 public:
     void request(std::string_view key, std::string_view relativePath) override;
     TextureStatus status(std::string_view key) const override;
-    bool uploadToOpenGl(std::string_view key, unsigned int texture, int& width, int& height) override;
+    std::optional<DecodedImageView> decodedImage(std::string_view key) const override;
+    void releaseDecodedImage(std::string_view key) override;
     std::string lastError() const override;
 
 private:
+    struct DecodedImage {
+        int width = 0;
+        int height = 0;
+        std::vector<std::uint8_t> rgba;
+    };
+
+    mutable std::unordered_map<std::string, DecodedImage> decodedImages_;
     mutable std::string lastError_;
 };
 
