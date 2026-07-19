@@ -123,6 +123,11 @@ struct PerformanceStats {
     PlatformDiagnostics platform;
 };
 
+enum class MiningDrillMode {
+    Toggle,
+    Hold
+};
+
 struct AppPreferences {
     ControllerPreferences controller;
     std::string resolutionPreset = "auto";
@@ -133,6 +138,7 @@ struct AppPreferences {
     bool helpDisabled = false;
     bool cameraShakeDisabled = false;
     bool fullscreen = false;
+    MiningDrillMode miningDrillMode = MiningDrillMode::Toggle;
     std::vector<std::string> dismissedHelpTopics;
 };
 

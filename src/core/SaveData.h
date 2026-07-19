@@ -7,7 +7,7 @@
 namespace rocket {
 
 struct SaveData {
-    int version = 1;
+    int version = 2;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 100.0;
     int destinationIndex = 0;
@@ -27,6 +27,9 @@ struct SaveData {
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
+    StoryBriefingState storyBriefing;
+    bool campaignIntroductionAcknowledged = false;
+    bool straylightDiscoveryAcknowledged = false;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
     std::vector<std::string> surfaceUpgradeIds;
@@ -61,6 +64,7 @@ struct SaveData {
     int totalFlybyMisses = 0;
     int totalFlybyGoods = 0;
     int totalFlybyPerfects = 0;
+    std::vector<std::string> destinationHistoryIds;
     std::vector<int> destinationAttempts;
     std::vector<int> destinationSuccesses;
     std::vector<int> destinationFlybys;

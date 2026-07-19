@@ -10,6 +10,9 @@
   },
   "scripts": {
     "sanity": "node tools/sanity-check.mjs",
+    "check:steam-readiness": "node tools/verify-steam-readiness.mjs --policy",
+    "test:steam-readiness": "node tools/verify-steam-readiness.test.mjs",
+    "verify:steam-release": "node tools/verify-steam-readiness.mjs --release-candidate",
     "doctor": "node tools/verify-toolchain.mjs",
     "prepare:azure": "node tools/prepare-azure-static-web-app.mjs",
     "serve:web": "node tools/serve.mjs build/web-release 8080",

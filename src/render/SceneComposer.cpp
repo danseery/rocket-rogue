@@ -196,7 +196,16 @@ int destinationBodyAsset(int destinationTier)
     if (destinationTier == 3) {
         return JupiterAsset;
     }
-    if (destinationTier >= 4) {
+    if (destinationTier == 4) {
+        return SaturnAsset;
+    }
+    if (destinationTier == 5) {
+        return UranusAsset;
+    }
+    if (destinationTier == 6) {
+        return NeptuneAsset;
+    }
+    if (destinationTier >= 7) {
         constexpr std::array<int, 9> outerPlanetAssets {
             OuterPlanet01Asset,
             OuterPlanet02Asset,
@@ -714,8 +723,10 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         drawSurfacePush(snapshot);
     } else {
         drawBackdrop(snapshot);
-        drawRocket(snapshot);
-        drawTelemetry(snapshot);
+        if (snapshot.screen != Screen::StoryBriefing) {
+            drawRocket(snapshot);
+            drawTelemetry(snapshot);
+        }
     }
     finalizePacket();
     return packet_;
@@ -1961,7 +1972,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     // The packed bay sprites leave a little transparent margin below the exhaust,
     // so their visible foot sits well below the texture center.
     const float shipVisibleFootShare = 0.455F;
-    const float desiredShipSpriteSize = cellSize * 11.50F;
+    const float desiredShipSpriteSize = cellSize * 8.50F;
     const float maxShipSpriteSize = std::max(
         cellSize * 7.25F,
         (top - shipGroundY - cellH * 0.85F) / (0.5F + shipVisibleFootShare));
@@ -2386,7 +2397,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     }
 
     const Vec2 target = gridPoint(snapshot.miningTargetX, snapshot.miningTargetY);
-    const float droneSize = std::min(cellW, cellH) * 4.35F;
+    const float droneSize = std::min(cellW, cellH) * 3.25F;
     const Vec2 targetHullDirection = normalize({
         static_cast<float>(snapshot.miningHullDirX) * cellW,
         -static_cast<float>(snapshot.miningHullDirY) * cellH
@@ -3569,7 +3580,13 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     };
 
-    if (snapshot.debugActOneCheckpoint >= 3) {
+    if (snapshot.straylightStoryReveal) {
+        const Vec2 neptune {-0.63F, -0.62F};
+        drawRadialGlow(0.28F, -0.01F, 0.62F, {0.20F, 0.68F, 0.92F, 0.15F}, 96);
+        drawArkSprite({0.30F, -0.01F}, 1.02F, 1.0F);
+        drawRadialGlow(neptune.x, neptune.y, 0.16F, {0.16F, 0.42F, 0.96F, 0.22F}, 64);
+        drawBodySprite(NeptuneAsset, neptune, 0.26F, 0.92F);
+    } else if (snapshot.debugActOneCheckpoint >= 3) {
         // Act 1 departures still originate at Earth. Keep a small Moon companion
         // with the distant home body so the outgoing route has a stronger sense of scale.
         if (snapshot.debugActOneCheckpoint <= 5) {
@@ -3595,10 +3612,6 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const int bodyAsset = destinationBodyAsset(snapshot);
         const float bodySize = snapshot.debugActOneCheckpoint == 4 ? 0.42F : 0.31F;
         drawRadialGlow(endpoint.x, endpoint.y, bodySize * 0.58F, {0.24F, 0.64F, 0.88F, 0.10F}, 72);
-        if (snapshot.debugActOneCheckpoint == 6 && arkVisible(snapshot.arkCondition)) {
-            // Neptune crosses in front of Straylight at the Act 1 reveal.
-            drawArkSprite({endpoint.x - 0.17F, endpoint.y - 0.05F}, 0.50F, 0.92F);
-        }
         drawBodySprite(bodyAsset, endpoint, bodySize, 0.98F);
     } else if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         const float earthX = -0.16F;
@@ -3699,7 +3712,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
         if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
             drawSprite(endpoint.x, endpoint.y, radius * 2.55F, radius * 2.55F, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
-        } else if (snapshot.destinationTier == 3) {
+        } else if (snapshot.destinationTier >= 3 && snapshot.destinationTier <= 6) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
                 : 0.0F;
@@ -3708,36 +3721,15 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             if (snapshot.screen == Screen::ArrivalFanfare) {
                 drawCircle(endpoint.x, endpoint.y, radius * (1.72F + arrivalBeat * 0.28F), {1.0F, 0.78F, 0.24F, 0.12F}, 72);
             }
-            if (textureReady(JupiterAsset)) {
+            const int planetAsset = destinationBodyAsset(snapshot);
+            if (textureReady(planetAsset)) {
                 drawCircle(endpoint.x, endpoint.y, bodyRadius * 1.55F, {1.0F, 0.72F, 0.28F, 0.10F}, 72);
-                drawSprite(endpoint.x, endpoint.y, bodyRadius * 2.58F, bodyRadius * 2.58F, {1.0F, 1.0F, 1.0F, 0.92F}, JupiterAsset);
+                drawSprite(endpoint.x, endpoint.y, bodyRadius * 2.58F, bodyRadius * 2.58F, {1.0F, 1.0F, 1.0F, 0.92F}, planetAsset);
             } else {
                 drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.78F, 0.58F, 0.30F, 0.64F}, 64);
                 drawCircle(endpoint.x + radius * 0.25F, endpoint.y + radius * 0.15F, radius * 0.62F * bodyPulse, {0.92F, 0.75F, 0.42F, 0.54F}, 48);
             }
-            drawBodySprite(SaturnAsset, {endpoint.x - radius * 2.35F, endpoint.y + radius * 1.18F}, radius * 2.45F, 0.62F);
-            drawBodySprite(UranusAsset, {endpoint.x + radius * 1.94F, endpoint.y + radius * 0.90F}, radius * 1.10F, 0.58F);
-            drawBodySprite(NeptuneAsset, {endpoint.x + radius * 2.40F, endpoint.y - radius * 0.70F}, radius * 1.00F, 0.52F);
-            if (arkVisible(snapshot.arkCondition) && !surfaceArkVisible) {
-                drawArkSprite({endpoint.x + radius * 3.12F, endpoint.y - radius * 1.58F}, radius * 4.80F, 0.84F);
-            }
-        } else if (snapshot.destinationTier == 4) {
-            const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
-                ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
-                : 0.0F;
-            const float pulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.07F : 1.0F;
-            const float bodyRadius = radius * 1.18F * pulse;
-            if (snapshot.screen == Screen::ArrivalFanfare) {
-                drawCircle(endpoint.x, endpoint.y, radius * (2.05F + arrivalBeat * 0.36F), {0.42F, 0.90F, 1.0F, 0.12F}, 72);
-            }
-            const int outerPlanetAsset = destinationBodyAsset(snapshot);
-            if (textureReady(outerPlanetAsset)) {
-                drawSprite(endpoint.x, endpoint.y, bodyRadius * 2.55F, bodyRadius * 2.55F, {1.0F, 1.0F, 1.0F, 0.96F}, outerPlanetAsset);
-            } else {
-                drawCircle(endpoint.x, endpoint.y, bodyRadius, {0.20F, 0.34F, 0.48F, 0.78F}, 72);
-                drawCircle(endpoint.x + bodyRadius * 0.22F, endpoint.y + bodyRadius * 0.15F, bodyRadius * 0.70F, {0.48F, 0.72F, 0.76F, 0.34F}, 48);
-            }
-        } else if (snapshot.destinationTier >= 5) {
+        } else if (snapshot.destinationTier >= 7) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)
                 : 0.0F;

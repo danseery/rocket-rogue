@@ -185,6 +185,7 @@ void NativePreferenceStore::ensureLoaded()
         else if (key == "accessibility.helpDisabled") cached_.helpDisabled = parseBool(value, false);
         else if (key == "render.cameraShakeDisabled") cached_.cameraShakeDisabled = parseBool(value, false);
         else if (key == "window.fullscreen") cached_.fullscreen = parseBool(value, false);
+        else if (key == "input.keyboardDrillMode") cached_.miningDrillMode = value == "hold" ? MiningDrillMode::Hold : MiningDrillMode::Toggle;
         else if (key == "help.dismissed" && !value.empty()) cached_.dismissedHelpTopics.emplace_back(value);
     }
 }
@@ -214,6 +215,7 @@ bool NativePreferenceStore::store(const AppPreferences& preferences)
            << "accessibility.helpDisabled=" << boolText(normalized.helpDisabled) << '\n'
            << "render.cameraShakeDisabled=" << boolText(normalized.cameraShakeDisabled) << '\n'
            << "window.fullscreen=" << boolText(normalized.fullscreen) << '\n';
+    stream << "input.keyboardDrillMode=" << (normalized.miningDrillMode == MiningDrillMode::Hold ? "hold" : "toggle") << '\n';
     for (const std::string& topic : normalized.dismissedHelpTopics) stream << "help.dismissed=" << sanitizeLine(topic) << '\n';
     if (!file_.store(stream.str())) return false;
     cached_ = std::move(normalized);

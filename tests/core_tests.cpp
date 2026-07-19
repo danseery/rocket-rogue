@@ -31,6 +31,7 @@
 
 #include <cassert>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -1273,11 +1274,11 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     moonArrival.destinationId = content::destination::moon;
     require(shouldOpenArrivalOps(moonArrival, catalog), "Moon transfer arrival should open arrival operations");
 
-    LaunchOutcome outerPlanetsArrival;
-    outerPlanetsArrival.type = LaunchResultType::MissionComplete;
-    outerPlanetsArrival.frontierTransfer = true;
-    outerPlanetsArrival.destinationId = content::destination::outerPlanets;
-    require(shouldOpenArrivalOps(outerPlanetsArrival, catalog), "Outer Planets transfer arrival should open arrival operations");
+    LaunchOutcome jupiterArrival;
+    jupiterArrival.type = LaunchResultType::MissionComplete;
+    jupiterArrival.frontierTransfer = true;
+    jupiterArrival.destinationId = content::destination::jupiter;
+    require(shouldOpenArrivalOps(jupiterArrival, catalog), "Jupiter transfer arrival should open arrival operations");
 
     startArrivalOps(state, moonArrival);
     require(canRunArrivalFlyby(state, catalog), "Moon flyby should always be available after arrival");
@@ -1497,7 +1498,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     LaunchOutcome outerArrival;
     outerArrival.type = LaunchResultType::MissionComplete;
     outerArrival.frontierTransfer = true;
-    outerArrival.destinationId = content::destination::outerPlanets;
+    outerArrival.destinationId = content::destination::jupiter;
     GameState outer = createNewGame(catalog, 707);
     startArrivalOps(outer, outerArrival);
     startArrivalFlybyRun(outer, catalog);
@@ -3223,7 +3224,7 @@ void hostileMiningTerrainGeneratesPreDugEnemyStructures()
     state.meta.campaignMilestone = CampaignMilestone::HostileSystemStranded;
     state.meta.ark.condition = ArkCondition::DamagedStranded;
     state.meta.chapter = GameChapter::Ascent;
-    const Destination& nearbyGalaxy = catalog.destinations[5];
+    const Destination& nearbyGalaxy = *catalog.findDestination(content::destination::nearbyGalaxy);
 
     const MiningTerrain terrain = generateMiningTerrain(state, nearbyGalaxy, SurfaceSiteProfile::OreShelf, 1);
     const MiningTerrain repeat = generateMiningTerrain(state, nearbyGalaxy, SurfaceSiteProfile::OreShelf, 1);
@@ -6155,9 +6156,10 @@ void launchOutcomePresentationIsShared()
     require(presentation.metricGroups[0].metrics.size() == 3, "mission result group should show outcome, recovery, and credits");
     require(presentation.metricGroups[1].title == text::panel::sections::burnProfile, "burn profile group should be explicit");
     require(presentation.metricGroups[2].title == text::panel::sections::peakTelemetry, "peak telemetry group should be explicit");
-    require(presentation.notes.size() == 2, "destroyed outcomes should include module and crew notes");
-    require(presentation.notes[0] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
-    require(presentation.notes[1] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
+    require(presentation.notes.size() == 3, "destroyed outcomes should compare burn and failure point before module and crew notes");
+    require(presentation.notes[0].find("revealed failure point") != std::string::npos, "debrief should explain the revealed failure point");
+    require(presentation.notes[1] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
+    require(presentation.notes[2] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
     require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("lost"), "crew death should create a major memorial result beat");
     require(presentation.crewFate.title == text::panel::crewFate::lostTitle, "crew death result beat should use memorial copy");
 
@@ -6175,11 +6177,12 @@ void launchOutcomePresentationIsShared()
     presentation = launchOutcomePresentation(transfer);
     require(presentation.label == text::panel::outcomes::transferComplete, "successful transfer should share transfer label");
     require(presentation.nextActionLabel == text::buttons::reviewRefitOptions, "survived outcomes should share refit review action label");
-    require(presentation.notes.empty(), "clean transfer should not invent result notes");
+    require(presentation.notes.size() == 1 && presentation.notes[0].find("revealed failure point") != std::string::npos,
+        "clean transfer should compare burn depth with the revealed failure point");
 
     presentation = launchOutcomePresentation(transfer, true);
     require(presentation.nextActionLabel == text::buttons::arrivalOps, "post-arrival outcomes should route toward the approach choice");
-    require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::postArrivalResearchReady), "post-arrival outcomes should explain the research handoff");
+    require(presentation.notes.size() == 2 && presentation.notes[1] == std::string(text::panel::messages::postArrivalResearchReady), "post-arrival outcomes should explain the research handoff after the burn comparison");
 
     LaunchOutcome injuredEject;
     injuredEject.type = LaunchResultType::SafeEject;
@@ -6187,7 +6190,7 @@ void launchOutcomePresentationIsShared()
     injuredEject.crewInjured = true;
     presentation = launchOutcomePresentation(injuredEject);
     require(presentation.label == text::panel::outcomes::emergencyEject, "manual ejection should share emergency eject label");
-    require(presentation.notes.size() == 1 && presentation.notes[0] == std::string(text::panel::messages::crewInjured), "crew injury note should be shared");
+    require(presentation.notes.size() == 2 && presentation.notes[1] == std::string(text::panel::messages::crewInjured), "crew injury note should follow the burn comparison");
 
     LaunchOutcome closeCall;
     closeCall.type = LaunchResultType::MissionComplete;
@@ -6195,7 +6198,8 @@ void launchOutcomePresentationIsShared()
     closeCall.ejectMultiplier = 2.78;
     closeCall.crashMultiplier = 2.82;
     presentation = launchOutcomePresentation(closeCall);
-    require(presentation.notes.empty(), "close recoveries should not be rendered as generic mission notes");
+    require(presentation.notes.size() == 1 && presentation.notes[0].find("revealed failure point") != std::string::npos,
+        "close recoveries should still explain the revealed failure margin");
     require(presentation.achievements.size() == 1, "close recoveries should unlock a close-call achievement");
     require(presentation.achievements[0].id == content::achievement::skinOfYourTeeth, "close-call achievement should use a stable content id");
     require(presentation.achievements[0].title == text::panel::achievements::skinOfYourTeethTitle, "close-call achievement should expose a clear title");
@@ -6903,7 +6907,9 @@ void solarMapModalTracksCampaignDiscovery()
     require(html.find("data-modal=\"map\"") != std::string::npos, "every panel should expose the solar map modal");
     require(html.find("solar-map-node map-earth is-explored") != std::string::npos, "Earth should begin explored on the solar map");
     require(html.find("solar-map-node map-saturn is-charted") != std::string::npos, "unvisited planets should remain charted and muted");
-    require(html.find("Unknown vessel") != std::string::npos && html.find("solar-map-node map-vessel is-unknown") != std::string::npos, "undiscovered vessels should use the unknown silhouette state");
+    require(html.find("Unknown vessel") == std::string::npos && html.find("Straylight") == std::string::npos
+            && html.find("Neptune Signal") == std::string::npos && html.find("Deep-space signal") == std::string::npos,
+        "pre-Neptune maps must not leak a vessel, signal, or Straylight hint");
 
     context.debugActOneCheckpoint = 4;
     html = buildGamePanelHtml(context);
@@ -7376,9 +7382,10 @@ void destinationRiskEscalates()
             earthDestroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
         }
         {
-            GameState state = configuredState(catalog, 5, catalog.destinations[5].targetMultiplier);
-            state.meta.destinationAttempts[5] = 4;
-            state.meta.destinationSuccesses[5] = 1;
+            const int riftIndex = static_cast<int>(catalog.findDestination(content::destination::nearbyGalaxy) - catalog.destinations.data());
+            GameState state = configuredState(catalog, riftIndex, catalog.destinations[static_cast<std::size_t>(riftIndex)].targetMultiplier);
+            state.meta.destinationAttempts[static_cast<std::size_t>(riftIndex)] = 4;
+            state.meta.destinationSuccesses[static_cast<std::size_t>(riftIndex)] = 1;
             Random rng(1000 + static_cast<std::uint64_t>(i));
             const LaunchOutcome outcome = simulateLaunchToTarget(state, catalog, rng);
             galaxyDestroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
@@ -7518,15 +7525,18 @@ void arkDiscoveryAndScriptedJumpProgression()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 62001);
 
-    LaunchOutcome outerPlanetsArrival;
-    outerPlanetsArrival.type = LaunchResultType::MissionComplete;
-    outerPlanetsArrival.frontierTransfer = true;
-    outerPlanetsArrival.destinationId = content::destination::outerPlanets;
-    outerPlanetsArrival.ejectMultiplier = 3.55;
-    outerPlanetsArrival.crashMultiplier = 4.20;
-    applyLaunchOutcome(state, catalog, outerPlanetsArrival);
+    LaunchOutcome neptuneArrival;
+    neptuneArrival.type = LaunchResultType::MissionComplete;
+    neptuneArrival.frontierTransfer = true;
+    neptuneArrival.destinationId = content::destination::neptune;
+    neptuneArrival.ejectMultiplier = 4.20;
+    neptuneArrival.crashMultiplier = 6.35;
+    applyLaunchOutcome(state, catalog, neptuneArrival);
 
-    require(arkDiscovered(state), "reaching Outer Planets should discover the operable derelict Ark");
+    require(!arkDiscovered(state), "Neptune arrival must not discover the Ark before the story takeover is acknowledged");
+    require(state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery, "successful Neptune arrival should persist the Straylight takeover");
+    require(acknowledgeStoryBriefing(state, catalog), "the Straylight takeover should acknowledge once");
+    require(arkDiscovered(state), "acknowledging the Neptune discovery should reveal the operable derelict Ark");
     require(state.meta.campaignMilestone == CampaignMilestone::ArkDiscovered, "Ark discovery should advance the campaign milestone");
     require(state.meta.chapter == GameChapter::Breakthrough, "Ark discovery should enter Breakthrough chapter");
     require(state.meta.ark.condition == ArkCondition::DerelictOperable, "discovered Ark should be derelict but operable");
@@ -7597,9 +7607,14 @@ void numberedChaptersAdvanceMonotonically()
     completeTransfer(content::destination::mars, 2.65);
     require(state.meta.chapter == GameChapter::RedFrontier, "Mars advancement should enter Chapter 3");
 
-    completeTransfer(content::destination::outerPlanets, 3.55);
-    require(state.meta.chapter == GameChapter::Breakthrough, "Outer Planets Ark discovery should enter Chapter 4");
-    require(arkDiscovered(state), "Chapter 4 should coincide with Ark discovery");
+    completeTransfer(content::destination::jupiter, 3.15);
+    completeTransfer(content::destination::saturn, 3.45);
+    completeTransfer(content::destination::uranus, 3.80);
+    completeTransfer(content::destination::neptune, 4.20);
+    require(state.meta.chapter == GameChapter::Breakthrough, "outer-planet progression should remain in Chapter 4 through Neptune");
+    require(!arkDiscovered(state), "Neptune completion should wait for the discovery acknowledgment");
+    require(acknowledgeStoryBriefing(state, catalog), "Neptune discovery should acknowledge before the first Ark jump");
+    require(arkDiscovered(state), "Chapter 4 should discover the Ark only after the Neptune takeover");
 
     require(performArkJump(state, catalog), "first Ark jump should enter Straylight");
     require(state.meta.chapter == GameChapter::Straylight, "first Ark jump should enter Chapter 5");
@@ -7648,7 +7663,7 @@ void hostileNavigationSelectsShuttleSortie()
     require(destinations.front()->id == content::destination::nearbyStar, "Nearby Star should be the first hostile-system sortie target");
 
     const int fuelBefore = state.meta.ark.fuelReserve;
-    const int expectedFuelCost = 2 + destinations.front()->tier;
+    const int expectedFuelCost = 6;
     require(selectNavigationDestination(state, catalog, 0), "selecting a navigation destination should succeed");
     require(state.screen == Screen::Hangar, "selecting a destination should open shuttle prep in the Hangar");
     require(state.launchConfig.destinationId == content::destination::nearbyStar, "navigation should sync launch destination");
@@ -7676,10 +7691,10 @@ void legacyDeepSpaceFrontierMigratesToArkFlow()
         }
         return -1;
     };
-    const int outerIndex = destinationIndex(content::destination::outerPlanets);
+    const int neptuneIndex = destinationIndex(content::destination::neptune);
     const int legacyStarIndex = destinationIndex(content::destination::nearbyStar);
-    require(outerIndex >= 0, "Outer Planets should resolve");
-    require(legacyStarIndex > outerIndex, "legacy deep-space destination should still exist for save compatibility");
+    require(neptuneIndex >= 0, "Neptune should resolve");
+    require(legacyStarIndex > neptuneIndex, "legacy deep-space destination should still exist for save compatibility");
 
     state.run.destinationIndex = legacyStarIndex;
     state.meta.furthestTier = catalog.destinations[static_cast<std::size_t>(legacyStarIndex)].tier;
@@ -7691,8 +7706,8 @@ void legacyDeepSpaceFrontierMigratesToArkFlow()
     require(arkDiscovered(state), "migration should discover the Ark instead of preserving the retired ladder");
     require(!hostileSystemActive(state), "migration should not skip the scripted Ark jumps");
     require(state.screen == Screen::Hangar, "migration should return stale launch saves to the Hangar");
-    require(state.run.destinationIndex == outerIndex, "migration should put the frontier back at Outer Planets");
-    require(nextDestination(state, catalog) == nullptr, "Solar System ladder should stop at Outer Planets once Ark flow begins");
+    require(state.run.destinationIndex == neptuneIndex, "migration should put the solar frontier at Neptune");
+    require(nextDestination(state, catalog) == nullptr, "Solar System ladder should stop at Neptune once Ark flow begins");
 }
 
 void arkCampaignStateRoundTripsThroughSave()
@@ -7842,6 +7857,223 @@ void displayFormatAndMathHelpersAreShared()
     require(math::smoothStep(-0.5) == 0.0, "smoothStep should clamp below zero");
     require(math::smoothStep(1.5) == 1.0, "smoothStep should clamp above one");
     require(std::abs(math::smoothStep(0.5) - 0.5) < 0.000001, "smoothStep midpoint should stay stable");
+}
+
+void outerPlanetCampaignSequenceIsExplicitAndUnskippable()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    struct ExpectedDestination {
+        std::string_view id;
+        int tier;
+        double target;
+        double maxCrash;
+        double reward;
+        double hazard;
+    };
+    const std::array<ExpectedDestination, 4> expected {{
+        {content::destination::jupiter, 3, 3.15, 5.00, 44.0, 1.55},
+        {content::destination::saturn, 4, 3.45, 5.40, 52.0, 1.70},
+        {content::destination::uranus, 5, 3.80, 5.85, 62.0, 1.85},
+        {content::destination::neptune, 6, 4.20, 6.35, 76.0, 2.05},
+    }};
+    for (const ExpectedDestination& item : expected) {
+        const Destination* destination = catalog.findDestination(item.id);
+        require(destination != nullptr, "every outer planet should have a stable destination id");
+        require(destination->tier == item.tier && std::abs(destination->targetMultiplier - item.target) < 0.000001,
+            "outer-planet tier and target values should match the campaign contract");
+        require(std::abs(destination->maxCrashMultiplier - item.maxCrash) < 0.000001
+                && std::abs(destination->baseReward - item.reward) < 0.000001
+                && std::abs(destination->hazard - item.hazard) < 0.000001,
+            "outer-planet crash, reward, and hazard values should match the campaign contract");
+    }
+    require(catalog.findDestination(content::destination::outerPlanets) == nullptr,
+        "the grouped outer_planets id must remain migration-only, not playable content");
+    require(catalog.findDestination(content::destination::nearbyStar)->tier == 7
+            && catalog.findDestination(content::destination::nearbyGalaxy)->tier == 8,
+        "Khepri Prime and Rift Belt should follow Neptune at tiers 7 and 8");
+
+    GameState state = createNewGame(catalog, 0x5511);
+    state.run.destinationIndex = 2;
+    syncLaunchConfig(state, catalog);
+    LaunchOutcome skipped;
+    skipped.type = LaunchResultType::MissionComplete;
+    skipped.recoveryMethod = RecoveryMethod::TransferArrival;
+    skipped.frontierTransfer = true;
+    skipped.destinationId = content::destination::saturn;
+    skipped.ejectMultiplier = 3.45;
+    skipped.crashMultiplier = 5.40;
+    applyLaunchOutcome(state, catalog, skipped);
+    require(state.run.destinationIndex == 2 && destinationHistoryValue(state.meta.destinationSuccesses, catalog, content::destination::saturn) == 0,
+        "Saturn cannot be completed or unlocked while Jupiter is current");
+
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const ExpectedDestination& item = expected[index];
+        LaunchOutcome arrival;
+        arrival.type = LaunchResultType::MissionComplete;
+        arrival.recoveryMethod = RecoveryMethod::TransferArrival;
+        arrival.frontierTransfer = true;
+        arrival.destinationId = std::string(item.id);
+        arrival.ejectMultiplier = item.target;
+        arrival.crashMultiplier = item.maxCrash;
+        applyLaunchOutcome(state, catalog, arrival);
+        require(state.run.destinationIndex == item.tier, "each successful arrival should unlock exactly the next outer planet");
+        require(destinationHistoryValue(state.meta.destinationSuccesses, catalog, item.id) == 1,
+            "each outer planet should retain its own completion history");
+        if (item.id != content::destination::neptune) {
+            require(!arkDiscovered(state) && state.storyBriefing.pending == StoryBriefingId::None,
+                "Jupiter through Uranus must not reveal or hint at the Straylight");
+        }
+    }
+    require(!arkDiscovered(state) && state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
+        "only successful Neptune arrival should queue the saved Straylight reveal");
+    require(nextDestination(state, catalog) == nullptr, "the solar transfer ladder should stop at Neptune until the story beat is acknowledged");
+}
+
+void storyBriefingsTakeOverAndPersist()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x5522);
+    LaunchOutcome neptune;
+    neptune.type = LaunchResultType::MissionComplete;
+    neptune.recoveryMethod = RecoveryMethod::TransferArrival;
+    neptune.frontierTransfer = true;
+    neptune.destinationId = content::destination::neptune;
+    neptune.ejectMultiplier = 4.20;
+    neptune.crashMultiplier = 6.35;
+    state.run.destinationIndex = 5;
+    applyLaunchOutcome(state, catalog, neptune);
+    startArrivalOps(state, neptune);
+    state.screen = Screen::StoryBriefing;
+
+    Random rng(0x5522);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    PanelRenderContext context {state, catalog, launch, launch};
+    const std::string html = buildGamePanelHtml(context);
+    require(html.find("data-panel-mode=\"story-briefing\"") != std::string::npos
+            && html.find("<h1>STRAYLIGHT</h1>") != std::string::npos,
+        "Straylight discovery should use the dedicated full-screen story panel");
+    require(countOccurrences(html, "data-rr-action=") == 1
+            && html.find("data-rr-action=\"acknowledge_story_briefing\"") != std::string::npos,
+        "the takeover should expose only Approach the Straylight as an action");
+    require(html.find("data-ui-close-modal") == std::string::npos
+            && html.find("data-ui-modal=\"settings\"") == std::string::npos
+            && html.find("data-ui-modal=\"map\"") == std::string::npos,
+        "story takeover markup must not expose close, navigation, HUD, or settings controls");
+
+    const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(parsed.has_value(), "pending story takeover should serialize");
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *parsed);
+    require(restored.screen == Screen::StoryBriefing && restored.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
+        "reload during the reveal must return to the takeover");
+    require(acknowledgeStoryBriefing(restored, catalog), "the saved takeover should acknowledge once");
+    require(arkDiscovered(restored) && restored.meta.straylightDiscoveryAcknowledged && restored.screen == Screen::ArrivalOps,
+        "approach should atomically discover the Ark and resume Neptune Arrival Ops");
+}
+
+void launchInstabilityMeetsLateFailureWarningFloor()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
+    Random rng(0x5533);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const auto atProximity = [&](double proximity) {
+        return telemetryAt(launch, 1.0 + (launch.crashMultiplier - 1.0) * proximity);
+    };
+    const TelemetryEvent high = atProximity(0.94);
+    const TelemetryEvent critical = atProximity(0.985);
+    require(high.instability >= 0.65 - 0.000001 && high.warning >= 0.65 - 0.000001,
+        "instability warning should reach 65% by 94% failure proximity");
+    require(critical.instability >= 0.90 - 0.000001 && critical.warning >= 0.90 - 0.000001,
+        "instability warning should reach 90% by 98.5% failure proximity");
+}
+
+void miningThermalCutoffAndGuidanceAreExplicit()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x5544);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 9, 0x5544}, false).applied,
+        "thermal cutoff test mining run should start with scanner, tether, and heat rules enabled");
+    MiningRunState& mining = state.run.mining;
+    mining.drillHeat = 1.0;
+    mining.drilling = true;
+    MiningEnemy thermal;
+    thermal.active = true;
+    thermal.type = MiningEnemyType::Elemental;
+    thermal.affinity = MiningElementalAffinity::Thermal;
+    thermal.x = mining.droneX;
+    thermal.y = mining.droneY;
+    thermal.health = thermal.maxHealth = 100.0;
+    thermal.effectRadius = 4.0;
+    mining.enemies.push_back(thermal);
+    updateMiningRun(state, catalog, 0.01);
+    require(mining.drillThermalLock && !mining.drilling, "100% heat should cut off active drilling");
+    setMiningDrilling(state, true);
+    require(!mining.drilling, "thermal lock should reject restart above 60% heat");
+    mining.enemies.clear();
+    mining.drillHeat = 0.60;
+    updateMiningRun(state, catalog, 0.01);
+    require(!mining.drillThermalLock, "drilling should become available again at or below 60% heat");
+
+    pulseMiningScanner(state, catalog);
+    require(state.statusLine.find("Scanner revealed") != std::string::npos,
+        "scanner feedback should report what terrain and signals were revealed");
+    mining.artifact = {};
+    const MiningRunPresentation presentation = miningRunPresentation(state, catalog);
+    const auto tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
+        return action.label.find("tether") != std::string::npos || action.label.find("Tether") != std::string::npos;
+    });
+    require(tether != presentation.actions.end() && !tether->enabled,
+        "tether should be visibly disabled when no meaningful target exists");
+    require(presentation.commandDetail.find("Drones execute") != std::string::npos,
+        "mining guidance should explain automatic drone behavior");
+}
+
+void legacyOuterPlanetSavesMigrateByStableId()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    SaveData unfinished = captureSaveData(createNewGame(catalog, 0x5555));
+    unfinished.version = 1;
+    unfinished.destinationIndex = 3;
+    unfinished.furthestTier = 3;
+    unfinished.destinationHistoryIds.clear();
+    unfinished.destinationAttempts = {2, 2, 2, 1, 0, 0};
+    unfinished.destinationSuccesses = {1, 1, 1, 0, 0, 0};
+
+    GameState migrated = createNewGame(catalog, 1);
+    restoreSaveData(migrated, catalog, unfinished);
+    require(currentDestination(migrated, catalog).id == content::destination::jupiter && !arkDiscovered(migrated),
+        "unfinished legacy outer_planets progress should become Jupiter without discovering the Ark");
+    require(destinationHistoryValue(migrated.meta.destinationAttempts, catalog, content::destination::jupiter) == 1,
+        "legacy grouped-outer history should map to Jupiter by stable id");
+
+    SaveData arkSave = unfinished;
+    arkSave.campaignMilestone = CampaignMilestone::ArkDiscovered;
+    arkSave.ark.condition = ArkCondition::DerelictOperable;
+    GameState arkMigrated = createNewGame(catalog, 1);
+    restoreSaveData(arkMigrated, catalog, arkSave);
+    for (const std::string_view id : {std::string_view(content::destination::jupiter), std::string_view(content::destination::saturn), std::string_view(content::destination::uranus), std::string_view(content::destination::neptune)}) {
+        require(destinationHistoryValue(arkMigrated.meta.destinationSuccesses, catalog, id) >= 1,
+            "Ark-discovered legacy saves should complete every required outer planet");
+    }
+    require(arkMigrated.meta.straylightDiscoveryAcknowledged,
+        "Ark-discovered legacy saves should acknowledge the one-time Straylight reveal");
+
+    SaveData postArk = arkSave;
+    postArk.destinationIndex = 5;
+    postArk.campaignMilestone = CampaignMilestone::HostileSystemStranded;
+    postArk.ark.condition = ArkCondition::DamagedStranded;
+    postArk.ark.gravityWellDisaster = true;
+    postArk.destinationSuccesses = {1, 1, 1, 1, 3, 2};
+    GameState postArkMigrated = createNewGame(catalog, 1);
+    restoreSaveData(postArkMigrated, catalog, postArk);
+    require(currentDestination(postArkMigrated, catalog).id == content::destination::nearbyGalaxy,
+        "post-Ark legacy destination index should map to Rift Belt by id");
+    require(destinationHistoryValue(postArkMigrated.meta.destinationSuccesses, catalog, content::destination::nearbyStar) == 3
+            && destinationHistoryValue(postArkMigrated.meta.destinationSuccesses, catalog, content::destination::nearbyGalaxy) == 2,
+        "Khepri Prime and Rift Belt history should survive their tier shift by stable id");
 }
 
 } // namespace
@@ -8001,6 +8233,11 @@ int main()
     panelLayoutModeIsPortablePresentationData();
     contentIdsResolveAgainstDefaultCatalog();
     displayFormatAndMathHelpersAreShared();
+    outerPlanetCampaignSequenceIsExplicitAndUnskippable();
+    storyBriefingsTakeOverAndPersist();
+    launchInstabilityMeetsLateFailureWarningFloor();
+    miningThermalCutoffAndGuidanceAreExplicit();
+    legacyOuterPlanetSavesMigrateByStableId();
 
     std::cout << "rocket_core_tests passed\n";
     return 0;

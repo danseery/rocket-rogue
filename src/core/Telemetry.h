@@ -16,7 +16,8 @@ enum class TelemetryChannel {
     Vibration,
     Guidance,
     FuelMix,
-    AbortRisk
+    AbortRisk,
+    Instability
 };
 
 struct TelemetryChannelDefinition {
@@ -25,13 +26,14 @@ struct TelemetryChannelDefinition {
     text::telemetry::WarningCopy warningCopy;
 };
 
-inline constexpr std::array<TelemetryChannelDefinition, 6> telemetryChannelDefinitions {{
+inline constexpr std::array<TelemetryChannelDefinition, 7> telemetryChannelDefinitions {{
     {TelemetryChannel::Heat, text::labels::temp, text::telemetry::heat},
     {TelemetryChannel::Pressure, text::labels::press, text::telemetry::pressure},
     {TelemetryChannel::Vibration, text::labels::vibration, text::telemetry::vibration},
     {TelemetryChannel::Guidance, text::labels::nav, text::telemetry::guidance},
     {TelemetryChannel::FuelMix, text::labels::mix, text::telemetry::fuelMix},
-    {TelemetryChannel::AbortRisk, text::labels::abort, text::telemetry::abortRisk}
+    {TelemetryChannel::AbortRisk, text::labels::abort, text::telemetry::abortRisk},
+    {TelemetryChannel::Instability, text::labels::instability, text::telemetry::instability}
 }};
 
 struct TelemetryChannelSample {
@@ -56,6 +58,8 @@ inline double telemetryValue(const TelemetryEvent& event, TelemetryChannel chann
         return event.fuelMix;
     case TelemetryChannel::AbortRisk:
         return event.abortRisk;
+    case TelemetryChannel::Instability:
+        return event.instability;
     }
     return 0.0;
 }

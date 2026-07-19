@@ -7,7 +7,7 @@ Use this page to choose the right source before changing gameplay, presentation,
 - [Rocket Rogue Game Design Document](Rocket_Rogue_Game_Design_Document.docx) - formatted, shareable game design document.
 - [Design Notes](DESIGN.md) - current gameplay loop, balance principles, architecture ownership, and persistence contracts.
 - [Agent Design Context](AGENT_DESIGN_CONTEXT.md) - implementation priority order and condensed project direction; start here before extending a game system.
-- [Ark Campaign and Navigation Spine](ARK_CAMPAIGN_NAVIGATION_PLAN.md) - numbered chapters, Straylight/Aaru Vale/Khepri Prime canon, and post-solar campaign structure.
+- [Ark Campaign and Navigation Spine](ARK_CAMPAIGN_NAVIGATION_PLAN.md) - individual Jupiter-to-Neptune progression, the Neptune-only Straylight takeover, numbered chapters, and post-solar campaign structure.
 
 ## Playable systems
 
@@ -20,6 +20,7 @@ Use this page to choose the right source before changing gameplay, presentation,
 ## Application, UI, and release
 
 - [Native Desktop Builds](DESKTOP_BUILDS.md) - Windows/Linux architecture, build/package commands, saves, window behavior, and native verification.
+- [Steam Release Readiness](STEAM_RELEASE_READINESS.md) - Steam-native campaign gates, Windows/Linux/Deck acceptance, collaborative ownership, and the human-creative AI boundary.
 - [Controller Support](CONTROLLER_SUPPORT.md) - shared native/web mappings, focus, pause safety, haptics, preferences, and physical test matrix.
 - [RmlUi UX Polish Guide](RMLUI_UX_POLISH_GUIDE.md) - shared layout lanes, UI semantics, native/web parity, and visual verification.
 - [Azure Static Web Apps](AZURE_STATIC_WEB_APPS.md) - web deployment workflow, static package contents, and local verification.

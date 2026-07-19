@@ -278,9 +278,12 @@ ContentCatalog createDefaultContent()
         {content::destination::earthOrbit, "Earth Orbit", 0, 1.45, 1.05, 2.25, 12.0, 0.65, content::unlock::starter},
         {content::destination::moon, "Moon", 1, 1.95, 1.10, 3.10, 20.0, 0.95, content::unlock::starter},
         {content::destination::mars, "Mars", 2, 2.65, 1.15, 4.15, 34.0, 1.35, content::unlock::starter},
-        {content::destination::outerPlanets, "Outer Planets", 3, 3.55, 1.20, 5.55, 54.0, 1.85, content::unlock::deepSpace},
-        {content::destination::nearbyStar, "Khepri Prime", 4, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace},
-        {content::destination::nearbyGalaxy, "Rift Belt", 5, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic}
+        {content::destination::jupiter, "Jupiter", 3, 3.15, 1.18, 5.00, 44.0, 1.55, content::unlock::deepSpace},
+        {content::destination::saturn, "Saturn", 4, 3.45, 1.20, 5.40, 52.0, 1.70, content::unlock::deepSpace},
+        {content::destination::uranus, "Uranus", 5, 3.80, 1.22, 5.85, 62.0, 1.85, content::unlock::deepSpace},
+        {content::destination::neptune, "Neptune", 6, 4.20, 1.24, 6.35, 76.0, 2.05, content::unlock::deepSpace},
+        {content::destination::nearbyStar, "Khepri Prime", 7, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace},
+        {content::destination::nearbyGalaxy, "Rift Belt", 8, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic}
     };
 
     return catalog;

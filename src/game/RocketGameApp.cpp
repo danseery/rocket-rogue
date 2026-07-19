@@ -33,10 +33,10 @@ constexpr std::array<DebugActOneCheckpoint, 7> kDebugActOneCheckpoints {{
     {"Earth Orbit / Proving Mission", content::destination::earthOrbit},
     {"Moon", content::destination::moon},
     {"Mars", content::destination::mars},
-    {"Jupiter", content::destination::outerPlanets},
-    {"Saturn", content::destination::outerPlanets},
-    {"Uranus", content::destination::outerPlanets},
-    {"Neptune / Straylight", content::destination::outerPlanets}
+    {"Jupiter", content::destination::jupiter},
+    {"Saturn", content::destination::saturn},
+    {"Uranus", content::destination::uranus},
+    {"Neptune", content::destination::neptune}
 }};
 
 void addDebugUnlock(GameState& state, const char* unlockKey)
@@ -66,9 +66,9 @@ LaunchOutcome debugTransferOutcome(std::string destinationId)
     outcome.peakWarning = 0.38;
     outcome.peakAbortRisk = 0.24;
     outcome.telemetry = {
-        {1.0, 0.12, 0.10, 0.05, 0.92, 0.86, 0.04, 0.10, 0.12, "Debug launch nominal."},
-        {1.7, 0.32, 0.24, 0.20, 0.72, 0.70, 0.12, 0.18, 0.28, "Transfer burn committed."},
-        {2.4, 0.46, 0.36, 0.30, 0.44, 0.62, 0.24, 0.26, 0.38, "Arrival corridor reached."}
+        {1.0, 0.12, 0.10, 0.05, 0.92, 0.86, 0.04, 0.0, 0.10, 0.12, "Debug launch nominal."},
+        {1.7, 0.32, 0.24, 0.20, 0.72, 0.70, 0.12, 0.0, 0.18, 0.28, "Transfer burn committed."},
+        {2.4, 0.46, 0.36, 0.30, 0.44, 0.62, 0.24, 0.0, 0.26, 0.38, "Arrival corridor reached."}
     };
     return outcome;
 }
@@ -260,8 +260,14 @@ void RocketGameApp::finishArrivalFanfare()
         return;
     }
     session_.arrivalFanfare = {};
-    state_.screen = Screen::ArrivalOps;
-    state_.statusLine = std::string(text::status::arrivalOpsOpened);
+    if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
+        state_.screen = Screen::StoryBriefing;
+        state_.statusLine = "An impossible contact is resolving beyond Neptune.";
+        save();
+    } else {
+        state_.screen = Screen::ArrivalOps;
+        state_.statusLine = std::string(text::status::arrivalOpsOpened);
+    }
     panelDirty_ = true;
 }
 
@@ -450,6 +456,15 @@ const ControllerPreferences& RocketGameApp::controllerPreferences() const
     return controllerPreferences_;
 }
 
+void RocketGameApp::setMiningDrillMode(MiningDrillMode mode)
+{
+    if (miningDrillMode_ == mode) {
+        return;
+    }
+    releaseRealtimeInputs(true);
+    miningDrillMode_ = mode;
+}
+
 void RocketGameApp::setActiveInputSource(InputSource source)
 {
     activeInputSource_ = source;
@@ -473,6 +488,7 @@ InputContext RocketGameApp::gameplayInputContext() const
         return session_.flightArmed ? InputContext::Launch : InputContext::Preflight;
     case Screen::Results:
     case Screen::ArrivalFanfare:
+    case Screen::StoryBriefing:
         return InputContext::Stamp;
     case Screen::Flyby:
         return state_.run.flyby.completed ? InputContext::FlybyComplete : InputContext::FlybyActive;
@@ -669,6 +685,7 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     controllerRealtimeInput_ = {};
     if (releaseKeyboard) {
         keyboardRealtimeInput_ = {};
+        keyboardDrillPressed_ = false;
     }
     state_.run.flyby.inputX = 0.0;
     state_.run.flyby.inputY = 0.0;
@@ -776,6 +793,8 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
             skipArrivalFanfare();
         } else if (state_.screen == Screen::Results) {
             next();
+        } else if (state_.screen == Screen::StoryBriefing) {
+            acknowledgeStoryBriefing();
         } else if (context == InputContext::FlybyComplete) {
             flybyContinue();
         } else if (context == InputContext::OrbitComplete) {
@@ -1187,7 +1206,13 @@ void RocketGameApp::tick(double deltaSeconds)
             }
         } else {
             const bool wasActive = state_.run.mining.active;
+            const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
             updateMiningRun(state_, catalog_, deltaSeconds);
+            if (!thermalLockWasActive && state_.run.mining.drillThermalLock) {
+                keyboardRealtimeInput_.drilling = false;
+                controllerRealtimeInput_.drilling = false;
+                keyboardDrillPressed_ = false;
+            }
             if (wasActive && !state_.run.mining.active) {
                 state_.statusLine = std::string(text::status::miningAborted);
                 save();
@@ -1390,6 +1415,15 @@ void RocketGameApp::skipArrivalFanfare()
     }
 }
 
+void RocketGameApp::acknowledgeStoryBriefing()
+{
+    if (state_.screen != Screen::StoryBriefing || !rocket::acknowledgeStoryBriefing(state_, catalog_)) {
+        return;
+    }
+    save();
+    refreshPanel();
+}
+
 void RocketGameApp::cutEngines()
 {
     if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome) {
@@ -1477,8 +1511,13 @@ void RocketGameApp::next()
         }
         if (shouldOpenArrivalOps(state_.lastOutcome, catalog_)) {
             startArrivalOps(state_, state_.lastOutcome);
-            state_.screen = Screen::ArrivalOps;
-            state_.statusLine = std::string(text::status::arrivalOpsOpened);
+            if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
+                state_.screen = Screen::StoryBriefing;
+                state_.statusLine = "An impossible contact is resolving beyond Neptune.";
+            } else {
+                state_.screen = Screen::ArrivalOps;
+                state_.statusLine = std::string(text::status::arrivalOpsOpened);
+            }
             syncLaunchConfig(state_, catalog_);
             save();
             panelDirty_ = true;
@@ -1846,6 +1885,26 @@ void RocketGameApp::miningDrill(bool active)
     applyRealtimeInputs();
 }
 
+void RocketGameApp::miningKeyboardDrill(bool active)
+{
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+        keyboardDrillPressed_ = false;
+        return;
+    }
+    if (active == keyboardDrillPressed_) {
+        return;
+    }
+    keyboardDrillPressed_ = active;
+    if (miningDrillMode_ == MiningDrillMode::Toggle) {
+        if (active) {
+            keyboardRealtimeInput_.drilling = !keyboardRealtimeInput_.drilling;
+        }
+    } else {
+        keyboardRealtimeInput_.drilling = active;
+    }
+    applyRealtimeInputs();
+}
+
 void RocketGameApp::miningScanner()
 {
     if (state_.screen != Screen::Mining || miningExtraction_.active) {
@@ -1853,7 +1912,6 @@ void RocketGameApp::miningScanner()
     }
 
     pulseMiningScanner(state_, catalog_);
-    state_.statusLine = "Scanner pulse widened the terrain readout.";
     panelDirty_ = true;
 }
 
@@ -2177,7 +2235,7 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
     std::string_view destinationId = content::destination::moon;
     if (miningAct == MiningAct::ActOne) {
         if (request.difficulty >= 7) {
-            destinationId = content::destination::outerPlanets;
+            destinationId = content::destination::neptune;
             state_.meta.chapter = request.difficulty >= 9 ? GameChapter::Straylight : GameChapter::Breakthrough;
         } else if (request.difficulty >= 4) {
             destinationId = content::destination::mars;
@@ -2549,15 +2607,14 @@ void RocketGameApp::applyDebugActOneCheckpoint()
     state_.meta.furthestTier = currentDestination(state_, catalog_).tier;
     state_.meta.ark = {};
     state_.meta.campaignMilestone = CampaignMilestone::SolarTutorial;
+    state_.meta.campaignIntroductionAcknowledged = true;
+    state_.meta.straylightDiscoveryAcknowledged = false;
+    state_.storyBriefing = {};
     state_.meta.chapter = debugActOneCheckpoint_ == 0
         ? GameChapter::ProvingGround
         : (debugActOneCheckpoint_ == 1
             ? GameChapter::LunarProgram
             : (debugActOneCheckpoint_ == 2 ? GameChapter::RedFrontier : GameChapter::Breakthrough));
-
-    if (debugActOneCheckpoint_ == static_cast<int>(kDebugActOneCheckpoints.size()) - 1) {
-        discoverArk(state_, catalog_);
-    }
 
     if (debugActOneCheckpoint_ == 0) {
         state_.launchConfig.frontierTransfer = false;
@@ -2571,7 +2628,12 @@ void RocketGameApp::applyDebugActOneCheckpoint()
         setDestinationHistory(state_.meta.destinationFlybys, catalog_, checkpoint.destinationId, 1);
         setDestinationHistory(state_.meta.destinationOrbits, catalog_, checkpoint.destinationId, 1);
         startArrivalOps(state_, state_.lastOutcome);
-        state_.screen = Screen::ArrivalOps;
+        if (checkpoint.destinationId == std::string_view(content::destination::neptune)) {
+            scheduleStoryBriefing(state_, StoryBriefingId::StraylightDiscovery, Screen::ArrivalOps);
+            state_.screen = Screen::StoryBriefing;
+        } else {
+            state_.screen = Screen::ArrivalOps;
+        }
     }
 
     state_.statusLine = "Debug Act 1 "
@@ -2783,6 +2845,8 @@ void RocketGameApp::newGame()
     GameState freshState = createNewGame(catalog_, 0x524F434B45544ULL);
     ensureDroneBayState(freshState, catalog_);
     syncLaunchConfig(freshState, catalog_);
+    scheduleStoryBriefing(freshState, StoryBriefingId::CampaignIntroduction, Screen::Hangar);
+    freshState.screen = Screen::StoryBriefing;
     const std::string initialSave = serializeSaveData(captureSaveData(freshState));
     const bool stored = services_.saves.storeAtomic(initialSave);
     if (!stored) {
@@ -2880,8 +2944,14 @@ void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
     outcome.telemetry = chartTelemetryForOutcome(flightModel, catalog_, burnMultiplier, wasReturningHome, frozenTravelProgress);
     applyLaunchOutcome(state_, catalog_, outcome);
     if (shouldOpenArrivalOps(outcome, catalog_)) {
-        startArrivalOps(state_, outcome);
-        beginArrivalFanfare();
+        if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
+            // Neptune is the one arrival whose ordinary fanfare gives way to a
+            // saved, input-blocking story beat after the player reviews results.
+            state_.screen = Screen::Results;
+        } else {
+            startArrivalOps(state_, outcome);
+            beginArrivalFanfare();
+        }
     } else {
         state_.screen = Screen::Results;
     }
@@ -2997,6 +3067,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         arrivalOps();
     } else if (action == ui::actions::skipArrivalFanfare) {
         skipArrivalFanfare();
+    } else if (action == ui::actions::acknowledgeStoryBriefing) {
+        acknowledgeStoryBriefing();
     } else if (action == ui::actions::cutEngines) {
         cutEngines();
     } else if (action == ui::actions::pressureRelief) {
@@ -3120,7 +3192,7 @@ RenderSnapshot RocketGameApp::snapshot() const
             visualDestination = activeDestination;
         }
         result.frontierTransfer = session_.preparedLaunch.config.frontierTransfer;
-    } else if (state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
+    } else if (state_.screen == Screen::StoryBriefing || state_.screen == Screen::Results || state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::ArrivalOps || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
         }
@@ -3169,6 +3241,11 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.destinationTier = visualDestination->tier;
     result.debugActOneCheckpoint = debugActOneCheckpoint_;
     result.arkCondition = state_.meta.ark.condition;
+    result.straylightStoryReveal = state_.screen == Screen::StoryBriefing
+        && state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery;
+    if (result.straylightStoryReveal) {
+        result.arkCondition = ArkCondition::DerelictOperable;
+    }
     result.preflightActive = state_.screen == Screen::Launch && !session_.flightArmed && miningDroneTransferEnabled(state_);
     result.preflightProgress = result.preflightActive
         ? std::clamp(session_.preflightElapsed / tuning::session::preflightBoardingSeconds, 0.0, 1.0)

@@ -117,6 +117,11 @@ namespace destination {
 inline constexpr const char* earthOrbit = "earth_orbit";
 inline constexpr const char* moon = "moon";
 inline constexpr const char* mars = "mars";
+inline constexpr const char* jupiter = "jupiter";
+inline constexpr const char* saturn = "saturn";
+inline constexpr const char* uranus = "uranus";
+inline constexpr const char* neptune = "neptune";
+// Legacy save alias. This id is intentionally absent from the live catalog.
 inline constexpr const char* outerPlanets = "outer_planets";
 inline constexpr const char* nearbyStar = "nearby_star";
 inline constexpr const char* nearbyGalaxy = "nearby_galaxy";

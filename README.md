@@ -8,13 +8,13 @@ Rocket Rogue is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applicati
 - Native SDL 3 application with direct Vulkan 1.3 rendering, a Vulkan RmlUi host, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
 - Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
-- Frontier ladder: prove Earth Orbit repeatedly, commit to Moon, then continue outward through Mars, Outer Planets, Nearby Star, and Nearby Galaxy.
+- Frontier ladder: prove Earth Orbit, then reach Moon, Mars, Jupiter, Saturn, Uranus, and Neptune in order before continuing to Khepri Prime and the Rift Belt. Each successful arrival unlocks exactly the next destination; flyby, orbit, landing, and mining remain optional.
 - Arrival operations: flyby, orbit, and landing gates. Perfect orbit rewards show both science and mission credits.
 - Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
-- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, and stow/abort decisions.
+- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and stow/abort decisions.
 - Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
 - Drone Bay progression with mining, resource, survey, hazard, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
-- Ark campaign spine: Outer Planets discovery, scripted Ark jump/disaster beats, Navigation after the hostile-system stranding, and Ark fuel framing for later sorties.
+- Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. Scripted Ark jump/disaster beats, Navigation after hostile-system stranding, and Ark fuel framing follow.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
 
 ## Quick prerequisites

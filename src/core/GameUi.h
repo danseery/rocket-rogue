@@ -31,6 +31,7 @@ inline constexpr std::string_view orbitAbort = "orbit_abort";
 inline constexpr std::string_view orbitContinue = "orbit_continue";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
 inline constexpr std::string_view skipArrivalFanfare = "skip_arrival_fanfare";
+inline constexpr std::string_view acknowledgeStoryBriefing = "acknowledge_story_briefing";
 inline constexpr std::string_view repairShip = "repair_ship";
 inline constexpr std::string_view recruitCrew = "recruit_crew";
 inline constexpr std::string_view recruitCandidatePrefix = "recruit_candidate:";

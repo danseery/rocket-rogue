@@ -26,10 +26,10 @@ The desired aesthetic is:
 
 ## Core Game Shape
 
-- Launch loop: risk hidden failure, manage telemetry, return/eject/mitigate, earn flight data and credits.
+- Launch loop: risk a per-run hidden failure, use the composite Instability warning plus system telemetry, return/eject/mitigate, then compare burn depth with the revealed failure point in the debrief. The yellow marker is a performance target, not a safety boundary.
 - Arrival loop: reaching a destination should feel rewarding, then ask whether to flyby, orbit, or land.
 - Surface loop: landing opens survey, one fuel-gated mining run, deeper excavation before mining, payload extraction, and drone upgrades that persist until the shuttle or mining drone is destroyed.
-- Mining mini-game: direct drone control, destructible chunked terrain, fog of war, scanner pulses, drill friction, ore pockets, artifacts, 30s baseline oxygen, shared fuel draw, cargo, and extraction risk.
+- Mining mini-game: direct drone control, destructible chunked terrain, fog of war, scanner pulses with explicit reveal reports, drill friction, ore pockets, context-gated tethering, automatic support drones, 30s baseline oxygen, shared fuel draw, cargo, and extraction risk. Keyboard drilling defaults to Toggle and can be set to Hold; mouse/controller remain hold-based. Heat cuts drilling off at 100% and unlocks below 60%.
 - Long-term loop: recovered materials, blueprints, artifacts, and research unlock better tools, drone bay options, ship parts, Ark/base systems, and future story threads.
 
 ## Planet And Resource Pillars
@@ -79,7 +79,7 @@ This supports the Brotato / Vampire Survivors passive-defense direction without 
 
 ## Ark And Base Progression
 
-See [ARK_CAMPAIGN_NAVIGATION_PLAN.md](ARK_CAMPAIGN_NAVIGATION_PLAN.md) for the active campaign spine. The Ark is discovered beyond Neptune as derelict but operable. The first Ark jump succeeds; the second scripted jump hits a gravity well and strands the Ark in a hostile system. After that, Navigation becomes the mission-selection layer and shuttle sorties return to the Ark instead of Earth.
+See [ARK_CAMPAIGN_NAVIGATION_PLAN.md](ARK_CAMPAIGN_NAVIGATION_PLAN.md) for the active campaign spine. Earth Orbit, Moon, Mars, Jupiter, Saturn, Uranus, and Neptune are mandatory individual arrivals. The Straylight is not named, drawn, tracked, or hinted at before Neptune. After successful Neptune arrival, a saved full-screen discovery briefing identifies the derelict-but-operable Ark; acknowledging its sole approach action enables Ark/home framing and resumes Neptune Arrival Ops. The first Ark jump succeeds; the second scripted jump hits a gravity well and strands the Ark in a hostile system. After that, Navigation becomes the mission-selection layer and shuttle sorties return to the Ark instead of Earth.
 
 Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering, Science, Cargo/Hangar, Environmental, and Cultural systems can become future unlock families.
 

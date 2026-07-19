@@ -12,11 +12,15 @@ on:
       - "src/**"
       - "tests/**"
       - "third_party/**"
+      - "config/steam-*.json"
+      - "docs/STEAM_RELEASE_READINESS.md"
+      - "package.json"
       - "requirements-dev.txt"
       - "tools/build-scene-atlas*.py"
       - "tools/build-vulkan-shaders*.mjs"
       - "tools/summarize-native-benchmarks*.mjs"
       - "tools/check-platform-boundaries.mjs"
+      - "tools/verify-steam-readiness*.mjs"
       - ".github/workflows/native-release.yml"
   push:
     branches: [main]
@@ -29,19 +33,37 @@ on:
       - "src/**"
       - "tests/**"
       - "third_party/**"
+      - "config/steam-*.json"
+      - "docs/STEAM_RELEASE_READINESS.md"
+      - "package.json"
       - "requirements-dev.txt"
       - "tools/build-scene-atlas*.py"
       - "tools/build-vulkan-shaders*.mjs"
       - "tools/summarize-native-benchmarks*.mjs"
       - "tools/check-platform-boundaries.mjs"
+      - "tools/verify-steam-readiness*.mjs"
       - ".github/workflows/native-release.yml"
 
 permissions:
   contents: read
 
 jobs:
+  steam-release-policy:
+    name: OREBIT Steam release policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Test release-readiness validator
+        run: npm run test:steam-readiness
+      - name: Enforce Steam-native product policy
+        run: npm run check:steam-readiness
+
   windows-x64:
     name: Windows x86-64
+    needs: steam-release-policy
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -126,6 +148,7 @@ jobs:
 
   linux-x64:
     name: Linux x86-64 (Steam Runtime 4 SDK)
+    needs: steam-release-policy
     runs-on: ubuntu-24.04
     container:
       image: registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0

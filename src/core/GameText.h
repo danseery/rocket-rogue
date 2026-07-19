@@ -141,6 +141,7 @@ inline constexpr WarningCopy vibration {"VIB: structural oscillation", "VIB: fra
 inline constexpr WarningCopy guidance {"NAV: guidance divergence", "NAV: tracking solution drifting"};
 inline constexpr WarningCopy fuelMix {"MIX: fuel ratio out of range", "MIX: combustion efficiency falling"};
 inline constexpr WarningCopy abortRisk {"ABORT: escape window collapsing", "ABORT: capsule margin thinning"};
+inline constexpr WarningCopy instability {"INSTABILITY: failure imminent", "INSTABILITY: hidden failure margin narrowing"};
 } // namespace telemetry
 
 namespace labels {
@@ -196,6 +197,7 @@ inline constexpr std::string_view vibration = "VIB";
 inline constexpr std::string_view nav = "NAV";
 inline constexpr std::string_view mix = "MIX";
 inline constexpr std::string_view abort = "ABORT";
+inline constexpr std::string_view instability = "INSTABILITY";
 } // namespace labels
 
 namespace fuel {

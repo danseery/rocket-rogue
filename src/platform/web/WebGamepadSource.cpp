@@ -244,6 +244,10 @@ EM_JS(int, rr_browser_environment_flags_js, (), {
                 noteKeyboardPointer();
             }
         }, true);
+        // Match native input arbitration: deliberate pointer movement hands
+        // presentation back to mouse/keyboard, so a stale controller focus
+        // ring cannot appear to select a different control under the cursor.
+        globalThis.addEventListener("pointermove", noteKeyboardPointer, {capture: true, passive: true});
         globalThis.addEventListener("pointerdown", noteKeyboardPointer, true);
         globalThis.addEventListener("wheel", noteKeyboardPointer, {capture: true, passive: true});
         globalThis.__rocketRogueBrowserEnvironment = state;

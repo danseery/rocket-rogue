@@ -4,15 +4,18 @@ USG Notes remain the primary design direction. This implementation adds the firs
 
 ## Current Playable Mapping
 
-- Earth, Moon, Mars, and Outer Planets are still the solar-system tutorial.
-- Reaching Outer Planets discovers the Ark beyond Neptune. It is derelict and under-equipped, but operable.
+- The mandatory solar route is Earth Orbit -> Moon -> Mars -> Jupiter -> Saturn -> Uranus -> Neptune. Successful arrival unlocks the next body; flyby, orbit, landing, and mining are optional.
+- Jupiter, Saturn, Uranus, and Neptune are independent destinations with stable history and map states. The retired `outer_planets` id exists only to migrate older saves to Jupiter.
+- Before Neptune succeeds, no Straylight name, contact, silhouette, art, signal, or Ark-return framing may appear anywhere.
+- Successful Neptune arrival persists a blocking, full-screen discovery briefing. Its only action, `Approach the Straylight`, acknowledges the beat, discovers the derelict-but-operable Ark, saves, and resumes Neptune Arrival Ops.
+- A saved Campaign Introduction after New Game explains the proving-flight objective, hidden failure point, and sequential frontier route.
 - The first Ark jump succeeds and teaches that the Ark is a larger version of the press-your-luck shuttle loop.
 - The second Ark jump is scripted to hit a gravity well, damaging and stranding the Ark in a hostile system.
 - After the disaster, the Navigation screen becomes the mission-selection layer.
 - Surface `Shared fuel` becomes `Ark fuel`, preserving the shuttle/mining-drone tradeoff while changing the fiction from Earth-return reserves to Ark sortie reserves.
-- Current hostile-system destinations reuse the existing deep-space destinations:
-  - Nearby Star: first hostile-system sortie target.
-  - Nearby Galaxy: high-risk placeholder for later deep route content.
+- Current post-Neptune destinations reuse the existing physical tuning under canonical names:
+  - Khepri Prime (tier 7): first hostile-system sortie target.
+  - Rift Belt (tier 8): high-risk placeholder for later deep route content.
 
 ## Numbered Chapters
 
@@ -21,7 +24,7 @@ Chapter numbers are stable references for saves, tests, UI, and docs. Subtitles 
 - Chapter 1: Proving Ground - Earth Orbit tutorial/proving loop.
 - Chapter 2: Lunar Program - Moon arrival, flyby, orbit, and landing phase.
 - Chapter 3: Red Frontier - Mars research, surface, and mining loop.
-- Chapter 4: Breakthrough - Outer Planets and the operational Ark discovery beyond Neptune.
+- Chapter 4: Breakthrough - the individual Jupiter, Saturn, Uranus, and Neptune route, ending in the full-screen Straylight discovery beyond Neptune.
 - Chapter 5: Straylight / Aaru Vale - operational Straylight as the Ark home, exploring friendly Aaru Vale for fuel, search, discovery, and mining without combat.
 - Chapter 6: Arkfall - gravity-well disaster after leaving Aaru Vale; Straylight is damaged and stranded near Khepri Prime. The emergency perimeter system grants Mk I Attack/Defense drones and brings undersized bays to three slots before Act 2 combat mining begins.
 - Chapter 7: Last Campfire - stranded hostile-system survival from damaged Straylight near Khepri Prime, with Perimeter Coordination research opening advanced combat-drone tuning and synergies.

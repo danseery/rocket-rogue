@@ -197,7 +197,7 @@ bool SdlPlatform::initialize(int initialWidth, int initialHeight)
         "OREBIT",
         std::max(320, initialWidth),
         std::max(200, initialHeight),
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
     if (!window_) {
         log(PlatformLogLevel::Error, std::string("Window creation failed: ") + SDL_GetError());
         shutdown();
@@ -437,7 +437,7 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
         break;
     case SDL_EVENT_KEY_UP:
         noteKeyboardPointerActivity();
-        if (event.key.key == SDLK_SPACE) app.miningDrill(false);
+        if (event.key.key == SDLK_SPACE) app.miningKeyboardDrill(false);
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         noteKeyboardPointerActivity();
@@ -497,7 +497,7 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     case InputContext::MiningActive:
     case InputContext::MiningService:
         app.miningMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (down ? 1.0 : 0.0) - (up ? 1.0 : 0.0));
-        app.miningDrill(state && state[SDL_SCANCODE_SPACE]);
+        app.miningKeyboardDrill(state && state[SDL_SCANCODE_SPACE]);
         break;
     default:
         break;
@@ -524,6 +524,22 @@ bool SdlPlatform::consumeGraphicsRebuildRequest()
     const bool requested = graphicsRebuildRequested_;
     graphicsRebuildRequested_ = false;
     return requested;
+}
+
+bool SdlPlatform::showWindowWhenReady()
+{
+    if (!window_) return false;
+    if (!SDL_ShowWindow(window_)) {
+        log(PlatformLogLevel::Error, std::string("Unable to show native window: ") + SDL_GetError());
+        return false;
+    }
+
+    frameLifecycle_.setVisible(true);
+    framePacer_.resetDeadline();
+    refreshViewportMetrics();
+    refreshDisplayTiming();
+    graphicsRebuildRequested_ = true;
+    return true;
 }
 
 SDL_Window* SdlPlatform::window() const noexcept { return window_; }
@@ -603,6 +619,7 @@ void SdlPlatform::releaseRealtimeInputs(RocketGameApp& app)
     app.flybyMove(0.0, 0.0);
     app.orbitMove(0.0, 0.0);
     app.miningMove(0.0, 0.0);
+    app.miningKeyboardDrill(false);
     app.miningDrill(false);
 }
 

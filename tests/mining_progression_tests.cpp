@@ -316,11 +316,11 @@ void miningGateContractsAndRuntimeAreDeterministic()
     require(miningCapabilityReadyForGate(profile, cocoon), "the matching Hazard mark should satisfy the direct key forecast");
 
     MetaProgress meta;
-    MiningStorySiteProgress* firstSite = ensureMiningStorySite(meta, content::destination::outerPlanets, actOneEight);
-    MiningStorySiteProgress* sameSite = ensureMiningStorySite(meta, content::destination::outerPlanets, actOneEight);
+    MiningStorySiteProgress* firstSite = ensureMiningStorySite(meta, content::destination::jupiter, actOneEight);
+    MiningStorySiteProgress* sameSite = ensureMiningStorySite(meta, content::destination::jupiter, actOneEight);
     require(firstSite != nullptr && sameSite != nullptr && firstSite->seed == sameSite->seed && firstSite->artifactId == sameSite->artifactId,
         "story sites should retain deterministic seed and artifact identity until completion");
-    creditExtractedMiningStoryArtifacts(meta, {{"wrong", content::destination::outerPlanets, false, ArtifactKind::Story}});
+    creditExtractedMiningStoryArtifacts(meta, {{"wrong", content::destination::jupiter, false, ArtifactKind::Story}});
     require(!meta.miningStorySites.front().completed, "unrelated recovered artifacts must not complete a story site");
     ArtifactRecord recovered;
     recovered.id = meta.miningStorySites.front().artifactId;
@@ -339,7 +339,7 @@ void miningGateContractsAndRuntimeAreDeterministic()
     };
 
     GameState hazardState = createNewGame(catalog, 501);
-    prepareSurface(hazardState, content::destination::outerPlanets);
+    prepareSurface(hazardState, content::destination::jupiter);
     const MiningArenaRequest hazardRequest {MiningAct::ActOne, 8, 0xCAFE, true, MiningGateType::HazardCocoon};
     require(startMiningRun(hazardState, catalog, hazardRequest, false).applied, "Hazard Cocoon debug arena should start");
     require(hazardState.run.mining.gate.type == MiningGateType::HazardCocoon
@@ -379,7 +379,7 @@ void miningGateContractsAndRuntimeAreDeterministic()
         "enemy seal should open only after its assigned encounter is cleared");
 
     GameState surveyState = createNewGame(catalog, 503);
-    prepareSurface(surveyState, content::destination::outerPlanets);
+    prepareSurface(surveyState, content::destination::jupiter);
     const MiningArenaRequest surveyRequest {MiningAct::ActOne, 8, 0x5151, true, MiningGateType::SurveyTriangulation};
     require(startMiningRun(surveyState, catalog, surveyRequest, false).applied, "Survey Triangulation debug arena should start");
     require(surveyState.run.mining.gate.markers.size() == 3, "triangulation should stamp three distinct scanner origins");

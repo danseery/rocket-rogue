@@ -28,7 +28,14 @@ enum class Screen {
     Upgrade,
     Legacy,
     DroneOps,
-    Navigation
+    Navigation,
+    StoryBriefing
+};
+
+enum class StoryBriefingId {
+    None,
+    CampaignIntroduction,
+    StraylightDiscovery
 };
 
 enum class CampaignMilestone {
@@ -597,6 +604,7 @@ struct TelemetryEvent {
     double fuelMix = 0.0;
     double guidance = 0.0;
     double abortRisk = 0.0;
+    double instability = 0.0;
     double stress = 0.0;
     double warning = 0.0;
     std::string message;
@@ -670,6 +678,7 @@ struct MetaProgress {
     int totalFlybyMisses = 0;
     int totalFlybyGoods = 0;
     int totalFlybyPerfects = 0;
+    std::vector<std::string> destinationHistoryIds;
     std::vector<int> destinationAttempts;
     std::vector<int> destinationSuccesses;
     std::vector<int> destinationFlybys;
@@ -677,6 +686,13 @@ struct MetaProgress {
     std::vector<int> destinationLandings;
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
+    bool campaignIntroductionAcknowledged = false;
+    bool straylightDiscoveryAcknowledged = false;
+};
+
+struct StoryBriefingState {
+    StoryBriefingId pending = StoryBriefingId::None;
+    Screen continuation = Screen::Hangar;
 };
 
 struct ArrivalOpsState {
@@ -976,6 +992,7 @@ struct MiningRunState {
     double hullDirX = 0.0;
     double hullDirY = 1.0;
     bool drilling = false;
+    bool drillThermalLock = false;
     bool failurePending = false;
     double failureSeconds = 0.0;
     std::string failureMessage;
@@ -1072,6 +1089,7 @@ struct GameState {
     MetaProgress meta;
     LaunchConfig launchConfig;
     LaunchOutcome lastOutcome;
+    StoryBriefingState storyBriefing;
     std::string statusLine = std::string(text::status::welcome);
 };
 

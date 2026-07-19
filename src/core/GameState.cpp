@@ -112,11 +112,36 @@ void ensurePermanentModuleState(GameState& state, const ContentCatalog& catalog)
 void ensureDestinationHistory(GameState& state, const ContentCatalog& catalog)
 {
     const std::size_t count = catalog.destinations.size();
-    state.meta.destinationAttempts.resize(count, 0);
-    state.meta.destinationSuccesses.resize(count, 0);
-    state.meta.destinationFlybys.resize(count, 0);
-    state.meta.destinationOrbits.resize(count, 0);
-    state.meta.destinationLandings.resize(count, 0);
+    std::vector<std::string> catalogIds;
+    catalogIds.reserve(count);
+    for (const Destination& destination : catalog.destinations) {
+        catalogIds.push_back(destination.id);
+    }
+
+    if (!state.meta.destinationHistoryIds.empty() && state.meta.destinationHistoryIds != catalogIds) {
+        const auto remap = [&](const std::vector<int>& source) {
+            std::vector<int> result(count, 0);
+            for (std::size_t oldIndex = 0; oldIndex < state.meta.destinationHistoryIds.size() && oldIndex < source.size(); ++oldIndex) {
+                const auto found = std::find(catalogIds.begin(), catalogIds.end(), state.meta.destinationHistoryIds[oldIndex]);
+                if (found != catalogIds.end()) {
+                    result[static_cast<std::size_t>(std::distance(catalogIds.begin(), found))] = source[oldIndex];
+                }
+            }
+            return result;
+        };
+        state.meta.destinationAttempts = remap(state.meta.destinationAttempts);
+        state.meta.destinationSuccesses = remap(state.meta.destinationSuccesses);
+        state.meta.destinationFlybys = remap(state.meta.destinationFlybys);
+        state.meta.destinationOrbits = remap(state.meta.destinationOrbits);
+        state.meta.destinationLandings = remap(state.meta.destinationLandings);
+    } else {
+        state.meta.destinationAttempts.resize(count, 0);
+        state.meta.destinationSuccesses.resize(count, 0);
+        state.meta.destinationFlybys.resize(count, 0);
+        state.meta.destinationOrbits.resize(count, 0);
+        state.meta.destinationLandings.resize(count, 0);
+    }
+    state.meta.destinationHistoryIds = std::move(catalogIds);
 }
 
 int destinationIndexForId(const ContentCatalog& catalog, const std::string& destinationId)
@@ -143,6 +168,14 @@ bool isCleanShallowRecoveryOutcome(const Destination& destination, const LaunchO
 
 int navigationFuelCost(const Destination& destination)
 {
+    // Khepri Prime and Rift Belt moved to campaign tiers 7 and 8, but their
+    // established sortie economics remain the former tier-4/tier-5 values.
+    if (destination.id == content::destination::nearbyStar) {
+        return 6;
+    }
+    if (destination.id == content::destination::nearbyGalaxy) {
+        return 7;
+    }
     return 2 + destination.tier;
 }
 
@@ -874,7 +907,7 @@ GameChapter chapterForState(const GameState& state, const ContentCatalog& catalo
         return GameChapter::Straylight;
     }
 
-    const int outerIndex = destinationIndexForId(catalog, content::destination::outerPlanets);
+    const int outerIndex = destinationIndexForId(catalog, content::destination::jupiter);
     if (arkDiscovered(state) ||
         (outerIndex >= 0 && state.run.destinationIndex >= outerIndex) ||
         (outerIndex >= 0 && state.meta.furthestTier >= catalog.destinations[static_cast<std::size_t>(outerIndex)].tier)) {
@@ -908,48 +941,85 @@ void syncChapterProgress(GameState& state, const ContentCatalog& catalog)
 
 bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog)
 {
-    if (hostileSystemActive(state)) {
-        return false;
+    bool migrated = false;
+    const int jupiterIndex = destinationIndexForId(catalog, content::destination::jupiter);
+    const int neptuneIndex = destinationIndexForId(catalog, content::destination::neptune);
+    const int khepriIndex = destinationIndexForId(catalog, content::destination::nearbyStar);
+    if (state.launchConfig.destinationId == content::destination::outerPlanets && jupiterIndex >= 0) {
+        state.run.destinationIndex = jupiterIndex;
+        state.launchConfig.frontierTransfer = false;
+        state.launchConfig.destinationId = content::destination::jupiter;
+        migrated = true;
     }
 
-    const int outerIndex = destinationIndexForId(catalog, content::destination::outerPlanets);
-    if (outerIndex < 0) {
-        return false;
-    }
-
-    const int launchIndex = destinationIndexForId(catalog, state.launchConfig.destinationId);
-    const bool legacyDeepSpaceLaunch = launchIndex > outerIndex ||
-        state.launchConfig.destinationId == content::destination::nearbyStar ||
-        state.launchConfig.destinationId == content::destination::nearbyGalaxy;
-    const bool legacyDeepSpaceRun = state.run.destinationIndex > outerIndex;
-    const bool reachedOuterPlanetsWithoutArk = state.run.destinationIndex >= outerIndex &&
-        state.meta.furthestTier >= catalog.destinations[static_cast<std::size_t>(outerIndex)].tier &&
-        !arkDiscovered(state);
-
-    if (!legacyDeepSpaceLaunch && !legacyDeepSpaceRun && !reachedOuterPlanetsWithoutArk) {
-        return false;
-    }
-
-    state.run.destinationIndex = outerIndex;
-    state.meta.furthestTier = std::max(state.meta.furthestTier, catalog.destinations[static_cast<std::size_t>(outerIndex)].tier);
-    discoverArk(state, catalog);
-    state.launchConfig.frontierTransfer = false;
-    state.launchConfig.destinationId = content::destination::outerPlanets;
-    state.launchConfig.burnGoalMultiplier = defaultProvingTarget(catalog.destinations[static_cast<std::size_t>(outerIndex)]);
-
-    if (state.screen == Screen::Launch ||
-        state.screen == Screen::Results ||
-        state.screen == Screen::ArrivalFanfare ||
-        state.screen == Screen::ArrivalOps ||
-        state.screen == Screen::Flyby ||
-        state.screen == Screen::Orbit ||
-        state.screen == Screen::Research ||
-        state.screen == Screen::SurfaceExpedition ||
-        state.screen == Screen::Mining) {
+    const bool legacyDirectDeepSpace = !arkDiscovered(state)
+        && khepriIndex >= 0
+        && state.run.destinationIndex >= khepriIndex
+        && (state.launchConfig.destinationId == content::destination::nearbyStar
+            || state.launchConfig.destinationId == content::destination::nearbyGalaxy);
+    if (legacyDirectDeepSpace && neptuneIndex >= 0) {
+        state.meta.campaignMilestone = CampaignMilestone::ArkDiscovered;
+        state.meta.ark.condition = ArkCondition::DerelictOperable;
+        state.meta.ark.fuelReserve = std::max(state.meta.ark.fuelReserve, 1);
+        state.run.destinationIndex = neptuneIndex;
+        state.launchConfig.frontierTransfer = false;
+        state.launchConfig.destinationId = content::destination::neptune;
+        state.storyBriefing = {};
         state.screen = Screen::Hangar;
+        migrated = true;
     }
 
-    state.statusLine = "Ark transition restored. Prep the derelict Ark instead of the retired deep-space ladder.";
+    if (arkDiscovered(state) && neptuneIndex >= 0) {
+        if (!state.meta.straylightDiscoveryAcknowledged) {
+            state.meta.straylightDiscoveryAcknowledged = true;
+            migrated = true;
+        }
+        state.meta.furthestTier = std::max(state.meta.furthestTier, catalog.destinations[static_cast<std::size_t>(neptuneIndex)].tier);
+        for (const std::string_view id : {std::string_view(content::destination::jupiter), std::string_view(content::destination::saturn), std::string_view(content::destination::uranus), std::string_view(content::destination::neptune)}) {
+            const int index = destinationIndexForId(catalog, std::string(id));
+            if (index >= 0 && static_cast<std::size_t>(index) < state.meta.destinationSuccesses.size()
+                && state.meta.destinationSuccesses[static_cast<std::size_t>(index)] < 1) {
+                state.meta.destinationSuccesses[static_cast<std::size_t>(index)] = 1;
+                migrated = true;
+            }
+        }
+        if (state.meta.navigation.arkLocationId.empty()) {
+            state.meta.navigation.arkLocationId = content::destination::neptune;
+            migrated = true;
+        }
+        addUniqueId(state.meta.navigation.discoveredDestinationIds, content::destination::neptune);
+    }
+
+    if (migrated) {
+        state.statusLine = "Legacy frontier progress migrated to the individual outer-planet route.";
+        syncLaunchConfig(state, catalog);
+    }
+    return migrated;
+}
+
+void scheduleStoryBriefing(GameState& state, StoryBriefingId briefing, Screen continuation)
+{
+    state.storyBriefing.pending = briefing;
+    state.storyBriefing.continuation = continuation;
+}
+
+bool acknowledgeStoryBriefing(GameState& state, const ContentCatalog& catalog)
+{
+    const StoryBriefingId briefing = state.storyBriefing.pending;
+    if (briefing == StoryBriefingId::None) {
+        return false;
+    }
+
+    const Screen continuation = state.storyBriefing.continuation;
+    if (briefing == StoryBriefingId::CampaignIntroduction) {
+        state.meta.campaignIntroductionAcknowledged = true;
+        state.statusLine = "Mission brief acknowledged. Build a flight profile and open the route to the Moon.";
+    } else if (briefing == StoryBriefingId::StraylightDiscovery) {
+        state.meta.straylightDiscoveryAcknowledged = true;
+        discoverArk(state, catalog);
+    }
+    state.storyBriefing = {};
+    state.screen = continuation;
     syncLaunchConfig(state, catalog);
     return true;
 }
@@ -962,7 +1032,7 @@ std::vector<const Destination*> navigationDestinations(const GameState& state, c
     }
 
     for (const Destination& destination : catalog.destinations) {
-        if (destination.tier >= 4) {
+        if (destination.tier >= 7) {
             destinations.push_back(&destination);
         }
     }
@@ -979,8 +1049,8 @@ void discoverArk(GameState& state, const ContentCatalog& catalog)
     state.meta.ark.condition = ArkCondition::DerelictOperable;
     state.meta.ark.fuelReserve = std::max(state.meta.ark.fuelReserve, 1);
     state.meta.navigation.currentSystemId = "solar_system";
-    state.meta.navigation.arkLocationId = content::destination::outerPlanets;
-    state.meta.navigation.discoveredDestinationIds = {content::destination::outerPlanets};
+    state.meta.navigation.arkLocationId = content::destination::neptune;
+    state.meta.navigation.discoveredDestinationIds = {content::destination::neptune};
     state.statusLine = "Ark discovered beyond Neptune: derelict, under-equipped, but operable.";
     syncLaunchConfig(state, catalog);
 }
@@ -1083,7 +1153,7 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
 int frontierReadinessRequired(const GameState& state, const ContentCatalog& catalog)
 {
     const Destination& destination = currentDestination(state, catalog);
-    if (destination.tier >= static_cast<int>(catalog.destinations.size()) - 1) {
+    if (nextDestination(state, catalog) == nullptr) {
         return 0;
     }
     if (destination.id == content::destination::moon) {
@@ -1104,8 +1174,8 @@ int frontierReadinessCap(const GameState& state, const ContentCatalog& catalog)
 const Destination* nextDestination(const GameState& state, const ContentCatalog& catalog)
 {
     if (!hostileSystemActive(state)) {
-        const int outerIndex = destinationIndexForId(catalog, content::destination::outerPlanets);
-        if (outerIndex >= 0 && state.run.destinationIndex >= outerIndex) {
+        const int neptuneIndex = destinationIndexForId(catalog, content::destination::neptune);
+        if (neptuneIndex >= 0 && state.run.destinationIndex >= neptuneIndex) {
             return nullptr;
         }
     }
@@ -1231,14 +1301,21 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     state.meta.blueprintProgress += outcome.blueprintGain;
     unlockFromBlueprints(state);
     const int outcomeDestinationIndex = destinationIndexForId(catalog, outcome.destinationId);
+    const Destination* outcomeDestination = catalog.findDestination(outcome.destinationId);
+    const bool solarFrontierAdvance = outcomeDestination != nullptr
+        && outcomeDestination->tier == state.run.destinationIndex + 1;
+    const bool selectedHostileSortie = hostileSystemActive(state)
+        && outcomeDestinationIndex == state.run.destinationIndex;
+    const bool validDestinationSuccess = outcome.type == LaunchResultType::MissionComplete
+        && outcomeDestination != nullptr
+        && (!outcome.frontierTransfer || solarFrontierAdvance || selectedHostileSortie);
     if (outcomeDestinationIndex >= 0) {
         const auto index = static_cast<std::size_t>(outcomeDestinationIndex);
         state.meta.destinationAttempts[index] += 1;
-        if (outcome.type == LaunchResultType::MissionComplete) {
+        if (validDestinationSuccess) {
             state.meta.destinationSuccesses[index] += 1;
         }
     }
-    const Destination* outcomeDestination = catalog.findDestination(outcome.destinationId);
     const bool shallowRecovery = outcomeDestination != nullptr && isShallowRecoveryOutcome(*outcomeDestination, outcome);
     const bool cleanShallowRecovery = outcomeDestination != nullptr && isCleanShallowRecoveryOutcome(*outcomeDestination, outcome);
     const bool cleanShallowRecoveryDestroyed = outcome.type == LaunchResultType::Destroyed
@@ -1302,12 +1379,19 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
         if (outcome.frontierTransfer) {
             if (outcome.type == LaunchResultType::MissionComplete) {
-                if (destination != nullptr && destination->tier == state.run.destinationIndex + 1) {
+                if (destination != nullptr && solarFrontierAdvance) {
                     state.run.destinationIndex += 1;
                     state.run.frontierReadiness = 0;
                     state.meta.furthestTier = std::max(state.meta.furthestTier, destination->tier);
                     state.launchConfig.destinationId = destination->id;
                     state.launchConfig.burnGoalMultiplier = defaultProvingTarget(*destination);
+                    state.statusLine = text::transferAchievedNewRoute(destination->name);
+                    if (destination->id == content::destination::jupiter ||
+                        destination->id == content::destination::saturn ||
+                        destination->id == content::destination::uranus) {
+                        state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+                    }
+                } else if (destination != nullptr && selectedHostileSortie) {
                     state.statusLine = text::transferAchievedNewRoute(destination->name);
                 } else {
                     state.statusLine = std::string(text::status::transferLedgerRejected);
@@ -1356,8 +1440,9 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (outcome.type == LaunchResultType::MissionComplete &&
         outcomeDestination != nullptr &&
-        outcomeDestination->id == content::destination::outerPlanets) {
-        discoverArk(state, catalog);
+        outcomeDestination->id == content::destination::neptune &&
+        !state.meta.straylightDiscoveryAcknowledged) {
+        scheduleStoryBriefing(state, StoryBriefingId::StraylightDiscovery, Screen::ArrivalOps);
     }
 
     syncLaunchConfig(state, catalog);

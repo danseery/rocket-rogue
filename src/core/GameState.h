@@ -75,6 +75,8 @@ bool navigationAvailable(const GameState& state);
 GameChapter chapterForState(const GameState& state, const ContentCatalog& catalog);
 void syncChapterProgress(GameState& state, const ContentCatalog& catalog);
 bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog);
+void scheduleStoryBriefing(GameState& state, StoryBriefingId briefing, Screen continuation);
+bool acknowledgeStoryBriefing(GameState& state, const ContentCatalog& catalog);
 std::vector<const Destination*> navigationDestinations(const GameState& state, const ContentCatalog& catalog);
 void discoverArk(GameState& state, const ContentCatalog& catalog);
 bool performArkJump(GameState& state, const ContentCatalog& catalog);

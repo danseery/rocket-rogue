@@ -356,6 +356,11 @@ else()
 
     add_executable(RocketRogue src/platform/sdl/NativeMain.cpp)
     target_link_libraries(RocketRogue PRIVATE rocket_app rocket_platform_sdl)
+    if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
+        # Player-facing Windows packages should not open a console. Debug and
+        # profiler presets remain console applications for live diagnostics.
+        set_target_properties(RocketRogue PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
     if(ROCKET_STEAMWORKS_SDK_ROOT AND UNIX AND NOT APPLE)
         # The packaged optional Steamworks runtime lives beside the executable.
         # Keep that package relocatable instead of depending on the SDK path

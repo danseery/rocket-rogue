@@ -785,7 +785,25 @@ TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
         incidentAbortRisk -
         escapeRelief * tuning::telemetry::abortEscapeRelief;
     event.abortRisk = std::clamp(rawAbortRisk * launch.crewAbortMultiplier, 0.0, 1.0);
-    event.warning = std::clamp(std::max({earlyThermal, event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk}), 0.0, 1.0);
+    if (progressToCrash <= tuning::telemetry::instabilityStart) {
+        event.instability = 0.0;
+    } else if (progressToCrash <= tuning::telemetry::instabilityHighProximity) {
+        event.instability = tuning::telemetry::instabilityHighWarning
+            * (progressToCrash - tuning::telemetry::instabilityStart)
+            / (tuning::telemetry::instabilityHighProximity - tuning::telemetry::instabilityStart);
+    } else if (progressToCrash <= tuning::telemetry::instabilityCriticalProximity) {
+        event.instability = tuning::telemetry::instabilityHighWarning
+            + (tuning::telemetry::instabilityCriticalWarning - tuning::telemetry::instabilityHighWarning)
+                * (progressToCrash - tuning::telemetry::instabilityHighProximity)
+                / (tuning::telemetry::instabilityCriticalProximity - tuning::telemetry::instabilityHighProximity);
+    } else {
+        event.instability = tuning::telemetry::instabilityCriticalWarning
+            + (1.0 - tuning::telemetry::instabilityCriticalWarning)
+                * (progressToCrash - tuning::telemetry::instabilityCriticalProximity)
+                / (1.0 - tuning::telemetry::instabilityCriticalProximity);
+    }
+    event.instability = std::clamp(event.instability, 0.0, 1.0);
+    event.warning = std::clamp(std::max({earlyThermal, event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk, event.instability}), 0.0, 1.0);
     event.stress = std::clamp(
         event.heat * tuning::telemetry::stressHeatScale +
             event.pressure * tuning::telemetry::stressPressureScale +

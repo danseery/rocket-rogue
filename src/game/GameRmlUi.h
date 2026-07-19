@@ -32,6 +32,7 @@ struct RmlButtonBinding {
 
 enum class RmlPanelMode {
     Title,
+    StoryBriefing,
     Control,
     PhaseBoard,
     ArrivalFanfare,

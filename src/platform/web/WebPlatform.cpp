@@ -19,6 +19,7 @@ EM_JS(char*, rr_web_string_preference, (int field), {
         if (field === 0) value = localStorage.getItem("rocket_rogue_resolution") || "auto";
         else if (field === 1) value = localStorage.getItem("rocket_rogue_help_dismissed_v1") || "[]";
         else if (field === 2) value = localStorage.getItem("rocket_rogue_frame_limit_mode") || "platform_default";
+        else if (field === 3) value = localStorage.getItem("rocket_rogue_keyboard_drill_mode") || "toggle";
     } catch (error) {}
     const length = lengthBytesUTF8(value) + 1;
     const result = _malloc(length);
@@ -64,6 +65,7 @@ EM_JS(void, rr_web_install_preference_revision_observer, (), {
         "[data-resolution-select]",
         "[data-frame-limit-select]",
         "[data-game-speed-select]",
+        "[data-keyboard-drill-mode-select]",
         "[data-controller-prompt-select]",
         "[data-controller-deadzone-select]",
         "[data-help-toggle]",
@@ -110,10 +112,11 @@ EM_JS(void, rr_web_bump_preference_revision, (), {
 });
 
 EM_JS(int, rr_web_store_preferences,
-    (const char* resolutionPtr, const char* frameLimitPtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
+    (const char* resolutionPtr, const char* frameLimitPtr, const char* drillModePtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
         try {
             const resolution = UTF8ToString(resolutionPtr || 0) || "auto";
             const frameLimit = UTF8ToString(frameLimitPtr || 0) || "platform_default";
+            const drillMode = UTF8ToString(drillModePtr || 0) || "toggle";
             const dismissed = UTF8ToString(dismissedPtr || 0) || "[]";
             if (resolution === "auto") localStorage.removeItem("rocket_rogue_resolution");
             else localStorage.setItem("rocket_rogue_resolution", resolution);
@@ -121,6 +124,8 @@ EM_JS(int, rr_web_store_preferences,
             else localStorage.setItem("rocket_rogue_game_speed", String(gameSpeed));
             if (frameLimit === "platform_default") localStorage.removeItem("rocket_rogue_frame_limit_mode");
             else localStorage.setItem("rocket_rogue_frame_limit_mode", frameLimit);
+            if (drillMode === "hold") localStorage.setItem("rocket_rogue_keyboard_drill_mode", "hold");
+            else localStorage.removeItem("rocket_rogue_keyboard_drill_mode");
             const setFlag = (key, enabled) => enabled ? localStorage.setItem(key, "1") : localStorage.removeItem(key);
             setFlag("rocket_rogue_debug_tools", debugTools !== 0);
             setFlag("rocket_rogue_performance_stats", performanceStats !== 0);
@@ -429,6 +434,7 @@ AppPreferences WebPreferenceStore::load()
     preferences.controller = loadWebControllerPreferences();
     preferences.resolutionPreset = takeJsString(rr_web_string_preference(0));
     preferences.frameLimitMode = parseFrameLimitMode(takeJsString(rr_web_string_preference(2)));
+    preferences.miningDrillMode = takeJsString(rr_web_string_preference(3)) == "hold" ? MiningDrillMode::Hold : MiningDrillMode::Toggle;
     preferences.gameSpeed = rr_web_number_preference(0);
     preferences.debugToolsEnabled = rr_web_bool_preference(0) != 0;
     preferences.performanceStatsEnabled = rr_web_bool_preference(4) != 0;
@@ -450,7 +456,8 @@ bool WebPreferenceStore::store(const AppPreferences& preferences)
     rr_web_bump_preference_revision();
     loaded_ = false;
     const std::string dismissed = encodeSimpleJsonStrings(preferences.dismissedHelpTopics);
-    if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), frameLimitModeName(preferences.frameLimitMode), preferences.gameSpeed,
+    const char* drillMode = preferences.miningDrillMode == MiningDrillMode::Hold ? "hold" : "toggle";
+    if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), frameLimitModeName(preferences.frameLimitMode), drillMode, preferences.gameSpeed,
             preferences.debugToolsEnabled, preferences.performanceStatsEnabled, preferences.helpDisabled,
             preferences.cameraShakeDisabled, dismissed.c_str()) != 0) {
         // Reload lazily so normalization performed by the JS storage boundary

@@ -97,6 +97,9 @@ public:
     void completeFrame();
     bool consumeFrameClockReset();
     bool consumeGraphicsRebuildRequest();
+    // Keep the native window off-screen while Vulkan, assets, and RmlUi
+    // initialize so players never see an unpainted OS/Vulkan surface.
+    bool showWindowWhenReady();
     SDL_Window* window() const noexcept;
 
     static std::filesystem::path preferenceDirectory();

@@ -249,6 +249,11 @@ int main(int argumentCount, char** arguments)
             platform.shutdown();
             return 1;
         }
+        if (!platform.showWindowWhenReady()) {
+            runner.shutdown();
+            platform.shutdown();
+            return 1;
+        }
 
         std::optional<rocket::performance::NativeBenchmarkController> benchmark;
         if (benchmarkOptions.enabled) {

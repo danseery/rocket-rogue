@@ -373,6 +373,8 @@ int screenToInt(Screen screen)
         return 7;
     case Screen::Navigation:
         return 8;
+    case Screen::StoryBriefing:
+        return 9;
     default:
         return 0;
     }
@@ -395,9 +397,28 @@ Screen screenFromInt(int value)
         return Screen::DroneOps;
     case 8:
         return Screen::Navigation;
+    case 9:
+        return Screen::StoryBriefing;
     default:
         return Screen::Hangar;
     }
+}
+
+int storyBriefingToInt(StoryBriefingId briefing)
+{
+    switch (briefing) {
+    case StoryBriefingId::CampaignIntroduction: return 1;
+    case StoryBriefingId::StraylightDiscovery: return 2;
+    case StoryBriefingId::None:
+    default: return 0;
+    }
+}
+
+StoryBriefingId storyBriefingFromInt(int value)
+{
+    if (value == 1) return StoryBriefingId::CampaignIntroduction;
+    if (value == 2) return StoryBriefingId::StraylightDiscovery;
+    return StoryBriefingId::None;
 }
 
 int campaignMilestoneToInt(CampaignMilestone milestone)
@@ -1666,12 +1687,15 @@ SaveData captureSaveData(const GameState& state)
     } else if ((state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) && state.run.surfaceExpedition.active) {
         save.screen = Screen::SurfaceExpedition;
     } else {
-        save.screen = state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
+        save.screen = state.screen == Screen::StoryBriefing || state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
     }
     save.campaignMilestone = state.meta.campaignMilestone;
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
     save.navigation = state.meta.navigation;
+    save.storyBriefing = state.storyBriefing;
+    save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
+    save.straylightDiscoveryAcknowledged = state.meta.straylightDiscoveryAcknowledged;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
@@ -1706,6 +1730,7 @@ SaveData captureSaveData(const GameState& state)
     save.totalFlybyMisses = state.meta.totalFlybyMisses;
     save.totalFlybyGoods = state.meta.totalFlybyGoods;
     save.totalFlybyPerfects = state.meta.totalFlybyPerfects;
+    save.destinationHistoryIds = state.meta.destinationHistoryIds;
     save.destinationAttempts = state.meta.destinationAttempts;
     save.destinationSuccesses = state.meta.destinationSuccesses;
     save.destinationFlybys = state.meta.destinationFlybys;
@@ -1719,9 +1744,31 @@ SaveData captureSaveData(const GameState& state)
 
 void restoreSaveData(GameState& state, const ContentCatalog& catalog, const SaveData& save)
 {
+    const auto catalogIndex = [&](std::string_view id) {
+        const auto found = std::find_if(catalog.destinations.begin(), catalog.destinations.end(), [id](const Destination& destination) {
+            return destination.id == id;
+        });
+        return found == catalog.destinations.end() ? -1 : static_cast<int>(std::distance(catalog.destinations.begin(), found));
+    };
+    const bool legacyArkDiscovered = save.ark.condition != ArkCondition::NotFound || save.campaignMilestone != CampaignMilestone::SolarTutorial;
+    const bool legacyHostileSystem = save.ark.gravityWellDisaster ||
+        save.ark.condition == ArkCondition::DamagedStranded ||
+        save.ark.condition == ArkCondition::Repairing;
     state.seed = save.seed;
     state.run.credits = save.credits;
-    state.run.destinationIndex = std::clamp(save.destinationIndex, 0, static_cast<int>(catalog.destinations.size()) - 1);
+    if (save.version < 2) {
+        if (legacyHostileSystem) {
+            state.run.destinationIndex = catalogIndex(save.destinationIndex >= 5 ? content::destination::nearbyGalaxy : content::destination::nearbyStar);
+        } else if (legacyArkDiscovered) {
+            state.run.destinationIndex = catalogIndex(content::destination::neptune);
+        } else if (save.destinationIndex <= 2) {
+            state.run.destinationIndex = std::clamp(save.destinationIndex, 0, 2);
+        } else {
+            state.run.destinationIndex = catalogIndex(content::destination::jupiter);
+        }
+    } else {
+        state.run.destinationIndex = std::clamp(save.destinationIndex, 0, static_cast<int>(catalog.destinations.size()) - 1);
+    }
     state.run.frontierReadiness = std::max(0, save.frontierReadiness);
     state.run.shipDamage = std::clamp(save.shipDamage, 0, 100);
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
@@ -1826,6 +1873,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.chapter = save.chapter;
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
+    state.storyBriefing = save.storyBriefing;
+    state.meta.campaignIntroductionAcknowledged = save.version < 2 ? true : save.campaignIntroductionAcknowledged;
+    state.meta.straylightDiscoveryAcknowledged = save.version < 2 ? legacyArkDiscovered : save.straylightDiscoveryAcknowledged;
     if (state.screen == Screen::Navigation && !navigationAvailable(state)) {
         state.screen = Screen::Hangar;
     }
@@ -1846,11 +1896,43 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.totalFlybyMisses = std::max(0, save.totalFlybyMisses);
     state.meta.totalFlybyGoods = std::max(0, save.totalFlybyGoods);
     state.meta.totalFlybyPerfects = std::max(0, save.totalFlybyPerfects);
-    state.meta.destinationAttempts = save.destinationAttempts;
-    state.meta.destinationSuccesses = save.destinationSuccesses;
-    state.meta.destinationFlybys = save.destinationFlybys;
-    state.meta.destinationOrbits = save.destinationOrbits;
-    state.meta.destinationLandings = save.destinationLandings;
+    if (save.version >= 2 && !save.destinationHistoryIds.empty()) {
+        state.meta.destinationHistoryIds = save.destinationHistoryIds;
+        state.meta.destinationAttempts = save.destinationAttempts;
+        state.meta.destinationSuccesses = save.destinationSuccesses;
+        state.meta.destinationFlybys = save.destinationFlybys;
+        state.meta.destinationOrbits = save.destinationOrbits;
+        state.meta.destinationLandings = save.destinationLandings;
+    } else {
+        state.meta.destinationHistoryIds = {
+            content::destination::earthOrbit,
+            content::destination::moon,
+            content::destination::mars,
+            content::destination::jupiter,
+            content::destination::nearbyStar,
+            content::destination::nearbyGalaxy
+        };
+        state.meta.destinationAttempts = save.destinationAttempts;
+        state.meta.destinationSuccesses = save.destinationSuccesses;
+        state.meta.destinationFlybys = save.destinationFlybys;
+        state.meta.destinationOrbits = save.destinationOrbits;
+        state.meta.destinationLandings = save.destinationLandings;
+    }
+    syncLaunchConfig(state, catalog);
+    if (save.version < 2 && legacyArkDiscovered) {
+        for (const std::string_view id : {std::string_view(content::destination::jupiter), std::string_view(content::destination::saturn), std::string_view(content::destination::uranus), std::string_view(content::destination::neptune)}) {
+            const int index = catalogIndex(id);
+            if (index >= 0) {
+                state.meta.destinationSuccesses[static_cast<std::size_t>(index)] = std::max(1, state.meta.destinationSuccesses[static_cast<std::size_t>(index)]);
+            }
+        }
+        state.meta.furthestTier = std::max(state.meta.furthestTier, 6);
+        state.meta.navigation.arkLocationId = content::destination::neptune;
+        state.meta.navigation.discoveredDestinationIds = {content::destination::neptune};
+    }
+    if (state.storyBriefing.pending != StoryBriefingId::None) {
+        state.screen = Screen::StoryBriefing;
+    }
     state.meta.memorials = save.memorials;
     state.meta.famousLaunches = save.famousLaunches;
     if (state.run.mining.active && state.run.mining.arenaMetadata.rulesVersion <= 0) {
@@ -1973,6 +2055,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::navigationArkLocation, save.navigation.arkLocationId);
     writeField(out, save_schema::field::navigationSelectedDestination, save.navigation.selectedDestinationId);
     writeField(out, save_schema::field::navigationDiscoveredDestinations, join(save.navigation.discoveredDestinationIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::storyPending, storyBriefingToInt(save.storyBriefing.pending));
+    writeField(out, save_schema::field::storyContinuation, screenToInt(save.storyBriefing.continuation));
+    writeField(out, save_schema::field::campaignIntroductionAcknowledged, save.campaignIntroductionAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::straylightDiscoveryAcknowledged, save.straylightDiscoveryAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::inventory, join(save.inventoryModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equipped, join(save.equippedModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::ownedModules, join(save.ownedModuleIds, save_schema::listDelimiter));
@@ -2020,6 +2106,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
     writeField(out, save_schema::field::miningHullHeading, serializePair(save.mining.hullDirX, save.mining.hullDirY));
     writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
+    writeField(out, save_schema::field::miningThermalLock, save.mining.drillThermalLock ? 1 : 0);
     writeField(out, save_schema::field::miningDepth, save.mining.depthZone);
     writeField(out, save_schema::field::miningCargo, save.mining.cargo);
     writeField(out, save_schema::field::miningMaterials, serializeMaterials(save.mining.temporaryMaterials));
@@ -2071,6 +2158,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::totalFlybyMisses, save.totalFlybyMisses);
     writeField(out, save_schema::field::totalFlybyGoods, save.totalFlybyGoods);
     writeField(out, save_schema::field::totalFlybyPerfects, save.totalFlybyPerfects);
+    writeField(out, save_schema::field::destinationHistoryIds, join(save.destinationHistoryIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationAttempts, joinInts(save.destinationAttempts, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationSuccesses, joinInts(save.destinationSuccesses, save_schema::listDelimiter));
     writeField(out, save_schema::field::destinationFlybys, joinInts(save.destinationFlybys, save_schema::listDelimiter));
@@ -2162,6 +2250,14 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.navigation.selectedDestinationId = std::string(value);
         } else if (key == save_schema::field::navigationDiscoveredDestinations) {
             save.navigation.discoveredDestinationIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::storyPending) {
+            save.storyBriefing.pending = storyBriefingFromInt(parseInt(value, 0));
+        } else if (key == save_schema::field::storyContinuation) {
+            save.storyBriefing.continuation = screenFromInt(parseInt(value, 0));
+        } else if (key == save_schema::field::campaignIntroductionAcknowledged) {
+            save.campaignIntroductionAcknowledged = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::straylightDiscoveryAcknowledged) {
+            save.straylightDiscoveryAcknowledged = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::inventory) {
             save.inventoryModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::equipped) {
@@ -2269,6 +2365,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             }
         } else if (key == save_schema::field::miningDrill) {
             parsePair(value, save.mining.drillHeat, save.mining.drillIntegrity);
+        } else if (key == save_schema::field::miningThermalLock) {
+            save.mining.drillThermalLock = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDepth) {
             save.mining.depthZone = parseInt(value, save.mining.depthZone);
         } else if (key == save_schema::field::miningCargo) {
@@ -2372,6 +2470,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.totalFlybyGoods = parseInt(value, save.totalFlybyGoods);
         } else if (key == save_schema::field::totalFlybyPerfects) {
             save.totalFlybyPerfects = parseInt(value, save.totalFlybyPerfects);
+        } else if (key == save_schema::field::destinationHistoryIds) {
+            save.destinationHistoryIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::destinationAttempts) {
             save.destinationAttempts = parseInts(value);
         } else if (key == save_schema::field::destinationSuccesses) {

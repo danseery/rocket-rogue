@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "product": "OREBIT",
+  "releaseDate": null,
+  "metrics": {
+    "wishlists": 0,
+    "demoPlayers": 0,
+    "repeatIntentPercent": 0,
+    "tradeoffUnderstandingPercent": 0,
+    "medianSessionMinutes": 0
+  },
+  "playtest": {
+    "waves": [
+      {
+        "targetPlayers": 50,
+        "status": "not_started",
+        "repeatIntentPercent": 0,
+        "tradeoffUnderstandingPercent": 0,
+        "medianSessionMinutes": 0,
+        "windowsLinuxProgressionParity": false,
+        "deckBlockers": null,
+        "evidence": null
+      },
+      {
+        "targetPlayers": 250,
+        "status": "not_started",
+        "repeatIntentPercent": 0,
+        "tradeoffUnderstandingPercent": 0,
+        "medianSessionMinutes": 0,
+        "windowsLinuxProgressionParity": false,
+        "deckBlockers": null,
+        "evidence": null
+      },
+      {
+        "targetPlayers": 1000,
+        "status": "not_started",
+        "repeatIntentPercent": 0,
+        "tradeoffUnderstandingPercent": 0,
+        "medianSessionMinutes": 0,
+        "windowsLinuxProgressionParity": false,
+        "deckBlockers": null,
+        "evidence": null
+      }
+    ]
+  },
+  "builds": {
+    "windowsX64": {
+      "status": "not_ready",
+      "evidence": null
+    },
+    "linuxX64": {
+      "status": "not_ready",
+      "evidence": null
+    },
+    "steamDeck": {
+      "status": "not_ready",
+      "valveReview": "not_submitted",
+      "evidence": null,
+      "checks": {
+        "controllerNavigationAndGlyphs": false,
+        "noLauncherOrMouseOnlyStep": false,
+        "readableAt1280x800": false,
+        "suspendResume": false,
+        "offlineFirstLaunch": false,
+        "crossPlatformSteamCloud": false,
+        "stableFramePacing": false,
+        "onScreenKeyboardForTextEntry": false
+      }
+    }
+  },
+  "content": {
+    "scopeLocked": false,
+    "featureComplete": false,
+    "capsuleArtHumanApproved": false,
+    "musicHumanApprovedOrNotInScope": false,
+    "storyHumanApprovedOrNotInScope": false
+  },
+  "steam": {
+    "comingSoonPageReady": false,
+    "publicDemoReleased": false,
+    "curatorConnectPrepared": false,
+    "nextFestAppearances": 0,
+    "launchAnnouncementPrepared": false,
+    "broadcastPrepared": false
+  }
+}

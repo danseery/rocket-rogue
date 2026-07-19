@@ -562,6 +562,16 @@ void rr_mining_drill(int active)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_keyboard_drill(int active)
+{
+    if (g_app) {
+        g_app->miningKeyboardDrill(active != 0);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_mining_scanner()
 {
     if (g_app) {

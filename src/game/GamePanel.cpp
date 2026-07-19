@@ -539,6 +539,10 @@ std::string draftInitial(std::string_view text, std::string_view fallback)
 std::string panelButton(const PanelButtonPresentation& action, bool defaultFocus = false)
 {
     if (!action.enabled) {
+        if (!action.actionId.empty()) {
+            return "<button type=\"button\" class=\"disabled\" data-rr-action=\"" + htmlEscape(action.actionId) + "\" disabled>" +
+                htmlEscape(action.label) + "</button>";
+        }
         return disabledButton(action.label);
     }
     return button(action.label, action.actionId, action.cssClass, defaultFocus);
@@ -1121,10 +1125,10 @@ std::string solarMapBody(const PanelRenderContext& context)
 
     const bool moonExplored = reached(1, 1) || destinationVisited(content::destination::moon);
     const bool marsExplored = reached(2, 2) || destinationVisited(content::destination::mars);
-    const bool jupiterExplored = reached(3, 3);
-    const bool saturnExplored = reached(4, 3);
-    const bool uranusExplored = reached(5, 3);
-    const bool neptuneExplored = reached(6, 3) || arkDiscovered(state);
+    const bool jupiterExplored = reached(3, 3) || destinationVisited(content::destination::jupiter);
+    const bool saturnExplored = reached(4, 4) || destinationVisited(content::destination::saturn);
+    const bool uranusExplored = reached(5, 5) || destinationVisited(content::destination::uranus);
+    const bool neptuneExplored = reached(6, 6) || destinationVisited(content::destination::neptune) || arkDiscovered(state);
     const bool straylightFound = arkDiscovered(state);
     const int exploredWorlds = 1
         + (moonExplored ? 1 : 0)
@@ -1163,11 +1167,11 @@ std::string solarMapBody(const PanelRenderContext& context)
         << "<div class=\"solar-map-lower\">"
         << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Vessels</h3><span>Tracked contacts</span></div><div class=\"solar-map-row\">"
         << solarMapNode("Pathfinder", "PF", "map-vessel", MapKnowledge::Explored)
-        << solarMapNode(straylightFound ? "Straylight" : "Unknown vessel", "ARK", "map-vessel", straylightFound ? MapKnowledge::Explored : MapKnowledge::Unknown)
+        << (straylightFound ? solarMapNode("Straylight", "ARK", "map-vessel", MapKnowledge::Explored) : std::string {})
         << "</div></div>"
         << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Anomalies</h3><span>Sensor returns</span></div><div class=\"solar-map-row\">"
         << solarMapNode(marsExplored ? "Mars Echo" : "Unresolved signal", "ME", "map-anomaly", marsExplored ? MapKnowledge::Explored : MapKnowledge::Unknown)
-        << solarMapNode(straylightFound ? "Neptune Signal" : "Deep-space signal", "NS", "map-anomaly", straylightFound ? MapKnowledge::Explored : MapKnowledge::Unknown)
+        << (straylightFound ? solarMapNode("Neptune Signal", "NS", "map-anomaly", MapKnowledge::Explored) : std::string {})
         << "</div></div>"
         << "<div class=\"solar-map-section solar-map-lower-section\"><div class=\"solar-map-section-head\"><h3>Asteroid fields</h3><span>Navigation hazards</span></div><div class=\"solar-map-row\">"
         << solarMapNode("Main Belt", "* *", "map-field", marsExplored ? MapKnowledge::Explored : MapKnowledge::Charted)
@@ -1259,6 +1263,13 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "<p>" << htmlEscape("Keep impact and drilling screen shake enabled, or disable it for comfort.") << "</p></div>"
         << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
         << htmlEscape("Disable camera shake") << "</button></section>";
+    settingsBody << "<section class=\"settings-control\" data-keyboard-drill-mode-settings>"
+        << "<div><h3>" << htmlEscape("Keyboard drill mode") << "</h3>"
+        << "<p>" << htmlEscape("Toggle avoids holding Space. Hold drills only while Space remains pressed. Mouse and controller always use hold.") << "</p></div>"
+        << "<label><span>" << htmlEscape("Space key") << "</span>"
+        << "<select data-keyboard-drill-mode-select data-ui-focus-id=\"setting:keyboard_drill_mode\" aria-label=\"Keyboard drill mode\">"
+        << "<option value=\"toggle\">Toggle (default)</option><option value=\"hold\">Hold</option>"
+        << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\" data-controller-prompt-settings>"
         << "<div><h3>" << htmlEscape("Controller prompts") << "</h3>"
         << "<p>" << htmlEscape("Auto follows the active controller. Override labels if the detected family is wrong.") << "</p></div>"
@@ -1350,6 +1361,37 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 "</div>";
             out << modalTemplate("new_game_confirm", "Begin a new expedition?", newGameBody);
         }
+        return out.str();
+    }
+
+    if (state.screen == Screen::StoryBriefing) {
+        const bool straylight = state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery;
+        out << "<section class=\"story-briefing " << (straylight ? "story-straylight" : "story-introduction")
+            << "\" data-panel-mode=\"story-briefing\" data-story-briefing-id=\""
+            << (straylight ? "straylight-discovery" : "campaign-introduction") << "\">"
+            << "<div class=\"story-vignette\"></div><div class=\"story-content\">";
+        if (straylight) {
+            out << "<span class=\"story-kicker\">NEPTUNE // DEEP-SPACE CONTACT</span>"
+                << "<h1>STRAYLIGHT</h1>"
+                << "<p class=\"story-lead\">Beyond Neptune, an impossible contact resolves against the dark.</p>"
+                << "<div class=\"story-beats\">"
+                << "<article><span>01</span><h2>Contact</h2><p>A hull answers where your charts insist there should be nothing.</p></article>"
+                << "<article><span>02</span><h2>Identification</h2><p>The registry wakes one name: Straylight. Derelict. Under-equipped. Operable.</p></article>"
+                << "<article><span>03</span><h2>Home</h2><p>For the first time, this expedition has more than a launch site. It has somewhere to return to.</p></article>"
+                << "</div>"
+                << button("Approach the Straylight", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+        } else {
+            out << "<span class=\"story-kicker\">DEEP SPACE RECOVERY // EXPEDITION BRIEF</span>"
+                << "<h1>THE FRONTIER IS OPEN</h1>"
+                << "<p class=\"story-lead\">Beyond the last safe orbit, every burn writes a route home. Push your ship to the edge, bring back what matters, and make the next world reachable.</p>"
+                << "<div class=\"story-beats\">"
+                << "<article><span>01</span><h2>Push Past Safe</h2><p>Every flight has a breaking point. Fly hard, turn back alive, and leave the unknown with more than it took.</p></article>"
+                << "<article><span>02</span><h2>Make the Leap</h2><p>Flight data, salvage, and hard-earned experience give your crew what it needs to go farther.</p></article>"
+                << "<article><span>03</span><h2>Claim the System</h2><p>Earth Orbit. The Moon. Mars. Then the giants. Each arrival unlocks the next impossible horizon.</p></article>"
+                << "</div>"
+                << button("Launch the expedition", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+        }
+        out << "</div></section>";
         return out.str();
     }
 
@@ -1614,6 +1656,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
 
         out << "<h2>" << htmlEscape(launchPanel.sectionTitle) << "</h2>";
+        out << "<section class=\"objective-strip\"><span>Objective</span><strong>Reach the required burn or data goal, then recover.</strong>"
+            << "<p>The yellow marker is a performance target, not a safety boundary. INSTABILITY estimates proximity to this run's hidden failure point.</p></section>";
         out << "<div class=\"metric-grid flight-readout\">";
         for (std::size_t index = 0; index < launchPanel.metrics.size(); ++index) {
             const PanelMetricPresentation& metricItem = launchPanel.metrics[index];
@@ -1746,6 +1790,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << phaseBoardOpen("phase-board-arrival", state.statusLine);
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
             << "</h2><p>" << htmlEscape("You made it. Choose how boldly to engage the destination.") << "</p></div></div>";
+        out << "<section class=\"objective-strip phase-lane\"><span>Objective</span><strong>Arrival already unlocked the next destination.</strong>"
+            << "<p>Flyby, orbit, landing, and mining are optional opportunities before continuing the campaign.</p></section>";
         const LaunchOutcomePresentation arrivalResult = launchOutcomePresentation(state.lastOutcome);
         out << "<h2>" << htmlEscape("Arrival summary") << "</h2>";
         out << crewFateCard(arrivalResult.crewFate);
@@ -1929,6 +1975,8 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         };
 
         out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\">";
+        out << "<section class=\"objective-strip mining-objective-strip\"><span>Objective</span><strong>Drill fuel-bearing terrain, bank cargo at the shuttle, then leave.</strong>"
+            << "<p>Space drills. E scans and reports discoveries. T tethers only an exposed target. Assigned drones work automatically.</p></section>";
         out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title" << (debugArena ? " debug-arena" : "") << "\"><span>"
             << htmlEscape(miningRunKicker) << "</span><strong id=\"rr-hud-mining-title\">" << htmlEscape(miningRunTitle)
             << "</strong>";

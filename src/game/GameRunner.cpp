@@ -27,6 +27,7 @@ bool sameAppPreferences(const AppPreferences& lhs, const AppPreferences& rhs)
         && lhs.helpDisabled == rhs.helpDisabled
         && lhs.cameraShakeDisabled == rhs.cameraShakeDisabled
         && lhs.fullscreen == rhs.fullscreen
+        && lhs.miningDrillMode == rhs.miningDrillMode
         && lhs.dismissedHelpTopics == rhs.dismissedHelpTopics;
 }
 
@@ -201,6 +202,7 @@ void GameRunner::refreshPreferences(bool force)
     // authoritative value has been captured.
     preferenceRevision_ = services_.preferences.revision();
     preferenceCacheInitialized_ = true;
+    app_.setMiningDrillMode(cachedPreferences_.miningDrillMode);
 
     if (force || controllerChanged) {
         services_.controllers.setPreferences(cachedPreferences_.controller);

@@ -38,6 +38,7 @@ struct RenderSnapshot {
     int destinationTier = 0;
     int debugActOneCheckpoint = -1;
     ArkCondition arkCondition = ArkCondition::NotFound;
+    bool straylightStoryReveal = false;
     bool frontierTransfer = false;
     bool returningHome = false;
     bool poweredFlight = false;

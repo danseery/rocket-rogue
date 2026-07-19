@@ -402,12 +402,13 @@ int main()
         fixture.host.now += 1.0 / 60.0;
         fixture.runner.frame();
         assert(!fixture.renderer.titleScreen);
-        assert(fixture.renderer.screen == rocket::Screen::Hangar);
+        assert(fixture.renderer.screen == rocket::Screen::StoryBriefing);
         assert(fixture.saves.storeCount == 1);
         assert(fixture.saves.clearCount == 0);
         const std::optional<rocket::SaveData> fresh = rocket::deserializeSaveData(fixture.saves.value);
         assert(fresh.has_value());
-        assert(fresh->screen == rocket::Screen::Hangar);
+        assert(fresh->screen == rocket::Screen::StoryBriefing);
+        assert(fresh->storyBriefing.pending == rocket::StoryBriefingId::CampaignIntroduction);
         assert(fresh->shipDamage == 0);
         fixture.runner.shutdown();
     }

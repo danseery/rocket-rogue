@@ -4156,7 +4156,11 @@ void setMiningDrilling(GameState& state, bool drilling)
 {
     if (state.run.mining.active) {
         const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(state.run.mining.arenaMetadata));
-        state.run.mining.drilling = arenaRules.mechanics.drilling && drilling && state.run.mining.drillIntegrity > 0.0 && !state.run.mining.failurePending;
+        state.run.mining.drilling = arenaRules.mechanics.drilling && drilling
+            && state.run.mining.drillIntegrity > 0.0
+            && !state.run.mining.drillThermalLock
+            && state.run.mining.drillHeat < 1.0
+            && !state.run.mining.failurePending;
     }
 }
 
@@ -4203,6 +4207,10 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
         return;
     }
     ensureMiningMiniDroneAgents(state, catalog);
+    const int revealedBefore = static_cast<int>(std::count_if(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
+        return cell.revealed;
+    }));
+    const bool artifactRevealedBefore = mining.artifact.revealed;
     const double scannerRadius = miningDrillStats(state, catalog).scannerRadius;
     revealAround(mining, mining.droneX, mining.droneY, scannerRadius);
     bool gateStateChanged = false;
@@ -4228,19 +4236,30 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
             activateGateMarkers(agent.x, agent.y, scannerRadius * 1.45);
         }
     }
+    bool contextualGateMessage = false;
     if (mining.gate.active && mining.gate.burrowBreach && surveyDronePresent) {
         gateStateChanged = gateStateChanged || !mining.gate.surveyComplete;
         mining.gate.surveyComplete = true;
         state.statusLine = "Survey Drone mapped the long natural route around the marked burrow wall.";
+        contextualGateMessage = true;
     } else if (!mining.gate.markers.empty()) {
         const int completed = static_cast<int>(std::count_if(mining.gate.markers.begin(), mining.gate.markers.end(), [](const MiningGateMarker& marker) {
             return marker.activated;
         }));
         state.statusLine = "Triangulation markers: " + std::to_string(completed) + "/" + std::to_string(mining.gate.requiredSurveyOrigins) + ". Reposition for a distinct origin.";
+        contextualGateMessage = true;
     }
     if (gateStateChanged) {
         markMiningGateDerivedStateDirty(mining);
     }
+    const int revealedAfter = static_cast<int>(std::count_if(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
+        return cell.revealed;
+    }));
+    const int terrainRevealed = std::max(0, revealedAfter - revealedBefore);
+    const int signalsRevealed = !artifactRevealedBefore && mining.artifact.revealed ? 1 : 0;
+    const std::string revealReport = "Scanner revealed " + std::to_string(terrainRevealed) + " terrain cells and "
+        + std::to_string(signalsRevealed) + (signalsRevealed == 1 ? " signal." : " signals.");
+    state.statusLine = contextualGateMessage ? state.statusLine + " " + revealReport : revealReport;
     mining.scannerPulseSeconds = 0.9;
 }
 
@@ -4497,6 +4516,15 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         drillTouchesTerrain,
         dt);
     mining.drillHeat = std::clamp(mining.drillHeat, 0.0, 1.0);
+    bool thermalStateChanged = false;
+    if (mining.drillHeat >= 1.0 && !mining.drillThermalLock) {
+        mining.drillThermalLock = true;
+        mining.drilling = false;
+        thermalStateChanged = true;
+    } else if (mining.drillThermalLock && mining.drillHeat <= 0.60) {
+        mining.drillThermalLock = false;
+        thermalStateChanged = true;
+    }
     mining.hazardDelta = std::clamp(mining.hazardDelta, 0.0, tuning::mining::maxMiningHazardDelta);
     updateMiningGate(state, arenaRules);
     updateMiningArtifact(state, dt);
@@ -4522,6 +4550,11 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         case MiningElementalAffinity::None:
             break;
         }
+    }
+    if (thermalStateChanged) {
+        state.statusLine = mining.drillThermalLock
+            ? "Drill thermal cutoff engaged at 100%. Cooling required before restart."
+            : "Drill cooled below 60%. Thermal lock cleared; drilling available.";
     }
     refreshTargetCell(mining);
 

@@ -36,6 +36,7 @@ public:
     void renderUi();
     int currentScreen() const;
     void setControllerPreferences(const ControllerPreferences& preferences);
+    void setMiningDrillMode(MiningDrillMode mode);
     const ControllerPreferences& controllerPreferences() const;
     void setActiveInputSource(InputSource source);
     InputContext inputContext() const;
@@ -48,6 +49,7 @@ public:
     void returnHome();
     void arrivalOps();
     void skipArrivalFanfare();
+    void acknowledgeStoryBriefing();
     void cutEngines();
     void pressureReliefValve();
     void closePressureReliefValve();
@@ -91,6 +93,7 @@ public:
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);
     void miningDrill(bool active);
+    void miningKeyboardDrill(bool active);
     void miningScanner();
     void miningTether();
     void miningRepairDrill();
@@ -236,6 +239,8 @@ private:
     MiningExtractionState miningExtraction_;
     RealtimeInputState keyboardRealtimeInput_;
     RealtimeInputState controllerRealtimeInput_;
+    MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;
+    bool keyboardDrillPressed_ = false;
     PauseReason pauseReason_ = PauseReason::None;
     Screen lastInputScreen_ = Screen::Hangar;
     bool controllerWasConnected_ = false;

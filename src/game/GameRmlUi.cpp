@@ -117,6 +117,20 @@ void rr_rml_set_frame_limit_preference(const char* rawValue)
     storePreferences(std::move(preferences));
 }
 
+int rr_rml_keyboard_drill_mode_preference()
+{
+    return currentPreferences().miningDrillMode == MiningDrillMode::Hold ? 1 : 0;
+}
+
+void rr_rml_set_keyboard_drill_mode_preference(const char* rawValue)
+{
+    AppPreferences preferences = currentPreferences();
+    preferences.miningDrillMode = rawValue && std::string_view(rawValue) == "hold"
+        ? MiningDrillMode::Hold
+        : MiningDrillMode::Toggle;
+    storePreferences(std::move(preferences));
+}
+
 int rr_rml_controller_prompt_preference()
 {
     switch (currentPreferences().controller.promptFamily) {
@@ -398,6 +412,7 @@ std::string normalizeBooleanAttributes(std::string html)
         "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
         "data-frame-limit-settings", "data-frame-limit-select",
         "data-game-speed-settings", "data-game-speed-select",
+        "data-keyboard-drill-mode-settings", "data-keyboard-drill-mode-select",
         "data-debug-tools-settings", "data-debug-tools-toggle",
         "data-performance-stats-settings", "data-performance-stats-toggle"
     };
@@ -518,6 +533,21 @@ std::string selectCurrentFrameLimit(std::string html)
     }
 
     const std::string value = currentFrameLimitOptionValue();
+    const std::string needle = "<option value=\"" + value + "\">";
+    const std::size_t optionStart = html.find(needle, selectStart);
+    if (optionStart != std::string::npos) {
+        html.insert(optionStart + needle.size() - 1, " selected=\"1\"");
+    }
+    return html;
+}
+
+std::string selectCurrentKeyboardDrillMode(std::string html)
+{
+    const std::size_t selectStart = html.find("data-keyboard-drill-mode-select");
+    if (selectStart == std::string::npos) {
+        return html;
+    }
+    const std::string value = rr_rml_keyboard_drill_mode_preference() == 1 ? "hold" : "toggle";
     const std::string needle = "<option value=\"" + value + "\">";
     const std::size_t optionStart = html.find(needle, selectStart);
     if (optionStart != std::string::npos) {
@@ -682,7 +712,7 @@ std::string syncSettingsControls(std::string html)
 {
     return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
         syncCurrentPerformanceStatsToggle(syncCurrentDebugToolsToggle(
-            selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html))))))))));
+            selectCurrentKeyboardDrillMode(selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html)))))))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -793,6 +823,9 @@ RmlPanelMode panelModeForHtml(std::string_view html)
     if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
         return RmlPanelMode::MiningFullscreen;
     }
+    if (html.find("data-panel-mode=\"story-briefing\"") != std::string_view::npos) {
+        return RmlPanelMode::StoryBriefing;
+    }
     if (html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         return RmlPanelMode::ArrivalFanfare;
     }
@@ -808,6 +841,11 @@ RmlPanelMode panelModeForHtml(std::string_view html)
 bool panelUsesTitle(RmlPanelMode mode)
 {
     return mode == RmlPanelMode::Title;
+}
+
+bool panelUsesStoryBriefing(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::StoryBriefing;
 }
 
 bool panelUsesPhaseBoard(RmlPanelMode mode)
@@ -913,7 +951,7 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
 {
     const int viewportWidth = rr_rml_viewport_width();
     const int viewportHeight = rr_rml_viewport_height();
-    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::MiningFullscreen) {
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing || mode == RmlPanelMode::MiningFullscreen) {
         return Rml::Rectanglei::FromPositionSize({0, 0}, {std::max(1, viewportWidth), std::max(1, viewportHeight)});
     }
     if (mode == RmlPanelMode::ArrivalFanfare) {
@@ -943,7 +981,7 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
 Rml::Rectanglei expandedPanelClip(RmlPanelMode mode)
 {
     const Rml::Rectanglei bounds = panelBounds(mode);
-    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::MiningFullscreen) {
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing || mode == RmlPanelMode::MiningFullscreen) {
         return bounds;
     }
     return Rml::Rectanglei::FromPositionSize(
@@ -966,6 +1004,23 @@ std::string panelRcss(RmlPanelMode mode)
     const int viewportHeight = std::max(1, rr_rml_viewport_height());
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
+    const int modalGutter = 16;
+    const int modalDefaultWidth = std::max(1, std::min(640, viewportWidth - modalGutter * 2));
+    const int modalInventoryWidth = std::max(1, std::min(760, viewportWidth - modalGutter * 2));
+    const int modalMapWidth = std::max(1, std::min(920, viewportWidth - modalGutter * 2));
+    const int modalTallHeight = std::max(1, std::min(viewportHeight - modalGutter * 2, (viewportHeight * 88) / 100));
+    const int modalTallTop = std::max(modalGutter, (viewportHeight - modalTallHeight) / 2);
+    const int modalDefaultLeft = std::max(modalGutter, (viewportWidth - modalDefaultWidth) / 2);
+    const int modalInventoryLeft = std::max(modalGutter, (viewportWidth - modalInventoryWidth) / 2);
+    const int modalMapLeft = std::max(modalGutter, (viewportWidth - modalMapWidth) / 2);
+    const int modalBriefHeight = std::max(1, std::min(340, viewportHeight - modalGutter * 2));
+    const int modalBriefTop = std::max(modalGutter, (viewportHeight - modalBriefHeight) / 2);
+    const int modalMissionHeight = std::max(1, std::min(300, viewportHeight - modalGutter * 2));
+    const int modalMissionTop = std::max(modalGutter, (viewportHeight - modalMissionHeight) / 2);
+    const int modalNewGameWidth = std::max(1, std::min(560, viewportWidth - modalGutter * 2));
+    const int modalNewGameHeight = std::max(1, std::min(230, viewportHeight - modalGutter * 2));
+    const int modalNewGameLeft = std::max(modalGutter, (viewportWidth - modalNewGameWidth) / 2);
+    const int modalNewGameTop = std::max(modalGutter, (viewportHeight - modalNewGameHeight) / 2);
     const int arrivalTitleSize = mode == RmlPanelMode::MissionStamp ? (panelWidth < 420 ? 31 : 40) : (panelWidth < 420 ? 34 : 46);
     const int left = bounds.Left();
     const int top = bounds.Top();
@@ -973,6 +1028,7 @@ std::string panelRcss(RmlPanelMode mode)
     const int miningInset = compactMining ? 10 : 18;
     const int miningRailWidth = std::max(1, panelWidth - miningInset * 2);
     const int miningTopHeight = compactMining ? 118 : 62;
+    const int miningObjectiveTop = miningInset + miningTopHeight + 12;
     const int miningBottomHeight = compactMining ? 164 : 126;
     const int miningBottomTop = std::max(miningTopHeight + 18, panelHeight - miningBottomHeight - miningInset);
     const int miningUtilityWidth = compactMining ? 104 : 108;
@@ -1016,8 +1072,11 @@ std::string panelRcss(RmlPanelMode mode)
 
     return R"(
 body {
-    width: 100%;
-    height: 100%;
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    width: )" + std::to_string(viewportWidth) + R"(px;
+    height: )" + std::to_string(viewportHeight) + R"(px;
     overflow: hidden;
     color: #edf4f8;
     font-family: rmlui-debugger-font;
@@ -1167,6 +1226,92 @@ scrollbarcorner {
     background-color: transparent;
     border-width: 0px;
     border-radius: 0px;
+}
+#rr-panel.story-briefing-panel-mode {
+    left: 0px;
+    top: 0px;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+    overflow: hidden;
+    padding: 0px;
+    background-color: transparent;
+    border-width: 0px;
+    border-radius: 0px;
+}
+.story-briefing {
+    position: relative;
+    width: )" + std::to_string(panelWidth) + R"(px;
+    height: )" + std::to_string(panelHeight) + R"(px;
+    overflow: hidden;
+    background-color: rgba(2, 7, 13, 0.46);
+}
+.story-vignette {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(2, 7, 13, 0.28);
+}
+.story-content {
+    box-sizing: border-box;
+    position: absolute;
+    left: )" + std::to_string(std::max(28, panelWidth / 10)) + R"(px;
+    top: )" + std::to_string(std::max(34, panelHeight / 10)) + R"(px;
+    width: )" + std::to_string(std::max(640, panelWidth - std::max(56, panelWidth / 5))) + R"(px;
+    padding: 24px 30px;
+    background-color: rgba(3, 12, 20, 0.88);
+    border-left-width: 3px;
+    border-color: #63e5ff;
+}
+.story-straylight .story-content { border-color: #ffd166; }
+.story-kicker {
+    display: block;
+    color: #84dff2;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 2px;
+}
+.story-content h1 {
+    margin-top: 8px;
+    margin-bottom: 8px;
+    color: #f4fbff;
+    font-size: 54px;
+    line-height: 1;
+    letter-spacing: 3px;
+}
+.story-straylight .story-content h1 { color: #ffd166; font-effect: glow(2px #6f5519); }
+.story-lead {
+    width: 82%;
+    color: #d7e9ef;
+    font-size: 18px;
+    line-height: 1.35;
+}
+.story-beats {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    margin-top: 22px;
+}
+.story-beats article {
+    box-sizing: border-box;
+    width: 31%;
+    min-height: 132px;
+    margin-right: 2%;
+    padding: 14px;
+    background-color: rgba(8, 27, 39, 0.86);
+    border-top-width: 1px;
+    border-color: rgba(99, 229, 255, 0.38);
+}
+.story-beats article span { color: #63e5ff; font-size: 11px; font-weight: bold; }
+.story-beats article h2 { margin-top: 5px; margin-bottom: 6px; color: #f1f8fa; font-size: 18px; }
+.story-beats article p { color: #b9ced6; font-size: 13px; line-height: 1.35; }
+.story-action {
+    width: 280px;
+    min-height: 48px;
+    margin-top: 22px;
+    font-size: 15px;
+    font-weight: bold;
 }
 .title-screen {
     position: relative;
@@ -1353,10 +1498,11 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     to { transform: translateY()" + std::to_string(panelHeight) + R"(px); opacity: 0; }
 }
 #rr-modal.modal-new_game_confirm {
-    top: )" + std::to_string(std::max(80, panelHeight / 2 - 135)) + R"(px;
-    width: 560px;
-    height: 230px;
-    margin-left: -296px;
+    left: )" + std::to_string(modalNewGameLeft) + R"(px;
+    top: )" + std::to_string(modalNewGameTop) + R"(px;
+    width: )" + std::to_string(modalNewGameWidth) + R"(px;
+    height: )" + std::to_string(modalNewGameHeight) + R"(px;
+    margin-left: 0px;
     border-color: #a77f32;
 }
 #rr-panel.surface-ops-panel {
@@ -1764,6 +1910,18 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     margin-left: )" + std::to_string(kPhaseLaneInset) + R"(px;
     margin-right: )" + std::to_string(kPhaseLaneInset) + R"(px;
 }
+.objective-strip {
+    display: block;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    border-width: 1px;
+    border-color: rgba(255, 209, 102, 0.52);
+    background-color: rgba(34, 29, 13, 0.90);
+}
+.objective-strip span { color: #ffd166; font-size: 11px; }
+.objective-strip strong { display: block; color: #fff2c0; font-size: 14px; }
+.objective-strip p { margin: 3px 0 0 0; color: rgba(255, 244, 205, 0.78); font-size: 11px; }
+.mining-objective-strip { position: absolute; left: )" + std::to_string(miningInset) + R"(px; top: )" + std::to_string(miningObjectiveTop) + R"(px; width: 520px; z-index: 4; }
 .phase-row,
 .phase-title-row,
 .phase-action-grid,
@@ -5605,17 +5763,16 @@ button.settings-toggle:hover {
     position: absolute;
     left: 0px;
     top: 0px;
-    width: 100%;
-    height: 100%;
+    width: )" + std::to_string(viewportWidth) + R"(px;
+    height: )" + std::to_string(viewportHeight) + R"(px;
     background-color: #05070a;
 }
 #rr-modal {
     position: absolute;
-    left: 50%;
-    top: 4%;
-    width: 640px;
-    height: 88%;
-    margin-left: -320px;
+    left: )" + std::to_string(modalDefaultLeft) + R"(px;
+    top: )" + std::to_string(modalTallTop) + R"(px;
+    width: )" + std::to_string(modalDefaultWidth) + R"(px;
+    height: )" + std::to_string(modalTallHeight) + R"(px;
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -5626,32 +5783,34 @@ button.settings-toggle:hover {
     overflow: hidden;
 }
 #rr-modal.modal-inventory {
-    top: 4%;
-    width: 760px;
-    height: 88%;
-    margin-left: -400px;
+    left: )" + std::to_string(modalInventoryLeft) + R"(px;
+    top: )" + std::to_string(modalTallTop) + R"(px;
+    width: )" + std::to_string(modalInventoryWidth) + R"(px;
+    height: )" + std::to_string(modalTallHeight) + R"(px;
+    margin-left: 0px;
     padding: 18px;
 }
 #rr-modal.modal-map {
-    top: 4%;
-    width: 920px;
-    height: 88%;
-    margin-left: -476px;
+    left: )" + std::to_string(modalMapLeft) + R"(px;
+    top: )" + std::to_string(modalTallTop) + R"(px;
+    width: )" + std::to_string(modalMapWidth) + R"(px;
+    height: )" + std::to_string(modalTallHeight) + R"(px;
+    margin-left: 0px;
     padding: 16px;
 }
 #rr-modal.modal-phase_briefing {
-    top: 14%;
-    height: 340px;
+    top: )" + std::to_string(modalBriefTop) + R"(px;
+    height: )" + std::to_string(modalBriefHeight) + R"(px;
     padding: 20px;
 }
 #rr-modal.modal-surface {
-    top: 4%;
-    height: 88%;
+    top: )" + std::to_string(modalTallTop) + R"(px;
+    height: )" + std::to_string(modalTallHeight) + R"(px;
     padding: 20px;
 }
 #rr-modal.modal-mission_log {
-    top: 12%;
-    height: 300px;
+    top: )" + std::to_string(modalMissionTop) + R"(px;
+    height: )" + std::to_string(modalMissionHeight) + R"(px;
     padding: 20px;
 }
 .modal-head {
@@ -5793,7 +5952,8 @@ std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily fam
         prompt += item("R-stick", "Scroll");
     } else if (panelHtml.find("data-panel-mode=\"title\"") != std::string_view::npos) {
         prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(labels.menu, "Settings");
-    } else if (panelHtml.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos ||
+    } else if (panelHtml.find("data-panel-mode=\"story-briefing\"") != std::string_view::npos ||
+               panelHtml.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos ||
                panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
     } else if (panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
@@ -5928,6 +6088,7 @@ std::string buildDocumentRml(
 
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
     const bool titleScreen = panelUsesTitle(panelMode);
+    const bool storyBriefing = panelUsesStoryBriefing(panelMode);
     const bool phaseBoard = panelUsesPhaseBoard(panelMode);
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
     const bool arrivalFanfare = panelUsesMissionStamp(panelMode);
@@ -5945,9 +6106,11 @@ std::string buildDocumentRml(
     document += "<div id=\"rr-panel\" class=\"" +
         std::string(titleScreen
                 ? "title-screen-panel-mode"
+                : (storyBriefing
+                ? "story-briefing-panel-mode"
                 : (miningFullscreen
                 ? "mining-fullscreen-panel"
-                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel"))));
+                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel")))));
     if (surfaceOps) {
         document += " surface-ops-panel";
     }
@@ -6093,6 +6256,10 @@ public:
                 rr_rml_set_frame_limit_preference(control->GetValue().c_str());
                 return;
             }
+            if (control->GetTagName() == "select" && control->HasAttribute("data-keyboard-drill-mode-select")) {
+                rr_rml_set_keyboard_drill_mode_preference(control->GetValue().c_str());
+                return;
+            }
             if (control->GetTagName() == "select" && control->HasAttribute("data-controller-prompt-select")) {
                 rr_rml_set_controller_preference("promptFamily", control->GetValue().c_str());
                 g_displayPreferenceChanged = true;
@@ -6228,6 +6395,7 @@ std::string derivedFocusId(Rml::Element* element)
     if (element->HasAttribute("data-resolution-select")) return "setting:resolution";
     if (element->HasAttribute("data-frame-limit-select")) return "setting:frame_limit";
     if (element->HasAttribute("data-game-speed-select")) return "setting:game_speed";
+    if (element->HasAttribute("data-keyboard-drill-mode-select")) return "setting:keyboard_drill_mode";
     if (element->HasAttribute("data-controller-prompt-select")) return "setting:controller_prompt";
     if (element->HasAttribute("data-controller-deadzone-select")) return "setting:controller_deadzone";
     if (element->GetTagName() == "input") {
@@ -6638,8 +6806,11 @@ bool GameRmlUi::mouseMove(int x, int y)
     if (!initialized_ || !g_context) {
         return false;
     }
-    const double ratio = rr_rml_density_ratio();
-    g_context->ProcessMouseMove(static_cast<int>(std::round(static_cast<double>(x) * ratio)), static_cast<int>(std::round(static_cast<double>(y) * ratio)), 0);
+    // RmlUi is laid out and projected in the platform's logical viewport.
+    // Browser pointer events and SDL window mouse events use that same space.
+    // Scaling input to the drawable framebuffer here caused hit testing to
+    // drift whenever the display density differed from 1x.
+    g_context->ProcessMouseMove(x, y, 0);
     return hitTest(x, y);
 }
 
@@ -6650,16 +6821,13 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
     }
     pressedButton_ = nullptr;
     pressedButtonAtSeconds_ = 0.0;
-    const double ratio = rr_rml_density_ratio();
-    const int scaledX = static_cast<int>(std::round(static_cast<double>(x) * ratio));
-    const int scaledY = static_cast<int>(std::round(static_cast<double>(y) * ratio));
-    g_context->ProcessMouseMove(scaledX, scaledY, 0);
+    g_context->ProcessMouseMove(x, y, 0);
     const bool overUi = hitTest(x, y);
     if (overUi) {
         g_context->ProcessMouseButtonDown(std::max(0, button), 0);
     }
     if (button == 0 && overUi) {
-        pressedButton_ = buttonElementAtPoint(*g_context, {static_cast<float>(scaledX), static_cast<float>(scaledY)});
+        pressedButton_ = buttonElementAtPoint(*g_context, {static_cast<float>(x), static_cast<float>(y)});
         if (pressedButton_) {
             pressedButtonAtSeconds_ = rr_rml_now_seconds();
         }
@@ -6672,16 +6840,13 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     if (!initialized_ || !g_context) {
         return false;
     }
-    const double ratio = rr_rml_density_ratio();
-    const int scaledX = static_cast<int>(std::round(static_cast<double>(x) * ratio));
-    const int scaledY = static_cast<int>(std::round(static_cast<double>(y) * ratio));
-    g_context->ProcessMouseMove(scaledX, scaledY, 0);
+    g_context->ProcessMouseMove(x, y, 0);
     g_context->ProcessMouseButtonUp(std::max(0, button), 0);
     if (!hitTest(x, y)) {
         pressedButton_ = nullptr;
         return false;
     }
-    const Rml::Vector2f point {static_cast<float>(scaledX), static_cast<float>(scaledY)};
+    const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
     Rml::Element* releasedButton = buttonElementAtPoint(*g_context, point);
     Rml::Element* pressedButton = pressedButton_;
     const double pressedAt = pressedButtonAtSeconds_;
@@ -6704,8 +6869,7 @@ bool GameRmlUi::mouseWheel(int x, int y, double deltaY)
     if (!initialized_ || !g_context || !hitTest(x, y)) {
         return false;
     }
-    const double ratio = rr_rml_density_ratio();
-    g_context->ProcessMouseMove(static_cast<int>(std::round(static_cast<double>(x) * ratio)), static_cast<int>(std::round(static_cast<double>(y) * ratio)), 0);
+    g_context->ProcessMouseMove(x, y, 0);
     g_context->ProcessMouseWheel(static_cast<float>(-deltaY / 90.0), 0);
     return true;
 }
@@ -6719,12 +6883,14 @@ bool GameRmlUi::hitTest(int x, int y) const
         return true;
     }
     if (panelMode_ == RmlPanelMode::MiningFullscreen && g_context) {
-        const double ratio = rr_rml_density_ratio();
-        const Rml::Vector2f point {
-            static_cast<float>(std::round(static_cast<double>(x) * ratio)),
-            static_cast<float>(std::round(static_cast<double>(y) * ratio))
-        };
+        const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
         return buttonElementAtPoint(*g_context, point) != nullptr;
+    }
+    if (nativeSceneOverlayMode(panelHtml_) == NativeSceneOverlayMode::PreflightLaunch && g_context) {
+        const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
+        if (buttonElementAtPoint(*g_context, point) != nullptr) {
+            return true;
+        }
     }
     const Rml::Rectanglei bounds = expandedPanelClip(panelMode_);
     return x >= bounds.Left() && y >= bounds.Top() && x <= bounds.Right() && y <= bounds.Bottom();

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "name": "OREBIT",
+    "corePromise": "A compact space-mining roguelite where every resource decision affects whether your crew escapes with the ore—or gets home at all.",
+    "publicReleaseDate": null
+  },
+  "store": {
+    "primary": "Steam",
+    "steamNativeCampaign": true,
+    "publicWebDemo": false,
+    "priceUsd": 14.99,
+    "launchDiscountPercent": 10
+  },
+  "platforms": {
+    "windowsX64": "first_class",
+    "linuxX64": "first_class",
+    "nativeLinux": true,
+    "steamDeckTarget": "verified"
+  },
+  "audience": {
+    "playtestWaves": [
+      50,
+      250,
+      1000
+    ],
+    "minimumWishlists": 10000,
+    "minimumDemoPlayers": 3000,
+    "minimumRepeatIntentPercent": 70,
+    "minimumTradeoffUnderstandingPercent": 60,
+    "minimumMedianSessionMinutes": 30
+  },
+  "notifications": {
+    "minimumCooldownDays": 14,
+    "maximumNextFestAppearances": 1,
+    "meaningfulUpdateCadenceWeeks": {
+      "minimum": 6,
+      "maximum": 8
+    }
+  },
+  "creative": {
+    "art": "human_created",
+    "music": "human_created",
+    "story": "human_created",
+    "aiAllowed": [
+      "code",
+      "testing",
+      "build_automation",
+      "platform_parity",
+      "quality_assurance",
+      "performance_profiling",
+      "bug_reproduction",
+      "store_data_analysis",
+      "release_administration",
+      "ui_implementation_under_human_direction",
+      "asset_pipeline_tooling",
+      "localization_infrastructure",
+      "accessibility_checks",
+      "footage_indexing"
+    ],
+    "aiForbidden": [
+      "art",
+      "visual_identity",
+      "music",
+      "soundtrack",
+      "story",
+      "dialogue",
+      "lore",
+      "characters",
+      "narrative_voice",
+      "collaborator_style_imitation",
+      "final_store_imagery",
+      "narrative_trailers"
+    ]
+  },
+  "scope": {
+    "pillars": [
+      "launch",
+      "landing",
+      "fuel",
+      "crew",
+      "mining",
+      "Ark progression"
+    ],
+    "virtualReality": false,
+    "liveService": false
+  }
+}

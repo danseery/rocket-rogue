@@ -187,6 +187,63 @@
       backdrop-filter: none;
     }
 
+    #panel.story-briefing-panel-mode {
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      overflow: hidden;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+
+    body:has(#panel.story-briefing-panel-mode) .debug-tools {
+      display: none !important;
+    }
+
+    .story-briefing {
+      position: relative;
+      display: flex;
+      width: 100%;
+      height: 100%;
+      align-items: center;
+      overflow: hidden;
+      isolation: isolate;
+      background: radial-gradient(circle at 72% 44%, rgba(74, 154, 183, 0.08), transparent 34%);
+    }
+
+    .story-vignette {
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(2, 7, 13, 0.96) 0%, rgba(2, 7, 13, 0.76) 56%, rgba(2, 7, 13, 0.22) 100%);
+      pointer-events: none;
+    }
+
+    .story-content {
+      width: min(900px, calc(100vw - 80px));
+      margin-left: clamp(34px, 7vw, 120px);
+      padding: 30px 34px;
+      border-left: 3px solid #63e5ff;
+      background: linear-gradient(90deg, rgba(3, 12, 20, 0.94), rgba(3, 12, 20, 0.64) 78%, transparent);
+    }
+
+    .story-straylight .story-content { border-left-color: #ffd166; }
+    .story-kicker { color: #84dff2; font-size: 11px; font-weight: 800; letter-spacing: 0.16em; }
+    .story-content h1 { margin: 8px 0; color: #f4fbff; font-size: clamp(48px, 7vw, 92px); line-height: 0.96; letter-spacing: 0.04em; }
+    .story-straylight .story-content h1 { color: #ffd166; text-shadow: 0 0 28px rgba(255, 209, 102, 0.28); }
+    .story-lead { max-width: 760px; color: #d7e9ef; font-size: clamp(16px, 1.7vw, 22px); line-height: 1.45; }
+    .story-beats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 24px; gap: 10px; }
+    .story-beats article { min-height: 142px; padding: 16px; border-top: 1px solid rgba(99, 229, 255, 0.42); background: rgba(8, 27, 39, 0.84); }
+    .story-beats article span { color: #63e5ff; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; }
+    .story-beats article h2 { margin: 6px 0; color: #f1f8fa; font-size: 18px; }
+    .story-beats article p { margin: 0; color: #b9ced6; font-size: 13px; line-height: 1.45; }
+    .story-action { min-width: 280px; min-height: 50px; margin-top: 24px; border-color: rgba(255, 209, 102, 0.76); background: rgba(74, 56, 13, 0.92); color: #fff1bd; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+
     .title-screen {
       position: relative;
       display: flex;
@@ -1559,6 +1616,19 @@
       color: var(--muted);
       line-height: 1.35;
     }
+
+    .objective-strip {
+      display: block;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      border: 1px solid rgba(255, 209, 102, 0.52);
+      background: rgba(34, 29, 13, 0.90);
+    }
+
+    .objective-strip span { color: #ffd166; font-size: 11px; text-transform: uppercase; }
+    .objective-strip strong { display: block; color: #fff2c0; font-size: 14px; }
+    .objective-strip p { margin: 3px 0 0; color: rgba(255, 244, 205, 0.78); font-size: 11px; }
+    .mining-objective-strip { position: absolute; left: 16px; top: 92px; width: min(520px, calc(100vw - 32px)); z-index: 4; }
 
     .phase-lane,
     .phase-title-row,
@@ -3213,6 +3283,11 @@
     }
 
     @media (max-width: 1220px) {
+      .mining-objective-strip {
+        left: 10px;
+        top: 140px;
+      }
+
       .mining-top-rail {
         left: 10px;
         right: 10px;
@@ -6296,6 +6371,7 @@
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
     const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
     const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
+    const keyboardDrillModeStorageKey = "rocket_rogue_keyboard_drill_mode";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
     const controllerPreferencesStorageKey = "rocket_rogue_controller_preferences_v1";
     const controllerPromptFamilies = Object.freeze(["auto", "xbox", "playstation", "steamdeck", "generic"]);
@@ -6418,6 +6494,29 @@
       root.querySelectorAll("[data-frame-limit-select]").forEach((select) => {
         select.value = mode;
       });
+    }
+
+    function keyboardDrillMode() {
+      try {
+        return window.localStorage.getItem(keyboardDrillModeStorageKey) === "hold" ? "hold" : "toggle";
+      } catch (error) {
+        return "toggle";
+      }
+    }
+
+    function setKeyboardDrillMode(value) {
+      const normalized = value === "hold" ? "hold" : "toggle";
+      releaseMiningDrill();
+      try {
+        if (normalized === "hold") window.localStorage.setItem(keyboardDrillModeStorageKey, "hold");
+        else window.localStorage.removeItem(keyboardDrillModeStorageKey);
+      } catch (error) {}
+      return normalized;
+    }
+
+    function syncKeyboardDrillModeControls(root = document) {
+      const mode = keyboardDrillMode();
+      root.querySelectorAll("[data-keyboard-drill-mode-select]").forEach((select) => { select.value = mode; });
     }
 
     function helpDisabled() {
@@ -6654,7 +6753,7 @@
           (modalRoot.dataset.dismissible === "0" ? "" : item(cancel, "Back")) + item("R-stick", "Scroll");
       } else if (panel.querySelector("[data-panel-mode='title']")) {
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(label.menu, "Settings");
-      } else if (panel.querySelector("[data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
+      } else if (panel.querySelector("[data-panel-mode='story-briefing'], [data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
         controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
       } else if (panel.querySelector("[data-panel-mode='mining-fullscreen']")) {
         controllerPromptBar.innerHTML = item("L-stick", "Move / face") + item(label.rt, "Drill") + item(label.west, "Scan") +
@@ -6704,6 +6803,7 @@
       syncFullscreenControls(root);
       syncFrameLimitControls(root);
       syncGameSpeedControls(root);
+      syncKeyboardDrillModeControls(root);
       syncHelpControls(root);
       syncCameraShakeControls(root);
       syncDebugToolsControls(root);
@@ -6785,17 +6885,24 @@
       const miningFullscreen = panel.classList.contains("mining-fullscreen-panel");
       const titleScreen = panel.classList.contains("title-screen-panel");
       const rmlModalOpen = document.body.classList.contains("rmlui-modal-open");
+      // The native RmlUi document renders its own scene-attached launch,
+      // telemetry, and service controls. The HTML overlays are the browser
+      // fallback only; leaving both enabled duplicates their visuals and
+      // creates competing click targets.
+      const useShellSceneOverlays = !document.body.classList.contains("rmlui-enabled");
       const shipServiceMarker = panel.querySelector("[data-mining-ship-service]");
       const drillRepairVisible = shipServiceMarker?.dataset.drillVisible === "1";
       const droneRepairVisible = shipServiceMarker?.dataset.droneVisible === "1";
-      const showShipService = Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
+      const showShipService = useShellSceneOverlays
+        && Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
       debugTools.classList.toggle("hud-suppressed", miningFullscreen || titleScreen);
 
-      sceneLaunchControl.classList.toggle("is-visible", preflight && !phaseBoard && !rmlModalOpen);
-      sceneLaunchControl.hidden = !(preflight && !phaseBoard && !rmlModalOpen);
+      const showLaunchControl = useShellSceneOverlays && preflight && !phaseBoard && !rmlModalOpen;
+      sceneLaunchControl.classList.toggle("is-visible", showLaunchControl);
+      sceneLaunchControl.hidden = !showLaunchControl;
       sceneLaunchControl.disabled = !preflightReady;
       sceneLaunchControl.textContent = preflightReady ? "Launch" : "Securing Drone";
-      if (preflight && !phaseBoard && !rmlModalOpen) {
+      if (showLaunchControl) {
         const anchor = worldToScreen(-0.18, -0.50);
         sceneLaunchControl.style.left = `${Math.round(anchor.x)}px`;
         sceneLaunchControl.style.top = `${Math.round(anchor.y)}px`;
@@ -6822,7 +6929,8 @@
         }
       }
 
-      const showLegend = (flight || debrief) && !flyby && !orbit && !preflight && !rmlModalOpen;
+      const showLegend = useShellSceneOverlays
+        && (flight || debrief) && !flyby && !orbit && !preflight && !rmlModalOpen;
       telemetryChartLegend.classList.toggle("is-visible", showLegend);
       telemetryChartLegend.hidden = !showLegend;
       if (showLegend) {
@@ -6886,6 +6994,7 @@
       if (control.matches("[data-desktop-fullscreen-toggle]")) return "setting:fullscreen";
       if (control.matches("[data-frame-limit-select]")) return "setting:frame_limit";
       if (control.matches("[data-game-speed-select]")) return "setting:game_speed";
+      if (control.matches("[data-keyboard-drill-mode-select]")) return "setting:keyboard_drill_mode";
       if (control.matches("[data-controller-prompt-select]")) return "setting:controller_prompt";
       if (control.matches("[data-controller-deadzone-select]")) return "setting:controller_deadzone";
       if (control.matches("[data-help-toggle]")) return "setting:mission_help";
@@ -7105,11 +7214,13 @@
         const phaseBoard = mode === "phase-board";
         const miningFullscreen = mode === "mining-fullscreen";
         const titleScreen = mode === "title";
+        const storyBriefing = mode === "story-briefing";
         const arrivalFanfarePanel = mode === "arrival-fanfare" || mode === "mission-stamp";
         panel.classList.toggle("phase-board-panel", phaseBoard);
         panel.classList.toggle("mining-fullscreen-panel", miningFullscreen);
         panel.classList.toggle("title-screen-panel", titleScreen);
         panel.classList.toggle("title-screen-panel-mode", titleScreen);
+        panel.classList.toggle("story-briefing-panel-mode", storyBriefing);
         panel.classList.toggle("arrival-fanfare-panel-mode", arrivalFanfarePanel);
         panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
         panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
@@ -7240,6 +7351,7 @@
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
+      miningKeyboardDrill: (active) => rrCall("rr_mining_keyboard_drill", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
       miningTether: () => rrCall("rr_mining_tether"),
       miningRepairDrill: () => rrCall("rr_mining_repair_drill"),
@@ -7412,7 +7524,7 @@
       "4/7 Jupiter",
       "5/7 Saturn",
       "6/7 Uranus",
-      "7/7 Neptune / Straylight"
+      "7/7 Neptune"
     ]);
 
     function syncDebugActOneControls() {
@@ -7904,6 +8016,14 @@
         return;
       }
 
+      const drillModeSelect = closestFromEvent(event, "[data-keyboard-drill-mode-select]");
+      if (drillModeSelect && (panel.contains(drillModeSelect) || modalRoot.contains(drillModeSelect))) {
+        setKeyboardDrillMode(drillModeSelect.value);
+        syncLocalControls(panel);
+        syncLocalControls(modalRoot);
+        return;
+      }
+
       const promptSelect = closestFromEvent(event, "[data-controller-prompt-select]");
       if (promptSelect && (panel.contains(promptSelect) || modalRoot.contains(promptSelect))) {
         setControllerPreference("promptFamily", promptSelect.value);
@@ -8090,6 +8210,7 @@
 
     function releaseMiningDrill() {
       miningPointerDown = false;
+      rr.miningKeyboardDrill(false);
       rr.miningDrill(false);
     }
 
@@ -8254,7 +8375,7 @@
         return true;
       }
       if (key === " ") {
-        rr.miningDrill(true);
+        rr.miningKeyboardDrill(true);
         event.preventDefault();
         return true;
       }
@@ -8289,7 +8410,7 @@
         return;
       }
       if (key === " ") {
-        rr.miningDrill(false);
+        rr.miningKeyboardDrill(false);
         event.preventDefault();
       }
     }
@@ -8472,7 +8593,12 @@
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (event.key === " " && sceneLaunchControl.classList.contains("is-visible") && !sceneLaunchControl.hidden && !sceneLaunchControl.disabled) {
+      // The native RmlUi launch control is rendered in the scene rather than
+      // as this shell overlay. Bind Space to the preflight state itself so
+      // keyboard launch works in both render paths.
+      const preflightLaunch = panel.querySelector("[data-preflight-launch]");
+      const preflightReady = preflightLaunch?.dataset.preflightReady === "1";
+      if (event.key === " " && preflightReady) {
         rr.startLaunch();
         event.preventDefault();
         return;

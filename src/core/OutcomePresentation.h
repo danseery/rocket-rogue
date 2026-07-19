@@ -87,6 +87,14 @@ inline std::string_view launchOutcomeNextActionLabel(const LaunchOutcome& outcom
 inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome, bool opensPostArrivalPhases = false)
 {
     std::vector<std::string> notes;
+    if (outcome.type == LaunchResultType::Destroyed) {
+        notes.push_back("Burn " + display::multiplier(outcome.ejectMultiplier)
+            + " reached the revealed failure point at " + display::multiplier(outcome.crashMultiplier) + ".");
+    } else {
+        notes.push_back("Burn " + display::multiplier(outcome.ejectMultiplier)
+            + " stopped " + display::multiplier(std::max(0.0, outcome.crashMultiplier - outcome.ejectMultiplier))
+            + " before the revealed failure point at " + display::multiplier(outcome.crashMultiplier) + ".");
+    }
     if (opensPostArrivalPhases) {
         notes.emplace_back(text::panel::messages::postArrivalResearchReady);
     }
