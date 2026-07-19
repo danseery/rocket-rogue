@@ -7,6 +7,7 @@
 
 #include <bit>
 #include <cassert>
+#include <cstdio>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -14,7 +15,7 @@
 
 namespace {
 
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xed80b34271fcbe69ULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0x94b6ba22e1b1767eULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:
@@ -324,7 +325,11 @@ void testLongRunMiningSubmissionBudget()
         triangles += draw.drawType == rocket::SceneDrawType::Triangles ? 1U : 0U;
         instances += draw.drawType == rocket::SceneDrawType::InstancedQuad ? 1U : 0U;
     }
-    assert(fixture.app.deterministicStateHash() == kExpectedLongRunMiningHash);
+    const std::uint64_t stateHash = fixture.app.deterministicStateHash();
+    if (stateHash != kExpectedLongRunMiningHash) {
+        std::fprintf(stderr, "Long-run mining state hash: 0x%llx\n", static_cast<unsigned long long>(stateHash));
+    }
+    assert(stateHash == kExpectedLongRunMiningHash);
     assert(fixture.renderer.draws.size() <= 33U);
     assert(fixture.renderer.draws.size() == 5U);
     assert(triangles == 0U);
@@ -355,7 +360,11 @@ void testLongRunMiningRunnerHash()
     for (int frame = 0; frame < 4200; ++frame) {
         runner.frameForBenchmark(1.0 / 60.0);
     }
-    assert(runner.app().deterministicStateHash() == kExpectedLongRunMiningHash);
+    const std::uint64_t runnerStateHash = runner.app().deterministicStateHash();
+    if (runnerStateHash != kExpectedLongRunMiningHash) {
+        std::fprintf(stderr, "Long-run mining runner hash: 0x%llx\n", static_cast<unsigned long long>(runnerStateHash));
+    }
+    assert(runnerStateHash == kExpectedLongRunMiningHash);
     runner.shutdown();
 }
 

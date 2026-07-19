@@ -884,6 +884,82 @@ bool parseMiningProgressionField(SaveData& save, std::string_view key, std::stri
     return false;
 }
 
+std::vector<Astronaut> parseCrew(std::string_view text);
+MaterialInventory parseMaterials(std::string_view text);
+std::vector<DroneUpgradeRecord> parseDroneUpgrades(std::string_view text);
+std::vector<ArtifactRecord> parseArtifacts(std::string_view text);
+std::vector<int> parseInts(std::string_view text);
+
+bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::string_view value)
+{
+    if (key == save_schema::field::unlocks) {
+        save.unlockKeys = split(value, save_schema::listDelimiter);
+    } else if (key == save_schema::field::blueprints) {
+        save.blueprintProgress = parseInt(value, save.blueprintProgress);
+    } else if (key == save_schema::field::materials) {
+        save.materials = parseMaterials(value);
+    } else if (key == save_schema::field::droneBaySlots) {
+        save.droneBaySlots = parseInt(value, save.droneBaySlots);
+    } else if (key == save_schema::field::ownedDrones) {
+        save.ownedDroneIds = split(value, save_schema::listDelimiter);
+    } else if (key == save_schema::field::equippedDrones) {
+        save.equippedDroneIds = split(value, save_schema::listDelimiter);
+    } else if (key == save_schema::field::droneUpgrades) {
+        save.droneUpgrades = parseDroneUpgrades(value);
+    } else if (key == save_schema::field::artifacts) {
+        save.artifacts = parseArtifacts(value);
+    } else if (key == save_schema::field::furthestTier) {
+        save.furthestTier = parseInt(value, save.furthestTier);
+    } else if (key == save_schema::field::shipsLost) {
+        save.shipsLost = parseInt(value, save.shipsLost);
+    } else if (key == save_schema::field::astronautsLost) {
+        save.astronautsLost = parseInt(value, save.astronautsLost);
+    } else if (key == save_schema::field::closestSurvivalMargin) {
+        save.closestSurvivalMargin = parseDouble(value, save.closestSurvivalMargin);
+    } else if (key == save_schema::field::closestSurvivalBurn) {
+        save.closestSurvivalBurn = parseDouble(value, save.closestSurvivalBurn);
+    } else if (key == save_schema::field::closestSurvivalFailurePoint) {
+        save.closestSurvivalFailurePoint = parseDouble(value, save.closestSurvivalFailurePoint);
+    } else if (key == save_schema::field::maxBurnDepth) {
+        save.maxBurnDepth = parseDouble(value, save.maxBurnDepth);
+    } else if (key == save_schema::field::maxPeakWarning) {
+        save.maxPeakWarning = parseDouble(value, save.maxPeakWarning);
+    } else if (key == save_schema::field::maxPeakAbortRisk) {
+        save.maxPeakAbortRisk = parseDouble(value, save.maxPeakAbortRisk);
+    } else if (key == save_schema::field::bestCreditDelta) {
+        save.bestCreditDelta = parseDouble(value, save.bestCreditDelta);
+    } else if (key == save_schema::field::worstCreditDelta) {
+        save.worstCreditDelta = parseDouble(value, save.worstCreditDelta);
+    } else if (key == save_schema::field::totalFlybyMisses) {
+        save.totalFlybyMisses = parseInt(value, save.totalFlybyMisses);
+    } else if (key == save_schema::field::totalFlybyGoods) {
+        save.totalFlybyGoods = parseInt(value, save.totalFlybyGoods);
+    } else if (key == save_schema::field::totalFlybyPerfects) {
+        save.totalFlybyPerfects = parseInt(value, save.totalFlybyPerfects);
+    } else if (key == save_schema::field::destinationHistoryIds) {
+        save.destinationHistoryIds = split(value, save_schema::listDelimiter);
+    } else if (key == save_schema::field::destinationAttempts) {
+        save.destinationAttempts = parseInts(value);
+    } else if (key == save_schema::field::destinationSuccesses) {
+        save.destinationSuccesses = parseInts(value);
+    } else if (key == save_schema::field::destinationFlybys) {
+        save.destinationFlybys = parseInts(value);
+    } else if (key == save_schema::field::destinationOrbits) {
+        save.destinationOrbits = parseInts(value);
+    } else if (key == save_schema::field::destinationLandings) {
+        save.destinationLandings = parseInts(value);
+    } else if (key == save_schema::field::memorials) {
+        save.memorials = split(value, save_schema::textListDelimiter);
+    } else if (key == save_schema::field::famousLaunches) {
+        save.famousLaunches = split(value, save_schema::textListDelimiter);
+    } else if (key == save_schema::field::crew) {
+        save.crew = parseCrew(value);
+    } else {
+        return false;
+    }
+    return true;
+}
+
 std::uint64_t parseU64(std::string_view text, std::uint64_t fallback)
 {
     std::uint64_t value = fallback;
@@ -2426,68 +2502,7 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             parseMiningTerrainSize(value, save.mining.terrain);
         } else if (key == save_schema::field::miningTerrainCells) {
             parseMiningCells(value, save.mining.terrain);
-        } else if (key == save_schema::field::unlocks) {
-            save.unlockKeys = split(value, save_schema::listDelimiter);
-        } else if (key == save_schema::field::blueprints) {
-            save.blueprintProgress = parseInt(value, save.blueprintProgress);
-        } else if (key == save_schema::field::materials) {
-            save.materials = parseMaterials(value);
-        } else if (key == save_schema::field::droneBaySlots) {
-            save.droneBaySlots = parseInt(value, save.droneBaySlots);
-        } else if (key == save_schema::field::ownedDrones) {
-            save.ownedDroneIds = split(value, save_schema::listDelimiter);
-        } else if (key == save_schema::field::equippedDrones) {
-            save.equippedDroneIds = split(value, save_schema::listDelimiter);
-        } else if (key == save_schema::field::droneUpgrades) {
-            save.droneUpgrades = parseDroneUpgrades(value);
-        } else if (key == save_schema::field::artifacts) {
-            save.artifacts = parseArtifacts(value);
-        } else if (key == save_schema::field::furthestTier) {
-            save.furthestTier = parseInt(value, save.furthestTier);
-        } else if (key == save_schema::field::shipsLost) {
-            save.shipsLost = parseInt(value, save.shipsLost);
-        } else if (key == save_schema::field::astronautsLost) {
-            save.astronautsLost = parseInt(value, save.astronautsLost);
-        } else if (key == save_schema::field::closestSurvivalMargin) {
-            save.closestSurvivalMargin = parseDouble(value, save.closestSurvivalMargin);
-        } else if (key == save_schema::field::closestSurvivalBurn) {
-            save.closestSurvivalBurn = parseDouble(value, save.closestSurvivalBurn);
-        } else if (key == save_schema::field::closestSurvivalFailurePoint) {
-            save.closestSurvivalFailurePoint = parseDouble(value, save.closestSurvivalFailurePoint);
-        } else if (key == save_schema::field::maxBurnDepth) {
-            save.maxBurnDepth = parseDouble(value, save.maxBurnDepth);
-        } else if (key == save_schema::field::maxPeakWarning) {
-            save.maxPeakWarning = parseDouble(value, save.maxPeakWarning);
-        } else if (key == save_schema::field::maxPeakAbortRisk) {
-            save.maxPeakAbortRisk = parseDouble(value, save.maxPeakAbortRisk);
-        } else if (key == save_schema::field::bestCreditDelta) {
-            save.bestCreditDelta = parseDouble(value, save.bestCreditDelta);
-        } else if (key == save_schema::field::worstCreditDelta) {
-            save.worstCreditDelta = parseDouble(value, save.worstCreditDelta);
-        } else if (key == save_schema::field::totalFlybyMisses) {
-            save.totalFlybyMisses = parseInt(value, save.totalFlybyMisses);
-        } else if (key == save_schema::field::totalFlybyGoods) {
-            save.totalFlybyGoods = parseInt(value, save.totalFlybyGoods);
-        } else if (key == save_schema::field::totalFlybyPerfects) {
-            save.totalFlybyPerfects = parseInt(value, save.totalFlybyPerfects);
-        } else if (key == save_schema::field::destinationHistoryIds) {
-            save.destinationHistoryIds = split(value, save_schema::listDelimiter);
-        } else if (key == save_schema::field::destinationAttempts) {
-            save.destinationAttempts = parseInts(value);
-        } else if (key == save_schema::field::destinationSuccesses) {
-            save.destinationSuccesses = parseInts(value);
-        } else if (key == save_schema::field::destinationFlybys) {
-            save.destinationFlybys = parseInts(value);
-        } else if (key == save_schema::field::destinationOrbits) {
-            save.destinationOrbits = parseInts(value);
-        } else if (key == save_schema::field::destinationLandings) {
-            save.destinationLandings = parseInts(value);
-        } else if (key == save_schema::field::memorials) {
-            save.memorials = split(value, save_schema::textListDelimiter);
-        } else if (key == save_schema::field::famousLaunches) {
-            save.famousLaunches = split(value, save_schema::textListDelimiter);
-        } else if (key == save_schema::field::crew) {
-            save.crew = parseCrew(value);
+        } else if (parseInventoryAndHistoryField(save, key, value)) {
         }
     }
 
