@@ -141,8 +141,12 @@ inline LaunchPanelPresentation launchPanelPresentation(
     presentation.metrics.push_back(panelMetric(
         actions.returningHome ? text::labels::returnProgress :
             (flightModel.config.frontierTransfer ? text::labels::requiredBurn : text::labels::dataGoal),
-        actions.returningHome ? display::percent(presentation.returnProgress) : display::multiplier(destination.targetMultiplier)));
+        actions.returningHome ? display::percent(presentation.returnProgress) :
+            display::multiplier(flightModel.config.frontierTransfer ? destination.targetMultiplier : flightModel.config.burnGoalMultiplier)));
     presentation.metrics.push_back(panelMetric(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
+    if (flightModel.objectiveConfidence > 0.0) {
+        presentation.metrics.push_back(panelMetric("Confidence", display::percent(flightModel.objectiveConfidence)));
+    }
 
     const TelemetryEvent event = telemetryAt(flightModel, presentation.displayedMultiplier);
     const auto samples = telemetrySamples(event);

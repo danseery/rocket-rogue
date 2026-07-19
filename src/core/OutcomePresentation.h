@@ -2,6 +2,7 @@
 
 #include "core/ContentIds.h"
 #include "core/GameFormat.h"
+#include "core/GameState.h"
 #include "core/GameText.h"
 #include "core/GameTypes.h"
 #include "core/Tuning.h"
@@ -45,6 +46,74 @@ struct LaunchOutcomePresentation {
     std::vector<std::string> notes;
     std::vector<AchievementPresentation> achievements;
 };
+
+struct LaunchOutcomeSummaryPresentation {
+    std::string title;
+    std::string consequence;
+    std::string progression;
+};
+
+inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const GameState& state, const ContentCatalog& catalog)
+{
+    const LaunchOutcome& outcome = state.lastOutcome;
+    const Destination* destination = catalog.findDestination(outcome.destinationId);
+    const bool earthFlight = destination != nullptr && destination->id == content::destination::earthOrbit;
+    const bool moonTransfer = destination != nullptr
+        && destination->id == content::destination::moon
+        && outcome.frontierTransfer;
+
+    if (moonTransfer && outcome.type == LaunchResultType::MissionComplete) {
+        return {"LUNAR ARRIVAL", "The expedition has crossed its first frontier.", "Mars route now open"};
+    }
+    if (moonTransfer) {
+        return {
+            "TRANSFER LOST",
+            "The Moon escaped this burn, but the route is better understood.",
+            "Flight Data 3/3  |  Next confidence 100%"
+        };
+    }
+
+    if (earthFlight) {
+        const int required = tuning::mission::readinessBaseRequired;
+        const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
+        const std::string flightData = "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required);
+        if (outcome.type == LaunchResultType::Destroyed) {
+            return {"VEHICLE LOST", "The mission ended beyond recovery.", flightData + "  |  Lunar route incomplete"};
+        }
+
+        const bool shallow = outcome.ejectMultiplier < 1.0 +
+            (destination->targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
+        const double usefulShare = outcome.recoveryMethod == RecoveryMethod::ManualEject
+            ? tuning::outcomes::manualEjectUsefulDataTargetShare
+            : tuning::outcomes::returnUsefulDataTargetShare;
+        const bool usefulReturn = !shallow && outcome.ejectMultiplier >= destination->targetMultiplier * usefulShare;
+        if (outcome.type == LaunchResultType::MissionComplete) {
+            const int remaining = std::max(0, required - readiness);
+            return {
+                "ROUTE DATA SECURED",
+                "The flight pushed far enough to chart more of the lunar corridor.",
+                remaining == 0 ? "Flight Data 3/3  |  Lunar route charted"
+                               : flightData + "  |  " + std::to_string(remaining) + (remaining == 1 ? " flight remains" : " flights remain")
+            };
+        }
+        if (usefulReturn) {
+            return {"SHIP RECOVERED", "The crew turned back, but brought home a usable flight profile.", flightData + "  |  Lunar route advancing"};
+        }
+        return {"FLIGHT RECALLED", "The ship came home before its instruments could chart a viable lunar route.", "Moon route locked  |  " + flightData};
+    }
+
+    const std::string destinationName = destination == nullptr ? std::string("the frontier") : destination->name;
+    if (outcome.type == LaunchResultType::Destroyed) {
+        return {"VEHICLE LOST", "The mission ended beyond recovery.", "Review the flight record before rebuilding"};
+    }
+    if (outcome.frontierTransfer && outcome.type == LaunchResultType::MissionComplete) {
+        return {destinationName + " ARRIVAL", "The expedition has opened another frontier.", "Continue to arrival operations"};
+    }
+    if (outcome.type == LaunchResultType::MissionComplete) {
+        return {"MISSION COMPLETE", "The crew returned with a complete flight profile.", "The next route is closer"};
+    }
+    return {"SHIP RECOVERED", "The crew returned before the flight profile was complete.", "Review the result and prepare the next launch"};
+}
 
 inline std::string_view launchOutcomeLabel(const LaunchOutcome& outcome)
 {

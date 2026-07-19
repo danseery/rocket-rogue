@@ -25,6 +25,21 @@ inline double performanceScore(const ModuleStats& stats, double crewTrainingBonu
             crewTrainingBonus);
 }
 
+inline double openingMoonTransferConfidence(double performance, int overpreparedData, int attempts, int successes)
+{
+    if (successes > 0 || attempts > 0) {
+        return 1.0;
+    }
+    return std::clamp(
+        tuning::mission::openingMoonConfidenceBase +
+            std::max(0.0, performance - tuning::mission::openingMoonConfidencePerformanceBaseline) *
+                tuning::mission::openingMoonConfidencePerformanceScale +
+            static_cast<double>(cappedOverpreparedData(overpreparedData)) *
+                tuning::mission::openingMoonConfidenceOverpreparedScale,
+        tuning::mission::openingMoonConfidenceMinimum,
+        tuning::mission::openingMoonConfidenceMaximum);
+}
+
 inline double readinessRatio(int currentReadiness, int requiredReadiness)
 {
     if (requiredReadiness <= 0) {

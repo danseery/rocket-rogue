@@ -243,6 +243,19 @@
     .story-beats article h2 { margin: 6px 0; color: #f1f8fa; font-size: 18px; }
     .story-beats article p { margin: 0; color: #b9ced6; font-size: 13px; line-height: 1.45; }
     .story-action { min-width: 280px; min-height: 50px; margin-top: 24px; border-color: rgba(255, 209, 102, 0.76); background: rgba(74, 56, 13, 0.92); color: #fff1bd; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+    .opening-controls { position: absolute; right: clamp(24px, 2.5vw, 44px); bottom: clamp(28px, 4vh, 56px); z-index: 2; width: min(480px, calc(100vw - 48px)); padding: 12px 14px 14px; border-left: 2px solid rgba(99, 229, 255, 0.58); background: rgba(3, 12, 20, 0.94); }
+    .opening-controls-kicker { display: block; margin-bottom: 8px; color: #84dff2; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; }
+    .opening-control-cards { display: flex; width: 100%; gap: 10px; }
+    .opening-control-card { min-height: 218px; flex: 1 1 100%; padding: 10px 12px; border-top: 1px solid rgba(99, 229, 255, 0.42); background: rgba(8, 27, 39, 0.82); }
+    .opening-control-title { display: block; color: #84dff2; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+    .opening-control-row { margin-top: 8px; }
+    .opening-control-row > strong { color: #fff0b7; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .opening-control-row p { margin: 2px 0 0; color: #c5d7de; font-size: 10px; line-height: 1.32; }
+    .opening-control-row p strong { color: #fff0b7; }
+    .opening-controller-controls { display: none; }
+    body.controller-input-active:not(.rmlui-enabled) .opening-keyboard-controls { flex-basis: 0; }
+    body.controller-input-active:not(.rmlui-enabled) .opening-controller-controls { display: block; flex-basis: 0; }
+    body.controller-input-active:not(.rmlui-enabled) .opening-controls { width: min(660px, calc(100vw - 56px)); }
 
     .title-screen {
       position: relative;
@@ -4666,6 +4679,33 @@
       margin-top: 14px;
     }
 
+    .launch-outcome-summary {
+      display: flex;
+      flex-direction: column;
+      min-height: 190px;
+    }
+
+    .launch-outcome-consequence {
+      margin: 12px 0 14px;
+      color: #c5d7de;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .launch-outcome-progression {
+      color: #f0d47a;
+      font-size: 14px;
+    }
+
+    .launch-outcome-actions {
+      margin-top: auto;
+    }
+
+    .launch-outcome-actions button {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
     body.controller-input-active.controller-focus-visible:not(.rmlui-enabled) #panel .controller-focused,
     body.controller-input-active.controller-focus-visible:not(.rmlui-enabled) #modal-root .controller-focused {
       outline: 3px solid #f4c95d;
@@ -5986,6 +6026,20 @@
         width: 100%;
       }
 
+      .opening-controls {
+        right: 14px;
+        bottom: 14px;
+        width: calc(100vw - 28px);
+      }
+
+      .opening-control-cards {
+        display: block;
+      }
+
+      .opening-controller-controls {
+        margin-top: 8px;
+      }
+
       #panel {
         inset: auto 10px 10px 10px;
         width: auto;
@@ -6736,10 +6790,23 @@
 
     function controllerPromptLabels() {
       const family = resolvedControllerPromptFamily();
-      if (family === "playstation") return { south: "Cross", east: "Circle", west: "Square", north: "Triangle", lb: "L1", rb: "R1", rt: "R2", menu: "Options" };
-      if (family === "xbox") return { south: "A", east: "B", west: "X", north: "Y", lb: "LB", rb: "RB", rt: "RT", menu: "Menu" };
-      if (family === "steamdeck") return { south: "A", east: "B", west: "X", north: "Y", lb: "L1", rb: "R1", rt: "R2", menu: "Menu" };
-      return { south: "South", east: "East", west: "West", north: "North", lb: "LB", rb: "RB", rt: "RT", menu: "Menu" };
+      if (family === "playstation") return { south: "Cross", east: "Circle", west: "Square", north: "Triangle", lb: "L1", rb: "R1", rt: "R2", menu: "Options", view: "Create" };
+      if (family === "xbox") return { south: "A", east: "B", west: "X", north: "Y", lb: "LB", rb: "RB", rt: "RT", menu: "Menu", view: "View" };
+      if (family === "steamdeck") return { south: "A", east: "B", west: "X", north: "Y", lb: "L1", rb: "R1", rt: "R2", menu: "Menu", view: "View" };
+      return { south: "South", east: "East", west: "West", north: "North", lb: "LB", rb: "RB", rt: "RT", menu: "Menu", view: "View" };
+    }
+
+    function syncOpeningControlGuides(root = panel) {
+      const label = controllerPromptLabels();
+      root.querySelectorAll("[data-controller-south]").forEach((element) => { element.textContent = label.south; });
+      root.querySelectorAll("[data-controller-east]").forEach((element) => { element.textContent = label.east; });
+      root.querySelectorAll("[data-controller-west]").forEach((element) => { element.textContent = label.west; });
+      root.querySelectorAll("[data-controller-north]").forEach((element) => { element.textContent = label.north; });
+      root.querySelectorAll("[data-controller-lb]").forEach((element) => { element.textContent = label.lb; });
+      root.querySelectorAll("[data-controller-rb]").forEach((element) => { element.textContent = label.rb; });
+      root.querySelectorAll("[data-controller-rt]").forEach((element) => { element.textContent = label.rt; });
+      root.querySelectorAll("[data-controller-menu]").forEach((element) => { element.textContent = label.menu; });
+      root.querySelectorAll("[data-controller-view]").forEach((element) => { element.textContent = label.view; });
     }
 
     function updateControllerPromptBar() {
@@ -6780,6 +6847,7 @@
       detectedControllerFamily = typeof family === "number" ? (families[family] || "generic") : (families.includes(family) ? family : "generic");
       document.body.classList.toggle("controller-input-active", Boolean(active));
       document.body.dataset.controllerFamily = resolvedControllerPromptFamily();
+      syncOpeningControlGuides();
       updateControllerPromptBar();
     }
 
@@ -7209,6 +7277,7 @@
       setPanel(html) {
         panel.innerHTML = html;
         syncLocalControls(panel);
+        syncOpeningControlGuides(panel);
         updateControllerPromptBar();
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
         const phaseBoard = mode === "phase-board";
@@ -7392,7 +7461,7 @@
       trainCrew: () => rrCall("rr_train_crew"),
       restCrew: () => rrCall("rr_rest_crew"),
       resetSave: () => {
-        closePanelModal(true);
+        closePanelModal(true, false);
         rrCall("rr_reset_save");
         syncSceneOverlays();
       },
@@ -7742,6 +7811,7 @@
       const dismissible = template.dataset.modalDismissible !== "0";
       modalRoot.dataset.dismissible = dismissible ? "1" : "0";
       modalRoot.dataset.modalId = id;
+      modalRoot.dataset.closeAction = template.dataset.modalCloseAction || "";
       modalClose.hidden = !dismissible || template.dataset.modalHideClose === "1";
       syncLocalControls(modalContent);
       modalRoot.hidden = false;
@@ -7755,15 +7825,17 @@
       return true;
     }
 
-    function closePanelModal(closeAll = false) {
+    function closePanelModal(closeAll = false, dispatchCloseAction = true) {
       if (!closeAll && panelModalStack.length) {
         const parent = panelModalStack.pop();
         openPanelModal(parent.id, false, parent.focusId);
         return;
       }
+      const closeAction = dispatchCloseAction ? (modalRoot.dataset.closeAction || "") : "";
       modalRoot.hidden = true;
       delete modalRoot.dataset.dismissible;
       delete modalRoot.dataset.modalId;
+      delete modalRoot.dataset.closeAction;
       modalClose.hidden = false;
       modalTitle.textContent = "";
       modalContent.innerHTML = "";
@@ -7772,6 +7844,7 @@
       modalReturnFocusId = "";
       updateControllerPromptBar();
       if (document.body.classList.contains("controller-input-active")) restoreControllerFocus();
+      if (closeAction) runPanelAction(closeAction);
     }
 
     function openInventoryFromKey(event) {
@@ -7924,7 +7997,7 @@
         button.classList.remove("controller-hold-active");
         if (!button.isConnected || button.disabled) return;
         const ranAction = runPanelAction(action);
-        if (ranAction && modalRoot.contains(button)) closePanelModal(true);
+        if (ranAction && modalRoot.contains(button)) closePanelModal(true, false);
       }, holdSeconds * 1000);
       heldPanelActions.set(button, timer);
     }
@@ -7966,7 +8039,7 @@
 
       const ranAction = runPanelAction(action);
       if (ranAction && modalRoot.contains(button)) {
-        closePanelModal(true);
+        closePanelModal(true, false);
       }
     }
 

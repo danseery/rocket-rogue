@@ -128,6 +128,14 @@ inline constexpr int readinessBaseRequired = 3;
 inline constexpr int moonReadinessRequired = 3;
 inline constexpr int readinessOverCap = 3;
 inline constexpr double destroyedCreditPenalty = 30.0;
+inline constexpr double openingProvingGoalMargin = 0.08;
+inline constexpr double openingMoonConfidenceBase = 0.80;
+inline constexpr double openingMoonConfidencePerformanceBaseline = 0.50;
+inline constexpr double openingMoonConfidencePerformanceScale = 0.10;
+inline constexpr double openingMoonConfidenceOverpreparedScale = 0.02;
+inline constexpr double openingMoonConfidenceMinimum = 0.85;
+inline constexpr double openingMoonConfidenceMaximum = 0.97;
+inline constexpr double openingMoonArrivalMargin = 0.06;
 } // namespace mission
 
 namespace ark {
@@ -143,7 +151,7 @@ struct BlueprintUnlock {
 };
 
 inline constexpr BlueprintUnlock blueprintUnlocks[] = {
-    {4, content::unlock::thermal, "Thermal systems unlocked."},
+    {2, content::unlock::thermal, "Thermal systems unlocked."},
     {8, content::unlock::recovery, "Recovery hardware unlocked."},
     {12, content::unlock::deepSpace, "Deep-space module family unlocked."},
     {18, content::unlock::ai, "Predictive guidance unlocked."},
@@ -571,6 +579,7 @@ inline constexpr double pushedProfileShelfShare = 0.45;
 inline constexpr double shallowRecoveryTargetShare = 0.25;
 inline constexpr double shallowRecoveryPenaltyBase = 15.0;
 inline constexpr int shallowRecoveryPenaltyMaxExponent = 6;
+inline constexpr double shallowRecoveryPenaltyMaximum = 30.0;
 inline constexpr double cleanShallowRecoveryWarningThreshold = 0.62;
 inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 } // namespace rewards

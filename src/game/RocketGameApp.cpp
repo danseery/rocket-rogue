@@ -997,7 +997,11 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
         || presentationContext == InputContext::OrbitActive
         || presentationContext == InputContext::MiningActive
         || presentationContext == InputContext::MiningService;
-    const bool controllerPresentation = frame.connected && activeInputSource_ == InputSource::Controller;
+    const bool openingScreen = titleScreenActive_
+        || (state_.screen == Screen::StoryBriefing
+            && state_.storyBriefing.pending == StoryBriefingId::CampaignIntroduction);
+    const bool controllerPresentation = frame.connected
+        && (activeInputSource_ == InputSource::Controller || openingScreen);
     const bool controllerFocusVisible = controllerPresentation
         && (!directGameplayControls || pauseReason_ != PauseReason::None || services_.ui.modalOpen());
     services_.ui.setControllerFocusVisible(controllerFocusVisible);

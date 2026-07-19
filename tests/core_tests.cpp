@@ -124,7 +124,7 @@ void safeAndDestroyedOutcomesResolve()
     require(doomed.shipDamage == tuning::damage::destroyedShipDamage, "destroyed launch should total the ship");
 }
 
-void shallowRecoveryCheeseEscalatesAndThenFails()
+void shallowRecoveryHasBoundedCostAndNoProgress()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
@@ -138,22 +138,27 @@ void shallowRecoveryCheeseEscalatesAndThenFails()
     applyLaunchOutcome(state, catalog, first);
     require(state.run.shallowRecoveryStreak == 1, "first shallow return should start shallow recovery streak");
     require(state.run.cleanShallowRecoveryStreak == 1, "clean shallow return should start clean streak");
+    require(state.run.frontierReadiness == 0, "shallow returns should not bank Flight Data");
+    require(first.payout <= first.recoveryCost, "shallow returns should never create profit");
 
     Random secondRng(78);
     const PreparedLaunch secondLaunch = prepareLaunch(state, catalog, secondRng);
     const LaunchOutcome second = resolveLaunch(secondLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, secondRng);
     require(second.type != LaunchResultType::Destroyed, "second shallow clean return should still survive");
-    require(second.recoveryCost - first.recoveryCost >= tuning::rewards::shallowRecoveryPenaltyBase - 0.001, "second shallow return should double the cheese penalty");
+    require(second.recoveryCost >= first.recoveryCost, "repeat shallow returns should not get cheaper");
+    require(second.payout <= second.recoveryCost, "repeat shallow returns should never create profit");
     applyLaunchOutcome(state, catalog, second);
-    require(state.run.cleanShallowRecoveryStreak == 2, "second clean shallow return should arm the cheese detector");
+    require(state.run.cleanShallowRecoveryStreak == 2, "second clean shallow return should retain the recovery streak");
 
     Random thirdRng(79);
     const PreparedLaunch thirdLaunch = prepareLaunch(state, catalog, thirdRng);
     const LaunchOutcome third = resolveLaunch(thirdLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, thirdRng);
-    require(third.type == LaunchResultType::Destroyed, "third clean shallow return should destroy the vehicle");
+    require(third.type != LaunchResultType::Destroyed, "repeat shallow returns should never trigger scripted destruction");
+    require(third.recoveryCost <= tuning::outcomes::returnHomeRecoveryMaximum + tuning::rewards::shallowRecoveryPenaltyMaximum + 0.001,
+        "repeat shallow return costs should remain bounded");
     applyLaunchOutcome(state, catalog, third);
-    require(state.statusLine == std::string(text::status::cleanShallowRecoveryDestroyed), "cheese destruction should explain what happened");
-    require(state.run.shallowRecoveryStreak == 0 && state.run.cleanShallowRecoveryStreak == 0, "destruction should reset cheese counters");
+    require(state.run.frontierReadiness == 0, "repeat shallow returns should still produce no Flight Data");
+    require(state.run.shallowRecoveryStreak == 3 && state.run.cleanShallowRecoveryStreak == 3, "surviving shallow returns should retain their bounded-cost streak");
 }
 
 void moduleAggregationIncludesFrameAndDamage()
@@ -497,9 +502,15 @@ void moduleOffersAreOneChoiceRefits()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 202);
     state.run.credits = 200.0;
+    state.meta.unlockKeys.push_back(content::unlock::thermal);
 
     Random rng(909);
     generateModuleOffers(state, catalog, rng);
+
+    for (const std::string& moduleId : state.run.offerModuleIds) {
+        require(moduleId.empty() || std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), moduleId) == state.meta.ownedModuleIds.end(),
+            "refit offers should never sell an already-owned starter module");
+    }
 
     require(!offerKeyAt(state, 0).empty(), "reward screen should receive offer one");
     require(!offerKeyAt(state, 1).empty(), "reward screen should receive offer two");
@@ -686,7 +697,7 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
 }
 
-void destroyedTransferAttemptCostsOneProvingFlight()
+void destroyedMoonTransferPreservesProvingFlights()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 468);
@@ -702,7 +713,7 @@ void destroyedTransferAttemptCostsOneProvingFlight()
 
     applyLaunchOutcome(state, catalog, destroyed);
 
-    require(state.run.frontierReadiness == frontierReadinessRequired(state, catalog) - 1, "destroyed transfer attempts should cost one proving flight, not all flight data");
+    require(state.run.frontierReadiness == frontierReadinessRequired(state, catalog), "destroyed Moon transfer attempts should preserve all banked Flight Data");
 }
 
 void deadCrewLosesTraining()
@@ -6547,7 +6558,7 @@ void launchPanelPresentationComesFromSharedHelper()
     const PanelMetricPresentation* returnRisk = findPanelMetric(panel.metrics, text::labels::returnRisk);
     require(panel.sectionTitle == text::panel::sections::provingFlight, "launch presentation should select proving section title");
     require(burn != nullptr && burn->value == display::multiplier(currentMultiplier), "launch presentation should expose displayed burn depth");
-    require(dataGoal != nullptr && dataGoal->value == display::multiplier(catalog.destinations[0].targetMultiplier), "launch presentation should expose data goal metric");
+    require(dataGoal != nullptr && dataGoal->value == display::multiplier(launch.config.burnGoalMultiplier), "launch presentation should expose the actual proving data goal");
     require(returnRisk != nullptr && returnRisk->value == display::percent(returnHomeRisk(launch, catalog, state, currentMultiplier)), "launch presentation should share return risk math");
     require(panel.telemetry.size() == telemetrySamples(telemetryAt(launch, currentMultiplier)).size(), "launch presentation should expose all telemetry channel samples");
     require(findDetailPresentationRow(panel.telemetryDetails, text::labels::returnRisk) != nullptr, "launch presentation should expose return risk in telemetry details");
@@ -6879,6 +6890,8 @@ void titleScreenPresentationIsPortable()
         "the title should carry the Settings template required by native and browser modal hosts");
     require(freshHtml.find("data-ui-default-focus=\"1\"") != std::string::npos,
         "the title should offer a deterministic keyboard/controller focus target");
+    require(freshHtml.find("opening-controls") == std::string::npos,
+        "the title should stay focused on New Game, Continue, and Settings rather than show the expedition guide");
 
     context.hasSavedGame = true;
     const std::string savedHtml = buildGamePanelHtml(context);
@@ -6890,6 +6903,118 @@ void titleScreenPresentationIsPortable()
     require(newGame != std::string::npos && continueGame != std::string::npos && settings != std::string::npos &&
             newGame < continueGame && continueGame < settings,
         "title actions should remain ordered New Game, Continue, Settings");
+
+    GameState briefingState = createNewGame(catalog, 912);
+    briefingState.screen = Screen::StoryBriefing;
+    briefingState.storyBriefing.pending = StoryBriefingId::CampaignIntroduction;
+    Random briefingRng(912);
+    const PreparedLaunch briefingLaunch = prepareLaunch(briefingState, catalog, briefingRng);
+    const std::string briefingHtml = buildGamePanelHtml({briefingState, catalog, briefingLaunch, briefingLaunch});
+    require(countOccurrences(briefingHtml, "class=\"opening-controls\"") == 1,
+        "the campaign introduction should carry exactly one dedicated expedition control guide");
+    require(briefingHtml.find("CONTROLS // FIELD REFERENCE") != std::string::npos
+            && briefingHtml.find("Keyboard + mouse") != std::string::npos
+            && briefingHtml.find("Controller") != std::string::npos,
+        "the introduction guide should identify its keyboard and controller references");
+    require(briefingHtml.find("Space launches or returns") != std::string::npos
+            && briefingHtml.find("Space drills") != std::string::npos
+            && briefingHtml.find("data-controller-rt") != std::string::npos,
+        "the introduction guide should cover menus, launch, flight, and mining controls");
+    require(briefingHtml.find("&middot;") == std::string::npos,
+        "the guide should not rely on unsupported named HTML entities");
+}
+
+void earlyGameProgressionAndOutcomeModalAreClear()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1911);
+    Random rng(1911);
+    PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+
+    std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("Chart the route to the Moon") != std::string::npos, "opening Hangar should state the lunar-route objective");
+    require(html.find("Flight Data 0/3") != std::string::npos, "opening Hangar should tie Flight Data to Moon progression");
+
+    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    syncLaunchConfig(state, catalog);
+    launch = prepareLaunch(state, catalog, rng);
+    html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("Lunar route charted") != std::string::npos && html.find("Prepare the transfer") != std::string::npos,
+        "ready Hangar should replace collection instructions with the transfer objective");
+
+    state.screen = Screen::Launch;
+    state.launchConfig.frontierTransfer = true;
+    state.launchConfig.destinationId = content::destination::moon;
+    state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
+    launch = prepareLaunch(state, catalog, rng);
+    html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find(">Confidence</span>") != std::string::npos && html.find("85%") != std::string::npos,
+        "first Moon preflight should expose its compact numeric confidence");
+    require(countOccurrences(html, ">Confidence</span>") == 1, "Moon confidence should appear once rather than repeat across the launch UI");
+
+    GameState recovered = createNewGame(catalog, 1912);
+    LaunchOutcome usefulReturn;
+    usefulReturn.type = LaunchResultType::SafeEject;
+    usefulReturn.recoveryMethod = RecoveryMethod::ReturnHome;
+    usefulReturn.destinationId = content::destination::earthOrbit;
+    usefulReturn.ejectMultiplier = defaultProvingTarget(catalog.destinations[0]);
+    usefulReturn.crashMultiplier = usefulReturn.ejectMultiplier + 0.20;
+    applyLaunchOutcome(recovered, catalog, usefulReturn);
+    recovered.screen = Screen::Results;
+    Random recoveredRng(1912);
+    const PreparedLaunch recoveredLaunch = prepareLaunch(recovered, catalog, recoveredRng);
+    const std::string recoveredHtml = buildGamePanelHtml({recovered, catalog, recoveredLaunch, recoveredLaunch});
+    require(recoveredHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos,
+        "launch results should auto-open the compact outcome modal");
+    require(recoveredHtml.find("data-modal-close-action=\"next\"") != std::string::npos,
+        "closing the outcome modal should advance the result exactly like Continue");
+    require(recoveredHtml.find("SHIP RECOVERED") != std::string::npos
+            && recoveredHtml.find("brought home a usable flight profile") != std::string::npos
+            && recoveredHtml.find("Flight Data 1/3") != std::string::npos,
+        "useful early returns should explain the fiction and progression consequence");
+    require(recoveredHtml.find("data-ui-modal=\"flight_report\"") != std::string::npos
+            && recoveredHtml.find("data-modal=\"flight_report\"") != std::string::npos,
+        "the compact outcome should keep detailed telemetry behind Flight Report");
+
+    GameState earlyUnlock = createNewGame(catalog, 1915);
+    LaunchOutcome unlockFlight = usefulReturn;
+    unlockFlight.blueprintGain = 2;
+    applyLaunchOutcome(earlyUnlock, catalog, unlockFlight);
+    require(hasUnlock(earlyUnlock.meta, content::unlock::thermal),
+        "two useful opening profiles should unlock meaningful thermal refits before the Moon");
+
+    GameState recalled = createNewGame(catalog, 1913);
+    recalled.run.frontierReadiness = 2;
+    recalled.lastOutcome = usefulReturn;
+    recalled.lastOutcome.ejectMultiplier = 1.05;
+    recalled.screen = Screen::Results;
+    Random recalledRng(1913);
+    const PreparedLaunch recalledLaunch = prepareLaunch(recalled, catalog, recalledRng);
+    const std::string recalledHtml = buildGamePanelHtml({recalled, catalog, recalledLaunch, recalledLaunch});
+    require(recalledHtml.find("FLIGHT RECALLED") != std::string::npos
+            && recalledHtml.find("before its instruments could chart a viable lunar route") != std::string::npos
+            && recalledHtml.find("Moon route locked") != std::string::npos,
+        "too-early returns should use thematic copy while stating the locked-route consequence");
+
+    GameState failedMoon = createNewGame(catalog, 1914);
+    failedMoon.run.frontierReadiness = frontierReadinessRequired(failedMoon, catalog);
+    LaunchOutcome lostTransfer;
+    lostTransfer.type = LaunchResultType::Destroyed;
+    lostTransfer.recoveryMethod = RecoveryMethod::TransferArrival;
+    lostTransfer.destinationId = content::destination::moon;
+    lostTransfer.frontierTransfer = true;
+    lostTransfer.ejectMultiplier = 1.82;
+    lostTransfer.crashMultiplier = 1.82;
+    applyLaunchOutcome(failedMoon, catalog, lostTransfer);
+    failedMoon.screen = Screen::Results;
+    require(failedMoon.run.frontierReadiness == 3, "failed Moon transfer fixture should retain all Flight Data");
+    Random failedMoonRng(1914);
+    const PreparedLaunch failedMoonLaunch = prepareLaunch(failedMoon, catalog, failedMoonRng);
+    const std::string failedMoonHtml = buildGamePanelHtml({failedMoon, catalog, failedMoonLaunch, failedMoonLaunch});
+    require(failedMoonHtml.find("TRANSFER LOST") != std::string::npos
+            && failedMoonHtml.find("Flight Data 3/3") != std::string::npos
+            && failedMoonHtml.find("Next confidence 100%") != std::string::npos,
+        "failed Moon modal should explain retained progress and guaranteed retry confidence");
 }
 
 void solarMapModalTracksCampaignDiscovery()
@@ -7395,13 +7520,11 @@ void destinationRiskEscalates()
     require(galaxyDestroyed > earthDestroyed, "farther destination should be more dangerous at target multiplier");
 }
 
-void starterMoonTransferIsNotReliable()
+void starterMoonTransferUsesVisibleConfidenceAndPity()
 {
     const ContentCatalog catalog = createDefaultContent();
-    int destroyed = 0;
-    int heatDominant = 0;
-    double requiredPrepCrashTotal = 0.0;
-    double overpreparedCrashTotal = 0.0;
+    int completed = 0;
+    double reportedConfidenceTotal = 0.0;
     constexpr int samples = 1000;
 
     for (int i = 0; i < samples; ++i) {
@@ -7412,28 +7535,25 @@ void starterMoonTransferIsNotReliable()
         state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
         Random rng(5000 + static_cast<std::uint64_t>(i));
         const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-        requiredPrepCrashTotal += launch.crashMultiplier;
+        reportedConfidenceTotal += launch.objectiveConfidence;
         const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[1].targetMultiplier, RecoveryMethod::TransferArrival, rng);
-        destroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
-        const double sampleBurn = std::min(catalog.destinations[1].targetMultiplier, launch.crashMultiplier - 0.02);
-        const TelemetryEvent event = telemetryAt(launch, sampleBurn);
-        const double worstNonHeat = strongestNonHeatTelemetryValue(event);
-        heatDominant += event.heat > worstNonHeat ? 1 : 0;
-
-        GameState overprepared = createNewGame(catalog, 333);
-        overprepared.run.frontierReadiness = frontierReadinessCap(overprepared, catalog);
-        overprepared.launchConfig.frontierTransfer = true;
-        overprepared.launchConfig.destinationId = catalog.destinations[1].id;
-        overprepared.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
-        Random overpreparedRng(5000 + static_cast<std::uint64_t>(i));
-        const PreparedLaunch overpreparedLaunch = prepareLaunch(overprepared, catalog, overpreparedRng);
-        overpreparedCrashTotal += overpreparedLaunch.crashMultiplier;
+        completed += outcome.type == LaunchResultType::MissionComplete ? 1 : 0;
     }
 
-    require(destroyed > samples * 60 / 100, "starter ship should not reliably reach the Moon transfer burn");
-    require(destroyed < samples * 97 / 100, "prepared Moon transfer should not be a guaranteed early explosion");
-    require(heatDominant < samples * 70 / 100, "Moon transfer failures should not be overwhelmingly thermal");
-    require(overpreparedCrashTotal > requiredPrepCrashTotal + 80.0, "extra Earth Orbit data should meaningfully improve Moon transfer odds");
+    const double averageConfidence = reportedConfidenceTotal / static_cast<double>(samples);
+    require(averageConfidence >= 0.85 && averageConfidence < 0.87, "starter Moon transfer should report approximately 85% confidence");
+    require(completed >= samples * 82 / 100 && completed <= samples * 89 / 100, "starter Moon transfer outcomes should match the displayed confidence");
+
+    GameState retry = createNewGame(catalog, 333);
+    retry.run.frontierReadiness = frontierReadinessRequired(retry, catalog);
+    retry.meta.destinationAttempts[1] = 1;
+    retry.launchConfig.frontierTransfer = true;
+    retry.launchConfig.destinationId = catalog.destinations[1].id;
+    retry.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
+    Random retryRng(9876);
+    const PreparedLaunch retryLaunch = prepareLaunch(retry, catalog, retryRng);
+    require(retryLaunch.objectiveConfidence == 1.0, "the first unsuccessful Moon attempt should raise retry confidence to 100%");
+    require(retryLaunch.crashMultiplier > catalog.destinations[1].targetMultiplier, "the 100% retry should keep the arrival corridor reachable");
 }
 
 void frontierReadinessGatesProgression()
@@ -8082,7 +8202,7 @@ int main()
 {
     deterministicLaunchesMatch();
     safeAndDestroyedOutcomesResolve();
-    shallowRecoveryCheeseEscalatesAndThenFails();
+    shallowRecoveryHasBoundedCostAndNoProgress();
     moduleAggregationIncludesFrameAndDamage();
     earlyTelemetryShowsSystemLoad();
     launchIncidentsAreChunkyAndRecoverable();
@@ -8108,7 +8228,7 @@ int main()
     hangarOperationCardsComeFromSharedPreview();
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
-    destroyedTransferAttemptCostsOneProvingFlight();
+    destroyedMoonTransferPreservesProvingFlights();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
     pressureControlModulesReducePressureTelemetry();
@@ -8213,6 +8333,7 @@ int main()
     panelChromePresentationComesFromSharedHelper();
     settingsResolutionSelectorExposesSupportedPresets();
     titleScreenPresentationIsPortable();
+    earlyGameProgressionAndOutcomeModalAreClear();
     solarMapModalTracksCampaignDiscovery();
     panelHtmlIncludesContextualTutorialLayer();
     surfaceHtmlPromotesMiningAction();
@@ -8220,7 +8341,7 @@ int main()
     hangarHtmlShowsPilotIntakeModal();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
-    starterMoonTransferIsNotReliable();
+    starterMoonTransferUsesVisibleConfidenceAndPity();
     frontierReadinessGatesProgression();
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();

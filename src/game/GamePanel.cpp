@@ -111,6 +111,29 @@ std::string realtimeIdForLabel(std::string_view prefix, std::string_view label)
     return result;
 }
 
+std::string expeditionControlsMarkup()
+{
+    return R"(<section class="opening-controls" aria-label="Expedition controls">
+<span class="opening-controls-kicker">CONTROLS // FIELD REFERENCE</span>
+<div class="opening-control-cards">
+<article class="opening-control-card opening-keyboard-controls">
+<span class="opening-control-title">Keyboard + mouse</span>
+<div class="opening-control-row"><strong>Menus</strong><p>Mouse or WASD / Arrows navigate. Enter / Space selects. Esc goes back or pauses.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p>Space launches or returns. R returns. E ejects. Use the mouse for ship systems.</p></div>
+<div class="opening-control-row"><strong>Flight</strong><p>WASD / Arrows steer approaches. Esc aborts.</p></div>
+<div class="opening-control-row"><strong>Mining</strong><p>WASD / Arrows move. Space drills. E scans. T tethers. R banks payload at the ship.</p></div>
+</article>
+<article class="opening-control-card opening-controller-controls">
+<span class="opening-control-title">Controller</span>
+<div class="opening-control-row"><strong>Menus</strong><p>L-stick / D-pad navigate. <strong data-controller-south>{{controller_south}}</strong> selects. <strong data-controller-east>{{controller_east}}</strong> goes back. R-stick scrolls.</p></div>
+<div class="opening-control-row"><strong>Shortcuts</strong><p><strong data-controller-menu>{{controller_menu}}</strong> pauses. <strong data-controller-view>{{controller_view}}</strong> opens Map. <strong data-controller-north>{{controller_north}}</strong> opens Inventory.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p><strong data-controller-south>{{controller_south}}</strong> launches or returns. Hold <strong data-controller-east>{{controller_east}}</strong> to eject. <strong data-controller-west>{{controller_west}}</strong> engines. <strong data-controller-north>{{controller_north}}</strong> pressure. Hold <strong data-controller-rb>{{controller_rb}}</strong> to jettison.</p></div>
+<div class="opening-control-row"><strong>Flight / Mining</strong><p>L-stick steers or moves. Hold <strong data-controller-east>{{controller_east}}</strong> to abort. <strong data-controller-rt>{{controller_rt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. <strong data-controller-south>{{controller_south}}</strong> banks. <strong data-controller-lb>{{controller_lb}}</strong> / <strong data-controller-rb>{{controller_rb}}</strong> repairs.</p></div>
+</article>
+</div>
+</section>)";
+}
+
 std::string compactMetric(std::string_view label, std::string value)
 {
     return "<div class=\"surface-kpi\"><span>" + htmlEscape(label) + "</span><strong>" + htmlEscape(value) + "</strong></div>";
@@ -214,10 +237,16 @@ std::string modalTemplate(std::string_view modalId, std::string_view title, std:
     return result;
 }
 
-std::string autoModalTemplate(std::string_view modalId, std::string_view title, std::string body, bool dismissible = true)
+std::string autoModalTemplate(
+    std::string_view modalId,
+    std::string_view title,
+    std::string body,
+    bool dismissible = true,
+    std::string_view closeAction = {})
 {
     return "<template data-modal=\"" + htmlEscape(modalId) + "\" data-auto-modal=\"1\" data-modal-dismissible=\"" +
-        (dismissible ? "1" : "0") + "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
+        (dismissible ? "1" : "0") + "\" data-modal-close-action=\"" + htmlEscape(closeAction) +
+        "\" data-title=\"" + htmlEscape(title) + "\">" + body + "</template>";
 }
 
 std::string sharedUtilityModalTemplates()
@@ -1389,9 +1418,14 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 << "<article><span>02</span><h2>Make the Leap</h2><p>Flight data, salvage, and hard-earned experience give your crew what it needs to go farther.</p></article>"
                 << "<article><span>03</span><h2>Claim the System</h2><p>Earth Orbit. The Moon. Mars. Then the giants. Each arrival unlocks the next impossible horizon.</p></article>"
                 << "</div>"
-                << button("Launch the expedition", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+                << button("Launch the expedition", ui::actions::acknowledgeStoryBriefing, "story-action ok", true)
+                << "</div>"
+                << expeditionControlsMarkup();
         }
-        out << "</div></section>";
+        if (straylight) {
+            out << "</div>";
+        }
+        out << "</section>";
         return out.str();
     }
 
@@ -1656,8 +1690,20 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         }
 
         out << "<h2>" << htmlEscape(launchPanel.sectionTitle) << "</h2>";
-        out << "<section class=\"objective-strip\"><span>Objective</span><strong>Reach the required burn or data goal, then recover.</strong>"
-            << "<p>The yellow marker is a performance target, not a safety boundary. INSTABILITY estimates proximity to this run's hidden failure point.</p></section>";
+        const bool openingEarthFlight = currentDestination(state, catalog).id == content::destination::earthOrbit
+            && !context.flightModel.config.frontierTransfer;
+        const bool openingMoonTransfer = context.flightModel.config.frontierTransfer
+            && context.flightModel.config.destinationId == content::destination::moon;
+        if (openingEarthFlight) {
+            const int required = frontierReadinessRequired(state, catalog);
+            out << "<section class=\"objective-strip\"><span>Objective</span><strong>Chart the route to the Moon</strong><p>Reach the yellow flight objective and bring the ship home. Flight Data "
+                << state.run.frontierReadiness << "/" << required << ".</p></section>";
+        } else if (openingMoonTransfer) {
+            out << "<section class=\"objective-strip\"><span>Objective</span><strong>Reach the Moon</strong><p>Commit to the lunar transfer.</p></section>";
+        } else {
+            out << "<section class=\"objective-strip\"><span>Objective</span><strong>Reach the required burn or data goal, then recover.</strong>"
+                << "<p>The yellow marker is the current flight objective. INSTABILITY warns when the vehicle is nearing failure.</p></section>";
+        }
         out << "<div class=\"metric-grid flight-readout\">";
         for (std::size_t index = 0; index < launchPanel.metrics.size(); ++index) {
             const PanelMetricPresentation& metricItem = launchPanel.metrics[index];
@@ -1735,42 +1781,37 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const LaunchOutcomePresentation presentation = launchOutcomePresentation(
             state.lastOutcome,
             opensPostArrival);
-        out << phaseBoardOpen("phase-board-results", "");
-        out << "<section class=\"debrief-hero\"><span>" << htmlEscape("Mission debrief") << "</span><h2>"
-            << htmlEscape(presentation.label) << "</h2><p>"
-            << htmlEscape("Review the recovery record, banked gains, and vehicle consequences before choosing the next refit window.")
-            << "</p></section>";
-        if (opensPostArrival) {
-            const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
-            out << "<section class=\"debrief-handoff\"><div class=\"debrief-handoff-copy\"><span>"
-                << htmlEscape("Next windows") << "</span><h3>" << htmlEscape("Arrival handoff")
-                << "</h3><p>" << htmlEscape("Arrival is open now. Research, surface work, and refit queue up next.")
-                << "</p></div><div class=\"debrief-handoff-plan\">" << debriefPhaseTrack(postArrivalPhaseSteps(Screen::Results))
-                << "</div><div class=\"debrief-handoff-actions utility-actions\">"
-                << modalButton(text::buttons::briefing, ui::modals::phaseBriefing, "ghost") << "</div></section>";
-            out << modalTemplate(ui::modals::phaseBriefing, arrivalBriefing.title, detailStack(arrivalBriefing.rows));
-        }
-        out << crewFateCard(presentation.crewFate);
-        out << "<div class=\"result-grid\">";
+        const LaunchOutcomeSummaryPresentation summary = launchOutcomeSummaryPresentation(state, catalog);
+        std::ostringstream report;
+        report << crewFateCard(presentation.crewFate) << "<div class=\"result-grid\">";
         for (const LaunchOutcomeMetricGroupPresentation& group : presentation.metricGroups) {
-            out << resultMetricGroup(group);
+            report << resultMetricGroup(group);
         }
-        out << "</div>";
+        report << "</div>";
         for (const std::string& note : presentation.notes) {
-            out << boardNote(note);
+            report << boardNote(note);
         }
         if (!presentation.achievements.empty()) {
-            out << "<h2>" << htmlEscape(text::panel::sections::achievements) << "</h2>";
-            out << "<div class=\"achievement-grid\">";
+            report << "<h2>" << htmlEscape(text::panel::sections::achievements) << "</h2><div class=\"achievement-grid\">";
             for (const AchievementPresentation& achievement : presentation.achievements) {
-                out << achievementCard(achievement);
+                report << achievementCard(achievement);
             }
-            out << "</div>";
+            report << "</div>";
         }
-        out << "<div class=\"actions action-row\">";
-        out << button(presentation.nextActionLabel, ui::actions::next, "ok");
-        out << "</div>";
-        out << phaseBoardClose();
+
+        std::ostringstream summaryBody;
+        summaryBody << "<section class=\"launch-outcome-summary\"><p class=\"launch-outcome-consequence\">"
+            << htmlEscape(summary.consequence) << "</p><strong class=\"launch-outcome-progression\">"
+            << htmlEscape(summary.progression) << "</strong><div class=\"modal-actions action-row launch-outcome-actions\">"
+            << modalButton("Flight Report", ui::modals::flightReport, "ghost")
+            << button("Continue", ui::actions::next, "ok", true) << "</div></section>";
+
+        out << phaseBoardOpen("phase-board-results", "")
+            << "<section class=\"debrief-hero compact-result-backdrop\"><span>Mission resolved</span><h2>"
+            << htmlEscape(summary.title) << "</h2><p>Select Continue to move into the next operation.</p></section>"
+            << phaseBoardClose();
+        out << autoModalTemplate(ui::modals::launchOutcome, summary.title, summaryBody.str(), true, ui::actions::next);
+        out << modalTemplate(ui::modals::flightReport, "Flight Report", report.str());
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -2369,6 +2410,18 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
     out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
+    if (currentFrontier.id == content::destination::earthOrbit
+        && next != nullptr
+        && next->id == content::destination::moon) {
+        const int required = frontierReadinessRequired(state, catalog);
+        out << "<section class=\"objective-strip phase-lane\"><span>Objective</span><strong>"
+            << htmlEscape(state.run.frontierReadiness >= required ? "Lunar route charted" : "Chart the route to the Moon")
+            << "</strong><p>"
+            << htmlEscape(state.run.frontierReadiness >= required
+                ? "Prepare the transfer"
+                : "Flight Data " + std::to_string(state.run.frontierReadiness) + "/" + std::to_string(required))
+            << "</p></section>";
+    }
     out << "<div class=\"summary-grid\">";
     out << "<article class=\"summary-card\"><span>" << htmlEscape(text::panel::details::ship) << "</span><strong>" << htmlEscape(display::damage(state.run.shipDamage)) << "</strong>"
         << modalButton(text::buttons::details, ui::modals::ship, "ghost") << "</article>";

@@ -250,6 +250,7 @@ struct ModalTemplate {
     std::string id;
     std::string title;
     std::string body;
+    std::string closeAction;
     bool autoOpen = false;
     bool dismissible = true;
     bool showClose = true;
@@ -306,6 +307,7 @@ std::vector<ModalTemplate> extractModals(const std::string& html)
         modal.autoOpen = attributeValue(tag, "data-auto-modal") == "1";
         modal.dismissible = attributeValue(tag, "data-modal-dismissible") != "0";
         modal.showClose = attributeValue(tag, "data-modal-hide-close") != "1";
+        modal.closeAction = attributeValue(tag, "data-modal-close-action");
         modal.body = html.substr(tagEnd + 1, close - tagEnd - 1);
         if (!modal.id.empty()) {
             modals.push_back(std::move(modal));
@@ -1057,6 +1059,10 @@ std::string panelRcss(RmlPanelMode mode)
     const int titleLockupLeft = std::max(0, (titleInnerWidth - titleLockupWidth) / 2);
     const int titleMenuWidth = compactTitle ? 300 : 340;
     const int titleMenuLeft = std::max(0, (titleInnerWidth - titleMenuWidth) / 2);
+    const int openingControlsWidth = std::clamp(panelWidth * 33 / 100, 420, 480);
+    const int openingControlsConnectedWidth = std::clamp(panelWidth * 45 / 100, 560, 660);
+    const int openingControlsRight = std::max(24, panelWidth / 40);
+    const int openingControlsBottom = std::max(28, panelHeight / 24);
     // Keep native RmlUi scene controls in the same world-space projection as
     // SceneComposer. Telemetry is authored at x=[0.18, 0.94], y=-0.58.
     const float nativeSceneUnit = std::max(1.0F, static_cast<float>(std::min(viewportWidth, viewportHeight)) * 0.46F);
@@ -1313,6 +1319,70 @@ scrollbarcorner {
     font-size: 15px;
     font-weight: bold;
 }
+.opening-controls {
+    box-sizing: border-box;
+    position: absolute;
+    right: )" + std::to_string(openingControlsRight) + R"(px;
+    bottom: )" + std::to_string(openingControlsBottom) + R"(px;
+    display: flex;
+    flex-direction: column;
+    width: )" + std::to_string(openingControlsWidth) + R"(px;
+    padding: 12px 14px 14px;
+    background-color: rgba(3, 12, 20, 0.90);
+    border-left-width: 2px;
+    border-color: rgba(99, 229, 255, 0.58);
+}
+.opening-controls-kicker {
+    width: 100%;
+    margin-bottom: 8px;
+    color: #84dff2;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+.opening-control-cards {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+}
+.opening-control-card {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 218px;
+    margin-right: 2%;
+    padding: 10px 12px;
+    border-top-width: 1px;
+    border-color: rgba(99, 229, 255, 0.38);
+    background-color: rgba(8, 27, 39, 0.82);
+}
+.opening-control-title {
+    display: block;
+    color: #84dff2;
+    font-size: 11px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.opening-control-row {
+    width: 100%;
+    margin-top: 8px;
+}
+.opening-control-row > strong {
+    color: #fff0b7;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+.opening-control-row p {
+    margin-top: 2px;
+    margin-bottom: 0px;
+    color: #c5d7de;
+    font-size: 10px;
+    line-height: 1.22;
+}
+.opening-control-row p strong { display: inline; color: #fff0b7; }
+.opening-controller-controls { display: none; }
+body.controller-connected .opening-keyboard-controls { width: 48%; }
+body.controller-connected .opening-controller-controls { display: block; width: 48%; }
+body.controller-connected .opening-controls { width: )" + std::to_string(openingControlsConnectedWidth) + R"(px; }
 .title-screen {
     position: relative;
     width: )" + std::to_string(panelWidth) + R"(px;
@@ -1325,7 +1395,7 @@ scrollbarcorner {
     left: )" + std::to_string(titleContentLeft) + R"(px;
     top: )" + std::to_string(titleContentTop) + R"(px;
     width: )" + std::to_string(titleContentWidth) + R"(px;
-    min-height: )" + std::string(compactTitle ? "450" : "520") + R"(px;
+    min-height: )" + std::string(compactTitle ? "520" : "610") + R"(px;
     padding: )" + std::string(compactTitle ? "18px 22px" : "26px 34px") + R"(;
     text-align: center;
     background-color: rgba(3, 10, 16, 0.76);
@@ -5813,6 +5883,33 @@ button.settings-toggle:hover {
     height: )" + std::to_string(modalMissionHeight) + R"(px;
     padding: 20px;
 }
+#rr-modal.modal-launch_outcome {
+    top: )" + std::to_string(std::max(24, (viewportHeight - 280) / 2)) + R"(px;
+    height: 280px;
+    padding: 20px;
+}
+.launch-outcome-summary {
+    display: flex;
+    flex-direction: column;
+    min-height: 190px;
+}
+.launch-outcome-consequence {
+    margin-top: 12px;
+    margin-bottom: 14px;
+    color: #c5d7de;
+    font-size: 15px;
+    line-height: 1.35;
+}
+.launch-outcome-progression {
+    color: #f0d47a;
+    font-size: 14px;
+}
+.launch-outcome-actions {
+    margin-top: auto;
+}
+.launch-outcome-actions button {
+    width: 48%;
+}
 .modal-head {
     display: flex;
     flex: none;
@@ -5917,21 +6014,44 @@ struct ControllerPromptLabels {
     const char* rightBumper;
     const char* rightTrigger;
     const char* menu;
+    const char* view;
 };
 
 ControllerPromptLabels controllerPromptLabels(ControllerFamily family)
 {
     switch (family) {
     case ControllerFamily::Xbox:
-        return {"A", "B", "X", "Y", "LB", "RB", "RT", "Menu"};
+        return {"A", "B", "X", "Y", "LB", "RB", "RT", "Menu", "View"};
     case ControllerFamily::PlayStation:
-        return {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "R2", "Options"};
+        return {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "R2", "Options", "Create"};
     case ControllerFamily::SteamDeck:
-        return {"A", "B", "X", "Y", "L1", "R1", "R2", "Menu"};
+        return {"A", "B", "X", "Y", "L1", "R1", "R2", "Menu", "View"};
     case ControllerFamily::Generic:
     default:
-        return {"South", "East", "West", "North", "LB", "RB", "RT", "Menu"};
+        return {"South", "East", "West", "North", "LB", "RB", "RT", "Menu", "View"};
     }
+}
+
+std::string withOpeningControllerLabels(std::string markup, ControllerFamily family)
+{
+    const ControllerPromptLabels labels = controllerPromptLabels(promptControllerFamily(family));
+    const auto replaceToken = [&](std::string_view token, std::string_view value) {
+        std::size_t position = 0;
+        while ((position = markup.find(token, position)) != std::string::npos) {
+            markup.replace(position, token.size(), value);
+            position += value.size();
+        }
+    };
+    replaceToken("{{controller_south}}", labels.south);
+    replaceToken("{{controller_east}}", labels.east);
+    replaceToken("{{controller_west}}", labels.west);
+    replaceToken("{{controller_north}}", labels.north);
+    replaceToken("{{controller_lb}}", labels.leftBumper);
+    replaceToken("{{controller_rb}}", labels.rightBumper);
+    replaceToken("{{controller_rt}}", labels.rightTrigger);
+    replaceToken("{{controller_menu}}", labels.menu);
+    replaceToken("{{controller_view}}", labels.view);
+    return markup;
 }
 
 std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily family, bool modalOpen, bool modalDismissible)
@@ -6096,11 +6216,23 @@ std::string buildDocumentRml(
     const bool droneOps = panelUsesDroneOps(panelHtml);
     const bool navigation = panelUsesNavigation(panelHtml);
     const bool draftRoom = panelUsesDraftRoom(panelHtml);
-    std::string body = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml)));
+    std::string body = withOpeningControllerLabels(
+        syncSettingsControls(sanitizeRml(removeTemplates(panelHtml))),
+        controllerFamily);
 
     std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body";
-    if (controllerFocusVisible) {
-        document += " class=\"controller-focus-visible\"";
+    if (controllerFocusVisible || controllerPresentationActive) {
+        document += " class=\"";
+        if (controllerFocusVisible) {
+            document += "controller-focus-visible";
+        }
+        if (controllerFocusVisible && controllerPresentationActive) {
+            document += " ";
+        }
+        if (controllerPresentationActive) {
+            document += "controller-connected";
+        }
+        document += "\"";
     }
     document += ">";
     document += "<div id=\"rr-panel\" class=\"" +
@@ -6697,7 +6829,9 @@ void GameRmlUi::setPanelHtml(const std::string& html)
         ++pendingPanelRebuilds_;
         pressedButton_ = nullptr;
         pressedButtonAtSeconds_ = 0.0;
-        const std::string panelBody = syncSettingsControls(sanitizeRml(removeTemplates(panelHtml_)));
+        const std::string panelBody = withOpeningControllerLabels(
+            syncSettingsControls(sanitizeRml(removeTemplates(panelHtml_))),
+            controllerFamily_);
         panelElement->SetInnerRML(panelBody);
 
         if (controllerPresentationActive_) {
@@ -7136,6 +7270,13 @@ void GameRmlUi::closeModal()
         rr_rml_dom_close_modal();
         return;
     }
+    std::string closeAction;
+    if (modalStack_.empty()) {
+        const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
+        if (const ModalTemplate* modal = findModal(modals, openModalId_)) {
+            closeAction = modal->closeAction;
+        }
+    }
     if (!modalStack_.empty()) {
         openModalId_ = modalStack_.back();
         modalStack_.pop_back();
@@ -7149,6 +7290,9 @@ void GameRmlUi::closeModal()
         modalReturnFocusId_.clear();
     }
     rebuildDocument();
+    if (!closeAction.empty() && actionHandler_) {
+        actionHandler_(closeAction);
+    }
 }
 
 void GameRmlUi::dismissHelp(const std::string& topic)

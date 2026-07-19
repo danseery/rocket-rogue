@@ -39,6 +39,7 @@ struct PreparedLaunch {
     double slingshotSpeedBoost = 0.0;
     int overpreparedData = 0;
     double provingPayoutBonus = 0.0;
+    double objectiveConfidence = 0.0;
     int crewStressSteps = 0;
     double crewGuidancePenalty = 0.0;
     double crewAbortMultiplier = 1.0;

@@ -123,6 +123,8 @@ inline constexpr std::string_view surface = "surface";
 inline constexpr std::string_view phaseBriefing = "phase_briefing";
 inline constexpr std::string_view missionLog = "mission_log";
 inline constexpr std::string_view miningFailure = "mining_failure";
+inline constexpr std::string_view launchOutcome = "launch_outcome";
+inline constexpr std::string_view flightReport = "flight_report";
 } // namespace modals
 
 } // namespace rocket::ui

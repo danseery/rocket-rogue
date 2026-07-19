@@ -433,10 +433,6 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     };
 
     addCandidates(true);
-    if (candidates.size() < state.run.offerModuleIds.size()) {
-        candidates.clear();
-        addCandidates(false);
-    }
 
     if (candidates.empty()) {
         return;
@@ -1351,7 +1347,12 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (outcome.type == LaunchResultType::Destroyed) {
         state.meta.shipsLost += 1;
-        state.run.frontierReadiness = std::max(0, state.run.frontierReadiness - 1);
+        const bool openingMoonTransfer = outcome.frontierTransfer
+            && outcome.destinationId == content::destination::moon
+            && currentDestination(state, catalog).id == content::destination::earthOrbit;
+        if (!openingMoonTransfer) {
+            state.run.frontierReadiness = std::max(0, state.run.frontierReadiness - 1);
+        }
         state.run.credits = std::max(tuning::hangar::minimumExpeditionCredits, state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.surfaceUpgradeIds.clear();
         state.run.active = false;
@@ -1425,7 +1426,9 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                 ? tuning::outcomes::manualEjectUsefulDataTargetShare
                 : tuning::outcomes::returnUsefulDataTargetShare;
             const double usefulDataThreshold = current.targetMultiplier * usefulDataTargetShare;
-            if (outcome.ejectMultiplier >= usefulDataThreshold && frontierReadinessRequired(state, catalog) > 0) {
+            if (!shallowRecovery
+                && outcome.ejectMultiplier >= usefulDataThreshold
+                && frontierReadinessRequired(state, catalog) > 0) {
                 state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
                 state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
                     ? std::string(text::status::emergencyEjectUseful)

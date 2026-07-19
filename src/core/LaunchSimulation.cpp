@@ -103,12 +103,6 @@ bool isShallowRecovery(const Destination& destination, double multiplier)
     return multiplier < 1.0 + (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
 }
 
-bool isCleanShallowRecovery(const Destination& destination, const LaunchOutcome& outcome)
-{
-    return isShallowRecovery(destination, outcome.ejectMultiplier)
-        && outcome.peakWarning < tuning::rewards::cleanShallowRecoveryWarningThreshold;
-}
-
 double shallowRecoveryPenalty(int shallowRecoveryStreak)
 {
     const int exponent = std::clamp(
@@ -119,7 +113,7 @@ double shallowRecoveryPenalty(int shallowRecoveryStreak)
     for (int i = 0; i < exponent; ++i) {
         penalty *= 2.0;
     }
-    return penalty;
+    return std::min(penalty, tuning::rewards::shallowRecoveryPenaltyMaximum);
 }
 
 double overburnJackpotMultiplier(const Destination& destination, double burnMultiplier)
@@ -272,6 +266,29 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     const double overpreparedCeilingBonus = launch_balance::provingOverpreparedCeilingBonus(launch.overpreparedData, launch.config.frontierTransfer);
     const double maxCrash = launch_balance::maxCrashCeiling(destination, transferCeilingPenalty, unprovenCeilingPenalty, pressureCeilingPenalty, longShotBonus, transferReadinessCeilingBonus, overpreparedCeilingBonus, safety);
     launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
+    const bool openingEarthProvingFlight = destination.id == content::destination::earthOrbit
+        && !launch.config.frontierTransfer
+        && currentReadiness < requiredReadiness
+        && launch.config.burnGoalMultiplier <= defaultProvingTarget(destination) + 0.001;
+    if (openingEarthProvingFlight) {
+        launch.crashMultiplier = std::max(
+            launch.crashMultiplier,
+            launch.config.burnGoalMultiplier + tuning::mission::openingProvingGoalMargin);
+    }
+    const bool openingMoonTransfer = destination.id == content::destination::moon
+        && launch.config.frontierTransfer
+        && currentDestination(state, catalog).id == content::destination::earthOrbit;
+    if (openingMoonTransfer) {
+        launch.objectiveConfidence = launch_balance::openingMoonTransferConfidence(
+            performance,
+            launch.overpreparedData,
+            attempts,
+            successes);
+        const bool arrivalCorridorReachable = launch.objectiveConfidence >= 1.0 || rng.chance(launch.objectiveConfidence);
+        launch.crashMultiplier = arrivalCorridorReachable
+            ? std::max(launch.crashMultiplier, destination.targetMultiplier + tuning::mission::openingMoonArrivalMargin)
+            : std::min(launch.crashMultiplier, destination.targetMultiplier - tuning::mission::openingMoonArrivalMargin);
+    }
     launch.sensorQuality = launch_balance::sensorQuality(launch.stats);
     const double transferHeatLoad = launch_balance::transferHeatLoad(destination, launch.config.frontierTransfer);
     launch.heatRate = launch_balance::heatRate(destination, launch.stats, transferHeatLoad);
@@ -429,6 +446,16 @@ double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalo
         return 1.0;
     }
 
+    const bool openingEarthObjective = destination->id == content::destination::earthOrbit
+        && !launch.config.frontierTransfer
+        && state.run.frontierReadiness < frontierReadinessRequired(state, catalog)
+        && launch.config.burnGoalMultiplier <= defaultProvingTarget(*destination) + 0.001
+        && burnMultiplier >= launch.config.burnGoalMultiplier
+        && burnMultiplier <= launch.config.burnGoalMultiplier + tuning::mission::openingProvingGoalMargin;
+    if (openingEarthObjective) {
+        return 0.0;
+    }
+
     const TelemetryEvent event = telemetryAt(launch, burnMultiplier);
     const double profileDepth = std::clamp(
         (burnMultiplier - 1.0) / std::max(tuning::session::minTravelDenominator, destination->targetMultiplier - 1.0),
@@ -493,13 +520,6 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
     }
 
     if (method == RecoveryMethod::ManualEject) {
-        if (isCleanShallowRecovery(*destination, outcome)
-            && state.run.cleanShallowRecoveryStreak + 1 >= tuning::rewards::cleanShallowRecoveryDestructionStreak) {
-            markDestroyed(outcome, launch, catalog, *destination, state, rng);
-            outcome.recoveryCost = 0.0;
-            return outcome;
-        }
-
         outcome.type = LaunchResultType::SafeEject;
         outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::manualEjectPayoutFactor;
         outcome.recoveryCost = std::clamp(
@@ -529,6 +549,7 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
         outcome.blueprintGain = outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::manualEjectBlueprintTargetShare ? 1 : 0;
         if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
             outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
+            outcome.payout = std::min(outcome.payout, outcome.recoveryCost);
         }
         return outcome;
     }
@@ -560,14 +581,9 @@ LaunchOutcome resolveLaunch(const PreparedLaunch& launch, const ContentCatalog& 
             outcome.ejectMultiplier * tuning::outcomes::returnHomeRecoveryBurnScale,
         tuning::outcomes::returnHomeRecoveryMinimum,
         tuning::outcomes::returnHomeRecoveryMaximum);
-    if (isCleanShallowRecovery(*destination, outcome)
-        && state.run.cleanShallowRecoveryStreak + 1 >= tuning::rewards::cleanShallowRecoveryDestructionStreak) {
-        markDestroyed(outcome, launch, catalog, *destination, state, rng);
-        outcome.recoveryCost = 0.0;
-        return outcome;
-    }
     if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
         outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
+        outcome.payout = std::min(outcome.payout, outcome.recoveryCost);
     }
     const double netRewardFloor = isShallowRecovery(*destination, outcome.ejectMultiplier)
         ? 0.0
