@@ -7,6 +7,7 @@
 #include "core/GameTypes.h"
 #include "core/Tuning.h"
 
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -53,6 +54,17 @@ struct LaunchOutcomeSummaryPresentation {
     std::string progression;
 };
 
+inline std::string launchFundingSummary(const LaunchOutcome& outcome)
+{
+    if (outcome.type == LaunchResultType::Destroyed) {
+        return "Funding lost";
+    }
+    const double netFunding = outcome.payout - outcome.recoveryCost;
+    return std::abs(netFunding) < 0.5
+        ? "Funding +0"
+        : "Funding " + display::signedMoney(netFunding);
+}
+
 inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const LaunchOutcome& outcome = state.lastOutcome;
@@ -61,15 +73,25 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
     const bool moonTransfer = destination != nullptr
         && destination->id == content::destination::moon
         && outcome.frontierTransfer;
+    const std::string funding = launchFundingSummary(outcome);
 
     if (moonTransfer && outcome.type == LaunchResultType::MissionComplete) {
-        return {"LUNAR ARRIVAL", "The expedition has crossed its first frontier.", "Mars route now open"};
+        return {
+            "LUNAR ARRIVAL",
+            "The Moon is ours. Fresh telemetry and renewed backing open the road to Mars.",
+            "Mars route open  •  " + funding
+        };
     }
     if (moonTransfer) {
+        const std::string consequence = outcome.type == LaunchResultType::Destroyed
+            ? (outcome.crewKilled
+                ? "The vehicle and crew were lost. Their final telemetry completed the lunar route archive."
+                : "The vehicle is gone, but rescue teams recovered the crew and the lunar route archive.")
+            : "The Moon escaped this burn, but the crew brought home a sharper route.";
         return {
             "TRANSFER LOST",
-            "The Moon escaped this burn, but the route is better understood.",
-            "Flight Data 3/3  |  Next confidence 100%"
+            consequence,
+            "Flight Data 3/3  •  " + funding + "  •  Retry 100%"
         };
     }
 
@@ -78,7 +100,23 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
         const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
         const std::string flightData = "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required);
         if (outcome.type == LaunchResultType::Destroyed) {
-            return {"VEHICLE LOST", "The mission ended beyond recovery.", flightData + "  |  Lunar route incomplete"};
+            return outcome.crewKilled
+                ? LaunchOutcomeSummaryPresentation {
+                    "CREW LOST",
+                    "The vehicle and crew did not return. Only the surviving telemetry reached the archive.",
+                    flightData + "  •  Funding lost"}
+                : LaunchOutcomeSummaryPresentation {
+                    "CREW RECOVERED",
+                    "Rescue teams brought the crew home, but the vehicle and mission reserve are gone.",
+                    flightData + "  •  Funding lost"};
+        }
+
+        if (readiness >= required) {
+            return {
+                "LUNAR ROUTE CHARTED",
+                "The route is complete. Mission Control has cleared the next launch for the Moon.",
+                flightData + "  â€¢  " + funding
+            };
         }
 
         const bool shallow = outcome.ejectMultiplier < 1.0 +
@@ -88,31 +126,81 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
             : tuning::outcomes::returnUsefulDataTargetShare;
         const bool usefulReturn = !shallow && outcome.ejectMultiplier >= destination->targetMultiplier * usefulShare;
         if (outcome.type == LaunchResultType::MissionComplete) {
-            const int remaining = std::max(0, required - readiness);
+            const bool outperformedBrief = outcome.ejectMultiplier > destination->targetMultiplier + 0.001;
             return {
-                "ROUTE DATA SECURED",
-                "The flight pushed far enough to chart more of the lunar corridor.",
-                remaining == 0 ? "Flight Data 3/3  |  Lunar route charted"
-                               : flightData + "  |  " + std::to_string(remaining) + (remaining == 1 ? " flight remains" : " flights remain")
+                outperformedBrief ? "ROUTE OUTPERFORMED" : "ROUTE DATA SECURED",
+                outperformedBrief
+                    ? "The flight delivered the route we needed—and extra distance brought back richer findings."
+                    : "The flight delivered the route we needed and renewed the program's backing.",
+                flightData + "  •  " + funding
             };
         }
         if (usefulReturn) {
-            return {"SHIP RECOVERED", "The crew turned back, but brought home a usable flight profile.", flightData + "  |  Lunar route advancing"};
+            if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
+                return {
+                    "CAPSULE RECOVERED",
+                    "The crew and usable telemetry made it home; recovery costs took their share.",
+                    flightData + "  •  " + funding
+                };
+            }
+            return {
+                "USEFUL DATA HOME",
+                "The crew turned back with usable readings and enough backing to keep the program moving.",
+                flightData + "  •  " + funding
+            };
         }
-        return {"FLIGHT RECALLED", "The ship came home before its instruments could chart a viable lunar route.", "Moon route locked  |  " + flightData};
+        return outcome.recoveryMethod == RecoveryMethod::ManualEject
+            ? LaunchOutcomeSummaryPresentation {
+                "CAPSULE RECOVERED",
+                "The crew is safe, but the short flight and rescue bill left no useful return.",
+                flightData + "  •  " + funding}
+            : LaunchOutcomeSummaryPresentation {
+                "FLIGHT RECALLED",
+                "The crew is home. The brief fell short, so the lunar route drew no new backing.",
+                flightData + "  •  " + funding};
     }
 
     const std::string destinationName = destination == nullptr ? std::string("the frontier") : destination->name;
     if (outcome.type == LaunchResultType::Destroyed) {
-        return {"VEHICLE LOST", "The mission ended beyond recovery.", "Review the flight record before rebuilding"};
+        return outcome.crewKilled
+            ? LaunchOutcomeSummaryPresentation {
+                "CREW LOST",
+                "The vehicle and crew did not return. Their final telemetry remains in the archive.",
+                "Funding lost  •  Rebuild the expedition"}
+            : LaunchOutcomeSummaryPresentation {
+                "CREW RECOVERED",
+                "Rescue teams brought the crew home, but the vehicle and mission reserve are gone.",
+                "Funding lost  •  Rebuild the expedition"};
     }
     if (outcome.frontierTransfer && outcome.type == LaunchResultType::MissionComplete) {
-        return {destinationName + " ARRIVAL", "The expedition has opened another frontier.", "Continue to arrival operations"};
+        return {
+            destinationName + " ARRIVAL",
+            "The expedition opened a new frontier and returned a priceless first survey.",
+            funding + "  •  Arrival operations ready"
+        };
     }
     if (outcome.type == LaunchResultType::MissionComplete) {
-        return {"MISSION COMPLETE", "The crew returned with a complete flight profile.", "The next route is closer"};
+        const bool outperformedBrief = destination != nullptr && outcome.ejectMultiplier > destination->targetMultiplier + 0.001;
+        return {
+            outperformedBrief ? "SURVEY OUTPERFORMED" : "MISSION COMPLETE",
+            outperformedBrief
+                ? "The crew pushed beyond the brief. Richer findings brought stronger backing home."
+                : "The crew returned with the complete profile mission control requested.",
+            funding + "  •  The next route is closer"
+        };
     }
-    return {"SHIP RECOVERED", "The crew returned before the flight profile was complete.", "Review the result and prepare the next launch"};
+    if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
+        return {
+            "CAPSULE RECOVERED",
+            "The crew and surviving telemetry are home; the recovery bill consumed the mission's return.",
+            funding + "  •  Prepare the next launch"
+        };
+    }
+    return {
+        "USEFUL DATA HOME",
+        "The crew returned early with readings the program can still build on.",
+        funding + "  •  Prepare the next launch"
+    };
 }
 
 inline std::string_view launchOutcomeLabel(const LaunchOutcome& outcome)

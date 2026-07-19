@@ -251,16 +251,18 @@ All player-facing screens in the native and web builds support standard-mapped X
 Use the on-screen mission-control buttons or their controller prompts:
 
 - Launch proving flights from the current frontier to bank flight data.
+- The yellow marker is the mission brief. Returning safely from farther beyond it brings home richer findings and more mission funding.
 - During flight, choose `Return home`, `Cut engines`, or `Eject`.
 - `Cut engines` lowers heat and vibration, slows the burn, and increases navigation drift.
 - `Relief valve` vents physical pressure at the cost of navigation drift, with a small failure/decompression risk.
 - `Jettison cargo` stabilizes fuel mix, but worsens navigation, vibration, and return-home risk.
 - Seeded telemetry incidents create temporary one-or-two-system spikes, so a bad PRESS, VIB, MIX, NAV, or ABORT read can become a short decision window rather than a guaranteed cascade.
 - New frontiers carry high mission pressure; repeated attempts and successful profiles reduce it, while pressure-control modules dampen the `PRESS` telemetry channel.
-- After each mission summary, choose one of three refit cards or skip the refit window.
+- Useful Flight Data or a successful arrival earns one permanent refit opportunity; crashes, shallow returns, and already-capped data do not.
+- Before the Moon, choose the next unique Reach, Control, or Recovery upgrade, or keep the credits. Later refit boards return to randomized, role-diverse offers without duplicates.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
 - Use Push Deeper through the frontier ladder only after enough proving data is banked.
-- Successful arrivals can open flyby/orbit/landing operations. Flyby can grant next-launch slingshot boosts; orbit grants science and credit rewards; landing opens post-arrival research and Surface Ops.
+- Successful arrivals can open flyby/orbit/landing operations. Their first selections pause for saved, one-time briefs: flyby and orbit explain that blueprint progress unlocks permanent ship upgrades, while landing explains that surface upgrades improve the mining drone. The Drone Bay introduces mini-drones only after that system is unlocked.
 - Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
 - Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
 - Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South stows at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.

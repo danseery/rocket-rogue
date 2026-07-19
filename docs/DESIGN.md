@@ -5,7 +5,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 ## Pillars
 
 - Hidden-risk launch tension with no real-money gambling mechanics.
-- Ship-first management through readable module slots and damage.
+- Ship-first management through readable permanent systems, expedition damage, and meaningful upgrade tracks.
 - Light but painful crew consequences.
 - Roguelite persistence through unlock variety, records, memorials, and blueprints.
 - Asset-light proof of concept using backend-neutral procedural primitives, RmlUi mission-control panels, and replaceable arcade sprites across native Vulkan and WebGL2 builds.
@@ -16,7 +16,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 2. Launch a proving flight on the current frontier.
 3. Watch multiplier, telemetry channels, return risk, and distance climb.
 4. Return home to bank data, cut engines to cool the ship while risking navigation drift, or eject for an expensive rescue.
-5. Read the mission summary, then choose one of three refit cards. Ship modules and crew facilities share this window; the install takes the full hangar window and still costs mission credits.
+5. A flight that banks new Flight Data or reaches a destination earns one saved refit opportunity. Buy one permanent ship system or keep the credits; crashes, shallow returns, and capped proving data go directly to the next phase.
 6. Return to hangar operations: repair damage, recruit crew, train, rest, and plan the next flight.
 7. Repeat proving flights until enough frontier readiness is banked.
 8. Commit the agency to the next frontier, then repeat the loop farther from home.
@@ -35,6 +35,8 @@ The first implemented phase model is:
 3. Start a surface expedition with action kits, shared fuel, a rolled site profile, and a short mission log.
 4. Survey, use Push Deeper, or deploy the mining drone for one fuel-gated mining run.
 5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
+
+The first selection of Flyby, Orbit, and Landing opens a short, saved introduction before starting the activity. Flyby and Orbit connect blueprint progress to permanent shipyard upgrades; Landing connects surface work to mining-drone upgrades. Mini-drone terminology must not appear in this onboarding until Drone Bay is unlocked, when opening Drone Ops receives its own one-time introduction.
 
 Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" Early solar-system expeditions do not have enemies. Enemy encounters should stay disabled until the Nearby Star tier, when the game leaves familiar planetary exploration and starts introducing hostile unknowns.
 
@@ -79,9 +81,19 @@ Crew stress is a separate human-performance modifier:
 - `ABORT` scales by stress steps from x1.00 at calm to x2.00 at maximum stress.
 - Simulator burns add training and stress; rest removes enough stress to erase at least one step in most practical cases.
 
-## Refit cards
+## Permanent refit tracks
 
-Module rewards are a post-mission choice, not a persistent hangar shop. Each reward screen shows three module cards and allows at most one install before hangar operations resume. Cards should explain the practical threat they mitigate, the strongest numeric impact, and any visible tradeoff:
+Ship modules are unique permanent installations, not replacement parts or a persistent hangar shop. An earned refit opportunity survives Results and Arrival Ops until the player buys one system or chooses `Keep credits`. Buying a module adds its deltas once to the Pathfinder's installed systems; it never evicts another module. Expedition damage can take a system offline for the current ship, but ownership survives and the next replacement ship restores every permanent installation.
+
+The opening proving phase is a bounded, curated ladder. Every useful Earth flight presents the next unowned upgrade from each actionable track, and the board is allowed to show fewer than three cards when a track is exhausted:
+
+- Reach improves propulsion, fuel, drilling depth, and hauling power.
+- Control improves cooling, sensors, pressure stability, simulator systems, and telemetry.
+- Recovery improves hull, escape, medical, storage, and extraction systems.
+
+The three opening ranks in each track are pure benefits with explicit prerequisites. They have no reroll action and use practical general-flight wording; the shared preflight Confidence value communicates their combined result without Moon-specific sales copy. After the Moon, unlocked refits return to randomized boards drawn without replacement. Those boards prefer one Reach, one Control, and one Recovery candidate whenever their pools allow it, and rerolls become available again.
+
+Later cards should explain the practical threat they mitigate, the strongest numeric impact, and any visible tradeoff:
 
 - Engine modules shorten exposure time but can raise volatility, fuel pressure, or heat load.
 - Fuel modules improve long-burn, return margin, and pressure stability.
@@ -96,10 +108,11 @@ Crew facilities are refit rewards too. They should sit in Crew Details and impro
 - Medical facilities improve rest and injury recovery.
 - Psychology/coaching facilities reduce post-launch stress and improve astronaut trait modifiers.
 
-Hangar operations should keep pressure visible next to readiness and transfer planning. Training, rest, repair, and recruitment are not pressure-control systems by themselves, but they should help the player understand whether the next launch is a first attempt, a retry, or a lower-pressure proving run. Ship Details should show equipped and stored ship upgrades; Crew Details should show installed crew facilities and aggregate effects.
+Hangar operations should keep pressure visible next to readiness and transfer planning. Training, rest, repair, and recruitment are not pressure-control systems by themselves, but they should help the player understand whether the next launch is a first attempt, a retry, or a lower-pressure proving run. Ship Details and Inventory should show permanent systems as `Built in`, `Installed`, or `Offline this expedition`; Crew Details should show installed crew facilities and aggregate effects.
 
 Refit economy should reward recovered risk in discrete shelves:
 
+- Launch and outcome copy should frame the yellow marker as the mission brief: meeting it secures the requested profile, while safely pushing beyond it returns richer findings and stronger funding.
 - Returning home at the current data goal guarantees enough net credits for a common refit.
 - Pushing beyond the data goal far enough guarantees enough net credits for an uncommon refit if recovered.
 - Returning from the full target guarantees enough net credits for a rare refit if recovered.
@@ -143,11 +156,11 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/LaunchReadinessPresentation.h` owns launch-hold presentation and readiness gating display: hull/crew blocked state, hold messages, required action detail, and repair/recruit actions. Panels should consume this object instead of recomputing launch-block rules inline.
 - `src/core/LaunchStatus.h` owns launch/return status-line selection. App code should pass the current telemetry/action context into it instead of branching directly on warning thresholds for player-facing copy.
 - `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
-- `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, slot classes, glyphs, threat copy, primary impact, stat chips, prices, affordability, install actions, reroll action, and skip action. Panels should render this returned data instead of rebuilding offer rules inline.
+- `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, track/rank classes, glyphs, practical copy, primary impact, correctly signed stat chips, prices, affordability, permanent-install actions, conditional reroll action, and keep-credits action. Panels should render this returned data instead of rebuilding offer rules inline.
 - `src/core/ResearchPresentation.h` owns research and surface-expedition presentation: blueprint/material metrics, research project cards, surface supply/cargo/risk metrics, and field action availability. Panels should render this returned data instead of rebuilding research/resource rules inline.
 - `src/core/MiningPresentation.h` owns mining HUD and detail presentation: oxygen, shared fuel, drill integrity, scanner/fuel cadence, drone support, hostile tunnel summaries, action buttons, and controls copy.
 - `src/core/CrewPresentation.h` owns Crew Details rows and facility-effect value wording. Panels should render detail rows and headers from this helper instead of recomputing training, stress, facility, and trait modifier strings.
-- `src/core/ShipPresentation.h` owns Ship Details rows, equipped/stored module summaries, and inventory fallback wording. Panels should render those rows instead of recomputing ship stats and module inventory display.
+- `src/core/ShipPresentation.h` owns Ship Details rows, installed/offline module summaries, and inventory fallback wording. Panels should render those rows instead of recomputing ship stats and module inventory display.
 - `src/core/ProgramPresentation.h` owns Frontier and Legacy detail rows: readiness, mission difficulty, next transfer target, blueprint progress, losses, and furthest tier. Panels should render these rows instead of rebuilding program-progress detail modals inline.
 - Legacy details should include recovered surface resources and artifact counts so the research/resource loop is inspectable without adding a separate inventory screen too early.
 - `src/core/HangarPresentation.h` owns Hangar Ops card presentation: operation titles, details, costs, action IDs, availability, and card classes derived from `HangarOperationPreview`. Panels should render these cards instead of branching on repair/training/rest/recruit state.
@@ -166,6 +179,6 @@ When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visi
 
 ## Persistence
 
-The campaign save format is versioned and line-based. `SaveSchema.h` defines the header, field keys, and delimiters so serialization, missing-field defaults, and migration tests stay synchronized as fields are added. `ISaveStore` keeps the shared app independent of the storage medium: the web adapter uses browser `localStorage`, while native builds use atomic replacement of `save_v1.txt` beneath the SDL per-user preference path. Native builds intentionally start with fresh native data and do not import browser saves.
+The campaign save format is versioned and line-based. Version 3 persists the refit entitlement and generated offer IDs so an earned shipyard choice survives reload and delayed Arrival Ops. Version-2 migration installs every previously owned or stored module once, while its legacy equipped list remains the operational/offline state for the current expedition. `SaveSchema.h` defines the header, field keys, and delimiters so serialization, missing-field defaults, and migration tests stay synchronized as fields are added. `ISaveStore` keeps the shared app independent of the storage medium: the web adapter uses browser `localStorage`, while native builds use atomic replacement of `save_v1.txt` beneath the SDL per-user preference path. Native builds intentionally start with fresh native data and do not import browser saves.
 
 Display, accessibility, debug, fullscreen, and controller settings are separate from campaign data behind `IPreferenceStore`. The web adapter persists browser-local preferences; native builds use `preferences_v1.txt` beside the native save.

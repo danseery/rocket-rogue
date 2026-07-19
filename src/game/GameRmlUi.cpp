@@ -1023,6 +1023,10 @@ std::string panelRcss(RmlPanelMode mode)
     const int modalNewGameHeight = std::max(1, std::min(230, viewportHeight - modalGutter * 2));
     const int modalNewGameLeft = std::max(modalGutter, (viewportWidth - modalNewGameWidth) / 2);
     const int modalNewGameTop = std::max(modalGutter, (viewportHeight - modalNewGameHeight) / 2);
+    const int modalActivityWidth = std::max(1, std::min(560, viewportWidth - modalGutter * 2));
+    const int modalActivityHeight = std::max(1, std::min(320, viewportHeight - modalGutter * 2));
+    const int modalActivityLeft = std::max(modalGutter, (viewportWidth - modalActivityWidth) / 2);
+    const int modalActivityTop = std::max(modalGutter, (viewportHeight - modalActivityHeight) / 2);
     const int arrivalTitleSize = mode == RmlPanelMode::MissionStamp ? (panelWidth < 420 ? 31 : 40) : (panelWidth < 420 ? 34 : 46);
     const int left = bounds.Left();
     const int top = bounds.Top();
@@ -1063,6 +1067,9 @@ std::string panelRcss(RmlPanelMode mode)
     const int openingControlsConnectedWidth = std::clamp(panelWidth * 45 / 100, 560, 660);
     const int openingControlsRight = std::max(24, panelWidth / 40);
     const int openingControlsBottom = std::max(28, panelHeight / 24);
+    const int storyContentLeft = std::max(28, panelWidth / 10);
+    const int storyIntroductionWidth = std::max(1, std::min(720, panelWidth - openingControlsWidth - openingControlsRight - storyContentLeft - 28));
+    const int storyIntroductionConnectedWidth = std::max(1, std::min(720, panelWidth - openingControlsConnectedWidth - openingControlsRight - storyContentLeft - 28));
     // Keep native RmlUi scene controls in the same world-space projection as
     // SceneComposer. Telemetry is authored at x=[0.18, 0.94], y=-0.58.
     const float nativeSceneUnit = std::max(1.0F, static_cast<float>(std::min(viewportWidth, viewportHeight)) * 0.46F);
@@ -1259,6 +1266,9 @@ scrollbarcorner {
     height: 100%;
     background-color: rgba(2, 7, 13, 0.28);
 }
+.story-introduction .story-vignette {
+    background-color: rgba(2, 7, 13, 0.12);
+}
 .story-content {
     box-sizing: border-box;
     position: absolute;
@@ -1269,6 +1279,16 @@ scrollbarcorner {
     background-color: rgba(3, 12, 20, 0.88);
     border-left-width: 3px;
     border-color: #63e5ff;
+}
+.story-introduction .story-content {
+    left: )" + std::to_string(storyContentLeft) + R"(px;
+    top: )" + std::to_string(std::max(34, panelHeight / 12)) + R"(px;
+    width: )" + std::to_string(storyIntroductionWidth) + R"(px;
+    padding: 24px 28px;
+    background-color: rgba(3, 10, 17, 0.94);
+}
+body.controller-connected .story-introduction .story-content {
+    width: )" + std::to_string(storyIntroductionConnectedWidth) + R"(px;
 }
 .story-straylight .story-content { border-color: #ffd166; }
 .story-kicker {
@@ -1292,6 +1312,34 @@ scrollbarcorner {
     color: #d7e9ef;
     font-size: 18px;
     line-height: 1.35;
+}
+.story-introduction .story-content h1 {
+    margin-top: 9px;
+    margin-bottom: 18px;
+    color: #ffd166;
+    font-size: 46px;
+    line-height: 1;
+    letter-spacing: 2px;
+}
+.story-exposition {
+    width: 100%;
+}
+.story-exposition p {
+    margin-top: 0px;
+    margin-bottom: 13px;
+    color: #d7e9ef;
+    font-size: 16px;
+    line-height: 1.45;
+}
+.story-exposition .story-directive {
+    margin-top: 17px;
+    margin-bottom: 0px;
+    color: #fff0b7;
+    font-weight: bold;
+}
+.story-introduction .story-action {
+    width: 220px;
+    margin-top: 18px;
 }
 .story-beats {
     display: flex;
@@ -2653,8 +2701,9 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer span {
-    width: 42px;
+    width: 80px;
     min-height: 34px;
+    white-space: nowrap;
     overflow: hidden;
 }
 .phase-board-arrival .arrival-card .card-footer button,
@@ -2678,7 +2727,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     font-size: 11px;
 }
 .phase-board-arrival .arrival-card .card-footer button {
-    width: 140px;
+    width: 102px;
     min-height: 36px;
     height: auto;
     line-height: 1.15;
@@ -3942,6 +3991,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .phase-board-refit .draft-card-grid {
     width: 736px;
+    justify-content: center;
 }
 .phase-board-refit .upgrade-draft-card {
     width: 206px;
@@ -4014,7 +4064,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     margin-right: 0px;
 }
 .phase-board-refit .upgrade-draft-card .draft-card-footer {
-    min-height: 52px;
+    min-height: 60px;
     height: auto;
     margin-top: auto;
     padding-top: 8px;
@@ -4031,7 +4081,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .phase-board-refit .upgrade-draft-card .draft-card-footer button {
     width: 98px;
-    min-height: 34px;
+    min-height: 44px;
     height: auto;
     line-height: 1.15;
     margin-top: 0px;
@@ -5888,21 +5938,97 @@ button.settings-toggle:hover {
     height: 280px;
     padding: 20px;
 }
+#rr-modal.modal-flyby_introduction,
+#rr-modal.modal-orbit_introduction,
+#rr-modal.modal-landing_introduction,
+#rr-modal.modal-mini_drone_introduction {
+    left: )" + std::to_string(modalActivityLeft) + R"(px;
+    top: )" + std::to_string(modalActivityTop) + R"(px;
+    width: )" + std::to_string(modalActivityWidth) + R"(px;
+    height: )" + std::to_string(modalActivityHeight) + R"(px;
+    padding: 20px;
+}
+#rr-modal.modal-flyby_introduction .modal-head,
+#rr-modal.modal-orbit_introduction .modal-head,
+#rr-modal.modal-landing_introduction .modal-head,
+#rr-modal.modal-mini_drone_introduction .modal-head {
+    margin-bottom: 12px;
+}
+#rr-modal.modal-flyby_introduction .modal-head button,
+#rr-modal.modal-orbit_introduction .modal-head button,
+#rr-modal.modal-landing_introduction .modal-head button,
+#rr-modal.modal-mini_drone_introduction .modal-head button {
+    width: 82px;
+    min-height: 36px;
+    padding: 7px 10px;
+}
+.activity-introduction {
+    display: flex;
+    flex-direction: column;
+    min-height: 218px;
+}
+.activity-introduction-kicker {
+    margin-bottom: 10px;
+    color: #69d9f0;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.activity-introduction-setup {
+    margin: 0px 0px 14px 0px;
+    color: #c5d7de;
+    font-size: 14px;
+    line-height: 1.4;
+}
+.activity-introduction-payoff {
+    display: flex;
+    flex-direction: column;
+    padding: 11px 12px;
+    background-color: #101c27;
+    border-left-width: 3px;
+    border-left-color: #f0c75e;
+}
+.activity-introduction-payoff span {
+    margin-bottom: 5px;
+    color: #f0c75e;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.activity-introduction-payoff strong {
+    color: #e5edf1;
+    font-size: 14px;
+    line-height: 1.35;
+}
+.activity-introduction-actions {
+    margin-top: auto;
+    justify-content: flex-end;
+}
+.activity-introduction-actions button {
+    width: 176px;
+    min-height: 42px;
+}
 .launch-outcome-summary {
     display: flex;
     flex-direction: column;
     min-height: 190px;
 }
 .launch-outcome-consequence {
+    min-height: 60px;
+    max-height: 60px;
     margin-top: 12px;
-    margin-bottom: 14px;
+    margin-bottom: 8px;
     color: #c5d7de;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.35;
+    overflow: hidden;
 }
 .launch-outcome-progression {
+    min-height: 20px;
+    max-height: 20px;
     color: #f0d47a;
     font-size: 14px;
+    overflow: hidden;
 }
 .launch-outcome-actions {
     margin-top: auto;
@@ -7303,15 +7429,18 @@ void GameRmlUi::dismissHelp(const std::string& topic)
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
-    if (!openModalId_.empty()) {
+    const bool closesModal = !openModalId_.empty();
+    if (closesModal) {
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
         modalReturnFocusId_.clear();
-        rebuildDocument();
     }
     if (actionHandler_) {
         actionHandler_(action);
+    }
+    if (closesModal) {
+        rebuildDocument();
     }
 }
 

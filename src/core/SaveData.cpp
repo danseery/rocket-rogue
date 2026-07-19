@@ -1739,6 +1739,13 @@ std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& va
     return result;
 }
 
+void appendUnique(std::vector<std::string>& values, const std::string& value)
+{
+    if (!value.empty() && std::find(values.begin(), values.end(), value) == values.end()) {
+        values.push_back(value);
+    }
+}
+
 } // namespace
 
 SaveData captureSaveData(const GameState& state)
@@ -1748,6 +1755,7 @@ SaveData captureSaveData(const GameState& state)
     save.credits = state.run.credits;
     save.destinationIndex = state.run.destinationIndex;
     save.frontierReadiness = state.run.frontierReadiness;
+    save.refitEntitled = state.run.refitEntitled;
     save.shipDamage = state.run.shipDamage;
     save.frameId = state.run.frameId;
     save.offerRerollsThisExpedition = state.run.offerRerollsThisExpedition;
@@ -1763,19 +1771,22 @@ SaveData captureSaveData(const GameState& state)
     } else if ((state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) && state.run.surfaceExpedition.active) {
         save.screen = Screen::SurfaceExpedition;
     } else {
-        save.screen = state.screen == Screen::StoryBriefing || state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation ? state.screen : Screen::Hangar;
+        save.screen = state.screen == Screen::StoryBriefing || state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation || state.screen == Screen::Upgrade ? state.screen : Screen::Hangar;
     }
     save.campaignMilestone = state.meta.campaignMilestone;
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
     save.navigation = state.meta.navigation;
     save.storyBriefing = state.storyBriefing;
+    save.acknowledgedActivityBriefingIds = state.meta.acknowledgedActivityBriefingIds;
     save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
     save.straylightDiscoveryAcknowledged = state.meta.straylightDiscoveryAcknowledged;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
+    save.offerModuleIds = arrayToVector(state.run.offerModuleIds);
+    save.offerCrewUpgradeIds = arrayToVector(state.run.offerCrewUpgradeIds);
     save.researchProjectIds = arrayToVector(state.run.researchProjectIds);
     save.arrivalOps = state.run.arrivalOps;
     save.surfaceExpedition = state.run.surfaceExpedition;
@@ -1846,6 +1857,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.run.destinationIndex = std::clamp(save.destinationIndex, 0, static_cast<int>(catalog.destinations.size()) - 1);
     }
     state.run.frontierReadiness = std::max(0, save.frontierReadiness);
+    state.run.refitEntitled = save.refitEntitled;
     state.run.shipDamage = std::clamp(save.shipDamage, 0, 100);
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
     state.run.offerRerollsThisExpedition = std::max(0, save.offerRerollsThisExpedition);
@@ -1860,6 +1872,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.surfaceUpgradeIds = save.surfaceUpgradeIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
+    state.run.offerModuleIds = vectorToOfferArray(save.offerModuleIds);
+    state.run.offerCrewUpgradeIds = vectorToOfferArray(save.offerCrewUpgradeIds);
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
@@ -1903,6 +1917,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             state.run.surfaceExpedition.logEntries.end() - tuning::research::surfaceLogEntryLimit);
     }
     state.screen = save.screen;
+    if (state.screen == Screen::Upgrade && !state.run.refitEntitled) {
+        state.screen = Screen::Hangar;
+    }
     if (state.screen == Screen::ArrivalOps && !state.run.arrivalOps.active) {
         state.screen = Screen::Hangar;
     }
@@ -1936,6 +1953,13 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.materials = save.materials;
     state.meta.ownedModuleIds = save.ownedModuleIds.empty() ? state.run.inventoryModuleIds : save.ownedModuleIds;
     state.meta.defaultEquippedModuleIds = save.defaultEquippedModuleIds.empty() ? state.run.equippedModuleIds : save.defaultEquippedModuleIds;
+    if (save.version < 3) {
+        for (const std::string& moduleId : state.meta.ownedModuleIds) {
+            appendUnique(state.run.inventoryModuleIds, moduleId);
+            appendUnique(state.run.equippedModuleIds, moduleId);
+            appendUnique(state.meta.defaultEquippedModuleIds, moduleId);
+        }
+    }
     state.meta.droneBaySlots = save.droneBaySlots;
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
@@ -1950,6 +1974,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
     state.storyBriefing = save.storyBriefing;
+    state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
     state.meta.campaignIntroductionAcknowledged = save.version < 2 ? true : save.campaignIntroductionAcknowledged;
     state.meta.straylightDiscoveryAcknowledged = save.version < 2 ? legacyArkDiscovered : save.straylightDiscoveryAcknowledged;
     if (state.screen == Screen::Navigation && !navigationAvailable(state)) {
@@ -2107,6 +2132,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::credits, save.credits);
     writeField(out, save_schema::field::destinationIndex, save.destinationIndex);
     writeField(out, save_schema::field::frontierReadiness, save.frontierReadiness);
+    writeField(out, save_schema::field::refitEntitled, save.refitEntitled ? 1 : 0);
     writeField(out, save_schema::field::shipDamage, save.shipDamage);
     writeField(out, save_schema::field::frameId, save.frameId);
     writeField(out, save_schema::field::offerRerolls, save.offerRerollsThisExpedition);
@@ -2133,6 +2159,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::navigationDiscoveredDestinations, join(save.navigation.discoveredDestinationIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::storyPending, storyBriefingToInt(save.storyBriefing.pending));
     writeField(out, save_schema::field::storyContinuation, screenToInt(save.storyBriefing.continuation));
+    writeField(out, save_schema::field::acknowledgedActivityBriefings, join(save.acknowledgedActivityBriefingIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::campaignIntroductionAcknowledged, save.campaignIntroductionAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::straylightDiscoveryAcknowledged, save.straylightDiscoveryAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::inventory, join(save.inventoryModuleIds, save_schema::listDelimiter));
@@ -2140,6 +2167,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::ownedModules, join(save.ownedModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::defaultEquippedModules, join(save.defaultEquippedModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::crewUpgrades, join(save.crewUpgradeIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::offerModules, join(save.offerModuleIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::offerCrewUpgrades, join(save.offerCrewUpgradeIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::researchProjects, join(save.researchProjectIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::arrivalActive, save.arrivalOps.active ? 1 : 0);
     writeField(out, save_schema::field::arrivalDestination, save.arrivalOps.destinationId);
@@ -2278,6 +2307,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.destinationIndex = parseInt(value, save.destinationIndex);
         } else if (key == save_schema::field::frontierReadiness) {
             save.frontierReadiness = parseInt(value, save.frontierReadiness);
+        } else if (key == save_schema::field::refitEntitled) {
+            save.refitEntitled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::shipDamage) {
             save.shipDamage = parseInt(value, save.shipDamage);
         } else if (key == save_schema::field::frameId) {
@@ -2330,6 +2361,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.storyBriefing.pending = storyBriefingFromInt(parseInt(value, 0));
         } else if (key == save_schema::field::storyContinuation) {
             save.storyBriefing.continuation = screenFromInt(parseInt(value, 0));
+        } else if (key == save_schema::field::acknowledgedActivityBriefings) {
+            save.acknowledgedActivityBriefingIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::campaignIntroductionAcknowledged) {
             save.campaignIntroductionAcknowledged = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::straylightDiscoveryAcknowledged) {
@@ -2344,6 +2377,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.defaultEquippedModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::crewUpgrades) {
             save.crewUpgradeIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::offerModules) {
+            save.offerModuleIds = split(value, save_schema::listDelimiter);
+        } else if (key == save_schema::field::offerCrewUpgrades) {
+            save.offerCrewUpgradeIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::researchProjects) {
             save.researchProjectIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::arrivalActive) {

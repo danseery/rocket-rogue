@@ -21,6 +21,7 @@ struct RefitCandidate {
     RefitOfferKind kind = RefitOfferKind::ShipModule;
     std::string id;
     int cost = 0;
+    RefitTrack track = RefitTrack::None;
 };
 
 bool hasMaterialCost(const MaterialInventory& cost)
@@ -87,25 +88,8 @@ void ensurePermanentModuleState(GameState& state, const ContentCatalog& catalog)
             }),
         state.meta.defaultEquippedModuleIds.end());
 
-    if (state.meta.defaultEquippedModuleIds.empty()) {
-        state.meta.defaultEquippedModuleIds = starterInventory();
-    }
-
-    for (const std::string& moduleId : starterInventory()) {
-        const ShipModule* starter = catalog.findModule(moduleId);
-        if (starter == nullptr) {
-            continue;
-        }
-        const bool slotCovered = std::any_of(
-            state.meta.defaultEquippedModuleIds.begin(),
-            state.meta.defaultEquippedModuleIds.end(),
-            [&](const std::string& equippedId) {
-                const ShipModule* equipped = catalog.findModule(equippedId);
-                return equipped != nullptr && equipped->slot == starter->slot;
-            });
-        if (!slotCovered) {
-            state.meta.defaultEquippedModuleIds.push_back(moduleId);
-        }
+    for (const std::string& moduleId : state.meta.ownedModuleIds) {
+        addUniqueId(state.meta.defaultEquippedModuleIds, moduleId);
     }
 }
 
@@ -295,9 +279,6 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
     ensureDestinationHistory(state, catalog);
     startNewExpedition(state, catalog);
 
-    Random rng(seed);
-    generateModuleOffers(state, catalog, rng);
-
     state.statusLine = std::string(text::status::programInitialized);
     return state;
 }
@@ -393,6 +374,11 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
     syncChapterProgress(state, catalog);
 }
 
+bool curatedProvingRefitsActive(const GameState& state)
+{
+    return state.run.refitEntitled && state.meta.furthestTier < 1;
+}
+
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
 {
     state.run.offerModuleIds = {};
@@ -406,99 +392,113 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
         return;
     }
 
-    std::vector<RefitCandidate> candidates;
-    const auto addCandidates = [&](bool onlyUnowned) {
-        for (const ShipModule* module : modulePool) {
-            if (!materialRefitsAvailable(state) && hasMaterialCost(module->materialCost)) {
-                continue;
-            }
-            const bool alreadyOwned = std::find(
-                state.meta.ownedModuleIds.begin(),
-                state.meta.ownedModuleIds.end(),
-                module->id) != state.meta.ownedModuleIds.end();
-            if (!onlyUnowned || !alreadyOwned) {
-                candidates.push_back({RefitOfferKind::ShipModule, module->id, moduleOfferCost(*module)});
-            }
-        }
-
-        for (const CrewUpgrade* upgrade : crewPool) {
-            const bool alreadyOwned = std::find(
-                state.run.crewUpgradeIds.begin(),
-                state.run.crewUpgradeIds.end(),
-                upgrade->id) != state.run.crewUpgradeIds.end();
-            if (!onlyUnowned || !alreadyOwned) {
-                candidates.push_back({RefitOfferKind::CrewUpgrade, upgrade->id, crewUpgradeCost(*upgrade)});
-            }
-        }
+    const auto ownsModule = [&](std::string_view id) {
+        return id.empty() || containsId(state.meta.ownedModuleIds, id);
+    };
+    const auto ownsCrewUpgrade = [&](std::string_view id) {
+        return id.empty() || containsId(state.run.crewUpgradeIds, id);
     };
 
-    addCandidates(true);
+    if (curatedProvingRefitsActive(state)) {
+        std::size_t offerIndex = 0;
+        for (const RefitTrack track : {RefitTrack::Reach, RefitTrack::Control, RefitTrack::Recovery}) {
+            const ShipModule* next = nullptr;
+            for (const ShipModule* module : modulePool) {
+                if (!module->provingTier || module->refitTrack != track || ownsModule(module->id) || !ownsModule(module->prerequisiteId)) {
+                    continue;
+                }
+                if (next == nullptr || module->refitRank < next->refitRank) {
+                    next = module;
+                }
+            }
+            if (next != nullptr && offerIndex < state.run.offerModuleIds.size()) {
+                state.run.offerModuleIds[offerIndex++] = next->id;
+            }
+        }
+        return;
+    }
+
+    std::vector<RefitCandidate> candidates;
+    for (const ShipModule* module : modulePool) {
+        if (ownsModule(module->id) || !ownsModule(module->prerequisiteId)) {
+            continue;
+        }
+        if (!materialRefitsAvailable(state) && hasMaterialCost(module->materialCost)) {
+            continue;
+        }
+        candidates.push_back({RefitOfferKind::ShipModule, module->id, moduleOfferCost(*module), module->refitTrack});
+    }
+
+    for (const CrewUpgrade* upgrade : crewPool) {
+        if (ownsCrewUpgrade(upgrade->id) || !ownsCrewUpgrade(upgrade->prerequisiteId)) {
+            continue;
+        }
+        candidates.push_back({RefitOfferKind::CrewUpgrade, upgrade->id, crewUpgradeCost(*upgrade), upgrade->refitTrack});
+    }
 
     if (candidates.empty()) {
         return;
     }
 
-    const auto sameCandidate = [](const RefitCandidate& lhs, const RefitCandidate& rhs) {
-        return lhs.kind == rhs.kind && lhs.id == rhs.id;
-    };
-
-    std::vector<RefitCandidate> pickedIds;
-    pickedIds.reserve(state.run.offerModuleIds.size());
-    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
-        const RefitCandidate* picked = nullptr;
-        for (int attempts = 0; attempts < 12 && picked == nullptr; ++attempts) {
-            const RefitCandidate& candidate = candidates[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(candidates.size()) - 1))];
-            if (std::find_if(pickedIds.begin(), pickedIds.end(), [&](const RefitCandidate& existing) { return sameCandidate(existing, candidate); }) == pickedIds.end()) {
-                picked = &candidate;
-            }
-        }
-        if (picked == nullptr) {
-            picked = &candidates[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(candidates.size()) - 1))];
-        }
-        if (picked->kind == RefitOfferKind::ShipModule) {
-            state.run.offerModuleIds[i] = picked->id;
-        } else {
-            state.run.offerCrewUpgradeIds[i] = picked->id;
-        }
-        pickedIds.push_back(*picked);
-    }
-
-    const auto isAffordable = [&](std::size_t index) {
-        const std::string& moduleId = state.run.offerModuleIds[index];
-        if (!moduleId.empty()) {
-            const ShipModule* module = catalog.findModule(moduleId);
+    const auto candidateAffordable = [&](const RefitCandidate& candidate) {
+        if (candidate.kind == RefitOfferKind::ShipModule) {
+            const ShipModule* module = catalog.findModule(candidate.id);
             return module != nullptr && canAffordModuleOffer(state, *module);
         }
-
-        const std::string& upgradeId = state.run.offerCrewUpgradeIds[index];
-        const CrewUpgrade* upgrade = catalog.findCrewUpgrade(upgradeId);
+        const CrewUpgrade* upgrade = catalog.findCrewUpgrade(candidate.id);
         return upgrade != nullptr && state.run.credits >= static_cast<double>(crewUpgradeCost(*upgrade));
     };
 
-    bool hasAffordableOffer = false;
-    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
-        hasAffordableOffer = hasAffordableOffer || isAffordable(i);
-    }
-
-    if (!hasAffordableOffer && state.run.credits > 0.0) {
-        const RefitCandidate* cheapestAffordable = nullptr;
-        for (const RefitCandidate& candidate : candidates) {
-            if (std::find_if(pickedIds.begin(), pickedIds.end(), [&](const RefitCandidate& existing) { return sameCandidate(existing, candidate); }) != pickedIds.end()) {
-                continue;
-            }
-            if (state.run.credits >= static_cast<double>(candidate.cost) && (cheapestAffordable == nullptr || candidate.cost < cheapestAffordable->cost)) {
-                cheapestAffordable = &candidate;
+    std::vector<RefitCandidate> remaining = candidates;
+    std::vector<RefitCandidate> pickedIds;
+    pickedIds.reserve(state.run.offerModuleIds.size());
+    const auto pickMatchingTrack = [&](RefitTrack track) {
+        std::vector<std::size_t> matches;
+        for (std::size_t i = 0; i < remaining.size(); ++i) {
+            if (remaining[i].track == track) {
+                matches.push_back(i);
             }
         }
+        if (matches.empty()) {
+            return;
+        }
+        const std::size_t match = matches[static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(matches.size()) - 1))];
+        pickedIds.push_back(remaining[match]);
+        remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(match));
+    };
 
-        if (cheapestAffordable != nullptr) {
-            state.run.offerModuleIds.back().clear();
-            state.run.offerCrewUpgradeIds.back().clear();
-            if (cheapestAffordable->kind == RefitOfferKind::ShipModule) {
-                state.run.offerModuleIds.back() = cheapestAffordable->id;
-            } else {
-                state.run.offerCrewUpgradeIds.back() = cheapestAffordable->id;
+    for (const RefitTrack track : {RefitTrack::Reach, RefitTrack::Control, RefitTrack::Recovery}) {
+        if (pickedIds.size() >= state.run.offerModuleIds.size()) {
+            break;
+        }
+        pickMatchingTrack(track);
+    }
+    while (pickedIds.size() < state.run.offerModuleIds.size() && !remaining.empty()) {
+        const std::size_t index = static_cast<std::size_t>(rng.rangeInt(0, static_cast<int>(remaining.size()) - 1));
+        pickedIds.push_back(remaining[index]);
+        remaining.erase(remaining.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+
+    const bool hasAffordableOffer = std::any_of(pickedIds.begin(), pickedIds.end(), candidateAffordable);
+    if (!hasAffordableOffer && state.run.credits > 0.0 && !pickedIds.empty()) {
+        const auto cheapestAffordable = std::min_element(remaining.begin(), remaining.end(), [&](const RefitCandidate& lhs, const RefitCandidate& rhs) {
+            const bool lhsAffordable = candidateAffordable(lhs);
+            const bool rhsAffordable = candidateAffordable(rhs);
+            if (lhsAffordable != rhsAffordable) {
+                return lhsAffordable;
             }
+            return lhs.cost < rhs.cost;
+        });
+        if (cheapestAffordable != remaining.end() && candidateAffordable(*cheapestAffordable)) {
+            pickedIds.back() = *cheapestAffordable;
+        }
+    }
+
+    for (std::size_t i = 0; i < pickedIds.size(); ++i) {
+        if (pickedIds[i].kind == RefitOfferKind::ShipModule) {
+            state.run.offerModuleIds[i] = pickedIds[i].id;
+        } else {
+            state.run.offerCrewUpgradeIds[i] = pickedIds[i].id;
         }
     }
 }
@@ -510,6 +510,9 @@ double offerRerollCost(const GameState& state)
 
 bool rerollOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
 {
+    if (curatedProvingRefitsActive(state)) {
+        return false;
+    }
     const double cost = offerRerollCost(state);
     if (state.run.credits < cost) {
         state.statusLine = std::string(text::status::refitRerollUnaffordable);
@@ -551,33 +554,15 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
         spendMaterials(state.meta.materials, module->materialCost);
         addUniqueId(state.meta.ownedModuleIds, module->id);
         addUniqueId(state.run.inventoryModuleIds, module->id);
-
-        auto slotIt = std::find_if(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), [&](const std::string& equippedId) {
-            const ShipModule* equipped = catalog.findModule(equippedId);
-            return equipped != nullptr && equipped->slot == module->slot;
-        });
-
-        if (slotIt != state.run.equippedModuleIds.end()) {
-            *slotIt = module->id;
-        } else {
-            state.run.equippedModuleIds.push_back(module->id);
-        }
-
-        auto defaultSlotIt = std::find_if(state.meta.defaultEquippedModuleIds.begin(), state.meta.defaultEquippedModuleIds.end(), [&](const std::string& equippedId) {
-            const ShipModule* equipped = catalog.findModule(equippedId);
-            return equipped != nullptr && equipped->slot == module->slot;
-        });
-        if (defaultSlotIt != state.meta.defaultEquippedModuleIds.end()) {
-            *defaultSlotIt = module->id;
-        } else {
-            state.meta.defaultEquippedModuleIds.push_back(module->id);
-        }
+        addUniqueId(state.run.equippedModuleIds, module->id);
+        addUniqueId(state.meta.defaultEquippedModuleIds, module->id);
     } else {
-        state.run.crewUpgradeIds.push_back(crewUpgrade->id);
+        addUniqueId(state.run.crewUpgradeIds, crewUpgrade->id);
     }
 
     state.run.offerModuleIds = {};
     state.run.offerCrewUpgradeIds = {};
+    state.run.refitEntitled = false;
     state.statusLine = text::refitInstalled(module != nullptr ? module->name : crewUpgrade->name);
     syncLaunchConfig(state, catalog);
     return true;
@@ -1283,6 +1268,7 @@ bool isSkinOfYourTeethOutcome(const LaunchOutcome& outcome)
 
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& rawOutcome)
 {
+    const int readinessBefore = state.run.frontierReadiness;
     LaunchOutcome outcome = rawOutcome;
     if (isSkinOfYourTeethOutcome(outcome)) {
         outcome.payout *= 1.0 + tuning::records::skinOfYourTeethCreditBonus;
@@ -1342,7 +1328,6 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (!outcome.moduleDestroyedId.empty() && outcome.type != LaunchResultType::Destroyed) {
         state.run.equippedModuleIds.erase(std::remove(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), outcome.moduleDestroyedId), state.run.equippedModuleIds.end());
-        state.run.inventoryModuleIds.erase(std::remove(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), outcome.moduleDestroyedId), state.run.inventoryModuleIds.end());
     }
 
     if (outcome.type == LaunchResultType::Destroyed) {
@@ -1440,6 +1425,10 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             }
         }
     }
+
+    state.run.refitEntitled = state.run.refitEntitled ||
+        state.run.frontierReadiness > readinessBefore ||
+        validDestinationSuccess;
 
     if (outcome.type == LaunchResultType::MissionComplete &&
         outcomeDestination != nullptr &&

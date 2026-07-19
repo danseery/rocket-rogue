@@ -533,6 +533,124 @@ void moduleOffersAreOneChoiceRefits()
     }
 }
 
+void openingRefitTracksAreCuratedAndEntitled()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 212);
+    state.run.credits = 500.0;
+    const ModuleStats baseline = aggregateShipStats(state, catalog);
+
+    LaunchOutcome useful;
+    useful.type = LaunchResultType::MissionComplete;
+    useful.recoveryMethod = RecoveryMethod::ReturnHome;
+    useful.destinationId = content::destination::earthOrbit;
+    useful.ejectMultiplier = catalog.destinations.front().targetMultiplier;
+    applyLaunchOutcome(state, catalog, useful);
+    require(state.run.refitEntitled, "a useful proving flight should earn one refit entitlement");
+
+    Random rng(2120);
+    generateModuleOffers(state, catalog, rng);
+    require(state.run.offerModuleIds[0] == content::module::sparrowInjectorTune, "first proving board should offer Reach I");
+    require(state.run.offerModuleIds[1] == content::module::radiatorVaneExtension, "first proving board should offer Control I");
+    require(state.run.offerModuleIds[2] == content::module::patchworkCrossBracing, "first proving board should offer Recovery I");
+    require(!rerollOffers(state, catalog, rng), "curated proving boards should not reroll");
+    require(buyOffer(state, catalog, 0), "Reach I should install from the curated board");
+    require(!state.run.refitEntitled, "installing a refit should consume its entitlement");
+    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::sparrowInjectorTune) != state.meta.ownedModuleIds.end(), "installed proving refit should be permanently owned");
+    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::sparrowEngine) != state.run.equippedModuleIds.end(), "permanent refits should not replace built-in hardware");
+    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::sparrowInjectorTune) != state.run.equippedModuleIds.end(), "permanent refits should stack with built-in hardware");
+    require(std::abs(aggregateShipStats(state, catalog).thrust - baseline.thrust - 0.8) < 0.0001, "Reach I should add its tuned thrust exactly once");
+
+    applyLaunchOutcome(state, catalog, useful);
+    generateModuleOffers(state, catalog, rng);
+    require(state.run.offerModuleIds[0] == content::module::reserveFeedManifold, "specializing in Reach should advance that track to Rank II");
+    require(state.run.offerModuleIds[1] == content::module::radiatorVaneExtension, "unchosen Control I should remain available");
+    require(state.run.offerModuleIds[2] == content::module::patchworkCrossBracing, "unchosen Recovery I should remain available");
+
+    const auto installCuratedSequence = [&](const std::array<const char*, 9>& sequence, std::uint64_t seed) {
+        GameState ladder = createNewGame(catalog, seed);
+        ladder.run.credits = 500.0;
+        Random ladderRng(seed + 1000);
+        for (const char* expectedId : sequence) {
+            ladder.run.refitEntitled = true;
+            generateModuleOffers(ladder, catalog, ladderRng);
+            int expectedIndex = -1;
+            std::vector<std::string> visibleIds;
+            for (std::size_t i = 0; i < ladder.run.offerModuleIds.size(); ++i) {
+                const std::string& offeredId = ladder.run.offerModuleIds[i];
+                if (!offeredId.empty()) {
+                    require(std::find(visibleIds.begin(), visibleIds.end(), offeredId) == visibleIds.end(),
+                        "curated proving boards should never duplicate a visible card");
+                    visibleIds.push_back(offeredId);
+                }
+                if (offeredId == expectedId) {
+                    expectedIndex = static_cast<int>(i);
+                }
+            }
+            require(expectedIndex >= 0, "the next prerequisite-satisfied proving rank should remain actionable");
+            require(buyOffer(ladder, catalog, expectedIndex), "every proving rank should install exactly once");
+        }
+        ladder.run.refitEntitled = true;
+        generateModuleOffers(ladder, catalog, ladderRng);
+        require(std::all_of(ladder.run.offerModuleIds.begin(), ladder.run.offerModuleIds.end(), [](const std::string& id) { return id.empty(); }),
+            "an exhausted proving pool should render no duplicate filler cards");
+    };
+
+    installCuratedSequence({
+        content::module::sparrowInjectorTune,
+        content::module::reserveFeedManifold,
+        content::module::sustainedBurnPackage,
+        content::module::radiatorVaneExtension,
+        content::module::telemetryNoiseFilter,
+        content::module::pressureBalanceBaffles,
+        content::module::patchworkCrossBracing,
+        content::module::springCapsuleRetropack,
+        content::module::recoveryCradle}, 216);
+    installCuratedSequence({
+        content::module::sparrowInjectorTune,
+        content::module::radiatorVaneExtension,
+        content::module::patchworkCrossBracing,
+        content::module::reserveFeedManifold,
+        content::module::telemetryNoiseFilter,
+        content::module::springCapsuleRetropack,
+        content::module::sustainedBurnPackage,
+        content::module::pressureBalanceBaffles,
+        content::module::recoveryCradle}, 217);
+
+    GameState shallow = createNewGame(catalog, 213);
+    LaunchOutcome recalled;
+    recalled.type = LaunchResultType::SafeEject;
+    recalled.recoveryMethod = RecoveryMethod::ReturnHome;
+    recalled.destinationId = content::destination::earthOrbit;
+    recalled.ejectMultiplier = 1.05;
+    applyLaunchOutcome(shallow, catalog, recalled);
+    require(!shallow.run.refitEntitled, "a shallow return should not earn a permanent refit");
+
+    GameState crashed = createNewGame(catalog, 218);
+    LaunchOutcome destroyed;
+    destroyed.type = LaunchResultType::Destroyed;
+    destroyed.destinationId = content::destination::earthOrbit;
+    applyLaunchOutcome(crashed, catalog, destroyed);
+    require(!crashed.run.refitEntitled, "a destroyed proving flight should not earn a permanent refit");
+
+    GameState capped = createNewGame(catalog, 214);
+    capped.run.frontierReadiness = frontierReadinessCap(capped, catalog);
+    recalled.ejectMultiplier = catalog.destinations.front().targetMultiplier;
+    applyLaunchOutcome(capped, catalog, recalled);
+    require(!capped.run.refitEntitled, "a flight at the Flight Data cap should not create another refit entitlement");
+
+    GameState arrived = createNewGame(catalog, 215);
+    arrived.run.frontierReadiness = frontierReadinessRequired(arrived, catalog);
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.recoveryMethod = RecoveryMethod::TransferArrival;
+    moonArrival.destinationId = content::destination::moon;
+    moonArrival.frontierTransfer = true;
+    moonArrival.ejectMultiplier = catalog.destinations[1].targetMultiplier;
+    applyLaunchOutcome(arrived, catalog, moonArrival);
+    require(arrived.run.refitEntitled, "a successful destination arrival should earn one delayed refit entitlement");
+}
+
 void refitRerollsSpendAndEscalate()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -684,12 +802,15 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship upgrades should become permanent shipyard tech");
     require(std::find(state.meta.defaultEquippedModuleIds.begin(), state.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != state.meta.defaultEquippedModuleIds.end(), "installed ship upgrades should become the default new-build loadout");
 
-    LaunchOutcome destroyed;
-    destroyed.type = LaunchResultType::Destroyed;
-    destroyed.destinationId = currentDestination(state, catalog).id;
-    destroyed.moduleDestroyedId = content::module::cryoLoop;
-    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
-    applyLaunchOutcome(state, catalog, destroyed);
+    LaunchOutcome damaged;
+    damaged.type = LaunchResultType::SafeEject;
+    damaged.recoveryMethod = RecoveryMethod::ReturnHome;
+    damaged.destinationId = currentDestination(state, catalog).id;
+    damaged.moduleDestroyedId = content::module::cryoLoop;
+    damaged.ejectMultiplier = 1.05;
+    applyLaunchOutcome(state, catalog, damaged);
+    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) == state.run.equippedModuleIds.end(), "damaged permanent tech should go offline for the current expedition");
+    require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::cryoLoop) != state.run.inventoryModuleIds.end(), "offline tech should remain in permanent inventory");
     startNewExpedition(state, catalog);
 
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship destruction should not erase permanent shipyard tech");
@@ -778,7 +899,7 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     };
     CrewUpgradeStats stats = aggregateCrewUpgradeStats(state, catalog);
     require(stats.trainingGain == 1, "crew simulator upgrades should aggregate training gain");
-    require(stats.trainingStressRelief == 5, "crew simulator upgrades should aggregate stress relief");
+    require(stats.trainingStressRelief == 13, "crew simulator upgrades should aggregate stress relief");
     require(stats.restStressBonus == 12, "medical upgrades should aggregate rest bonus");
     require(stats.launchStressRelief == 5, "psych upgrades should aggregate launch stress relief");
     require(stats.traitModifier > 0.34, "trait upgrades should aggregate trait modifiers");
@@ -790,7 +911,7 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     const double creditsBeforeTraining = state.run.credits;
     require(trainCrew(state, catalog), "crew training should use facility upgrades");
     require(pilot->training == 3, "upgraded simulator should grant extra training");
-    require(pilot->stress == 45, "upgraded simulator should reduce training stress gain without eliminating stress");
+    require(pilot->stress == 41, "upgraded simulator should reduce training stress gain without eliminating stress");
     require(state.run.credits < creditsBeforeTraining, "training should still cost credits");
     require(crewTrainingStressGain(state, catalog) >= tuning::crew::stressPerStep, "crew training should always carry at least one stress step");
     pilot->training = tuning::crew::maxTraining;
@@ -1323,6 +1444,80 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     require(mars.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001, "YOLO landing should carry extra surface hazard");
 }
 
+void activityIntroductionsAreFirstUseAndUnlockAware()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    LaunchOutcome marsArrival;
+    marsArrival.type = LaunchResultType::MissionComplete;
+    marsArrival.frontierTransfer = true;
+    marsArrival.destinationId = content::destination::mars;
+
+    GameState arrival = createNewGame(catalog, 609);
+    startArrivalOps(arrival, marsArrival);
+    arrival.screen = Screen::ArrivalOps;
+    Random arrivalRng(609);
+    const PreparedLaunch arrivalLaunch = prepareLaunch(arrival, catalog, arrivalRng);
+    std::string html = buildGamePanelHtml({arrival, catalog, arrivalLaunch, arrivalLaunch});
+    require(html.find("data-ui-modal=\"flyby_introduction\"") != std::string::npos,
+        "first Flyby selection should open its introduction modal");
+    require(html.find("data-ui-modal=\"orbit_introduction\"") != std::string::npos,
+        "first Orbit selection should open its introduction modal");
+    require(html.find("data-ui-modal=\"landing_introduction\"") != std::string::npos,
+        "first Landing selection should open its introduction modal");
+    require(html.find("Blueprints unlock permanent upgrades for your SHIP") != std::string::npos,
+        "Flyby and Orbit introductions should connect blueprints to permanent ship upgrades");
+    require(html.find("Surface upgrades improve your DRONE") != std::string::npos,
+        "Landing introduction should connect surface upgrades to the mining drone");
+    require(html.find("activity-introduction-kicker") != std::string::npos
+            && html.find("activity-introduction-payoff") != std::string::npos
+            && html.find("activity-introduction-actions") != std::string::npos
+            && html.find("Why it matters") != std::string::npos,
+        "first-use activity introductions should use the compact briefing hierarchy");
+    require(html.find("data-rr-action=\"arrival_flyby\"") != std::string::npos
+            && html.find("data-rr-action=\"arrival_orbit\"") != std::string::npos
+            && html.find("data-rr-action=\"arrival_landing\"") != std::string::npos,
+        "each first-use Arrival Ops modal should confirm into its activity action");
+    require(html.find("Mini-drones") == std::string::npos,
+        "arrival introductions should not mention mini-drones before the Drone Bay unlock");
+
+    ui::briefings::acknowledge(arrival.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby);
+    ui::briefings::acknowledge(arrival.meta.acknowledgedActivityBriefingIds, ui::briefings::orbit);
+    ui::briefings::acknowledge(arrival.meta.acknowledgedActivityBriefingIds, ui::briefings::landing);
+    html = buildGamePanelHtml({arrival, catalog, arrivalLaunch, arrivalLaunch});
+    require(html.find("data-ui-modal=\"flyby_introduction\"") == std::string::npos
+            && html.find("data-ui-modal=\"orbit_introduction\"") == std::string::npos
+            && html.find("data-ui-modal=\"landing_introduction\"") == std::string::npos,
+        "acknowledged Arrival Ops activities should start directly without repeating introductions");
+    require(html.find("data-rr-action=\"arrival_flyby\"") != std::string::npos
+            && html.find("data-rr-action=\"arrival_orbit\"") != std::string::npos
+            && html.find("data-rr-action=\"arrival_landing\"") != std::string::npos,
+        "acknowledged Arrival Ops cards should retain their direct actions");
+
+    GameState surface = createNewGame(catalog, 610);
+    surface.run.destinationIndex = 2;
+    startSurfaceExpedition(surface, catalog);
+    surface.screen = Screen::SurfaceExpedition;
+    Random surfaceRng(610);
+    const PreparedLaunch surfaceLaunch = prepareLaunch(surface, catalog, surfaceRng);
+    html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
+    require(html.find("mini_drone_introduction") == std::string::npos
+            && html.find("Mini-drones are persistent") == std::string::npos,
+        "locked Drone Bay screens should not emit mini-drone introduction copy or markup");
+
+    surface.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(surface, catalog);
+    html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
+    require(html.find("data-ui-modal=\"mini_drone_introduction\"") != std::string::npos
+            && html.find("Mini-drones are persistent support craft") != std::string::npos
+            && html.find("data-rr-action=\"drone_ops\"") != std::string::npos,
+        "the unlocked Drone Bay should introduce mini-drones on first selection");
+    ui::briefings::acknowledge(surface.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
+    html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
+    require(html.find("data-ui-modal=\"mini_drone_introduction\"") == std::string::npos
+            && html.find("data-rr-action=\"drone_ops\"") != std::string::npos,
+        "acknowledged Drone Ops should open directly without repeating its introduction");
+}
+
 void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1603,6 +1798,12 @@ void shipUpgradesAssistFlybyAndOrbitMinigames()
 
     GameState assisted = createNewGame(catalog, 719);
     assisted.run.equippedModuleIds = {
+        content::module::sparrowEngine,
+        content::module::stableTank,
+        content::module::patchworkHull,
+        content::module::radiatorVanes,
+        content::module::analogTelemetry,
+        content::module::springCapsule,
         content::module::kestrelEngine,
         content::module::deepReservoir,
         content::module::titaniumRib,
@@ -6008,6 +6209,8 @@ void saveRoundTripPreservesProgress()
     state.run.credits = 222.0;
     state.run.destinationIndex = 2;
     state.run.frontierReadiness = 3;
+    state.run.refitEntitled = true;
+    state.run.offerModuleIds = {content::module::sparrowInjectorTune, content::module::radiatorVaneExtension, content::module::patchworkCrossBracing};
     state.run.shipDamage = 17;
     state.run.offerRerollsThisExpedition = 2;
     state.run.repairOpsThisExpedition = 1;
@@ -6030,6 +6233,10 @@ void saveRoundTripPreservesProgress()
     state.meta.worstCreditDelta = -30.0;
     state.meta.destinationAttempts = {2, 1, 0};
     state.meta.destinationSuccesses = {1, 0, 0};
+    state.meta.acknowledgedActivityBriefingIds = {
+        std::string(ui::briefings::flyby),
+        std::string(ui::briefings::landing)
+    };
     state.meta.memorials.push_back("Test Pilot lost during Mars");
     state.run.crewUpgradeIds = {
         content::crewUpgrade::analogSimBay,
@@ -6049,6 +6256,8 @@ void saveRoundTripPreservesProgress()
     require(std::abs(restored.run.credits - 222.0) < 0.001, "credits should round trip");
     require(restored.run.destinationIndex == 2, "destination index should round trip");
     require(restored.run.frontierReadiness == 3, "frontier readiness should round trip");
+    require(restored.run.refitEntitled, "saved refit entitlement should round trip");
+    require(restored.run.offerModuleIds[0] == content::module::sparrowInjectorTune, "saved refit board should round trip");
     require(restored.run.shipDamage == 17, "ship damage should round trip");
     require(restored.run.offerRerollsThisExpedition == 2, "refit reroll count should round trip");
     require(restored.run.repairOpsThisExpedition == 1, "repair escalation should round trip");
@@ -6069,11 +6278,31 @@ void saveRoundTripPreservesProgress()
     require(std::abs(restored.meta.worstCreditDelta + 30.0) < 0.001, "worst credit delta should round trip");
     require(restored.meta.destinationAttempts.size() >= 3 && restored.meta.destinationAttempts[0] == 2, "destination attempts should round trip");
     require(restored.meta.destinationSuccesses.size() >= 3 && restored.meta.destinationSuccesses[0] == 1, "destination successes should round trip");
+    require(ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
+            && ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::landing),
+        "activity introduction acknowledgments should round trip");
     require(restored.meta.memorials.size() == 1, "memorials should round trip");
     require(restored.run.crewUpgradeIds.size() == 2 && restored.run.crewUpgradeIds[0] == content::crewUpgrade::analogSimBay, "crew upgrades should round trip");
     require(restored.run.crew.front().training == 7, "crew training should round trip");
     require(restored.run.crew.front().stress == 42, "crew stress should round trip");
     require(restored.run.crew.front().status == CrewStatus::Injured, "crew status should round trip");
+}
+
+void versionTwoStoredModulesMigrateToInstalledSystems()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState legacyState = createNewGame(catalog, 56);
+    SaveData legacy = captureSaveData(legacyState);
+    legacy.version = 2;
+    legacy.ownedModuleIds.push_back(content::module::cryoLoop);
+    legacy.inventoryModuleIds.push_back(content::module::cryoLoop);
+    legacy.equippedModuleIds.erase(std::remove(legacy.equippedModuleIds.begin(), legacy.equippedModuleIds.end(), content::module::cryoLoop), legacy.equippedModuleIds.end());
+    legacy.defaultEquippedModuleIds.erase(std::remove(legacy.defaultEquippedModuleIds.begin(), legacy.defaultEquippedModuleIds.end(), content::module::cryoLoop), legacy.defaultEquippedModuleIds.end());
+
+    GameState restored = createNewGame(catalog, 57);
+    restoreSaveData(restored, catalog, legacy);
+    require(std::find(restored.run.equippedModuleIds.begin(), restored.run.equippedModuleIds.end(), content::module::cryoLoop) != restored.run.equippedModuleIds.end(), "version-two stored modules should migrate to installed systems");
+    require(std::find(restored.meta.defaultEquippedModuleIds.begin(), restored.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != restored.meta.defaultEquippedModuleIds.end(), "migrated installed systems should survive replacement ships");
 }
 
 void saveSchemaConstantsMatchSerializedFields()
@@ -6090,6 +6319,9 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::inventory) + save_schema::keyValueDelimiter) != std::string::npos, "inventory key should use shared schema name");
     require(text.find(std::string(save_schema::field::ownedModules) + save_schema::keyValueDelimiter) != std::string::npos, "owned modules key should use shared schema name");
     require(text.find(std::string(save_schema::field::defaultEquippedModules) + save_schema::keyValueDelimiter) != std::string::npos, "default equipped modules key should use shared schema name");
+    require(text.find(std::string(save_schema::field::refitEntitled) + save_schema::keyValueDelimiter) != std::string::npos, "refit entitlement key should use shared schema name");
+    require(text.find(std::string(save_schema::field::acknowledgedActivityBriefings) + save_schema::keyValueDelimiter) != std::string::npos, "activity briefing acknowledgments should use a shared schema name");
+    require(text.find(std::string(save_schema::field::offerModules) + save_schema::keyValueDelimiter) != std::string::npos, "refit offers key should use shared schema name");
     require(text.find(std::string(save_schema::field::screen) + save_schema::keyValueDelimiter) != std::string::npos, "screen key should use shared schema name");
     require(text.find(std::string(save_schema::field::chapter) + save_schema::keyValueDelimiter) != std::string::npos, "chapter key should use shared schema name");
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
@@ -6298,10 +6530,10 @@ void refitPresentationComesFromSharedHelper()
 
     RefitPresentation crewCard = crewUpgradeRefitPresentation(*simBay);
     require(crewCard.slotClass == "sensors", "crew upgrade presentation should use shared card slot class");
-    require(crewCard.category == std::string(text::panel::details::crew), "crew upgrade presentation should expose crew category");
+    require(crewCard.category == "CONTROL", "crew upgrade presentation should expose its permanent track");
     require(crewCard.glyph == "C", "crew upgrade presentation should expose a stable card glyph");
-    require(crewCard.primaryImpact == text::panel::simulatorStressImpact(2), "crew upgrade presentation should expose strongest facility impact");
-    require(hasRefitChip(crewCard, text::moduleStats::simStressChip, "+2.0", true), "crew upgrade presentation should expose simulator stress chip");
+    require(crewCard.primaryImpact == text::panel::simulatorStressImpact(8), "crew upgrade presentation should expose strongest facility impact");
+    require(hasRefitChip(crewCard, text::moduleStats::simStressChip, "-8.0", true), "crew upgrade presentation should expose simulator stress reduction with the correct sign");
 }
 
 void refitWindowPresentationComesFromSharedHelper()
@@ -6329,7 +6561,7 @@ void refitWindowPresentationComesFromSharedHelper()
     require(moduleOffer.affordable, "module offer should expose affordability");
     require(moduleOffer.card.title == engine->name, "module offer should include shared card presentation");
     require(moduleOffer.action.enabled, "affordable module offer should enable install action");
-    require(moduleOffer.action.label == std::string(text::buttons::install), "module offer should use shared install label");
+    require(moduleOffer.action.label == std::string(text::buttons::installPermanently), "module offer should use permanent install label");
     require(moduleOffer.action.actionId == ui::actions::buyOffer(0), "module offer should use shared indexed buy action");
     require(moduleOffer.action.cssClass == "ok", "module offer should expose install button style");
 
@@ -6346,7 +6578,7 @@ void refitWindowPresentationComesFromSharedHelper()
     require(window.rerollAction.label == text::panel::rerollOffers(display::money(window.rerollCost)), "reroll action should use shared label formatting");
     require(window.rerollAction.actionId == std::string(ui::actions::rerollOffers), "reroll action should use shared action id");
     require(window.rerollAction.cssClass == "warn", "reroll action should expose warning button style");
-    require(window.skipAction.enabled && window.skipAction.label == std::string(text::buttons::skipRefit), "skip refit action should always be available");
+    require(window.skipAction.enabled && window.skipAction.label == std::string(text::buttons::keepCredits), "keep-credits action should always be available");
     require(window.skipAction.actionId == std::string(ui::actions::next), "skip refit action should advance through shared action id");
 
     state.meta.blueprintProgress = 3;
@@ -6425,24 +6657,21 @@ void shipDetailsPresentationComesFromSharedHelper()
     const std::vector<DetailPresentationRow> rows = shipDetailsPresentation(state, catalog);
     const DetailPresentationRow* thrust = findDetailPresentationRow(rows, text::moduleStats::thrustDetail);
     const DetailPresentationRow* damage = findDetailPresentationRow(rows, text::moduleStats::damage);
-    const DetailPresentationRow* engine = findDetailPresentationRow(rows, text::enums::slot::engine);
-    const DetailPresentationRow* inventory = findDetailPresentationRow(rows, text::panel::details::inventory);
+    const DetailPresentationRow* engine = findDetailPresentationRow(rows, "Built in");
 
     require(thrust != nullptr && !thrust->value.empty(), "ship presentation should expose formatted ship stats");
     require(damage != nullptr && damage->value == display::wholePercent(state.run.shipDamage), "ship presentation should expose damage row");
-    require(hasDetailPresentationHeader(rows, text::panel::details::equippedShipUpgrades), "ship presentation should include equipped upgrades section");
-    require(hasDetailPresentationHeader(rows, text::panel::details::storedShipUpgrades), "ship presentation should include stored upgrades section");
-    require(engine != nullptr && engine->value.find("Sparrow Engine") != std::string::npos, "ship presentation should summarize equipped modules");
-    require(inventory != nullptr && inventory->value == std::string(text::panel::noSpareModules), "ship presentation should show no-spares fallback");
+    require(hasDetailPresentationHeader(rows, "Installed ship systems"), "ship presentation should include permanent systems section");
+    require(engine != nullptr && engine->value.find("Sparrow Engine") != std::string::npos, "ship presentation should summarize built-in modules");
 
     const ShipModule* spareModule = catalog.findModule(content::module::cryoLoop);
     require(spareModule != nullptr, "ship presentation test needs a non-starter spare module");
-    state.run.inventoryModuleIds.push_back(spareModule->id);
+    state.meta.ownedModuleIds.push_back(spareModule->id);
     const std::vector<DetailPresentationRow> rowsWithSpare = shipDetailsPresentation(state, catalog);
     const std::string spareSummary = shipModuleSummary(*spareModule);
     require(std::find_if(rowsWithSpare.begin(), rowsWithSpare.end(), [&](const DetailPresentationRow& row) {
         return !row.heading && row.value == spareSummary;
-    }) != rowsWithSpare.end(), "ship presentation should summarize stored spare modules");
+    }) != rowsWithSpare.end(), "ship presentation should summarize offline permanent modules");
 }
 
 void programDetailsPresentationComesFromSharedHelper()
@@ -6910,6 +7139,15 @@ void titleScreenPresentationIsPortable()
     Random briefingRng(912);
     const PreparedLaunch briefingLaunch = prepareLaunch(briefingState, catalog, briefingRng);
     const std::string briefingHtml = buildGamePanelHtml({briefingState, catalog, briefingLaunch, briefingLaunch});
+    require(briefingHtml.find("<h1>THE YEAR IS 20X6</h1>") != std::string::npos
+            && briefingHtml.find("Humans have thoroughly fucked the planet.") != std::string::npos
+            && briefingHtml.find("bootleg copy of KSP2") != std::string::npos
+            && briefingHtml.find("small band of adorable varmints") != std::string::npos
+            && briefingHtml.find(">Help them</button>") != std::string::npos,
+        "the campaign introduction should present the approved retro exposition and directive");
+    require(briefingHtml.find("THE FRONTIER IS OPEN") == std::string::npos
+            && briefingHtml.find("Push Past Safe") == std::string::npos,
+        "the campaign introduction should not retain the former feature-list treatment");
     require(countOccurrences(briefingHtml, "class=\"opening-controls\"") == 1,
         "the campaign introduction should carry exactly one dedicated expedition control guide");
     require(briefingHtml.find("CONTROLS // FIELD REFERENCE") != std::string::npos
@@ -6952,6 +7190,14 @@ void earlyGameProgressionAndOutcomeModalAreClear()
         "first Moon preflight should expose its compact numeric confidence");
     require(countOccurrences(html, ">Confidence</span>") == 1, "Moon confidence should appear once rather than repeat across the launch UI");
 
+    GameState fundingBrief = createNewGame(catalog, 1911);
+    fundingBrief.screen = Screen::Launch;
+    Random fundingBriefRng(1911);
+    const PreparedLaunch fundingBriefLaunch = prepareLaunch(fundingBrief, catalog, fundingBriefRng);
+    const std::string fundingBriefHtml = buildGamePanelHtml({fundingBrief, catalog, fundingBriefLaunch, fundingBriefLaunch});
+    require(fundingBriefHtml.find("Push farther for richer findings and more funding") != std::string::npos,
+        "opening launch instructions should explain the reward for safely pushing beyond the brief");
+
     GameState recovered = createNewGame(catalog, 1912);
     LaunchOutcome usefulReturn;
     usefulReturn.type = LaunchResultType::SafeEject;
@@ -6959,6 +7205,8 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     usefulReturn.destinationId = content::destination::earthOrbit;
     usefulReturn.ejectMultiplier = defaultProvingTarget(catalog.destinations[0]);
     usefulReturn.crashMultiplier = usefulReturn.ejectMultiplier + 0.20;
+    usefulReturn.payout = 32.0;
+    usefulReturn.recoveryCost = 10.0;
     applyLaunchOutcome(recovered, catalog, usefulReturn);
     recovered.screen = Screen::Results;
     Random recoveredRng(1912);
@@ -6968,10 +7216,11 @@ void earlyGameProgressionAndOutcomeModalAreClear()
         "launch results should auto-open the compact outcome modal");
     require(recoveredHtml.find("data-modal-close-action=\"next\"") != std::string::npos,
         "closing the outcome modal should advance the result exactly like Continue");
-    require(recoveredHtml.find("SHIP RECOVERED") != std::string::npos
-            && recoveredHtml.find("brought home a usable flight profile") != std::string::npos
-            && recoveredHtml.find("Flight Data 1/3") != std::string::npos,
-        "useful early returns should explain the fiction and progression consequence");
+    require(recoveredHtml.find("USEFUL DATA HOME") != std::string::npos
+            && recoveredHtml.find("enough backing to keep the program moving") != std::string::npos
+            && recoveredHtml.find("Flight Data 1/3") != std::string::npos
+            && recoveredHtml.find("Funding +22") != std::string::npos,
+        "useful early returns should explain both route progress and recovered funding");
     require(recoveredHtml.find("data-ui-modal=\"flight_report\"") != std::string::npos
             && recoveredHtml.find("data-modal=\"flight_report\"") != std::string::npos,
         "the compact outcome should keep detailed telemetry behind Flight Report");
@@ -6987,14 +7236,64 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     recalled.run.frontierReadiness = 2;
     recalled.lastOutcome = usefulReturn;
     recalled.lastOutcome.ejectMultiplier = 1.05;
+    recalled.lastOutcome.payout = 12.0;
+    recalled.lastOutcome.recoveryCost = 12.0;
     recalled.screen = Screen::Results;
     Random recalledRng(1913);
     const PreparedLaunch recalledLaunch = prepareLaunch(recalled, catalog, recalledRng);
     const std::string recalledHtml = buildGamePanelHtml({recalled, catalog, recalledLaunch, recalledLaunch});
-    require(recalledHtml.find("FLIGHT RECALLED") != std::string::npos
-            && recalledHtml.find("before its instruments could chart a viable lunar route") != std::string::npos
-            && recalledHtml.find("Moon route locked") != std::string::npos,
-        "too-early returns should use thematic copy while stating the locked-route consequence");
+    const LaunchOutcomeSummaryPresentation recalledSummary = launchOutcomeSummaryPresentation(recalled, catalog);
+    require(recalledSummary.title == "FLIGHT RECALLED", "too-early returns should keep the recalled-flight title");
+    require(recalledSummary.consequence.find("brief fell short") != std::string::npos,
+        "too-early returns should explain why the route brief was missed");
+    require(recalledSummary.progression.find("Funding +0") != std::string::npos,
+        "too-early returns should state that they produced no new backing");
+    require(recalledHtml.find("FLIGHT RECALLED") != std::string::npos,
+        "the compact modal should render the recalled-flight summary");
+
+    GameState outperformed = createNewGame(catalog, 1916);
+    LaunchOutcome richProfile = usefulReturn;
+    richProfile.type = LaunchResultType::MissionComplete;
+    richProfile.ejectMultiplier = catalog.destinations[0].targetMultiplier + 0.25;
+    richProfile.crashMultiplier = richProfile.ejectMultiplier + 0.20;
+    richProfile.payout = 74.0;
+    richProfile.recoveryCost = 10.0;
+    applyLaunchOutcome(outperformed, catalog, richProfile);
+    const LaunchOutcomeSummaryPresentation richSummary = launchOutcomeSummaryPresentation(outperformed, catalog);
+    require(richSummary.title == "ROUTE OUTPERFORMED"
+            && richSummary.consequence.find("extra distance brought back richer findings") != std::string::npos
+            && richSummary.progression.find("Funding +64") != std::string::npos,
+        "a recovered over-target profile should connect extra distance to stronger funding");
+
+    GameState lunarRoute = createNewGame(catalog, 1918);
+    lunarRoute.run.frontierReadiness = 2;
+    applyLaunchOutcome(lunarRoute, catalog, richProfile);
+    lunarRoute.screen = Screen::Results;
+    const LaunchOutcomeSummaryPresentation lunarRouteSummary = launchOutcomeSummaryPresentation(lunarRoute, catalog);
+    require(lunarRouteSummary.title == "LUNAR ROUTE CHARTED"
+            && lunarRouteSummary.consequence.find("cleared the next launch for the Moon") != std::string::npos
+            && lunarRouteSummary.progression.find("Flight Data 3/3") != std::string::npos,
+        "the third proving profile should explicitly announce that the Moon transfer is available");
+    Random lunarRouteRng(1918);
+    const PreparedLaunch lunarRouteLaunch = prepareLaunch(lunarRoute, catalog, lunarRouteRng);
+    const std::string lunarRouteHtml = buildGamePanelHtml({lunarRoute, catalog, lunarRouteLaunch, lunarRouteLaunch});
+    require(lunarRouteHtml.find("LUNAR ROUTE CHARTED") != std::string::npos
+            && lunarRouteHtml.find("Mission Control has cleared the next launch for the Moon") != std::string::npos,
+        "the compact outcome modal should render the Moon unlock beat before the Hangar button changes");
+
+    GameState capsule = createNewGame(catalog, 1917);
+    LaunchOutcome recoveredCapsule = usefulReturn;
+    recoveredCapsule.recoveryMethod = RecoveryMethod::ManualEject;
+    recoveredCapsule.ejectMultiplier = catalog.destinations[0].targetMultiplier * tuning::outcomes::manualEjectUsefulDataTargetShare;
+    recoveredCapsule.payout = 5.0;
+    recoveredCapsule.recoveryCost = 20.0;
+    applyLaunchOutcome(capsule, catalog, recoveredCapsule);
+    const LaunchOutcomeSummaryPresentation capsuleSummary = launchOutcomeSummaryPresentation(capsule, catalog);
+    require(capsuleSummary.title == "CAPSULE RECOVERED"
+            && capsuleSummary.consequence.find("crew and usable telemetry made it home") != std::string::npos
+            && capsuleSummary.progression.find("Flight Data 1/3") != std::string::npos
+            && capsuleSummary.progression.find("Funding -15") != std::string::npos,
+        "emergency recovery should distinguish saved crew and data from lost funding");
 
     GameState failedMoon = createNewGame(catalog, 1914);
     failedMoon.run.frontierReadiness = frontierReadinessRequired(failedMoon, catalog);
@@ -7005,6 +7304,7 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     lostTransfer.frontierTransfer = true;
     lostTransfer.ejectMultiplier = 1.82;
     lostTransfer.crashMultiplier = 1.82;
+    lostTransfer.crewKilled = true;
     applyLaunchOutcome(failedMoon, catalog, lostTransfer);
     failedMoon.screen = Screen::Results;
     require(failedMoon.run.frontierReadiness == 3, "failed Moon transfer fixture should retain all Flight Data");
@@ -7012,9 +7312,11 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     const PreparedLaunch failedMoonLaunch = prepareLaunch(failedMoon, catalog, failedMoonRng);
     const std::string failedMoonHtml = buildGamePanelHtml({failedMoon, catalog, failedMoonLaunch, failedMoonLaunch});
     require(failedMoonHtml.find("TRANSFER LOST") != std::string::npos
+            && failedMoonHtml.find("vehicle and crew were lost") != std::string::npos
             && failedMoonHtml.find("Flight Data 3/3") != std::string::npos
-            && failedMoonHtml.find("Next confidence 100%") != std::string::npos,
-        "failed Moon modal should explain retained progress and guaranteed retry confidence");
+            && failedMoonHtml.find("Funding lost") != std::string::npos
+            && failedMoonHtml.find("Retry 100%") != std::string::npos,
+        "failed Moon modal should distinguish crew and funding loss from preserved route data");
 }
 
 void solarMapModalTracksCampaignDiscovery()
@@ -7343,6 +7645,9 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(arrivalHtml.find("phase-board phase-board-arrival") != std::string::npos, "approach should render inside the dedicated arrival board");
     require(arrivalHtml.find("class=\"result-grid\"") != std::string::npos, "approach should keep arrival summary in the result grid");
     require(countOccurrences(arrivalHtml, "ops-card arrival-card") == 3, "approach should render flyby, orbit, and landing as three action cards");
+    require(countOccurrences(arrivalHtml, "class=\"arrival-card-status\"") == 3
+            && arrivalHtml.find(">Unavailable</span>") != std::string::npos,
+        "arrival cards should render the complete unavailable status in its reserved footer lane");
     require(arrivalHtml.find("phase-status") == std::string::npos, "approach should not duplicate the yellow mission status inside the board");
 
     GameState researchState = createNewGame(catalog, 717);
@@ -7418,6 +7723,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     GameState refitState = createNewGame(catalog, 722);
     refitState.run.credits = 1000.0;
     refitState.screen = Screen::Upgrade;
+    refitState.run.refitEntitled = true;
     Random refitOfferRng(722);
     generateModuleOffers(refitState, catalog, refitOfferRng);
     Random refitLaunchRng(723);
@@ -7427,8 +7733,17 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(countOccurrences(refitHtml, "upgrade-draft-card") == 3, "refit should expose three controller-cycle choices");
     require(refitHtml.find("draft-card-grid controller-choice-row") != std::string::npos,
         "refit choices should use the shared controller choice row");
+    require(refitHtml.find("CHOOSE ONE PERMANENT REFIT") != std::string::npos,
+        "refit board should frame the reward as a permanent installation");
+    require(refitHtml.find("REACH I") != std::string::npos && refitHtml.find("CONTROL I") != std::string::npos && refitHtml.find("RECOVERY I") != std::string::npos,
+        "first proving board should label all three track ranks explicitly");
+    require(countOccurrences(refitHtml, "Install permanently") == 3,
+        "each proving card should use the permanent-install action copy");
+    require(refitHtml.find("Keep credits") != std::string::npos,
+        "refit decline action should explain that the player keeps the credits");
     require(refitHtml.find("draft-actions controller-action-row") != std::string::npos,
-        "refit reroll and skip should use the shared controller action row");
+        "refit keep-credits action should use the shared controller action row");
+    require(refitHtml.find("reroll_offers") == std::string::npos, "curated proving refits should hide rerolls");
 }
 
 void hangarHtmlShowsPilotIntakeModal()
@@ -7543,6 +7858,34 @@ void starterMoonTransferUsesVisibleConfidenceAndPity()
     const double averageConfidence = reportedConfidenceTotal / static_cast<double>(samples);
     require(averageConfidence >= 0.85 && averageConfidence < 0.87, "starter Moon transfer should report approximately 85% confidence");
     require(completed >= samples * 82 / 100 && completed <= samples * 89 / 100, "starter Moon transfer outcomes should match the displayed confidence");
+
+    const std::array<std::array<const char*, 3>, 3> provingTracks {{
+        {content::module::sparrowInjectorTune, content::module::reserveFeedManifold, content::module::sustainedBurnPackage},
+        {content::module::radiatorVaneExtension, content::module::telemetryNoiseFilter, content::module::pressureBalanceBaffles},
+        {content::module::patchworkCrossBracing, content::module::springCapsuleRetropack, content::module::recoveryCradle}
+    }};
+    for (int reach = 0; reach <= 3; ++reach) {
+        for (int control = 0; control <= 3 - reach; ++control) {
+            const int recovery = 3 - reach - control;
+            if (recovery > 3) {
+                continue;
+            }
+            GameState build = createNewGame(catalog, 334);
+            const std::array<int, 3> ranks {reach, control, recovery};
+            for (std::size_t track = 0; track < provingTracks.size(); ++track) {
+                for (int rank = 0; rank < ranks[track]; ++rank) {
+                    build.run.equippedModuleIds.push_back(provingTracks[track][static_cast<std::size_t>(rank)]);
+                }
+            }
+            build.run.frontierReadiness = frontierReadinessRequired(build, catalog);
+            build.launchConfig.frontierTransfer = true;
+            build.launchConfig.destinationId = content::destination::moon;
+            build.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
+            Random buildRng(6000 + static_cast<std::uint64_t>(reach * 10 + control));
+            const PreparedLaunch prepared = prepareLaunch(build, catalog, buildRng);
+            require(prepared.objectiveConfidence >= 0.85 && prepared.objectiveConfidence < 0.87, "every legal three-refit opening build should keep Moon confidence in the 85-87% target band");
+        }
+    }
 
     GameState retry = createNewGame(catalog, 333);
     retry.run.frontierReadiness = frontierReadinessRequired(retry, catalog);
@@ -8215,6 +8558,7 @@ int main()
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     emergencyRecruitmentOffersAnimalCandidateChoice();
     moduleOffersAreOneChoiceRefits();
+    openingRefitTracksAreCuratedAndEntitled();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
     preMiningRefitOffersAvoidMaterialCosts();
@@ -8237,6 +8581,7 @@ int main()
     returnHomeRewardShelvesMatchRefitCosts();
     researchPhasesUnlockOnlyAfterMarsArrival();
     arrivalOperationsGateMoonButAllowMarsRisk();
+    activityIntroductionsAreFirstUseAndUnlockAware();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
     shipUpgradesAssistFlybyAndOrbitMinigames();
     activeFlybySaveResumesAtApproach();
@@ -8318,6 +8663,7 @@ int main()
     surfacePresentationComesFromSharedHelper();
     overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
+    versionTwoStoredModulesMigrateToInstalledSystems();
     saveSchemaConstantsMatchSerializedFields();
     legacyRecordsTrackAchievementStats();
     launchOutcomePresentationIsShared();

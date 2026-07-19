@@ -36,6 +36,7 @@
     { "textureId": "MiniDroneSurvey", "key": "mini_drone_survey", "source": "assets/art/mini-drone-survey.png", "columns": 1, "rows": 1 },
     { "textureId": "MiniDroneHazard", "key": "mini_drone_hazard", "source": "assets/art/mini-drone-hazard.png", "columns": 1, "rows": 1 },
     { "textureId": "MiniDroneAttack", "key": "mini_drone_attack", "source": "assets/art/mini-drone-attack.png", "columns": 1, "rows": 1 },
-    { "textureId": "MiniDroneDefense", "key": "mini_drone_defense", "source": "assets/art/mini-drone-defense.png", "columns": 1, "rows": 1 }
+    { "textureId": "MiniDroneDefense", "key": "mini_drone_defense", "source": "assets/art/mini-drone-defense.png", "columns": 1, "rows": 1 },
+    { "textureId": "HeroicCapybara", "key": "heroic_capybara", "source": "assets/art/heroic-capybara.png", "columns": 1, "rows": 1 }
   ]
 }

@@ -10,7 +10,19 @@ namespace rocket {
 
 namespace {
 
-ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity, ModuleStats stats, std::string unlockKey, std::vector<std::string> tags, MaterialInventory materialCost = {})
+ShipModule module(
+    std::string id,
+    std::string name,
+    SlotType slot,
+    Rarity rarity,
+    ModuleStats stats,
+    std::string unlockKey,
+    std::vector<std::string> tags,
+    MaterialInventory materialCost = {},
+    RefitTrack refitTrack = RefitTrack::None,
+    int refitRank = 0,
+    std::string prerequisiteId = {},
+    bool provingTier = false)
 {
     ShipModule result;
     result.id = std::move(id);
@@ -21,10 +33,24 @@ ShipModule module(std::string id, std::string name, SlotType slot, Rarity rarity
     result.materialCost = materialCost;
     result.unlockKey = std::move(unlockKey);
     result.tags = std::move(tags);
+    result.refitTrack = refitTrack;
+    result.refitRank = refitRank;
+    result.prerequisiteId = std::move(prerequisiteId);
+    result.provingTier = provingTier;
     return result;
 }
 
-CrewUpgrade crewUpgrade(std::string id, std::string name, std::string description, Rarity rarity, CrewUpgradeStats stats, std::string unlockKey, std::vector<std::string> tags)
+CrewUpgrade crewUpgrade(
+    std::string id,
+    std::string name,
+    std::string description,
+    Rarity rarity,
+    CrewUpgradeStats stats,
+    std::string unlockKey,
+    std::vector<std::string> tags,
+    RefitTrack refitTrack = RefitTrack::Control,
+    int refitRank = 0,
+    std::string prerequisiteId = {})
 {
     CrewUpgrade result;
     result.id = std::move(id);
@@ -34,6 +60,9 @@ CrewUpgrade crewUpgrade(std::string id, std::string name, std::string descriptio
     result.stats = stats;
     result.unlockKey = std::move(unlockKey);
     result.tags = std::move(tags);
+    result.refitTrack = refitTrack;
+    result.refitRank = refitRank;
+    result.prerequisiteId = std::move(prerequisiteId);
     return result;
 }
 
@@ -176,47 +205,57 @@ ContentCatalog createDefaultContent()
     ContentCatalog catalog;
 
     catalog.modules = {
+        module(content::module::sparrowInjectorTune, "Sparrow Injector Tune", SlotType::Engine, Rarity::Common, {.thrust = 0.8}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 1, "", true),
+        module(content::module::reserveFeedManifold, "Reserve Feed Manifold", SlotType::Fuel, Rarity::Uncommon, {.fuel = 1.2}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 2, content::module::sparrowInjectorTune, true),
+        module(content::module::sustainedBurnPackage, "Sustained-Burn Package", SlotType::Engine, Rarity::Rare, {.thrust = 0.5, .fuel = 0.6}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 3, content::module::reserveFeedManifold, true),
+        module(content::module::radiatorVaneExtension, "Radiator Vane Extension", SlotType::Cooling, Rarity::Common, {.cooling = 1.0}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 1, "", true),
+        module(content::module::telemetryNoiseFilter, "Telemetry Noise Filter", SlotType::Sensors, Rarity::Uncommon, {.sensors = 1.2}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 2, content::module::radiatorVaneExtension, true),
+        module(content::module::pressureBalanceBaffles, "Pressure-Balance Baffles", SlotType::Fuel, Rarity::Rare, {.pressure = 0.8, .volatility = -0.1}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 3, content::module::telemetryNoiseFilter, true),
+        module(content::module::patchworkCrossBracing, "Patchwork Cross-Bracing", SlotType::Hull, Rarity::Common, {.hull = 1.0}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 1, "", true),
+        module(content::module::springCapsuleRetropack, "Spring Capsule Retropack", SlotType::Escape, Rarity::Uncommon, {.escape = 1.2}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 2, content::module::patchworkCrossBracing, true),
+        module(content::module::recoveryCradle, "Recovery Cradle", SlotType::Hull, Rarity::Rare, {.hull = 0.5, .escape = 0.7}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 3, content::module::springCapsuleRetropack, true),
+
         module(content::module::sparrowEngine, "Sparrow Engine", SlotType::Engine, Rarity::Common, {.thrust = 2.0, .volatility = 0.2}, content::unlock::starter, {"steady", content::unlock::starter}),
-        module(content::module::kestrelEngine, "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 3.6, .fuel = -0.4, .volatility = 0.45, .payout = 0.4}, content::unlock::deepSpace, {"fast", "hungry"}),
-        module(content::module::novaDrive, "Nova Drive", SlotType::Engine, Rarity::Rare, {.thrust = 5.2, .cooling = -0.8, .volatility = 1.1, .payout = 1.1}, content::unlock::exotic, {"prototype", "dangerous"}, {.rare = 2, .exotic = 1}),
+        module(content::module::kestrelEngine, "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 1.6, .fuel = -0.4, .volatility = 0.25, .payout = 0.4}, content::unlock::deepSpace, {"fast", "hungry"}, {}, RefitTrack::Reach, 1, content::module::sparrowEngine),
+        module(content::module::novaDrive, "Nova Drive", SlotType::Engine, Rarity::Rare, {.thrust = 1.6, .fuel = 0.4, .cooling = -0.8, .volatility = 0.65, .payout = 0.7}, content::unlock::exotic, {"prototype", "dangerous"}, {.rare = 2, .exotic = 1}, RefitTrack::Reach, 2, content::module::kestrelEngine),
 
         module(content::module::stableTank, "Stable Tank", SlotType::Fuel, Rarity::Common, {.fuel = 2.5, .hull = 0.2, .pressure = 0.4}, content::unlock::starter, {"safe", "pressure"}),
-        module(content::module::slushTank, "Slush Tank", SlotType::Fuel, Rarity::Uncommon, {.fuel = 4.0, .cooling = 0.4, .pressure = 0.8, .volatility = 0.35}, content::unlock::thermal, {"cold", "pressure"}),
-        module(content::module::deepReservoir, "Deep Reservoir", SlotType::Fuel, Rarity::Rare, {.thrust = 0.5, .fuel = 5.4, .volatility = 0.75}, content::unlock::deepSpace, {"long-haul"}, {.common = 2, .rare = 1}),
+        module(content::module::slushTank, "Slush Tank", SlotType::Fuel, Rarity::Uncommon, {.fuel = 1.5, .hull = -0.2, .cooling = 0.4, .pressure = 0.4, .volatility = 0.35}, content::unlock::thermal, {"cold", "pressure"}, {}, RefitTrack::Reach, 1, content::module::stableTank),
+        module(content::module::deepReservoir, "Deep Reservoir", SlotType::Fuel, Rarity::Rare, {.thrust = 0.5, .fuel = 1.4, .cooling = -0.4, .pressure = -0.8, .volatility = 0.4}, content::unlock::deepSpace, {"long-haul"}, {.common = 2, .rare = 1}, RefitTrack::Reach, 2, content::module::slushTank),
 
-        module(content::module::patchworkHull, "Patchwork Hull", SlotType::Hull, Rarity::Common, {.hull = 2.6, .repair = 0.6}, content::unlock::starter, {"cheap"}),
-        module(content::module::titaniumRib, "Titanium Rib", SlotType::Hull, Rarity::Uncommon, {.hull = 4.2, .cooling = -0.2}, content::unlock::recovery, {"durable"}),
-        module(content::module::ablativeSkin, "Ablative Skin", SlotType::Hull, Rarity::Rare, {.hull = 3.4, .cooling = 1.2, .escape = 0.4}, content::unlock::thermal, {"heat-shield"}),
+        module(content::module::patchworkHull, "Patchwork Hull", SlotType::Hull, Rarity::Common, {.hull = 2.6}, content::unlock::starter, {"cheap"}),
+        module(content::module::titaniumRib, "Titanium Rib", SlotType::Hull, Rarity::Uncommon, {.hull = 1.6, .cooling = -0.2}, content::unlock::recovery, {"durable"}, {}, RefitTrack::Recovery, 1, content::module::patchworkHull),
+        module(content::module::ablativeSkin, "Ablative Skin", SlotType::Hull, Rarity::Rare, {.hull = 0.8, .cooling = 1.2, .escape = 0.4}, content::unlock::thermal, {"heat-shield"}, {}, RefitTrack::Recovery, 1, content::module::patchworkHull),
 
         module(content::module::radiatorVanes, "Radiator Vanes", SlotType::Cooling, Rarity::Common, {.hull = -0.2, .cooling = 2.5}, content::unlock::starter, {"cooling"}),
-        module(content::module::cryoLoop, "Cryo Loop", SlotType::Cooling, Rarity::Uncommon, {.fuel = -0.4, .cooling = 4.4}, content::unlock::thermal, {"precision"}),
-        module(content::module::sacrificialSink, "Sacrificial Heat Sink", SlotType::Cooling, Rarity::Rare, {.hull = -0.8, .cooling = 6.0, .repair = -0.4}, content::unlock::recovery, {"one-more-burn"}),
+        module(content::module::cryoLoop, "Cryo Loop", SlotType::Cooling, Rarity::Uncommon, {.fuel = -0.4, .cooling = 1.9}, content::unlock::thermal, {"precision"}, {}, RefitTrack::Control, 1, content::module::radiatorVanes),
+        module(content::module::sacrificialSink, "Sacrificial Heat Sink", SlotType::Cooling, Rarity::Rare, {.fuel = 0.4, .hull = -0.8, .cooling = 1.6}, content::unlock::recovery, {"one-more-burn"}, {}, RefitTrack::Control, 2, content::module::cryoLoop),
 
         module(content::module::analogTelemetry, "Analog Telemetry", SlotType::Sensors, Rarity::Common, {.sensors = 2.0, .pressure = 0.3}, content::unlock::starter, {"honest", "pressure"}),
-        module(content::module::hazardRadar, "Hazard Radar", SlotType::Sensors, Rarity::Uncommon, {.sensors = 3.8, .escape = 0.2, .pressure = 0.7}, content::unlock::deepSpace, {"warning", "pressure"}),
-        module(content::module::predictiveGuidance, "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 5.2, .pressure = 1.0, .volatility = 0.25}, content::unlock::ai, {"forecast", "pressure"}, {.rare = 2}),
+        module(content::module::hazardRadar, "Hazard Radar", SlotType::Sensors, Rarity::Uncommon, {.sensors = 1.8, .escape = 0.2, .pressure = 0.4}, content::unlock::deepSpace, {"warning", "pressure"}, {}, RefitTrack::Control, 1, content::module::analogTelemetry),
+        module(content::module::predictiveGuidance, "Predictive Guidance", SlotType::Sensors, Rarity::Prototype, {.thrust = 0.6, .sensors = 1.4, .escape = -0.2, .pressure = 0.3, .volatility = 0.25}, content::unlock::ai, {"forecast", "pressure"}, {.rare = 2}, RefitTrack::Control, 2, content::module::hazardRadar),
 
         module(content::module::springCapsule, "Spring Capsule", SlotType::Escape, Rarity::Common, {.thrust = -0.2, .escape = 2.8}, content::unlock::starter, {"eject"}),
-        module(content::module::abortTower, "Abort Tower", SlotType::Escape, Rarity::Uncommon, {.hull = 0.5, .escape = 4.6, .payout = -0.2}, content::unlock::recovery, {"crew-first"}),
-        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.escape = 6.2, .volatility = -0.3, .repair = 0.2}, content::unlock::exotic, {"legendary"}, {.rare = 1, .exotic = 1}),
+        module(content::module::abortTower, "Abort Tower", SlotType::Escape, Rarity::Uncommon, {.thrust = 0.2, .hull = 0.5, .escape = 1.8, .payout = -0.2}, content::unlock::recovery, {"crew-first"}, {}, RefitTrack::Recovery, 1, content::module::springCapsule),
+        module(content::module::phoenixPod, "Phoenix Pod", SlotType::Escape, Rarity::Rare, {.hull = -0.5, .escape = 1.6, .volatility = -0.3, .payout = 0.2}, content::unlock::exotic, {"legendary"}, {.rare = 1, .exotic = 1}, RefitTrack::Recovery, 2, content::module::abortTower),
 
-        module(content::module::surfaceMapper, "Surface Mapper", SlotType::Sensors, Rarity::Common, {.sensors = 0.4, .miningWidth = 1.0}, content::unlock::surfaceProbes, {"surface", "mining", "survey"}),
-        module(content::module::regolithAuger, "Regolith Auger", SlotType::Engine, Rarity::Common, {.volatility = 0.10, .miningPower = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "drill"}),
-        module(content::module::oreSorter, "Ore Sorter", SlotType::Fuel, Rarity::Uncommon, {.fuel = -0.2, .miningYield = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "yield"}, {.common = 1}),
-        module(content::module::coolantSleeve, "Coolant Sleeve", SlotType::Cooling, Rarity::Uncommon, {.cooling = 0.4, .miningCooling = 1.1}, content::unlock::surfaceDrills, {"surface", "mining", "cooling"}, {.common = 1}),
-        module(content::module::diamondBearings, "Diamond Bearings", SlotType::Hull, Rarity::Rare, {.hull = 0.2, .miningDurability = 1.2}, content::unlock::surfaceDrills, {"surface", "mining", "durable"}, {.common = 1, .rare = 1}),
-        module(content::module::deepBoreFrame, "Deep-Bore Frame", SlotType::Fuel, Rarity::Rare, {.fuel = -0.4, .miningPower = 0.4, .miningDepth = 1.0}, content::unlock::cargoRigs, {"surface", "mining", "deep"}, {.common = 2, .rare = 1}),
-        module(content::module::cargoSpine, "Cargo Spine", SlotType::Hull, Rarity::Common, {.hull = 0.4, .miningStorage = 3.0}, content::unlock::cargoRigs, {"surface", "mining", "cargo"}, {.common = 2}),
-        module(content::module::haulerThrusters, "Hauler Thrusters", SlotType::Engine, Rarity::Uncommon, {.thrust = 0.6, .fuel = -0.2, .volatility = 0.20, .miningEngineEfficiency = 0.24}, content::unlock::cargoRigs, {"surface", "mining", "hauler"}, {.common = 2, .rare = 1}),
-        module(content::module::massDriverWinch, "Mass Driver Winch", SlotType::Escape, Rarity::Rare, {.escape = 0.6, .volatility = 0.25, .miningStorage = 2.0, .miningEngineEfficiency = 0.34}, content::unlock::cargoRigs, {"surface", "mining", "artifact"}, {.rare = 2, .exotic = 1})
+        module(content::module::surfaceMapper, "Surface Mapper", SlotType::Sensors, Rarity::Common, {.sensors = 0.4, .miningWidth = 1.0}, content::unlock::surfaceProbes, {"surface", "mining", "survey"}, {}, RefitTrack::Control),
+        module(content::module::regolithAuger, "Regolith Auger", SlotType::Engine, Rarity::Common, {.volatility = 0.10, .miningPower = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "drill"}, {}, RefitTrack::Reach),
+        module(content::module::oreSorter, "Ore Sorter", SlotType::Fuel, Rarity::Uncommon, {.fuel = -0.2, .miningYield = 1.0}, content::unlock::surfaceDrills, {"surface", "mining", "yield"}, {.common = 1}, RefitTrack::Recovery),
+        module(content::module::coolantSleeve, "Coolant Sleeve", SlotType::Cooling, Rarity::Uncommon, {.cooling = 0.4, .miningCooling = 1.1}, content::unlock::surfaceDrills, {"surface", "mining", "cooling"}, {.common = 1}, RefitTrack::Control),
+        module(content::module::diamondBearings, "Diamond Bearings", SlotType::Hull, Rarity::Rare, {.hull = 0.2, .miningDurability = 1.2}, content::unlock::surfaceDrills, {"surface", "mining", "durable"}, {.common = 1, .rare = 1}, RefitTrack::Control),
+        module(content::module::deepBoreFrame, "Deep-Bore Frame", SlotType::Fuel, Rarity::Rare, {.fuel = -0.4, .miningPower = 0.4, .miningDepth = 1.0}, content::unlock::cargoRigs, {"surface", "mining", "deep"}, {.common = 2, .rare = 1}, RefitTrack::Reach),
+        module(content::module::cargoSpine, "Cargo Spine", SlotType::Hull, Rarity::Common, {.hull = 0.4, .miningStorage = 3.0}, content::unlock::cargoRigs, {"surface", "mining", "cargo"}, {.common = 2}, RefitTrack::Recovery),
+        module(content::module::haulerThrusters, "Hauler Thrusters", SlotType::Engine, Rarity::Uncommon, {.thrust = 0.6, .fuel = -0.2, .volatility = 0.20, .miningEngineEfficiency = 0.24}, content::unlock::cargoRigs, {"surface", "mining", "hauler"}, {.common = 2, .rare = 1}, RefitTrack::Reach),
+        module(content::module::massDriverWinch, "Mass Driver Winch", SlotType::Escape, Rarity::Rare, {.escape = 0.6, .volatility = 0.25, .miningStorage = 2.0, .miningEngineEfficiency = 0.34}, content::unlock::cargoRigs, {"surface", "mining", "artifact"}, {.rare = 2, .exotic = 1}, RefitTrack::Recovery)
     };
 
     catalog.crewUpgrades = {
-        crewUpgrade(content::crewUpgrade::analogSimBay, "Analog Simulator Bay", "Lower-stress rehearsal gear for routine burns.", Rarity::Common, {.trainingStressRelief = 2}, content::unlock::starter, {"simulator", "training"}),
-        crewUpgrade(content::crewUpgrade::highGSimulator, "High-G Simulator", "A better simulator that teaches more per session.", Rarity::Uncommon, {.trainingGain = 1, .trainingStressRelief = 1}, content::unlock::recovery, {"simulator", "training"}),
-        crewUpgrade(content::crewUpgrade::medicalRecoveryWard, "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, content::unlock::recovery, {"medical", "stress"}),
-        crewUpgrade(content::crewUpgrade::missionPsychOffice, "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, content::unlock::thermal, {"psych", "stress"}),
-        crewUpgrade(content::crewUpgrade::traitCoachingLab, "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, content::unlock::ai, {"coaching", "traits"})
+        crewUpgrade(content::crewUpgrade::analogSimBay, "Analog Simulator Bay", "Lower-stress rehearsal gear for routine burns.", Rarity::Common, {.trainingStressRelief = 8}, content::unlock::starter, {"simulator", "training"}, RefitTrack::Control),
+        crewUpgrade(content::crewUpgrade::highGSimulator, "High-G Simulator", "A better simulator that teaches more per session.", Rarity::Uncommon, {.trainingGain = 1, .trainingStressRelief = 3}, content::unlock::recovery, {"simulator", "training"}, RefitTrack::Control, 0, content::crewUpgrade::analogSimBay),
+        crewUpgrade(content::crewUpgrade::medicalRecoveryWard, "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, content::unlock::recovery, {"medical", "stress"}, RefitTrack::Recovery),
+        crewUpgrade(content::crewUpgrade::missionPsychOffice, "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, content::unlock::thermal, {"psych", "stress"}, RefitTrack::Control),
+        crewUpgrade(content::crewUpgrade::traitCoachingLab, "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, content::unlock::ai, {"coaching", "traits"}, RefitTrack::Recovery)
     };
 
     catalog.surfaceUpgrades = {
@@ -404,6 +443,21 @@ std::string_view toString(SlotType slot)
         return text::enums::slot::escape;
     }
     return text::enums::unknown;
+}
+
+std::string_view toString(RefitTrack track)
+{
+    switch (track) {
+    case RefitTrack::Reach:
+        return "REACH";
+    case RefitTrack::Control:
+        return "CONTROL";
+    case RefitTrack::Recovery:
+        return "RECOVERY";
+    case RefitTrack::None:
+        break;
+    }
+    return "SYSTEM";
 }
 
 std::string_view toString(Rarity rarity)
@@ -609,7 +663,6 @@ ModuleStats& operator+=(ModuleStats& lhs, const ModuleStats& rhs)
     lhs.pressure += rhs.pressure;
     lhs.volatility += rhs.volatility;
     lhs.payout += rhs.payout;
-    lhs.repair += rhs.repair;
     lhs.miningPower += rhs.miningPower;
     lhs.miningYield += rhs.miningYield;
     lhs.miningCooling += rhs.miningCooling;

@@ -4,9 +4,9 @@
   "maxPageSize": 4096,
   "packingPageSize": 3776,
   "padding": 2,
-  "pageCount": 2,
-  "textureCount": 33,
-  "frameCount": 53,
+  "pageCount": 3,
+  "textureCount": 34,
+  "frameCount": 54,
   "pages": [
     {
       "index": 0,
@@ -20,9 +20,17 @@
       "index": 1,
       "key": "scene_atlas_1",
       "path": "assets/scene-atlas/scene-atlas-1.png",
-      "width": 3744,
-      "height": 3668,
-      "pixelSha256": "4538c32e3b47b5a0edfb6208f4f2ef46b9028fecf1bb4a3eda678fae52ada4c6"
+      "width": 3740,
+      "height": 3664,
+      "pixelSha256": "98c7b790b537843fa3e3dd9dd62e00203bce4565f5cd864fef839727337c9279"
+    },
+    {
+      "index": 2,
+      "key": "scene_atlas_2",
+      "path": "assets/scene-atlas/scene-atlas-2.png",
+      "width": 1548,
+      "height": 516,
+      "pixelSha256": "c343de0aab988f15fc22835151af1f3e5c05616ff0d10e7e2a6a99076fda6cac"
     }
   ],
   "textures": [
@@ -48,14 +56,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2,
-            "y": 2638,
+            "x": 1030,
+            "y": 2420,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 0,
-            "y": 2636,
+            "x": 1028,
+            "y": 2418,
             "width": 516,
             "height": 516
           }
@@ -84,14 +92,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2066,
-            "y": 2574,
+            "x": 2578,
+            "y": 3090,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2064,
-            "y": 2572,
+            "x": 2576,
+            "y": 3088,
             "width": 516,
             "height": 516
           }
@@ -120,14 +128,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 518,
-            "y": 2638,
+            "x": 1546,
+            "y": 2420,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 516,
-            "y": 2636,
+            "x": 1544,
+            "y": 2418,
             "width": 516,
             "height": 516
           }
@@ -157,13 +165,13 @@
           },
           "atlasRect": {
             "x": 2518,
-            "y": 2,
+            "y": 1030,
             "width": 1024,
             "height": 1024
           },
           "paddedRect": {
             "x": 2516,
-            "y": 0,
+            "y": 1028,
             "width": 1028,
             "height": 1028
           }
@@ -192,13 +200,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 2,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 0,
             "width": 132,
             "height": 132
@@ -214,13 +222,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 134,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 132,
             "width": 132,
             "height": 132
@@ -236,13 +244,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 266,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 264,
             "width": 132,
             "height": 132
@@ -258,13 +266,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 398,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 396,
             "width": 132,
             "height": 132
@@ -280,13 +288,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 530,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 528,
             "width": 132,
             "height": 132
@@ -302,13 +310,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 662,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 660,
             "width": 132,
             "height": 132
@@ -324,13 +332,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 794,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 792,
             "width": 132,
             "height": 132
@@ -346,13 +354,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 926,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 924,
             "width": 132,
             "height": 132
@@ -382,13 +390,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1058,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1056,
             "width": 132,
             "height": 132
@@ -404,13 +412,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1190,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1188,
             "width": 132,
             "height": 132
@@ -426,13 +434,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1322,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1320,
             "width": 132,
             "height": 132
@@ -448,13 +456,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1454,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1452,
             "width": 132,
             "height": 132
@@ -470,13 +478,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1586,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1584,
             "width": 132,
             "height": 132
@@ -492,13 +500,13 @@
             "height": 128
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1718,
             "width": 128,
             "height": 128
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1716,
             "width": 132,
             "height": 132
@@ -528,14 +536,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 3098,
-            "y": 2058,
+            "x": 3094,
+            "y": 2574,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 3096,
-            "y": 2056,
+            "x": 3092,
+            "y": 2572,
             "width": 516,
             "height": 516
           }
@@ -564,13 +572,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1850,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1848,
             "width": 116,
             "height": 116
@@ -586,13 +594,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 1966,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 1964,
             "width": 116,
             "height": 116
@@ -608,13 +616,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 2082,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 2080,
             "width": 116,
             "height": 116
@@ -630,13 +638,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 2198,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 2196,
             "width": 116,
             "height": 116
@@ -652,13 +660,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 2314,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 2312,
             "width": 116,
             "height": 116
@@ -674,13 +682,13 @@
             "height": 112
           },
           "atlasRect": {
-            "x": 3614,
+            "x": 3610,
             "y": 2430,
             "width": 112,
             "height": 112
           },
           "paddedRect": {
-            "x": 3612,
+            "x": 3608,
             "y": 2428,
             "width": 116,
             "height": 116
@@ -711,13 +719,13 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 2058,
+            "y": 3086,
             "width": 1024,
             "height": 576
           },
           "paddedRect": {
             "x": 0,
-            "y": 2056,
+            "y": 3084,
             "width": 1028,
             "height": 580
           }
@@ -812,14 +820,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 518,
-            "y": 3154,
+            "x": 1546,
+            "y": 2936,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 516,
-            "y": 3152,
+            "x": 1544,
+            "y": 2934,
             "width": 516,
             "height": 516
           }
@@ -840,7 +848,7 @@
       "frames": [
         {
           "index": 0,
-          "page": 1,
+          "page": 2,
           "sourceRect": {
             "x": 0,
             "y": 0,
@@ -848,14 +856,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2582,
-            "y": 3090,
+            "x": 1034,
+            "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2580,
-            "y": 3088,
+            "x": 1032,
+            "y": 0,
             "width": 516,
             "height": 516
           }
@@ -884,14 +892,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2,
-            "y": 3154,
+            "x": 1030,
+            "y": 2936,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 0,
-            "y": 3152,
+            "x": 1028,
+            "y": 2934,
             "width": 516,
             "height": 516
           }
@@ -912,7 +920,7 @@
       "frames": [
         {
           "index": 0,
-          "page": 1,
+          "page": 2,
           "sourceRect": {
             "x": 0,
             "y": 0,
@@ -920,14 +928,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2582,
-            "y": 2574,
+            "x": 2,
+            "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2580,
-            "y": 2572,
+            "x": 0,
+            "y": 0,
             "width": 516,
             "height": 516
           }
@@ -948,7 +956,7 @@
       "frames": [
         {
           "index": 0,
-          "page": 1,
+          "page": 2,
           "sourceRect": {
             "x": 0,
             "y": 0,
@@ -956,14 +964,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 3098,
-            "y": 2574,
+            "x": 518,
+            "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 3096,
-            "y": 2572,
+            "x": 516,
+            "y": 0,
             "width": 516,
             "height": 516
           }
@@ -992,13 +1000,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2066,
+            "x": 3094,
             "y": 3090,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2064,
+            "x": 3092,
             "y": 3088,
             "width": 516,
             "height": 516
@@ -1424,14 +1432,14 @@
             "height": 1024
           },
           "atlasRect": {
-            "x": 2518,
-            "y": 1030,
+            "x": 2,
+            "y": 2058,
             "width": 1024,
             "height": 1024
           },
           "paddedRect": {
-            "x": 2516,
-            "y": 1028,
+            "x": 0,
+            "y": 2056,
             "width": 1028,
             "height": 1028
           }
@@ -1460,14 +1468,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 1550,
-            "y": 2936,
+            "x": 2062,
+            "y": 2574,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 1548,
-            "y": 2934,
+            "x": 2060,
+            "y": 2572,
             "width": 516,
             "height": 516
           }
@@ -1496,14 +1504,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2066,
-            "y": 2058,
+            "x": 2062,
+            "y": 3090,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2064,
-            "y": 2056,
+            "x": 2060,
+            "y": 3088,
             "width": 516,
             "height": 516
           }
@@ -1532,14 +1540,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2582,
-            "y": 2058,
+            "x": 2578,
+            "y": 2574,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2580,
-            "y": 2056,
+            "x": 2576,
+            "y": 2572,
             "width": 516,
             "height": 516
           }
@@ -1568,14 +1576,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 1550,
-            "y": 2420,
+            "x": 3094,
+            "y": 2058,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 1548,
-            "y": 2418,
+            "x": 3092,
+            "y": 2056,
             "width": 516,
             "height": 516
           }
@@ -1604,14 +1612,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 1034,
-            "y": 2420,
+            "x": 2062,
+            "y": 2058,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 1032,
-            "y": 2418,
+            "x": 2060,
+            "y": 2056,
             "width": 516,
             "height": 516
           }
@@ -1640,16 +1648,52 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 1034,
-            "y": 2936,
+            "x": 2578,
+            "y": 2058,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 1032,
-            "y": 2934,
+            "x": 2576,
+            "y": 2056,
             "width": 516,
             "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "HeroicCapybara",
+      "key": "heroic_capybara",
+      "source": "assets/art/heroic-capybara.png",
+      "sourceSha256": "2a9b83ad7059562fe1d6ce1dc7c81135277719272a65f28424d85d2dd8c2a8fe",
+      "width": 1024,
+      "height": 1024,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 1024,
+      "frameHeight": 1024,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 1024,
+            "height": 1024
+          },
+          "atlasRect": {
+            "x": 2518,
+            "y": 2,
+            "width": 1024,
+            "height": 1024
+          },
+          "paddedRect": {
+            "x": 2516,
+            "y": 0,
+            "width": 1028,
+            "height": 1028
           }
         }
       ]

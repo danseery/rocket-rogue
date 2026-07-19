@@ -7,11 +7,12 @@
 namespace rocket {
 
 struct SaveData {
-    int version = 2;
+    int version = 3;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 100.0;
     int destinationIndex = 0;
     int frontierReadiness = 0;
+    bool refitEntitled = false;
     int shipDamage = 0;
     std::string frameId = "pathfinder";
     int offerRerollsThisExpedition = 0;
@@ -28,12 +29,15 @@ struct SaveData {
     ArkState ark;
     NavigationState navigation;
     StoryBriefingState storyBriefing;
+    std::vector<std::string> acknowledgedActivityBriefingIds;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
     std::vector<std::string> surfaceUpgradeIds;
     std::vector<std::string> crewUpgradeIds;
+    std::vector<std::string> offerModuleIds;
+    std::vector<std::string> offerCrewUpgradeIds;
     std::vector<std::string> researchProjectIds;
     ArrivalOpsState arrivalOps;
     SurfaceExpeditionState surfaceExpedition;

@@ -55,7 +55,8 @@ enum ArtAsset {
     MiniDroneSurveyAsset = 29,
     MiniDroneHazardAsset = 30,
     MiniDroneAttackAsset = 31,
-    MiniDroneDefenseAsset = 32
+    MiniDroneDefenseAsset = 32,
+    HeroicCapybaraAsset = 33
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -3580,7 +3581,12 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     };
 
-    if (snapshot.straylightStoryReveal) {
+    if (snapshot.campaignStoryIntroduction) {
+        if (textureReady(HeroicCapybaraAsset)) {
+            drawRadialGlow(0.64F, 0.10F, 0.64F, {0.98F, 0.70F, 0.22F, 0.12F}, 96);
+            drawSprite(0.64F, 0.10F, 1.28F, 1.28F, {1.0F, 1.0F, 1.0F, 1.0F}, HeroicCapybaraAsset);
+        }
+    } else if (snapshot.straylightStoryReveal) {
         const Vec2 neptune {-0.63F, -0.62F};
         drawRadialGlow(0.28F, -0.01F, 0.62F, {0.20F, 0.68F, 0.92F, 0.15F}, 96);
         drawArkSprite({0.30F, -0.01F}, 1.02F, 1.0F);

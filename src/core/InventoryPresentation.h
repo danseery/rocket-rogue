@@ -147,7 +147,7 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
 
     InventorySectionPresentation modules {
         "Ship tech",
-        "Permanent shipyard improvements and currently stored modules.",
+        "Permanent shipyard improvements. Damaged systems return with the next replacement ship.",
         {}
     };
     if (state.meta.ownedModuleIds.empty()) {
@@ -160,10 +160,12 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
             }
             addInventoryItem(
                 modules,
-                std::string(toString(module->slot)).substr(0, 1),
+                module->refitTrack == RefitTrack::None ? std::string(toString(module->slot)).substr(0, 1) : std::string(toString(module->refitTrack)).substr(0, 1),
                 module->name,
-                std::string(toString(module->slot)) + " - " + std::string(toString(module->rarity)),
-                std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end() ? "Equipped" : "Stored",
+                (module->refitTrack == RefitTrack::None ? std::string(toString(module->slot)) : std::string(toString(module->refitTrack))) + " - " + std::string(toString(module->rarity)),
+                module->refitTrack == RefitTrack::None && module->unlockKey == content::unlock::starter
+                    ? "Built in"
+                    : (std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end() ? "Installed" : "Offline this expedition"),
                 "module " + rarityCssClass(module->rarity));
         }
     }

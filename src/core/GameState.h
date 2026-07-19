@@ -48,6 +48,7 @@ PostLaunchCrewStress postLaunchCrewStress(const LaunchOutcome& outcome, const Cr
 int postLaunchCrewStressGain(const LaunchOutcome& outcome, const CrewUpgradeStats& upgrades);
 void startNewExpedition(GameState& state, const ContentCatalog& catalog);
 void syncLaunchConfig(GameState& state, const ContentCatalog& catalog);
+bool curatedProvingRefitsActive(const GameState& state);
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 double offerRerollCost(const GameState& state);
 bool rerollOffers(GameState& state, const ContentCatalog& catalog, Random& rng);

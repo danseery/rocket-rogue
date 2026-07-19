@@ -274,10 +274,12 @@ void RocketGameApp::finishArrivalFanfare()
 void RocketGameApp::beginSurfaceExpeditionOrRefit()
 {
     startSurfaceExpedition(state_, catalog_, &rng_);
-    state_.screen = state_.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Upgrade;
+    state_.screen = state_.run.surfaceExpedition.active
+        ? Screen::SurfaceExpedition
+        : (state_.run.refitEntitled ? Screen::Upgrade : (navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar));
     state_.statusLine = state_.run.surfaceExpedition.active
         ? std::string(text::status::surfaceExpeditionStarted)
-        : std::string(text::status::refitWindowOpened);
+        : (state_.run.refitEntitled ? std::string(text::status::refitWindowOpened) : std::string(text::status::refitWindowClosed));
     if (state_.screen == Screen::Upgrade) {
         generateModuleOffers(state_, catalog_, rng_);
     }
@@ -1527,9 +1529,14 @@ void RocketGameApp::next()
             panelDirty_ = true;
             return;
         }
-        generateModuleOffers(state_, catalog_, rng_);
-        state_.screen = Screen::Upgrade;
-        state_.statusLine = std::string(text::status::refitWindowOpened);
+        if (state_.run.refitEntitled) {
+            generateModuleOffers(state_, catalog_, rng_);
+            state_.screen = Screen::Upgrade;
+            state_.statusLine = std::string(text::status::refitWindowOpened);
+        } else {
+            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+            state_.statusLine = std::string(text::status::refitWindowClosed);
+        }
         syncLaunchConfig(state_, catalog_);
         save();
     } else if (state_.screen == Screen::SurfaceUpgrade) {
@@ -1541,6 +1548,7 @@ void RocketGameApp::next()
     } else if (state_.screen == Screen::Upgrade) {
         state_.run.offerModuleIds = {};
         state_.run.offerCrewUpgradeIds = {};
+        state_.run.refitEntitled = false;
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         state_.statusLine = std::string(text::status::refitWindowClosed);
         syncLaunchConfig(state_, catalog_);
@@ -1555,6 +1563,7 @@ void RocketGameApp::runArrivalFlyby()
         return;
     }
 
+    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby);
     startArrivalFlybyRun(state_, catalog_);
     state_.statusLine = "Manual flyby started. Stay in the approach corridor.";
     syncLaunchConfig(state_, catalog_);
@@ -1616,6 +1625,7 @@ void RocketGameApp::enterArrivalOrbit()
         return;
     }
 
+    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::orbit);
     startArrivalOrbitRun(state_, catalog_);
     state_.statusLine = "Orbital insertion started. Use prograde and radial corrections to stay in the research band.";
     syncLaunchConfig(state_, catalog_);
@@ -1677,6 +1687,7 @@ void RocketGameApp::attemptArrivalLanding()
         return;
     }
 
+    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::landing);
     state_.statusLine = std::string(text::status::landingCommitted);
     bankArrivalLandingFlightData(state_, catalog_);
     beginSurfaceExpeditionOrRefit();
@@ -1765,8 +1776,12 @@ void RocketGameApp::extractSurface()
     }
 
     state_.statusLine = surfaceActionSummary(outcome);
-    generateModuleOffers(state_, catalog_, rng_);
-    state_.screen = Screen::Upgrade;
+    if (state_.run.refitEntitled) {
+        generateModuleOffers(state_, catalog_, rng_);
+        state_.screen = Screen::Upgrade;
+    } else {
+        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+    }
     save();
     panelDirty_ = true;
 }
@@ -1792,6 +1807,7 @@ void RocketGameApp::openDroneOps()
         return;
     }
 
+    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
     ensureDroneBayState(state_, catalog_);
     state_.screen = Screen::DroneOps;
     state_.statusLine = "Choose helper drones for the next mining run.";
@@ -3247,6 +3263,8 @@ RenderSnapshot RocketGameApp::snapshot() const
     result.arkCondition = state_.meta.ark.condition;
     result.straylightStoryReveal = state_.screen == Screen::StoryBriefing
         && state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery;
+    result.campaignStoryIntroduction = state_.screen == Screen::StoryBriefing
+        && state_.storyBriefing.pending == StoryBriefingId::CampaignIntroduction;
     if (result.straylightStoryReveal) {
         result.arkCondition = ArkCondition::DerelictOperable;
     }

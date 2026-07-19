@@ -18,6 +18,8 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
+Each optional activity introduces its progression value at the moment the player first selects it. Flyby and Orbit explicitly frame blueprint progress as the route to permanent ship upgrades. Landing frames surface upgrades as improvements to the mining drone. These briefs are acknowledged only when the player starts the activity, survive save/load, and never name mini-drones before Drone Bay unlock; the first Drone Ops selection introduces that system after it becomes available.
+
 ## Research Phase
 
 Research is a strategic menu phase, not an action scene. It should be quick, readable, and tied to long-term agency capability.
@@ -120,7 +122,7 @@ Current POC implementation: post-solar-system expeditions can trigger hostile co
 Bring forward:
 
 - Tool-forward exploration: jetpack, grappling, drones, mining tools, and special equipment all fit the fantasy of a small expedition crew improvising under pressure.
-- Equipment inventory: limited slots and attachment points map well to Rocket Rogue's module/refit philosophy.
+- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; drone loadouts may still use explicit equipment slots.
 - Procedural chambers: generated corridors, rooms, vaults, and deposits are a strong fit for repeatable surface expeditions.
 - Passive defense upgrades: drones, shields, and area control can make combat strategic without requiring twitch-shooter controls.
 - Artifact goals: the prototype's artifact collection idea fits the research/story loop cleanly.

@@ -224,6 +224,10 @@
       pointer-events: none;
     }
 
+    .story-introduction .story-vignette {
+      background: linear-gradient(90deg, rgba(2, 7, 13, 0.82) 0%, rgba(2, 7, 13, 0.50) 52%, rgba(2, 7, 13, 0.06) 100%);
+    }
+
     .story-content {
       width: min(900px, calc(100vw - 80px));
       margin-left: clamp(34px, 7vw, 120px);
@@ -232,11 +236,28 @@
       background: linear-gradient(90deg, rgba(3, 12, 20, 0.94), rgba(3, 12, 20, 0.64) 78%, transparent);
     }
 
+    .story-introduction .story-content {
+      width: min(720px, calc(100vw - 590px));
+      min-width: 520px;
+      padding: 24px 28px;
+      background: rgba(3, 10, 17, 0.94);
+    }
+
+    body.controller-input-active:not(.rmlui-enabled) .story-introduction .story-content {
+      width: min(720px, calc(100vw - 760px));
+      min-width: 460px;
+    }
+
     .story-straylight .story-content { border-left-color: #ffd166; }
     .story-kicker { color: #84dff2; font-size: 11px; font-weight: 800; letter-spacing: 0.16em; }
     .story-content h1 { margin: 8px 0; color: #f4fbff; font-size: clamp(48px, 7vw, 92px); line-height: 0.96; letter-spacing: 0.04em; }
     .story-straylight .story-content h1 { color: #ffd166; text-shadow: 0 0 28px rgba(255, 209, 102, 0.28); }
     .story-lead { max-width: 760px; color: #d7e9ef; font-size: clamp(16px, 1.7vw, 22px); line-height: 1.45; }
+    .story-introduction .story-content h1 { margin: 9px 0 18px; color: #ffd166; font-size: clamp(38px, 4vw, 58px); line-height: 1; letter-spacing: 0.04em; }
+    .story-exposition { width: 100%; }
+    .story-exposition p { margin: 0 0 13px; color: #d7e9ef; font-size: clamp(15px, 1.2vw, 17px); line-height: 1.45; }
+    .story-exposition .story-directive { margin-top: 17px; margin-bottom: 0; color: #fff0b7; font-weight: 800; }
+    .story-introduction .story-action { min-width: 220px; margin-top: 18px; }
     .story-beats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 24px; gap: 10px; }
     .story-beats article { min-height: 142px; padding: 16px; border-top: 1px solid rgba(99, 229, 255, 0.42); background: rgba(8, 27, 39, 0.84); }
     .story-beats article span { color: #63e5ff; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; }
@@ -3878,6 +3899,12 @@
       margin-top: auto;
     }
 
+    .phase-board-arrival .arrival-card .arrival-card-status {
+      flex: 0 0 80px;
+      width: 80px;
+      white-space: nowrap;
+    }
+
     .phase-board-arrival .arrival-card .card-topline {
       display: flex;
       justify-content: space-between;
@@ -3912,7 +3939,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      min-width: 140px;
+      width: 102px;
+      min-width: 102px;
       white-space: normal;
       min-height: 36px;
       height: auto;
@@ -4677,6 +4705,68 @@
 
     .modal-actions {
       margin-top: 14px;
+    }
+
+    .modal-root[data-modal-id="flyby_introduction"] .modal-panel,
+    .modal-root[data-modal-id="orbit_introduction"] .modal-panel,
+    .modal-root[data-modal-id="landing_introduction"] .modal-panel,
+    .modal-root[data-modal-id="mini_drone_introduction"] .modal-panel {
+      width: min(560px, calc(100vw - 36px));
+      max-height: min(320px, calc(100dvh - 36px));
+      padding: 20px;
+    }
+
+    .activity-introduction {
+      display: flex;
+      flex-direction: column;
+      min-height: 218px;
+    }
+
+    .activity-introduction-kicker {
+      margin-bottom: 10px;
+      color: #69d9f0;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .activity-introduction-setup {
+      margin: 0 0 14px;
+      color: #c5d7de;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .activity-introduction-payoff {
+      display: flex;
+      flex-direction: column;
+      padding: 11px 12px;
+      border-left: 3px solid #f0c75e;
+      background: #101c27;
+    }
+
+    .activity-introduction-payoff span {
+      margin-bottom: 5px;
+      color: #f0c75e;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .activity-introduction-payoff strong {
+      color: #e5edf1;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .activity-introduction-actions {
+      justify-content: flex-end;
+      margin-top: auto;
+    }
+
+    .activity-introduction-actions button {
+      width: 176px;
+      min-height: 42px;
     }
 
     .launch-outcome-summary {
@@ -6030,6 +6120,19 @@
         right: 14px;
         bottom: 14px;
         width: calc(100vw - 28px);
+      }
+
+      .story-introduction {
+        align-items: flex-start;
+        overflow-y: auto;
+      }
+
+      .story-introduction .story-content,
+      body.controller-input-active:not(.rmlui-enabled) .story-introduction .story-content {
+        width: calc(100vw - 28px);
+        min-width: 0;
+        margin: 14px 14px 390px;
+        padding: 20px 18px;
       }
 
       .opening-control-cards {

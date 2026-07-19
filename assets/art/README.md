@@ -4,7 +4,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 
 ## Registered runtime textures
 
-`scene-textures.json` declares all 33 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
+`scene-textures.json` declares all 34 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
@@ -18,6 +18,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 | `mining-drone.png` | 512x512 | Player mining rig. |
 | `drill-bit-sheet.png` | 672x112 | Six horizontal 112x112 drill frames. |
 | `mini-drone-mining.png`, `mini-drone-resource.png`, `mini-drone-survey.png`, `mini-drone-hazard.png`, `mini-drone-attack.png`, `mini-drone-defense.png` | 512x512 each | Mining, logistics, survey, remediation, and passive-combat support drones. |
+| `heroic-capybara.png` | 1024x1024 | Campaign-introduction hero art. |
 | `outer-system-planet-01.png` through `outer-system-planet-09.png` | 1254x1254 each | Post-solar destination variants selected by destination tier. |
 
 ## Not registered by the renderer

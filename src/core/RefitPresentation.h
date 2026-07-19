@@ -62,6 +62,7 @@ struct RefitWindowPresentation {
     std::string recoveryDetail;
     std::vector<RefitOfferPresentation> offers;
     double rerollCost = 0.0;
+    bool showReroll = true;
     PanelButtonPresentation rerollAction;
     PanelButtonPresentation skipAction;
 };
@@ -85,7 +86,22 @@ inline std::string slotClass(SlotType slot)
     return "module";
 }
 
-inline std::array<ModuleStatDisplay, 18> moduleStatDisplays(const ModuleStats& stats)
+inline std::string refitTrackClass(RefitTrack track, SlotType fallback)
+{
+    switch (track) {
+    case RefitTrack::Reach:
+        return "reach";
+    case RefitTrack::Control:
+        return "control";
+    case RefitTrack::Recovery:
+        return "recovery";
+    case RefitTrack::None:
+        return slotClass(fallback);
+    }
+    return "module";
+}
+
+inline std::array<ModuleStatDisplay, 17> moduleStatDisplays(const ModuleStats& stats)
 {
     return {{
         {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail},
@@ -97,7 +113,6 @@ inline std::array<ModuleStatDisplay, 18> moduleStatDisplays(const ModuleStats& s
         {stats.pressure, text::moduleStats::pressureControl, text::moduleStats::pressureChip, text::moduleStats::pressureControl},
         {stats.volatility, text::moduleStats::volatility, text::moduleStats::volatilityChip, text::moduleStats::volatility, false},
         {stats.payout, text::moduleStats::dataPayout, text::moduleStats::payoutChip, text::moduleStats::dataPayout, false},
-        {stats.repair, text::moduleStats::repairCost, text::moduleStats::repairChip, text::moduleStats::repairCost, false},
         {stats.miningPower, text::moduleStats::miningPower, text::moduleStats::miningPowerChip, text::moduleStats::miningPower},
         {stats.miningYield, text::moduleStats::miningYield, text::moduleStats::miningYieldChip, text::moduleStats::miningYield},
         {stats.miningCooling, text::moduleStats::miningCooling, text::moduleStats::miningCoolingChip, text::moduleStats::miningCooling},
@@ -179,6 +194,14 @@ inline void addStatChip(std::vector<RefitStatChip>& chips, std::string_view labe
     });
 }
 
+inline void addBeneficialReductionChip(std::vector<RefitStatChip>& chips, std::string_view label, double reduction)
+{
+    if (reduction < tuning::presentation::statChipMinimumMagnitude) {
+        return;
+    }
+    chips.push_back({std::string(label), display::signedFixed(-reduction, 1), true});
+}
+
 inline std::vector<RefitStatChip> moduleStatChips(const ShipModule& module)
 {
     std::vector<RefitStatChip> chips;
@@ -193,7 +216,7 @@ inline std::vector<RefitStatChip> crewUpgradeStatChips(const CrewUpgrade& upgrad
     const CrewUpgradeStats& stats = upgrade.stats;
     std::vector<RefitStatChip> chips;
     addStatChip(chips, text::moduleStats::trainingChip, static_cast<double>(stats.trainingGain));
-    addStatChip(chips, text::moduleStats::simStressChip, static_cast<double>(stats.trainingStressRelief));
+    addBeneficialReductionChip(chips, text::moduleStats::simStressChip, static_cast<double>(stats.trainingStressRelief));
     addStatChip(chips, text::moduleStats::restChip, static_cast<double>(stats.restStressBonus));
     addStatChip(chips, text::moduleStats::launchStressChip, static_cast<double>(stats.launchStressRelief));
     addStatChip(chips, text::moduleStats::traitChip, stats.traitModifier * 100.0);
@@ -223,9 +246,21 @@ inline std::string crewUpgradePrimaryImpact(const CrewUpgrade& upgrade)
 
 inline RefitPresentation moduleRefitPresentation(const ShipModule& module)
 {
+    std::string category = module.refitTrack == RefitTrack::None
+        ? std::string(toString(module.slot))
+        : std::string(toString(module.refitTrack));
+    if (module.refitRank > 0) {
+        static constexpr std::array<std::string_view, 3> ranks {"I", "II", "III"};
+        category += " ";
+        if (module.refitRank <= static_cast<int>(ranks.size())) {
+            category += ranks[static_cast<std::size_t>(module.refitRank - 1)];
+        } else {
+            category += std::to_string(module.refitRank);
+        }
+    }
     return {
-        slotClass(module.slot),
-        std::string(toString(module.slot)),
+        refitTrackClass(module.refitTrack, module.slot),
+        category,
         std::string(toString(module.rarity)),
         std::string(toString(module.slot)).substr(0, 1),
         module.name,
@@ -239,7 +274,7 @@ inline RefitPresentation crewUpgradeRefitPresentation(const CrewUpgrade& upgrade
 {
     return {
         slotClass(SlotType::Sensors),
-        std::string(text::panel::details::crew),
+        std::string(toString(upgrade.refitTrack)),
         std::string(toString(upgrade.rarity)),
         "C",
         upgrade.name,
@@ -332,7 +367,7 @@ inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, 
         affordable,
         moduleRefitPresentation(module),
         affordable
-            ? panelActionButton(text::buttons::install, ui::actions::buyOffer(index), "ok")
+            ? panelActionButton(text::buttons::installPermanently, ui::actions::buyOffer(index), "ok")
             : disabledPanelButton(missingModuleCostLabel(state, module))
     };
 }
@@ -350,7 +385,7 @@ inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& up
         affordable,
         crewUpgradeRefitPresentation(upgrade),
         affordable
-            ? panelActionButton(text::buttons::install, ui::actions::buyOffer(index), "ok")
+            ? panelActionButton(text::buttons::installPermanently, ui::actions::buyOffer(index), "ok")
             : disabledPanelButton(text::needCredits(cost))
     };
 }
@@ -375,10 +410,11 @@ inline RefitWindowPresentation refitWindowPresentation(const GameState& state, c
     }
 
     presentation.rerollCost = offerRerollCost(state);
+    presentation.showReroll = !curatedProvingRefitsActive(state);
     presentation.rerollAction = state.run.credits >= presentation.rerollCost
         ? panelActionButton(text::panel::rerollOffers(display::money(presentation.rerollCost)), ui::actions::rerollOffers, "warn")
         : disabledPanelButton(display::needCredits(presentation.rerollCost));
-    presentation.skipAction = panelActionButton(text::buttons::skipRefit, ui::actions::next);
+    presentation.skipAction = panelActionButton(text::buttons::keepCredits, ui::actions::next);
     return presentation;
 }
 

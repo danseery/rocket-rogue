@@ -78,6 +78,13 @@ enum class SlotType {
     Escape
 };
 
+enum class RefitTrack {
+    None,
+    Reach,
+    Control,
+    Recovery
+};
+
 enum class Rarity {
     Common,
     Uncommon,
@@ -422,7 +429,6 @@ struct ModuleStats {
     double pressure = 0.0;
     double volatility = 0.0;
     double payout = 0.0;
-    double repair = 0.0;
     double miningPower = 0.0;
     double miningYield = 0.0;
     double miningCooling = 0.0;
@@ -501,6 +507,10 @@ struct ShipModule {
     int durability = 100;
     std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
+    RefitTrack refitTrack = RefitTrack::None;
+    int refitRank = 0;
+    std::string prerequisiteId;
+    bool provingTier = false;
 };
 
 struct CrewUpgrade {
@@ -511,6 +521,9 @@ struct CrewUpgrade {
     CrewUpgradeStats stats;
     std::string unlockKey = content::unlock::starter;
     std::vector<std::string> tags;
+    RefitTrack refitTrack = RefitTrack::None;
+    int refitRank = 0;
+    std::string prerequisiteId;
 };
 
 struct SurfaceUpgrade {
@@ -686,6 +699,7 @@ struct MetaProgress {
     std::vector<int> destinationLandings;
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
+    std::vector<std::string> acknowledgedActivityBriefingIds;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
 };
@@ -1053,6 +1067,7 @@ struct RunState {
     bool active = true;
     int destinationIndex = 0;
     int frontierReadiness = 0;
+    bool refitEntitled = false;
     int shipDamage = 0;
     double credits = 100.0;
     std::string frameId;
@@ -1094,6 +1109,7 @@ struct GameState {
 };
 
 std::string_view toString(SlotType slot);
+std::string_view toString(RefitTrack track);
 std::string_view toString(Rarity rarity);
 std::string_view toString(SurfaceUpgradeCategory category);
 std::string_view toString(MiniDroneRole role);

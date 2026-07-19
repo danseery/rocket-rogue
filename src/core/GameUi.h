@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocket::ui {
 
@@ -125,6 +126,34 @@ inline constexpr std::string_view missionLog = "mission_log";
 inline constexpr std::string_view miningFailure = "mining_failure";
 inline constexpr std::string_view launchOutcome = "launch_outcome";
 inline constexpr std::string_view flightReport = "flight_report";
+inline constexpr std::string_view flybyIntroduction = "flyby_introduction";
+inline constexpr std::string_view orbitIntroduction = "orbit_introduction";
+inline constexpr std::string_view landingIntroduction = "landing_introduction";
+inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introduction";
 } // namespace modals
+
+namespace briefings {
+inline constexpr std::string_view flyby = "flyby_blueprints";
+inline constexpr std::string_view orbit = "orbit_blueprints";
+inline constexpr std::string_view landing = "landing_drone_upgrades";
+inline constexpr std::string_view miniDrones = "mini_drones";
+
+inline bool acknowledged(const std::vector<std::string>& ids, std::string_view id)
+{
+    for (const std::string& existing : ids) {
+        if (existing == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void acknowledge(std::vector<std::string>& ids, std::string_view id)
+{
+    if (!acknowledged(ids, id)) {
+        ids.emplace_back(id);
+    }
+}
+} // namespace briefings
 
 } // namespace rocket::ui

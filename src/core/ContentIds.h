@@ -20,6 +20,15 @@ inline constexpr const char* droneBay = "drone_bay";
 } // namespace unlock
 
 namespace module {
+inline constexpr const char* sparrowInjectorTune = "sparrow_injector_tune";
+inline constexpr const char* reserveFeedManifold = "reserve_feed_manifold";
+inline constexpr const char* sustainedBurnPackage = "sustained_burn_package";
+inline constexpr const char* radiatorVaneExtension = "radiator_vane_extension";
+inline constexpr const char* telemetryNoiseFilter = "telemetry_noise_filter";
+inline constexpr const char* pressureBalanceBaffles = "pressure_balance_baffles";
+inline constexpr const char* patchworkCrossBracing = "patchwork_cross_bracing";
+inline constexpr const char* springCapsuleRetropack = "spring_capsule_retropack";
+inline constexpr const char* recoveryCradle = "recovery_cradle";
 inline constexpr const char* sparrowEngine = "sparrow_engine";
 inline constexpr const char* kestrelEngine = "kestrel_engine";
 inline constexpr const char* novaDrive = "nova_drive";

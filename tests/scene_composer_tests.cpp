@@ -249,6 +249,36 @@ void testManifestAndLogicalTextureMapping()
     assert(background.frameHeight == 576U);
     assert(background.columns == 4U);
     assert(background.frameCount == 4U);
+
+    const rocket::SceneAtlasTexture& capybara =
+        rocket::kSceneAtlasTextures[rocket::textureIndex(TextureId::HeroicCapybara)];
+    assert(capybara.sourceWidth == 1024U);
+    assert(capybara.sourceHeight == 1024U);
+    assert(capybara.frameCount == 1U);
+}
+
+void testCampaignIntroductionDrawsHeroicCapybara()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setTextureReady(TextureId::LocalSolarBackground, true);
+    composer.setTextureReady(TextureId::HeroicCapybara, true);
+
+    RenderSnapshot introduction;
+    introduction.screen = rocket::Screen::StoryBriefing;
+    introduction.campaignStoryIntroduction = true;
+    const ScenePacket& introductionPacket = composer.compose(introduction);
+    assert(std::any_of(introductionPacket.draws.begin(), introductionPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::HeroicCapybara;
+    }));
+
+    RenderSnapshot straylight;
+    straylight.screen = rocket::Screen::StoryBriefing;
+    straylight.straylightStoryReveal = true;
+    const ScenePacket& straylightPacket = composer.compose(straylight);
+    assert(std::none_of(straylightPacket.draws.begin(), straylightPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::HeroicCapybara;
+    }));
 }
 
 void testPolygonInstanceMatchesTriangleFan()
@@ -774,6 +804,7 @@ int main()
 {
     testPackedVertexConversion();
     testManifestAndLogicalTextureMapping();
+    testCampaignIntroductionDrawsHeroicCapybara();
     testPolygonInstanceMatchesTriangleFan();
     testOrderedBatchingAndWideLineInstancing();
     testUniformAndGradientLineOrdering();
