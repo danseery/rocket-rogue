@@ -7272,7 +7272,7 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     const LaunchOutcomeSummaryPresentation lunarRouteSummary = launchOutcomeSummaryPresentation(lunarRoute, catalog);
     require(lunarRouteSummary.title == "LUNAR ROUTE CHARTED"
             && lunarRouteSummary.consequence.find("cleared the next launch for the Moon") != std::string::npos
-            && lunarRouteSummary.progression.find("Flight Data 3/3") != std::string::npos,
+            && lunarRouteSummary.progression == "Flight Data 3/3  •  Funding +64",
         "the third proving profile should explicitly announce that the Moon transfer is available");
     Random lunarRouteRng(1918);
     const PreparedLaunch lunarRouteLaunch = prepareLaunch(lunarRoute, catalog, lunarRouteRng);

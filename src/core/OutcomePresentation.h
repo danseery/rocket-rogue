@@ -115,7 +115,7 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
             return {
                 "LUNAR ROUTE CHARTED",
                 "The route is complete. Mission Control has cleared the next launch for the Moon.",
-                flightData + "  â€¢  " + funding
+                flightData + "  •  " + funding
             };
         }
 

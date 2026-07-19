@@ -635,6 +635,71 @@ std::vector<PackedSceneInstance> attackDroneInstances(const RenderSnapshot& snap
     return {};
 }
 
+rocket::MiningRunState miningState(double inactiveEnemyX, double activeEnemyX);
+
+SceneInstance miningRigInstance(const ScenePacket& packet)
+{
+    const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+        TextureId::MiningDrone, 0.0F, 0.0F, 1.0F, 1.0F);
+    constexpr float tolerance = 2.0F / 65535.0F;
+    assert(expected.valid);
+    for (const SceneDraw& draw : packet.draws) {
+        if (draw.drawType != SceneDrawType::InstancedQuad || draw.atlasPage != expected.page) {
+            continue;
+        }
+        for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+            const SceneInstance instance = rocket::unpackSceneInstance(
+                packet.instances[draw.firstInstance + index]);
+            if (instance.textured
+                && std::abs(instance.u0 - expected.u0) < tolerance
+                && std::abs(instance.v0 - expected.v0) < tolerance
+                && std::abs(instance.u1 - expected.u1) < tolerance
+                && std::abs(instance.v1 - expected.v1) < tolerance) {
+                return instance;
+            }
+        }
+    }
+    assert(false && "Expected the mining-rig texture instance.");
+    return {};
+}
+
+void testMiningRigSlerpsVerticalDuringExtraction()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningHullDirX = 1.0;
+    snapshot.miningHullDirY = 0.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setTextureReady(TextureId::MiningDrone, true);
+
+    composer.setPresentationTime(1.0);
+    composer.compose(snapshot);
+
+    snapshot.miningExtractionActive = true;
+    snapshot.miningExtractionProgress = 0.20;
+    composer.setPresentationTime(1.016);
+    const SceneInstance start = miningRigInstance(composer.compose(snapshot));
+    const float startLength = std::hypot(start.axisYx, start.axisYy);
+    assert(start.axisYx / startLength < -0.99F);
+    assert(std::abs(start.axisYy / startLength) < 0.02F);
+
+    snapshot.miningExtractionProgress = 0.38;
+    composer.setPresentationTime(1.032);
+    const SceneInstance middle = miningRigInstance(composer.compose(snapshot));
+    const float middleLength = std::hypot(middle.axisYx, middle.axisYy);
+    assert(middle.axisYx / middleLength < -0.10F);
+    assert(middle.axisYy / middleLength > 0.10F);
+
+    snapshot.miningExtractionProgress = 0.48;
+    composer.setPresentationTime(1.048);
+    const SceneInstance end = miningRigInstance(composer.compose(snapshot));
+    const float endLength = std::hypot(end.axisYx, end.axisYy);
+    assert(std::abs(end.axisYx / endLength) < 0.02F);
+    assert(end.axisYy / endLength > 0.99F);
+}
+
 rocket::MiningRunState miningState(double inactiveEnemyX, double activeEnemyX)
 {
     rocket::MiningRunState mining;
@@ -809,6 +874,7 @@ int main()
     testOrderedBatchingAndWideLineInstancing();
     testUniformAndGradientLineOrdering();
     testAtlasPageBatchingAcrossLogicalTextures();
+    testMiningRigSlerpsVerticalDuringExtraction();
     testFrameViewsKeepAuthoritativeEnemyIndices();
     testMiningTerrainPersistentStreamInvalidation();
     return 0;

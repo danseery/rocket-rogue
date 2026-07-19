@@ -2856,11 +2856,23 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 drone.y + (extractionBay.y - drone.y) * rigEntry
             };
             const float rigSize = droneSize * (1.0F - rigEntry * 0.46F);
+            const float rigRotationProgress = smoothExtraction(std::clamp(rigEntry / 0.82F, 0.0F, 1.0F));
+            const Vec2 rigDirection = slerpDirection(
+                {-hullDirection.x, -hullDirection.y},
+                {0.0F, 1.0F},
+                rigRotationProgress);
             drawLine(drone.x, drone.y, rigPosition.x, rigPosition.y, {0.44F, 0.96F, 1.0F, (1.0F - rigEntry) * 0.26F}, 2.4F);
             drawRadialGlow(rigPosition.x, rigPosition.y, rigSize * 0.84F, {0.30F, 0.94F, 1.0F, 0.16F + (1.0F - rigEntry) * 0.12F}, 20);
             if (textureReady(MiningDroneAsset)) {
-                // Keep the cockpit dome pointed up while the rig drifts into the bay.
-                drawSpriteRotated(rigPosition.x, rigPosition.y, rigSize, rigSize, 0.0F, 1.0F, {1.0F, 1.0F, 1.0F, 1.0F}, MiningDroneAsset);
+                drawSpriteRotated(
+                    rigPosition.x,
+                    rigPosition.y,
+                    rigSize,
+                    rigSize,
+                    rigDirection.x,
+                    rigDirection.y,
+                    {1.0F, 1.0F, 1.0F, 1.0F},
+                    MiningDroneAsset);
             } else {
                 drawCircle(rigPosition.x, rigPosition.y, rigSize * 0.34F, {0.34F, 0.92F, 1.0F, 0.96F}, 16);
             }
