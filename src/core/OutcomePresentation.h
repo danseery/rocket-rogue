@@ -103,12 +103,12 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
             return outcome.crewKilled
                 ? LaunchOutcomeSummaryPresentation {
                     "CREW LOST",
-                    "The vehicle and crew did not return. Only the surviving telemetry reached the archive.",
-                    flightData + "  •  Funding lost"}
+                    "The vehicle and crew did not return. No new route data survived the loss.",
+                    "Flight Data held at " + std::to_string(readiness) + "/" + std::to_string(required) + "  •  Funding lost"}
                 : LaunchOutcomeSummaryPresentation {
                     "CREW RECOVERED",
-                    "Rescue teams brought the crew home, but the vehicle and mission reserve are gone.",
-                    flightData + "  •  Funding lost"};
+                    "Rescue teams brought the crew home. No new route data survived the loss.",
+                    "Flight Data held at " + std::to_string(readiness) + "/" + std::to_string(required) + "  •  Funding lost"};
         }
 
         if (readiness >= required) {

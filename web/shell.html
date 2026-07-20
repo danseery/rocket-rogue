@@ -3174,7 +3174,7 @@
     }
 
     .mining-health-strip {
-      margin-top: 5px;
+      margin-top: 2px;
       padding: 0;
       border: 0;
       background: transparent;
@@ -3189,7 +3189,7 @@
 
     .mining-health-bar {
       height: 9px;
-      margin-top: 3px;
+      margin-top: 0;
       border-radius: 5px;
     }
 
@@ -3249,6 +3249,21 @@
       color: #f1fbff;
       font-size: 17px;
       line-height: 1;
+    }
+
+    .mining-command-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 3px 0 8px;
+    }
+
+    .mining-command-list span {
+      display: block;
+      color: #f1fbff;
+      font-size: 13px;
+      line-height: 1.2;
+      text-transform: none;
     }
 
     .mining-command-dock .system-actions {
@@ -4532,48 +4547,6 @@
       accent-color: var(--accent);
     }
 
-    .tutorial-card {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-      margin: 10px 0 12px;
-      padding: 10px 12px;
-      border: 1px solid rgba(255, 209, 102, 0.24);
-      border-radius: 8px;
-      background: rgba(255, 209, 102, 0.060);
-    }
-
-    .tutorial-card[hidden] {
-      display: none;
-    }
-
-    .tutorial-card span {
-      display: block;
-      color: var(--warn);
-      font-size: 13px;
-      font-weight: 800;
-      text-transform: uppercase;
-    }
-
-    .tutorial-card strong {
-      display: block;
-      margin-top: 3px;
-      font-size: 16px;
-      line-height: 1.18;
-    }
-
-    .tutorial-card p {
-      margin-top: 5px;
-      color: var(--muted);
-    }
-
-    .tutorial-card button {
-      min-width: 68px;
-      min-height: 30px;
-      padding-inline: 10px;
-    }
-
     .utility-row {
       display: flex;
       gap: 8px;
@@ -4707,10 +4680,13 @@
       margin-top: 14px;
     }
 
+    .modal-root[data-modal-id="launch_introduction"] .modal-panel,
+    .modal-root[data-modal-id="approach_introduction"] .modal-panel,
     .modal-root[data-modal-id="flyby_introduction"] .modal-panel,
     .modal-root[data-modal-id="orbit_introduction"] .modal-panel,
     .modal-root[data-modal-id="landing_introduction"] .modal-panel,
-    .modal-root[data-modal-id="mini_drone_introduction"] .modal-panel {
+    .modal-root[data-modal-id="mini_drone_introduction"] .modal-panel,
+    .modal-root[data-modal-id="mining_introduction"] .modal-panel {
       width: min(560px, calc(100vw - 36px));
       max-height: min(320px, calc(100dvh - 36px));
       padding: 20px;
@@ -4831,8 +4807,18 @@
       pointer-events: none;
     }
 
-    body.controller-input-active:not(.rmlui-enabled) .controller-prompt-bar {
+    body:not(.rmlui-enabled) .controller-prompt-bar.is-visible {
       display: flex;
+    }
+
+    .controller-prompt-bar.mining-input-helper {
+      flex-wrap: wrap;
+      white-space: normal;
+    }
+
+    .controller-prompt-bar span {
+      flex-shrink: 0;
+      white-space: nowrap;
     }
 
     .controller-prompt-bar strong {
@@ -6526,7 +6512,6 @@
     const frameLimitStorageKey = "rocket_rogue_frame_limit_mode";
     const frameLimitOptions = Object.freeze(["platform_default", "smooth60", "balanced", "battery30", "display"]);
     const helpDisabledStorageKey = "rocket_rogue_help_disabled";
-    const helpDismissedStorageKey = "rocket_rogue_help_dismissed_v1";
     const cameraShakeDisabledStorageKey = "rocket_rogue_camera_shake_disabled";
     const keyboardDrillModeStorageKey = "rocket_rogue_keyboard_drill_mode";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
@@ -6696,41 +6681,14 @@
       }
     }
 
-    function dismissedHelpTopics() {
-      try {
-        const parsed = JSON.parse(window.localStorage.getItem(helpDismissedStorageKey) || "[]");
-        return new Set(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
-      } catch (error) {
-        return new Set();
-      }
-    }
-
-    function dismissHelpTopic(topic) {
-      if (!topic) {
-        return;
-      }
-      const topics = dismissedHelpTopics();
-      topics.add(topic);
-      try {
-        window.localStorage.setItem(helpDismissedStorageKey, JSON.stringify(Array.from(topics)));
-      } catch (error) {
-        return;
-      }
-    }
-
     function syncHelpControls(root = document) {
       const disabled = helpDisabled();
-      const dismissed = dismissedHelpTopics();
       root.querySelectorAll("[data-help-toggle]").forEach((control) => {
         if ("checked" in control) {
           control.checked = !disabled;
         }
-        control.textContent = disabled ? "Show mission help" : "Hide mission help";
+        control.textContent = disabled ? "Show introductions" : "Hide introductions";
         control.setAttribute("aria-pressed", disabled ? "false" : "true");
-      });
-      root.querySelectorAll("[data-help-topic]").forEach((card) => {
-        const topic = card.dataset.helpTopic || "";
-        card.hidden = disabled || dismissed.has(topic);
       });
     }
 
@@ -6917,7 +6875,45 @@
       const swapConfirmCancel = controllerPreferences().swapConfirmCancel;
       const confirm = swapConfirmCancel ? label.east : label.south;
       const cancel = swapConfirmCancel ? label.south : label.east;
+      const controllerActive = document.body.classList.contains("controller-input-active");
+      const mining = Boolean(panel.querySelector("[data-panel-mode='mining-fullscreen']"));
+      const flyby = Boolean(panel.querySelector("[data-flyby-run][data-flyby-completed='0']"));
+      const orbit = Boolean(panel.querySelector("[data-orbit-run][data-orbit-completed='0']"));
+      const gameplayHelper = mining || flyby || orbit;
       const item = (button, action) => `<span><strong>${button}</strong> ${action}</span>`;
+      const describedItem = (action, button, purpose = "") =>
+        `<span>${action} (${button})${purpose ? ` - ${purpose}` : ""}</span>`;
+      controllerPromptBar.classList.toggle("mining-input-helper", mining && modalRoot.hidden);
+
+      if (!controllerActive) {
+        if (!modalRoot.hidden || !gameplayHelper) {
+          controllerPromptBar.innerHTML = "";
+          controllerPromptBar.classList.remove("is-visible");
+          return;
+        }
+        if (mining) {
+          controllerPromptBar.innerHTML = describedItem("Move / Face", "WASD / Arrows") +
+            describedItem("Drill", "Space", "Extracts terrain") +
+            describedItem("Pulse Scanner", "E", "Reveals nearby resources") +
+            (panel.querySelector("[data-rr-action='mining_tether']")
+              ? describedItem("Tether Artifact", "T", "Requires an exposed nearby target") : "") +
+            (panel.querySelector("[data-mining-drones='1']")
+              ? describedItem("Assigned Drones", "Automatic", "Execute their roles automatically") : "") +
+            (panel.querySelector("[data-rr-action='mining_stow']")
+              ? describedItem("Bank Cargo", "R", "Secures the payload") : "") +
+            (panel.querySelector("[data-rr-action='mining_abort']")
+              ? describedItem("Emergency Recall", "Esc", "Ends the run") : "");
+        } else if (flyby) {
+          controllerPromptBar.innerHTML = describedItem("Accelerate / Slow", "W/S or Up/Down") +
+            describedItem("Turn", "A/D or Left/Right") + describedItem("Abort", "Esc", "Records a Miss");
+        } else {
+          controllerPromptBar.innerHTML = describedItem("Prograde / Retrograde", "W/S or Up/Down") +
+            describedItem("Tighten / Widen", "A/D or Left/Right") + describedItem("Abort", "Esc", "Records a Miss");
+        }
+        controllerPromptBar.classList.add("is-visible");
+        return;
+      }
+
       if (!modalRoot.hidden) {
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") +
           (modalRoot.dataset.dismissible === "0" ? "" : item(cancel, "Back")) + item("R-stick", "Scroll");
@@ -6925,12 +6921,26 @@
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(label.menu, "Settings");
       } else if (panel.querySelector("[data-panel-mode='story-briefing'], [data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
         controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
-      } else if (panel.querySelector("[data-panel-mode='mining-fullscreen']")) {
-        controllerPromptBar.innerHTML = item("L-stick", "Move / face") + item(label.rt, "Drill") + item(label.west, "Scan") +
-          item(label.north, "Tether") + item(label.lb, "Drill repair") + item(label.rb, "Rig repair") + item(label.south, "Stow") +
-          item(label.east, "Hold: recall") + item(label.menu, "Pause");
-      } else if (panel.querySelector("[data-flyby-run], [data-orbit-run]")) {
-        controllerPromptBar.innerHTML = item("L-stick", "Fly") + item(label.east, "Hold: abort") + item(label.menu, "Pause");
+      } else if (mining) {
+        controllerPromptBar.innerHTML = describedItem("Move / Face", "L-stick") +
+          describedItem("Drill", label.rt, "Extracts terrain") +
+          describedItem("Pulse Scanner", label.west, "Reveals nearby resources") +
+          (panel.querySelector("[data-rr-action='mining_tether']")
+            ? describedItem("Tether Artifact", label.north, "Requires an exposed nearby target") : "") +
+          (panel.querySelector("[data-mining-drones='1']")
+            ? describedItem("Assigned Drones", "Automatic", "Execute their roles automatically") : "") +
+          (panel.querySelector("[data-drill-visible='1']") ? describedItem("Repair Drill", label.lb) : "") +
+          (panel.querySelector("[data-drone-visible='1']") ? describedItem("Repair Rig", label.rb) : "") +
+          (panel.querySelector("[data-rr-action='mining_stow']")
+            ? describedItem("Bank Cargo", label.south, "Secures the payload") : "") +
+          (panel.querySelector("[data-rr-action='mining_abort']")
+            ? describedItem("Emergency Recall", label.east, "Hold to end the run") : "") + item(label.menu, "Pause");
+      } else if (flyby) {
+        controllerPromptBar.innerHTML = describedItem("Accelerate / Slow", "L-stick vertical") +
+          describedItem("Turn", "L-stick horizontal") + describedItem("Abort", label.east, "Hold to record a Miss") + item(label.menu, "Pause");
+      } else if (orbit) {
+        controllerPromptBar.innerHTML = describedItem("Prograde / Retrograde", "L-stick vertical") +
+          describedItem("Tighten / Widen", "L-stick horizontal") + describedItem("Abort", label.east, "Hold to record a Miss") + item(label.menu, "Pause");
       } else if (panel.querySelector(".push-minigame, .scan-minigame")) {
         controllerPromptBar.innerHTML = item(label.south, "Pulse / push") + item(label.west, "Bank") + item(label.east, "Hold: abort") + item(label.menu, "Pause");
       } else if (panel.querySelector("[data-rr-action='return_home']")) {
@@ -6943,6 +6953,7 @@
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(cancel, "Back") +
           item("R-stick", "Scroll") + item(label.menu, "Pause");
       }
+      controllerPromptBar.classList.add("is-visible");
     }
 
     function setControllerPresentation(active, family) {
@@ -7160,7 +7171,6 @@
       if (control.dataset.rrAction) return `action:${control.dataset.rrAction}`;
       if (control.dataset.uiModal) return `modal:${control.dataset.uiModal}`;
       if (control.dataset.uiCloseModal !== undefined) return "modal:close";
-      if (control.dataset.helpDismiss) return `help-dismiss:${control.dataset.helpDismiss}`;
       if (control.matches("[data-resolution-select]")) return "setting:resolution";
       if (control.matches("[data-desktop-fullscreen-toggle]")) return "setting:fullscreen";
       if (control.matches("[data-frame-limit-select]")) return "setting:frame_limit";
@@ -7492,6 +7502,7 @@
       selectNavigationDestination: (index) => rrCall("rr_select_navigation", [index], ["number"]),
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
       rerollOffers: () => rrCall("rr_reroll_offers"),
+      acknowledgeApproachIntroduction: () => rrCall("rr_acknowledge_approach_introduction"),
       arrivalFlyby: () => rrCall("rr_arrival_flyby"),
       flybyMove: (xAxis, yAxis) => rrCall("rr_flyby_move", [xAxis, yAxis], ["number", "number"]),
       flybyAbort: () => rrCall("rr_flyby_abort"),
@@ -7602,6 +7613,7 @@
       upgradeDronePrefix: "upgrade_drone:",
       upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
+      acknowledgeApproachIntroduction: "acknowledge_approach_introduction",
       arrivalFlyby: "arrival_flyby",
       flybyAbort: "flyby_abort",
       flybyContinue: "flyby_continue",
@@ -7654,6 +7666,7 @@
       [rrActionIds.openNavigation]: () => rr.openNavigation(),
       [rrActionIds.arkJump]: () => rr.arkJump(),
       [rrActionIds.rerollOffers]: () => rr.rerollOffers(),
+      [rrActionIds.acknowledgeApproachIntroduction]: () => rr.acknowledgeApproachIntroduction(),
       [rrActionIds.arrivalFlyby]: () => rr.arrivalFlyby(),
       [rrActionIds.flybyAbort]: () => rr.flybyAbort(),
       [rrActionIds.flybyContinue]: () => rr.flybyContinue(),
@@ -7790,7 +7803,9 @@
     const debugParams = new URLSearchParams(window.location.search);
     const debugToolsEnabled = debugParams.has("debug_tools") || debugParams.has("debug_minigames");
     if (debugToolsEnabled) {
-      setDebugToolsVisible(true);
+      // The query flag is a development-session override. Do not persist it:
+      // opening a debug URL must not make later normal launches show tooling.
+      debugTools.classList.add("is-visible");
     } else {
       setDebugToolsVisible(debugToolsVisible());
     }
@@ -8308,18 +8323,6 @@
       syncLocalControls(modalRoot);
     }
 
-    function handleHelpDismiss(event) {
-      const button = closestFromEvent(event, "[data-help-dismiss]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      dismissHelpTopic(button.dataset.helpDismiss || "");
-      syncLocalControls(panel);
-      syncLocalControls(modalRoot);
-    }
-
     function handleModalCloseButton(event) {
       const button = closestFromEvent(event, "button[data-ui-close-modal]");
       if (!button || modalRoot.hidden || !modalRoot.contains(button)) {
@@ -8332,8 +8335,6 @@
 
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
-    document.addEventListener("pointerdown", handleHelpDismiss, true);
-    document.addEventListener("click", handleHelpDismiss, true);
     document.addEventListener("click", handleHelpToggle, true);
     document.addEventListener("click", handleCameraShakeToggle, true);
     document.addEventListener("click", handleFullscreenToggle, true);

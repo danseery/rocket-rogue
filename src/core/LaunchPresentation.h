@@ -1,6 +1,5 @@
 #pragma once
 
-#include "core/DetailPresentation.h"
 #include "core/FlightProgress.h"
 #include "core/GameFormat.h"
 #include "core/GameState.h"
@@ -24,7 +23,6 @@ struct LaunchPanelPresentation {
     std::vector<PanelMetricPresentation> metrics;
     std::vector<TelemetryChannelSample> telemetry;
     std::string telemetryMessage;
-    std::vector<DetailPresentationRow> telemetryDetails;
     std::vector<FlightActionButtonPresentation> primaryActions;
     std::vector<FlightActionButtonPresentation> systemActions;
     double displayedMultiplier = 1.0;
@@ -152,11 +150,6 @@ inline LaunchPanelPresentation launchPanelPresentation(
     const auto samples = telemetrySamples(event);
     presentation.telemetry.assign(samples.begin(), samples.end());
     presentation.telemetryMessage = event.message;
-    for (const TelemetryChannelSample& sample : presentation.telemetry) {
-        presentation.telemetryDetails.push_back(detailPresentationRow(sample.label, display::percent(sample.value)));
-    }
-    presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
-    presentation.telemetryDetails.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(flightModel.pressureModifier)));
     presentation.primaryActions = primaryFlightActions(actions, arkDiscovered(state));
     if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
         presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);

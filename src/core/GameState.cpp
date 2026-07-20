@@ -1332,12 +1332,6 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (outcome.type == LaunchResultType::Destroyed) {
         state.meta.shipsLost += 1;
-        const bool openingMoonTransfer = outcome.frontierTransfer
-            && outcome.destinationId == content::destination::moon
-            && currentDestination(state, catalog).id == content::destination::earthOrbit;
-        if (!openingMoonTransfer) {
-            state.run.frontierReadiness = std::max(0, state.run.frontierReadiness - 1);
-        }
         state.run.credits = std::max(tuning::hangar::minimumExpeditionCredits, state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.surfaceUpgradeIds.clear();
         state.run.active = false;

@@ -1,4 +1,5 @@
 #include "game/GameRunner.h"
+#include "core/GameUi.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
@@ -203,7 +204,6 @@ public:
     std::string focusedId() const override { return "action:primary"; }
     void openModal(const std::string&) override {}
     void closeModal() override {}
-    void dismissHelp(const std::string&) override {}
     void dispatchAction(const std::string& action) override { if (actionHandler) actionHandler(action); }
     void refresh() override {}
     bool activateButtonLabel(const std::string&) override { return false; }
@@ -250,10 +250,16 @@ public:
     bool openModal(std::string_view) override { return false; }
     void closeModal() override {}
     std::string focusedId() const override { return {}; }
-    void preferencesChanged(const rocket::AppPreferences&) override {}
+    void preferencesChanged(const rocket::AppPreferences& value) override
+    {
+        lastPreferences = value;
+        ++preferenceUpdateCount;
+    }
     std::string html;
     int panelSetCount = 0;
     int hudSetCount = 0;
+    int preferenceUpdateCount = 0;
+    rocket::AppPreferences lastPreferences;
     rocket::RealtimeHudState hud;
 };
 
@@ -280,6 +286,16 @@ std::string activeMiningSave(double drillHeat)
     assert(rocket::startMiningRun(state, catalog).applied);
     state.run.mining.drillHeat = drillHeat;
     state.run.shipDamage = 37;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string freshSurfaceExpeditionSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0x51A7EULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
@@ -397,12 +413,16 @@ int main()
     {
         AppFixture fixture;
         fixture.saves.value = activeMiningSave(0.65);
+        fixture.preferences.value.debugToolsEnabled = true;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
         fixture.host.now += 1.0 / 60.0;
         fixture.runner.frame();
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::StoryBriefing);
+        assert(!fixture.preferences.value.debugToolsEnabled);
+        assert(fixture.bridge.preferenceUpdateCount == 1);
+        assert(!fixture.bridge.lastPreferences.debugToolsEnabled);
         assert(fixture.saves.storeCount == 1);
         assert(fixture.saves.clearCount == 0);
         const std::optional<rocket::SaveData> fresh = rocket::deserializeSaveData(fixture.saves.value);
@@ -410,6 +430,64 @@ int main()
         assert(fresh->screen == rocket::Screen::StoryBriefing);
         assert(fresh->storyBriefing.pending == rocket::StoryBriefingId::CampaignIntroduction);
         assert(fresh->shipDamage == 0);
+        fixture.runner.shutdown();
+    }
+
+    // Starting over also returns the application to its player-facing mode:
+    // debug tooling must not survive a reset into a fresh campaign.
+    {
+        AppFixture fixture;
+        fixture.preferences.value.debugToolsEnabled = true;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("reset_save");
+        assert(!fixture.preferences.value.debugToolsEnabled);
+        assert(fixture.bridge.preferenceUpdateCount == 1);
+        assert(!fixture.bridge.lastPreferences.debugToolsEnabled);
+        fixture.runner.shutdown();
+    }
+
+    // The first-flight modal's CTA must perform the original action and save
+    // its acknowledgment before entering the non-restorable launch session.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("new_game");
+        fixture.ui.dispatchAction("acknowledge_story_briefing");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+        assert(fixture.ui.html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos);
+
+        const std::optional<rocket::SaveData> beforeLaunch = rocket::deserializeSaveData(fixture.saves.value);
+        assert(beforeLaunch.has_value());
+        assert(!rocket::ui::briefings::acknowledged(beforeLaunch->acknowledgedActivityBriefingIds, rocket::ui::briefings::launch));
+
+        fixture.ui.dispatchAction("prepare_launch");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        const std::optional<rocket::SaveData> afterLaunch = rocket::deserializeSaveData(fixture.saves.value);
+        assert(afterLaunch.has_value());
+        assert(afterLaunch->screen == rocket::Screen::Hangar);
+        assert(rocket::ui::briefings::acknowledged(afterLaunch->acknowledgedActivityBriefingIds, rocket::ui::briefings::launch));
+        fixture.runner.shutdown();
+    }
+
+    // The mining overview CTA must acknowledge the introduction only when it
+    // successfully starts the first mining run.
+    {
+        AppFixture fixture;
+        fixture.saves.value = freshSurfaceExpeditionSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        assert(fixture.ui.html.find("data-ui-modal=\"mining_introduction\"") != std::string::npos);
+
+        const std::optional<rocket::SaveData> beforeMining = rocket::deserializeSaveData(fixture.saves.value);
+        assert(beforeMining.has_value());
+        assert(!rocket::ui::briefings::acknowledged(beforeMining->acknowledgedActivityBriefingIds, rocket::ui::briefings::mining));
+
+        fixture.ui.dispatchAction("mine_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        const std::optional<rocket::SaveData> afterMining = rocket::deserializeSaveData(fixture.saves.value);
+        assert(afterMining.has_value());
+        assert(rocket::ui::briefings::acknowledged(afterMining->acknowledgedActivityBriefingIds, rocket::ui::briefings::mining));
         fixture.runner.shutdown();
     }
 
@@ -469,6 +547,7 @@ int main()
     rocket::AppPreferences changedPreferences = preferences.value;
     changedPreferences.controller.invertFlightY = true;
     changedPreferences.cameraShakeDisabled = true;
+    changedPreferences.helpDisabled = true;
     changedPreferences.gameSpeed = 1.5;
     assert(preferences.store(changedPreferences));
     host.now += 1.0 / 60.0;
@@ -479,6 +558,7 @@ int main()
     assert(controllers.preferences.invertFlightY);
     assert(renderer.preferences.cameraShakeDisabled);
     assert(runner.app().controllerPreferences().invertFlightY);
+    assert(ui.html.find("Show introductions") != std::string::npos);
 
     // A revision may advance after a redundant store, but unchanged values do
     // not need to be copied into frame consumers again.

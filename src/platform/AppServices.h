@@ -266,7 +266,6 @@ public:
     virtual std::string focusedId() const = 0;
     virtual void openModal(const std::string& id) = 0;
     virtual void closeModal() = 0;
-    virtual void dismissHelp(const std::string& topic) = 0;
     virtual void dispatchAction(const std::string& action) = 0;
     virtual void refresh() = 0;
     virtual bool activateButtonLabel(const std::string& label) = 0;

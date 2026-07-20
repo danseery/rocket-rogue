@@ -32,6 +32,7 @@ struct PanelRenderContext {
     bool titleScreenActive = false;
     bool hasSavedGame = false;
     std::string_view titleNotice;
+    bool firstTimeIntroductionsEnabled = true;
 };
 
 std::string buildGamePanelHtml(const PanelRenderContext& context);

@@ -145,7 +145,6 @@ public:
     std::string focusedId() const override { return {}; }
     void openModal(const std::string&) override {}
     void closeModal() override {}
-    void dismissHelp(const std::string&) override {}
     void dispatchAction(const std::string& action) override { if (actionHandler) actionHandler(action); }
     void refresh() override {}
     bool activateButtonLabel(const std::string&) override { return false; }

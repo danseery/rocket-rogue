@@ -252,6 +252,16 @@ void rr_reroll_offers()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_acknowledge_approach_introduction()
+{
+    if (g_app) {
+        g_app->acknowledgeApproachIntroduction();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_flyby()
 {
     if (g_app) {

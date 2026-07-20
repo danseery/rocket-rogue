@@ -87,11 +87,6 @@ EM_JS(void, rr_web_install_preference_revision_observer, (), {
     document.addEventListener("click", (event) => {
         if (matches(event, clickSelector)) bump();
     }, true);
-    // Help dismissal is intentionally handled on pointerdown by the browser
-    // fallback, before its synthetic click is dispatched.
-    document.addEventListener("pointerdown", (event) => {
-        if (matches(event, "[data-help-dismiss]")) bump();
-    }, true);
     globalThis.addEventListener("storage", (event) => {
         if (!event.key || event.key.startsWith("rocket_rogue_")) bump();
     });

@@ -212,18 +212,6 @@ int rr_rml_help_disabled() { return currentPreferences().helpDisabled ? 1 : 0; }
 void rr_rml_set_help_disabled(int disabled) { AppPreferences p = currentPreferences(); p.helpDisabled = disabled != 0; storePreferences(std::move(p)); }
 int rr_rml_camera_shake_disabled() { return currentPreferences().cameraShakeDisabled ? 1 : 0; }
 void rr_rml_set_camera_shake_disabled(int disabled) { AppPreferences p = currentPreferences(); p.cameraShakeDisabled = disabled != 0; storePreferences(std::move(p)); }
-int rr_rml_help_topic_hidden(const char* value)
-{
-    const AppPreferences preferences = currentPreferences();
-    return preferences.helpDisabled || std::find(preferences.dismissedHelpTopics.begin(), preferences.dismissedHelpTopics.end(), value ? value : "") != preferences.dismissedHelpTopics.end();
-}
-void rr_rml_dismiss_help_topic(const char* value)
-{
-    if (!value || !*value) return;
-    AppPreferences preferences = currentPreferences();
-    if (std::find(preferences.dismissedHelpTopics.begin(), preferences.dismissedHelpTopics.end(), value) == preferences.dismissedHelpTopics.end()) preferences.dismissedHelpTopics.emplace_back(value);
-    storePreferences(std::move(preferences));
-}
 
 class RmlSystemInterface final : public Rml::SystemInterface {
 public:
@@ -368,43 +356,6 @@ std::string removeHiddenElements(std::string html)
     return html;
 }
 
-std::string removeDismissedHelpCards(std::string html)
-{
-    std::size_t search = 0;
-    while ((search = html.find("data-help-topic", search)) != std::string::npos) {
-        const std::size_t tagStart = html.rfind('<', search);
-        const std::size_t tagEnd = html.find('>', search);
-        if (tagStart == std::string::npos || tagEnd == std::string::npos || html.compare(tagStart, 2, "</") == 0) {
-            search += std::string_view("data-help-topic").size();
-            continue;
-        }
-
-        const std::string_view tag(html.data() + tagStart, tagEnd - tagStart + 1);
-        const std::string topic = attributeValue(tag, "data-help-topic");
-        if (topic.empty() || rr_rml_help_topic_hidden(topic.c_str()) == 0) {
-            search = tagEnd + 1;
-            continue;
-        }
-
-        const std::size_t tagNameStart = tagStart + 1;
-        std::size_t tagNameEnd = tagNameStart;
-        while (tagNameEnd < tagEnd && !std::isspace(static_cast<unsigned char>(html[tagNameEnd])) && html[tagNameEnd] != '>') {
-            ++tagNameEnd;
-        }
-
-        const std::string tagName = html.substr(tagNameStart, tagNameEnd - tagNameStart);
-        const std::string closeTag = "</" + tagName + ">";
-        const std::size_t closeStart = html.find(closeTag, tagEnd + 1);
-        if (closeStart == std::string::npos) {
-            html.erase(tagStart, tagEnd - tagStart + 1);
-        } else {
-            html.erase(tagStart, closeStart + closeTag.size() - tagStart);
-        }
-        search = tagStart;
-    }
-    return html;
-}
-
 std::string normalizeBooleanAttributes(std::string html)
 {
     static constexpr std::string_view names[] = {
@@ -435,7 +386,6 @@ std::string sanitizeRml(std::string html)
 {
     html = normalizeBooleanAttributes(std::move(html));
     html = removeHiddenElements(std::move(html));
-    html = removeDismissedHelpCards(std::move(html));
 
     replaceAll(html, "<section", "<div");
     replaceAll(html, "</section>", "</div>");
@@ -660,7 +610,7 @@ std::string syncCurrentHelpToggle(std::string html)
     const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
     if (tagEnd != std::string::npos && closeStart != std::string::npos) {
         const bool enabled = rr_rml_help_disabled() == 0;
-        const std::string label = enabled ? "Hide mission help" : "Show mission help";
+        const std::string label = enabled ? "Hide introductions" : "Show introductions";
         html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
     }
     return html;
@@ -784,7 +734,6 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
         binding.label = textFromMarkup(std::string_view(html.data() + tagEnd + 1, closeStart - tagEnd - 1));
         binding.action = attributeValue(tag, "data-rr-action");
         binding.modal = attributeValue(tag, "data-ui-modal");
-        binding.helpDismiss = attributeValue(tag, "data-help-dismiss");
         binding.close = !attributeValue(tag, "data-ui-close-modal").empty();
         binding.helpToggle = !attributeValue(tag, "data-help-toggle").empty();
         binding.cameraShakeToggle = !attributeValue(tag, "data-camera-shake-toggle").empty();
@@ -805,8 +754,6 @@ std::vector<RmlButtonBinding> extractButtonBindings(const std::string& html)
                 binding.focusId = "modal:" + binding.modal;
             } else if (binding.close) {
                 binding.focusId = "modal:close";
-            } else if (!binding.helpDismiss.empty()) {
-                binding.focusId = "help-dismiss:" + binding.helpDismiss;
             } else if (!binding.controllerSetting.empty()) {
                 binding.focusId = "setting:" + binding.controllerSetting;
             }
@@ -1015,8 +962,6 @@ std::string panelRcss(RmlPanelMode mode)
     const int modalDefaultLeft = std::max(modalGutter, (viewportWidth - modalDefaultWidth) / 2);
     const int modalInventoryLeft = std::max(modalGutter, (viewportWidth - modalInventoryWidth) / 2);
     const int modalMapLeft = std::max(modalGutter, (viewportWidth - modalMapWidth) / 2);
-    const int modalBriefHeight = std::max(1, std::min(340, viewportHeight - modalGutter * 2));
-    const int modalBriefTop = std::max(modalGutter, (viewportHeight - modalBriefHeight) / 2);
     const int modalMissionHeight = std::max(1, std::min(300, viewportHeight - modalGutter * 2));
     const int modalMissionTop = std::max(modalGutter, (viewportHeight - modalMissionHeight) / 2);
     const int modalNewGameWidth = std::max(1, std::min(560, viewportWidth - modalGutter * 2));
@@ -1862,7 +1807,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .mining-health-strip {
     width: )" + std::to_string(std::max(1, miningTitleWidth - 4)) + R"(px;
-    margin-top: 5px;
+    margin-top: 2px;
 }
 .mining-health-strip > div {
     display: flex;
@@ -1881,7 +1826,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .mining-health-bar {
     width: )" + std::to_string(std::max(1, miningTitleWidth - 6)) + R"(px;
     height: 9px;
-    margin-top: 3px;
+    margin-top: 0px;
     background-color: rgba(1, 8, 13, 0.92);
     border-width: 1px;
     border-color: rgba(127, 236, 255, 0.18);
@@ -1970,6 +1915,20 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     color: #f1fbff;
     font-size: 17px;
     margin-bottom: 6px;
+}
+.mining-command-list {
+    display: flex;
+    flex-direction: column;
+    margin-top: 3px;
+    margin-bottom: 8px;
+}
+.mining-command-list span {
+    display: block;
+    color: #f1fbff;
+    font-size: 13px;
+    line-height: 1.2;
+    margin-bottom: 4px;
+    text-transform: none;
 }
 .mining-command-dock .system-actions {
     display: flex;
@@ -2434,27 +2393,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .phase-board-arrival .achievement-card p,
 .phase-board-results .achievement-card p {
     width: 670px;
-}
-.phase-board-arrival .tutorial-card {
-    width: 704px;
-    padding: 11px 12px;
-    margin-top: 10px;
-    margin-bottom: 12px;
-    background-color: #101923;
-    border-color: #2f4354;
-}
-.phase-board-arrival .tutorial-card div {
-    width: 680px;
-}
-.phase-board-arrival .tutorial-card p {
-    width: 680px;
-    line-height: 1.32;
-}
-.phase-board-arrival .tutorial-card button {
-    width: 140px;
-    height: 34px;
-    line-height: 34px;
-    margin-top: 8px;
 }
 .phase-board-arrival > .metric-grid,
 .phase-board-research .focus-metrics,
@@ -4331,7 +4269,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     line-height: 1.15;
     margin-right: 0px;
 }
-.metric, .summary-card, .ops-card, .pilot-card, .inventory-item, .resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .achievement-card, .crew-fate-card, .tutorial-card, .result-group {
+.metric, .summary-card, .ops-card, .pilot-card, .inventory-item, .resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .achievement-card, .crew-fate-card, .result-group {
     margin-top: 8px;
     margin-right: 8px;
     padding: 9px 10px;
@@ -4964,7 +4902,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .inventory-item.rarity-exotic .inventory-art span {
     color: #ffaad9;
 }
-.resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .tutorial-card, .draft-hero, .draft-board, .board-primary {
+.resource-bank, .phase-advisory, .cockpit-hud, .surface-primary-action, .draft-hero, .draft-board, .board-primary {
     width: 100%;
 }
 .metric, .surface-kpi {
@@ -5043,7 +4981,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     margin-top: 0px;
     margin-right: 0px;
 }
-.control-panel .phase-board-mining .tutorial-card,
 .control-panel .phase-board-mining .phase-advisory,
 .control-panel .phase-board-mining .mining-health-strip,
 .control-panel .phase-board-mining .mining-combat-strip,
@@ -5258,42 +5195,8 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     line-height: 1.05;
     text-align: center;
 }
-.control-panel .tutorial-card,
 .control-panel .phase-advisory {
     width: 370px;
-}
-.control-panel .tutorial-card {
-    display: block;
-    margin-top: 8px;
-    margin-bottom: 12px;
-    padding: 10px;
-    background-color: #101923;
-    border-color: #2f4354;
-}
-.control-panel .tutorial-card div {
-    display: block;
-    width: 344px;
-}
-.control-panel .tutorial-card span {
-    color: #7f91a0;
-    font-size: 12px;
-}
-.control-panel .tutorial-card strong {
-    margin-top: 2px;
-    margin-bottom: 4px;
-}
-.control-panel .tutorial-card p {
-    width: 344px;
-    line-height: 1.25;
-}
-.control-panel .tutorial-card button {
-    display: block;
-    min-width: 0px;
-    width: 128px;
-    height: 32px;
-    line-height: 32px;
-    margin-top: 8px;
-    margin-right: 0px;
 }
 .control-panel .telemetry-status,
 .control-panel .phase-copy,
@@ -5918,11 +5821,6 @@ button.settings-toggle:hover {
     margin-left: 0px;
     padding: 16px;
 }
-#rr-modal.modal-phase_briefing {
-    top: )" + std::to_string(modalBriefTop) + R"(px;
-    height: )" + std::to_string(modalBriefHeight) + R"(px;
-    padding: 20px;
-}
 #rr-modal.modal-surface {
     top: )" + std::to_string(modalTallTop) + R"(px;
     height: )" + std::to_string(modalTallHeight) + R"(px;
@@ -5938,26 +5836,35 @@ button.settings-toggle:hover {
     height: 280px;
     padding: 20px;
 }
+#rr-modal.modal-launch_introduction,
+#rr-modal.modal-approach_introduction,
 #rr-modal.modal-flyby_introduction,
 #rr-modal.modal-orbit_introduction,
 #rr-modal.modal-landing_introduction,
-#rr-modal.modal-mini_drone_introduction {
+#rr-modal.modal-mini_drone_introduction,
+#rr-modal.modal-mining_introduction {
     left: )" + std::to_string(modalActivityLeft) + R"(px;
     top: )" + std::to_string(modalActivityTop) + R"(px;
     width: )" + std::to_string(modalActivityWidth) + R"(px;
     height: )" + std::to_string(modalActivityHeight) + R"(px;
     padding: 20px;
 }
+#rr-modal.modal-launch_introduction .modal-head,
+#rr-modal.modal-approach_introduction .modal-head,
 #rr-modal.modal-flyby_introduction .modal-head,
 #rr-modal.modal-orbit_introduction .modal-head,
 #rr-modal.modal-landing_introduction .modal-head,
-#rr-modal.modal-mini_drone_introduction .modal-head {
+#rr-modal.modal-mini_drone_introduction .modal-head,
+#rr-modal.modal-mining_introduction .modal-head {
     margin-bottom: 12px;
 }
+#rr-modal.modal-launch_introduction .modal-head button,
+#rr-modal.modal-approach_introduction .modal-head button,
 #rr-modal.modal-flyby_introduction .modal-head button,
 #rr-modal.modal-orbit_introduction .modal-head button,
 #rr-modal.modal-landing_introduction .modal-head button,
-#rr-modal.modal-mini_drone_introduction .modal-head button {
+#rr-modal.modal-mini_drone_introduction .modal-head button,
+#rr-modal.modal-mining_introduction .modal-head button {
     width: 82px;
     min-height: 36px;
     padding: 7px 10px;
@@ -6061,7 +5968,7 @@ body.controller-focus-visible .rr-controller-focus {
     left: 16px;
     right: 16px;
     bottom: 8px;
-    height: 28px;
+    min-height: 28px;
     display: flex;
     flex-direction: row;
     justify-content: center;
@@ -6074,6 +5981,14 @@ body.controller-focus-visible .rr-controller-focus {
     border-radius: 6px;
     color: #b9c9d4;
     font-size: 12px;
+}
+#rr-controller-prompt-bar.mining-input-helper {
+    min-height: 42px;
+    flex-wrap: wrap;
+}
+#rr-controller-prompt-bar span {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 #rr-controller-prompt-bar strong {
     color: #f4c95d;
@@ -6180,16 +6095,78 @@ std::string withOpeningControllerLabels(std::string markup, ControllerFamily fam
     return markup;
 }
 
-std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily family, bool modalOpen, bool modalDismissible)
+bool usesGameplayInputHelper(std::string_view panelHtml)
+{
+    return panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos
+        || panelHtml.find("data-flyby-completed=\"0\"") != std::string_view::npos
+        || panelHtml.find("data-orbit-completed=\"0\"") != std::string_view::npos;
+}
+
+std::string inputPromptBar(
+    std::string_view panelHtml,
+    ControllerFamily family,
+    bool controllerActive,
+    bool modalOpen,
+    bool modalDismissible)
 {
     const ControllerPromptLabels labels = controllerPromptLabels(promptControllerFamily(family));
     const bool swapConfirmCancel = rr_rml_controller_boolean_preference(1) != 0;
     const char* confirm = swapConfirmCancel ? labels.east : labels.south;
     const char* cancel = swapConfirmCancel ? labels.south : labels.east;
-    std::string prompt = "<div id=\"rr-controller-prompt-bar\">";
+    const bool mining = panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos;
+    const bool flyby = panelHtml.find("data-flyby-completed=\"0\"") != std::string_view::npos;
+    const bool orbit = panelHtml.find("data-orbit-completed=\"0\"") != std::string_view::npos;
+    if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit))) {
+        return {};
+    }
+
+    std::string prompt = "<div id=\"rr-controller-prompt-bar\"";
+    if (mining && !modalOpen) {
+        prompt += " class=\"mining-input-helper\"";
+    }
+    prompt += ">";
     const auto item = [&](const char* button, const char* action) {
         return std::string("<span><strong>") + button + "</strong> " + action + "</span>";
     };
+    const auto describedItem = [&](std::string_view action, std::string_view button, std::string_view purpose = {}) {
+        // Keep the complete action/key phrase in one text run. RmlUi may wrap
+        // around nested inline elements even when the parent is nowrap.
+        std::string result = "<span>" + std::string(action) + " (" + std::string(button) + ")";
+        if (!purpose.empty()) {
+            result += " - " + std::string(purpose);
+        }
+        return result + "</span>";
+    };
+
+    if (!controllerActive) {
+        if (mining) {
+            prompt += describedItem("Move / Face", "WASD / Arrows")
+                + describedItem("Drill", "Space", "Extracts terrain")
+                + describedItem("Pulse Scanner", "E", "Reveals nearby resources");
+            if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
+                prompt += describedItem("Tether Artifact", "T", "Requires an exposed nearby target");
+            }
+            if (panelHtml.find("data-mining-drones=\"1\"") != std::string_view::npos) {
+                prompt += describedItem("Assigned Drones", "Automatic", "Execute their roles automatically");
+            }
+            if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
+                prompt += describedItem("Bank Cargo", "R", "Secures the payload");
+            }
+            if (panelHtml.find("data-rr-action=\"mining_abort\"") != std::string_view::npos) {
+                prompt += describedItem("Emergency Recall", "Esc", "Ends the run");
+            }
+        } else if (flyby) {
+            prompt += describedItem("Accelerate / Slow", "W/S or Up/Down")
+                + describedItem("Turn", "A/D or Left/Right")
+                + describedItem("Abort", "Esc", "Records a Miss");
+        } else if (orbit) {
+            prompt += describedItem("Prograde / Retrograde", "W/S or Up/Down")
+                + describedItem("Tighten / Widen", "A/D or Left/Right")
+                + describedItem("Abort", "Esc", "Records a Miss");
+        }
+        return prompt + "</div>";
+    }
+
     if (modalOpen) {
         prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select");
         if (modalDismissible) {
@@ -6202,12 +6179,39 @@ std::string controllerPromptBar(std::string_view panelHtml, ControllerFamily fam
                panelHtml.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos ||
                panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
-    } else if (panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
-        prompt += item("L-stick", "Move / face") + item(labels.rightTrigger, "Drill") + item(labels.west, "Scan") +
-            item(labels.north, "Tether") + item(labels.leftBumper, "Drill repair") + item(labels.rightBumper, "Rig repair") +
-            item(labels.south, "Stow") + item(labels.east, "Hold: recall") + item(labels.menu, "Pause");
-    } else if (panelHtml.find("data-flyby-run") != std::string_view::npos || panelHtml.find("data-orbit-run") != std::string_view::npos) {
-        prompt += item("L-stick", "Fly") + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
+    } else if (mining) {
+        prompt += describedItem("Move / Face", "L-stick")
+            + describedItem("Drill", labels.rightTrigger, "Extracts terrain")
+            + describedItem("Pulse Scanner", labels.west, "Reveals nearby resources");
+        if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
+            prompt += describedItem("Tether Artifact", labels.north, "Requires an exposed nearby target");
+        }
+        if (panelHtml.find("data-mining-drones=\"1\"") != std::string_view::npos) {
+            prompt += describedItem("Assigned Drones", "Automatic", "Execute their roles automatically");
+        }
+        if (panelHtml.find("data-drill-visible=\"1\"") != std::string_view::npos) {
+            prompt += describedItem("Repair Drill", labels.leftBumper);
+        }
+        if (panelHtml.find("data-drone-visible=\"1\"") != std::string_view::npos) {
+            prompt += describedItem("Repair Rig", labels.rightBumper);
+        }
+        if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
+            prompt += describedItem("Bank Cargo", labels.south, "Secures the payload");
+        }
+        if (panelHtml.find("data-rr-action=\"mining_abort\"") != std::string_view::npos) {
+            prompt += describedItem("Emergency Recall", labels.east, "Hold to end the run");
+        }
+        prompt += item(labels.menu, "Pause");
+    } else if (flyby) {
+        prompt += describedItem("Accelerate / Slow", "L-stick vertical")
+            + describedItem("Turn", "L-stick horizontal")
+            + describedItem("Abort", labels.east, "Hold to record a Miss")
+            + item(labels.menu, "Pause");
+    } else if (orbit) {
+        prompt += describedItem("Prograde / Retrograde", "L-stick vertical")
+            + describedItem("Tighten / Widen", "L-stick horizontal")
+            + describedItem("Abort", labels.east, "Hold to record a Miss")
+            + item(labels.menu, "Pause");
     } else if (panelHtml.find("push-minigame") != std::string_view::npos || panelHtml.find("scan-minigame") != std::string_view::npos) {
         prompt += item(labels.south, "Pulse / push") + item(labels.west, "Bank") + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
     } else if (panelHtml.find("data-rr-action=\"return_home\"") != std::string_view::npos) {
@@ -6404,8 +6408,13 @@ std::string buildDocumentRml(
         document += "</div></div>";
     }
 
-    if (controllerPresentationActive) {
-        document += controllerPromptBar(panelHtml, controllerFamily, activeModal != nullptr, activeModal == nullptr || activeModal->dismissible);
+    if (controllerPresentationActive || usesGameplayInputHelper(panelHtml)) {
+        document += inputPromptBar(
+            panelHtml,
+            controllerFamily,
+            controllerPresentationActive,
+            activeModal != nullptr,
+            activeModal == nullptr || activeModal->dismissible);
     }
 
     document += "<div id=\"rr-performance-stats\"";
@@ -6548,10 +6557,6 @@ bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
 {
     if (binding.close) {
         owner.closeModal();
-        return true;
-    }
-    if (!binding.helpDismiss.empty()) {
-        owner.dismissHelp(binding.helpDismiss);
         return true;
     }
     if (!binding.modal.empty()) {
@@ -6812,12 +6817,6 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
         return true;
     }
 
-    const Rml::String helpDismiss = button->GetAttribute<Rml::String>("data-help-dismiss", "");
-    if (!helpDismiss.empty()) {
-        owner.dismissHelp(helpDismiss);
-        return true;
-    }
-
     const std::string modalId = button->GetAttribute<Rml::String>("data-ui-modal", "");
     if (!modalId.empty()) {
         owner.openModal(modalId);
@@ -6960,10 +6959,10 @@ void GameRmlUi::setPanelHtml(const std::string& html)
             controllerFamily_);
         panelElement->SetInnerRML(panelBody);
 
-        if (controllerPresentationActive_) {
+        {
             Rml::Element* promptElement = g_document->GetElementById("rr-controller-prompt-bar");
             if (promptElement) {
-                const std::string promptMarkup = controllerPromptBar(panelHtml_, controllerFamily_, false, true);
+                const std::string promptMarkup = inputPromptBar(panelHtml_, controllerFamily_, controllerPresentationActive_, false, true);
                 const std::size_t contentStart = promptMarkup.find('>');
                 const std::size_t contentEnd = promptMarkup.rfind("</div>");
                 if (contentStart != std::string::npos && contentEnd != std::string::npos && contentEnd > contentStart) {
@@ -7040,7 +7039,7 @@ void GameRmlUi::render()
         viewport.drawableHeight,
     });
     Rml::Rectanglei rootClip;
-    if (!openModalId_.empty() || controllerPresentationActive_ || performanceStatsVisible_
+    if (!openModalId_.empty() || controllerPresentationActive_ || usesGameplayInputHelper(panelHtml_) || performanceStatsVisible_
         || nativeSceneOverlayMode(panelHtml_) != NativeSceneOverlayMode::None) {
         rootClip = Rml::Rectanglei::FromSize({viewportWidth, viewportHeight});
     } else {
@@ -7421,12 +7420,6 @@ void GameRmlUi::closeModal()
     }
 }
 
-void GameRmlUi::dismissHelp(const std::string& topic)
-{
-    rr_rml_dismiss_help_topic(topic.c_str());
-    rebuildDocument();
-}
-
 void GameRmlUi::dispatchAction(const std::string& action)
 {
     const bool closesModal = !openModalId_.empty();
@@ -7461,10 +7454,6 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
 
     if (it->close) {
         closeModal();
-        return true;
-    }
-    if (!it->helpDismiss.empty()) {
-        dismissHelp(it->helpDismiss);
         return true;
     }
     if (!it->modal.empty()) {

@@ -37,11 +37,6 @@ struct ResearchProjectCardPresentation {
     PanelButtonPresentation action;
 };
 
-struct PhaseBriefingPresentation {
-    std::string title;
-    std::vector<DetailPresentationRow> rows;
-};
-
 struct PhaseAdvisoryPresentation {
     std::string title;
     std::string detail;
@@ -50,7 +45,6 @@ struct PhaseAdvisoryPresentation {
 
 struct ResearchPhasePresentation {
     std::vector<PhaseStepPresentation> phaseSteps;
-    PhaseBriefingPresentation briefing;
     PhaseAdvisoryPresentation advisory;
     std::vector<DetailPresentationRow> details;
     std::vector<PanelMetricPresentation> metrics;
@@ -81,7 +75,6 @@ struct SurfaceUpgradeCardPresentation {
 
 struct SurfaceExpeditionPresentation {
     std::vector<PhaseStepPresentation> phaseSteps;
-    PhaseBriefingPresentation briefing;
     std::string postureTitle;
     std::string postureDetail;
     std::string postureClass;
@@ -203,46 +196,6 @@ inline std::vector<PhaseStepPresentation> postArrivalPhaseSteps(Screen screen)
         phaseStep(text::panel::details::researchPhase, screen == Screen::Research ? "Now" : (researchDone ? "Done" : "Next"), screen == Screen::Research ? "active" : (researchDone ? "done" : "pending")),
         phaseStep(text::panel::details::surfacePhase, screen == Screen::SurfaceExpedition ? "Now" : (surfaceDone ? "Done" : "Next"), screen == Screen::SurfaceExpedition ? "active" : (surfaceDone ? "done" : "pending")),
         phaseStep(text::panel::details::refitPhase, screen == Screen::Upgrade ? "Now" : "Next", screen == Screen::Upgrade ? "active" : "pending")
-    };
-}
-
-inline PhaseBriefingPresentation postArrivalPhaseBriefing(Screen screen)
-{
-    if (screen == Screen::Results) {
-        return {
-            std::string(text::panel::modals::arrivalBriefing),
-            {
-                detailPresentationRow(text::panel::details::phaseIntent, std::string("Confirm the agency reached a research frontier and prepare the post-arrival sequence.")),
-                detailPresentationRow(text::panel::details::phaseInputs, std::string("Transfer telemetry, surviving crew, vehicle condition, and any resources already in the archive.")),
-                detailPresentationRow(text::panel::details::phaseOutputs, std::string("Opens one research decision, then a landed surface expedition before the next refit.")),
-                detailPresentationRow(text::panel::details::phaseRisk, std::string("The ship still needs to survive surface operations and the next launch cycle; arrival is not the end of the run.")),
-                detailPresentationRow(text::panel::details::phaseNext, std::string("Continue to Research to spend or preserve materials before the landing team deploys."))
-            }
-        };
-    }
-
-    if (screen == Screen::Research) {
-        return {
-            std::string(text::panel::modals::researchBriefing),
-            {
-                detailPresentationRow(text::panel::details::phaseIntent, std::string("Turn a successful Mars arrival into long-term agency capability.")),
-                detailPresentationRow(text::panel::details::phaseInputs, std::string("Blueprints, recovered materials, decoded artifacts, and lab bonuses.")),
-                detailPresentationRow(text::panel::details::phaseOutputs, std::string("Unlock module families, crew facilities, field tools, and artifact analysis threads.")),
-                detailPresentationRow(text::panel::details::phaseRisk, std::string("Research spends scarce materials before you know what the surface team will recover.")),
-                detailPresentationRow(text::panel::details::phaseNext, std::string("Pick one project or skip, then deploy the surface expedition."))
-            }
-        };
-    }
-
-    return {
-        std::string(text::panel::modals::surfaceBriefing),
-        {
-            detailPresentationRow(text::panel::details::phaseIntent, std::string("Convert a landing into recoverable samples, artifacts, and future refit options.")),
-            detailPresentationRow(text::panel::details::phaseInputs, std::string("Action kits, site profile, field-kit unlocks, and the payload already in the canisters.")),
-            detailPresentationRow(text::panel::details::phaseOutputs, std::string("Common, rare, and exotic materials plus occasional artifacts or blueprint leads.")),
-            detailPresentationRow(text::panel::details::phaseRisk, std::string("Cargo, hazard, low action kits, and depth raise extraction risk. Failed extraction can lose payload.")),
-            detailPresentationRow(text::panel::details::phaseNext, std::string("Extract to bank the payload and return to the refit window."))
-        }
     };
 }
 
@@ -1187,7 +1140,6 @@ inline ResearchPhasePresentation researchPhasePresentation(const GameState& stat
 {
     ResearchPhasePresentation presentation;
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::Research);
-    presentation.briefing = postArrivalPhaseBriefing(Screen::Research);
     presentation.details = {
         detailPresentationRow(text::labels::blueprints, std::to_string(state.meta.blueprintProgress)),
         detailPresentationRow(text::labels::artifactInsight, text::panel::blueprintGain(artifactInsightBlueprintBonus(state.meta))),
@@ -1571,7 +1523,6 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk, arkKnown);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
-    presentation.briefing = postArrivalPhaseBriefing(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
     presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
     if (gateType != MiningGateType::None) {

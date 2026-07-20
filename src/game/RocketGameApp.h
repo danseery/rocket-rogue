@@ -37,6 +37,7 @@ public:
     int currentScreen() const;
     void setControllerPreferences(const ControllerPreferences& preferences);
     void setMiningDrillMode(MiningDrillMode mode);
+    void setFirstTimeIntroductionsEnabled(bool enabled);
     const ControllerPreferences& controllerPreferences() const;
     void setActiveInputSource(InputSource source);
     InputContext inputContext() const;
@@ -62,6 +63,7 @@ public:
     void selectNavigationDestination(int index);
     void buyOffer(int index);
     void rerollOffers();
+    void acknowledgeApproachIntroduction();
     void runArrivalFlyby();
     void flybyMove(double xAxis, double yAxis);
     void flybyAbort();
@@ -141,6 +143,8 @@ public:
     bool uiCancel();
 
 private:
+    void disableDebugToolsForFreshCampaign();
+
     struct ReturnTripState {
         double elapsed = 0.0;
         double duration = 2.4;
@@ -240,6 +244,7 @@ private:
     RealtimeInputState keyboardRealtimeInput_;
     RealtimeInputState controllerRealtimeInput_;
     MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;
+    bool firstTimeIntroductionsEnabled_ = true;
     bool keyboardDrillPressed_ = false;
     PauseReason pauseReason_ = PauseReason::None;
     Screen lastInputScreen_ = Screen::Hangar;

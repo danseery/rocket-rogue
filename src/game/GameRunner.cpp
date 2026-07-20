@@ -203,6 +203,7 @@ void GameRunner::refreshPreferences(bool force)
     preferenceRevision_ = services_.preferences.revision();
     preferenceCacheInitialized_ = true;
     app_.setMiningDrillMode(cachedPreferences_.miningDrillMode);
+    app_.setFirstTimeIntroductionsEnabled(!cachedPreferences_.helpDisabled);
 
     if (force || controllerChanged) {
         services_.controllers.setPreferences(cachedPreferences_.controller);

@@ -267,6 +267,11 @@ void RocketGameApp::finishArrivalFanfare()
     } else {
         state_.screen = Screen::ArrivalOps;
         state_.statusLine = std::string(text::status::arrivalOpsOpened);
+        if (!firstTimeIntroductionsEnabled_
+            && state_.run.arrivalOps.destinationId == content::destination::moon) {
+            ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
+            save();
+        }
     }
     panelDirty_ = true;
 }
@@ -465,6 +470,22 @@ void RocketGameApp::setMiningDrillMode(MiningDrillMode mode)
     }
     releaseRealtimeInputs(true);
     miningDrillMode_ = mode;
+}
+
+void RocketGameApp::setFirstTimeIntroductionsEnabled(bool enabled)
+{
+    if (firstTimeIntroductionsEnabled_ == enabled) {
+        return;
+    }
+    firstTimeIntroductionsEnabled_ = enabled;
+    if (!enabled
+        && state_.screen == Screen::ArrivalOps
+        && state_.run.arrivalOps.destinationId == content::destination::moon
+        && !ui::briefings::acknowledged(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach)) {
+        ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
+        save();
+    }
+    panelDirty_ = true;
 }
 
 void RocketGameApp::setActiveInputSource(InputSource source)
@@ -1317,6 +1338,13 @@ void RocketGameApp::prepareForLaunch()
         return;
     }
 
+    if (!ui::briefings::acknowledged(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch)) {
+        ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
+        // Persist while the campaign is still safely in the Hangar. Active
+        // launch sessions are intentionally not restored from save data.
+        save();
+    }
+
     state_.run.active = true;
     syncLaunchConfig(state_, catalog_);
     state_.launchConfig.frontierTransfer = hostileSystemActive(state_);
@@ -1523,6 +1551,10 @@ void RocketGameApp::next()
             } else {
                 state_.screen = Screen::ArrivalOps;
                 state_.statusLine = std::string(text::status::arrivalOpsOpened);
+                if (!firstTimeIntroductionsEnabled_
+                    && state_.run.arrivalOps.destinationId == content::destination::moon) {
+                    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
+                }
             }
             syncLaunchConfig(state_, catalog_);
             save();
@@ -1567,6 +1599,18 @@ void RocketGameApp::runArrivalFlyby()
     startArrivalFlybyRun(state_, catalog_);
     state_.statusLine = "Manual flyby started. Stay in the approach corridor.";
     syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::acknowledgeApproachIntroduction()
+{
+    if (state_.screen != Screen::ArrivalOps
+        || state_.run.arrivalOps.destinationId != content::destination::moon) {
+        return;
+    }
+
+    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
     save();
     panelDirty_ = true;
 }
@@ -1746,6 +1790,9 @@ void RocketGameApp::mineSurface()
     }
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
+    if (outcome.applied) {
+        ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
+    }
     state_.statusLine = outcome.applied ? std::string(text::status::miningStarted) : surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -2853,6 +2900,7 @@ void RocketGameApp::resetSave()
     rng_ = Random(state_.seed);
     session_ = {};
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
+    disableDebugToolsForFreshCampaign();
     refreshPanel();
 }
 
@@ -2887,10 +2935,30 @@ void RocketGameApp::newGame()
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
     miningExtraction_ = {};
     releaseRealtimeInputs(true);
+    disableDebugToolsForFreshCampaign();
     hasSavedGame_ = stored;
     titleScreenActive_ = false;
     titleNotice_.clear();
     refreshPanel();
+}
+
+void RocketGameApp::disableDebugToolsForFreshCampaign()
+{
+    AppPreferences preferences = services_.preferences.load();
+    if (!preferences.debugToolsEnabled) {
+        return;
+    }
+
+    preferences.debugToolsEnabled = false;
+    if (!services_.preferences.store(preferences)) {
+        services_.host.log(PlatformLogLevel::Error, services_.preferences.lastError());
+        return;
+    }
+
+    // The preference controls the web overlay as well as native UI
+    // presentation, so update both immediately rather than waiting a frame.
+    services_.renderer.setPreferences(preferences);
+    services_.uiBridge.preferencesChanged(preferences);
 }
 
 void RocketGameApp::continueGame()
@@ -3021,6 +3089,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         titleScreenActive_,
         hasSavedGame_,
         titleNotice_,
+        firstTimeIntroductionsEnabled_,
     };
 }
 
@@ -3107,6 +3176,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         arkJump();
     } else if (action == ui::actions::rerollOffers) {
         rerollOffers();
+    } else if (action == ui::actions::acknowledgeApproachIntroduction) {
+        acknowledgeApproachIntroduction();
     } else if (action == ui::actions::arrivalFlyby) {
         runArrivalFlyby();
     } else if (action == ui::actions::flybyAbort) {

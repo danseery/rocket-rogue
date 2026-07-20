@@ -1,6 +1,7 @@
 #include "core/SaveData.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/GameUi.h"
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
@@ -2018,6 +2019,18 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.meta.destinationFlybys = save.destinationFlybys;
         state.meta.destinationOrbits = save.destinationOrbits;
         state.meta.destinationLandings = save.destinationLandings;
+    }
+    const bool hasRecordedLaunchHistory = save.destinationIndex > 0
+        || save.frontierReadiness > 0
+        || save.furthestTier > 0
+        || save.shipsLost > 0
+        || std::any_of(save.destinationAttempts.begin(), save.destinationAttempts.end(), [](int attempts) { return attempts > 0; })
+        || std::any_of(save.destinationSuccesses.begin(), save.destinationSuccesses.end(), [](int successes) { return successes > 0; });
+    if (hasRecordedLaunchHistory) {
+        ui::briefings::acknowledge(state.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
+    }
+    if (save.surfaceExpedition.miningRunUsed || save.mining.active) {
+        ui::briefings::acknowledge(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
     }
     syncLaunchConfig(state, catalog);
     if (save.version < 2 && legacyArkDiscovered) {

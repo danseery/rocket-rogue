@@ -25,6 +25,7 @@ inline constexpr std::string_view arkJump = "ark_jump";
 inline constexpr std::string_view selectNavigationDestinationPrefix = "select_navigation:";
 inline constexpr std::string_view rerollOffers = "reroll_offers";
 inline constexpr std::string_view arrivalFlyby = "arrival_flyby";
+inline constexpr std::string_view acknowledgeApproachIntroduction = "acknowledge_approach_introduction";
 inline constexpr std::string_view flybyAbort = "flyby_abort";
 inline constexpr std::string_view flybyContinue = "flyby_continue";
 inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
@@ -109,7 +110,6 @@ inline std::string upgradeDrone(int index)
 } // namespace actions
 
 namespace modals {
-inline constexpr std::string_view telemetry = "telemetry";
 inline constexpr std::string_view settings = "settings";
 inline constexpr std::string_view ship = "ship";
 inline constexpr std::string_view crew = "crew";
@@ -121,22 +121,27 @@ inline constexpr std::string_view inventory = "inventory";
 inline constexpr std::string_view map = "map";
 inline constexpr std::string_view research = "research";
 inline constexpr std::string_view surface = "surface";
-inline constexpr std::string_view phaseBriefing = "phase_briefing";
 inline constexpr std::string_view missionLog = "mission_log";
 inline constexpr std::string_view miningFailure = "mining_failure";
 inline constexpr std::string_view launchOutcome = "launch_outcome";
 inline constexpr std::string_view flightReport = "flight_report";
+inline constexpr std::string_view launchIntroduction = "launch_introduction";
+inline constexpr std::string_view approachIntroduction = "approach_introduction";
 inline constexpr std::string_view flybyIntroduction = "flyby_introduction";
 inline constexpr std::string_view orbitIntroduction = "orbit_introduction";
 inline constexpr std::string_view landingIntroduction = "landing_introduction";
 inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introduction";
+inline constexpr std::string_view miningIntroduction = "mining_introduction";
 } // namespace modals
 
 namespace briefings {
+inline constexpr std::string_view launch = "launch_controls";
+inline constexpr std::string_view approach = "approach_overview";
 inline constexpr std::string_view flyby = "flyby_blueprints";
 inline constexpr std::string_view orbit = "orbit_blueprints";
 inline constexpr std::string_view landing = "landing_drone_upgrades";
 inline constexpr std::string_view miniDrones = "mini_drones";
+inline constexpr std::string_view mining = "mining_overview";
 
 inline bool acknowledged(const std::vector<std::string>& ids, std::string_view id)
 {

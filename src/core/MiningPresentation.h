@@ -24,6 +24,7 @@ struct MiningRunPresentation {
     std::string combatDetail;
     std::string commandTitle;
     std::string commandDetail;
+    std::vector<std::string> commandHints;
     std::string rigHealth;
     double rigHealthRatio = 1.0;
     bool failurePending = false;
@@ -385,28 +386,32 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             const double artifactDistance = artifactRecoverable
                 ? std::hypot(artifact.x - mining.droneX, artifact.y - mining.droneY)
                 : 0.0;
-            PanelButtonPresentation tetherAction = disabledPanelButton("No tether target");
-            if (artifact.tethered) {
-                tetherAction = panelActionButton("Release tether", ui::actions::miningTether, "warn");
-            } else if (artifactRecoverable && !artifactExposed) {
-                tetherAction = disabledPanelButton("Scan or expose artifact");
-            } else if (artifactRecoverable && artifactDistance > tuning::mining::artifactTetherRangeCells) {
-                tetherAction = disabledPanelButton("Move within tether range");
-            } else if (artifactRecoverable) {
-                tetherAction = panelActionButton(text::buttons::tetherArtifact, ui::actions::miningTether, "warn");
-            }
-            // Keep the command discoverable even when disabled. The UI exposes
-            // the stable action id while native controls correctly refuse it.
-            if (!tetherAction.enabled) {
-                tetherAction.actionId = std::string(ui::actions::miningTether);
-            }
             presentation.commandTitle = "Commands";
-            presentation.commandDetail = "E scans and reports discoveries. T is available only for an exposed nearby artifact. Drones execute their assigned roles automatically.";
-            presentation.actions = {
-                panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
-                tetherAction,
-                panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger")
-            };
+            presentation.commandHints.push_back("Pulse Scanner (E) - Reveals nearby resources");
+            presentation.actions.push_back(panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+            if (artifact.present) {
+                PanelButtonPresentation tetherAction = disabledPanelButton("No tether target");
+                if (artifact.tethered) {
+                    tetherAction = panelActionButton("Release tether", ui::actions::miningTether, "warn");
+                } else if (artifactRecoverable && !artifactExposed) {
+                    tetherAction = disabledPanelButton("Scan or expose artifact");
+                } else if (artifactRecoverable && artifactDistance > tuning::mining::artifactTetherRangeCells) {
+                    tetherAction = disabledPanelButton("Move within tether range");
+                } else if (artifactRecoverable) {
+                    tetherAction = panelActionButton(text::buttons::tetherArtifact, ui::actions::miningTether, "warn");
+                }
+                // Keep the command discoverable once artifact play is active,
+                // even when the current target is not yet meaningful.
+                if (!tetherAction.enabled) {
+                    tetherAction.actionId = std::string(ui::actions::miningTether);
+                }
+                presentation.commandHints.push_back("Tether Artifact (T) - Requires an exposed nearby target");
+                presentation.actions.push_back(std::move(tetherAction));
+            }
+            if (!mining.miniDrones.empty()) {
+                presentation.commandHints.push_back("Assigned Drones (Automatic) - Execute their roles automatically");
+            }
+            presentation.actions.push_back(panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger"));
         }
     }
     return presentation;

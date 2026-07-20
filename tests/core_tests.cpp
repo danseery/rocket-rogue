@@ -818,23 +818,51 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
 }
 
-void destroyedMoonTransferPreservesProvingFlights()
+void destroyedLaunchesPreserveProvingFlights()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 468);
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-    const Destination* next = nextDestination(state, catalog);
+    GameState earthFlight = createNewGame(catalog, 468);
+
+    LaunchOutcome successfulEarthFlight;
+    successfulEarthFlight.type = LaunchResultType::MissionComplete;
+    successfulEarthFlight.destinationId = content::destination::earthOrbit;
+    successfulEarthFlight.ejectMultiplier = defaultProvingTarget(catalog.destinations.front());
+    successfulEarthFlight.crashMultiplier = successfulEarthFlight.ejectMultiplier + 0.2;
+    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
+    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
+    require(earthFlight.run.frontierReadiness == 2, "two successful proving flights should bank two Flight Data");
+
+    LaunchOutcome destroyedEarthFlight;
+    destroyedEarthFlight.type = LaunchResultType::Destroyed;
+    destroyedEarthFlight.destinationId = content::destination::earthOrbit;
+    destroyedEarthFlight.shipDamage = tuning::damage::destroyedShipDamage;
+    destroyedEarthFlight.crewKilled = true;
+
+    applyLaunchOutcome(earthFlight, catalog, destroyedEarthFlight);
+
+    require(earthFlight.run.frontierReadiness == 2, "destroyed proving flights should preserve all previously banked Flight Data");
+    const LaunchOutcomeSummaryPresentation earthSummary = launchOutcomeSummaryPresentation(earthFlight, catalog);
+    require(earthSummary.progression.find("Flight Data held at 2/3") != std::string::npos,
+        "destroyed proving-flight summaries should say that existing route progress was preserved");
+
+    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
+    require(earthFlight.run.frontierReadiness == frontierReadinessRequired(earthFlight, catalog),
+        "the third successful proving flight should chart the Moon route even when a crash occurred between successes");
+
+    GameState moonTransfer = createNewGame(catalog, 469);
+    moonTransfer.run.frontierReadiness = frontierReadinessRequired(moonTransfer, catalog);
+    const Destination* next = nextDestination(moonTransfer, catalog);
     require(next != nullptr, "starter route should have a transfer target");
 
-    LaunchOutcome destroyed;
-    destroyed.type = LaunchResultType::Destroyed;
-    destroyed.destinationId = next->id;
-    destroyed.frontierTransfer = true;
-    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
+    LaunchOutcome destroyedMoonTransfer;
+    destroyedMoonTransfer.type = LaunchResultType::Destroyed;
+    destroyedMoonTransfer.destinationId = next->id;
+    destroyedMoonTransfer.frontierTransfer = true;
+    destroyedMoonTransfer.shipDamage = tuning::damage::destroyedShipDamage;
 
-    applyLaunchOutcome(state, catalog, destroyed);
+    applyLaunchOutcome(moonTransfer, catalog, destroyedMoonTransfer);
 
-    require(state.run.frontierReadiness == frontierReadinessRequired(state, catalog), "destroyed Moon transfer attempts should preserve all banked Flight Data");
+    require(moonTransfer.run.frontierReadiness == frontierReadinessRequired(moonTransfer, catalog), "destroyed Moon transfer attempts should preserve all banked Flight Data");
 }
 
 void deadCrewLosesTraining()
@@ -1389,10 +1417,6 @@ void researchPhasesUnlockOnlyAfterMarsArrival()
     require(arrivalSteps[0].label == std::string(text::panel::details::arrivalPhase), "arrival phase track should start with arrival");
     require(arrivalSteps[0].stateLabel == "Now" && arrivalSteps[0].stateClass == "active", "arrival phase track should mark arrival active on results");
     require(arrivalSteps[1].label == std::string(text::panel::details::researchPhase) && arrivalSteps[1].stateLabel == "Next", "arrival phase track should stage research next");
-    const PhaseBriefingPresentation arrivalBriefing = postArrivalPhaseBriefing(Screen::Results);
-    require(arrivalBriefing.title == std::string(text::panel::modals::arrivalBriefing), "arrival results should expose an arrival briefing");
-    require(findDetailPresentationRow(arrivalBriefing.rows, text::panel::details::phaseIntent) != nullptr, "arrival briefing should explain phase intent");
-    require(findDetailPresentationRow(arrivalBriefing.rows, text::panel::details::phaseNext) != nullptr, "arrival briefing should explain the research handoff");
 }
 
 void arrivalOperationsGateMoonButAllowMarsRisk()
@@ -1447,6 +1471,30 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
 void activityIntroductionsAreFirstUseAndUnlockAware()
 {
     const ContentCatalog catalog = createDefaultContent();
+    GameState hangar = createNewGame(catalog, 608);
+    Random hangarRng(608);
+    const PreparedLaunch hangarLaunch = prepareLaunch(hangar, catalog, hangarRng);
+    PanelRenderContext hangarContext {hangar, catalog, hangarLaunch, hangarLaunch};
+    std::string html = buildGamePanelHtml(hangarContext);
+    require(html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos
+            && html.find("FIRST FLIGHT BRIEF") != std::string::npos,
+        "a fresh campaign should introduce the first proving launch from its launch button");
+    require(html.find("Every safe mile beyond it brings richer findings and more funding.") != std::string::npos
+            && html.find("data-rr-action=\"prepare_launch\"") != std::string::npos,
+        "the launch introduction should explain over-target rewards and continue directly into preflight");
+
+    hangarContext.firstTimeIntroductionsEnabled = false;
+    html = buildGamePanelHtml(hangarContext);
+    require(html.find("launch_introduction") == std::string::npos
+            && html.find("data-rr-action=\"prepare_launch\"") != std::string::npos,
+        "disabled introductions should leave a direct proving-launch action");
+
+    ui::briefings::acknowledge(hangar.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
+    hangarContext.firstTimeIntroductionsEnabled = true;
+    html = buildGamePanelHtml(hangarContext);
+    require(html.find("launch_introduction") == std::string::npos,
+        "an acknowledged launch introduction should not repeat");
+
     LaunchOutcome marsArrival;
     marsArrival.type = LaunchResultType::MissionComplete;
     marsArrival.frontierTransfer = true;
@@ -1457,7 +1505,7 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     arrival.screen = Screen::ArrivalOps;
     Random arrivalRng(609);
     const PreparedLaunch arrivalLaunch = prepareLaunch(arrival, catalog, arrivalRng);
-    std::string html = buildGamePanelHtml({arrival, catalog, arrivalLaunch, arrivalLaunch});
+    html = buildGamePanelHtml({arrival, catalog, arrivalLaunch, arrivalLaunch});
     require(html.find("data-ui-modal=\"flyby_introduction\"") != std::string::npos,
         "first Flyby selection should open its introduction modal");
     require(html.find("data-ui-modal=\"orbit_introduction\"") != std::string::npos,
@@ -1466,6 +1514,8 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
         "first Landing selection should open its introduction modal");
     require(html.find("Blueprints unlock permanent upgrades for your SHIP") != std::string::npos,
         "Flyby and Orbit introductions should connect blueprints to permanent ship upgrades");
+    require(html.find("A perfect flyby slingshots the next launch with more speed and fuel margin") != std::string::npos,
+        "Flyby introduction should explain how a perfect run extends the next launch's reach");
     require(html.find("Surface upgrades improve your DRONE") != std::string::npos,
         "Landing introduction should connect surface upgrades to the mining drone");
     require(html.find("activity-introduction-kicker") != std::string::npos
@@ -1479,6 +1529,34 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
         "each first-use Arrival Ops modal should confirm into its activity action");
     require(html.find("Mini-drones") == std::string::npos,
         "arrival introductions should not mention mini-drones before the Drone Bay unlock");
+
+    LaunchOutcome moonArrival = marsArrival;
+    moonArrival.destinationId = content::destination::moon;
+    GameState lunarApproach = createNewGame(catalog, 610);
+    startArrivalOps(lunarApproach, moonArrival);
+    lunarApproach.screen = Screen::ArrivalOps;
+    Random lunarApproachRng(610);
+    const PreparedLaunch lunarApproachLaunch = prepareLaunch(lunarApproach, catalog, lunarApproachRng);
+    html = buildGamePanelHtml({lunarApproach, catalog, lunarApproachLaunch, lunarApproachLaunch});
+    require(html.find("data-modal=\"approach_introduction\" data-auto-modal=\"1\"") != std::string::npos
+            && html.find("LUNAR APPROACH") != std::string::npos,
+        "the first successful lunar arrival should automatically introduce the Approach phase");
+    require(html.find("route to Mars is now open") != std::string::npos
+            && html.find("Begin with a flyby") != std::string::npos
+            && html.find("data-rr-action=\"acknowledge_approach_introduction\"") != std::string::npos,
+        "the lunar Approach introduction should explain the phase and return to its options");
+    ui::briefings::acknowledge(lunarApproach.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
+    html = buildGamePanelHtml({lunarApproach, catalog, lunarApproachLaunch, lunarApproachLaunch});
+    require(html.find("approach_introduction") == std::string::npos,
+        "an acknowledged lunar Approach introduction should not repeat");
+
+    PanelRenderContext arrivalHelpDisabled {arrival, catalog, arrivalLaunch, arrivalLaunch};
+    arrivalHelpDisabled.firstTimeIntroductionsEnabled = false;
+    html = buildGamePanelHtml(arrivalHelpDisabled);
+    require(html.find("flyby_introduction") == std::string::npos
+            && html.find("orbit_introduction") == std::string::npos
+            && html.find("landing_introduction") == std::string::npos,
+        "disabled introductions should route every Arrival Ops card directly to its activity");
 
     ui::briefings::acknowledge(arrival.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby);
     ui::briefings::acknowledge(arrival.meta.acknowledgedActivityBriefingIds, ui::briefings::orbit);
@@ -1503,6 +1581,25 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     require(html.find("mini_drone_introduction") == std::string::npos
             && html.find("Mini-drones are persistent") == std::string::npos,
         "locked Drone Bay screens should not emit mini-drone introduction copy or markup");
+    require(html.find("data-ui-modal=\"mining_introduction\"") != std::string::npos
+            && html.find("MINING OPERATIONS") != std::string::npos
+            && html.find("Deployment spends 1 Shared Fuel") != std::string::npos
+            && html.find("bank cargo at the shuttle") != std::string::npos
+            && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
+        "the first available mining action should open an overview that deploys directly into the run");
+
+    PanelRenderContext miningHelpDisabled {surface, catalog, surfaceLaunch, surfaceLaunch};
+    miningHelpDisabled.firstTimeIntroductionsEnabled = false;
+    html = buildGamePanelHtml(miningHelpDisabled);
+    require(html.find("mining_introduction") == std::string::npos
+            && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
+        "disabled introductions should leave the first mining action direct");
+
+    ui::briefings::acknowledge(surface.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
+    html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
+    require(html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos
+            && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
+        "acknowledged mining should start directly without repeating its overview");
 
     surface.meta.unlockKeys.push_back(content::unlock::droneBay);
     ensureDroneBayState(surface, catalog);
@@ -1511,6 +1608,12 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
             && html.find("Mini-drones are persistent support craft") != std::string::npos
             && html.find("data-rr-action=\"drone_ops\"") != std::string::npos,
         "the unlocked Drone Bay should introduce mini-drones on first selection");
+    PanelRenderContext surfaceHelpDisabled {surface, catalog, surfaceLaunch, surfaceLaunch};
+    surfaceHelpDisabled.firstTimeIntroductionsEnabled = false;
+    html = buildGamePanelHtml(surfaceHelpDisabled);
+    require(html.find("mini_drone_introduction") == std::string::npos
+            && html.find("data-rr-action=\"drone_ops\"") != std::string::npos,
+        "disabled introductions should open the unlocked Drone Bay directly");
     ui::briefings::acknowledge(surface.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
     html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
     require(html.find("data-ui-modal=\"mini_drone_introduction\"") == std::string::npos
@@ -1751,6 +1854,13 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     GameState controls = createNewGame(catalog, 709);
     startArrivalOps(controls, moonArrival);
     startArrivalFlybyRun(controls, catalog);
+    Random controlsPanelRng(709);
+    const PreparedLaunch controlsPanelLaunch = prepareLaunch(controls, catalog, controlsPanelRng);
+    const std::string controlsPanelHtml = buildGamePanelHtml({controls, catalog, controlsPanelLaunch, controlsPanelLaunch});
+    require(controlsPanelHtml.find("data-flyby-completed=\"0\"") != std::string::npos
+            && controlsPanelHtml.find("Flyby controls") == std::string::npos
+            && controlsPanelHtml.find("cockpit-hud flight-hud") == std::string::npos,
+        "active flyby should reserve the left panel for telemetry and expose controls through the bottom input helper");
     controls.run.flyby.gravityStrength = 0.0;
     const double baseSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
     setFlybyMove(controls, 0.0, 1.0);
@@ -1859,6 +1969,13 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     startArrivalOps(miss, moonArrival);
     startArrivalOrbitRun(miss, catalog);
     require(miss.screen == Screen::Orbit && miss.run.orbit.active, "starting arrival orbit should open the orbit minigame");
+    Random missPanelRng(721);
+    const PreparedLaunch missPanelLaunch = prepareLaunch(miss, catalog, missPanelRng);
+    const std::string missPanelHtml = buildGamePanelHtml({miss, catalog, missPanelLaunch, missPanelLaunch});
+    require(missPanelHtml.find("data-orbit-completed=\"0\"") != std::string::npos
+            && missPanelHtml.find("Orbit controls") == std::string::npos
+            && missPanelHtml.find("orbit-control-panel") == std::string::npos,
+        "active orbit should reserve the left panel for telemetry and expose controls through the bottom input helper");
     require(miss.run.orbit.currentZone >= 1, "orbit should begin inside the scalable orbital band");
     require(miss.run.orbit.durationSeconds >= tuning::orbit::durationSeconds, "orbit should start from the tuned insertion timer");
     require(miss.run.orbit.durationSeconds <= tuning::orbit::durationSeconds + tuning::orbit::maxAssistDurationBonus + 0.001, "orbit assist should keep the insertion buffer bounded");
@@ -5953,9 +6070,6 @@ void researchPresentationComesFromSharedHelper()
     require(research.phaseSteps[1].stateLabel == "Now" && research.phaseSteps[1].stateClass == "active", "research phase track should mark research active");
     require(research.phaseSteps[2].label == std::string(text::panel::details::surfacePhase) && research.phaseSteps[2].stateLabel == "Next", "research phase track should stage surface next");
     require(research.phaseSteps[3].label == std::string(text::panel::details::refitPhase) && research.phaseSteps[3].stateLabel == "Next", "research phase track should stage refit next");
-    require(research.briefing.title == std::string(text::panel::modals::researchBriefing), "research presentation should expose a briefing modal title");
-    require(findDetailPresentationRow(research.briefing.rows, text::panel::details::phaseIntent) != nullptr, "research briefing should explain phase intent");
-    require(findDetailPresentationRow(research.briefing.rows, text::panel::details::phaseNext) != nullptr, "research briefing should explain the next phase");
     require(research.advisory.title == std::string(text::panel::messages::researchAdvisoryReady), "funded research should present ready advisory");
     require(research.advisory.cssClass == "ok", "funded research advisory should use ok styling");
     require(!research.details.empty(), "research presentation should expose detail modal rows");
@@ -6032,9 +6146,6 @@ void surfacePresentationComesFromSharedHelper()
     require(surface.phaseSteps[2].label == std::string(text::panel::details::surfacePhase), "surface phase track should include surface");
     require(surface.phaseSteps[2].stateLabel == "Now" && surface.phaseSteps[2].stateClass == "active", "surface phase track should mark surface active");
     require(surface.phaseSteps[3].label == std::string(text::panel::details::refitPhase) && surface.phaseSteps[3].stateLabel == "Next", "surface phase track should stage refit next");
-    require(surface.briefing.title == std::string(text::panel::modals::surfaceBriefing), "surface presentation should expose a briefing modal title");
-    require(findDetailPresentationRow(surface.briefing.rows, text::panel::details::phaseRisk) != nullptr, "surface briefing should explain extraction risk");
-    require(findDetailPresentationRow(surface.briefing.rows, text::panel::details::phaseNext) != nullptr, "surface briefing should explain the next phase");
     require(surface.postureTitle == std::string(text::panel::messages::surfacePostureStable), "loaded low-risk surface payload should present stable posture");
     require(surface.postureClass == "ok", "stable surface posture should use ok styling");
     require(surface.metrics.front().label == std::string(text::labels::site), "surface presentation should expose active site profile");
@@ -6234,8 +6345,10 @@ void saveRoundTripPreservesProgress()
     state.meta.destinationAttempts = {2, 1, 0};
     state.meta.destinationSuccesses = {1, 0, 0};
     state.meta.acknowledgedActivityBriefingIds = {
+        std::string(ui::briefings::launch),
         std::string(ui::briefings::flyby),
-        std::string(ui::briefings::landing)
+        std::string(ui::briefings::landing),
+        std::string(ui::briefings::mining)
     };
     state.meta.memorials.push_back("Test Pilot lost during Mars");
     state.run.crewUpgradeIds = {
@@ -6278,14 +6391,34 @@ void saveRoundTripPreservesProgress()
     require(std::abs(restored.meta.worstCreditDelta + 30.0) < 0.001, "worst credit delta should round trip");
     require(restored.meta.destinationAttempts.size() >= 3 && restored.meta.destinationAttempts[0] == 2, "destination attempts should round trip");
     require(restored.meta.destinationSuccesses.size() >= 3 && restored.meta.destinationSuccesses[0] == 1, "destination successes should round trip");
-    require(ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
-            && ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::landing),
+    require(ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::launch)
+            && ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
+            && ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::landing)
+            && ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::mining),
         "activity introduction acknowledgments should round trip");
     require(restored.meta.memorials.size() == 1, "memorials should round trip");
     require(restored.run.crewUpgradeIds.size() == 2 && restored.run.crewUpgradeIds[0] == content::crewUpgrade::analogSimBay, "crew upgrades should round trip");
     require(restored.run.crew.front().training == 7, "crew training should round trip");
     require(restored.run.crew.front().stress == 42, "crew stress should round trip");
     require(restored.run.crew.front().status == CrewStatus::Injured, "crew status should round trip");
+}
+
+void progressedSavesSkipTheFirstLaunchIntroduction()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const GameState freshState = createNewGame(catalog, 0xB12EF);
+    SaveData freshSave = captureSaveData(freshState);
+
+    GameState freshRestored = createNewGame(catalog, 1);
+    restoreSaveData(freshRestored, catalog, freshSave);
+    require(!ui::briefings::acknowledged(freshRestored.meta.acknowledgedActivityBriefingIds, ui::briefings::launch),
+        "a campaign with no launch history should retain the first-flight introduction");
+
+    freshSave.destinationAttempts = {1};
+    GameState progressedRestored = createNewGame(catalog, 2);
+    restoreSaveData(progressedRestored, catalog, freshSave);
+    require(ui::briefings::acknowledged(progressedRestored.meta.acknowledgedActivityBriefingIds, ui::briefings::launch),
+        "a campaign with recorded launch history should migrate past the first-flight introduction");
 }
 
 void versionTwoStoredModulesMigrateToInstalledSystems()
@@ -6790,8 +6923,6 @@ void launchPanelPresentationComesFromSharedHelper()
     require(dataGoal != nullptr && dataGoal->value == display::multiplier(launch.config.burnGoalMultiplier), "launch presentation should expose the actual proving data goal");
     require(returnRisk != nullptr && returnRisk->value == display::percent(returnHomeRisk(launch, catalog, state, currentMultiplier)), "launch presentation should share return risk math");
     require(panel.telemetry.size() == telemetrySamples(telemetryAt(launch, currentMultiplier)).size(), "launch presentation should expose all telemetry channel samples");
-    require(findDetailPresentationRow(panel.telemetryDetails, text::labels::returnRisk) != nullptr, "launch presentation should expose return risk in telemetry details");
-    require(findDetailPresentationRow(panel.telemetryDetails, text::labels::missionDifficulty) != nullptr, "launch presentation should expose mission difficulty in telemetry details");
 
     const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
     const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
@@ -7350,7 +7481,7 @@ void solarMapModalTracksCampaignDiscovery()
     require(html.find("Straylight") != std::string::npos && html.find("solar-map-node map-vessel is-explored") != std::string::npos, "Ark discovery should identify Straylight as an explored vessel");
 }
 
-void panelHtmlIncludesContextualTutorialLayer()
+void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
 {
     const ContentCatalog catalog = createDefaultContent();
 
@@ -7363,12 +7494,13 @@ void panelHtmlIncludesContextualTutorialLayer()
     const std::string launchHtml = buildGamePanelHtml(launchContext);
     require(launchHtml.find("<h1>Flight</h1>") != std::string::npos, "launch panel should title the current phase instead of repeating the game title");
     require(launchHtml.find("class=\"cockpit-hud flight-hud\"") != std::string::npos, "launch controls should render in a cockpit HUD");
-    require(launchHtml.find("data-help-topic=\"launch-controls\"") != std::string::npos, "launch panel should introduce return/eject/mitigation help");
-    require(launchHtml.find("data-ui-focus-id=\"help-dismiss:launch-controls\"") != std::string::npos,
-        "mission help dismissal should expose a stable controller focus id");
-    require(launchHtml.find("Return to Earth banks data") != std::string::npos, "launch help should mention returning to Earth");
-    require(launchHtml.find("unlock the Moon route") != std::string::npos, "first launch help should keep the intro focused on return/eject");
+    require(launchHtml.find("tutorial-card") == std::string::npos
+            && launchHtml.find("data-help-topic") == std::string::npos,
+        "launch telemetry and controls should not contain inline tutorial help");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+    require(launchHtml.find("First-time introductions") != std::string::npos
+            && launchHtml.find("Hide introductions") != std::string::npos,
+        "settings should describe the retained toggle as first-time introductions");
     require(launchHtml.find("data-camera-shake-toggle") != std::string::npos, "settings should expose a camera shake toggle");
     require(launchHtml.find("data-debug-tools-toggle") != std::string::npos, "settings should expose a debug mini-games toggle");
 
@@ -7381,7 +7513,8 @@ void panelHtmlIncludesContextualTutorialLayer()
     PanelRenderContext moonLaunchContext {moonLaunchState, catalog, moonLaunch, moonLaunch};
     moonLaunchContext.currentMultiplier = 1.12;
     const std::string moonLaunchHtml = buildGamePanelHtml(moonLaunchContext);
-    require(moonLaunchHtml.find("relief valve") != std::string::npos, "Moon-tier launch help should mention mitigation controls");
+    require(moonLaunchHtml.find("tutorial-card") == std::string::npos,
+        "Moon-tier launch controls should remain free of inline tutorial cards");
 
     GameState arkLaunchState = createNewGame(catalog, 714);
     discoverArk(arkLaunchState, catalog);
@@ -7391,7 +7524,6 @@ void panelHtmlIncludesContextualTutorialLayer()
     PanelRenderContext arkLaunchContext {arkLaunchState, catalog, arkLaunch, arkLaunch};
     arkLaunchContext.currentMultiplier = 1.12;
     const std::string arkLaunchHtml = buildGamePanelHtml(arkLaunchContext);
-    require(arkLaunchHtml.find("Return to Ark banks data") != std::string::npos, "Ark launch help should relabel the return destination");
     require(arkLaunchHtml.find(">Return to Ark</button>") != std::string::npos, "Ark launch controls should show the Ark return label");
 
     launchContext.flightArmed = false;
@@ -7431,12 +7563,17 @@ void panelHtmlIncludesContextualTutorialLayer()
     Random arrivalRng(712);
     const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
     const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
-    require(arrivalHtml.find("data-help-topic=\"arrival-ops\"") != std::string::npos, "arrival ops panel should introduce flyby/orbit/land help");
-    require(arrivalHtml.find("data-ui-focus-id=\"help-dismiss:arrival-ops\"") != std::string::npos,
-        "arrival help dismissal should expose a stable controller focus id");
-    require(arrivalHtml.find("Flyby is the safest scan") != std::string::npos, "arrival help should explain flyby/orbit/landing progression");
-    require(arrivalHtml.find("Arrival summary") != std::string::npos, "arrival ops panel should consolidate debrief summary");
-    require(arrivalHtml.find("Mission result") != std::string::npos, "arrival ops panel should include outcome metrics");
+    require(arrivalHtml.find("tutorial-card") == std::string::npos
+            && arrivalHtml.find("data-help-topic") == std::string::npos,
+        "Arrival Ops should keep first-use teaching in activity modals rather than the operational panel");
+    require(arrivalHtml.find("Choose approach") != std::string::npos
+            && arrivalHtml.find("data-rr-action=\"arrival_flyby\"") != std::string::npos,
+        "Arrival Ops should keep its approach heading and actions after removing inline help");
+    require(arrivalHtml.find("Arrival summary") == std::string::npos
+            && arrivalHtml.find("Mission result") == std::string::npos
+            && arrivalHtml.find("approach-metrics") == std::string::npos
+            && arrivalHtml.find("objective-strip") == std::string::npos,
+        "Arrival Ops should remove the redundant debrief, history metrics, and tutorial objective strip");
 
     arrivalState.screen = Screen::ArrivalFanfare;
     const std::string fanfareHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
@@ -7468,6 +7605,8 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(miningHtml.find("class=\"cockpit-hud mining-hud\"") == std::string::npos, "mining should not render the old compact cockpit HUD");
     require(miningHtml.find("class=\"mining-health-strip\"") != std::string::npos, "mining panel should expose a prominent drone health strip");
     require(miningHtml.find("Rig health") != std::string::npos, "mining panel should label rig health");
+    require(miningHtml.find("rr-hud-mining-health-fill") < miningHtml.find("rr-hud-mining-detail"),
+        "mining health bar should render above the status detail so the objective strip cannot cover it");
     require(miningHtml.find("Oxygen") != std::string::npos, "mining panel should expose oxygen");
     require(miningHtml.find("Next fuel") != std::string::npos, "mining panel should expose fuel cadence");
     require(miningHtml.find("Drill bit") != std::string::npos, "mining panel should label drill bit health");
@@ -7487,6 +7626,8 @@ void panelHtmlIncludesContextualTutorialLayer()
     require(miningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos, "mining HUD should keep scanner control");
     require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos, "mining HUD should keep tether control");
     require(miningHtml.find("data-rr-action=\"mining_abort\"") != std::string::npos, "mining HUD should keep abort control away from the ship");
+    require(miningHtml.find("class=\"mining-command-list\"") == std::string::npos,
+        "mining HUD should keep explanatory control copy in the bottom input helper instead of the payload rail");
     require(miningHtml.find("data-help-topic=\"mining-basics\"") == std::string::npos, "mining panel should not show the old tutorial card inline");
     require(miningHtml.find("WASD/arrows turn and thrust the forward drill") != std::string::npos, "mining details should explain forward-facing movement controls");
     require(miningHtml.find("Combat read") != std::string::npos, "mining details should include a combat readability legend");
@@ -7643,7 +7784,9 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const PreparedLaunch arrivalLaunch = prepareLaunch(arrivalState, catalog, arrivalRng);
     const std::string arrivalHtml = buildGamePanelHtml({arrivalState, catalog, arrivalLaunch, arrivalLaunch});
     require(arrivalHtml.find("phase-board phase-board-arrival") != std::string::npos, "approach should render inside the dedicated arrival board");
-    require(arrivalHtml.find("class=\"result-grid\"") != std::string::npos, "approach should keep arrival summary in the result grid");
+    require(arrivalHtml.find("class=\"result-grid\"") == std::string::npos
+            && arrivalHtml.find("Optional operations are available before refit.") != std::string::npos,
+        "approach should use a concise decision header instead of repeating arrival telemetry");
     require(countOccurrences(arrivalHtml, "ops-card arrival-card") == 3, "approach should render flyby, orbit, and landing as three action cards");
     require(countOccurrences(arrivalHtml, "class=\"arrival-card-status\"") == 3
             && arrivalHtml.find(">Unavailable</span>") != std::string::npos,
@@ -7664,6 +7807,9 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(researchHtml.find("Research options") != std::string::npos, "research should expose the project board");
     require(researchHtml.find("class=\"ops-card\"") != std::string::npos, "research projects should render as styled cards");
     require(researchHtml.find("class=\"phase-advisory") != std::string::npos, "research should include advisory styling");
+    require(researchHtml.find("phase_briefing") == std::string::npos
+            && researchHtml.find(">Briefing</button>") == std::string::npos,
+        "research should not emit an unused generic tutorial briefing");
     require(researchHtml.find("phase-status") == std::string::npos, "research should not duplicate the yellow mission status inside the board");
     require(researchHtml.find("Have:") == std::string::npos, "research cards should not repeat the shared material inventory in their yellow footer copy");
 
@@ -7682,6 +7828,10 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(surfaceHtml.find("featured-action") != std::string::npos, "surface ops should promote mining inside the action grid");
     require(surfaceHtml.find("surface-action-card") != std::string::npos, "surface ops should keep actions in styled cards");
     require(surfaceHtml.find("drone-ops-callout phase-lane phase-row") != std::string::npos, "surface ops drone callout should align to the shared phase lane");
+    require(surfaceHtml.find("phase_briefing") == std::string::npos
+            && surfaceHtml.find(">Briefing</button>") == std::string::npos
+            && surfaceHtml.find(">Details</button>") != std::string::npos,
+        "surface ops should remove generic briefing clutter while retaining operational details");
     require(surfaceHtml.find("phase-status") == std::string::npos, "surface ops should not duplicate the yellow mission status inside the board");
 
     GameState droneState = surfaceState;
@@ -8214,6 +8364,8 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
     require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
     require(ui::actions::skipArrivalFanfare == "skip_arrival_fanfare", "arrival fanfare skip action should use a stable schema id");
+    require(ui::actions::acknowledgeApproachIntroduction == "acknowledge_approach_introduction",
+        "approach introduction acknowledgment should use a stable schema id");
     require(ui::actions::openNavigation == "open_navigation", "navigation action should use a stable schema id");
     require(ui::actions::arkJump == "ark_jump", "Ark jump action should use a stable schema id");
     require(ui::actions::selectNavigationDestination(2) == "select_navigation:2", "indexed navigation actions should share one action family");
@@ -8484,14 +8636,35 @@ void miningThermalCutoffAndGuidanceAreExplicit()
     require(state.statusLine.find("Scanner revealed") != std::string::npos,
         "scanner feedback should report what terrain and signals were revealed");
     mining.artifact = {};
-    const MiningRunPresentation presentation = miningRunPresentation(state, catalog);
-    const auto tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
+    MiningRunPresentation presentation = miningRunPresentation(state, catalog);
+    auto tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
         return action.label.find("tether") != std::string::npos || action.label.find("Tether") != std::string::npos;
     });
+    require(tether == presentation.actions.end(),
+        "tether guidance and controls should stay hidden before artifact recovery is available");
+    require(presentation.commandHints.size() == 1
+            && presentation.commandHints.front() == "Pulse Scanner (E) - Reveals nearby resources",
+        "the opening mining command list should contain only the available scanner guidance");
+
+    mining.artifact.present = true;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    presentation = miningRunPresentation(state, catalog);
+    tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
+        return action.actionId == ui::actions::miningTether;
+    });
     require(tether != presentation.actions.end() && !tether->enabled,
-        "tether should be visibly disabled when no meaningful target exists");
-    require(presentation.commandDetail.find("Drones execute") != std::string::npos,
-        "mining guidance should explain automatic drone behavior");
+        "artifact recovery should reveal a contextual tether control before its target is exposed");
+    require(std::any_of(presentation.commandHints.begin(), presentation.commandHints.end(), [](const std::string& hint) {
+            return hint.find("Tether Artifact (T)") != std::string::npos;
+        }),
+        "artifact recovery should unlock its own command-list line");
+
+    mining.miniDrones.emplace_back();
+    presentation = miningRunPresentation(state, catalog);
+    require(std::any_of(presentation.commandHints.begin(), presentation.commandHints.end(), [](const std::string& hint) {
+            return hint.find("Assigned Drones (Automatic)") != std::string::npos;
+        }),
+        "equipped helper drones should unlock their automatic-role command line");
 }
 
 void legacyOuterPlanetSavesMigrateByStableId()
@@ -8572,7 +8745,7 @@ int main()
     hangarOperationCardsComeFromSharedPreview();
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
-    destroyedMoonTransferPreservesProvingFlights();
+    destroyedLaunchesPreserveProvingFlights();
     pressureTracksFrontierExperience();
     crewStressTracksPeakTelemetryDanger();
     pressureControlModulesReducePressureTelemetry();
@@ -8663,6 +8836,7 @@ int main()
     surfacePresentationComesFromSharedHelper();
     overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
+    progressedSavesSkipTheFirstLaunchIntroduction();
     versionTwoStoredModulesMigrateToInstalledSystems();
     saveSchemaConstantsMatchSerializedFields();
     legacyRecordsTrackAchievementStats();
@@ -8681,7 +8855,7 @@ int main()
     titleScreenPresentationIsPortable();
     earlyGameProgressionAndOutcomeModalAreClear();
     solarMapModalTracksCampaignDiscovery();
-    panelHtmlIncludesContextualTutorialLayer();
+    panelHtmlKeepsTutorialsOutOfOperationalSurfaces();
     surfaceHtmlPromotesMiningAction();
     postArrivalPhaseHtmlUsesPolishedBoardStructure();
     hangarHtmlShowsPilotIntakeModal();

@@ -416,7 +416,6 @@ inline constexpr std::string_view launch = "Launch";
 inline constexpr std::string_view needFlightData = "Need flight data";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view details = "Details";
-inline constexpr std::string_view briefing = "Briefing";
 inline constexpr std::string_view resetSave = "Reset save";
 inline constexpr std::string_view startReplacementRefit = "Start replacement refit";
 inline constexpr std::string_view reviewRefitOptions = "Review refit options";
@@ -500,7 +499,6 @@ inline constexpr std::string_view lostDetail = "Memorial record opened. The next
 } // namespace crewFate
 
 namespace modals {
-inline constexpr std::string_view telemetryDetails = "Telemetry Details";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view shipDetails = "Ship Details";
 inline constexpr std::string_view crewDetails = "Crew Details";
@@ -510,9 +508,6 @@ inline constexpr std::string_view launchHold = "Launch Hold";
 inline constexpr std::string_view legacy = "Legacy";
 inline constexpr std::string_view researchDetails = "Research Details";
 inline constexpr std::string_view surfaceDetails = "Surface Details";
-inline constexpr std::string_view arrivalBriefing = "Arrival Briefing";
-inline constexpr std::string_view researchBriefing = "Research Briefing";
-inline constexpr std::string_view surfaceBriefing = "Surface Briefing";
 } // namespace modals
 
 namespace details {

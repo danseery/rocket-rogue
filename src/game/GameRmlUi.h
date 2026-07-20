@@ -20,7 +20,6 @@ struct RmlButtonBinding {
     std::string label;
     std::string action;
     std::string modal;
-    std::string helpDismiss;
     std::string controllerSetting;
     bool close = false;
     bool helpToggle = false;
@@ -69,7 +68,6 @@ public:
     std::string focusedId() const override;
     void openModal(const std::string& id) override;
     void closeModal() override;
-    void dismissHelp(const std::string& topic) override;
     void dispatchAction(const std::string& action) override;
     void refresh() override;
     bool activateButtonLabel(const std::string& label) override;
