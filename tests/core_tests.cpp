@@ -1582,11 +1582,13 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
             && html.find("Mini-drones are persistent") == std::string::npos,
         "locked Drone Bay screens should not emit mini-drone introduction copy or markup");
     require(html.find("data-ui-modal=\"mining_introduction\"") != std::string::npos
-            && html.find("MINING OPERATIONS") != std::string::npos
+            && html.find("THE PROSPECTOR CONTRACT") != std::string::npos
+            && html.find("3 Common Ore") != std::string::npos
+            && html.find("first autonomous Mining Drone") != std::string::npos
             && html.find("Deployment spends 1 Shared Fuel") != std::string::npos
-            && html.find("bank cargo at the shuttle") != std::string::npos
+            && html.find("bank the ore at the shuttle") != std::string::npos
             && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
-        "the first available mining action should open an overview that deploys directly into the run");
+        "the first mining action should present the Prospector contract and deploy directly into the run");
 
     PanelRenderContext miningHelpDisabled {surface, catalog, surfaceLaunch, surfaceLaunch};
     miningHelpDisabled.firstTimeIntroductionsEnabled = false;
@@ -1602,6 +1604,8 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
         "acknowledged mining should start directly without repeating its overview");
 
     surface.meta.unlockKeys.push_back(content::unlock::droneBay);
+    surface.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    ui::briefings::acknowledge(surface.meta.acknowledgedActivityBriefingIds, ui::briefings::prospectorComplete);
     ensureDroneBayState(surface, catalog);
     html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
     require(html.find("data-ui-modal=\"mini_drone_introduction\"") != std::string::npos
@@ -2376,6 +2380,7 @@ void surfaceUpgradesAndDronesModifyScanMiniGame()
         content::surfaceUpgrade::deepEchoMapper
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    upgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     upgraded.meta.droneBaySlots = 1;
     upgraded.meta.equippedDroneIds = {content::drone::surveyDrone};
 
@@ -2413,6 +2418,7 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
         content::surfaceUpgrade::oreHopper
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    upgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     upgraded.meta.droneBaySlots = 1;
     upgraded.meta.equippedDroneIds = {content::drone::hazardDrone};
 
@@ -2463,6 +2469,7 @@ void surfaceScanAndPushDepthLimitsStayInParity()
         content::surfaceUpgrade::deepEchoMapper
     };
     scannerUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    scannerUpgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     scannerUpgraded.meta.droneBaySlots = 1;
     scannerUpgraded.meta.equippedDroneIds = {content::drone::surveyDrone};
     const auto scannerLimits = scanPushLimitPair(scannerUpgraded, 1939);
@@ -2476,6 +2483,7 @@ void surfaceScanAndPushDepthLimitsStayInParity()
         content::surfaceUpgrade::recoilBraces
     };
     structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
+    structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     structureUpgraded.meta.droneBaySlots = 1;
     structureUpgraded.meta.equippedDroneIds = {content::drone::hazardDrone};
     const auto structureLimits = scanPushLimitPair(structureUpgraded, 1940);
@@ -2609,6 +2617,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     activateOnlyCrew(state, content::astronaut::marco);
     startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.materials.common = 4;
     ensureDroneBayState(state, catalog);
     require(state.meta.droneBaySlots == 1, "drone bay unlock should initialize one slot");
@@ -2692,6 +2701,96 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
         "Perimeter Drone Network should consume the Arkfall kit unlock and reward advanced coordination");
 }
 
+void firstMiningContractBuildsAndCelebratesProspector()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xC0A11);
+    state.run.destinationIndex = 2;
+
+    const auto recoverMiningOre = [](GameState& target, int common) {
+        for (int seed = 1; seed <= 512; ++seed) {
+            GameState candidate = target;
+            candidate.run.surfaceExpedition = {};
+            candidate.run.surfaceExpedition.active = true;
+            candidate.run.surfaceExpedition.temporaryMaterials.common = common;
+            candidate.run.surfaceExpedition.bankedMiningMaterials.common = common;
+            candidate.run.surfaceExpedition.bankedMiningArenaValid = true;
+            candidate.run.surfaceExpedition.bankedMiningProgressionEligible = true;
+            candidate.run.surfaceExpedition.bankedMiningArenaMetadata.act = MiningAct::ActOne;
+            candidate.run.surfaceExpedition.bankedMiningArenaMetadata.difficulty = 1;
+            candidate.run.surfaceExpedition.bankedMiningArenaMetadata.seed = 0xC0A11;
+            Random rng(seed);
+            const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, rng);
+            if (outcome.cargoRecovered) {
+                target = std::move(candidate);
+                return outcome;
+            }
+        }
+        throw std::runtime_error("test should find a clean Prospector extraction seed");
+    };
+
+    const SurfaceActionOutcome firstRecovery = recoverMiningOre(state, 2);
+    require(firstRecovery.applied && !firstRecovery.prospectorUnlocked,
+        "a partial Prospector contract should bank progress without unlocking the drone");
+    require(state.meta.prospectorCommonOreRecovered == 2,
+        "only safely extracted mining ore should advance the Prospector contract");
+    require(state.meta.materials.common == 0,
+        "Prospector contract ore should be committed to fabrication instead of ordinary research spend");
+    require(!hasUnlock(state.meta, content::unlock::droneBay),
+        "the Prospector should remain locked before all three ore loads are home");
+
+    const SurfaceActionOutcome completion = recoverMiningOre(state, 1);
+    require(completion.prospectorUnlocked,
+        "the third safely extracted common ore should complete the Prospector contract");
+    require(state.meta.prospectorCommonOreRecovered == tuning::research::prospectorCommonOreGoal,
+        "Prospector progress should stop at its stated goal");
+    require(hasUnlock(state.meta, content::unlock::droneBay)
+            && !hasUnlock(state.meta, content::unlock::droneSupportSuite),
+        "the first contract should unlock the Mining Drone without prematurely granting later support drones");
+    require(state.meta.droneBaySlots == 1
+            && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
+            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
+        "the completed contract should install and equip one permanent Prospector Mining Drone");
+
+    state.screen = Screen::Hangar;
+    Random launchRng(0xC0A11);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, launchRng);
+    std::string html = buildGamePanelHtml({state, catalog, launch, launch});
+    require(html.find("data-modal=\"prospector_completion\" data-auto-modal=\"1\"") != std::string::npos
+            && html.find("data-modal-dismissible=\"0\"") != std::string::npos
+            && html.find("PROSPECTOR ONLINE") != std::string::npos
+            && html.find("First contract complete") != std::string::npos
+            && html.find("data-rr-action=\"acknowledge_prospector_completion\"") != std::string::npos,
+        "Prospector completion should receive a saved, acknowledgment-focused celebration modal");
+
+    const std::string serialized = serializeSaveData(captureSaveData(state));
+    const auto save = deserializeSaveData(serialized);
+    require(save.has_value(), "pending Prospector completion should serialize");
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.meta.prospectorCommonOreRecovered == tuning::research::prospectorCommonOreGoal
+            && !ui::briefings::acknowledged(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::prospectorComplete),
+        "reloading before acknowledgment should preserve the Prospector completion beat");
+
+    ui::briefings::acknowledge(restored.meta.acknowledgedActivityBriefingIds, ui::briefings::prospectorComplete);
+    restored.screen = Screen::Hangar;
+    Random restoredLaunchRng(1);
+    const PreparedLaunch restoredLaunch = prepareLaunch(restored, catalog, restoredLaunchRng);
+    html = buildGamePanelHtml({restored, catalog, restoredLaunch, restoredLaunch});
+    require(html.find("prospector_completion") == std::string::npos,
+        "the Prospector celebration should not repeat after acknowledgment");
+
+    SaveData legacy = captureSaveData(createNewGame(catalog, 77));
+    legacy.version = 3;
+    legacy.acknowledgedActivityBriefingIds.push_back(std::string(ui::briefings::mining));
+    GameState migrated = createNewGame(catalog, 78);
+    restoreSaveData(migrated, catalog, legacy);
+    require(hasUnlock(migrated.meta, content::unlock::droneBay)
+            && migrated.meta.prospectorCommonOreRecovered == tuning::research::prospectorCommonOreGoal
+            && ui::briefings::acknowledged(migrated.meta.acknowledgedActivityBriefingIds, ui::briefings::prospectorComplete),
+        "campaigns that already used mining should migrate past the new opening contract without a stale modal");
+}
+
 void droneOpsPresentationExposesPersistentLoadout()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2699,6 +2798,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.materials.common = 4;
     state.meta.materials.rare = 2;
     ensureDroneBayState(state, catalog);
@@ -3743,6 +3843,7 @@ void hostileMiningRunSpawnsEnemiesAndPassiveDefenses()
     defended.meta.ark.fuelReserve = tuning::ark::hostileSystemFuelReserve;
     defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
     defended.meta.unlockKeys.push_back(content::unlock::droneBay);
+    defended.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(defended, catalog);
@@ -3804,6 +3905,7 @@ void miningEnemySpawnersAreGenericCappedAndDestructible()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
@@ -3920,6 +4022,7 @@ void attackDroneCombatCanCritAndEnemyCooldownPersists()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
@@ -3954,6 +4057,7 @@ void miningMiniDronesFollowIndependentRolePositions()
     GameState state = createNewGame(catalog, 91932);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 6;
     state.meta.equippedDroneIds = {
@@ -4015,6 +4119,7 @@ void hazardDroneTreatsAffinityLadderAndBatches()
     auto runFirstTreatment = [&](int level, MiningElementalAffinity affinity, int clusterSize, int expectedBatch) {
         GameState state = createNewGame(catalog, 93000 + level * 17 + static_cast<int>(affinity));
         state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
         ensureDroneBayState(state, catalog);
         state.meta.droneBaySlots = 1;
         state.meta.equippedDroneIds = {content::drone::hazardDrone};
@@ -4151,6 +4256,7 @@ void legacyStabilizerSavesMigrateToHazardDrone()
     const ContentCatalog catalog = createDefaultContent();
     GameState source = createNewGame(catalog, 93200);
     source.meta.unlockKeys.push_back(content::unlock::droneBay);
+    source.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(source, catalog);
     SaveData save = captureSaveData(source);
     save.droneBaySlots = 3;
@@ -4176,6 +4282,7 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91933);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 3;
     state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::miningDrone, content::drone::surveyDrone};
@@ -4302,6 +4409,7 @@ void surveyDroneRunsAnchoredPriorityScanCycles()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91936);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::surveyDrone};
@@ -4408,6 +4516,7 @@ void surveyDronesMaintainCoordinatedSearchLanes()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91943);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 5;
     state.meta.equippedDroneIds = {
@@ -4517,6 +4626,7 @@ void resourceDroneRunsTimedMaterialShuttles()
     auto createResourceRun = [&](std::uint64_t seed, int upgradeLevel) {
         GameState state = createNewGame(catalog, seed);
         state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
         ensureDroneBayState(state, catalog);
         state.meta.droneBaySlots = 1;
         state.meta.equippedDroneIds = {content::drone::resourceDrone};
@@ -4622,6 +4732,7 @@ void resourceDronesCollectInMovingFormation()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91944);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 5;
     state.meta.equippedDroneIds = {
@@ -4696,6 +4807,7 @@ void miningDroneRunsTimedCapacityShuttles()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 91941);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::miningDrone};
@@ -4922,6 +5034,7 @@ void attackAndDefenseDroneAgentsOwnCombatBehavior()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 4;
     state.meta.equippedDroneIds = {
@@ -5162,6 +5275,7 @@ void elementalMiningCombatAppliesAffinityAndAreaDefenses()
     defended.meta.unlockKeys.push_back(content::unlock::deepSpace);
     defended.meta.unlockKeys.push_back(content::unlock::droneBay);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    defended.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     defended.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(defended, catalog);
     defended.meta.droneBaySlots = 2;
@@ -5191,6 +5305,7 @@ void mammalBossChambersGrantAdvancedRewards()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::attackDrone};
@@ -5668,7 +5783,7 @@ void miningShipRepairsUseBankedMaterialsProportionally()
     const auto droneAction = std::find_if(service.actions.begin(), service.actions.end(), [](const PanelButtonPresentation& action) {
         return action.actionId == ui::actions::miningRepairDrone;
     });
-    require(service.commandTitle == "Ship service" && service.commandDetail == "Repair, then leave", "ship radius should switch the command dock to repair framing");
+    require(service.commandTitle == "Ship service" && service.commandDetail == "Repair, scan the site, then leave", "ship radius should switch the command dock to repair framing");
     require(drillAction != service.actions.end() && drillAction->enabled && drillAction->label.find("4 common") != std::string::npos, "ship service should show the funded drill repair cost");
     require(droneAction != service.actions.end() && droneAction->enabled && droneAction->label.find("3 common") != std::string::npos, "ship service should show the funded drone repair cost");
     Random repairRng(94950);
@@ -5677,8 +5792,8 @@ void miningShipRepairsUseBankedMaterialsProportionally()
     require(repairHtml.find("data-mining-ship-service=\"1\"") != std::string::npos, "docked repairs should emit a spatial ship-service marker");
     require(repairHtml.find("data-mining-return-x=") != std::string::npos && repairHtml.find("data-mining-return-y=") != std::string::npos, "ship-service marker should expose the return-zone projection anchor");
     require(repairHtml.find("data-drill-label=\"Repair bit (4 common)\"") != std::string::npos, "ship-service marker should carry the current proportional drill repair label");
-    require(repairHtml.find("data-rr-action=\"mining_repair_drill\"") == std::string::npos, "docked drill repair should no longer render in the lower command dock");
-    require(repairHtml.find("data-rr-action=\"mining_repair_drone\"") == std::string::npos, "docked drone repair should no longer render in the lower command dock");
+    require(repairHtml.find("data-rr-action=\"mining_repair_drill\"") != std::string::npos, "docked drill repair should render as a native command-dock button");
+    require(repairHtml.find("data-rr-action=\"mining_repair_drone\"") != std::string::npos, "docked drone repair should render as a native command-dock button");
 
     require(repairMiningDrill(state), "funded ship service should repair a broken drill bit");
     require(mining.drillIntegrity == 1.0 && !mining.drillBreakNotified, "drill repair should restore integrity and clear the broken latch");
@@ -6330,6 +6445,7 @@ void saveRoundTripPreservesProgress()
     state.meta.unlockKeys.push_back(content::unlock::thermal);
     state.meta.blueprintProgress = 5;
     state.meta.materials = {.common = 3, .rare = 2, .exotic = 1};
+    state.meta.prospectorCommonOreRecovered = 2;
     state.meta.ownedModuleIds.push_back(content::module::cryoLoop);
     state.meta.defaultEquippedModuleIds.push_back(content::module::cryoLoop);
     state.meta.artifacts.push_back({"mars_signal_1", content::destination::mars, true});
@@ -6378,6 +6494,7 @@ void saveRoundTripPreservesProgress()
     require(restored.run.restOpsThisExpedition == 3, "rest escalation should round trip");
     require(hasUnlock(restored.meta, content::unlock::thermal), "unlock keys should round trip");
     require(restored.meta.materials.common == 3 && restored.meta.materials.rare == 2 && restored.meta.materials.exotic == 1, "materials should round trip");
+    require(restored.meta.prospectorCommonOreRecovered == 2, "Prospector contract progress should round trip");
     require(std::find(restored.meta.ownedModuleIds.begin(), restored.meta.ownedModuleIds.end(), content::module::cryoLoop) != restored.meta.ownedModuleIds.end(), "permanent shipyard modules should round trip");
     require(std::find(restored.meta.defaultEquippedModuleIds.begin(), restored.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != restored.meta.defaultEquippedModuleIds.end(), "default shipyard loadout should round trip");
     require(restored.meta.artifacts.size() == 1 && restored.meta.artifacts[0].identified, "artifacts should round trip");
@@ -6466,6 +6583,7 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::ownedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "owned drones key should use shared schema name");
     require(text.find(std::string(save_schema::field::equippedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "equipped drones key should use shared schema name");
     require(text.find(std::string(save_schema::field::droneUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "drone tuning key should use shared schema name");
+    require(text.find(std::string(save_schema::field::prospectorCommonOreRecovered) + save_schema::keyValueDelimiter) != std::string::npos, "Prospector contract progress should use a shared schema name");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -7345,8 +7463,10 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     const std::string recoveredHtml = buildGamePanelHtml({recovered, catalog, recoveredLaunch, recoveredLaunch});
     require(recoveredHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos,
         "launch results should auto-open the compact outcome modal");
-    require(recoveredHtml.find("data-modal-close-action=\"next\"") != std::string::npos,
-        "closing the outcome modal should advance the result exactly like Continue");
+    require(recoveredHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\" data-modal-dismissible=\"0\"") != std::string::npos,
+        "launch outcomes should require an explicit acknowledgement rather than expose generic dismissal");
+    require(recoveredHtml.find("data-modal-close-action=\"next\"") == std::string::npos,
+        "launch outcomes should not advance through a generic modal close action");
     require(recoveredHtml.find("USEFUL DATA HOME") != std::string::npos
             && recoveredHtml.find("enough backing to keep the program moving") != std::string::npos
             && recoveredHtml.find("Flight Data 1/3") != std::string::npos
@@ -7633,6 +7753,14 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(miningHtml.find("Combat read") != std::string::npos, "mining details should include a combat readability legend");
     require(miningHtml.find("Blue numbers") != std::string::npos, "mining details should explain allied and enemy damage text colors");
 
+    miningState.run.mining.droneX = miningState.run.mining.returnZoneX;
+    miningState.run.mining.droneY = miningState.run.mining.returnZoneY;
+    const std::string dockedMiningHtml = buildGamePanelHtml({miningState, catalog, miningLaunch, miningLaunch});
+    require(dockedMiningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos,
+        "the docked mining HUD should expose the Pulse Scanner before its first keyboard use");
+    require(dockedMiningHtml.find("data-rr-action=\"mining_stow\"") != std::string::npos,
+        "adding the docked scanner control should retain the Leave command");
+
     miningState.run.mining.oxygenSeconds = tuning::mining::oxygenSeconds * 0.25;
     miningState.run.mining.drillIntegrity = 0.25;
     miningState.run.mining.fuelCycleProgress = 0.75;
@@ -7700,6 +7828,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     GameState droneState = createNewGame(catalog, 715);
     droneState.screen = Screen::DroneOps;
     droneState.meta.unlockKeys.push_back(content::unlock::droneBay);
+    droneState.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     droneState.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     droneState.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
     ensureDroneBayState(droneState, catalog);
@@ -7816,6 +7945,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     GameState surfaceState = createNewGame(catalog, 719);
     surfaceState.run.destinationIndex = 2;
     surfaceState.meta.unlockKeys.push_back(content::unlock::droneBay);
+    surfaceState.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     startSurfaceExpedition(surfaceState, catalog);
     prepareMiningSiteForTest(surfaceState);
     surfaceState.screen = Screen::SurfaceExpedition;
@@ -8778,6 +8908,7 @@ int main()
     surfaceUpgradesResetOnEmergencyRecallOnly();
     miningDepletionAtShipGracefullyEndsRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
+    firstMiningContractBuildsAndCelebratesProspector();
     droneOpsPresentationExposesPersistentLoadout();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();

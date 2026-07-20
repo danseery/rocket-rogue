@@ -163,6 +163,10 @@ private:
     bool fullscreen_ = false;
     bool graphicsRebuildRequested_ = false;
     bool benchmarkMode_ = false;
+    // Space begins a launch return. If it remains physically held while the
+    // result board arrives, do not let that same press activate Continue.
+    // Enter is guarded alongside it because both keys confirm focused UI.
+    bool launchOutcomeConfirmReleaseGuard_ = false;
     float mouseX_ = 0.0F;
     float mouseY_ = 0.0F;
 };

@@ -422,6 +422,18 @@ void launchBindingsOverrideCockpitFocus()
     require(!heldInput.has(GameInputAction::ReturnHome),
         "a held Cross/South button must not restart the return action every frame");
 
+    const RoutedGameInput outcomeHeldInput = router.route(InputContext::Ui, frame, preferences);
+    require(!outcomeHeldInput.has(GameInputAction::ActivateFocused),
+        "a held Return confirm must be released before it can acknowledge a launch outcome");
+
+    frame = {};
+    frame.connected = true;
+    router.route(InputContext::Ui, frame, preferences);
+    frame.pressed.set(index(ControllerButton::South));
+    const RoutedGameInput outcomeConfirmInput = router.route(InputContext::Ui, frame, preferences);
+    require(outcomeConfirmInput.has(GameInputAction::ActivateFocused),
+        "a fresh confirm press should acknowledge the launch outcome after release");
+
     router.reset();
     frame = {};
     frame.connected = true;

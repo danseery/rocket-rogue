@@ -6,7 +6,7 @@ This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Treat US
 
 ## Role In The Loop
 
-Drone Bay is a permanent surface-tech unlock. Once researched, Surface Ops exposes a Drone Ops screen before mining. The player fills bay slots with helper drone copies, then enters the mining mini-game with that loadout active.
+Drone Bay begins as the payoff for the first mining contract. Safely extracting 3 Common Ore fabricates the Prospector Mk I, permanently installs one Mining Drone, and opens one bay slot. Surface Ops then exposes Drone Ops before later mining runs. The player fills expanded bay slots with helper drone copies, then enters the mining mini-game with that loadout active.
 
 Drone choices should be readable and chunky:
 
@@ -39,8 +39,8 @@ Drone Ops should present this as a build table, not a hidden ruleset: the active
 
 The current implementation supports persistent Drone Ops loadouts plus passive hostile-mining combat:
 
-- Drone Bay Program research unlocks Drone Ops.
-- Unlocking Drone Bay seeds the four environmental drones: Mining, Resource, Survey, Hazard.
+- The Prospector contract unlocks Drone Ops and seeds the Mining Drone.
+- Drone Support Program research adds the Resource, Survey, and Hazard drones.
 - Arkfall grants Mk I Attack and Defense drones and raises undersized bays to three slots without erasing stronger equipment.
 - Perimeter Drone Network research grants Perimeter Coordination, which gates Mk II/Mk III combat tuning and advanced combat synergies.
 - Mining HUD summarizes active drone support, active synergies, rig health, threat roles, bullet colors, damage text, and the current build signature.

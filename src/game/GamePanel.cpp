@@ -608,6 +608,56 @@ std::string activityIntroductionModal(
         : modalTemplate(modalId, title, body.str());
 }
 
+bool prospectorCompletionPending(const GameState& state)
+{
+    return hasUnlock(state.meta, content::unlock::droneBay)
+        && !ui::briefings::acknowledged(
+            state.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::prospectorComplete);
+}
+
+std::string prospectorCompletionModal(const GameState& state)
+{
+    if (!prospectorCompletionPending(state)) {
+        return {};
+    }
+
+    std::ostringstream body;
+    body << "<section class=\"activity-introduction modal-body\">"
+        << "<span class=\"activity-introduction-kicker\">First contract complete</span>"
+        << "<p class=\"activity-introduction-setup\">Three loads of common ore are home, refined, and under the wrench.</p>"
+        << "<div class=\"activity-introduction-payoff\"><span>Prospector Mk I</span><strong>"
+        << "Your first Mining Drone is online. It will join future digs and work exposed ore on its own."
+        << "</strong></div><div class=\"modal-actions action-row activity-introduction-actions\">"
+        << button("Assign the Prospector", ui::actions::acknowledgeProspectorCompletion, "ok", true)
+        << "</div></section>";
+    return autoModalTemplate(
+        ui::modals::prospectorCompletion,
+        "PROSPECTOR ONLINE",
+        body.str(),
+        false);
+}
+
+struct ProspectorObjectivePresentation {
+    std::string title;
+    std::string detail;
+};
+
+ProspectorObjectivePresentation prospectorObjectivePresentation(const GameState& state)
+{
+    const int goal = tuning::research::prospectorCommonOreGoal;
+    const int home = std::clamp(state.meta.prospectorCommonOreRecovered, 0, goal);
+    const int aboard = std::max(0, state.run.mining.stowedMaterials.common);
+    const int carried = std::max(0, state.run.mining.temporaryMaterials.common);
+    return {
+        "Build the Prospector Mk I",
+        "Ore home " + std::to_string(home) + "/" + std::to_string(goal) +
+            " | Aboard " + std::to_string(aboard) +
+            " | Carried " + std::to_string(carried) +
+            ". Only ore brought home advances the contract."
+    };
+}
+
 std::string flybyZoneLabel(int zone)
 {
     if (zone >= 2) {
@@ -1525,6 +1575,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             out << "</div></section>";
         }
         out << phaseBoardClose();
+        out << prospectorCompletionModal(state);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -1788,7 +1839,11 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             << "<section class=\"debrief-hero compact-result-backdrop\"><span>Mission resolved</span><h2>"
             << htmlEscape(summary.title) << "</h2><p>Select Continue to move into the next operation.</p></section>"
             << phaseBoardClose();
-        out << autoModalTemplate(ui::modals::launchOutcome, summary.title, summaryBody.str(), true, ui::actions::next);
+        // A launch outcome is an acknowledgement checkpoint. It must not
+        // inherit the generic Close/Escape behaviour: the player needs to
+        // deliberately choose Continue (or inspect the Flight Report) after
+        // the flight has resolved.
+        out << autoModalTemplate(ui::modals::launchOutcome, summary.title, summaryBody.str(), false);
         out << modalTemplate(ui::modals::flightReport, "Flight Report", report.str());
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
@@ -2022,8 +2077,15 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
 
         out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\" data-mining-drones=\""
             << (!mining.miniDrones.empty() ? 1 : 0) << "\">";
-        out << "<section class=\"objective-strip mining-objective-strip\"><span>Objective</span><strong>Drill fuel-bearing terrain, bank cargo at the shuttle, then leave.</strong>"
-            << "<p>Return to the shuttle to secure recovered cargo before departure.</p></section>";
+        if (!hasUnlock(state.meta, content::unlock::droneBay)) {
+            const ProspectorObjectivePresentation prospector = prospectorObjectivePresentation(state);
+            out << "<section class=\"objective-strip mining-objective-strip\"><span>First contract</span><strong id=\"rr-hud-mining-objective-title\">"
+                << htmlEscape(prospector.title) << "</strong><p id=\"rr-hud-mining-objective-detail\">"
+                << htmlEscape(prospector.detail) << "</p></section>";
+        } else {
+            out << "<section class=\"objective-strip mining-objective-strip\"><span>Objective</span><strong id=\"rr-hud-mining-objective-title\">Drill fuel-bearing terrain, bank cargo at the shuttle, then leave.</strong>"
+                << "<p id=\"rr-hud-mining-objective-detail\">Return to the shuttle to secure recovered cargo before departure.</p></section>";
+        }
         out << "<div class=\"mining-top-rail\"><div class=\"mining-run-title" << (debugArena ? " debug-arena" : "") << "\"><span>"
             << htmlEscape(miningRunKicker) << "</span><strong id=\"rr-hud-mining-title\">" << htmlEscape(miningRunTitle)
             << "</strong>";
@@ -2077,24 +2139,37 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         const PanelButtonPresentation* drillRepairAction = nullptr;
         const PanelButtonPresentation* droneRepairAction = nullptr;
         std::vector<const PanelButtonPresentation*> miningDockActions;
+        std::vector<const PanelButtonPresentation*> miningServiceActions;
         for (const PanelButtonPresentation& action : miningPanel.actions) {
             if (action.actionId == ui::actions::miningStow || action.actionId == ui::actions::miningAbort) {
                 miningPrimaryAction = &action;
                 continue;
             }
-            if (miningAtShip && drillRepairAction == nullptr) {
+            if (miningAtShip && action.actionId == ui::actions::miningRepairDrill) {
                 drillRepairAction = &action;
                 continue;
             }
-            if (miningAtShip && droneRepairAction == nullptr) {
+            if (miningAtShip && action.actionId == ui::actions::miningRepairDrone) {
                 droneRepairAction = &action;
                 continue;
             }
             miningDockActions.push_back(&action);
         }
+        // Browser fallback used to project these from a hidden marker near the
+        // shuttle. Native RmlUi has no matching scene overlay, so damaged
+        // components need their actual buttons in the shared command dock.
+        if (miningAtShip && miningDrillRepairCost(mining) > 0 && drillRepairAction != nullptr) {
+            miningServiceActions.push_back(drillRepairAction);
+        }
+        if (miningAtShip && miningDroneRepairCost(mining) > 0 && droneRepairAction != nullptr) {
+            miningServiceActions.push_back(droneRepairAction);
+        }
         out << "</section>";
-        if (!miningDockActions.empty()) {
+        if (!miningServiceActions.empty() || !miningDockActions.empty()) {
             out << "<section class=\"mining-command-dock\"><div class=\"actions action-row system-actions\">";
+            for (const PanelButtonPresentation* action : miningServiceActions) {
+                out << panelButton(*action);
+            }
             for (const PanelButtonPresentation* action : miningDockActions) {
                 out << panelButton(*action);
             }
@@ -2338,14 +2413,25 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 "warn");
         }
         if (showMiningIntroduction) {
-            out << activityIntroductionModal(
-                ui::modals::miningIntroduction,
-                "MINING OPERATIONS",
-                "Deployment spends 1 Shared Fuel and opens this surface loop's single mining run. Drill marked deposits, bank cargo at the shuttle, and leave before oxygen runs out.",
-                "Use the scanner to reveal nearby resources and the tether to pull back toward the ship. Heat shuts down the drill until it cools.",
-                "Deploy mining rig",
-                ui::actions::mineSurface,
-                "rare");
+            if (!hasUnlock(state.meta, content::unlock::droneBay)) {
+                out << activityIntroductionModal(
+                    ui::modals::miningIntroduction,
+                    "THE PROSPECTOR CONTRACT",
+                    "Mission Control needs 3 Common Ore to build the Prospector Mk I, your first autonomous Mining Drone. Drill marked deposits, bank the ore at the shuttle, and extract it safely home.",
+                    "Deployment spends 1 Shared Fuel and opens this surface loop's only mining run. Scan for resources, mind drill heat and oxygen, and leave with the ore aboard.",
+                    "Begin the contract",
+                    ui::actions::mineSurface,
+                    "rare");
+            } else {
+                out << activityIntroductionModal(
+                    ui::modals::miningIntroduction,
+                    "MINING OPERATIONS",
+                    "Deployment spends 1 Shared Fuel and opens this surface loop's single mining run. Drill marked deposits, bank cargo at the shuttle, and leave before oxygen runs out.",
+                    "Use the scanner to reveal nearby resources and the tether to pull back toward the ship. Heat shuts down the drill until it cools.",
+                    "Deploy mining rig",
+                    ui::actions::mineSurface,
+                    "rare");
+            }
         }
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
         out << modalTemplate(ui::modals::missionLog, text::panel::sections::missionLog, missionLog(surfacePanel.logEntries));
@@ -2386,6 +2472,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << panelButton(panelActionButton("Skip field research", ui::actions::next));
         out << "</div></section>";
         out << phaseBoardClose();
+        out << prospectorCompletionModal(state);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -2414,6 +2501,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         out << panelButton(refitWindow.skipAction);
         out << "</div></section>";
         out << phaseBoardClose();
+        out << prospectorCompletionModal(state);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -2527,6 +2615,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
             ui::actions::prepareLaunch,
             "ok");
     }
+    out << prospectorCompletionModal(state);
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
     out << inventoryTemplate(state, catalog);
@@ -2624,6 +2713,20 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         ? "Seed " + std::to_string(mining.arenaMetadata.seed) + " \xE2\x80\xA2 Ruleset v" +
             std::to_string(mining.arenaMetadata.rulesVersion) + " \xE2\x80\xA2 Rig health " + miningPanel.rigHealth
         : state.statusLine;
+    if (!hasUnlock(state.meta, content::unlock::droneBay)) {
+        const ProspectorObjectivePresentation prospector = prospectorObjectivePresentation(state);
+        appendHudText(result, "rr-hud-mining-objective-title", prospector.title);
+        appendHudText(result, "rr-hud-mining-objective-detail", prospector.detail);
+    } else {
+        appendHudText(
+            result,
+            "rr-hud-mining-objective-title",
+            "Drill fuel-bearing terrain, bank cargo at the shuttle, then leave.");
+        appendHudText(
+            result,
+            "rr-hud-mining-objective-detail",
+            "Return to the shuttle to secure recovered cargo before departure.");
+    }
     appendHudText(result, "rr-hud-mining-title", miningRunTitle);
     appendHudText(result, "rr-hud-mining-detail", miningRunDetail + miningGateDetail);
     appendHudClass(

@@ -262,6 +262,16 @@ void rr_acknowledge_approach_introduction()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_acknowledge_prospector_completion()
+{
+    if (g_app) {
+        g_app->acknowledgeProspectorCompletion();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_flyby()
 {
     if (g_app) {

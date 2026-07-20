@@ -156,6 +156,31 @@ SwapchainExtentDecision chooseSwapchainExtent(
 
 inline constexpr std::uint32_t framesInFlight = 2;
 
+// The regular scene-vertex and packed-instance streams both occupy Vulkan
+// vertex binding 0. Track the kind as well as the logical stream so switching
+// draw types always restores the buffer expected by the active pipeline.
+enum class SceneVertexBindingKind : std::uint8_t {
+    None,
+    Vertices,
+    Instances,
+};
+
+struct SceneVertexBindingState {
+    SceneVertexBindingKind kind = SceneVertexBindingKind::None;
+    std::uint8_t stream = 0;
+};
+
+constexpr bool updateSceneVertexBinding(
+    SceneVertexBindingState& state,
+    SceneVertexBindingKind kind,
+    std::uint8_t stream)
+{
+    const bool bindingRequired = state.kind != kind || state.stream != stream;
+    state.kind = kind;
+    state.stream = stream;
+    return bindingRequired;
+}
+
 constexpr std::uint32_t frameSlotForSerial(std::uint64_t frameSerial)
 {
     return frameSerial == 0

@@ -637,10 +637,16 @@ std::vector<PackedSceneInstance> attackDroneInstances(const RenderSnapshot& snap
 
 rocket::MiningRunState miningState(double inactiveEnemyX, double activeEnemyX);
 
-SceneInstance miningRigInstance(const ScenePacket& packet)
+SceneInstance spriteInstance(
+    const ScenePacket& packet,
+    TextureId texture,
+    float sourceU0,
+    float sourceV0,
+    float sourceU1,
+    float sourceV1)
 {
     const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
-        TextureId::MiningDrone, 0.0F, 0.0F, 1.0F, 1.0F);
+        texture, sourceU0, sourceV0, sourceU1, sourceV1);
     constexpr float tolerance = 2.0F / 65535.0F;
     assert(expected.valid);
     for (const SceneDraw& draw : packet.draws) {
@@ -659,8 +665,18 @@ SceneInstance miningRigInstance(const ScenePacket& packet)
             }
         }
     }
-    assert(false && "Expected the mining-rig texture instance.");
+    assert(false && "Expected the requested textured scene instance.");
     return {};
+}
+
+SceneInstance miningRigInstance(const ScenePacket& packet)
+{
+    return spriteInstance(packet, TextureId::MiningDrone, 0.0F, 0.0F, 1.0F, 1.0F);
+}
+
+SceneInstance miningDrillBitInstance(const ScenePacket& packet)
+{
+    return spriteInstance(packet, TextureId::DrillBit, 0.0F, 0.0F, 1.0F / 6.0F, 1.0F);
 }
 
 void testMiningRigSlerpsVerticalDuringExtraction()
@@ -698,6 +714,89 @@ void testMiningRigSlerpsVerticalDuringExtraction()
     const float endLength = std::hypot(end.axisYx, end.axisYy);
     assert(std::abs(end.axisYx / endLength) < 0.02F);
     assert(end.axisYy / endLength > 0.99F);
+
+    // The rig remains visible in the open bay after its travel finishes; the
+    // closing shuttle, rather than a hard disappearance, is what hides it.
+    snapshot.miningExtractionProgress = 0.62;
+    composer.setPresentationTime(1.064);
+    const SceneInstance docked = miningRigInstance(composer.compose(snapshot));
+    const float dockedLength = std::hypot(docked.axisYx, docked.axisYy);
+    assert(std::abs(docked.axisYx / dockedLength) < 0.02F);
+    assert(docked.axisYy / dockedLength > 0.99F);
+    assert(docked.color.a > 0.10F);
+}
+
+void testMiningRigStaysVisibleAndTracksHeading()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningHullDirX = 1.0;
+    snapshot.miningHullDirY = 0.0;
+    snapshot.miningMoveX = 1.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setTextureReady(TextureId::MiningDrone, true);
+    composer.setTextureReady(TextureId::DrillBit, true);
+
+    composer.setPresentationTime(1.0);
+    const ScenePacket& firstPacket = composer.compose(snapshot);
+    const SceneInstance first = miningRigInstance(firstPacket);
+    const SceneInstance firstDrill = miningDrillBitInstance(firstPacket);
+    assert(std::isfinite(first.centerX) && std::isfinite(first.centerY));
+    assert(first.textured);
+    assert(first.shape == SceneInstanceShape::Rectangle);
+    assert(first.color.a > 0.99F);
+    assert(std::hypot(first.axisXx, first.axisXy) > 0.01F);
+    assert(std::hypot(first.axisYx, first.axisYy) > 0.01F);
+    assert(first.axisYx < -0.01F);
+    assert(std::abs(first.axisYy) < 0.001F);
+    const float firstLength = std::hypot(first.axisYx, first.axisYy);
+    const float firstDrillLength = std::hypot(firstDrill.axisYx, firstDrill.axisYy);
+    assert((first.axisYx * firstDrill.axisYx + first.axisYy * firstDrill.axisYy)
+        / (firstLength * firstDrillLength) > 0.999F);
+
+    // A large presentation-time step snaps to the new heading, avoiding the
+    // intentional short steering Slerp while checking the opposite direction.
+    snapshot.miningHullDirX = -1.0;
+    snapshot.miningMoveX = -1.0;
+    composer.setPresentationTime(1.5);
+    const ScenePacket& reversedPacket = composer.compose(snapshot);
+    const SceneInstance reversed = miningRigInstance(reversedPacket);
+    const SceneInstance reversedDrill = miningDrillBitInstance(reversedPacket);
+    assert(std::isfinite(reversed.centerX) && std::isfinite(reversed.centerY));
+    assert(reversed.textured);
+    assert(reversed.shape == SceneInstanceShape::Rectangle);
+    assert(reversed.color.a > 0.99F);
+    assert(std::hypot(reversed.axisXx, reversed.axisXy) > 0.01F);
+    assert(std::hypot(reversed.axisYx, reversed.axisYy) > 0.01F);
+    assert(reversed.axisYx > 0.01F);
+    assert(std::abs(reversed.axisYy) < 0.001F);
+    const float reversedLength = std::hypot(reversed.axisYx, reversed.axisYy);
+    const float reversedDrillLength = std::hypot(reversedDrill.axisYx, reversedDrill.axisYy);
+    assert(std::abs(reversedLength - firstLength) < 0.001F);
+    assert(std::abs(
+        std::hypot(reversed.axisXx, reversed.axisXy)
+        - std::hypot(first.axisXx, first.axisXy)) < 0.001F);
+    assert((reversed.axisYx * reversedDrill.axisYx + reversed.axisYy * reversedDrill.axisYy)
+        / (reversedLength * reversedDrillLength) > 0.999F);
+
+    // Diagonal steering must rotate the body and drill together rather than
+    // leaving the body on either cardinal orientation.
+    snapshot.miningHullDirX = 1.0;
+    snapshot.miningHullDirY = 1.0;
+    snapshot.miningMoveX = 1.0;
+    snapshot.miningMoveY = 1.0;
+    composer.setPresentationTime(2.0);
+    const ScenePacket& diagonalPacket = composer.compose(snapshot);
+    const SceneInstance diagonal = miningRigInstance(diagonalPacket);
+    const SceneInstance diagonalDrill = miningDrillBitInstance(diagonalPacket);
+    assert(std::abs(diagonal.axisYx) > 0.01F);
+    assert(std::abs(diagonal.axisYy) > 0.01F);
+    const float diagonalLength = std::hypot(diagonal.axisYx, diagonal.axisYy);
+    const float diagonalDrillLength = std::hypot(diagonalDrill.axisYx, diagonalDrill.axisYy);
+    assert((diagonal.axisYx * diagonalDrill.axisYx + diagonal.axisYy * diagonalDrill.axisYy)
+        / (diagonalLength * diagonalDrillLength) > 0.999F);
 }
 
 rocket::MiningRunState miningState(double inactiveEnemyX, double activeEnemyX)
@@ -875,6 +974,7 @@ int main()
     testUniformAndGradientLineOrdering();
     testAtlasPageBatchingAcrossLogicalTextures();
     testMiningRigSlerpsVerticalDuringExtraction();
+    testMiningRigStaysVisibleAndTracksHeading();
     testFrameViewsKeepAuthoritativeEnemyIndices();
     testMiningTerrainPersistentStreamInvalidation();
     return 0;

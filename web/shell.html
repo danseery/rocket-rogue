@@ -2997,6 +2997,8 @@
       overflow: hidden;
       color: #edf8fb;
       pointer-events: none;
+      /* Reserve a dedicated lane for the persistent keyboard/controller helper. */
+      --mining-input-helper-reserve: 72px;
     }
 
     .mining-top-rail,
@@ -3199,14 +3201,14 @@
 
     .mining-playfield-space {
       position: absolute;
-      inset: 118px 18px 156px;
+      inset: 118px 18px calc(156px + var(--mining-input-helper-reserve));
       pointer-events: none;
     }
 
     .mining-bottom-rail {
       left: 18px;
       right: 18px;
-      bottom: 14px;
+      bottom: calc(14px + var(--mining-input-helper-reserve));
       min-height: 108px;
       padding: 10px;
       display: block;
@@ -3369,13 +3371,13 @@
       }
 
       .mining-playfield-space {
-        inset: 158px 10px 190px;
+        inset: 158px 10px calc(190px + var(--mining-input-helper-reserve));
       }
 
       .mining-bottom-rail {
         left: 10px;
         right: 10px;
-        bottom: 10px;
+        bottom: calc(10px + var(--mining-input-helper-reserve));
         min-height: 162px;
         flex-direction: column;
         gap: 8px;
@@ -4692,6 +4694,18 @@
       padding: 20px;
     }
 
+    .modal-root[data-modal-id="launch_outcome"] #modal-content,
+    .modal-root[data-modal-id="launch_introduction"] #modal-content,
+    .modal-root[data-modal-id="approach_introduction"] #modal-content,
+    .modal-root[data-modal-id="flyby_introduction"] #modal-content,
+    .modal-root[data-modal-id="orbit_introduction"] #modal-content,
+    .modal-root[data-modal-id="landing_introduction"] #modal-content,
+    .modal-root[data-modal-id="mini_drone_introduction"] #modal-content,
+    .modal-root[data-modal-id="mining_introduction"] #modal-content {
+      overflow-y: hidden;
+      scrollbar-gutter: auto;
+    }
+
     .activity-introduction {
       display: flex;
       flex-direction: column;
@@ -4741,8 +4755,9 @@
     }
 
     .activity-introduction-actions button {
-      width: 176px;
-      min-height: 42px;
+      width: 160px;
+      min-height: 36px;
+      padding-block: 6px;
     }
 
     .launch-outcome-summary {
@@ -4764,12 +4779,17 @@
     }
 
     .launch-outcome-actions {
+      flex-wrap: nowrap;
+      justify-content: flex-end;
       margin-top: auto;
     }
 
     .launch-outcome-actions button {
-      flex: 1 1 0;
-      min-width: 0;
+      flex: 0 0 150px;
+      width: 150px;
+      min-width: 150px;
+      min-height: 36px;
+      padding-block: 6px;
     }
 
     body.controller-input-active.controller-focus-visible:not(.rmlui-enabled) #panel .controller-focused,
@@ -7075,7 +7095,10 @@
       const shipServiceMarker = panel.querySelector("[data-mining-ship-service]");
       const drillRepairVisible = shipServiceMarker?.dataset.drillVisible === "1";
       const droneRepairVisible = shipServiceMarker?.dataset.droneVisible === "1";
+      const repairsRenderInPanel = Boolean(panel.querySelector(
+        "[data-rr-action='mining_repair_drill'], [data-rr-action='mining_repair_drone']"));
       const showShipService = useShellSceneOverlays
+        && !repairsRenderInPanel
         && Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
       debugTools.classList.toggle("hud-suppressed", miningFullscreen || titleScreen);
 
@@ -7503,6 +7526,7 @@
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
       rerollOffers: () => rrCall("rr_reroll_offers"),
       acknowledgeApproachIntroduction: () => rrCall("rr_acknowledge_approach_introduction"),
+      acknowledgeProspectorCompletion: () => rrCall("rr_acknowledge_prospector_completion"),
       arrivalFlyby: () => rrCall("rr_arrival_flyby"),
       flybyMove: (xAxis, yAxis) => rrCall("rr_flyby_move", [xAxis, yAxis], ["number", "number"]),
       flybyAbort: () => rrCall("rr_flyby_abort"),
@@ -7614,6 +7638,7 @@
       upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
       acknowledgeApproachIntroduction: "acknowledge_approach_introduction",
+      acknowledgeProspectorCompletion: "acknowledge_prospector_completion",
       arrivalFlyby: "arrival_flyby",
       flybyAbort: "flyby_abort",
       flybyContinue: "flyby_continue",
@@ -7667,6 +7692,7 @@
       [rrActionIds.arkJump]: () => rr.arkJump(),
       [rrActionIds.rerollOffers]: () => rr.rerollOffers(),
       [rrActionIds.acknowledgeApproachIntroduction]: () => rr.acknowledgeApproachIntroduction(),
+      [rrActionIds.acknowledgeProspectorCompletion]: () => rr.acknowledgeProspectorCompletion(),
       [rrActionIds.arrivalFlyby]: () => rr.arrivalFlyby(),
       [rrActionIds.flybyAbort]: () => rr.flybyAbort(),
       [rrActionIds.flybyContinue]: () => rr.flybyContinue(),
@@ -7900,6 +7926,10 @@
     let lastPanelAction = "";
     let lastPanelModalAt = 0;
     let lastPanelModal = "";
+    // Space is the launch Return shortcut and also confirms a focused modal
+    // action. Keep its physical press from carrying through into a launch
+    // outcome that appears before the key is released.
+    let launchOutcomeConfirmReleaseGuard = false;
     const heldPanelActions = new Map();
 
     function closestFromEvent(event, selector) {
@@ -7938,7 +7968,8 @@
       if (document.body.classList.contains("controller-input-active")) {
         restoreControllerFocus(preferredFocusId);
       } else {
-        (!modalClose.hidden ? modalClose : modalContent.querySelector("button"))?.focus();
+        (modalContent.querySelector("[data-ui-default-focus='1']")
+          || (!modalClose.hidden ? modalClose : modalContent.querySelector("button")))?.focus();
       }
       return true;
     }
@@ -8355,11 +8386,17 @@
     }, true);
     modalRoot.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
+      if (launchOutcomeConfirmReleaseGuard && modalRoot.dataset.modalId === "launch_outcome") {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       handleModalTrigger(event);
       handlePanelAction(event);
     }, true);
     window.addEventListener("keyup", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
+      launchOutcomeConfirmReleaseGuard = false;
       cancelAllHeldPanelActions();
     }, true);
     document.addEventListener("fullscreenchange", () => {
@@ -8781,6 +8818,7 @@
         return;
       }
       if (event.key === " " || event.key.toLowerCase() === "r") {
+        if (event.key === " ") launchOutcomeConfirmReleaseGuard = true;
         rr.returnHome();
         event.preventDefault();
       } else if (event.key.toLowerCase() === "e") {
@@ -8798,12 +8836,14 @@
     });
 
     window.addEventListener("blur", () => {
+      launchOutcomeConfirmReleaseGuard = false;
       cancelAllHeldPanelActions();
       releaseRealtimeInputs();
     });
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
+        launchOutcomeConfirmReleaseGuard = false;
         cancelAllHeldPanelActions();
         releaseRealtimeInputs();
       }

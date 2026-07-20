@@ -13,7 +13,7 @@ Rocket Rogue is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applicati
 - Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
 - Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and stow/abort decisions.
 - Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
-- Drone Bay progression with mining, resource, survey, hazard, attack, and defense drones. Combat-facing drones stay gated behind post-solar hostile-system progression.
+- The first mining contract reserves 3 safely recovered Common Ore to fabricate the Prospector Mk I, permanently unlocking one Mining Drone and one Drone Bay slot. Later research expands the bay with resource, survey, and hazard support; combat drones remain gated behind post-solar hostile-system progression.
 - Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. Scripted Ark jump/disaster beats, Navigation after hostile-system stranding, and Ark fuel framing follow.
 - Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
 
@@ -262,7 +262,7 @@ Use the on-screen mission-control buttons or their controller prompts:
 - Before the Moon, choose the next unique Reach, Control, or Recovery upgrade, or keep the credits. Later refit boards return to randomized, role-diverse offers without duplicates.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
 - Use Push Deeper through the frontier ladder only after enough proving data is banked.
-- Successful arrivals can open flyby/orbit/landing operations. Their first selections pause for saved, one-time briefs: flyby and orbit explain that blueprint progress unlocks permanent ship upgrades, while landing explains that surface upgrades improve the mining drone. The Drone Bay introduces mini-drones only after that system is unlocked.
+- Successful arrivals can open flyby/orbit/landing operations. Their first selections pause for saved, one-time briefs: flyby and orbit explain that blueprint progress unlocks permanent ship upgrades, while landing explains surface work. The first mining brief presents the 3-Common-Ore Prospector contract before deployment; safely extracted ore advances its saved objective, and completion receives a one-time `PROSPECTOR ONLINE` acknowledgment before the Mining Drone joins future digs.
 - Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
 - Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
 - Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South stows at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.

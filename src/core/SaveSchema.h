@@ -124,6 +124,7 @@ inline constexpr std::string_view droneBaySlots = "droneBaySlots";
 inline constexpr std::string_view ownedDrones = "ownedDrones";
 inline constexpr std::string_view equippedDrones = "equippedDrones";
 inline constexpr std::string_view droneUpgrades = "droneUpgrades";
+inline constexpr std::string_view prospectorCommonOreRecovered = "prospectorCommonOreRecovered";
 inline constexpr std::string_view artifacts = "artifacts";
 inline constexpr std::string_view miningFirstClearProgress = "miningFirstClearProgress";
 inline constexpr std::string_view miningStorySites = "miningStorySites";

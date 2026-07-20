@@ -674,6 +674,7 @@ struct MetaProgress {
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
     std::vector<DroneUpgradeRecord> droneUpgrades;
+    int prospectorCommonOreRecovered = 0;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
     std::vector<MiningStorySiteProgress> miningStorySites;

@@ -1482,7 +1482,10 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::fieldKit, surfaceFieldKitSummary(meta)),
         detailPresentationRow("Drone loadout", hasUnlock(meta, content::unlock::droneBay)
             ? std::string("Configure persistent helper drones from Drone Ops before mining.")
-            : std::string("Research Drone Bay to assign persistent mining helpers.")),
+            : std::string("Prospector contract: ") +
+                std::to_string(std::clamp(meta.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal)) +
+                "/" + std::to_string(tuning::research::prospectorCommonOreGoal) +
+                " Common Ore safely recovered."),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and drone operations"),
@@ -1574,7 +1577,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     }
     presentation.droneOpsAction = droneBayUnlocked(state)
         ? panelActionButton("Drone Ops", ui::actions::droneOps, "warn")
-        : disabledPanelButton("Research Drone Bay");
+        : disabledPanelButton("Build Prospector");
     SurfaceActionPreviewPresentation surveyPreview = surfaceActionPreview(
         text::buttons::surveySite,
         std::string(text::panel::messages::surfaceSurveyDetail),

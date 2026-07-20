@@ -155,6 +155,16 @@ int main()
     assert(wouldExceedFramesInFlight(3, 0));
     assert(!wouldExceedFramesInFlight(3, 1));
 
+    SceneVertexBindingState binding;
+    assert(updateSceneVertexBinding(binding, SceneVertexBindingKind::Instances, 0));
+    assert(!updateSceneVertexBinding(binding, SceneVertexBindingKind::Instances, 0));
+    // Movement exhaust alternates a triangle draw between instanced effects
+    // and the textured mining rig. Binding 0 must be restored at both edges.
+    assert(updateSceneVertexBinding(binding, SceneVertexBindingKind::Vertices, 0));
+    assert(updateSceneVertexBinding(binding, SceneVertexBindingKind::Instances, 0));
+    assert(!updateSceneVertexBinding(binding, SceneVertexBindingKind::Instances, 0));
+    assert(updateSceneVertexBinding(binding, SceneVertexBindingKind::Instances, 1));
+
     FrameRetirementDecision retirement = decideFrameRetirement(1, 0, 0, false);
     assert(retirement.action == FrameRetirementAction::UseUnusedSlot);
     assert(retirement.frameSlot == 0 && !retirement.waitForFence);

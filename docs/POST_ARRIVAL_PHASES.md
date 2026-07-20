@@ -18,7 +18,7 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Each optional activity introduces its progression value at the moment the player first selects it. Flyby and Orbit explicitly frame blueprint progress as the route to permanent ship upgrades. Landing frames surface upgrades as improvements to the mining drone. These briefs are acknowledged only when the player starts the activity, survive save/load, and never name mini-drones before Drone Bay unlock; the first Drone Ops selection introduces that system after it becomes available.
+Each optional activity introduces its progression value at the moment the player first selects it. Flyby and Orbit explicitly frame blueprint progress as the route to permanent ship upgrades. Landing introduces surface operations. The first Mining brief states the 3-Common-Ore Prospector contract before deployment, and its live objective distinguishes ore home, aboard, and carried. Safely completing the contract produces a saved `PROSPECTOR ONLINE` celebration that unlocks the first Mining Drone; later support-drone research expands the bay without cluttering the initial brief.
 
 ## Research Phase
 
@@ -47,7 +47,7 @@ The current POC treats research facilities and surface tools as small unlock lay
 - Field probes add action-kit margin and improve survey yield.
 - Surface drills improve mining yield and rare-material odds.
 - Cargo return rigs reduce extraction risk, especially when cargo gets heavy.
-- Drone Bay unlocks persistent helper drones and the Drone Ops loadout screen.
+- The Prospector contract unlocks the first Mining Drone and Drone Ops; Drone Support research adds the remaining environmental helpers.
 - Arkfall grants Mk I Attack/Defense drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
 
 These are research unlocks, not refit cards, so the player has a reason to care about Mars research even before enemy encounters exist.

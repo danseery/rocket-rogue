@@ -122,7 +122,8 @@ Research improves mining through specific tools:
 - Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra blueprint progress from recovered field notes.
-- Drone Bay Program: persistent helper drones and Drone Ops loadout.
+- First mining contract: 3 safely extracted Common Ore fabricates the Prospector Mk I, unlocking one permanent Mining Drone and the first Drone Bay slot.
+- Drone Support Program: expands the Prospector cradle with Resource, Survey, and Hazard helpers for the Drone Ops loadout.
 - Arkfall emergency kit: Mk I Attack and Defense drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
 - Perimeter Drone Network: Perimeter Coordination for Mk II/Mk III combat tuning and advanced combat synergies.
 

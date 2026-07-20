@@ -981,7 +981,12 @@ std::string panelRcss(RmlPanelMode mode)
     const int miningTopHeight = compactMining ? 118 : 62;
     const int miningObjectiveTop = miningInset + miningTopHeight + 12;
     const int miningBottomHeight = compactMining ? 164 : 126;
-    const int miningBottomTop = std::max(miningTopHeight + 18, panelHeight - miningBottomHeight - miningInset);
+    // The persistent mining input helper owns the screen's bottom lane. Keep
+    // the docked Leave / Recall control above its tallest two-line treatment.
+    const int miningInputHelperReservedHeight = 72;
+    const int miningBottomTop = std::max(
+        miningTopHeight + 18,
+        panelHeight - miningBottomHeight - miningInset - miningInputHelperReservedHeight);
     const int miningUtilityWidth = compactMining ? 104 : 108;
     const int miningTitleWidth = compactMining ? std::max(1, miningRailWidth - miningUtilityWidth - 12) : 246;
     const int miningVitalWidth = compactMining ? 78 : 86;
@@ -5836,6 +5841,17 @@ button.settings-toggle:hover {
     height: 280px;
     padding: 20px;
 }
+#rr-modal.modal-launch_outcome .modal-scroll-body,
+#rr-modal.modal-launch_introduction .modal-scroll-body,
+#rr-modal.modal-approach_introduction .modal-scroll-body,
+#rr-modal.modal-flyby_introduction .modal-scroll-body,
+#rr-modal.modal-orbit_introduction .modal-scroll-body,
+#rr-modal.modal-landing_introduction .modal-scroll-body,
+#rr-modal.modal-mini_drone_introduction .modal-scroll-body,
+#rr-modal.modal-mining_introduction .modal-scroll-body {
+    overflow-y: hidden;
+    padding-right: 0px;
+}
 #rr-modal.modal-launch_introduction,
 #rr-modal.modal-approach_introduction,
 #rr-modal.modal-flyby_introduction,
@@ -5858,6 +5874,7 @@ button.settings-toggle:hover {
 #rr-modal.modal-mining_introduction .modal-head {
     margin-bottom: 12px;
 }
+#rr-modal.modal-launch_outcome .modal-head button,
 #rr-modal.modal-launch_introduction .modal-head button,
 #rr-modal.modal-approach_introduction .modal-head button,
 #rr-modal.modal-flyby_introduction .modal-head button,
@@ -5865,9 +5882,13 @@ button.settings-toggle:hover {
 #rr-modal.modal-landing_introduction .modal-head button,
 #rr-modal.modal-mini_drone_introduction .modal-head button,
 #rr-modal.modal-mining_introduction .modal-head button {
-    width: 82px;
-    min-height: 36px;
-    padding: 7px 10px;
+    box-sizing: border-box;
+    width: 72px;
+    height: 34px;
+    min-height: 0px;
+    margin-top: 0px;
+    margin-right: 0px;
+    padding: 5px 8px;
 }
 .activity-introduction {
     display: flex;
@@ -5912,8 +5933,13 @@ button.settings-toggle:hover {
     justify-content: flex-end;
 }
 .activity-introduction-actions button {
-    width: 176px;
-    min-height: 42px;
+    box-sizing: border-box;
+    width: 160px;
+    height: 36px;
+    min-height: 0px;
+    margin-top: 0px;
+    margin-right: 0px;
+    padding: 5px 8px;
 }
 .launch-outcome-summary {
     display: flex;
@@ -5939,9 +5965,17 @@ button.settings-toggle:hover {
 }
 .launch-outcome-actions {
     margin-top: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
 }
 .launch-outcome-actions button {
-    width: 48%;
+    box-sizing: border-box;
+    width: 150px;
+    height: 36px;
+    min-height: 0px;
+    margin-top: 0px;
+    margin-right: 8px;
+    padding: 5px 8px;
 }
 .modal-head {
     display: flex;
@@ -6326,15 +6360,10 @@ std::string buildDocumentRml(
     bool performanceStatsVisible)
 {
     const std::vector<ModalTemplate> modals = extractModals(panelHtml);
+    // setPanelHtml is the only place that promotes an auto-open template into
+    // openModalId_. Re-opening it while rebuilding would make Close and Back
+    // redraw a briefing the player had just dismissed.
     std::string activeModalId = openModalId;
-    if (activeModalId.empty()) {
-        const auto autoModal = std::find_if(modals.begin(), modals.end(), [](const ModalTemplate& modal) {
-            return modal.autoOpen;
-        });
-        if (autoModal != modals.end()) {
-            activeModalId = autoModal->id;
-        }
-    }
 
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
     const bool titleScreen = panelUsesTitle(panelMode);

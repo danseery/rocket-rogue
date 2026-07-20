@@ -130,6 +130,7 @@ struct SurfaceActionOutcome {
     int artifactsLost = 0;
     bool enemyEncounter = false;
     bool cargoRecovered = false;
+    bool prospectorUnlocked = false;
     double extractionRisk = 0.0;
     double extractionRiskDelta = 0.0;
 };

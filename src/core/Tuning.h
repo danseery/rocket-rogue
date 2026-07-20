@@ -586,6 +586,7 @@ inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 
 namespace research {
 inline constexpr int firstResearchTier = 2;
+inline constexpr int prospectorCommonOreGoal = 3;
 inline constexpr int enemyEncounterTier = 4;
 inline constexpr int offerCount = 3;
 inline constexpr int baseSupply = 7;

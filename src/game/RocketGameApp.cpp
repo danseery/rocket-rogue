@@ -84,6 +84,7 @@ void seedDebugResearchAccess(GameState& state)
     addDebugUnlock(state, content::unlock::cargoRigs);
     addDebugUnlock(state, content::unlock::analysisLab);
     addDebugUnlock(state, content::unlock::droneBay);
+    addDebugUnlock(state, content::unlock::droneSupportSuite);
     addDebugUnlock(state, content::unlock::perimeterDrones);
     state.meta.materials.common = std::max(state.meta.materials.common, 18);
     state.meta.materials.rare = std::max(state.meta.materials.rare, 8);
@@ -94,6 +95,7 @@ void seedDebugResearchAccess(GameState& state)
 void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
 {
     addDebugUnlock(state, content::unlock::droneBay);
+    addDebugUnlock(state, content::unlock::droneSupportSuite);
     addDebugUnlock(state, content::unlock::perimeterDrones);
     state.meta.droneBaySlots = 6;
     state.meta.ownedDroneIds = {
@@ -1615,6 +1617,25 @@ void RocketGameApp::acknowledgeApproachIntroduction()
     panelDirty_ = true;
 }
 
+void RocketGameApp::acknowledgeProspectorCompletion()
+{
+    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
+        return;
+    }
+
+    ui::briefings::acknowledge(
+        state_.meta.acknowledgedActivityBriefingIds,
+        ui::briefings::prospectorComplete);
+    // The completion beat already teaches the player's first Mining Drone.
+    // Do not immediately repeat the generic Drone Ops introduction.
+    ui::briefings::acknowledge(
+        state_.meta.acknowledgedActivityBriefingIds,
+        ui::briefings::miniDrones);
+    state_.statusLine = "Prospector Mk I assigned. Your Mining Drone is ready for the next dig.";
+    save();
+    panelDirty_ = true;
+}
+
 void RocketGameApp::flybyMove(double xAxis, double yAxis)
 {
     if (state_.screen != Screen::Flyby) {
@@ -1849,7 +1870,7 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
 void RocketGameApp::openDroneOps()
 {
     if (state_.screen != Screen::SurfaceExpedition || !state_.run.surfaceExpedition.active || !droneBayUnlocked(state_)) {
-        state_.statusLine = "Research Drone Bay before assigning helper drones.";
+        state_.statusLine = "Complete the Prospector contract before assigning helper drones.";
         panelDirty_ = true;
         return;
     }
@@ -3178,6 +3199,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         rerollOffers();
     } else if (action == ui::actions::acknowledgeApproachIntroduction) {
         acknowledgeApproachIntroduction();
+    } else if (action == ui::actions::acknowledgeProspectorCompletion) {
+        acknowledgeProspectorCompletion();
     } else if (action == ui::actions::arrivalFlyby) {
         runArrivalFlyby();
     } else if (action == ui::actions::flybyAbort) {

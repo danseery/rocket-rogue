@@ -67,6 +67,7 @@ inline constexpr std::string_view miningRepairDrone = "mining_repair_drone";
 inline constexpr std::string_view miningStow = "mining_stow";
 inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
+inline constexpr std::string_view acknowledgeProspectorCompletion = "acknowledge_prospector_completion";
 
 inline std::string buyOffer(int index)
 {
@@ -132,6 +133,7 @@ inline constexpr std::string_view orbitIntroduction = "orbit_introduction";
 inline constexpr std::string_view landingIntroduction = "landing_introduction";
 inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introduction";
 inline constexpr std::string_view miningIntroduction = "mining_introduction";
+inline constexpr std::string_view prospectorCompletion = "prospector_completion";
 } // namespace modals
 
 namespace briefings {
@@ -142,6 +144,7 @@ inline constexpr std::string_view orbit = "orbit_blueprints";
 inline constexpr std::string_view landing = "landing_drone_upgrades";
 inline constexpr std::string_view miniDrones = "mini_drones";
 inline constexpr std::string_view mining = "mining_overview";
+inline constexpr std::string_view prospectorComplete = "prospector_complete";
 
 inline bool acknowledged(const std::vector<std::string>& ids, std::string_view id)
 {

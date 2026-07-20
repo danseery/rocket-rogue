@@ -1382,10 +1382,7 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
     vkCmdSetViewport(activeFrame_->commandBuffer, 0, 1, &viewport);
     vkCmdSetScissor(activeFrame_->commandBuffer, 0, 1, &scissor);
     const VkDeviceSize vertexOffset = 0;
-    SceneVertexStream boundVertexStream = SceneVertexStream::Frame;
-    bool vertexStreamBound = false;
-    SceneInstanceStream boundInstanceStream = SceneInstanceStream::Frame;
-    bool instanceStreamBound = false;
+    vulkan_policy::SceneVertexBindingState vertexBinding;
     SceneDrawType boundDrawType = SceneDrawType::Triangles;
     bool pipelineBound = false;
     VkDescriptorSet boundDescriptor = VK_NULL_HANDLE;
@@ -1401,7 +1398,10 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
             pipelineBound = true;
         }
         if (draw.drawType == SceneDrawType::InstancedQuad) {
-            if (!instanceStreamBound || draw.instanceStream != boundInstanceStream) {
+            if (vulkan_policy::updateSceneVertexBinding(
+                    vertexBinding,
+                    vulkan_policy::SceneVertexBindingKind::Instances,
+                    static_cast<std::uint8_t>(draw.instanceStream))) {
                 const VkBuffer instanceBuffer = draw.instanceStream == SceneInstanceStream::MiningTerrain
                     ? activeFrame_->miningTerrainInstanceBuffer
                     : activeFrame_->instanceBuffer;
@@ -1412,10 +1412,11 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
                 }
                 vkCmdBindVertexBuffers(
                     activeFrame_->commandBuffer, 0, 1, &instanceBuffer, &vertexOffset);
-                boundInstanceStream = draw.instanceStream;
-                instanceStreamBound = true;
             }
-        } else if (!vertexStreamBound || draw.vertexStream != boundVertexStream) {
+        } else if (vulkan_policy::updateSceneVertexBinding(
+                       vertexBinding,
+                       vulkan_policy::SceneVertexBindingKind::Vertices,
+                       static_cast<std::uint8_t>(draw.vertexStream))) {
             const VkBuffer vertexBuffer = draw.vertexStream == SceneVertexStream::MiningTerrain
                 ? activeFrame_->miningTerrainVertexBuffer
                 : activeFrame_->vertexBuffer;
@@ -1425,8 +1426,6 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
                 return;
             }
             vkCmdBindVertexBuffers(activeFrame_->commandBuffer, 0, 1, &vertexBuffer, &vertexOffset);
-            boundVertexStream = draw.vertexStream;
-            vertexStreamBound = true;
         }
         std::size_t textureResource = 0;
         if (draw.atlasPage != kNoSceneAtlasPage) {

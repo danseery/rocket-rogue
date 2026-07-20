@@ -363,7 +363,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             const int drillRepairCost = miningDrillRepairCost(mining);
             const int droneRepairCost = miningDroneRepairCost(mining);
             presentation.commandTitle = "Ship service";
-            presentation.commandDetail = "Repair, then leave";
+            presentation.commandDetail = "Repair, scan the site, then leave";
             presentation.actions = {
                 drillRepairCost <= 0
                     ? disabledPanelButton("Bit ready")
@@ -375,6 +375,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                     : (mining.stowedMaterials.common >= droneRepairCost
                               ? panelActionButton("Repair drone (" + std::to_string(droneRepairCost) + " common)", ui::actions::miningRepairDrone, "ok")
                               : disabledPanelButton("Need " + std::to_string(droneRepairCost) + " common for drone")),
+                // The scanner is useful before the rig leaves the shuttle. Keep
+                // the same visible action as the E key so the opening HUD never
+                // appears to require a hidden input before surveying.
+                panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
                 panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok")
             };
         } else {

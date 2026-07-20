@@ -36,7 +36,7 @@ The first implemented phase model is:
 4. Survey, use Push Deeper, or deploy the mining drone for one fuel-gated mining run.
 5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
 
-The first selection of Flyby, Orbit, and Landing opens a short, saved introduction before starting the activity. Flyby and Orbit connect blueprint progress to permanent shipyard upgrades; Landing connects surface work to mining-drone upgrades. Mini-drone terminology must not appear in this onboarding until Drone Bay is unlocked, when opening Drone Ops receives its own one-time introduction.
+The first selection of Flyby, Orbit, Landing, and Mining opens a short, saved introduction before starting the activity. Flyby and Orbit connect blueprint progress to permanent shipyard upgrades; Landing connects the player to surface work. The first Mining brief presents the Prospector contract: safely recover 3 Common Ore to fabricate the first autonomous Mining Drone. The live objective separates ore already home from ore aboard or carried, and contract completion receives a saved, acknowledgment-focused modal before Drone Ops becomes part of later surface loops.
 
 Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" Early solar-system expeditions do not have enemies. Enemy encounters should stay disabled until the Nearby Star tier, when the game leaves familiar planetary exploration and starts introducing hostile unknowns.
 

@@ -15,7 +15,7 @@
 
 namespace {
 
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xadfc346da3bcfb59ULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0x079a56a29778fbecbULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:

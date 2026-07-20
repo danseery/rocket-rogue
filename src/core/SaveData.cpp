@@ -907,6 +907,8 @@ bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::st
         save.equippedDroneIds = split(value, save_schema::listDelimiter);
     } else if (key == save_schema::field::droneUpgrades) {
         save.droneUpgrades = parseDroneUpgrades(value);
+    } else if (key == save_schema::field::prospectorCommonOreRecovered) {
+        save.prospectorCommonOreRecovered = parseInt(value, save.prospectorCommonOreRecovered);
     } else if (key == save_schema::field::artifacts) {
         save.artifacts = parseArtifacts(value);
     } else if (key == save_schema::field::furthestTier) {
@@ -1801,6 +1803,7 @@ SaveData captureSaveData(const GameState& state)
     save.ownedDroneIds = state.meta.ownedDroneIds;
     save.equippedDroneIds = state.meta.equippedDroneIds;
     save.droneUpgrades = state.meta.droneUpgrades;
+    save.prospectorCommonOreRecovered = state.meta.prospectorCommonOreRecovered;
     save.artifacts = state.meta.artifacts;
     save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
     save.miningStorySites = state.meta.miningStorySites;
@@ -1965,6 +1968,27 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
     state.meta.droneUpgrades = save.droneUpgrades;
+    state.meta.prospectorCommonOreRecovered = std::clamp(
+        save.prospectorCommonOreRecovered,
+        0,
+        tuning::research::prospectorCommonOreGoal);
+    state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
+    const bool legacyDroneBayUnlocked = hasUnlock(state.meta, content::unlock::droneBay);
+    const bool legacyMiningSeen = ui::briefings::acknowledged(
+        state.meta.acknowledgedActivityBriefingIds,
+        ui::briefings::mining)
+        || save.surfaceExpedition.miningRunUsed
+        || save.mining.active;
+    if (save.version < 4 && (legacyDroneBayUnlocked || legacyMiningSeen)) {
+        state.meta.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
+        appendUnique(state.meta.unlockKeys, content::unlock::droneBay);
+        ui::briefings::acknowledge(
+            state.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::prospectorComplete);
+    }
+    if (save.version < 4 && legacyDroneBayUnlocked) {
+        appendUnique(state.meta.unlockKeys, content::unlock::droneSupportSuite);
+    }
     migrateLegacyHazardDroneRecords(state.meta);
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
@@ -1975,7 +1999,6 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
     state.storyBriefing = save.storyBriefing;
-    state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
     state.meta.campaignIntroductionAcknowledged = save.version < 2 ? true : save.campaignIntroductionAcknowledged;
     state.meta.straylightDiscoveryAcknowledged = save.version < 2 ? legacyArkDiscovered : save.straylightDiscoveryAcknowledged;
     if (state.screen == Screen::Navigation && !navigationAvailable(state)) {
@@ -2259,6 +2282,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::ownedDrones, join(save.ownedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equippedDrones, join(save.equippedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
+    writeField(out, save_schema::field::prospectorCommonOreRecovered, save.prospectorCommonOreRecovered);
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
     writeField(out, save_schema::field::miningStorySites, serializeMiningStorySites(save.miningStorySites));

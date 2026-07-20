@@ -2808,6 +2808,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     }
 
     if (!snapshot.miningExtractionActive && textureReady(MiningDroneAsset)) {
+        // The art's drill mount is at the bottom of the authored texture, so
+        // its sprite-forward vector is opposite the gameplay hull direction.
+        // Use the same visual heading as the drill and exhaust so the complete
+        // rig turns as one vehicle while steering and drilling.
         drawSpriteRotated(
             drone.x,
             drone.y,
@@ -2850,17 +2854,24 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         }
 
         const float rigEntry = smoothExtraction((extractionProgress - 0.20F) / 0.36F);
-        if (rigEntry < 0.999F) {
-            const Vec2 rigPosition {
-                drone.x + (extractionBay.x - drone.x) * rigEntry,
-                drone.y + (extractionBay.y - drone.y) * rigEntry
-            };
-            const float rigSize = droneSize * (1.0F - rigEntry * 0.46F);
-            const float rigRotationProgress = smoothExtraction(std::clamp(rigEntry / 0.82F, 0.0F, 1.0F));
-            const Vec2 rigDirection = slerpDirection(
-                {-hullDirection.x, -hullDirection.y},
-                {0.0F, 1.0F},
-                rigRotationProgress);
+        const Vec2 rigPosition {
+            drone.x + (extractionBay.x - drone.x) * rigEntry,
+            drone.y + (extractionBay.y - drone.y) * rigEntry
+        };
+        const float rigSize = droneSize * (1.0F - rigEntry * 0.46F);
+        const float rigRotationProgress = smoothExtraction(std::clamp(rigEntry / 0.82F, 0.0F, 1.0F));
+        const Vec2 rigDirection = slerpDirection(
+            {-hullDirection.x, -hullDirection.y},
+            {0.0F, 1.0F},
+            rigRotationProgress);
+        // Do not drop the rig as soon as it reaches the bay. There is a visible
+        // gap before the bay door closes, which made the player craft vanish
+        // mid-extraction. Once docked, hold it upright in the open bay and
+        // fade it only as the closing shuttle covers it.
+        const float dockedRigAlpha = rigEntry < 0.999F
+            ? 1.0F
+            : std::max(0.0F, 1.0F - extractionClose);
+        if (dockedRigAlpha > 0.001F) {
             drawLine(drone.x, drone.y, rigPosition.x, rigPosition.y, {0.44F, 0.96F, 1.0F, (1.0F - rigEntry) * 0.26F}, 2.4F);
             drawRadialGlow(rigPosition.x, rigPosition.y, rigSize * 0.84F, {0.30F, 0.94F, 1.0F, 0.16F + (1.0F - rigEntry) * 0.12F}, 20);
             if (textureReady(MiningDroneAsset)) {
@@ -2871,10 +2882,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                     rigSize,
                     rigDirection.x,
                     rigDirection.y,
-                    {1.0F, 1.0F, 1.0F, 1.0F},
+                    {1.0F, 1.0F, 1.0F, dockedRigAlpha},
                     MiningDroneAsset);
             } else {
-                drawCircle(rigPosition.x, rigPosition.y, rigSize * 0.34F, {0.34F, 0.92F, 1.0F, 0.96F}, 16);
+                drawCircle(rigPosition.x, rigPosition.y, rigSize * 0.34F, {0.34F, 0.92F, 1.0F, 0.96F * dockedRigAlpha}, 16);
             }
         }
 

@@ -64,6 +64,7 @@ public:
     void buyOffer(int index);
     void rerollOffers();
     void acknowledgeApproachIntroduction();
+    void acknowledgeProspectorCompletion();
     void runArrivalFlyby();
     void flybyMove(double xAxis, double yAxis);
     void flybyAbort();

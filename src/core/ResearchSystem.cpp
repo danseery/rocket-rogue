@@ -1696,11 +1696,8 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
 
     state.meta.droneBaySlots = std::clamp(state.meta.droneBaySlots <= 0 ? 1 : state.meta.droneBaySlots, 1, 6);
 
-    const std::array<std::string_view, 4> starterDrones {
-        content::drone::miningDrone,
-        content::drone::resourceDrone,
-        content::drone::surveyDrone,
-        content::drone::hazardDrone
+    const std::array<std::string_view, 1> starterDrones {
+        content::drone::miningDrone
     };
     for (std::string_view droneId : starterDrones) {
         if (catalog.findMiniDrone(droneId) != nullptr
@@ -3056,6 +3053,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
         outcome.message = std::string(text::status::surfaceExtractionRough);
     }
 
+    int recoveredMiningCommon = 0;
     if (expedition.bankedMiningArenaValid && expedition.bankedMiningProgressionEligible) {
         const MiningArenaRequest request {
             expedition.bankedMiningArenaMetadata.act,
@@ -3063,6 +3061,10 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
             expedition.bankedMiningArenaMetadata.seed
         };
         const MiningArenaRules rules = resolveMiningArenaRules(request);
+        recoveredMiningCommon = attributedRecoveredMiningMaterial(
+            expedition.bankedMiningMaterials.common,
+            expedition.temporaryMaterials.common,
+            outcome.materialDelta.common);
         const int rareBanked = attributedRecoveredMiningMaterial(
             expedition.bankedMiningMaterials.rare,
             expedition.temporaryMaterials.rare,
@@ -3072,6 +3074,37 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
             expedition.temporaryMaterials.exotic,
             outcome.materialDelta.exotic);
         creditBankedMiningFirstClearRewards(state.meta, rules, rareBanked, exoticBanked);
+    }
+
+    if (!hasUnlock(state.meta, content::unlock::droneBay) && recoveredMiningCommon > 0) {
+        const int current = std::clamp(
+            state.meta.prospectorCommonOreRecovered,
+            0,
+            tuning::research::prospectorCommonOreGoal);
+        const int allocated = std::min(
+            tuning::research::prospectorCommonOreGoal - current,
+            recoveredMiningCommon);
+        state.meta.prospectorCommonOreRecovered = current + allocated;
+        // These samples are committed to the fabrication contract as soon as
+        // they reach home, so they never compete with ordinary research spend.
+        state.meta.materials.common = std::max(0, state.meta.materials.common - allocated);
+        if (state.meta.prospectorCommonOreRecovered >= tuning::research::prospectorCommonOreGoal) {
+            state.meta.unlockKeys.push_back(content::unlock::droneBay);
+            state.meta.droneBaySlots = std::max(1, state.meta.droneBaySlots);
+            if (std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), content::drone::miningDrone) == state.meta.ownedDroneIds.end()) {
+                state.meta.ownedDroneIds.push_back(content::drone::miningDrone);
+            }
+            if (state.meta.equippedDroneIds.empty()) {
+                state.meta.equippedDroneIds.push_back(content::drone::miningDrone);
+            }
+            const auto upgrade = std::find_if(state.meta.droneUpgrades.begin(), state.meta.droneUpgrades.end(), [](const DroneUpgradeRecord& record) {
+                return record.droneId == content::drone::miningDrone;
+            });
+            if (upgrade == state.meta.droneUpgrades.end()) {
+                state.meta.droneUpgrades.push_back({content::drone::miningDrone, 1});
+            }
+            outcome.prospectorUnlocked = true;
+        }
     }
 
     expedition = {};

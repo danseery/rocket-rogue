@@ -438,6 +438,9 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
     case SDL_EVENT_KEY_UP:
         noteKeyboardPointerActivity();
         if (event.key.key == SDLK_SPACE) app.miningKeyboardDrill(false);
+        if (event.key.key == SDLK_SPACE || event.key.key == SDLK_RETURN) {
+            launchOutcomeConfirmReleaseGuard_ = false;
+        }
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN: {
         noteKeyboardPointerActivity();
@@ -557,7 +560,12 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         else if (event.key == SDLK_DOWN || event.key == SDLK_S || event.key == SDLK_TAB) app.uiNavigate(UiDirection::Down);
         else if (event.key == SDLK_LEFT || event.key == SDLK_A) app.uiNavigate(UiDirection::Left);
         else if (event.key == SDLK_RIGHT || event.key == SDLK_D) app.uiNavigate(UiDirection::Right);
-        else if ((event.key == SDLK_RETURN || event.key == SDLK_SPACE) && !event.repeat) app.uiActivateFocused();
+        else if ((event.key == SDLK_RETURN || event.key == SDLK_SPACE) && !event.repeat) {
+            // The launch Return shortcut is also a UI confirm key. A result
+            // can appear while it is still held, so wait for a physical key-up
+            // before allowing it to acknowledge Continue.
+            if (!launchOutcomeConfirmReleaseGuard_) app.uiActivateFocused();
+        }
         else if (event.key == SDLK_ESCAPE && !event.repeat) app.uiCancel();
         return;
     }
@@ -568,7 +576,10 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.startLaunch();
         break;
     case InputContext::Launch:
-        if (event.key == SDLK_R || event.key == SDLK_SPACE) app.returnHome();
+        if (event.key == SDLK_R || event.key == SDLK_SPACE) {
+            if (event.key == SDLK_SPACE) launchOutcomeConfirmReleaseGuard_ = true;
+            app.returnHome();
+        }
         else if (event.key == SDLK_E) app.ejectNow();
         else if (event.key == SDLK_C) app.cutEngines();
         else if (event.key == SDLK_V) app.pressureReliefValve();
@@ -621,6 +632,9 @@ void SdlPlatform::releaseRealtimeInputs(RocketGameApp& app)
     app.miningMove(0.0, 0.0);
     app.miningKeyboardDrill(false);
     app.miningDrill(false);
+    // Focus loss cannot reliably deliver a key-up event. There is no
+    // carry-over confirmation once the window is no longer receiving input.
+    launchOutcomeConfirmReleaseGuard_ = false;
 }
 
 void SdlPlatform::setWindowVisible(RocketGameApp& app, bool visible)
