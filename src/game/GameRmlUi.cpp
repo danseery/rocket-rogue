@@ -981,9 +981,10 @@ std::string panelRcss(RmlPanelMode mode)
     const int miningTopHeight = compactMining ? 118 : 62;
     const int miningObjectiveTop = miningInset + miningTopHeight + 12;
     const int miningBottomHeight = compactMining ? 164 : 126;
-    // The persistent mining input helper owns the screen's bottom lane. Keep
-    // the docked Leave / Recall control above its tallest two-line treatment.
-    const int miningInputHelperReservedHeight = 72;
+    // The persistent mining input helper owns the screen's bottom lane. Its
+    // contextual list can wrap to several rows, so reserve its full maximum
+    // height rather than letting it cover Leave or Emergency Recall.
+    const int miningInputHelperReservedHeight = 120;
     const int miningBottomTop = std::max(
         miningTopHeight + 18,
         panelHeight - miningBottomHeight - miningInset - miningInputHelperReservedHeight);

@@ -2997,8 +2997,9 @@
       overflow: hidden;
       color: #edf8fb;
       pointer-events: none;
-      /* Reserve a dedicated lane for the persistent keyboard/controller helper. */
-      --mining-input-helper-reserve: 72px;
+      /* The contextual helper can span several rows. Reserve its complete lane
+         so Leave and Emergency Recall remain above it. */
+      --mining-input-helper-reserve: 120px;
     }
 
     .mining-top-rail,
