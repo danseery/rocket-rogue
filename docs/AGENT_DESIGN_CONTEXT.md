@@ -28,9 +28,9 @@ The desired aesthetic is:
 
 - Launch loop: risk a per-run hidden failure, use the composite Instability warning plus system telemetry, return/eject/mitigate, then compare burn depth with the revealed failure point in the debrief. The yellow marker is a performance target, not a safety boundary.
 - Arrival loop: reaching a destination should feel rewarding, then ask whether to flyby, orbit, or land.
-- Surface loop: landing opens survey, one fuel-gated mining run, deeper excavation before mining, payload extraction, and drone upgrades that persist until the shuttle or mining drone is destroyed.
+- Surface loop: landing opens Survey Site or Push Deeper to prepare one fuel-gated mining run, followed by payload extraction. The Prospector contract and later research create persistent Drone Bay ownership and loadout options; expedition damage can end a dig without deleting those unlocks.
 - Mining mini-game: direct drone control, destructible chunked terrain, fog of war, scanner pulses with explicit reveal reports, drill friction, ore pockets, context-gated tethering, automatic support drones, 30s baseline oxygen, shared fuel draw, cargo, and extraction risk. Keyboard drilling defaults to Toggle and can be set to Hold; mouse/controller remain hold-based. Heat cuts drilling off at 100% and unlocks below 60%.
-- Long-term loop: recovered materials, blueprints, artifacts, and research unlock better tools, drone bay options, ship parts, Ark/base systems, and future story threads.
+- Long-term loop: recovered materials, blueprints, artifacts, and research unlock better tools, Drone Bay options, permanent ship systems, Ark/base systems, and future story threads.
 
 ## Planet And Resource Pillars
 

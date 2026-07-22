@@ -1,6 +1,6 @@
-# Rocket Rogue POC
+# OREBIT (Rocket Rogue project)
 
-Rocket Rogue is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications for Windows and Linux plus a fully supported WebGL2/Emscripten build. It borrows the tension of a hidden crash-point launch game, then wraps it in ship-first module management, light astronaut consequences, and persistent roguelite unlock variety.
+OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications for Windows and Linux plus a fully supported WebGL2/Emscripten build. The repository and some internal identifiers retain the Rocket Rogue project name. The game borrows the tension of a hidden crash-point launch, then wraps it in permanent ship systems, light astronaut consequences, surface extraction, and persistent roguelite unlock variety.
 
 ## What is implemented
 
@@ -8,14 +8,18 @@ Rocket Rogue is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applicati
 - Native SDL 3 application with direct Vulkan 1.3 rendering, a Vulkan RmlUi host, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
 - Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
+- Saved campaign and activity onboarding: New Game opens with the proving-flight brief, and the first launch, approach, flyby, orbit, landing, mining run, mini-drone encounter, and Prospector completion explain their progression value once without repeating on later saves.
 - Frontier ladder: prove Earth Orbit, then reach Moon, Mars, Jupiter, Saturn, Uranus, and Neptune in order before continuing to Khepri Prime and the Rift Belt. Each successful arrival unlocks exactly the next destination; flyby, orbit, landing, and mining remain optional.
-- Arrival operations: flyby, orbit, and landing gates. Perfect orbit rewards show both science and mission credits.
+- Arrival operations: flyby, orbit, and landing gates with saved first-use briefs. Perfect orbit rewards show both science and mission credits.
 - Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
-- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, artifacts, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and stow/abort decisions.
+- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, physical artifact tethering, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and return/abort decisions.
 - Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
+- Deterministic mining progression: chapter and surface depth select an Act and level, teaching noncombat excavation in Act 1, passive-drone combat in Act 2, and counter-heavy mastery in Act 3 without scaling difficulty from the equipped loadout. Rich-material guarantees and caps share one reward ledger.
+- Lock-and-key artifact sites: forecasted Hazard, Survey, Mining, Resource, Attack, and Defense capabilities can open deterministic gates, while most sites preserve systemic alternatives such as manual triangulation, route preparation, terrain cover, or encounter clearance.
 - The first mining contract reserves 3 safely recovered Common Ore to fabricate the Prospector Mk I, permanently unlocking one Mining Drone and one Drone Bay slot. Later research expands the bay with resource, survey, and hazard support; combat drones remain gated behind post-solar hostile-system progression.
-- Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. Scripted Ark jump/disaster beats, Navigation after hostile-system stranding, and Ark fuel framing follow.
-- Harsh legacy failure: ship losses, astronaut memorials, module destruction, blueprint progress, and unlock variety.
+- Permanent refit tracks: useful Flight Data or a successful arrival grants one saved shipyard opportunity. The pre-Moon ladder offers the next unique Reach, Control, and Recovery system; later boards return to randomized, role-diverse offers. Installed systems survive replacement ships even when expedition damage takes one offline.
+- Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. The first Ark jump reaches friendly Aaru Vale; the second causes Arkfall near hostile Khepri Prime, where Navigation, Ark fuel, and passive combat take over.
+- Harsh legacy failure: ship losses, astronaut memorials, expedition system outages, blueprint progress, and unlock variety without deleting permanent system ownership.
 
 ## Quick prerequisites
 
@@ -264,8 +268,8 @@ Use the on-screen mission-control buttons or their controller prompts:
 - Use Push Deeper through the frontier ladder only after enough proving data is banked.
 - Successful arrivals can open flyby/orbit/landing operations. Their first selections pause for saved, one-time briefs: flyby and orbit explain that blueprint progress unlocks permanent ship upgrades, while landing explains surface work. The first mining brief presents the 3-Common-Ore Prospector contract before deployment; safely extracted ore advances its saved objective, and completion receives a one-time `PROSPECTOR ONLINE` acknowledgment before the Mining Drone joins future digs.
 - Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
-- Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `R` stows payload, and Esc aborts.
-- Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South stows at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.
+- Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `T` tethers or releases an artifact, `R` leaves and banks the run while inside the ship ring, and Esc aborts.
+- Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South leaves and banks at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.
 
 ## Deploy to Azure Static Web Apps
 

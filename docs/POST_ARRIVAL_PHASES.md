@@ -103,7 +103,7 @@ These events should remain short, readable pulses attached to menu actions. They
 
 The surface screen keeps a short recent mission log. It should preserve the last few site/action/hazard/event summaries so the player can understand why action kits, fuel, cargo, hazard, or blueprints changed after several clicks. Keep it bounded and lightweight; it is a memory aid, not a full journal.
 
-The current mining layer is a compact direct-control mini-game opened from `Mine deposit`. The mining drone digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and then stows or aborts back into the same surface outcome model. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
+The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The mining drone digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and then returns to the ship to bank and leave or aborts back into the same surface outcome model. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
 
 ## Post-Solar Enemy Layer
 
@@ -155,12 +155,12 @@ The current shared C++ native/web application should keep this scope focused:
 - Identified artifacts provide capped blueprint insight for later research, giving recovery/decoding a mechanical reward before story content exists.
 - The Legacy archive lists recovered artifacts by origin and decoded status without inventing final story lore.
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
-- Mining uses a direct-control drone screen with 30s baseline oxygen, shared fuel draw, scanner pulses, destructible terrain, drill integrity, stow/abort decisions, and payload conversion back into the surface expedition.
+- Mining uses a direct-control drone screen with 30s baseline oxygen, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
 - Shared fuel is displayed as a shuttle/drone tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as "Mining drone offline" with disabled button copy "Unavailable".
 - Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the drone is offline.
 - Solar-system surface expeditions have environmental risk only.
-- Nearby Star and later surface expeditions can trigger hostile contact events.
-- Nearby Star and later mining runs can include enemy tunnel networks and passive-defense combat pressure.
+- Khepri Prime and later post-Arkfall surface expeditions can trigger hostile contact events.
+- Khepri Prime and later mining runs can include enemy tunnel networks and passive-defense combat pressure.
 - Arkfall introduces Mk I Attack and Defense drones for those later expeditions; Perimeter Drone Network research advances their coordination.
 
 This is enough to prove whether post-arrival phases improve the launch loop without building a second full game too early.
@@ -173,4 +173,4 @@ These are the decisions that need taste, not just implementation:
 - Mars pacing: one short surface expedition after each successful Mars transfer, or multiple surface sorties before returning to the launch loop?
 - Artifact tone: ancient alien mystery, lost human probes, cosmic horror, or grounded scientific anomaly?
 - Player avatar: astronaut on foot, remote rover, mining drone, or abstract expedition team?
-- Combat escalation: how quickly should enemy pressure grow after Nearby Star, and which artifact or Ark systems should explain it?
+- Combat escalation: how quickly should enemy pressure grow after Arkfall at Khepri Prime, and which artifact or Ark systems should explain it?

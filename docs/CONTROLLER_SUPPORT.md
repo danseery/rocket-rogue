@@ -36,7 +36,7 @@ Controller names use positions so the same rule applies to every prompt family: 
 | Flyby | Left stick steers and throttles; South continues after completion; hold East 0.45 s to abort. |
 | Orbit | Left stick supplies radial and tangential thrust; South continues after completion; hold East 0.45 s to abort. |
 | Surface Scan / Push Deeper | South pulses or pushes; West banks; hold East 0.45 s to abort. Screen actions remain spatially focusable. |
-| Mining | Left stick moves and faces the rig; RT drills; West scans; North tethers; South stows at the ship or acknowledges failure; LB repairs the drill; RB repairs the rig; hold East 0.45 s for emergency recall. |
+| Mining | Left stick moves and faces the rig; RT drills; West scans; North tethers; South leaves and banks at the ship or acknowledges failure; LB repairs the drill; RB repairs the rig; hold East 0.45 s for emergency recall. |
 | Real-time UI access | Preflight and active launch never enter D-pad UI focus: South launches or returns, and dedicated flight buttons stay authoritative. Options/Menu explicitly opens the system menu. Steering and drilling contexts still use D-pad UI focus and pause. Gameplay input remains suppressed while a modal is open. |
 
 The mining drill stays forward-facing and drone combat remains passive. There is no weapon aim or twin-stick drill aim.

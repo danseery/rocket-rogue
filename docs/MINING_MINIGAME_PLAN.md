@@ -12,7 +12,7 @@ This note describes the current playable mining phase layered onto the post-arri
 
 Mining is the landed version of the rocket launch loop:
 
-- The player chooses whether to spend shared fuel, how much cargo to load, and when to stow or abort.
+- The player chooses whether to spend shared fuel, how much cargo to load, and when to return and leave or abort.
 - Better crew, tools, drones, and surface upgrades make risk more readable and controllable, but never remove it.
 - Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and extraction risk.
 - Hostile terrain and enemies stay out of Moon and Mars mining. Enemy pressure begins after the solar-system tutorial when the agency is stranded in a hostile system.
@@ -24,8 +24,8 @@ Current flow:
 1. Reach a destination.
 2. Choose Flyby, Orbit, or Landing.
 3. Landing opens Research, then Surface Ops.
-4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked.
-5. Pressing `Mine deposit` spends 1 shared fuel and opens the direct-control Mining screen.
+4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked. Mine deposit remains unavailable until Survey Site or Push Deeper prepares the site.
+5. Pressing the prepared `Mine deposit` action spends 1 shared fuel and opens the direct-control Mining screen.
 
 Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining drone offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push Deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
 
@@ -51,7 +51,7 @@ The first playable version is direct and short:
 2. Turn the rig and drill straight ahead into regolith, hard rock, ore, exotic veins, or artifact caches.
 3. Pulse the scanner to reveal fog-of-war and hidden seams.
 4. Manage oxygen, fuel cadence, drill heat, drill integrity, cargo, and extraction risk.
-5. Stow payload to bank the run, or abort/lose the run when oxygen, fuel, or drill integrity fails.
+5. Return to the ship and leave to bank the run, or abort/lose the run when oxygen, fuel, or drill integrity fails.
 
 Controls:
 
@@ -59,7 +59,7 @@ Controls:
 - Space or mouse hold: drill.
 - `E`: pulse scanner.
 - `T`: tether or release an eligible artifact.
-- `R`: stow payload.
+- `R`: leave and bank the run while inside the ship ring.
 - Esc: abort.
 
 Standard controller:
@@ -68,7 +68,7 @@ Standard controller:
 - Right trigger: drill.
 - West (X/Square): pulse scanner.
 - North (Y/Triangle): tether or release an eligible artifact.
-- South (A/Cross): stow while inside the ship ring, or acknowledge failure.
+- South (A/Cross): leave and bank while inside the ship ring, or acknowledge failure.
 - Left/right bumper: repair the drill bit/mining rig while ship service is available.
 - Hold East (B/Circle) for 0.45 seconds: emergency recall.
 
@@ -144,11 +144,11 @@ Solar-system mining should remain enemy-free. After the Ark gravity-well disaste
 - Hostile tunnel networks, encounter rooms, hives, miniboss lairs, and boss chambers.
 - Passive base defense plus independent Attack drone targeting and Defense drone interception.
 
-The player should survive through build planning, movement, stow timing, and drone loadout, not through a twitch weapon mode. Mini-drones execute their own role behavior automatically: Mining drones work revealed cells, Survey drones add remote scan origins, Resource drones stay close, Hazard drones remediate dangerous terrain, Attack drones hold targets, and Defense drones intercept fire.
+The player should survive through build planning, movement, return timing, and drone loadout, not through a twitch weapon mode. Mini-drones execute their own role behavior automatically: Mining drones work revealed cells, Survey drones add remote scan origins, Resource drones stay close, Hazard drones remediate dangerous terrain, Attack drones hold targets, and Defense drones intercept fire.
 
 ## Implementation Boundaries
 
-- `src/core/MiningSystem.*` owns terrain, drill stats, oxygen/fuel cadence, scanner pulses, mining enemies, stow/abort/failure outcomes, and payload conversion.
+- `src/core/MiningSystem.*` owns terrain, drill stats, oxygen/fuel cadence, scanner pulses, mining enemies, finish/abort/failure outcomes, and payload conversion.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, metrics, and detail rows.
 - `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral mining input actions.
