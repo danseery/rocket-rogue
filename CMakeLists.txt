@@ -153,7 +153,7 @@ target_link_libraries(rocket_controller_input_tests PRIVATE rocket_core)
 set_target_properties(rocket_controller_input_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
 add_executable(rocket_app_services_tests tests/app_services_tests.cpp)
-target_link_libraries(rocket_app_services_tests PRIVATE rocket_app)
+target_link_libraries(rocket_app_services_tests PRIVATE rocket_app rmlui_core)
 set_target_properties(rocket_app_services_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
 add_executable(rocket_performance_metrics_tests tests/performance_metrics_tests.cpp)

@@ -10,7 +10,7 @@
 #include "core/SaveData.h"
 #include "platform/AppServices.h"
 
-#include "../.deps/RmlUi/Include/RmlUi/Core/RenderInterface.h"
+#include <RmlUi/Core/RenderInterface.h>
 
 #include <algorithm>
 #include <cassert>
