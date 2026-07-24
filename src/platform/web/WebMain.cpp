@@ -1,3 +1,4 @@
+#include "core/UiViewportLayout.h"
 #include "game/GameRmlUi.h"
 #include "game/GameRunner.h"
 #include "platform/web/WebGamepadSource.h"
@@ -25,12 +26,15 @@ std::unique_ptr<rocket::WebTextureSource> g_textureSource;
 std::unique_ptr<rocket::WebUiBridge> g_uiBridge;
 std::unique_ptr<rocket::WebGlGraphicsBackend> g_renderer;
 std::unique_ptr<rocket::WebGlRmlRenderHost> g_rmlRenderHost;
-std::unique_ptr<rocket::GameRmlUi> g_ui;
+std::unique_ptr<rocket::IGameUi> g_ui;
 std::unique_ptr<rocket::AppServices> g_services;
 std::unique_ptr<rocket::GameRunner> g_runner;
 std::string g_debugMiningPreview;
 std::string g_controllerDebugStatus;
 std::string g_controllerAppDebugStatus;
+int g_domLayoutWidth = -1;
+int g_domLayoutHeight = -1;
+rocket::UiSurfaceKind g_domLayoutSurface = rocket::UiSurfaceKind::Fullscreen;
 
 #ifdef __EMSCRIPTEN__
 EM_JS(int, rr_controller_debug_tools_enabled, (), {
@@ -41,9 +45,30 @@ EM_JS(int, rr_controller_debug_tools_enabled, (), {
     }
 });
 
+void syncDomViewportLayout()
+{
+    if (!g_platformHost || !g_uiBridge) return;
+    const rocket::ViewportMetrics viewport = g_platformHost->viewportMetrics();
+    const rocket::UiSurfaceKind surface = g_uiBridge->viewportSurfaceKind();
+    if (viewport.logicalWidth == g_domLayoutWidth
+        && viewport.logicalHeight == g_domLayoutHeight
+        && surface == g_domLayoutSurface) {
+        return;
+    }
+
+    g_uiBridge->setUiViewportLayout(rocket::resolveUiViewportLayout(
+        viewport.logicalWidth,
+        viewport.logicalHeight,
+        surface));
+    g_domLayoutWidth = viewport.logicalWidth;
+    g_domLayoutHeight = viewport.logicalHeight;
+    g_domLayoutSurface = surface;
+}
+
 void mainLoop()
 {
     if (g_runner) g_runner->frame();
+    syncDomViewportLayout();
 }
 #endif
 
@@ -236,6 +261,16 @@ void rr_buy_offer(int index)
 {
     if (g_app) {
         g_app->buyOffer(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_select_refit_offer(int index)
+{
+    if (g_app) {
+        g_app->selectRefitOffer(index);
     }
 }
 
@@ -788,6 +823,16 @@ void rr_debug_research()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_refit()
+{
+    if (g_app) {
+        g_app->debugShowRefit();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_surface_upgrade()
 {
     if (g_app) {
@@ -966,6 +1011,34 @@ int rr_rml_hit_test(int x, int y)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+int rr_ui_navigate(int direction)
+{
+    if (!g_app || direction < static_cast<int>(rocket::UiDirection::Up) ||
+        direction > static_cast<int>(rocket::UiDirection::Right)) {
+        return 0;
+    }
+    return g_app->uiNavigate(static_cast<rocket::UiDirection>(direction)) ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_ui_activate_focused()
+{
+    return g_app && g_app->uiActivateFocused() ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_ui_cancel()
+{
+    return g_app && g_app->uiCancel() ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 const char* rr_controller_debug_status()
 {
     g_controllerDebugStatus = g_gamepadSource
@@ -1068,6 +1141,7 @@ int main()
     g_runner = std::make_unique<rocket::GameRunner>(*g_services);
     if (!g_runner->initialize()) return 1;
     g_app = &g_runner->app();
+    syncDomViewportLayout();
     emscripten_set_main_loop(mainLoop, 0, 1);
 #endif
 

@@ -673,8 +673,7 @@ void SdlPlatform::refreshViewportMetrics()
         logicalHeight,
         drawableWidth,
         drawableHeight,
-        static_cast<float>(drawableWidth) / static_cast<float>(logicalWidth),
-        -1.0F
+        static_cast<float>(drawableWidth) / static_cast<float>(logicalWidth)
     };
 }
 

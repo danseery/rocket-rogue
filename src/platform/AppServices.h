@@ -28,7 +28,6 @@ struct ViewportMetrics {
     int drawableWidth = 1280;
     int drawableHeight = 800;
     float densityRatio = 1.0F;
-    float sceneLeftNdc = -1.0F;
 };
 
 struct RendererDiagnostics {
@@ -259,11 +258,16 @@ public:
     virtual bool activateFocused() = 0;
     virtual bool cancel() = 0;
     virtual bool scroll(float amount) = 0;
+    // Modal visibility is the authoritative input and focus boundary. While
+    // true, navigation, activation, cancellation, scrolling, and hit testing
+    // must target only the active modal; callers may not fall through to the
+    // persistent panel or gameplay scene.
     virtual bool modalOpen() const = 0;
     virtual void setControllerPresentation(bool active, ControllerFamily family) = 0;
     virtual void setControllerFocusVisible(bool visible) = 0;
     virtual void setControllerResumeBlocked(bool blocked, bool controllerConnected) = 0;
     virtual std::string focusedId() const = 0;
+    virtual void requestFocus(std::string_view) {}
     virtual void openModal(const std::string& id) = 0;
     virtual void closeModal() = 0;
     virtual void dispatchAction(const std::string& action) = 0;
@@ -274,8 +278,8 @@ public:
     virtual void shutdown() = 0;
 };
 
-// The web adapter mirrors selected RmlUi state into the browser-shell fallback.
-// Native platforms use a no-op implementation while RmlUi remains authoritative.
+// The platform adapter mirrors presentation state needed outside the RmlUi
+// document. It is never an alternate game-UI renderer.
 class IUiBridge {
 public:
     virtual ~IUiBridge() = default;
@@ -286,14 +290,6 @@ public:
     virtual void setControllerPresentation(bool active, ControllerFamily family) = 0;
     virtual void setControllerFocusVisible(bool visible) = 0;
     virtual void setControllerResumeBlocked(bool blocked, bool connected) = 0;
-    virtual bool navigate(UiDirection direction) = 0;
-    virtual bool activate() = 0;
-    virtual bool cancel() = 0;
-    virtual bool scroll(double amount) = 0;
-    virtual bool modalOpen() const = 0;
-    virtual bool openModal(std::string_view id) = 0;
-    virtual void closeModal() = 0;
-    virtual std::string focusedId() const = 0;
     virtual void preferencesChanged(const AppPreferences& preferences) = 0;
     virtual void setPerformanceStats(std::string_view, bool) {}
 };

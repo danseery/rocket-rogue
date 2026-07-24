@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/UiViewportLayout.h"
 #include "platform/AppServices.h"
 
 #include <string>
@@ -69,6 +70,8 @@ private:
 
 class WebUiBridge final : public IUiBridge {
 public:
+    void setUiViewportLayout(const UiViewportLayout& layout);
+    UiSurfaceKind viewportSurfaceKind() const noexcept;
     void setPanelHtml(std::string_view html) override;
     void setRealtimeHudState(const RealtimeHudState& state) override;
     void setRmlUiEnabled(bool enabled) override;
@@ -76,16 +79,11 @@ public:
     void setControllerPresentation(bool active, ControllerFamily family) override;
     void setControllerFocusVisible(bool visible) override;
     void setControllerResumeBlocked(bool blocked, bool connected) override;
-    bool navigate(UiDirection direction) override;
-    bool activate() override;
-    bool cancel() override;
-    bool scroll(double amount) override;
-    bool modalOpen() const override;
-    bool openModal(std::string_view id) override;
-    void closeModal() override;
-    std::string focusedId() const override;
     void preferencesChanged(const AppPreferences& preferences) override;
     void setPerformanceStats(std::string_view html, bool visible) override;
+
+private:
+    UiSurfaceKind viewportSurfaceKind_ = UiSurfaceKind::Fullscreen;
 };
 
 } // namespace rocket

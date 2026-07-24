@@ -32,6 +32,9 @@ struct RmlButtonBinding {
 enum class RmlPanelMode {
     Title,
     StoryBriefing,
+    Results,
+    DroneWorkspace,
+    Workspace,
     Control,
     PhaseBoard,
     ArrivalFanfare,
@@ -45,7 +48,8 @@ public:
         IPreferenceStore& preferences,
         IPlatformHost& host,
         IUiBridge& uiBridge,
-        IRmlRenderHost& renderHost);
+        IRmlRenderHost& renderHost,
+        std::string assetRoot = {});
 
     bool initialize(ActionHandler actionHandler) override;
     void setPanelHtml(const std::string& html) override;
@@ -66,6 +70,7 @@ public:
     void setControllerFocusVisible(bool visible) override;
     void setControllerResumeBlocked(bool blocked, bool controllerConnected) override;
     std::string focusedId() const override;
+    void requestFocus(std::string_view id) override;
     void openModal(const std::string& id) override;
     void closeModal() override;
     void dispatchAction(const std::string& action) override;
@@ -77,11 +82,13 @@ public:
 
 private:
     void rebuildDocument();
+    bool applyPendingFocusIfAvailable();
 
     IPreferenceStore& preferences_;
     IPlatformHost& host_;
     IUiBridge& uiBridge_;
     IRmlRenderHost& renderHost_;
+    std::string assetRoot_;
     ActionHandler actionHandler_;
     std::string panelHtml_;
     std::string openModalId_;
@@ -89,6 +96,7 @@ private:
     std::vector<std::string> modalFocusStack_;
     std::vector<RmlButtonBinding> buttonBindings_;
     std::string focusedId_;
+    std::string pendingFocusId_;
     std::string modalReturnFocusId_;
     std::string performanceStatsHtml_;
     float lastFocusCenterX_ = 0.0f;

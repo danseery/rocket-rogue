@@ -41,6 +41,7 @@ inline constexpr std::string_view trainCrew = "train_crew";
 inline constexpr std::string_view restCrew = "rest_crew";
 inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
+inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
@@ -72,6 +73,11 @@ inline constexpr std::string_view acknowledgeProspectorCompletion = "acknowledge
 inline std::string buyOffer(int index)
 {
     return std::string(buyOfferPrefix) + std::to_string(index);
+}
+
+inline std::string selectRefitOffer(int index)
+{
+    return std::string(selectRefitOfferPrefix) + std::to_string(index);
 }
 
 inline std::string researchProject(int index)
@@ -132,6 +138,7 @@ inline constexpr std::string_view flybyIntroduction = "flyby_introduction";
 inline constexpr std::string_view orbitIntroduction = "orbit_introduction";
 inline constexpr std::string_view landingIntroduction = "landing_introduction";
 inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introduction";
+inline constexpr std::string_view droneSynergies = "drone_synergies";
 inline constexpr std::string_view miningIntroduction = "mining_introduction";
 inline constexpr std::string_view prospectorCompletion = "prospector_completion";
 } // namespace modals

@@ -141,24 +141,31 @@ bool controllerResumeBlocked(PauseReason reason, bool controllerConnected, bool 
 
 bool controllerPauseStopsSimulation(PauseReason reason, InputContext gameplayContext, bool modalOpen)
 {
+    // Modal visibility is authoritative even before a controller-specific
+    // pause reason has been assigned. Results and other non-realtime screens
+    // can auto-open a modal while PauseReason is still None; allowing that
+    // early return first keeps their scene animation running underneath the
+    // input boundary.
+    if (modalOpen) {
+        return true;
+    }
     if (reason == PauseReason::None) {
         return false;
     }
     // Launch is an autonomous burn. A stale controller-focus pause from the
     // prior screen must not freeze it. Steering/drilling contexts still pause
     // for safety.
-    return modalOpen || reason != PauseReason::ControllerUiFocus || gameplayContext != InputContext::Launch;
+    return reason != PauseReason::ControllerUiFocus || gameplayContext != InputContext::Launch;
 }
 
 InputContext resolvedControllerInputContext(InputContext gameplayContext, PauseReason reason, bool modalOpen)
 {
-    // The forced mining-failure modal has one authoritative recovery action.
-    // Keep that action reachable even though the modal also pauses the mining
-    // simulation; routing it as generic paused UI makes acknowledgment depend
-    // on transient document focus after the auto-modal rebuild.
-    if (gameplayContext == InputContext::MiningFailure
-        && (reason == PauseReason::None || reason == PauseReason::BlockingModal)) {
-        return InputContext::MiningFailure;
+    // A visible modal is the authoritative controller focus scope. Route every
+    // modal, including forced mining recovery, through the same focused UI
+    // actions so no gameplay or background-panel binding can win because of a
+    // stale pause reason.
+    if (modalOpen) {
+        return InputContext::Paused;
     }
     // Preflight and launch are hard gameplay handoffs. Stale menu focus must
     // not replace Cross/South with generic UI activation. Actual modals and
@@ -170,9 +177,6 @@ InputContext resolvedControllerInputContext(InputContext gameplayContext, PauseR
     }
     if (reason != PauseReason::None) {
         return InputContext::Paused;
-    }
-    if (modalOpen) {
-        return InputContext::Ui;
     }
     return gameplayContext;
 }

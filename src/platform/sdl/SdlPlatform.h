@@ -150,7 +150,7 @@ private:
     InputSourceArbiter sourceArbiter_;
     ControllerFrame lastControllerFrame_;
     ControllerPreferences controllerPreferences_;
-    ViewportMetrics viewportMetrics_ {1280, 800, 1280, 800, 1.0F, -1.0F};
+    ViewportMetrics viewportMetrics_ {1280, 800, 1280, 800, 1.0F};
     PlatformDiagnostics diagnostics_;
     NativeFrameLifecycle frameLifecycle_;
     NativeFramePacer framePacer_;

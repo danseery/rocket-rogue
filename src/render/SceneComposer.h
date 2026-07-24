@@ -15,7 +15,6 @@ struct SceneViewport {
     int drawableWidth = 1280;
     int drawableHeight = 800;
     float densityRatio = 1.0F;
-    float sceneLeftNdc = -1.0F;
 };
 
 // Stateful presentation frontend. It retains visual interpolation/burst state,

@@ -233,7 +233,7 @@ int main(int argumentCount, char** arguments)
         rocket::VulkanRmlRenderHost rmlRenderHost(
             renderer,
             {rmlVertexShader, rmlFragmentShader});
-        rocket::GameRmlUi ui(preferences, platform, uiBridge, rmlRenderHost);
+        rocket::GameRmlUi ui(preferences, platform, uiBridge, rmlRenderHost, runtimeRoot.string());
         rocket::AppServices services {
             saves,
             preferences,

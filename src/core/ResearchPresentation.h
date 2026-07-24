@@ -1078,12 +1078,15 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     for (int index = 0; index < static_cast<int>(catalog.miniDrones.size()); ++index) {
         presentation.drones.push_back(miniDroneCardPresentation(catalog.miniDrones[static_cast<std::size_t>(index)], state, index));
     }
-    presentation.nextSlotCost = maxed ? "Max capacity" : compactMaterialSummary(nextCost);
+    presentation.nextSlotCost = maxed ? "MAX" : compactMaterialSummary(nextCost);
     const std::string blockedSlotLabel = "Need mats";
     presentation.upgradeSlotAction = maxed
         ? disabledPanelButton("Bay maxed")
         : (affordable ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok") : disabledPanelButton(blockedSlotLabel));
-    presentation.backAction = panelActionButton("Back to Surface Ops", ui::actions::backToSurfaceOps);
+    presentation.backAction = panelActionButton(
+        "Done — Return to Surface Ops",
+        ui::actions::backToSurfaceOps,
+        "drone-done-action");
     return presentation;
 }
 

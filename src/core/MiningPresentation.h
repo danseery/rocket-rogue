@@ -8,8 +8,10 @@
 #include "core/PanelPresentation.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocket {
@@ -27,6 +29,33 @@ struct MiningRunPresentation {
     std::vector<std::string> commandHints;
     std::string rigHealth;
     double rigHealthRatio = 1.0;
+    bool failurePending = false;
+    std::string failureTitle;
+    std::string failureBody;
+};
+
+struct MiningHudTilePresentation {
+    std::string label;
+    std::string value;
+    std::string cssClass;
+    std::string microLabel;
+    std::string microValue;
+};
+
+struct MiningOreManifestPresentation {
+    std::array<MiningHudTilePresentation, 3> ores;
+    std::string legend;
+};
+
+struct MiningHudPresentation {
+    std::string runLabel;
+    std::string objective;
+    std::array<MiningHudTilePresentation, 4> vitals;
+    MiningOreManifestPresentation oreManifest;
+    std::array<MiningHudTilePresentation, 2> payload;
+    std::vector<PanelButtonPresentation> actions;
+    std::vector<DetailPresentationRow> details;
+    bool atShip = false;
     bool failurePending = false;
     std::string failureTitle;
     std::string failureBody;
@@ -310,6 +339,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Recommended counters", std::string(arenaRules.recommendedCounters)),
         detailPresentationRow("Controls", std::string("WASD/arrows turn and thrust the forward drill; mouse hold or Space drills; E scans; T tethers artifacts; return to the ship to bank, refill oxygen, and Leave.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
+        detailPresentationRow("Rig health", presentation.rigHealth),
         detailPresentationRow("Drill power", display::fixed(stats.power, 1)),
         detailPresentationRow("Scanner radius", display::fixed(stats.scannerRadius, 1)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity)) + " available for this dig"),
@@ -417,6 +447,137 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             }
             presentation.actions.push_back(panelActionButton(text::buttons::abortMining, ui::actions::miningAbort, "danger"));
         }
+    }
+    return presentation;
+}
+
+inline MiningHudPresentation miningHudPresentation(const GameState& state, const ContentCatalog& catalog)
+{
+    const MiningRunState& mining = state.run.mining;
+    const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
+    const MiningRunPresentation run = miningRunPresentation(state, catalog);
+    const MiningLoadStats load = miningLoadStats(state, catalog);
+    const bool arkKnown = arkDiscovered(state);
+
+    auto metricValue = [&run](std::string_view label, std::string fallback = "--") {
+        const auto found = std::find_if(run.metrics.begin(), run.metrics.end(), [label](const PanelMetricPresentation& metric) {
+            return metric.label == label;
+        });
+        return found == run.metrics.end() ? std::move(fallback) : found->value;
+    };
+    auto payloadValue = [&run](std::string_view label, std::string fallback = "0") {
+        const auto found = std::find_if(run.payloadMetrics.begin(), run.payloadMetrics.end(), [label](const PanelMetricPresentation& metric) {
+            return metric.label == label;
+        });
+        return found == run.payloadMetrics.end() ? std::move(fallback) : found->value;
+    };
+    auto copyAction = [](const PanelButtonPresentation& source, std::string label, std::string extraClass = {}) {
+        PanelButtonPresentation action = source;
+        action.label = std::move(label);
+        if (!extraClass.empty()) {
+            if (!action.cssClass.empty()) {
+                action.cssClass += " ";
+            }
+            action.cssClass += std::move(extraClass);
+        }
+        return action;
+    };
+    auto findAction = [&run](std::string_view actionId) -> const PanelButtonPresentation* {
+        const auto found = std::find_if(run.actions.begin(), run.actions.end(), [actionId](const PanelButtonPresentation& action) {
+            return action.actionId == actionId;
+        });
+        return found == run.actions.end() ? nullptr : &*found;
+    };
+
+    std::string drillCssClass = "drill mining-vital-drill";
+    if (mining.drillIntegrity <= 0.0) {
+        drillCssClass += " mining-vital-broken";
+    }
+
+    MiningHudPresentation presentation;
+    presentation.runLabel = std::string(miningActName(mining.arenaMetadata.act))
+        + " \xE2\x80\xA2 LEVEL " + std::to_string(mining.arenaMetadata.difficulty);
+    const int levelsFromShip = std::max(0, mining.depthZone - mining.entryDepthZone);
+    const int prospectorGoal = tuning::research::prospectorCommonOreGoal;
+    const int prospectorHome = std::clamp(state.meta.prospectorCommonOreRecovered, 0, prospectorGoal);
+    if (!hasUnlock(state.meta, content::unlock::droneBay)) {
+        presentation.objective = "PROSPECTOR \xE2\x80\xA2 HOME " + std::to_string(prospectorHome) + "/" +
+            std::to_string(prospectorGoal) + " \xE2\x80\xA2 SHIP ";
+    } else {
+        presentation.objective = "DEPTH +" + std::to_string(levelsFromShip) + " \xE2\x80\xA2 SHIP ";
+    }
+    if (levelsFromShip == 0) {
+        presentation.objective += "HERE";
+    } else {
+        presentation.objective += "\xE2\x86\x91 " + std::to_string(levelsFromShip);
+    }
+    presentation.atShip = mining.active && miningAtReturnZone(mining);
+    presentation.failurePending = run.failurePending;
+    presentation.failureTitle = run.failureTitle;
+    presentation.failureBody = run.failureBody;
+    presentation.details = run.details;
+    presentation.vitals = {{
+        {"OXYGEN", metricValue(text::labels::oxygen), "oxygen", {}, {}},
+        {"FUEL", metricValue(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
+        {"DRILL", metricValue(text::labels::drillBit), std::move(drillCssClass), "HEAT", metricValue(text::labels::drillHeat, "0%")},
+        {"LOAD", display::fixed(load.currentLoad, 1), "load", {}, {}}
+    }};
+    presentation.oreManifest.legend = "RIG / SHIP";
+    presentation.oreManifest.ores = {{
+        {"COMMON", std::to_string(std::max(0, mining.temporaryMaterials.common)) + " / " +
+            std::to_string(std::max(0, mining.stowedMaterials.common)), "common", {}, {}},
+        {"RARE", std::to_string(std::max(0, mining.temporaryMaterials.rare)) + " / " +
+            std::to_string(std::max(0, mining.stowedMaterials.rare)), "rare", {}, {}},
+        {"EXOTIC", std::to_string(std::max(0, mining.temporaryMaterials.exotic)) + " / " +
+            std::to_string(std::max(0, mining.stowedMaterials.exotic)), "exotic", {}, {}}
+    }};
+    presentation.payload = {{
+        {"BANKED", payloadValue("Banked cargo"), "banked", {}, {}},
+        {"ARTIFACT", mining.artifact.present ? metricValue("Artifact integrity", "0%") : "--", mining.artifact.present ? "artifact active" : "artifact", {}, {}}
+    }};
+
+    if (!mining.active || mining.failurePending) {
+        presentation.actions = run.actions;
+        return presentation;
+    }
+
+    if (presentation.atShip) {
+        if (miningDrillRepairCost(mining) > 0) {
+            if (const PanelButtonPresentation* repair = findAction(ui::actions::miningRepairDrill)) {
+                presentation.actions.push_back(copyAction(*repair, "REPAIR DRILL", "mining-repair-action"));
+            } else {
+                presentation.actions.push_back(disabledPanelButton("REPAIR DRILL"));
+            }
+        }
+        if (miningDroneRepairCost(mining) > 0) {
+            if (const PanelButtonPresentation* repair = findAction(ui::actions::miningRepairDrone)) {
+                presentation.actions.push_back(copyAction(*repair, "REPAIR RIG", "mining-repair-action"));
+            } else {
+                presentation.actions.push_back(disabledPanelButton("REPAIR RIG"));
+            }
+        }
+        if (const PanelButtonPresentation* scanner = findAction(ui::actions::miningScanner)) {
+            presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
+        }
+        if (const PanelButtonPresentation* stow = findAction(ui::actions::miningStow)) {
+            presentation.actions.push_back(copyAction(*stow, "BANK / LEAVE", "mining-bank-action"));
+        }
+        return presentation;
+    }
+
+    if (const PanelButtonPresentation* scanner = findAction(ui::actions::miningScanner)) {
+        presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
+    }
+    if (const PanelButtonPresentation* tether = findAction(ui::actions::miningTether)) {
+        presentation.actions.push_back(copyAction(*tether, "TETHER ARTIFACT", "mining-tether-action"));
+    } else {
+        PanelButtonPresentation unavailableTether = disabledPanelButton("TETHER ARTIFACT");
+        unavailableTether.actionId = std::string(ui::actions::miningTether);
+        unavailableTether.cssClass = "mining-tether-action";
+        presentation.actions.push_back(std::move(unavailableTether));
+    }
+    if (const PanelButtonPresentation* recall = findAction(ui::actions::miningAbort)) {
+        presentation.actions.push_back(copyAction(*recall, "EMERGENCY RECALL", "mining-recall-action"));
     }
     return presentation;
 }

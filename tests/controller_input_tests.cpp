@@ -1,5 +1,6 @@
 #include "input/ControllerInput.h"
 #include "input/GameInputRouter.h"
+#include "input/UiFocusNavigation.h"
 
 #include <array>
 #include <cmath>
@@ -31,6 +32,76 @@ rocket::RawControllerSnapshot controller(int controllerIndex = 0)
     result.index = controllerIndex;
     result.id = "Xbox Wireless Controller";
     return result;
+}
+
+void directionalFocusMatchesVisualLayout()
+{
+    using namespace rocket;
+    const auto target = [](std::span<const UiFocusRect> targets, std::size_t current, UiDirection direction) {
+        return directionalFocusTarget(targets, current, direction);
+    };
+
+    constexpr std::array vertical {
+        UiFocusRect {100.0f, 20.0f, 300.0f, 60.0f},
+        UiFocusRect {100.0f, 80.0f, 300.0f, 120.0f},
+        UiFocusRect {100.0f, 140.0f, 300.0f, 180.0f},
+    };
+    require(target(vertical, 1, UiDirection::Up) == 0, "Up should follow a vertical menu to the item above");
+    require(target(vertical, 1, UiDirection::Down) == 2, "Down should follow a vertical menu to the item below");
+    require(!target(vertical, 1, UiDirection::Left), "Left should not traverse a vertically displayed menu");
+    require(!target(vertical, 1, UiDirection::Right), "Right should not traverse a vertically displayed menu");
+    require(!target(vertical, 0, UiDirection::Up), "focus should not wrap above the first vertical item");
+    require(!target(vertical, 2, UiDirection::Down), "focus should not wrap below the last vertical item");
+
+    constexpr std::array horizontal {
+        UiFocusRect {20.0f, 100.0f, 100.0f, 140.0f},
+        UiFocusRect {130.0f, 100.0f, 210.0f, 140.0f},
+        UiFocusRect {240.0f, 100.0f, 320.0f, 140.0f},
+    };
+    require(target(horizontal, 1, UiDirection::Left) == 0, "Left should follow a horizontal card row");
+    require(target(horizontal, 1, UiDirection::Right) == 2, "Right should follow a horizontal card row");
+    require(!target(horizontal, 1, UiDirection::Up), "Up should not move sideways through a horizontal card row");
+    require(!target(horizontal, 1, UiDirection::Down), "Down should not move sideways through a horizontal card row");
+    require(!target(horizontal, 0, UiDirection::Left), "focus should not wrap left from the first card");
+    require(!target(horizontal, 2, UiDirection::Right), "focus should not wrap right from the last card");
+
+    constexpr std::array grid {
+        UiFocusRect {20.0f, 20.0f, 120.0f, 70.0f},
+        UiFocusRect {160.0f, 20.0f, 260.0f, 70.0f},
+        UiFocusRect {20.0f, 100.0f, 120.0f, 150.0f},
+        UiFocusRect {160.0f, 100.0f, 260.0f, 150.0f},
+        UiFocusRect {90.0f, 190.0f, 190.0f, 230.0f},
+    };
+    require(target(grid, 0, UiDirection::Right) == 1, "Right should stay in the current grid row");
+    require(target(grid, 0, UiDirection::Down) == 2, "Down should stay in the current grid column");
+    require(target(grid, 3, UiDirection::Left) == 2, "Left should stay in the current grid row");
+    require(target(grid, 3, UiDirection::Up) == 1, "Up should stay in the current grid column");
+    require(target(grid, 2, UiDirection::Down) == 4, "a centered footer action should be reachable from either card column");
+    require(target(grid, 4, UiDirection::Up) == 2, "Up from a centered footer should choose the nearest visible column");
+
+    constexpr std::array angledAdjacent {
+        UiFocusRect {20.0f, 20.0f, 100.0f, 60.0f},
+        UiFocusRect {120.0f, 90.0f, 200.0f, 130.0f},
+    };
+    require(target(angledAdjacent, 0, UiDirection::Down) == 1,
+        "Down should reach a nearby staggered control when the visible lanes nearly touch");
+
+    constexpr std::array offsetStack {
+        UiFocusRect {100.0f, 20.0f, 200.0f, 60.0f},
+        UiFocusRect {90.0f, 80.0f, 190.0f, 120.0f},
+    };
+    require(!target(offsetStack, 0, UiDirection::Left),
+        "a small center offset must not turn adjacent vertical rows into Left/Right peers");
+
+    constexpr std::array steepDiagonal {
+        UiFocusRect {100.0f, 20.0f, 200.0f, 60.0f},
+        UiFocusRect {105.0f, 260.0f, 205.0f, 300.0f},
+        UiFocusRect {320.0f, 20.0f, 420.0f, 60.0f},
+    };
+    require(target(steepDiagonal, 0, UiDirection::Right) == 2,
+        "Right should prefer a visible row peer over a slightly offset control far below");
+    require(!target(std::span<const UiFocusRect>(steepDiagonal.data(), 2), 0, UiDirection::Right),
+        "a steep diagonal jump should not masquerade as horizontal navigation");
 }
 
 void familyDetectionAndOverrides()
@@ -355,6 +426,8 @@ void controllerUiFocusKeepsAutonomousLaunchMoving()
     using namespace rocket;
     require(!controllerPauseStopsSimulation(PauseReason::None, InputContext::Launch, false),
         "an unpaused launch should keep simulating");
+    require(controllerPauseStopsSimulation(PauseReason::None, InputContext::Stamp, true),
+        "a visible launch-outcome modal must freeze its results scene even before a separate pause reason is assigned");
     require(!controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, false),
         "D-pad flight-control focus must not silently freeze an autonomous launch");
     require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::FlybyActive, false)
@@ -452,30 +525,47 @@ void launchBindingsOverrideCockpitFocus()
         "Cross/South must always start or queue launch during preflight");
 }
 
-void forcedMiningFailureRetainsItsDedicatedControllerContext()
+void globalModalOwnsEveryControllerContext()
 {
     using namespace rocket;
-    require(resolvedControllerInputContext(
-                InputContext::MiningFailure,
-                PauseReason::BlockingModal,
-                true)
+
+    constexpr std::array contexts {
+        InputContext::Ui,
+        InputContext::Preflight,
+        InputContext::Launch,
+        InputContext::FlybyActive,
+        InputContext::FlybyComplete,
+        InputContext::OrbitActive,
+        InputContext::OrbitComplete,
+        InputContext::SurfaceScan,
+        InputContext::SurfacePush,
+        InputContext::MiningActive,
+        InputContext::MiningService,
+        InputContext::MiningFailure,
+        InputContext::Stamp,
+        InputContext::Paused,
+    };
+    constexpr std::array pauseReasons {
+        PauseReason::None,
+        PauseReason::SystemMenu,
+        PauseReason::BlockingModal,
+        PauseReason::ControllerDisconnected,
+        PauseReason::PageHidden,
+        PauseReason::ControllerUiFocus,
+    };
+    for (const InputContext context : contexts) {
+        for (const PauseReason reason : pauseReasons) {
+            require(resolvedControllerInputContext(context, reason, true) == InputContext::Paused,
+                "a visible global modal must own controller routing regardless of gameplay context or stale pause reason");
+        }
+    }
+
+    require(resolvedControllerInputContext(InputContext::MiningFailure, PauseReason::None, false)
             == InputContext::MiningFailure,
-        "an auto-open mining failure must keep its direct South-button recovery action");
-    require(resolvedControllerInputContext(
-                InputContext::MiningActive,
-                PauseReason::BlockingModal,
-                true)
-            == InputContext::Paused,
-        "ordinary realtime gameplay must remain paused behind a blocking modal");
-    require(resolvedControllerInputContext(
-                InputContext::MiningFailure,
-                PauseReason::ControllerDisconnected,
-                true)
-            == InputContext::Paused,
-        "the direct failure action must not bypass a controller-loss safety pause");
-    require(resolvedControllerInputContext(InputContext::MiningActive, PauseReason::None, true)
-            == InputContext::Ui,
-        "an ordinary modal should route controller input through UI focus");
+        "mining failure keeps its dedicated action only when no global modal owns focus");
+    require(resolvedControllerInputContext(InputContext::Launch, PauseReason::ControllerUiFocus, false)
+            == InputContext::Launch,
+        "launch should still ignore stale controller focus when no modal is visible");
     require(resolvedControllerInputContext(InputContext::MiningActive, PauseReason::None, false)
             == InputContext::MiningActive,
         "unpaused mining should retain its realtime controller context");
@@ -738,6 +828,7 @@ void routerHonorsConfirmSwapAndRealTimeHolds()
 
 int main()
 {
+    directionalFocusMatchesVisualLayout();
     familyDetectionAndOverrides();
     radialDeadzoneRescales();
     buttonEdgesHoldsAndDisconnect();
@@ -754,7 +845,7 @@ int main()
     resumeSafetyPredicateMatchesPauseContract();
     controllerUiFocusKeepsAutonomousLaunchMoving();
     launchBindingsOverrideCockpitFocus();
-    forcedMiningFailureRetainsItsDedicatedControllerContext();
+    globalModalOwnsEveryControllerContext();
     routerMapsEveryGameplayContext();
     routerTableCoversEveryInputContext();
     routerContextualFocusPreservesDedicatedBindings();

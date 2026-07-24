@@ -64,6 +64,7 @@ int main()
     assert(helpText.find("--benchmark-profile-dir") != std::string::npos);
     assert(helpText.find("--benchmark-screenshot") != std::string::npos);
     assert(helpText.find("--benchmark-frame-limit") != std::string::npos);
+    assert(helpText.find("surface-scan") != std::string::npos);
     assert(helpText.find("mutually exclusive") != std::string::npos);
 
     const NativeBenchmarkParseResult full = parse({
@@ -115,6 +116,13 @@ int main()
         "--benchmark-profile-dir", "surface-ops-profile",
     });
     assert(surfaceOps && surfaceOps.options.scenario == NativeBenchmarkScenario::SurfaceOps);
+    const NativeBenchmarkParseResult surfaceScan = parse({
+        "--benchmark-scenario", "surface-scan",
+        "--benchmark-json", "surface-scan.json",
+        "--benchmark-profile-dir", "surface-scan-profile",
+    });
+    assert(surfaceScan && surfaceScan.options.scenario == NativeBenchmarkScenario::SurfaceScan);
+    assert(nativeBenchmarkScenarioName(surfaceScan.options.scenario) == "surface-scan");
     assert(!minimalBenchmark({"--benchmark-resolution", "1280"}));
     assert(!minimalBenchmark({"--benchmark-resolution", "200x100"}));
     assert(!minimalBenchmark({"--benchmark-renderer", "directx"}));

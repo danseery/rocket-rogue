@@ -1,6 +1,7 @@
 #include "render/OpenGlRenderer.h"
 
 #include "render/OpenGlApi.h"
+#include "render/SceneClip.h"
 
 #include <algorithm>
 #include <string>
@@ -305,17 +306,31 @@ void WebGlGraphicsBackend::render(const RenderSnapshot& snapshot)
         metrics.logicalHeight,
         metrics.drawableWidth,
         metrics.drawableHeight,
-        metrics.densityRatio,
-        metrics.sceneLeftNdc
+        metrics.densityRatio
     });
     composer_.setPresentationTime(host_.monotonicSeconds());
     const ScenePacket& packet = composer_.compose(snapshot);
 
-    glViewport(0, 0, std::max(1, metrics.drawableWidth), std::max(1, metrics.drawableHeight));
+    const int drawableWidth = std::max(1, metrics.drawableWidth);
+    const int drawableHeight = std::max(1, metrics.drawableHeight);
+    glViewport(0, 0, drawableWidth, drawableHeight);
     glDisable(GL_SCISSOR_TEST);
     glClearColor(packet.clearColor.r, packet.clearColor.g, packet.clearColor.b, packet.clearColor.a);
     glClear(GL_COLOR_BUFFER_BIT);
+    const FramebufferSceneClip sceneClip = resolveSceneFramebufferClip(
+        packet.logicalSceneClip,
+        std::max(1, metrics.logicalWidth),
+        std::max(1, metrics.logicalHeight),
+        drawableWidth,
+        drawableHeight);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(
+        sceneClip.x,
+        openGlSceneScissorY(sceneClip, drawableHeight),
+        sceneClip.width,
+        sceneClip.height);
     flushCommands(packet);
+    glDisable(GL_SCISSOR_TEST);
 }
 
 bool WebGlGraphicsBackend::textureReady(std::size_t pageIndex)

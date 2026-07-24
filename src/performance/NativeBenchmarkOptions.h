@@ -21,6 +21,7 @@ enum class NativeBenchmarkScenario {
     Flyby,
     Orbit,
     SurfaceOps,
+    SurfaceScan,
     Mining,
 };
 

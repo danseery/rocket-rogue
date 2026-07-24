@@ -1,6 +1,9 @@
 #include "game/GameRmlUi.h"
 #include "game/IRmlRenderHost.h"
 
+#include "core/UiViewportLayout.h"
+#include "input/UiFocusNavigation.h"
+
 #include <utility>
 
 #include <RmlUi/Core/Context.h>
@@ -8,6 +11,7 @@
 #include <RmlUi/Core/Element.h>
 #include <RmlUi/Core/ElementDocument.h>
 #include <RmlUi/Core/ElementText.h>
+#include <RmlUi/Core/ElementUtilities.h>
 #include <RmlUi/Core/Elements/ElementFormControl.h>
 #include <RmlUi/Core/Elements/ElementFormControlInput.h>
 #include <RmlUi/Core/Elements/ElementFormControlSelect.h>
@@ -17,13 +21,12 @@
 #include <RmlUi/Core/SystemInterface.h>
 #include <RmlUi/Core/StringUtilities.h>
 
-#include "FontSource.h"
-
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -35,8 +38,6 @@
 namespace rocket {
 namespace {
 
-constexpr int kPanelWidth = 448;
-constexpr int kPanelInset = 16;
 constexpr int kPhaseBoardFrameWidth = 736;
 constexpr int kPhaseContentLaneWidth = 704;
 constexpr int kPhaseLaneInset = 16;
@@ -44,6 +45,9 @@ constexpr int kPhaseCardSlotWidth = 170;
 constexpr int kPhaseCardGap = 8;
 constexpr int kPhaseCommonButtonWidth = 132;
 constexpr int kPhaseCommonChipSlotWidth = 132;
+constexpr int kWorkspaceContentMaxWidth = 1200;
+constexpr int kWorkspaceHorizontalPadding = 24;
+constexpr int kDroneWorkspaceHorizontalPadding = 16;
 
 IPreferenceStore* g_preferences = nullptr;
 IPlatformHost* g_host = nullptr;
@@ -176,25 +180,6 @@ void rr_rml_set_controller_preference(const char* fieldValue, const char* rawVal
     storePreferences(std::move(preferences));
 }
 
-void rr_rml_dom_set_controller_presentation(int active, int family) { if (g_uiBridge) g_uiBridge->setControllerPresentation(active != 0, static_cast<ControllerFamily>(family)); }
-void rr_rml_dom_set_controller_focus_visible(int visible) { if (g_uiBridge) g_uiBridge->setControllerFocusVisible(visible != 0); }
-void rr_rml_dom_set_controller_resume_blocked(int blocked, int connected) { if (g_uiBridge) g_uiBridge->setControllerResumeBlocked(blocked != 0, connected != 0); }
-int rr_rml_dom_navigate(int direction) { return g_uiBridge && g_uiBridge->navigate(static_cast<UiDirection>(direction)) ? 1 : 0; }
-int rr_rml_dom_activate() { return g_uiBridge && g_uiBridge->activate() ? 1 : 0; }
-int rr_rml_dom_cancel() { return g_uiBridge && g_uiBridge->cancel() ? 1 : 0; }
-int rr_rml_dom_scroll(double amount) { return g_uiBridge && g_uiBridge->scroll(amount) ? 1 : 0; }
-int rr_rml_dom_modal_open() { return g_uiBridge && g_uiBridge->modalOpen() ? 1 : 0; }
-int rr_rml_dom_open_modal(const char* value) { return g_uiBridge && g_uiBridge->openModal(value ? value : "") ? 1 : 0; }
-void rr_rml_dom_close_modal() { if (g_uiBridge) g_uiBridge->closeModal(); }
-int rr_rml_dom_focused_id(char* buffer, int capacity)
-{
-    if (!buffer || capacity <= 0) return 0;
-    const std::string value = g_uiBridge ? g_uiBridge->focusedId() : std::string {};
-    const int length = std::min(capacity - 1, static_cast<int>(value.size()));
-    std::copy_n(value.data(), length, buffer);
-    buffer[length] = '\0';
-    return length;
-}
 void rr_rml_set_enabled(int enabled) { if (g_uiBridge) g_uiBridge->setRmlUiEnabled(enabled != 0); }
 void rr_rml_set_modal_open(int enabled) { if (g_uiBridge) g_uiBridge->setModalOpen(enabled != 0); }
 double rr_rml_game_speed_multiplier() { return currentPreferences().gameSpeed; }
@@ -775,6 +760,15 @@ RmlPanelMode panelModeForHtml(std::string_view html)
     if (html.find("data-panel-mode=\"story-briefing\"") != std::string_view::npos) {
         return RmlPanelMode::StoryBriefing;
     }
+    if (html.find("data-panel-mode=\"results\"") != std::string_view::npos) {
+        return RmlPanelMode::Results;
+    }
+    if (html.find("data-panel-mode=\"drone-workspace\"") != std::string_view::npos) {
+        return RmlPanelMode::DroneWorkspace;
+    }
+    if (html.find("data-panel-mode=\"workspace\"") != std::string_view::npos) {
+        return RmlPanelMode::Workspace;
+    }
     if (html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         return RmlPanelMode::ArrivalFanfare;
     }
@@ -797,6 +791,21 @@ bool panelUsesStoryBriefing(RmlPanelMode mode)
     return mode == RmlPanelMode::StoryBriefing;
 }
 
+bool panelUsesResults(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::Results;
+}
+
+bool panelUsesDroneWorkspace(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::DroneWorkspace;
+}
+
+bool panelUsesWorkspace(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::Workspace;
+}
+
 bool panelUsesPhaseBoard(RmlPanelMode mode)
 {
     return mode == RmlPanelMode::PhaseBoard;
@@ -812,9 +821,19 @@ bool panelUsesMissionStamp(RmlPanelMode mode)
     return mode == RmlPanelMode::ArrivalFanfare || mode == RmlPanelMode::MissionStamp;
 }
 
+bool panelUsesResponsiveViewport(RmlPanelMode mode)
+{
+    return mode == RmlPanelMode::Control || mode == RmlPanelMode::PhaseBoard;
+}
+
 bool panelUsesSurfaceOps(std::string_view html)
 {
     return html.find("surface-ops-screen") != std::string_view::npos;
+}
+
+bool panelUsesSurfaceScan(std::string_view html)
+{
+    return html.find("phase-board-scan") != std::string_view::npos;
 }
 
 bool panelUsesDroneOps(std::string_view html)
@@ -832,16 +851,41 @@ bool panelUsesDraftRoom(std::string_view html)
     return html.find("phase-board-draft-room") != std::string_view::npos;
 }
 
+std::string_view panelVisualFamilyClass(std::string_view html)
+{
+    if (html.find("ui-family-management") != std::string_view::npos) return "management-family-panel";
+    if (html.find("ui-family-decision") != std::string_view::npos) return "decision-family-panel";
+    if (html.find("ui-family-live-hud") != std::string_view::npos) return "live-hud-family-panel";
+    if (html.find("ui-family-selection") != std::string_view::npos) return "selection-family-panel";
+    return {};
+}
+
+std::string_view panelScreenClass(std::string_view html)
+{
+    if (html.find("phase-board-hangar") != std::string_view::npos) return "hangar-family-panel";
+    if (html.find("phase-board-navigation") != std::string_view::npos) return "navigation-family-panel";
+    if (html.find("phase-board-research") != std::string_view::npos) return "research-family-panel";
+    if (html.find("phase-board-drone-ops") != std::string_view::npos) return "drone-workspace-screen-panel";
+    if (html.find("phase-board-arrival") != std::string_view::npos) return "arrival-family-panel";
+    if (html.find("phase-board-draft-room") != std::string_view::npos) return "selection-screen-panel";
+    if (html.find("class=\"cockpit-hud flight-hud\"") != std::string_view::npos) return "flight-family-panel";
+    return {};
+}
+
 enum class NativeSceneOverlayMode {
     None,
     PreflightLaunch,
     TelemetryLegend,
+    SurfaceScanReadout,
 };
 
 NativeSceneOverlayMode nativeSceneOverlayMode(std::string_view html)
 {
     if (html.find("data-preflight-launch") != std::string_view::npos) {
         return NativeSceneOverlayMode::PreflightLaunch;
+    }
+    if (html.find("surface-scan-scene-marker") != std::string_view::npos) {
+        return NativeSceneOverlayMode::SurfaceScanReadout;
     }
 
     const bool flight = html.find("class=\"cockpit-hud flight-hud\"") != std::string_view::npos;
@@ -851,6 +895,21 @@ NativeSceneOverlayMode nativeSceneOverlayMode(std::string_view html)
     return (flight || debrief) && !flyby && !orbit
         ? NativeSceneOverlayMode::TelemetryLegend
         : NativeSceneOverlayMode::None;
+}
+
+std::string surfaceScanSignalLabel(std::string_view html)
+{
+    const std::size_t marker = html.find("surface-scan-scene-marker");
+    if (marker == std::string_view::npos) {
+        return "0%";
+    }
+    const std::size_t tagStart = html.rfind('<', marker);
+    const std::size_t tagEnd = html.find('>', marker);
+    if (tagStart == std::string_view::npos || tagEnd == std::string_view::npos) {
+        return "0%";
+    }
+    const std::string value = attributeValue(html.substr(tagStart, tagEnd - tagStart + 1), "data-scan-signal");
+    return value.empty() ? "0%" : value;
 }
 
 bool nativePreflightLaunchReady(std::string_view html)
@@ -879,6 +938,10 @@ std::string nativeSceneOverlayMarkup(std::string_view panelHtml)
 <div class="native-telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong></div>
 <div class="native-telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong></div>
 </div>)";
+    case NativeSceneOverlayMode::SurfaceScanReadout:
+        return "<div id=\"rr-scan-scene-readout\"><strong>"
+            + Rml::StringUtilities::EncodeRml(surfaceScanSignalLabel(panelHtml))
+            + "</strong></div>";
     case NativeSceneOverlayMode::None:
     default:
         return {};
@@ -892,16 +955,21 @@ bool samePanelStructure(std::string_view lhs, std::string_view rhs)
         && panelUsesDroneOps(lhs) == panelUsesDroneOps(rhs)
         && panelUsesNavigation(lhs) == panelUsesNavigation(rhs)
         && panelUsesDraftRoom(lhs) == panelUsesDraftRoom(rhs)
+        && panelVisualFamilyClass(lhs) == panelVisualFamilyClass(rhs)
+        && panelScreenClass(lhs) == panelScreenClass(rhs)
         && nativeSceneOverlayMode(lhs) == nativeSceneOverlayMode(rhs)
         && nativePreflightLaunchReady(lhs) == nativePreflightLaunchReady(rhs);
 }
 
 Rml::Rectanglei panelBounds(RmlPanelMode mode)
 {
-    const int viewportWidth = rr_rml_viewport_width();
-    const int viewportHeight = rr_rml_viewport_height();
-    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing || mode == RmlPanelMode::MiningFullscreen) {
-        return Rml::Rectanglei::FromPositionSize({0, 0}, {std::max(1, viewportWidth), std::max(1, viewportHeight)});
+    const int viewportWidth = std::max(1, rr_rml_viewport_width());
+    const int viewportHeight = std::max(1, rr_rml_viewport_height());
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing
+        || mode == RmlPanelMode::Results || mode == RmlPanelMode::DroneWorkspace
+        || mode == RmlPanelMode::Workspace
+        || mode == RmlPanelMode::MiningFullscreen) {
+        return Rml::Rectanglei::FromPositionSize({0, 0}, {viewportWidth, viewportHeight});
     }
     if (mode == RmlPanelMode::ArrivalFanfare) {
         const int width = std::clamp(viewportWidth - 48, 320, 520);
@@ -917,20 +985,28 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
         const int top = std::max(16, (viewportHeight - height) / 2 - 24);
         return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
     }
-    const bool phaseBoard = panelUsesPhaseBoard(mode);
-    const int left = phaseBoard ? 16 : kPanelInset;
-    const int top = phaseBoard ? 16 : kPanelInset;
-    const int width = phaseBoard ? std::clamp(viewportWidth - 64, 560, kPhaseBoardFrameWidth) : kPanelWidth + 34;
-    const int height = phaseBoard
-        ? std::max(360, viewportHeight - 64)
-        : std::max(1, viewportHeight - 56);
-    return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
+    const UiViewportLayout layout = resolveUiViewportLayout(
+        viewportWidth,
+        viewportHeight,
+        UiSurfaceKind::PersistentPanel);
+    return Rml::Rectanglei::FromPositionSize(
+        {layout.panelRect.x, layout.panelRect.y},
+        {std::max(1, layout.panelRect.width), std::max(1, layout.panelRect.height)});
 }
 
 Rml::Rectanglei expandedPanelClip(RmlPanelMode mode)
 {
     const Rml::Rectanglei bounds = panelBounds(mode);
-    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing || mode == RmlPanelMode::MiningFullscreen) {
+    if (mode == RmlPanelMode::Title || mode == RmlPanelMode::StoryBriefing
+        || mode == RmlPanelMode::Results || mode == RmlPanelMode::DroneWorkspace
+        || mode == RmlPanelMode::Workspace
+        || mode == RmlPanelMode::MiningFullscreen) {
+        return bounds;
+    }
+    if (panelUsesResponsiveViewport(mode)) {
+        // Persistent UI must not capture or render into the protected scene.
+        // Shadows and scrollbars stay inside the border-box instead of using
+        // the legacy 40 px expansion.
         return bounds;
     }
     return Rml::Rectanglei::FromPositionSize(
@@ -953,6 +1029,144 @@ std::string panelRcss(RmlPanelMode mode)
     const int viewportHeight = std::max(1, rr_rml_viewport_height());
     const int panelWidth = bounds.Width();
     const int panelHeight = std::max(180, bounds.Height());
+    const bool responsiveViewport = panelUsesResponsiveViewport(mode);
+    const UiViewportLayout responsiveLayout = resolveUiViewportLayout(
+        viewportWidth,
+        viewportHeight,
+        UiSurfaceKind::PersistentPanel);
+    const bool bottomDock = responsiveViewport
+        && responsiveLayout.layoutClass == UiLayoutClass::BottomDock;
+    const UiRect sceneRect = responsiveViewport
+        ? responsiveLayout.sceneRect
+        : UiRect {0, 0, viewportWidth, viewportHeight};
+    const UiRect hudSafeRect = responsiveViewport
+        ? responsiveLayout.hudSafeRect
+        : sceneRect;
+    // Persistent rails use a 14 px inset and 1 px border. Full-screen
+    // workspaces instead have 24 px side padding and cap their centered work
+    // lane at 1200 px. Resolve against the lane that actually owns the
+    // descendants; using the outer viewport width here pushes fixed Surface
+    // Ops summaries beyond the capped workspace and strands their buttons
+    // outside the clipped right edge on wide, short displays.
+    const int responsiveContentWidth = panelUsesWorkspace(mode)
+        ? std::max(1, std::min(
+            kWorkspaceContentMaxWidth,
+            panelWidth - kWorkspaceHorizontalPadding * 2))
+        : std::max(1, panelWidth - 30);
+    const bool compactResponsivePanel = responsiveContentWidth < kPhaseContentLaneWidth;
+    const int responsiveMetricWidth = std::min(
+        150,
+        std::max(72, (responsiveContentWidth - kPhaseCardGap) / 2));
+    const int responsiveCardWidth = compactResponsivePanel
+        ? responsiveContentWidth
+        : std::min(292, std::max(170, (responsiveContentWidth - kPhaseCardGap) / 2));
+    const int responsiveToolbarButtonWidth = std::min(
+        132,
+        std::max(104, (responsiveContentWidth - kPhaseCardGap) / 2));
+    const int responsiveHeaderButtonWidth = bottomDock
+        ? 96
+        : std::max(56, (responsiveContentWidth - kPhaseCardGap) / 3);
+    const int responsivePanelTitleWidth = bottomDock
+        ? std::min(220, responsiveContentWidth / 3)
+        : responsiveContentWidth;
+    const int responsivePanelHeaderActionsWidth = bottomDock
+        ? std::min(316, responsiveContentWidth - responsivePanelTitleWidth - kPhaseCardGap)
+        : responsiveContentWidth;
+    const int responsiveSurfaceButtonWidth = std::min(
+        104,
+        std::max(84, responsiveContentWidth / 3));
+    const int responsiveSurfaceSummaryWidth = std::max(
+        80,
+        responsiveContentWidth - responsiveSurfaceButtonWidth - 28);
+    const int responsivePushMetricsWidth = std::clamp(
+        responsiveContentWidth * 44 / 100,
+        128,
+        196);
+    const int responsivePushRewardsWidth = std::max(
+        96,
+        responsiveContentWidth - responsivePushMetricsWidth - 10);
+    const int responsivePushMetricWidth = std::max(
+        52,
+        (responsivePushMetricsWidth - 8) / 2);
+    // Drone Ops owns the full viewport, but its persistent controls must still
+    // fit the narrowest supported management viewport. Keep these lanes
+    // resolved here so native RmlUi receives the same concrete geometry every
+    // frame instead of relying on a browser-only measurement heuristic.
+    // The RmlUi buttons retain an 8 px leading margin, including the first
+    // control in a row. Account for all three margins here; the previous
+    // two-gap width underreported each action lane and clipped its last
+    // button on the browser-backed native canvas.
+    const int droneWorkspaceInnerWidth = std::max(
+        1,
+        panelWidth - kDroneWorkspaceHorizontalPadding * 2);
+    const int droneHeaderButtonWidth = std::clamp(droneWorkspaceInnerWidth / 12, 72, 104);
+    const int droneHeaderActionsWidth = droneHeaderButtonWidth * 3 + 24;
+    const int droneSecondaryActionWidth = std::clamp(droneWorkspaceInnerWidth / 13, 76, 104);
+    const int droneDoneActionWidth = std::clamp(droneWorkspaceInnerWidth / 5, 150, 188);
+    const int droneWorkspaceActionsWidth = droneSecondaryActionWidth * 2 + droneDoneActionWidth + 24;
+    // The loadout is the decision surface, not a narrow sidebar. Give it two
+    // fifths of compact workspaces while retaining a useful roster lane, then
+    // cap it so wide displays still devote most of their area to drone cards.
+    const int droneLoadoutBenchWidth = std::clamp(droneWorkspaceInnerWidth * 2 / 5, 360, 420);
+    // A 1080p display commonly leaves the canvas roughly 900 px tall once
+    // window chrome is accounted for. Use one compact vertical rhythm for that
+    // tier instead of forcing independent scrollbars into both management
+    // columns. The 2K workspace keeps its existing, more relaxed density.
+    const bool compactDroneWorkspaceVertical = viewportHeight <= 1080;
+    const int droneWorkspaceVerticalPadding = compactDroneWorkspaceVertical ? 8 : 14;
+    const int droneHeaderHeight = compactDroneWorkspaceVertical ? 50 : 58;
+    const int droneHeaderGap = compactDroneWorkspaceVertical ? 6 : 10;
+    const int droneHeaderBottomPadding = compactDroneWorkspaceVertical ? 6 : 10;
+    const int droneHeaderButtonHeight = compactDroneWorkspaceVertical ? 36 : 40;
+    const int droneToolbarHeight = compactDroneWorkspaceVertical ? 60 : 72;
+    const int droneToolbarGap = compactDroneWorkspaceVertical ? 6 : 10;
+    const int droneToolbarVerticalPadding = compactDroneWorkspaceVertical ? 6 : 8;
+    const int droneToolbarButtonHeight = compactDroneWorkspaceVertical ? 40 : 46;
+    const int droneTopRowHeight = compactDroneWorkspaceVertical ? 72 : 92;
+    const int droneTopRowGap = compactDroneWorkspaceVertical ? 6 : 10;
+    const int droneBayVerticalPadding = compactDroneWorkspaceVertical ? 7 : 10;
+    const int droneBayChipHeight = compactDroneWorkspaceVertical ? 40 : 48;
+    const int droneBayButtonHeight = compactDroneWorkspaceVertical ? 40 : 44;
+    const int droneSectionHeadingHeight = compactDroneWorkspaceVertical ? 38 : 45;
+    const int droneSectionHeadingGap = compactDroneWorkspaceVertical ? 6 : 10;
+    constexpr int kDroneWorkspaceMainGap = 8;
+    constexpr int kDroneRosterPanelChrome = 26;
+    constexpr int kDroneControlColumns = 3;
+    constexpr int kDroneControlCardHorizontalGap = 12;
+    constexpr int kDroneControlCardMinWidth = 250;
+    const int droneControlCardVerticalGap = compactDroneWorkspaceVertical ? 8 : 12;
+    // Card capability chips now live in the per-drone Details modal. Keep the
+    // roster cards deliberately compact and equal-height at every resolution.
+    const int droneControlCardHeight = compactDroneWorkspaceVertical ? 224 : 240;
+    const int droneControlCardPadding = compactDroneWorkspaceVertical ? 8 : 10;
+    const int droneCardFooterButtonHeight = compactDroneWorkspaceVertical ? 36 : 40;
+    const int droneLoadoutSlotMinHeight = compactDroneWorkspaceVertical ? 94 : 112;
+    const std::string droneLoadoutSlotHeight = compactDroneWorkspaceVertical ? "94px" : "auto";
+    const std::string droneLoadoutSlotMaxHeight = compactDroneWorkspaceVertical ? "94px" : "none";
+    const int droneLoadoutSlotGap = compactDroneWorkspaceVertical ? 6 : 8;
+    const int droneLoadoutSlotVerticalPadding = compactDroneWorkspaceVertical ? 5 : 9;
+    const int droneLoadoutButtonHeight = compactDroneWorkspaceVertical ? 28 : 36;
+    const int droneLoadoutStatMarginTop = compactDroneWorkspaceVertical ? 2 : 7;
+    const int droneLoadoutChipMinHeight = compactDroneWorkspaceVertical ? 20 : 25;
+    const int droneLoadoutChipVerticalPadding = compactDroneWorkspaceVertical ? 2 : 4;
+    const int refitChoiceCardHeight = std::clamp(viewportHeight - 240, 210, 360);
+    const int arrivalChoiceCardHeight = std::clamp(viewportHeight - 220, 190, 280);
+    const int surfaceOpsChoiceCardHeight = std::clamp(viewportHeight - 330, 140, 210);
+    const int surfaceUpgradeChoiceCardHeight = std::clamp(viewportHeight - 240, 130, 220);
+    const int hangarOperationCardHeight = std::clamp(viewportHeight - 350, 130, 210);
+    const int droneRosterWidth = std::max(
+        1,
+        droneWorkspaceInnerWidth - droneLoadoutBenchWidth - kDroneWorkspaceMainGap);
+    const int droneRosterContentWidth = std::max(
+        1,
+        droneRosterWidth - kDroneRosterPanelChrome);
+    // Resolve one shared flex basis for all six cards. Three cards plus two
+    // space-between gutters fill the roster lane exactly, so the second row
+    // cannot grow a lone card to a different size.
+    const int droneControlCardWidth = std::max(
+        kDroneControlCardMinWidth,
+        (droneRosterContentWidth - kDroneControlCardHorizontalGap * (kDroneControlColumns - 1))
+            / kDroneControlColumns);
     const int modalGutter = 16;
     const int modalDefaultWidth = std::max(1, std::min(640, viewportWidth - modalGutter * 2));
     const int modalInventoryWidth = std::max(1, std::min(760, viewportWidth - modalGutter * 2));
@@ -972,36 +1186,54 @@ std::string panelRcss(RmlPanelMode mode)
     const int modalActivityHeight = std::max(1, std::min(320, viewportHeight - modalGutter * 2));
     const int modalActivityLeft = std::max(modalGutter, (viewportWidth - modalActivityWidth) / 2);
     const int modalActivityTop = std::max(modalGutter, (viewportHeight - modalActivityHeight) / 2);
+    // Outcome summaries contain three consequence rows plus a persistent
+    // action lane. Size the border-box for that authored content instead of
+    // clipping it inside the legacy 280 px content-box.
+    const int modalOutcomeHeight = std::max(1, std::min(360, viewportHeight - modalGutter * 2));
+    const int modalOutcomeTop = std::max(modalGutter, (viewportHeight - modalOutcomeHeight) / 2);
+    const bool modalOutcomeNeedsScroll = modalOutcomeHeight < 320;
+    const int panelPromptLeft = bounds.Left() + 4;
+    const int panelPromptRight = std::max(4, viewportWidth - (bounds.Left() + bounds.Width()) + 4);
+    const int panelPromptBottom = std::max(4, viewportHeight - (bounds.Top() + bounds.Height()) + 4);
+    const int resultsCardWidth = std::max(1, std::min(640, viewportWidth - modalGutter * 2));
+    const int resultsCardHeight = std::max(1, std::min(220, viewportHeight - modalGutter * 2));
+    const int resultsCardLeft = std::max(modalGutter, (viewportWidth - resultsCardWidth) / 2);
+    const int resultsCardTop = std::max(modalGutter, (viewportHeight - resultsCardHeight) / 2);
     const int arrivalTitleSize = mode == RmlPanelMode::MissionStamp ? (panelWidth < 420 ? 31 : 40) : (panelWidth < 420 ? 34 : 46);
     const int left = bounds.Left();
     const int top = bounds.Top();
-    const bool compactMining = panelWidth < 1220;
-    const int miningInset = compactMining ? 10 : 18;
-    const int miningRailWidth = std::max(1, panelWidth - miningInset * 2);
-    const int miningTopHeight = compactMining ? 118 : 62;
-    const int miningObjectiveTop = miningInset + miningTopHeight + 12;
-    const int miningBottomHeight = compactMining ? 164 : 126;
-    // The persistent mining input helper owns the screen's bottom lane. Its
-    // contextual list can wrap to several rows, so reserve its full maximum
-    // height rather than letting it cover Leave or Emergency Recall.
-    const int miningInputHelperReservedHeight = 120;
-    const int miningBottomTop = std::max(
-        miningTopHeight + 18,
-        panelHeight - miningBottomHeight - miningInset - miningInputHelperReservedHeight);
-    const int miningUtilityWidth = compactMining ? 104 : 108;
-    const int miningTitleWidth = compactMining ? std::max(1, miningRailWidth - miningUtilityWidth - 12) : 246;
-    const int miningVitalWidth = compactMining ? 78 : 86;
+    const UiViewportLayout miningViewportLayout = resolveUiViewportLayout(
+        viewportWidth,
+        viewportHeight,
+        UiSurfaceKind::Mining);
+    const UiRect miningSceneRect = miningViewportLayout.sceneRect;
+    const UiRect miningBottomRect = miningViewportLayout.panelRect;
+    const int miningInset = miningBottomRect.x;
+    const int miningRailWidth = std::max(1, miningBottomRect.width);
+    const int miningTopHeight = std::max(1, miningSceneRect.y - miningInset * 2);
+    const int miningBottomHeight = std::max(1, miningBottomRect.height);
+    const int miningBottomTop = miningBottomRect.y;
+    const bool compactMining = viewportWidth < 1100;
+    const int miningUtilityButtonWidth = compactMining ? 76 : 92;
+    const int miningUtilityWidth = miningUtilityButtonWidth * 3 + 8;
+    const int miningObjectiveWidth = std::clamp(miningRailWidth * 23 / 100, 220, 300);
+    const int miningObjectiveTop = miningInset + 4;
+    const int miningTitleWidth = miningObjectiveWidth;
+    const int miningVitalsLeft = miningObjectiveWidth + 20;
     const int miningVitalGap = 5;
-    const int miningVitalsWidth = compactMining ? miningRailWidth : (miningVitalWidth * 6 + miningVitalGap * 5 + 84);
-    const int miningVitalsLeft = compactMining ? 0 : std::max(0, (miningRailWidth - miningVitalsWidth) / 2);
-    const int miningPlayfieldTop = miningTopHeight + miningInset + (compactMining ? 30 : 40);
-    const int miningPayloadWidth = compactMining ? miningRailWidth : std::max(260, miningRailWidth - 378);
+    const int miningVitalWidth = std::clamp(
+        (miningRailWidth - miningObjectiveWidth - miningUtilityWidth - 56 - miningVitalGap * 3) / 4,
+        72,
+        105);
+    const int miningVitalsWidth = miningVitalWidth * 4 + miningVitalGap * 4;
+    const int miningPlayfieldTop = miningSceneRect.y;
+    const int miningPayloadWidth = std::clamp(miningRailWidth * 40 / 100, 360, 500);
     const int miningActionWidth = compactMining ? 126 : 154;
-    const int miningCommandWidth = compactMining ? miningRailWidth : std::min(380, miningRailWidth);
-    const int miningCommandLeft = compactMining ? 0 : std::max(0, miningRailWidth - miningCommandWidth - 4);
-    const int miningPrimaryActionWidth = compactMining ? std::min(180, miningRailWidth) : 170;
+    const int miningCommandWidth = std::clamp(miningRailWidth * 30 / 100, 300, 380);
+    const int miningCommandLeft = std::max(0, miningRailWidth - miningCommandWidth - 10);
+    const int miningPrimaryActionWidth = std::min(180, miningRailWidth);
     const int miningPrimaryActionLeft = std::max(0, (miningRailWidth - miningPrimaryActionWidth) / 2);
-    const int miningPrimaryActionTop = std::max(8, miningBottomHeight - 56);
+    const int miningPrimaryActionTop = std::min(44, std::max(8, miningBottomHeight - 48));
     const bool compactTitle = panelWidth < 800 || panelHeight < 680;
     const int titleContentWidth = std::clamp(panelWidth - (compactTitle ? 48 : 120), 360, 760);
     const int titleContentLeft = std::max(0, (panelWidth - titleContentWidth) / 2);
@@ -1023,16 +1255,42 @@ std::string panelRcss(RmlPanelMode mode)
     const int storyIntroductionConnectedWidth = std::max(1, std::min(720, panelWidth - openingControlsConnectedWidth - openingControlsRight - storyContentLeft - 28));
     // Keep native RmlUi scene controls in the same world-space projection as
     // SceneComposer. Telemetry is authored at x=[0.18, 0.94], y=-0.58.
-    const float nativeSceneUnit = std::max(1.0F, static_cast<float>(std::min(viewportWidth, viewportHeight)) * 0.46F);
-    const int nativeSceneCenterX = viewportWidth / 2;
-    const int nativeSceneCenterY = viewportHeight / 2;
-    const int nativeLaunchCenterX = nativeSceneCenterX - static_cast<int>(0.18F * nativeSceneUnit);
-    const int nativeLaunchCenterY = nativeSceneCenterY + static_cast<int>(0.50F * nativeSceneUnit);
-    const int nativeTelemetryLeft = nativeSceneCenterX + static_cast<int>(0.18F * nativeSceneUnit);
-    const int nativeTelemetryRight = nativeSceneCenterX + static_cast<int>(0.94F * nativeSceneUnit);
-    const int nativeTelemetryTop = nativeSceneCenterY + static_cast<int>(0.58F * nativeSceneUnit);
-    const int nativeLegendTop = std::max(8, nativeTelemetryTop - 34);
-    const int nativeTelemetryWidth = std::max(1, nativeTelemetryRight - nativeTelemetryLeft);
+    const float nativeScenePadding = mode == RmlPanelMode::MiningFullscreen
+        ? 1.0F
+        : (responsiveLayout.layoutClass == UiLayoutClass::BottomDock ? 0.56F : 0.92F);
+    const float nativeSceneUnit = std::max(
+        1.0F,
+        static_cast<float>(std::min(sceneRect.width, sceneRect.height)) * 0.5F * nativeScenePadding);
+    const int nativeSceneCenterX = sceneRect.x + sceneRect.width / 2;
+    const int nativeSceneCenterY = sceneRect.y + sceneRect.height / 2;
+    const int launchAnchorX = nativeSceneCenterX - static_cast<int>(0.18F * nativeSceneUnit);
+    const int launchAnchorY = nativeSceneCenterY + static_cast<int>(0.50F * nativeSceneUnit);
+    const int nativeLaunchWidth = std::min(196, std::max(1, hudSafeRect.width));
+    const int nativeLaunchHeight = std::min(62, std::max(1, hudSafeRect.height));
+    const int nativeLaunchLeft = std::clamp(
+        launchAnchorX - nativeLaunchWidth / 2,
+        hudSafeRect.x,
+        std::max(hudSafeRect.x, uiRectRight(hudSafeRect) - nativeLaunchWidth));
+    const int nativeLaunchTop = std::clamp(
+        launchAnchorY - nativeLaunchHeight / 2,
+        hudSafeRect.y,
+        std::max(hudSafeRect.y, uiRectBottom(hudSafeRect) - nativeLaunchHeight));
+
+    const int telemetryAnchorLeft = nativeSceneCenterX + static_cast<int>(0.18F * nativeSceneUnit);
+    const int telemetryAnchorRight = nativeSceneCenterX + static_cast<int>(0.94F * nativeSceneUnit);
+    const int telemetryAnchorTop = nativeSceneCenterY + static_cast<int>(0.58F * nativeSceneUnit) - 34;
+    const int nativeTelemetryWidth = std::min(
+        std::max(1, telemetryAnchorRight - telemetryAnchorLeft),
+        std::max(1, hudSafeRect.width));
+    const int nativeTelemetryHeight = std::min(24, std::max(1, hudSafeRect.height));
+    const int nativeTelemetryLeft = std::clamp(
+        telemetryAnchorLeft,
+        hudSafeRect.x,
+        std::max(hudSafeRect.x, uiRectRight(hudSafeRect) - nativeTelemetryWidth));
+    const int nativeLegendTop = std::clamp(
+        telemetryAnchorTop,
+        hudSafeRect.y,
+        std::max(hudSafeRect.y, uiRectBottom(hudSafeRect) - nativeTelemetryHeight));
 
     return R"(
 body {
@@ -1043,7 +1301,7 @@ body {
     height: )" + std::to_string(viewportHeight) + R"(px;
     overflow: hidden;
     color: #edf4f8;
-    font-family: rmlui-debugger-font;
+    font-family: source-code-pro;
     font-size: 14px;
 }
 div, p, h1, h2, h3, aside {
@@ -1083,6 +1341,7 @@ scrollbarcorner {
     border-width: 0px;
 }
 #rr-panel {
+    box-sizing: border-box;
     position: absolute;
     left: )" + std::to_string(left) + R"(px;
     top: )" + std::to_string(top) + R"(px;
@@ -1099,10 +1358,10 @@ scrollbarcorner {
 #rr-scene-launch-control {
     position: fixed;
     z-index: 8;
-    left: )" + std::to_string(nativeLaunchCenterX - 98) + R"(px;
-    top: )" + std::to_string(nativeLaunchCenterY - 31) + R"(px;
-    width: 196px;
-    height: 62px;
+    left: )" + std::to_string(nativeLaunchLeft) + R"(px;
+    top: )" + std::to_string(nativeLaunchTop) + R"(px;
+    width: )" + std::to_string(nativeLaunchWidth) + R"(px;
+    height: )" + std::to_string(nativeLaunchHeight) + R"(px;
     padding: 0px 16px;
     color: #edfdf4;
     background-color: #1d6e53;
@@ -1125,6 +1384,7 @@ scrollbarcorner {
     left: )" + std::to_string(nativeTelemetryLeft) + R"(px;
     top: )" + std::to_string(nativeLegendTop) + R"(px;
     width: )" + std::to_string(nativeTelemetryWidth) + R"(px;
+    height: )" + std::to_string(nativeTelemetryHeight) + R"(px;
     display: flex;
     flex-direction: row;
     gap: 6px;
@@ -1201,6 +1461,22 @@ scrollbarcorner {
     background-color: transparent;
     border-width: 0px;
     border-radius: 0px;
+}
+#rr-panel.results-panel-mode {
+    left: 0px;
+    top: 0px;
+    width: )" + std::to_string(viewportWidth) + R"(px;
+    height: )" + std::to_string(viewportHeight) + R"(px;
+    overflow: hidden;
+    padding: 0px;
+    background-color: transparent;
+    border-width: 0px;
+    border-radius: 0px;
+}
+#rr-panel.results-panel-mode > .panel-head,
+#rr-panel.results-panel-mode > .status,
+#rr-panel.results-panel-mode > .panel-kpis {
+    display: none;
 }
 .story-briefing {
     position: relative;
@@ -1703,12 +1979,13 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     top: )" + std::to_string(miningInset) + R"(px;
     width: )" + std::to_string(miningRailWidth) + R"(px;
     min-height: )" + std::to_string(miningTopHeight) + R"(px;
-    padding: 5px 8px;
+    height: )" + std::to_string(miningTopHeight) + R"(px;
+    padding: 0px;
+    box-sizing: border-box;
     display: block;
 }
 .mining-run-title {
-    width: )" + std::to_string(miningTitleWidth) + R"(px;
-    margin-right: 10px;
+    display: none;
 }
 .mining-run-title span,
 .mining-utility-cluster span,
@@ -1723,7 +2000,8 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     font-size: 23px;
     line-height: 1.05;
 }
-.mining-run-title small {
+.mining-run-title small,
+.mining-run-title .mining-run-objective {
     color: rgba(215, 232, 234, 0.78);
     font-size: 12px;
     line-height: 1.12;
@@ -1736,33 +2014,34 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     font-size: 10px;
 }
 .mining-vitals {
-    position: )" + std::string(compactMining ? "relative" : "absolute") + R"(;
+    position: absolute;
     left: )" + std::to_string(miningVitalsLeft) + R"(px;
-    top: )" + std::string(compactMining ? "0px" : "5px") + R"(;
+    top: 7px;
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     width: )" + std::to_string(miningVitalsWidth) + R"(px;
-    margin-top: )" + std::string(compactMining ? "8px" : "0px") + R"(;
+    margin-top: 0px;
     margin-right: 0px;
 }
 .mining-vitals .metric {
     width: )" + std::to_string(miningVitalWidth) + R"(px;
-    height: 42px;
-    min-height: 42px;
+    height: )" + std::to_string(std::max(44, miningTopHeight - 14)) + R"(px;
+    min-height: )" + std::to_string(std::max(44, miningTopHeight - 14)) + R"(px;
     margin-right: )" + std::to_string(miningVitalGap) + R"(px;
-    margin-bottom: 5px;
+    margin-bottom: 0px;
     padding: 3px 5px;
+    box-sizing: border-box;
     background-color: rgba(8, 30, 39, 0.94);
     border-width: 1px;
     border-color: #2f7d99;
 }
 .mining-vitals .metric strong {
-    font-size: 24px;
+    font-size: 20px;
     line-height: 0.98;
 }
 .mining-vitals .metric span {
-    font-size: 12px;
+    font-size: 10px;
     line-height: 1.0;
 }
 .mining-vitals .metric.mining-alert-caution {
@@ -1856,36 +2135,69 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .mining-utility-cluster {
     position: absolute;
     right: 8px;
-    top: 6px;
+    top: 12px;
     width: )" + std::to_string(miningUtilityWidth) + R"(px;
     display: flex;
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
 }
+.mining-utility-cluster > span {
+    display: none;
+}
 .mining-utility-cluster button {
-    width: 102px;
-    min-height: 24px;
+    width: )" + std::to_string(miningUtilityButtonWidth) + R"(px;
+    min-height: 34px;
     height: auto;
     line-height: 1.15;
     margin-left: 4px;
-    margin-bottom: 5px;
+    margin-bottom: 0px;
     padding: 4px 4px;
-    font-size: 12px;
+    font-size: 11px;
 }
 .mining-playfield-space {
     position: absolute;
-    left: )" + std::to_string(miningInset) + R"(px;
+    left: )" + std::to_string(miningSceneRect.x) + R"(px;
     top: )" + std::to_string(miningPlayfieldTop) + R"(px;
-    width: )" + std::to_string(miningRailWidth) + R"(px;
-    height: )" + std::to_string(std::max(1, miningBottomTop - miningPlayfieldTop - 12)) + R"(px;
+    width: )" + std::to_string(miningSceneRect.width) + R"(px;
+    height: )" + std::to_string(miningSceneRect.height) + R"(px;
 }
+.mining-depth-route-overlay {
+    position: absolute;
+    left: )" + std::to_string(miningSceneRect.x) + R"(px;
+    top: )" + std::to_string(miningSceneRect.y) + R"(px;
+    width: )" + std::to_string(miningSceneRect.width) + R"(px;
+    height: )" + std::to_string(miningSceneRect.height) + R"(px;
+    pointer-events: none;
+}
+.mining-depth-route-overlay span {
+    display: block;
+    position: absolute;
+    left: )" + std::to_string(std::max(8, miningSceneRect.width / 2 - 120)) + R"(px;
+    width: 240px;
+    height: 22px;
+    padding: 5px 8px;
+    box-sizing: border-box;
+    color: #21d8ef;
+    font-size: 9px;
+    font-weight: normal;
+    line-height: 1.0;
+    text-align: center;
+    background-color: #030c12;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 3px;
+}
+.mining-depth-route-overlay .mining-route-up { top: 8px; }
+.mining-depth-route-overlay .mining-route-down { top: )" + std::to_string(std::max(8, miningSceneRect.height - 30)) + R"(px; }
 .mining-bottom-rail {
     left: )" + std::to_string(miningInset) + R"(px;
     top: )" + std::to_string(miningBottomTop) + R"(px;
     width: )" + std::to_string(miningRailWidth) + R"(px;
     min-height: )" + std::to_string(miningBottomHeight) + R"(px;
-    padding: 10px;
+    height: )" + std::to_string(miningBottomHeight) + R"(px;
+    padding: 8px 10px 28px 10px;
+    box-sizing: border-box;
     display: block;
 }
 .mining-payload-strip {
@@ -1901,15 +2213,14 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .mining-payload-strip .stat-chip,
 .mining-artifact-strip .stat-chip {
     width: 112px;
-    min-height: 18px;
-    padding: 4px 6px;
-    margin-top: 5px;
+    min-height: 16px;
+    padding: 3px 5px;
+    margin-top: 3px;
     margin-right: 6px;
     font-size: 11px;
 }
 .mining-artifact-strip {
-    width: )" + std::to_string(miningPayloadWidth) + R"(px;
-    margin-top: 6px;
+    display: none;
 }
 .mining-command-dock {
     position: absolute;
@@ -1944,13 +2255,13 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .mining-command-dock .system-actions button {
     width: )" + std::to_string(miningActionWidth) + R"(px;
-    min-height: 40px;
+    min-height: 36px;
     height: auto;
     line-height: 1.15;
     margin-right: 8px;
-    margin-bottom: 7px;
-    padding: 7px 4px;
-    font-size: 13px;
+    margin-bottom: 4px;
+    padding: 5px 4px;
+    font-size: 12px;
 }
 .mining-ship-service-marker {
     display: none;
@@ -1963,11 +2274,11 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .mining-recall-dock .system-actions button {
     width: )" + std::to_string(miningPrimaryActionWidth) + R"(px;
-    min-height: 40px;
+    min-height: 34px;
     height: auto;
     line-height: 1.15;
-    padding: 7px 4px;
-    font-size: 13px;
+    padding: 5px 4px;
+    font-size: 12px;
 }
 .mining-failure-banner {
     left: )" + std::to_string(miningInset) + R"(px;
@@ -2004,7 +2315,31 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .objective-strip span { color: #ffd166; font-size: 11px; }
 .objective-strip strong { display: block; color: #fff2c0; font-size: 14px; }
 .objective-strip p { margin: 3px 0 0 0; color: rgba(255, 244, 205, 0.78); font-size: 11px; }
-.mining-objective-strip { position: absolute; left: )" + std::to_string(miningInset) + R"(px; top: )" + std::to_string(miningObjectiveTop) + R"(px; width: 520px; z-index: 4; }
+.mining-objective-strip {
+    position: absolute;
+    left: )" + std::to_string(miningInset + 9) + R"(px;
+    top: )" + std::to_string(miningObjectiveTop) + R"(px;
+    width: )" + std::to_string(miningObjectiveWidth) + R"(px;
+    height: )" + std::to_string(std::max(1, miningTopHeight - 8)) + R"(px;
+    margin: 0px;
+    padding: 4px 0px;
+    box-sizing: border-box;
+    overflow: hidden;
+    z-index: 4;
+    border-width: 0px;
+    background-color: transparent;
+}
+.mining-objective-strip span {
+    font-size: 10px;
+}
+.mining-objective-strip strong {
+    width: )" + std::to_string(miningObjectiveWidth) + R"(px;
+    font-size: 12px;
+    line-height: 1.15;
+}
+.mining-objective-strip p {
+    display: none;
+}
 .phase-row,
 .phase-title-row,
 .phase-action-grid,
@@ -3875,12 +4210,15 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     overflow: hidden;
 }
 .phase-board-hangar .ops-card .card-footer button {
-    width: 92px;
+    width: 112px;
+    min-width: 112px;
     min-height: 36px;
     height: auto;
     line-height: 1.15;
     margin-top: 0px;
     margin-right: 0px;
+    font-size: 11px;
+    white-space: nowrap;
 }
 .phase-board-hangar .hangar-actions {
     width: 704px;
@@ -5790,6 +6128,7 @@ button.settings-toggle:hover {
 }
 #rr-modal-scrim {
     position: absolute;
+    z-index: 100;
     left: 0px;
     top: 0px;
     width: )" + std::to_string(viewportWidth) + R"(px;
@@ -5797,7 +6136,9 @@ button.settings-toggle:hover {
     background-color: #05070a;
 }
 #rr-modal {
+    box-sizing: border-box;
     position: absolute;
+    z-index: 101;
     left: )" + std::to_string(modalDefaultLeft) + R"(px;
     top: )" + std::to_string(modalTallTop) + R"(px;
     width: )" + std::to_string(modalDefaultWidth) + R"(px;
@@ -5838,11 +6179,17 @@ button.settings-toggle:hover {
     padding: 20px;
 }
 #rr-modal.modal-launch_outcome {
-    top: )" + std::to_string(std::max(24, (viewportHeight - 280) / 2)) + R"(px;
-    height: 280px;
+    box-sizing: border-box;
+    top: )" + std::to_string(modalOutcomeTop) + R"(px;
+    height: )" + std::to_string(modalOutcomeHeight) + R"(px;
     padding: 20px;
 }
-#rr-modal.modal-launch_outcome .modal-scroll-body,
+#rr-modal.modal-launch_outcome .modal-scroll-body {
+    display: flex;
+    flex-direction: column;
+    overflow-y: )" + std::string(modalOutcomeNeedsScroll ? "auto" : "hidden") + R"(;
+    padding-right: )" + std::string(modalOutcomeNeedsScroll ? "8px" : "0px") + R"(;
+}
 #rr-modal.modal-launch_introduction .modal-scroll-body,
 #rr-modal.modal-approach_introduction .modal-scroll-body,
 #rr-modal.modal-flyby_introduction .modal-scroll-body,
@@ -5944,13 +6291,18 @@ button.settings-toggle:hover {
 }
 .launch-outcome-summary {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
-    min-height: 190px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 0px;
+    height: 100%;
 }
 .launch-outcome-consequence {
-    min-height: 60px;
-    max-height: 60px;
-    margin-top: 12px;
+    flex: 0 0 52px;
+    min-height: 52px;
+    max-height: 52px;
+    margin-top: 8px;
     margin-bottom: 8px;
     color: #c5d7de;
     font-size: 14px;
@@ -5965,6 +6317,8 @@ button.settings-toggle:hover {
     overflow: hidden;
 }
 .launch-outcome-actions {
+    flex: 0 0 40px;
+    height: 40px;
     margin-top: auto;
     flex-wrap: nowrap;
     justify-content: flex-end;
@@ -5972,11 +6326,19 @@ button.settings-toggle:hover {
 .launch-outcome-actions button {
     box-sizing: border-box;
     width: 150px;
-    height: 36px;
+    height: 40px;
     min-height: 0px;
     margin-top: 0px;
     margin-right: 8px;
     padding: 5px 8px;
+}
+#rr-modal.modal-launch_outcome .ui-outcome-rows {
+    margin-top: 8px;
+}
+#rr-modal.modal-launch_outcome .ui-outcome-rows > div {
+    min-height: 40px;
+    height: 40px;
+    padding: 8px 10px;
 }
 .modal-head {
     display: flex;
@@ -5984,6 +6346,10 @@ button.settings-toggle:hover {
     flex-direction: row;
     justify-content: space-between;
     margin-bottom: 8px;
+}
+.modal-head h2 {
+    margin-top: 0px;
+    margin-bottom: 0px;
 }
 .modal-scroll-body {
     display: block;
@@ -6017,9 +6383,36 @@ body.controller-focus-visible .rr-controller-focus {
     color: #b9c9d4;
     font-size: 12px;
 }
-#rr-controller-prompt-bar.mining-input-helper {
-    min-height: 42px;
+#rr-controller-prompt-bar.panel-input-helper {
+    left: )" + std::to_string(panelPromptLeft) + R"(px;
+    right: )" + std::to_string(panelPromptRight) + R"(px;
+    bottom: )" + std::to_string(panelPromptBottom) + R"(px;
+    height: 60px;
+    min-height: 0px;
+    padding: 4px 7px;
+    box-sizing: border-box;
     flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 4px 8px;
+    overflow: hidden;
+    font-size: 10px;
+}
+body.panel-input-helper-visible #rr-panel.phase-board-panel,
+body.panel-input-helper-visible #rr-panel.control-panel {
+    padding-bottom: 72px;
+}
+#rr-controller-prompt-bar.mining-input-helper {
+    left: )" + std::to_string(miningInset + 4) + R"(px;
+    right: )" + std::to_string(miningInset + 4) + R"(px;
+    bottom: )" + std::to_string(miningInset) + R"(px;
+    min-height: 22px;
+    height: 22px;
+    padding: 2px 6px;
+    box-sizing: border-box;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow: hidden;
+    font-size: 9px;
 }
 #rr-controller-prompt-bar span {
     flex-shrink: 0;
@@ -6061,6 +6454,2947 @@ body.controller-focus-visible .rr-controller-focus {
 #rr-performance-stats .performance-warning {
     color: #ff8b7d;
     font-weight: bold;
+}
+
+/* Results owns the full scene surface. Only its acknowledgement card is
+   content-sized; it must never inherit the persistent phase-board rail. */
+#rr-panel.results-panel-mode .results-panel {
+    box-sizing: border-box;
+    position: absolute;
+    left: )" + std::to_string(resultsCardLeft) + R"(px;
+    top: )" + std::to_string(resultsCardTop) + R"(px;
+    width: )" + std::to_string(resultsCardWidth) + R"(px;
+    height: )" + std::to_string(resultsCardHeight) + R"(px;
+    overflow: hidden;
+    padding: 14px;
+    background-color: #0b1118;
+    border-width: 1px;
+    border-color: #6d5d35;
+    border-radius: 10px;
+}
+#rr-panel.results-panel-mode .results-panel .debrief-hero {
+    box-sizing: border-box;
+    width: )" + std::to_string(std::max(1, resultsCardWidth - 30)) + R"(px;
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+#rr-panel.results-panel-mode .results-panel .debrief-hero p {
+    width: )" + std::to_string(std::max(1, resultsCardWidth - 60)) + R"(px;
+}
+
+/* The authored phase boards retain their wide-screen dimensions above as a
+   design baseline. These final rules bind every persistent native document to
+   the shared rail/dock border-box and cap legacy 736/704/482 px descendants
+   before RmlUi lays them out. */
+#rr-panel.phase-board-panel,
+#rr-panel.control-panel {
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+#rr-panel.phase-board-panel *,
+#rr-panel.control-panel * {
+    box-sizing: border-box;
+    max-width: )" + std::to_string(responsiveContentWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .panel-head,
+#rr-panel.phase-board-panel .status,
+#rr-panel.phase-board-panel .phase-status,
+#rr-panel.phase-board-panel .panel-kpis,
+#rr-panel.phase-board-panel .phase-titlebar,
+#rr-panel.phase-board-panel .phase-board,
+#rr-panel.phase-board-panel .phase-action-grid,
+#rr-panel.phase-board-panel .phase-footer-lane,
+#rr-panel.phase-board-panel .board-primary,
+#rr-panel.phase-board-panel .draft-hero,
+#rr-panel.phase-board-panel .draft-board,
+#rr-panel.phase-board-panel .surface-command,
+#rr-panel.phase-board-panel .surface-quickbar,
+#rr-panel.phase-board-panel .surface-kpi-grid,
+#rr-panel.phase-board-panel .drone-ops-callout,
+#rr-panel.phase-board-panel .surface-arena-forecast,
+#rr-panel.phase-board-panel .surface-primary-action,
+#rr-panel.phase-board-panel .resource-bank,
+#rr-panel.phase-board-panel .phase-advisory,
+#rr-panel.phase-board-panel .ops-grid,
+#rr-panel.phase-board-panel .nav-grid,
+#rr-panel.phase-board-panel .result-grid,
+#rr-panel.phase-board-panel .achievement-grid,
+#rr-panel.phase-board-panel .actions,
+#rr-panel.phase-board-panel .hangar-actions,
+#rr-panel.phase-board-panel .draft-card-grid,
+#rr-panel.phase-board-panel .drone-loadout-bench,
+#rr-panel.phase-board-panel .drone-roster,
+#rr-panel.phase-board-panel .drone-combat-forecast,
+#rr-panel.phase-board-panel .drone-bay-strip,
+#rr-panel.control-panel .panel-head,
+#rr-panel.control-panel .status,
+#rr-panel.control-panel .panel-kpis,
+#rr-panel.control-panel .phase-titlebar,
+#rr-panel.control-panel .phase-board,
+#rr-panel.control-panel .metric-grid,
+#rr-panel.control-panel .focus-metrics,
+#rr-panel.control-panel .warning-grid,
+#rr-panel.control-panel .cockpit-hud,
+#rr-panel.control-panel .phase-advisory,
+#rr-panel.control-panel .telemetry-status,
+#rr-panel.control-panel .phase-copy,
+#rr-panel.control-panel .cockpit-hold-copy,
+#rr-panel.control-panel .minigame-readout,
+#rr-panel.control-panel .minigame-metrics,
+#rr-panel.control-panel .minigame-metric-row,
+#rr-panel.control-panel .minigame-rewards {
+    width: )" + std::to_string(responsiveContentWidth) + R"(px;
+    margin-left: 0px;
+    margin-right: 0px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-readout {
+    display: flex;
+    flex-direction: row;
+    width: )" + std::to_string(responsiveContentWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics,
+#rr-panel.phase-board-panel .phase-board-push .minigame-metric-row {
+    width: )" + std::to_string(responsivePushMetricsWidth) + R"(px;
+    margin-left: 0px;
+    margin-right: 0px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics {
+    flex-shrink: 0;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric {
+    box-sizing: border-box;
+    width: )" + std::to_string(responsivePushMetricWidth) + R"(px;
+    min-width: 0px;
+    padding: 6px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metric-row:last-child .metric {
+    width: )" + std::to_string(responsivePushMetricsWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric strong,
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric span {
+    max-width: 100%;
+    white-space: normal;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric strong {
+    font-size: 14px;
+}
+#rr-panel.phase-board-panel .phase-board-push .minigame-rewards {
+    width: )" + std::to_string(responsivePushRewardsWidth) + R"(px;
+    min-width: 0px;
+    margin-left: 10px;
+}
+#rr-panel.phase-board-panel .panel-head,
+#rr-panel.phase-board-panel .phase-titlebar,
+#rr-panel.phase-board-panel .phase-title-row,
+#rr-panel.phase-board-panel .phase-action-grid,
+#rr-panel.phase-board-panel .phase-footer-lane,
+#rr-panel.phase-board-panel .surface-command,
+#rr-panel.phase-board-panel .surface-quickbar,
+#rr-panel.phase-board-panel .surface-primary-action,
+#rr-panel.phase-board-panel .resource-bank,
+#rr-panel.phase-board-panel .drone-top-row,
+#rr-panel.phase-board-panel .drone-build-guidance,
+#rr-panel.phase-board-panel .drone-combat-forecast,
+#rr-panel.phase-board-panel .drone-bay-strip,
+#rr-panel.phase-board-panel .card-footer,
+#rr-panel.phase-board-panel .draft-card-footer,
+#rr-panel.phase-board-panel .utility-row,
+#rr-panel.phase-board-panel .utility-actions,
+#rr-panel.control-panel .panel-head,
+#rr-panel.control-panel .phase-titlebar,
+#rr-panel.control-panel .card-footer,
+#rr-panel.control-panel .utility-row,
+#rr-panel.control-panel .utility-actions {
+    flex-wrap: wrap;
+}
+#rr-panel.phase-board-panel .panel-title,
+#rr-panel.phase-board-panel .panel-head-actions,
+#rr-panel.phase-board-panel .phase-titlebar > div,
+#rr-panel.phase-board-panel .phase-titlebar p,
+#rr-panel.phase-board-panel .compact-tools,
+#rr-panel.control-panel .panel-title,
+#rr-panel.control-panel .panel-head-actions,
+#rr-panel.control-panel .phase-titlebar > div,
+#rr-panel.control-panel .phase-titlebar p,
+#rr-panel.control-panel .compact-tools {
+    width: )" + std::to_string(responsiveContentWidth) + R"(px;
+    margin-left: 0px;
+    margin-right: 0px;
+}
+#rr-panel.phase-board-panel .panel-head-actions,
+#rr-panel.phase-board-panel .compact-tools,
+#rr-panel.control-panel .panel-head-actions,
+#rr-panel.control-panel .compact-tools {
+    justify-content: flex-start;
+}
+#rr-panel.phase-board-panel .panel-head-actions button,
+#rr-panel.phase-board-panel .compact-tools button,
+#rr-panel.control-panel .panel-head-actions button,
+#rr-panel.control-panel .compact-tools button {
+    flex: 0 0 )" + std::to_string(responsiveToolbarButtonWidth) + R"(px;
+    min-width: 0px;
+    width: )" + std::to_string(responsiveToolbarButtonWidth) + R"(px;
+    margin-left: 0px;
+    margin-right: )" + std::to_string(kPhaseCardGap) + R"(px;
+}
+#rr-panel.phase-board-panel .panel-head-actions {
+    flex-wrap: nowrap;
+    justify-content: space-between;
+}
+#rr-panel.phase-board-panel .panel-head-actions button {
+    flex: 0 0 )" + std::to_string(responsiveHeaderButtonWidth) + R"(px;
+    width: )" + std::to_string(responsiveHeaderButtonWidth) + R"(px;
+    margin-right: 0px;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 11px;
+}
+#rr-panel.phase-board-panel .panel-title {
+    width: )" + std::to_string(responsivePanelTitleWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .panel-head-actions {
+    width: )" + std::to_string(responsivePanelHeaderActionsWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .surface-choice-list {
+    display: flex;
+    flex-direction: column;
+    width: )" + std::to_string(responsiveContentWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .surface-choice-row,
+#rr-panel.phase-board-panel .surface-choice-row.surface-primary-action {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    width: )" + std::to_string(responsiveContentWidth) + R"(px;
+    min-height: 56px;
+    margin-top: 5px;
+    margin-right: 0px;
+    padding: 7px 9px;
+}
+#rr-panel.phase-board-panel .surface-choice-summary {
+    flex: 0 0 )" + std::to_string(responsiveSurfaceSummaryWidth) + R"(px;
+    width: )" + std::to_string(responsiveSurfaceSummaryWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .surface-choice-summary h3 {
+    width: )" + std::to_string(responsiveSurfaceSummaryWidth) + R"(px;
+    margin-top: 0px;
+    margin-bottom: 2px;
+    font-size: 13px;
+    line-height: 1.1;
+}
+#rr-panel.phase-board-panel .surface-choice-cues {
+    display: flex;
+    flex-direction: column;
+    width: )" + std::to_string(responsiveSurfaceSummaryWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .surface-choice-cues span,
+#rr-panel.phase-board-panel .surface-choice-row.surface-primary-action .surface-choice-cues span {
+    width: )" + std::to_string(responsiveSurfaceSummaryWidth) + R"(px;
+    min-height: 12px;
+    color: #9fb2c0;
+    font-size: 10px;
+    font-weight: normal;
+    line-height: 1.15;
+    text-transform: none;
+}
+#rr-panel.phase-board-panel .surface-choice-row button,
+#rr-panel.phase-board-panel .surface-choice-row.surface-primary-action button {
+    flex: 0 0 )" + std::to_string(responsiveSurfaceButtonWidth) + R"(px;
+    width: )" + std::to_string(responsiveSurfaceButtonWidth) + R"(px;
+    min-height: 32px;
+    height: auto;
+    margin: 0px;
+    padding-left: 3px;
+    padding-right: 3px;
+    font-size: 11px;
+    line-height: 1.1;
+}
+#rr-panel.mining-fullscreen-panel .mining-utility-cluster button {
+    flex: 0 0 )" + std::to_string(miningUtilityButtonWidth) + R"(px;
+    width: )" + std::to_string(miningUtilityButtonWidth) + R"(px;
+    min-width: 0px;
+    margin-left: 4px;
+    margin-right: 0px;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 10px;
+}
+#rr-panel.phase-board-panel .metric,
+#rr-panel.phase-board-panel .surface-kpi,
+#rr-panel.control-panel .metric,
+#rr-panel.control-panel .surface-kpi {
+    width: )" + std::to_string(responsiveMetricWidth) + R"(px;
+}
+#rr-panel.phase-board-panel .phase-card-slot,
+#rr-panel.phase-board-panel .ops-card,
+#rr-panel.phase-board-panel .pilot-card,
+#rr-panel.phase-board-panel .upgrade-card,
+#rr-panel.phase-board-panel .upgrade-draft-card,
+#rr-panel.phase-board-panel .arrival-card,
+#rr-panel.phase-board-panel .nav-card,
+#rr-panel.phase-board-panel .inventory-item,
+#rr-panel.phase-board-panel .achievement-card,
+#rr-panel.phase-board-panel .crew-fate-card,
+#rr-panel.phase-board-panel .result-group,
+#rr-panel.phase-board-panel .drone-recipe-card,
+#rr-panel.phase-board-panel .drone-loadout-slot,
+#rr-panel.phase-board-panel .drone-control-card,
+#rr-panel.phase-board-panel .surface-action-card,
+#rr-panel.control-panel .ops-card,
+#rr-panel.control-panel .pilot-card,
+#rr-panel.control-panel .upgrade-card,
+#rr-panel.control-panel .upgrade-draft-card,
+#rr-panel.control-panel .surface-action-card {
+    flex: 0 0 )" + std::to_string(responsiveCardWidth) + R"(px;
+    width: )" + std::to_string(responsiveCardWidth) + R"(px;
+}
+)" + std::string(bottomDock ? R"(
+/* A short bottom dock keeps its persistent controls and immediate Surface Ops
+   choices in separate rows. The choices scroll horizontally inside the dock;
+   they never cover or capture the protected scene above. */
+#rr-panel.phase-board-panel .surface-ops-screen .phase-titlebar,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-quickbar,
+#rr-panel.phase-board-panel .surface-ops-screen .drone-ops-callout {
+    display: none;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-actions {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 7px;
+    width: auto;
+    height: 68px;
+    margin: 0px;
+    padding: 0px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background-color: #0b1118;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-list {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    min-width: 810px;
+    height: 66px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row.surface-primary-action {
+    flex: 0 0 198px;
+    width: 198px;
+    min-height: 60px;
+    height: 60px;
+    margin-top: 0px;
+    margin-right: 6px;
+    padding: 6px 7px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-summary,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-summary h3,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-cues,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-cues span {
+    flex: 0 0 96px;
+    width: 96px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row button,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row.surface-primary-action button {
+    flex: 0 0 82px;
+    width: 82px;
+}
+)" : "") + R"(
+/* Mockup-faithful compact cockpit components. */
+.ui-kicker,
+.ui-kpi span,
+.mining-vital-tile span,
+.mining-payload-tile span {
+    color: #8faabd;
+    font-size: 10px;
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.phase-board-scan {
+    width: 100%;
+    height: 100%;
+    min-height: 0px;
+    margin: 0px;
+    padding: 0px;
+}
+#rr-panel.phase-board-panel.surface-scan-panel > .panel-head {
+    display: none;
+}
+.surface-scan-rail {
+    display: block;
+    width: 100%;
+    min-height: 100%;
+}
+.scan-header {
+    display: block;
+    width: 100%;
+    margin: 0px 0px 14px 0px;
+    padding: 0px 0px 14px 0px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+.scan-heading .ui-kicker {
+    display: block;
+    margin-bottom: 3px;
+}
+.scan-heading h2 {
+    margin: 0px;
+    color: #e9f7fb;
+    font-size: 20px;
+    font-weight: normal;
+    line-height: 1.05;
+}
+.scan-utility-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin-top: 13px;
+}
+.scan-utility-actions button {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 40px;
+    height: 40px;
+    margin: 0px 8px 0px 0px;
+    padding: 0px 4px;
+    color: #8faabd;
+    font-size: 12px;
+    background-color: #030c12;
+    border-color: #34596a;
+}
+.scan-utility-actions button:last-child {
+    margin-right: 0px;
+}
+.scan-objective {
+    margin: 0px 0px 14px 0px;
+    color: #f1b72b;
+    font-size: 12px;
+    line-height: 1.2;
+}
+.scan-kpis {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin-bottom: 12px;
+}
+.scan-kpis .ui-kpi {
+    flex: 1 1 0px;
+    min-width: 0px;
+    min-height: 68px;
+    margin-right: 8px;
+    padding: 9px 5px;
+    text-align: center;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 6px;
+}
+.scan-kpis .ui-kpi:last-child {
+    margin-right: 0px;
+}
+.scan-kpis .ui-kpi strong {
+    display: block;
+    margin-top: 7px;
+    color: #e9f7fb;
+    font-size: 20px;
+    font-weight: normal;
+    line-height: 1.0;
+}
+.scan-signal-card {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    margin-bottom: 16px;
+    padding: 12px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 6px;
+}
+.scan-signal-copy span {
+    color: #8faabd;
+    font-size: 10px;
+}
+.scan-signal-copy strong {
+    margin-top: 4px;
+    color: #e9f7fb;
+    font-size: 20px;
+    font-weight: normal;
+}
+.scan-signal-track {
+    position: relative;
+    width: 100%;
+    height: 14px;
+    margin-top: 8px;
+    background-color: #031019;
+    border-width: 1px;
+    border-color: #174153;
+}
+.scan-signal-fill {
+    display: block;
+    height: 12px;
+    background-color: #21d8ef;
+}
+.scan-signal-0 { width: 0%; }
+.scan-signal-10 { width: 10%; }
+.scan-signal-20 { width: 20%; }
+.scan-signal-30 { width: 30%; }
+.scan-signal-40 { width: 40%; }
+.scan-signal-50 { width: 50%; }
+.scan-signal-60 { width: 60%; }
+.scan-signal-70 { width: 70%; }
+.scan-signal-80 { width: 80%; }
+.scan-signal-90 { width: 90%; }
+.scan-signal-100 { width: 100%; }
+.scan-signal-risk-marker {
+    position: absolute;
+    right: 31%;
+    top: -4px;
+    width: 2px;
+    height: 20px;
+    background-color: #f1b72b;
+}
+.scan-layer-readout {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 56px;
+    margin-bottom: 18px;
+    padding: 8px;
+    box-sizing: border-box;
+    background-color: #07151d;
+    border-width: 1px;
+    border-color: #f1b72b;
+    border-radius: 6px;
+    text-align: center;
+}
+.scan-layer-readout strong {
+    color: #55d86d;
+    font-size: 16px;
+    font-weight: normal;
+}
+.scan-layer-readout.rare strong { color: #f1b72b; }
+.scan-layer-readout.exotic strong { color: #ff70d6; }
+.scan-layer-readout.artifact strong { color: #b692ff; }
+.scan-layer-readout.empty strong { color: #8faabd; }
+.scan-actions {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding-top: 16px;
+    border-top-width: 1px;
+    border-color: #34596a;
+}
+.scan-actions button {
+    width: 100%;
+    min-height: 64px;
+    margin: 0px 0px 12px 0px;
+    padding: 8px;
+    color: #e9f7fb;
+    font-size: 18px;
+    font-weight: normal;
+    line-height: 1.0;
+    background-color: #08161e;
+    border-width: 1px;
+    border-radius: 6px;
+}
+.scan-actions .scan-pulse-action { color: #21d8ef; border-color: #21d8ef; }
+.scan-actions .scan-bank-action { color: #55d86d; border-color: #55d86d; background-color: #0b261b; }
+.scan-actions .scan-abort-action {
+    min-height: 42px;
+    margin-top: 8px;
+    color: #ff5e55;
+    font-size: 14px;
+    text-align: left;
+    background-color: transparent;
+    border-top-width: 1px;
+    border-right-width: 0px;
+    border-bottom-width: 0px;
+    border-left-width: 0px;
+    border-color: #34596a;
+}
+.surface-scan-scene-marker {
+    display: none;
+}
+#rr-scan-scene-readout {
+    position: fixed;
+    left: )" + std::to_string(nativeSceneCenterX - 34) + R"(px;
+    top: )" + std::to_string(std::max(hudSafeRect.y, nativeSceneCenterY - 214)) + R"(px;
+    width: 68px;
+    height: 24px;
+    color: #e9f7fb;
+    font-size: 12px;
+    font-weight: normal;
+    text-align: center;
+    pointer-events: none;
+}
+
+/* Mining keeps all permanent controls in the two reserved HUD rails. */
+.mining-playfield-space {
+    box-sizing: border-box;
+    border-width: 1px;
+    border-color: #21d8ef;
+    border-radius: 5px;
+    pointer-events: none;
+}
+.mining-top-rail,
+.mining-bottom-rail {
+    background-color: #030c12;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.mining-run-title {
+    display: block;
+    position: absolute;
+    left: 16px;
+    top: 13px;
+    width: )" + std::to_string(std::max(150, miningObjectiveWidth - 20)) + R"(px;
+}
+.mining-run-title strong {
+    display: block;
+    color: #e9f7fb;
+    font-size: 14px;
+    font-weight: normal;
+    line-height: 1.05;
+    text-transform: uppercase;
+}
+.mining-run-title small,
+.mining-run-title .mining-run-objective {
+    display: block;
+    margin-top: 8px;
+    color: #8faabd;
+    font-size: 11px;
+    font-weight: normal;
+    line-height: 1.05;
+}
+.mining-vitals {
+    top: 7px;
+    align-items: stretch;
+}
+.mining-vitals .mining-vital-tile {
+    flex: 0 0 )" + std::to_string(miningVitalWidth) + R"(px;
+    width: )" + std::to_string(miningVitalWidth) + R"(px;
+    min-height: )" + std::to_string(std::max(44, miningTopHeight - 14)) + R"(px;
+    height: )" + std::to_string(std::max(44, miningTopHeight - 14)) + R"(px;
+    margin-right: )" + std::to_string(miningVitalGap) + R"(px;
+    padding: 7px 8px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.mining-vital-tile strong,
+.mining-payload-tile strong {
+    display: block;
+    margin-top: 3px;
+    color: #e9f7fb;
+    font-size: 20px;
+    font-weight: normal;
+    line-height: 0.95;
+}
+.mining-vital-tile small {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    margin-top: 4px;
+    color: #f1b72b;
+    font-size: 9px;
+    line-height: 1.0;
+}
+.mining-vital-tile small b,
+.mining-vital-tile small i {
+    display: inline-block;
+    color: #f1b72b;
+    font-style: normal;
+    font-weight: normal;
+}
+.mining-vital-tile small b {
+    margin-right: 6px;
+}
+.mining-payload-strip {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: )" + std::to_string(miningPayloadWidth) + R"(px;
+    margin: 0px;
+}
+.mining-ore-manifest {
+    flex: 1 1 auto;
+    min-width: 0px;
+    min-height: 54px;
+    margin-right: 8px;
+    padding: 5px 7px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.mining-ore-manifest header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    color: #8faabd;
+    font-size: 8px;
+    line-height: 1;
+}
+.mining-ore-manifest header span,
+.mining-ore-manifest header small {
+    color: #8faabd;
+    font-size: 8px;
+    font-weight: normal;
+    line-height: 1;
+}
+.mining-ore-manifest-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin-top: 5px;
+}
+.mining-ore-entry {
+    flex: 1 1 0px;
+    min-width: 0px;
+    padding-right: 4px;
+    text-align: center;
+    border-right-width: 1px;
+    border-color: #203b49;
+}
+.mining-ore-entry:last-child {
+    padding-right: 0px;
+    border-right-width: 0px;
+}
+.mining-ore-entry span {
+    display: block;
+    color: #8faabd;
+    font-size: 8px;
+    line-height: 1;
+}
+.mining-ore-entry strong {
+    display: block;
+    margin-top: 3px;
+    color: #e9f7fb;
+    font-size: 14px;
+    font-weight: normal;
+    line-height: 1;
+}
+.mining-ore-entry.rare strong { color: #f1b72b; }
+.mining-ore-entry.exotic strong { color: #55d86d; }
+.mining-payload-tile {
+    flex: 0 0 80px;
+    width: 80px;
+    min-width: 0px;
+    min-height: 54px;
+    margin-right: 8px;
+    padding: 7px 8px;
+    box-sizing: border-box;
+    text-align: center;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.mining-payload-tile:last-child { margin-right: 0px; }
+.mining-payload-tile.artifact.active strong { color: #55d86d; }
+.mining-command-dock {
+    left: )" + std::to_string(miningPayloadWidth + 24) + R"(px;
+    top: 8px;
+    width: )" + std::to_string(std::max(1, miningRailWidth - miningPayloadWidth - 36)) + R"(px;
+}
+.mining-command-dock .system-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    justify-content: flex-start;
+}
+.mining-command-dock .system-actions button {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 54px;
+    height: 54px;
+    margin: 0px 8px 0px 0px;
+    padding: 5px 8px;
+    color: #21d8ef;
+    font-size: 12px;
+    font-weight: normal;
+    background-color: #08161e;
+    border-color: #21d8ef;
+    border-radius: 4px;
+}
+.mining-command-dock .system-actions button:last-child { margin-right: 0px; }
+.mining-command-dock .system-actions .mining-tether-action { color: #f1b72b; border-color: #f1b72b; }
+.mining-command-dock .system-actions .mining-recall-action { color: #ff5e55; border-color: #ff5e55; }
+.mining-command-dock .system-actions .mining-bank-action { color: #55d86d; border-color: #55d86d; }
+.mining-command-dock .system-actions .mining-repair-action { color: #f1b72b; border-color: #f1b72b; }
+
+/* Remaining mockup families share the same compact semantic lanes. */
+#rr-panel.phase-board-panel,
+#rr-panel.control-panel {
+    background-color: #030c12;
+    border-color: #34596a;
+}
+.panel-head.ui-family-management,
+.panel-head.ui-family-decision,
+.panel-head.ui-family-live-hud,
+.panel-head.ui-family-selection {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+.management-choice-row,
+.decision-choice-row {
+    width: 100%;
+    min-height: 56px;
+    height: auto;
+    margin-bottom: 8px;
+    padding: 8px 9px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 5px;
+}
+.management-choice-row .card-copy,
+.management-choice-row .chip-strip,
+.decision-choice-row .card-copy {
+    display: none;
+}
+.management-choice-row .card-title,
+.decision-choice-row .card-title {
+    margin: 2px 0px 4px 0px;
+    color: #e9f7fb;
+    font-size: 13px;
+    line-height: 1.05;
+}
+.management-choice-row .card-topline,
+.management-choice-row .card-kicker,
+.decision-choice-row .card-topline {
+    color: #8faabd;
+    font-size: 9px;
+}
+.management-choice-row .card-footer,
+.decision-choice-row .card-footer {
+    min-height: 34px;
+    margin-top: 4px;
+}
+.management-choice-row .card-footer button,
+.decision-choice-row .card-footer button {
+    min-height: 32px;
+    height: 32px;
+    padding: 3px 7px;
+    font-size: 10px;
+}
+.phase-board-arrival > h2,
+.phase-board-research .board-primary > h2,
+.phase-board-navigation .navigation-map > h2 {
+    display: none;
+}
+.phase-board-arrival .ops-grid,
+.phase-board-research .ops-grid,
+.phase-board-navigation .nav-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+.phase-board-drone-ops .drone-control-card,
+.phase-board-drone-ops .drone-loadout-slot {
+    min-height: 68px;
+    height: auto;
+    margin-bottom: 8px;
+    padding: 8px;
+    background-color: #08161e;
+    border-color: #34596a;
+}
+.phase-board-drone-ops .drone-control-status,
+.phase-board-drone-ops .drone-control-card .chip-strip,
+.phase-board-drone-ops .drone-loadout-slot .chip-strip {
+    display: none;
+}
+.phase-board-drone-ops .drone-control-grid,
+.phase-board-drone-ops .drone-loadout-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+.live-hud-header {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    width: 100%;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+.live-hud-header > div {
+    /* Force the briefing into the space left by its fixed Details button.
+       Without a zero flex basis, a long Flyby word can extend one glyph
+       underneath the button before RmlUi wraps the next word. */
+    flex: 1 1 0px;
+    box-sizing: border-box;
+    width: 0px;
+    min-width: 0px;
+    padding-right: 6px;
+}
+.live-hud-header h2 {
+    margin: 0px 0px 4px 0px;
+    color: #e9f7fb;
+    font-size: 20px;
+    font-weight: normal;
+}
+.live-hud-header p {
+    margin: 0px;
+    color: #f1b72b;
+    font-size: 11px;
+    line-height: 1.15;
+    white-space: normal;
+}
+.live-hud-header button {
+    flex: 0 0 82px;
+    width: 82px;
+    min-height: 36px;
+    height: 36px;
+    margin-left: 8px;
+    font-size: 10px;
+}
+#rr-panel.control-panel .flight-readout {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0px 0px 12px 0px;
+}
+#rr-panel.control-panel .flight-readout .metric {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 64px;
+    margin-right: 8px;
+    padding: 8px 5px;
+    text-align: center;
+    background-color: #08161e;
+    border-color: #34596a;
+}
+#rr-panel.control-panel .flight-readout .metric:last-child { margin-right: 0px; }
+#rr-panel.control-panel .flight-readout .metric strong { font-size: 16px; }
+.live-hud-actions {
+    display: flex;
+    width: 100%;
+    margin-top: 12px;
+}
+.live-hud-actions button {
+    width: 100%;
+    min-height: 48px;
+    color: #ff5e55;
+    border-color: #ff5e55;
+    background-color: transparent;
+}
+.flight-hud .primary-actions,
+.flight-hud .system-actions {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+.flight-hud .primary-actions button,
+.flight-hud .system-actions button {
+    width: 100%;
+    min-height: 48px;
+    margin-bottom: 8px;
+}
+.phase-board-draft-room .draft-card-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+.phase-board-draft-room .compact-draft-selector {
+    width: 100%;
+    min-height: 88px;
+    height: auto;
+    margin-bottom: 8px;
+    padding: 8px;
+    box-sizing: border-box;
+}
+.phase-board-draft-room .compact-draft-selector.selected {
+    background-color: #0a2028;
+    border-color: #21d8ef;
+}
+.phase-board-draft-room .compact-draft-selector .chip-strip,
+.phase-board-draft-room .compact-draft-selector .module-impact {
+    display: none;
+}
+.ui-selected-detail {
+    display: block;
+    width: 100%;
+    min-height: 124px;
+    margin: 12px 0px;
+    padding: 12px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #21d8ef;
+    border-radius: 5px;
+}
+.ui-selected-detail > span {
+    color: #21d8ef;
+    font-size: 10px;
+}
+.ui-selected-detail h3 {
+    margin: 5px 0px;
+    color: #e9f7fb;
+    font-size: 16px;
+}
+.ui-selected-detail p {
+    margin: 0px 0px 8px 0px;
+    color: #8faabd;
+    font-size: 11px;
+    line-height: 1.2;
+}
+.ui-selected-detail button {
+    width: 100%;
+    min-height: 40px;
+    margin-top: 8px;
+    color: #55d86d;
+    border-color: #55d86d;
+}
+.ui-selected-detail button.disabled,
+.ui-selected-detail button:disabled {
+    color: #ff5e55;
+    background-color: #252b31;
+    border-color: #ff5e55;
+}
+.ui-outcome-rows {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin-top: 12px;
+}
+.ui-outcome-rows > div {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 42px;
+    padding: 9px 10px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+.ui-outcome-rows span {
+    color: #8faabd;
+    font-size: 10px;
+}
+.ui-outcome-rows strong {
+    color: #e9f7fb;
+    font-size: 11px;
+    font-weight: normal;
+    text-align: right;
+}
+)" + std::string(bottomDock ? R"(
+/* Every compact family uses the shared dock rectangle below the protected
+   scene. Persistent chrome occupies the first 44 px; choices scroll only
+   inside the remainder. */
+#rr-panel.management-family-panel,
+#rr-panel.decision-family-panel,
+#rr-panel.selection-family-panel,
+#rr-panel.live-hud-family-panel {
+    overflow: hidden;
+}
+#rr-panel.management-family-panel > .panel-head,
+#rr-panel.decision-family-panel > .panel-head,
+#rr-panel.selection-family-panel > .panel-head,
+#rr-panel.live-hud-family-panel > .panel-head {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    top: 5px;
+    width: auto;
+    height: 40px;
+    margin: 0px;
+    padding: 0px 0px 5px 0px;
+    overflow: hidden;
+}
+#rr-panel.management-family-panel > .panel-head .game-mark,
+#rr-panel.decision-family-panel > .panel-head .game-mark,
+#rr-panel.selection-family-panel > .panel-head .game-mark,
+#rr-panel.live-hud-family-panel > .panel-head .game-mark {
+    display: none;
+}
+#rr-panel.management-family-panel > .panel-head .panel-title,
+#rr-panel.decision-family-panel > .panel-head .panel-title,
+#rr-panel.selection-family-panel > .panel-head .panel-title,
+#rr-panel.live-hud-family-panel > .panel-head .panel-title {
+    flex: 0 0 190px;
+    width: 190px;
+}
+#rr-panel.management-family-panel > .panel-head .panel-title h1,
+#rr-panel.decision-family-panel > .panel-head .panel-title h1,
+#rr-panel.selection-family-panel > .panel-head .panel-title h1,
+#rr-panel.live-hud-family-panel > .panel-head .panel-title h1 {
+    font-size: 15px;
+}
+#rr-panel.management-family-panel > .panel-head .panel-head-actions,
+#rr-panel.decision-family-panel > .panel-head .panel-head-actions,
+#rr-panel.selection-family-panel > .panel-head .panel-head-actions,
+#rr-panel.live-hud-family-panel > .panel-head .panel-head-actions {
+    position: absolute;
+    right: 0px;
+    top: 0px;
+    display: flex;
+    width: 284px;
+    height: 34px;
+}
+#rr-panel.management-family-panel > .panel-head .panel-head-actions button,
+#rr-panel.decision-family-panel > .panel-head .panel-head-actions button,
+#rr-panel.selection-family-panel > .panel-head .panel-head-actions button,
+#rr-panel.live-hud-family-panel > .panel-head .panel-head-actions button {
+    flex: 0 0 90px;
+    width: 90px;
+    min-height: 32px;
+    height: 32px;
+    margin-right: 4px;
+}
+#rr-panel.management-family-panel > .status,
+#rr-panel.decision-family-panel > .status {
+    display: none;
+}
+#rr-panel.management-family-panel > .panel-kpis,
+#rr-panel.decision-family-panel > .panel-kpis {
+    position: absolute;
+    left: 212px;
+    right: 312px;
+    top: 5px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: auto;
+    height: 36px;
+    margin: 0px;
+    overflow: hidden;
+}
+#rr-panel.management-family-panel > .panel-kpis .metric,
+#rr-panel.decision-family-panel > .panel-kpis .metric {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 36px;
+    height: 36px;
+    margin-right: 4px;
+    padding: 4px;
+}
+#rr-panel.management-family-panel > .phase-board,
+#rr-panel.decision-family-panel > .phase-board,
+#rr-panel.selection-family-panel > .phase-board {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    top: 49px;
+    bottom: 7px;
+    width: auto;
+    height: auto;
+    margin: 0px;
+    padding: 0px;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+#rr-panel.management-family-panel .phase-titlebar,
+#rr-panel.decision-family-panel .phase-titlebar,
+#rr-panel.management-family-panel .phase-advisory,
+#rr-panel.management-family-panel .focus-metrics,
+#rr-panel.management-family-panel .section-heading,
+#rr-panel.management-family-panel .drone-top-row,
+#rr-panel.selection-family-panel .draft-hero,
+#rr-panel.selection-family-panel .draft-recovery-note,
+#rr-panel.selection-family-panel .draft-board > .phase-titlebar,
+#rr-panel.hangar-family-panel .phase-board-hangar > h2,
+#rr-panel.hangar-family-panel .objective-strip,
+#rr-panel.hangar-family-panel .hangar-detail-actions {
+    display: none;
+}
+#rr-panel.management-family-panel .ops-grid,
+#rr-panel.management-family-panel .nav-grid,
+#rr-panel.decision-family-panel .ops-grid,
+#rr-panel.selection-family-panel .draft-card-grid,
+#rr-panel.drone-family-panel .drone-control-grid,
+#rr-panel.drone-family-panel .drone-loadout-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: auto;
+    min-width: 610px;
+    height: 100%;
+    margin: 0px;
+    overflow: hidden;
+}
+#rr-panel.management-family-panel .management-choice-row,
+#rr-panel.decision-family-panel .decision-choice-row,
+#rr-panel.selection-family-panel .compact-draft-selector,
+#rr-panel.drone-family-panel .drone-control-card,
+#rr-panel.drone-family-panel .drone-loadout-slot {
+    flex: 0 0 198px;
+    width: 198px;
+    min-height: 0px;
+    height: 100%;
+    margin: 0px 6px 0px 0px;
+    padding: 6px 7px;
+    overflow: hidden;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar,
+#rr-panel.research-family-panel .phase-board-research {
+    display: flex;
+    flex-direction: row;
+}
+#rr-panel.hangar-family-panel .hangar-actions,
+#rr-panel.research-family-panel .phase-board-research > .actions {
+    flex: 0 0 230px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 230px;
+    height: 100%;
+    margin: 0px 0px 0px 8px;
+    padding: 0px;
+    overflow-y: auto;
+}
+#rr-panel.hangar-family-panel .hangar-actions button,
+#rr-panel.research-family-panel .phase-board-research > .actions button {
+    flex: 1 1 100px;
+    width: 106px;
+    min-height: 34px;
+    height: auto;
+    margin: 0px 4px 4px 0px;
+    padding: 4px;
+    font-size: 10px;
+}
+#rr-panel.selection-family-panel .draft-board {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+}
+#rr-panel.selection-family-panel .draft-card-grid { flex: 1 1 auto; min-width: 610px; }
+#rr-panel.selection-family-panel .ui-selected-detail {
+    flex: 0 0 210px;
+    width: 210px;
+    min-height: 0px;
+    height: 100%;
+    margin: 0px 8px;
+    padding: 7px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .draft-actions {
+    flex: 0 0 180px;
+    display: flex;
+    flex-direction: column;
+    width: 180px;
+    height: 100%;
+    margin: 0px;
+    padding: 0px;
+}
+#rr-panel.selection-family-panel .draft-actions button {
+    width: 180px;
+    min-height: 34px;
+    height: auto;
+    margin-bottom: 5px;
+}
+)" : "") + R"(
+
+/* Final compact-family reset. These rules intentionally outrank the old
+   704 px phase-board cards so a rail never inherits desktop card heights. */
+#rr-panel.management-family-panel > .panel-head,
+#rr-panel.decision-family-panel > .panel-head,
+#rr-panel.live-hud-family-panel > .panel-head,
+#rr-panel.selection-family-panel > .panel-head {
+    margin-bottom: 8px;
+}
+#rr-panel.management-family-panel > .status.panel-objective,
+#rr-panel.decision-family-panel > .status.panel-objective {
+    display: block;
+    min-height: 0px;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+    color: #f1b72b;
+    font-size: 11px;
+    line-height: 1.2;
+}
+#rr-panel.management-family-panel > .panel-kpis,
+#rr-panel.decision-family-panel > .panel-kpis {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0px 0px 10px 0px;
+}
+#rr-panel.management-family-panel > .panel-kpis .metric,
+#rr-panel.decision-family-panel > .panel-kpis .metric {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 54px;
+    height: 54px;
+    margin: 0px 6px 0px 0px;
+    padding: 6px 4px;
+    overflow: hidden;
+    text-align: center;
+    background-color: #08161e;
+    border-color: #34596a;
+}
+#rr-panel.management-family-panel > .panel-kpis .metric:last-child,
+#rr-panel.decision-family-panel > .panel-kpis .metric:last-child { margin-right: 0px; }
+#rr-panel.management-family-panel > .panel-kpis .metric strong,
+#rr-panel.decision-family-panel > .panel-kpis .metric strong { font-size: 13px; }
+#rr-panel.management-family-panel > .panel-kpis .metric span,
+#rr-panel.decision-family-panel > .panel-kpis .metric span { font-size: 8px; }
+#rr-panel.hangar-family-panel .phase-board-hangar,
+#rr-panel.navigation-family-panel .phase-board-navigation,
+#rr-panel.research-family-panel .phase-board-research,
+#rr-panel.drone-family-panel .phase-board-drone-ops,
+#rr-panel.arrival-family-panel .phase-board-arrival,
+#rr-panel.selection-family-panel .phase-board-draft-room {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 0px;
+    margin: 0px;
+    padding: 0px 0px 8px 0px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar > h2,
+#rr-panel.hangar-family-panel .phase-board-hangar > .objective-strip,
+#rr-panel.arrival-family-panel .phase-board-arrival > h2,
+#rr-panel.navigation-family-panel .phase-board-navigation .navigation-map > h2,
+#rr-panel.research-family-panel .phase-board-research .board-primary > h2 {
+    display: none;
+}
+#rr-panel.hangar-family-panel .hangar-detail-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+}
+#rr-panel.hangar-family-panel .hangar-detail-actions button {
+    flex: 1 1 130px;
+    width: auto;
+    min-width: 0px;
+    min-height: 32px;
+    height: 32px;
+    margin: 0px 5px 5px 0px;
+    padding: 3px;
+    font-size: 9px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-grid,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-grid,
+#rr-panel.research-family-panel .phase-board-research .ops-grid,
+#rr-panel.arrival-family-panel .phase-board-arrival .ops-grid {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card,
+#rr-panel.research-family-panel .phase-board-research .ops-card,
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 68px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 8px 9px;
+    overflow: hidden;
+    background-color: #08161e;
+    border-color: #34596a;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .ops-detail,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card > p,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card .stat-grid,
+#rr-panel.research-family-panel .phase-board-research .ops-card > p,
+#rr-panel.research-family-panel .phase-board-research .ops-card .stat-grid,
+#rr-panel.research-family-panel .phase-board-research .ops-card .module-impact,
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card > p {
+    display: none;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card h3,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card h3,
+#rr-panel.research-family-panel .phase-board-research .ops-card h3,
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card h3 {
+    min-height: 0px;
+    margin: 0px 0px 3px 0px;
+    font-size: 13px;
+    line-height: 1.05;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .card-footer,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card .card-footer,
+#rr-panel.research-family-panel .phase-board-research .ops-card .card-footer,
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-footer {
+    min-height: 32px;
+    height: 32px;
+    margin: 3px 0px 0px 0px;
+    padding: 0px;
+    border-top-width: 0px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .card-footer button,
+#rr-panel.navigation-family-panel .phase-board-navigation .nav-card .card-footer button,
+#rr-panel.research-family-panel .phase-board-research .ops-card .card-footer button,
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-footer button {
+    min-height: 32px;
+    height: 32px;
+    padding: 3px 6px;
+    font-size: 10px;
+}
+#rr-panel.hangar-family-panel .hangar-actions,
+#rr-panel.research-family-panel .phase-board-research > .actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    margin: 4px 0px 0px 0px;
+    padding: 0px;
+}
+#rr-panel.hangar-family-panel .hangar-actions button,
+#rr-panel.research-family-panel .phase-board-research > .actions button {
+    flex: 1 1 132px;
+    width: auto;
+    min-width: 0px;
+    min-height: 48px;
+    height: auto;
+    margin: 0px 5px 5px 0px;
+    padding: 5px;
+    font-size: 10px;
+    line-height: 1.05;
+}
+#rr-panel.navigation-family-panel .phase-titlebar,
+#rr-panel.arrival-family-panel .phase-titlebar {
+    display: none;
+}
+#rr-panel.navigation-family-panel .phase-board-navigation .ark-status {
+    display: none;
+}
+#rr-panel.research-family-panel .phase-titlebar {
+    min-height: 40px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+}
+#rr-panel.research-family-panel .phase-titlebar p { display: none; }
+#rr-panel.research-family-panel .phase-advisory {
+    min-height: 42px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 7px 8px;
+}
+#rr-panel.research-family-panel .phase-advisory span { display: none; }
+#rr-panel.research-family-panel .focus-metrics {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+}
+#rr-panel.research-family-panel .focus-metrics .metric {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: 48px;
+    height: 48px;
+    margin: 0px 5px 0px 0px;
+    padding: 5px 3px;
+}
+#rr-panel.drone-family-panel .phase-titlebar {
+    min-height: 40px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+}
+#rr-panel.drone-family-panel .phase-titlebar p,
+#rr-panel.drone-family-panel .section-heading p,
+#rr-panel.drone-family-panel .drone-control-status,
+#rr-panel.drone-family-panel .drone-control-card .stat-grid,
+#rr-panel.drone-family-panel .drone-loadout-slot p,
+#rr-panel.drone-family-panel .drone-loadout-slot .stat-grid {
+    display: none;
+}
+#rr-panel.drone-family-panel .drone-bay-strip {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 64px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 6px 8px;
+}
+#rr-panel.drone-family-panel .drone-bay-strip .stat-chip { min-height: 22px; height: auto; }
+#rr-panel.drone-family-panel .drone-roster,
+#rr-panel.drone-family-panel .drone-loadout-bench {
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+}
+#rr-panel.drone-family-panel .section-heading {
+    min-height: 22px;
+    height: 22px;
+    margin: 0px 0px 4px 0px;
+}
+#rr-panel.drone-family-panel .drone-control-grid,
+#rr-panel.drone-family-panel .drone-loadout-grid {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+#rr-panel.drone-family-panel .drone-control-card,
+#rr-panel.drone-family-panel .drone-loadout-slot {
+    flex: 0 0 68px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 68px;
+    height: 68px;
+    margin: 0px 0px 8px 0px;
+    padding: 7px 8px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .draft-hero {
+    display: none;
+}
+#rr-panel.selection-family-panel .draft-hero p,
+#rr-panel.selection-family-panel .draft-recovery-note,
+#rr-panel.selection-family-panel .draft-board > .phase-titlebar p {
+    display: none;
+}
+#rr-panel.selection-family-panel .draft-board,
+#rr-panel.selection-family-panel .draft-card-grid {
+    width: 100%;
+    margin: 0px;
+}
+#rr-panel.selection-family-panel .draft-board > .phase-titlebar {
+    min-height: 38px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .compact-draft-selector {
+    position: relative;
+    display: block;
+    flex: 0 0 72px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 72px;
+    height: 72px;
+    margin: 0px 0px 8px 0px;
+    padding: 7px 8px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card {
+    color: #e9f7fb;
+    font-family: source-code-pro;
+    text-align: left;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 5px;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card.selected {
+    color: #ffffff;
+    background-color: #0a2028;
+    border-color: #21d8ef;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-selector {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    display: block;
+    width: 100%;
+    height: 100%;
+    margin: 0px;
+    padding: 0px;
+    color: transparent;
+    background-color: transparent;
+    border-width: 1px;
+    border-color: transparent;
+    border-radius: 5px;
+    z-index: 2;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-selector:hover,
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-selector:focus,
+body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-selector.rr-controller-focus {
+    background-color: rgba(16, 40, 50, 0.30);
+    border-color: #f1b72b;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card .card-title {
+    color: #e9f7fb;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card .pilot-card-top span {
+    color: #21d8ef;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card .refit-offer-cost {
+    color: #55d86d;
+}
+#rr-panel.selection-family-panel .phase-board-draft-room .refit-offer-card .refit-offer-cost.unaffordable {
+    color: #ff5e55;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .pilot-card-top,
+#rr-panel.selection-family-panel .compact-draft-selector .card-title {
+    width: 164px;
+    min-height: 0px;
+    height: auto;
+    margin: 0px 0px 3px 0px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .pilot-card-top strong {
+    display: none;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .pilot-card-top,
+#rr-panel.selection-family-panel .compact-draft-selector .card-title,
+#rr-panel.selection-family-panel .compact-draft-selector .draft-card-footer {
+    min-height: 0px;
+    height: auto;
+    margin-top: 0px;
+    margin-bottom: 3px;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .draft-card-footer {
+    position: absolute;
+    right: 7px;
+    top: 7px;
+    display: block;
+    width: 88px;
+    height: 56px;
+    margin: 0px;
+    padding: 0px;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .refit-offer-cost {
+    display: block;
+    width: 88px;
+    min-height: 14px;
+    margin: 0px 0px 3px 0px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 600;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .chip-strip,
+#rr-panel.selection-family-panel .compact-draft-selector .module-impact {
+    display: none;
+}
+#rr-panel.selection-family-panel .compact-draft-selector .draft-card-footer button {
+    width: 88px;
+    min-height: 30px;
+    height: 30px;
+    padding: 3px;
+    font-size: 9px;
+}
+#rr-panel.selection-family-panel .ui-selected-detail {
+    min-height: 108px;
+    height: auto;
+    margin: 8px 0px;
+    padding: 8px 9px;
+}
+#rr-panel.selection-family-panel .ui-selected-detail .chip-strip,
+#rr-panel.selection-family-panel .ui-selected-detail .module-impact { display: none; }
+#rr-panel.selection-family-panel .draft-actions {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    margin: 0px;
+    padding: 0px;
+}
+#rr-panel.selection-family-panel .draft-actions button {
+    flex: 1 1 132px;
+    width: auto;
+    min-width: 0px;
+    min-height: 48px;
+    height: auto;
+    margin-right: 6px;
+}
+)" + std::string(!bottomDock ? R"(
+
+/* Rail chrome contract: every persistent screen keeps its title above one
+   equal-width, non-wrapping Map / Inventory / Menu row. This final rule
+   intentionally overrides legacy control-panel button widths and margins. */
+#rr-panel.phase-board-panel > .panel-head,
+#rr-panel.control-panel > .panel-head {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+}
+#rr-panel.phase-board-panel > .panel-head .panel-title,
+#rr-panel.control-panel > .panel-head .panel-title {
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0px;
+}
+#rr-panel.phase-board-panel > .panel-head .panel-head-actions,
+#rr-panel.control-panel > .panel-head .panel-head-actions {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    width: 100%;
+    margin: 6px 0px 0px 0px;
+}
+#rr-panel.phase-board-panel > .panel-head .panel-head-actions button,
+#rr-panel.control-panel > .panel-head .panel-head-actions button {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    margin: 0px 6px 0px 0px;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 11px;
+}
+#rr-panel.phase-board-panel > .panel-head .panel-head-actions button:last-child,
+#rr-panel.control-panel > .panel-head .panel-head-actions button:last-child {
+    margin-right: 0px;
+}
+)" : "") + R"(
+
+/* Non-gameplay management, decision, and selection families own the viewport.
+   Preserve the shared phase-board components, but give them one generous
+   full-screen work lane and one vertical scroll container. */
+#rr-panel.workspace-panel {
+    display: block;
+    box-sizing: border-box;
+    left: 0px;
+    top: 0px;
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 16px )" + std::to_string(kWorkspaceHorizontalPadding) + R"(px 28px )" + std::to_string(kWorkspaceHorizontalPadding) + R"(px;
+    background-color: #030c12;
+    border-width: 0px;
+    border-radius: 0px;
+}
+#rr-panel.workspace-panel > .panel-head,
+#rr-panel.workspace-panel > .status,
+#rr-panel.workspace-panel > .panel-kpis,
+#rr-panel.workspace-panel > .phase-board {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: )" + std::to_string(kWorkspaceContentMaxWidth) + R"(px;
+    margin-left: auto;
+    margin-right: auto;
+}
+#rr-panel.workspace-panel > .panel-head {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    min-height: 58px;
+    height: auto;
+    margin-bottom: 12px;
+    padding: 0px 0px 10px 0px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+#rr-panel.workspace-panel > .panel-head .panel-title {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    margin: 0px;
+}
+#rr-panel.workspace-panel > .panel-head .panel-head-actions {
+    flex: 0 0 336px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    width: 336px;
+    margin: 0px;
+}
+#rr-panel.workspace-panel > .panel-head .panel-head-actions button {
+    flex: 0 0 104px;
+    box-sizing: border-box;
+    width: 104px;
+    min-height: 40px;
+    height: auto;
+    margin: 0px 0px 0px 8px;
+    padding: 8px 8px;
+}
+#rr-panel.workspace-panel > .status {
+    margin-top: 0px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    white-space: normal;
+}
+#rr-panel.workspace-panel > .panel-kpis {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+#rr-panel.workspace-panel > .panel-kpis .metric {
+    flex: 1 1 130px;
+    min-width: 130px;
+    height: auto;
+}
+#rr-panel.workspace-panel > .phase-board {
+    display: block;
+    min-height: 0px;
+    height: auto;
+    max-height: none;
+    margin-top: 0px;
+    padding-bottom: 24px;
+    overflow: visible;
+}
+#rr-panel.workspace-panel .phase-lane,
+#rr-panel.workspace-panel .phase-title-row,
+#rr-panel.workspace-panel .phase-footer-lane,
+#rr-panel.workspace-panel .board-primary,
+#rr-panel.workspace-panel .draft-hero,
+#rr-panel.workspace-panel .draft-board,
+#rr-panel.workspace-panel .resource-bank,
+#rr-panel.workspace-panel .surface-command {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: none;
+    margin-left: 0px;
+    margin-right: 0px;
+}
+#rr-panel.workspace-panel .ops-grid,
+#rr-panel.workspace-panel .nav-grid,
+#rr-panel.workspace-panel .upgrade-grid,
+#rr-panel.workspace-panel .draft-card-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 10px;
+    width: 100%;
+    max-width: none;
+}
+#rr-panel.workspace-panel .ops-card,
+#rr-panel.workspace-panel .nav-card,
+#rr-panel.workspace-panel .pilot-card,
+#rr-panel.workspace-panel .upgrade-card,
+#rr-panel.workspace-panel .upgrade-draft-card,
+#rr-panel.workspace-panel .management-choice-row,
+#rr-panel.workspace-panel .decision-choice-row {
+    flex: 1 1 280px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 260px;
+    max-width: none;
+    min-height: 0px;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+}
+#rr-panel.workspace-panel .card-title,
+#rr-panel.workspace-panel .card-copy,
+#rr-panel.workspace-panel .module-impact,
+#rr-panel.workspace-panel .metric,
+#rr-panel.workspace-panel .stat-chip {
+    max-width: 100%;
+    overflow: visible;
+    white-space: normal;
+}
+#rr-panel.workspace-panel button {
+    box-sizing: border-box;
+    min-height: 40px;
+    height: auto;
+    white-space: normal;
+}
+#rr-panel.workspace-panel .primary-actions,
+#rr-panel.workspace-panel .final-actions,
+#rr-panel.workspace-panel .draft-actions {
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 12px;
+    padding-top: 8px;
+}
+
+/* Drone Ops is a paused management workspace, not persistent gameplay chrome.
+   It owns the viewport and keeps its completion action visible while the
+   roster and active loadout scroll independently. */
+#rr-panel.drone-workspace-panel {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    left: 0px;
+    top: 0px;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    padding: )" + std::to_string(droneWorkspaceVerticalPadding) + R"(px )" + std::to_string(kDroneWorkspaceHorizontalPadding) + R"(px;
+    background-color: #030c12;
+    border-width: 0px;
+    border-radius: 0px;
+}
+#rr-panel.drone-workspace-panel button {
+    box-sizing: border-box;
+}
+#rr-panel.drone-workspace-panel > .panel-head {
+    flex: 0 0 )" + std::to_string(droneHeaderHeight) + R"(px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    height: )" + std::to_string(droneHeaderHeight) + R"(px;
+    margin: 0px 0px )" + std::to_string(droneHeaderGap) + R"(px 0px;
+    padding: 0px 0px )" + std::to_string(droneHeaderBottomPadding) + R"(px 0px;
+    overflow: hidden;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+#rr-panel.drone-workspace-panel > .panel-head .panel-title {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    margin: 0px;
+}
+#rr-panel.drone-workspace-panel > .panel-head .panel-title h1 {
+    margin: 1px 0px 0px 0px;
+    font-size: 22px;
+}
+#rr-panel.drone-workspace-panel > .panel-head .panel-head-actions {
+    flex: 0 0 )" + std::to_string(droneHeaderActionsWidth) + R"(px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    width: )" + std::to_string(droneHeaderActionsWidth) + R"(px;
+    margin: 0px;
+}
+#rr-panel.drone-workspace-panel > .panel-head .panel-head-actions button {
+    flex: 0 0 )" + std::to_string(droneHeaderButtonWidth) + R"(px;
+    width: )" + std::to_string(droneHeaderButtonWidth) + R"(px;
+    min-height: )" + std::to_string(droneHeaderButtonHeight) + R"(px;
+    height: )" + std::to_string(droneHeaderButtonHeight) + R"(px;
+    margin: 0px 0px 0px 8px;
+}
+#rr-panel.drone-workspace-panel .phase-board-drone-ops {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    min-height: 0px;
+    height: auto;
+    margin: 0px;
+    padding: 0px;
+    overflow: hidden;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-toolbar {
+    flex: 0 0 )" + std::to_string(droneToolbarHeight) + R"(px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    box-sizing: border-box;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    height: )" + std::to_string(droneToolbarHeight) + R"(px;
+    margin: 0px 0px )" + std::to_string(droneToolbarGap) + R"(px 0px;
+    padding: )" + std::to_string(droneToolbarVerticalPadding) + R"(px 12px;
+    overflow: hidden;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 7px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading {
+    flex: 1 1 auto;
+    min-width: 0px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading .ui-kicker,
+#rr-panel.drone-workspace-panel .section-heading .ui-kicker,
+#rr-panel.drone-workspace-panel .drone-bay-copy .ui-kicker {
+    color: #21d8ef;
+    font-size: 9px;
+    letter-spacing: 1px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading h2 {
+    margin: 2px 0px 1px 0px;
+    font-size: 20px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading p {
+    margin: 0px;
+    color: #9ab0bc;
+    font-size: 11px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-actions {
+    flex: 0 0 )" + std::to_string(droneWorkspaceActionsWidth) + R"(px;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    width: )" + std::to_string(droneWorkspaceActionsWidth) + R"(px;
+    margin: 0px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-actions button {
+    min-height: )" + std::to_string(droneToolbarButtonHeight) + R"(px;
+    height: )" + std::to_string(droneToolbarButtonHeight) + R"(px;
+    margin: 0px 0px 0px 8px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-actions .ghost {
+    width: )" + std::to_string(droneSecondaryActionWidth) + R"(px;
+}
+#rr-panel.drone-workspace-panel .drone-done-action {
+    width: )" + std::to_string(droneDoneActionWidth) + R"(px;
+    color: #dffcff;
+    background-color: #10323b;
+    border-color: #21d8ef;
+    font-size: 12px;
+    font-weight: bold;
+}
+#rr-panel.drone-workspace-panel .drone-top-row {
+    flex: 0 0 )" + std::to_string(droneTopRowHeight) + R"(px;
+    display: block;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    max-width: none;
+    height: )" + std::to_string(droneTopRowHeight) + R"(px;
+    margin: 0px 0px )" + std::to_string(droneTopRowGap) + R"(px 0px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-strip {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: 100%;
+    max-width: none;
+    min-height: )" + std::to_string(droneTopRowHeight) + R"(px;
+    height: )" + std::to_string(droneTopRowHeight) + R"(px;
+    margin: 0px;
+    padding: )" + std::to_string(droneBayVerticalPadding) + R"(px 12px;
+    background-color: #08161e;
+    border-color: #34596a;
+}
+#rr-panel.drone-workspace-panel .drone-bay-copy {
+    flex: 0 0 220px;
+    width: 220px;
+    margin-right: 12px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-copy h2 {
+    margin: 2px 0px 1px 0px;
+    font-size: 17px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-copy p {
+    display: block;
+    margin: 0px;
+    color: #9ab0bc;
+    font-size: 10px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-strip .drone-bay-stats {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    min-width: 0px;
+    margin: 0px 12px 0px 0px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-strip .stat-chip {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 70px;
+    min-height: )" + std::to_string(droneBayChipHeight) + R"(px;
+    height: )" + std::to_string(droneBayChipHeight) + R"(px;
+    margin: 0px 6px 0px 0px;
+    padding: 7px 6px;
+    font-size: 10px;
+    text-align: center;
+}
+#rr-panel.drone-workspace-panel .drone-bay-strip > button {
+    flex: 0 0 126px;
+    width: 126px;
+    min-height: )" + std::to_string(droneBayButtonHeight) + R"(px;
+    height: )" + std::to_string(droneBayButtonHeight) + R"(px;
+    margin: 0px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-main {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    min-height: 0px;
+    height: auto;
+    overflow: hidden;
+}
+#rr-panel.drone-workspace-panel .drone-roster,
+#rr-panel.drone-workspace-panel .drone-loadout-bench {
+    box-sizing: border-box;
+    min-height: 0px;
+    height: 100%;
+    margin: 0px;
+    padding: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    background-color: #06121a;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 7px;
+}
+#rr-panel.drone-workspace-panel .drone-roster {
+    flex: 0 0 )" + std::to_string(droneRosterWidth) + R"(px;
+    width: )" + std::to_string(droneRosterWidth) + R"(px;
+    margin-right: )" + std::to_string(kDroneWorkspaceMainGap) + R"(px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-bench {
+    flex: 0 0 )" + std::to_string(droneLoadoutBenchWidth) + R"(px;
+    width: )" + std::to_string(droneLoadoutBenchWidth) + R"(px;
+}
+#rr-panel.drone-workspace-panel .section-heading {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    width: 100%;
+    min-height: )" + std::to_string(droneSectionHeadingHeight) + R"(px;
+    height: auto;
+    margin: 0px 0px )" + std::to_string(droneSectionHeadingGap) + R"(px 0px;
+}
+#rr-panel.drone-workspace-panel .section-heading h2 {
+    margin: 2px 0px 0px 0px;
+    font-size: 17px;
+}
+#rr-panel.drone-workspace-panel .section-heading p {
+    display: block;
+    max-width: 220px;
+    margin: 0px 0px 2px 10px;
+    color: #9ab0bc;
+    font-size: 10px;
+    text-align: right;
+}
+#rr-panel.drone-workspace-panel .drone-control-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    width: )" + std::to_string(droneRosterContentWidth) + R"(px;
+    min-width: 0px;
+    height: auto;
+    margin: 0px;
+    overflow: visible;
+}
+#rr-panel.drone-workspace-panel .drone-control-card {
+    flex: 0 0 )" + std::to_string(droneControlCardWidth) + R"(px;
+    box-sizing: border-box;
+    width: )" + std::to_string(droneControlCardWidth) + R"(px;
+    min-width: )" + std::to_string(droneControlCardWidth) + R"(px;
+    max-width: )" + std::to_string(droneControlCardWidth) + R"(px;
+    min-height: )" + std::to_string(droneControlCardHeight) + R"(px;
+    height: )" + std::to_string(droneControlCardHeight) + R"(px;
+    max-height: )" + std::to_string(droneControlCardHeight) + R"(px;
+    margin: 0px 0px )" + std::to_string(droneControlCardVerticalGap) + R"(px 0px;
+    padding: )" + std::to_string(droneControlCardPadding) + R"(px;
+    overflow: hidden;
+    background-color: #0a1b24;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 7px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card.rarity-uncommon {
+    border-color: #31865f;
+}
+#rr-panel.drone-workspace-panel .drone-control-card.rarity-rare {
+    border-color: #8b6a16;
+}
+#rr-panel.drone-workspace-panel .drone-card-head,
+#rr-panel.drone-workspace-panel .slot-card-head,
+#rr-panel.drone-workspace-panel .slot-card-body,
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-grid,
+#rr-panel.drone-workspace-panel .drone-card-id .card-topline,
+#rr-panel.drone-workspace-panel .drone-card-id .card-title {
+    width: 100%;
+    max-width: none;
+}
+#rr-panel.drone-workspace-panel .drone-card-id {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    max-width: none;
+}
+#rr-panel.drone-workspace-panel .drone-control-status {
+    display: block;
+    width: 100%;
+    max-width: none;
+    min-height: 16px;
+    height: auto;
+    max-height: none;
+    margin: 6px 0px 4px 0px;
+    color: #21d8ef;
+    font-size: 11px;
+}
+#rr-panel.drone-workspace-panel .drone-card-summary {
+    flex: 0 0 36px;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 36px;
+    max-height: 36px;
+    margin: 4px 0px;
+    color: #c5d3da;
+    font-size: 10px;
+    line-height: 1.2;
+    overflow: hidden;
+}
+#rr-panel.drone-workspace-panel .drone-card-description,
+#rr-panel.drone-workspace-panel .drone-build-hook,
+#rr-panel.drone-workspace-panel .drone-upgrade-summary {
+    display: block;
+    min-height: 0px;
+    height: auto;
+    margin: 4px 0px;
+    overflow: visible;
+    font-size: 10px;
+    line-height: 1.2;
+}
+#rr-panel.drone-workspace-panel .drone-card-description {
+    color: #c5d3da;
+}
+#rr-panel.drone-workspace-panel .drone-build-hook {
+    padding: 5px 6px;
+    color: #bfeef7;
+    background-color: #0a2028;
+    border-width: 1px;
+    border-color: #234856;
+    border-radius: 4px;
+}
+#rr-panel.drone-workspace-panel .drone-upgrade-summary {
+    color: #f1b72b;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .stat-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    min-height: 34px;
+    height: auto;
+    max-height: none;
+    margin: 5px 0px 7px 0px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .stat-chip {
+    flex: 1 1 84px;
+    width: auto;
+    min-width: 84px;
+    min-height: 28px;
+    height: auto;
+    margin: 0px 4px 4px 0px;
+    padding: 4px 5px;
+    font-size: 9px;
+    white-space: normal;
+    overflow: visible;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .card-footer {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    min-height: 42px;
+    height: auto;
+    margin: auto 0px 0px 0px;
+    padding: 7px 0px 0px 0px;
+    border-top-width: 1px;
+    border-color: #234856;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .card-footer button {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(droneCardFooterButtonHeight) + R"(px;
+    height: )" + std::to_string(droneCardFooterButtonHeight) + R"(px;
+    margin: 0px 6px 0px 0px;
+    padding: 4px 6px;
+    font-size: 10px;
+}
+#rr-modal .drone-details-modal {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 0px;
+    padding: 0px;
+}
+#rr-modal .drone-details-summary {
+    margin: 0px 0px 10px 0px;
+    padding: 0px 0px 10px 0px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+#rr-modal .drone-details-summary h3 {
+    margin: 3px 0px;
+    color: #dffcff;
+    font-size: 18px;
+}
+#rr-modal .drone-details-status {
+    margin: 0px;
+    color: #21d8ef;
+    font-size: 12px;
+}
+#rr-modal .drone-detail-section {
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+    padding: 9px 10px;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 5px;
+}
+#rr-modal .drone-detail-section h3 {
+    margin: 0px 0px 5px 0px;
+    color: #8eeafa;
+    font-size: 11px;
+}
+#rr-modal .drone-detail-section p {
+    margin: 0px;
+    color: #c5d3da;
+    font-size: 12px;
+    line-height: 1.3;
+}
+#rr-modal .drone-detail-section .drone-details-upgrade {
+    color: #f1b72b;
+}
+#rr-modal .drone-detail-section .stat-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    margin: 0px;
+}
+#rr-modal .drone-detail-section .stat-chip {
+    flex: 1 1 210px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: 36px;
+    margin: 0px 6px 6px 0px;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+#rr-modal .drone-details-actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    width: 100%;
+    margin: 2px 0px 0px 0px;
+}
+#rr-modal .drone-details-actions button {
+    flex: 0 0 144px;
+    box-sizing: border-box;
+    width: 144px;
+    min-height: 36px;
+    height: 36px;
+    margin: 0px 0px 0px 8px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-grid {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    width: 100%;
+    height: auto;
+    margin: 0px;
+    overflow: visible;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: )" + std::to_string(droneLoadoutSlotMinHeight) + R"(px;
+    height: )" + droneLoadoutSlotHeight + R"(;
+    max-height: )" + droneLoadoutSlotMaxHeight + R"(;
+    margin: 0px 0px )" + std::to_string(droneLoadoutSlotGap) + R"(px 0px;
+    padding: )" + std::to_string(droneLoadoutSlotVerticalPadding) + R"(px 10px;
+    overflow: hidden;
+    background-color: #0a1b24;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 7px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot p,
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-grid {
+    display: block;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-head button {
+    min-width: 96px;
+    min-height: )" + std::to_string(droneLoadoutButtonHeight) + R"(px;
+    height: )" + std::to_string(droneLoadoutButtonHeight) + R"(px;
+    font-size: 10px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-grid {
+    margin: )" + std::to_string(droneLoadoutStatMarginTop) + R"(px 0px 0px 0px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-chip {
+    display: inline-block;
+    min-width: 82px;
+    min-height: )" + std::to_string(droneLoadoutChipMinHeight) + R"(px;
+    height: auto;
+    margin: 0px 4px 4px 0px;
+    padding: )" + std::to_string(droneLoadoutChipVerticalPadding) + R"(px 5px;
+    font-size: 9px;
+}
+#rr-modal .drone-synergy-modal {
+    width: 100%;
+}
+#rr-modal .drone-synergy-summary {
+    margin: 0px 0px 10px 0px;
+    padding: 0px 0px 10px 0px;
+    border-bottom-width: 1px;
+    border-color: #34596a;
+}
+#rr-modal .drone-synergy-summary h3 {
+    margin: 3px 0px;
+    color: #dffcff;
+    font-size: 16px;
+}
+#rr-modal .drone-synergy-summary p,
+#rr-modal .drone-synergy-row p {
+    margin: 3px 0px;
+    color: #b8cbd3;
+    font-size: 11px;
+    line-height: 1.3;
+}
+#rr-modal .drone-synergy-summary .stat-grid {
+    margin: 8px 0px 0px 0px;
+}
+#rr-modal .drone-synergy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+#rr-modal .drone-synergy-row {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 5px;
+    background-color: #08161e;
+}
+#rr-modal .drone-synergy-row.active {
+    border-color: #21d8ef;
+}
+#rr-modal .drone-synergy-row.signature {
+    border-color: #8b6a16;
+}
+#rr-modal .drone-synergy-row.active.signature {
+    border-color: #21d8ef;
+}
+#rr-modal .drone-synergy-row .recipe-topline {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 8px;
+    color: #dffcff;
+    font-size: 12px;
+}
+#rr-modal .drone-synergy-row .recipe-topline span {
+    color: #21d8ef;
+    font-size: 10px;
+}
+#rr-modal .drone-synergy-row .drone-synergy-requirements {
+    color: #f1b72b;
+}
+#rr-modal .refit-comparison-divider {
+    width: 100%;
+    min-height: 1px;
+    height: 1px;
+    margin: 12px 0px;
+    background-color: #34596a;
+}
+/* Permanent refits are a full-screen reward, not a compact selector rail.
+   This final rule overrides the shared small-screen rail treatment without
+   changing the Field Upgrade card contract. */
+#rr-panel.selection-family-panel .phase-board-refit .draft-board {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    margin: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .draft-board > .phase-titlebar {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .draft-card-grid {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0px;
+    height: )" + std::to_string(refitChoiceCardHeight) + R"(px;
+    margin: 0px;
+    overflow: visible;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card {
+    position: relative;
+    display: flex;
+    flex: 1 1 0px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(refitChoiceCardHeight) + R"(px;
+    height: )" + std::to_string(refitChoiceCardHeight) + R"(px;
+    margin: 0px 10px 0px 0px;
+    padding: 12px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card:last-child {
+    margin-right: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .pilot-card-top,
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .card-title {
+    width: 100%;
+    min-height: 0px;
+    height: auto;
+    margin: 0px 0px 6px 0px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .pilot-card-top strong {
+    display: block;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .card-title {
+    color: #edf4f8;
+    font-size: 18px;
+    line-height: 1.15;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .refit-offer-detail {
+    display: block;
+    width: 100%;
+    min-height: 34px;
+    max-height: 34px;
+    margin: 0px 0px 6px 0px;
+    color: #9fb7c5;
+    font-size: 12px;
+    line-height: 1.2;
+    overflow: hidden;
+}
+
+/* Field Upgrade uses the same direct, balanced decision-card treatment as
+   Surface Ops. The shared compact selector rail remains available to other
+   narrow selection views, but must not collapse these three primary choices. */
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .draft-board {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    margin: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .draft-board > .phase-titlebar {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0px 0px 8px 0px;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .draft-card-grid {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0px;
+    height: )" + std::to_string(surfaceUpgradeChoiceCardHeight) + R"(px;
+    margin: 0px;
+    overflow: visible;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card {
+    position: relative;
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(surfaceUpgradeChoiceCardHeight) + R"(px;
+    height: )" + std::to_string(surfaceUpgradeChoiceCardHeight) + R"(px;
+    margin: 0px 10px 0px 0px;
+    padding: 12px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card:last-child {
+    margin-right: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .pilot-card-top,
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .card-title {
+    width: 100%;
+    min-height: 0px;
+    height: auto;
+    margin: 0px 0px 6px 0px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .pilot-card-top strong {
+    display: block;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .card-title {
+    color: #edf4f8;
+    font-size: 18px;
+    line-height: 1.15;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .surface-upgrade-detail {
+    display: block;
+    width: 100%;
+    min-height: 30px;
+    max-height: 30px;
+    margin: 0px 0px 6px 0px;
+    color: #9fb7c5;
+    font-size: 12px;
+    line-height: 1.2;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .chip-strip {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 22px;
+    margin: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .draft-card-footer {
+    position: static;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    height: auto;
+    margin: auto 0px 0px 0px;
+    padding: 7px 0px 0px 0px;
+    border-top-width: 1px;
+    border-top-color: #34596a;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .draft-card-footer span {
+    display: block;
+    width: 100%;
+    min-height: 13px;
+    margin: 0px 0px 4px 0px;
+    color: #55d86d;
+    font-size: 11px;
+    line-height: 1.1;
+    text-align: left;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .draft-card-footer button {
+    width: 100%;
+    min-height: 34px;
+    height: 34px;
+    margin: 0px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+#rr-panel.selection-family-panel .phase-board-surface-upgrade .draft-actions {
+    margin: 10px 0px 0px 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .module-impact {
+    display: block;
+    min-height: 18px;
+    margin: 0px 0px 6px 0px;
+    color: #e9f7fb;
+    font-size: 13px;
+    line-height: 1.2;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .chip-strip {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 48px;
+    margin: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .stat-chip {
+    flex: 0 0 42%;
+    box-sizing: border-box;
+    width: 42%;
+    min-width: 0px;
+    min-height: 24px;
+    margin: 0px 5px 5px 0px;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer {
+    position: static;
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    height: auto;
+    min-height: 42px;
+    margin: auto 0px 0px 0px;
+    padding: 8px 0px 0px 0px;
+    border-top-width: 1px;
+    border-top-color: #34596a;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .refit-offer-cost,
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer button {
+    width: auto;
+    min-width: 0px;
+    height: 36px;
+    min-height: 36px;
+    margin: 0px;
+    font-size: 11px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .refit-offer-cost {
+    flex: 1 1 auto;
+    padding: 9px 0px 0px 0px;
+    font-size: 12px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer button {
+    flex: 0 0 132px;
+    padding: 4px 8px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .draft-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    width: 100%;
+    margin: 12px 0px 0px 0px;
+    padding: 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .draft-actions button {
+    min-height: 42px;
+    height: 42px;
+}
+/* Approach uses the same compact, three-choice workspace rhythm as the
+   updated refit board. The old vertical decision rail wasted the available
+   width after the operation cards were simplified. */
+#rr-panel.arrival-family-panel .phase-board-arrival .ops-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    margin: 10px 0px 0px 0px;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card {
+    display: flex;
+    flex: 1 1 0px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(arrivalChoiceCardHeight) + R"(px;
+    height: )" + std::to_string(arrivalChoiceCardHeight) + R"(px;
+    margin: 0px 10px 0px 0px;
+    padding: 12px;
+    overflow: hidden;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card:last-child {
+    margin-right: 0px;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-topline {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 18px;
+    margin: 0px 0px 8px 0px;
+    overflow: hidden;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-topline span {
+    width: auto;
+    min-height: 0px;
+    line-height: 1.15;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card h3 {
+    width: 100%;
+    min-height: 22px;
+    margin: 0px 0px 6px 0px;
+    color: #edf4f8;
+    font-size: 19px;
+    line-height: 1.15;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .arrival-operation-detail {
+    display: block;
+    width: 100%;
+    min-height: 48px;
+    max-height: 48px;
+    margin: 0px;
+    color: #9fb7c5;
+    font-size: 12px;
+    line-height: 1.3;
+    overflow: hidden;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-footer {
+    display: flex;
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 42px;
+    height: 42px;
+    margin: auto 0px 0px 0px;
+    padding: 8px 0px 0px 0px;
+    border-top-width: 1px;
+    border-top-color: #34596a;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-footer span {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    min-height: 36px;
+    padding-top: 10px;
+    font-size: 12px;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival .arrival-card .card-footer button {
+    flex: 0 0 132px;
+    width: 132px;
+    min-height: 36px;
+    height: 36px;
+    margin: 0px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+/* Hangar operations are a three-card decision lane. Keep the operational
+   detail and its action together rather than stretching each choice across
+   the whole workspace. */
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    margin: 10px 0px 0px 0px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card {
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(hangarOperationCardHeight) + R"(px;
+    height: )" + std::to_string(hangarOperationCardHeight) + R"(px;
+    margin: 0px 10px 0px 0px;
+    padding: 12px;
+    overflow: hidden;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card:last-child {
+    margin-right: 0px;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card h3 {
+    width: 100%;
+    min-height: 22px;
+    height: auto;
+    margin: 0px 0px 6px 0px;
+    color: #edf4f8;
+    font-size: 19px;
+    line-height: 1.15;
+    overflow: hidden;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .ops-detail {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    max-height: 36px;
+    margin: 0px;
+    color: #9fb7c5;
+    font-size: 12px;
+    line-height: 1.2;
+    overflow: hidden;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .card-footer {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    width: 100%;
+    min-height: 42px;
+    height: 42px;
+    margin: auto 0px 0px 0px;
+    padding: 8px 0px 0px 0px;
+    border-top-width: 1px;
+    border-top-color: #34596a;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .card-footer .ops-cost {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    min-height: 34px;
+    padding-top: 9px;
+    color: #d7c276;
+    font-size: 12px;
+    line-height: 1.1;
+    overflow: hidden;
+}
+#rr-panel.hangar-family-panel .phase-board-hangar .ops-card .card-footer button {
+    flex: 0 0 122px;
+    width: 122px;
+    min-height: 36px;
+    height: 36px;
+    margin: 0px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+#rr-panel.hangar-family-panel .hangar-actions {
+    margin: 10px 0px 0px 0px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-actions {
+    width: 100%;
+    margin: 10px 0px 0px 0px;
+    padding: 0px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0px;
+    height: )" + std::to_string(surfaceOpsChoiceCardHeight) + R"(px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row.surface-primary-action {
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+    align-items: stretch;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: )" + std::to_string(surfaceOpsChoiceCardHeight) + R"(px;
+    height: )" + std::to_string(surfaceOpsChoiceCardHeight) + R"(px;
+    margin: 0px 10px 0px 0px;
+    padding: 12px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row:last-child {
+    margin-right: 0px;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-summary,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-summary h3 {
+    flex: 0 0 auto;
+    width: 100%;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-summary h3 {
+    margin: 0px 0px 8px 0px;
+    color: #edf4f8;
+    font-size: 17px;
+    line-height: 1.15;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-cues {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-cues span,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row.surface-primary-action .surface-choice-cues span {
+    width: 100%;
+    min-height: 17px;
+    font-size: 11px;
+    line-height: 1.2;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row button,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row.surface-primary-action button {
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 38px;
+    height: 38px;
+    margin: auto 0px 0px 0px;
+    padding: 4px 8px;
+    font-size: 11px;
 }
 )";
 }
@@ -6151,6 +9485,7 @@ std::string inputPromptBar(
     const bool mining = panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos;
     const bool flyby = panelHtml.find("data-flyby-completed=\"0\"") != std::string_view::npos;
     const bool orbit = panelHtml.find("data-orbit-completed=\"0\"") != std::string_view::npos;
+    const bool persistentPanel = panelUsesResponsiveViewport(panelModeForHtml(panelHtml));
     if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit))) {
         return {};
     }
@@ -6158,6 +9493,8 @@ std::string inputPromptBar(
     std::string prompt = "<div id=\"rr-controller-prompt-bar\"";
     if (mining && !modalOpen) {
         prompt += " class=\"mining-input-helper\"";
+    } else if (persistentPanel && !modalOpen) {
+        prompt += " class=\"panel-input-helper\"";
     }
     prompt += ">";
     const auto item = [&](const char* button, const char* action) {
@@ -6175,20 +9512,17 @@ std::string inputPromptBar(
 
     if (!controllerActive) {
         if (mining) {
-            prompt += describedItem("Move / Face", "WASD / Arrows")
-                + describedItem("Drill", "Space", "Extracts terrain")
-                + describedItem("Pulse Scanner", "E", "Reveals nearby resources");
+            prompt += describedItem("Move", "WASD / Arrows")
+                + describedItem("Drill", "Space / Mouse")
+                + describedItem("Scan", "E");
             if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
-                prompt += describedItem("Tether Artifact", "T", "Requires an exposed nearby target");
-            }
-            if (panelHtml.find("data-mining-drones=\"1\"") != std::string_view::npos) {
-                prompt += describedItem("Assigned Drones", "Automatic", "Execute their roles automatically");
+                prompt += describedItem("Tether", "T");
             }
             if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
-                prompt += describedItem("Bank Cargo", "R", "Secures the payload");
+                prompt += describedItem("Bank / Leave", "R");
             }
             if (panelHtml.find("data-rr-action=\"mining_abort\"") != std::string_view::npos) {
-                prompt += describedItem("Emergency Recall", "Esc", "Ends the run");
+                prompt += describedItem("Recall", "Esc");
             }
         } else if (flyby) {
             prompt += describedItem("Accelerate / Slow", "W/S or Up/Down")
@@ -6215,26 +9549,21 @@ std::string inputPromptBar(
                panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
     } else if (mining) {
-        prompt += describedItem("Move / Face", "L-stick")
-            + describedItem("Drill", labels.rightTrigger, "Extracts terrain")
-            + describedItem("Pulse Scanner", labels.west, "Reveals nearby resources");
+        prompt += describedItem("Move", "L-stick")
+            + describedItem("Drill", labels.rightTrigger)
+            + describedItem("Scan", labels.west);
         if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
-            prompt += describedItem("Tether Artifact", labels.north, "Requires an exposed nearby target");
+            prompt += describedItem("Tether", labels.north);
         }
-        if (panelHtml.find("data-mining-drones=\"1\"") != std::string_view::npos) {
-            prompt += describedItem("Assigned Drones", "Automatic", "Execute their roles automatically");
-        }
-        if (panelHtml.find("data-drill-visible=\"1\"") != std::string_view::npos) {
-            prompt += describedItem("Repair Drill", labels.leftBumper);
-        }
-        if (panelHtml.find("data-drone-visible=\"1\"") != std::string_view::npos) {
-            prompt += describedItem("Repair Rig", labels.rightBumper);
+        if (panelHtml.find("data-drill-visible=\"1\"") != std::string_view::npos
+            || panelHtml.find("data-drone-visible=\"1\"") != std::string_view::npos) {
+            prompt += describedItem("Service", std::string(labels.leftBumper) + " / " + labels.rightBumper);
         }
         if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
-            prompt += describedItem("Bank Cargo", labels.south, "Secures the payload");
+            prompt += describedItem("Bank / Leave", labels.south);
         }
         if (panelHtml.find("data-rr-action=\"mining_abort\"") != std::string_view::npos) {
-            prompt += describedItem("Emergency Recall", labels.east, "Hold to end the run");
+            prompt += describedItem("Recall", labels.east);
         }
         prompt += item(labels.menu, "Pause");
     } else if (flyby) {
@@ -6369,42 +9698,71 @@ std::string buildDocumentRml(
     const RmlPanelMode panelMode = panelModeForHtml(panelHtml);
     const bool titleScreen = panelUsesTitle(panelMode);
     const bool storyBriefing = panelUsesStoryBriefing(panelMode);
+    const bool results = panelUsesResults(panelMode);
+    const bool droneWorkspace = panelUsesDroneWorkspace(panelMode);
+    const bool workspace = panelUsesWorkspace(panelMode);
     const bool phaseBoard = panelUsesPhaseBoard(panelMode);
     const bool miningFullscreen = panelUsesMiningFullscreen(panelMode);
     const bool arrivalFanfare = panelUsesMissionStamp(panelMode);
     const bool surfaceOps = panelUsesSurfaceOps(panelHtml);
+    const bool surfaceScan = panelUsesSurfaceScan(panelHtml);
     const bool droneOps = panelUsesDroneOps(panelHtml);
     const bool navigation = panelUsesNavigation(panelHtml);
     const bool draftRoom = panelUsesDraftRoom(panelHtml);
+    const std::string_view visualFamilyClass = panelVisualFamilyClass(panelHtml);
+    const std::string_view screenClass = panelScreenClass(panelHtml);
+    const bool panelInputHelperVisible = panelUsesResponsiveViewport(panelMode)
+        && activeModalId.empty()
+        && (controllerPresentationActive || usesGameplayInputHelper(panelHtml));
     std::string body = withOpeningControllerLabels(
         syncSettingsControls(sanitizeRml(removeTemplates(panelHtml))),
         controllerFamily);
 
     std::string document = "<rml><head><style>" + panelRcss(panelMode) + "</style></head><body";
-    if (controllerFocusVisible || controllerPresentationActive) {
+    if (controllerFocusVisible || controllerPresentationActive || panelInputHelperVisible) {
         document += " class=\"";
+        bool wroteBodyClass = false;
         if (controllerFocusVisible) {
             document += "controller-focus-visible";
+            wroteBodyClass = true;
         }
-        if (controllerFocusVisible && controllerPresentationActive) {
+        if (wroteBodyClass && controllerPresentationActive) {
             document += " ";
         }
         if (controllerPresentationActive) {
             document += "controller-connected";
+            wroteBodyClass = true;
+        }
+        if (wroteBodyClass && panelInputHelperVisible) {
+            document += " ";
+        }
+        if (panelInputHelperVisible) {
+            document += "panel-input-helper-visible";
         }
         document += "\"";
     }
     document += ">";
-    document += "<div id=\"rr-panel\" class=\"" +
-        std::string(titleScreen
-                ? "title-screen-panel-mode"
-                : (storyBriefing
-                ? "story-briefing-panel-mode"
-                : (miningFullscreen
-                ? "mining-fullscreen-panel"
-                : (arrivalFanfare ? "arrival-fanfare-panel-mode" : (phaseBoard ? "phase-board-panel" : "control-panel")))));
+    const std::string_view panelClass = titleScreen
+        ? "title-screen-panel-mode"
+        : (storyBriefing
+            ? "story-briefing-panel-mode"
+            : (results
+                ? "results-panel-mode"
+                : (droneWorkspace
+                    ? "drone-workspace-panel"
+                    : (workspace
+                        ? "workspace-panel phase-board-panel"
+                        : (miningFullscreen
+                            ? "mining-fullscreen-panel"
+                            : (arrivalFanfare
+                                ? "arrival-fanfare-panel-mode"
+                                : (phaseBoard ? "phase-board-panel" : "control-panel")))))));
+    document += "<div id=\"rr-panel\" class=\"" + std::string(panelClass);
     if (surfaceOps) {
         document += " surface-ops-panel";
+    }
+    if (surfaceScan) {
+        document += " surface-scan-panel";
     }
     if (droneOps) {
         document += " drone-ops-panel";
@@ -6415,16 +9773,29 @@ std::string buildDocumentRml(
     if (draftRoom) {
         document += " draft-room-panel";
     }
+    if (!visualFamilyClass.empty()) {
+        document += " " + std::string(visualFamilyClass);
+    }
+    if (!screenClass.empty()) {
+        document += " " + std::string(screenClass);
+    }
     document += "\">";
     document += body;
     document += "</div>";
-    document += nativeSceneOverlayMarkup(panelHtml);
 
     const ModalTemplate* activeModal = findModal(modals, activeModalId);
+    // Scene-attached controls and telemetry are persistent HUD chrome, not
+    // modal content. Do not leave their positioned layers in the document
+    // while a modal owns the viewport: their explicit z-index can otherwise
+    // render them above the scrim in RmlUi.
+    if (activeModal == nullptr) {
+        document += nativeSceneOverlayMarkup(panelHtml);
+    }
     if (activeModal) {
         const ModalTemplate* modal = activeModal;
         document += "<div id=\"rr-modal-scrim\"></div>";
-        document += "<div id=\"rr-modal\" class=\"modal-" + activeModalId + "\"><div class=\"modal-head\"><h2>";
+        document += "<div id=\"rr-modal\" class=\"modal-" + activeModalId +
+            "\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"rr-modal-title\"><div class=\"modal-head\"><h2 id=\"rr-modal-title\">";
         document += modal->title;
         document += "</h2>";
         if (modal->dismissible && modal->showClose) {
@@ -6448,7 +9819,7 @@ std::string buildDocumentRml(
     }
 
     document += "<div id=\"rr-performance-stats\"";
-    if (!performanceStatsVisible || performanceStatsHtml.empty()) {
+    if (activeModal || !performanceStatsVisible || performanceStatsHtml.empty()) {
         document += " class=\"performance-hidden\"";
     }
     document += ">" + performanceStatsHtml + "</div>";
@@ -6466,14 +9837,22 @@ struct FocusTarget {
     std::string id;
     float centerX = 0.0f;
     float centerY = 0.0f;
+    UiFocusRect bounds;
 };
 std::vector<FocusTarget> g_focusTargets;
+bool g_focusTargetsModalScoped = false;
 bool g_displayPreferenceChanged = false;
 
 enum class ControllerFocusRow {
     None,
     Choices,
-    Actions
+    DroneChoices,
+    DroneLoadout,
+    SurfaceChoices,
+    SurfaceCallout,
+    Actions,
+    Titlebar,
+    Utilities
 };
 
 ControllerFocusRow controllerFocusRow(const FocusTarget& target)
@@ -6481,57 +9860,92 @@ ControllerFocusRow controllerFocusRow(const FocusTarget& target)
     if (!target.element) {
         return ControllerFocusRow::None;
     }
+    if (target.element->Closest(".drone-controller-choice-row")) {
+        return ControllerFocusRow::DroneChoices;
+    }
+    if (target.element->Closest(".drone-controller-loadout-row")) {
+        return ControllerFocusRow::DroneLoadout;
+    }
+    if (target.element->Closest(".surface-controller-action-row")) {
+        return ControllerFocusRow::SurfaceChoices;
+    }
+    if (target.element->Closest(".surface-controller-callout")) {
+        return ControllerFocusRow::SurfaceCallout;
+    }
     if (target.element->Closest(".controller-choice-row")) {
         return ControllerFocusRow::Choices;
     }
     if (target.element->Closest(".controller-action-row")) {
         return ControllerFocusRow::Actions;
     }
+    if (target.element->Closest(".panel-head-actions")) {
+        return ControllerFocusRow::Titlebar;
+    }
+    if (target.element->Closest(".utility-actions")) {
+        return ControllerFocusRow::Utilities;
+    }
     return ControllerFocusRow::None;
 }
 
-FocusTarget* nearestControllerRowTarget(ControllerFocusRow row, float centerX)
+FocusTarget* directionalControllerRowTarget(
+    FocusTarget& current,
+    ControllerFocusRow destinationRow,
+    UiDirection direction)
 {
-    FocusTarget* nearest = nullptr;
-    float bestDistance = std::numeric_limits<float>::max();
+    const bool horizontal = direction == UiDirection::Left || direction == UiDirection::Right;
+    const float directionSign = direction == UiDirection::Left || direction == UiDirection::Up ? -1.0f : 1.0f;
+    FocusTarget* best = nullptr;
+    float bestScore = std::numeric_limits<float>::max();
     for (FocusTarget& target : g_focusTargets) {
-        if (controllerFocusRow(target) != row) {
+        if (controllerFocusRow(target) != destinationRow) {
             continue;
         }
-        const float distance = std::abs(target.centerX - centerX);
-        if (distance < bestDistance) {
-            bestDistance = distance;
-            nearest = &target;
+        const float primary = directionSign * (horizontal
+            ? target.centerX - current.centerX
+            : target.centerY - current.centerY);
+        if (primary <= 1.0f) {
+            continue;
+        }
+        // Drone Ops deliberately puts the work toolbar and loadout to the
+        // right of a wider card grid. Keep semantic handoffs stable even
+        // when the target sits outside the current control's x/y column.
+        const float secondary = std::abs(horizontal
+            ? target.centerY - current.centerY
+            : target.centerX - current.centerX);
+        const float score = primary + secondary * 0.25f;
+        if (score < bestScore) {
+            bestScore = score;
+            best = &target;
         }
     }
-    return nearest;
+    return best;
 }
 
-FocusTarget* cycleControllerRowTarget(FocusTarget& current, UiDirection direction)
+FocusTarget* rightAlignedControllerRowTarget(
+    FocusTarget& current,
+    ControllerFocusRow destinationRow)
 {
-    const ControllerFocusRow row = controllerFocusRow(current);
-    if (row == ControllerFocusRow::None || (direction != UiDirection::Left && direction != UiDirection::Right)) {
-        return nullptr;
-    }
-
-    std::vector<FocusTarget*> rowTargets;
+    const ControllerFocusRow sourceRow = controllerFocusRow(current);
+    std::vector<FocusTarget*> sourceTargets;
+    std::vector<FocusTarget*> destinationTargets;
     for (FocusTarget& target : g_focusTargets) {
-        if (controllerFocusRow(target) == row) {
-            rowTargets.push_back(&target);
+        const ControllerFocusRow row = controllerFocusRow(target);
+        if (row == sourceRow) {
+            sourceTargets.push_back(&target);
+        } else if (row == destinationRow) {
+            destinationTargets.push_back(&target);
         }
     }
-    std::sort(rowTargets.begin(), rowTargets.end(), [](const FocusTarget* lhs, const FocusTarget* rhs) {
-        return lhs->centerX < rhs->centerX;
-    });
-    const auto currentIt = std::find(rowTargets.begin(), rowTargets.end(), &current);
-    if (currentIt == rowTargets.end() || rowTargets.empty()) {
+    const auto currentIt = std::find(sourceTargets.begin(), sourceTargets.end(), &current);
+    if (currentIt == sourceTargets.end() || destinationTargets.empty()) {
         return nullptr;
     }
-    const std::size_t index = static_cast<std::size_t>(std::distance(rowTargets.begin(), currentIt));
-    const std::size_t next = direction == UiDirection::Left
-        ? (index + rowTargets.size() - 1) % rowTargets.size()
-        : (index + 1) % rowTargets.size();
-    return rowTargets[next];
+    const std::size_t sourceIndex = static_cast<std::size_t>(std::distance(sourceTargets.begin(), currentIt));
+    const std::size_t distanceFromRight = sourceTargets.size() - sourceIndex - 1;
+    const std::size_t destinationIndex = destinationTargets.size() - std::min(
+        distanceFromRight + 1,
+        destinationTargets.size());
+    return destinationTargets[destinationIndex];
 }
 
 class RmlSettingsEventListener final : public Rml::EventListener {
@@ -6718,9 +10132,43 @@ void collectFocusableElements(Rml::Element* element, std::vector<Rml::Element*>&
     }
 }
 
+void clearFocusTargets()
+{
+    for (FocusTarget& target : g_focusTargets) {
+        if (!target.element) {
+            continue;
+        }
+        target.element->SetClass("rr-controller-focus", false);
+        target.element->Blur();
+    }
+    g_focusTargets.clear();
+}
+
+Rml::Element* focusGeometryElement(Rml::Element* control)
+{
+    if (!control) {
+        return nullptr;
+    }
+    static constexpr std::string_view visualItemSelectors[] = {
+        ".ui-choice-row",
+        ".surface-choice-row",
+        ".upgrade-draft-card",
+        ".pilot-card",
+        ".drone-loadout-slot",
+        ".drone-ops-callout",
+    };
+    for (const std::string_view selector : visualItemSelectors) {
+        if (Rml::Element* item = control->Closest(std::string(selector))) {
+            return item;
+        }
+    }
+    return control;
+}
+
 void collectFocusTargets(bool modalOpen)
 {
-    g_focusTargets.clear();
+    clearFocusTargets();
+    g_focusTargetsModalScoped = modalOpen;
     if (!g_document) {
         return;
     }
@@ -6740,9 +10188,19 @@ void collectFocusTargets(bool modalOpen)
         if (duplicates > 0) {
             id += "#" + std::to_string(duplicates);
         }
-        const Rml::Vector2f offset = element->GetAbsoluteOffset(Rml::BoxArea::Border);
-        const Rml::Vector2f size = element->GetBox().GetSize(Rml::BoxArea::Border);
-        g_focusTargets.push_back({element, std::move(id), offset.x + size.x * 0.5f, offset.y + size.y * 0.5f});
+        Rml::Element* geometryElement = focusGeometryElement(element);
+        Rml::Rectanglef bounds;
+        if (!Rml::ElementUtilities::GetBoundingBox(bounds, geometryElement, Rml::BoxArea::Border)) {
+            const Rml::Vector2f offset = geometryElement->GetAbsoluteOffset(Rml::BoxArea::Border);
+            const Rml::Vector2f size = geometryElement->GetBox().GetSize(Rml::BoxArea::Border);
+            bounds = Rml::Rectanglef::FromPositionSize(offset, size);
+        }
+        g_focusTargets.push_back({
+            element,
+            std::move(id),
+            bounds.Center().x,
+            bounds.Center().y,
+            {bounds.Left(), bounds.Top(), bounds.Right(), bounds.Bottom()}});
     }
 }
 
@@ -6801,6 +10259,21 @@ FocusTarget* defaultFocusTarget()
     });
     if (explicitDefault != g_focusTargets.end()) {
         return &*explicitDefault;
+    }
+    if (g_focusTargetsModalScoped) {
+        const auto primary = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
+            if (!target.element) {
+                return false;
+            }
+            return target.element->IsClassSet("ok")
+                || target.element->Closest(".primary-actions")
+                || target.element->Closest(".draft-actions")
+                || target.element->Closest(".final-actions")
+                || target.element->Closest(".card-footer");
+        });
+        return primary != g_focusTargets.end()
+            ? &*primary
+            : (g_focusTargets.empty() ? nullptr : &g_focusTargets.front());
     }
     const auto controllerChoice = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
         return controllerFocusRow(target) == ControllerFocusRow::Choices;
@@ -6894,8 +10367,9 @@ GameRmlUi::GameRmlUi(
     IPreferenceStore& preferences,
     IPlatformHost& host,
     IUiBridge& uiBridge,
-    IRmlRenderHost& renderHost)
-    : preferences_(preferences), host_(host), uiBridge_(uiBridge), renderHost_(renderHost)
+    IRmlRenderHost& renderHost,
+    std::string assetRoot)
+    : preferences_(preferences), host_(host), uiBridge_(uiBridge), renderHost_(renderHost), assetRoot_(std::move(assetRoot))
 {
 }
 
@@ -6909,24 +10383,44 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
     Rml::SetSystemInterface(&g_systemInterface);
 
     if (!renderHost_.initialize()) {
+        uiBridge_.setRmlUiEnabled(false);
         return false;
     }
     Rml::SetRenderInterface(&renderHost_.renderInterface());
 
     if (!Rml::Initialise()) {
+        uiBridge_.setRmlUiEnabled(false);
         renderHost_.shutdown();
         return false;
     }
 
-    const auto normal = Rml::Span<const Rml::byte>(reinterpret_cast<const Rml::byte*>(courier_prime_code), sizeof(courier_prime_code));
-    const auto italic = Rml::Span<const Rml::byte>(reinterpret_cast<const Rml::byte*>(courier_prime_code_italic), sizeof(courier_prime_code_italic));
-    Rml::LoadFontFace(normal, "rmlui-debugger-font", Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Normal);
-    Rml::LoadFontFace(italic, "rmlui-debugger-font", Rml::Style::FontStyle::Italic, Rml::Style::FontWeight::Normal);
+    const std::filesystem::path fontRoot = std::filesystem::path(assetRoot_) / "assets" / "fonts";
+    const std::filesystem::path regularFont = fontRoot / "SourceCodePro-Regular.ttf";
+    const std::filesystem::path semiboldFont = fontRoot / "SourceCodePro-Semibold.ttf";
+    const std::filesystem::path italicFont = fontRoot / "SourceCodePro-It.ttf";
+    const auto loadFamily = [&](const char* family) {
+        return Rml::LoadFontFace(
+                   regularFont.string(), family, Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Normal)
+            && Rml::LoadFontFace(
+                semiboldFont.string(), family, Rml::Style::FontStyle::Normal, Rml::Style::FontWeight::Bold)
+            && Rml::LoadFontFace(
+                italicFont.string(), family, Rml::Style::FontStyle::Italic, Rml::Style::FontWeight::Normal);
+    };
+    if (!loadFamily("source-code-pro") || !loadFamily("rmlui-debugger-font")) {
+        host_.log(
+            PlatformLogLevel::Error,
+            "Unable to load bundled Source Code Pro fonts from " + fontRoot.string());
+        Rml::Shutdown();
+        renderHost_.shutdown();
+        uiBridge_.setRmlUiEnabled(false);
+        return false;
+    }
 
     g_context = Rml::CreateContext("rocket-ui", {rr_rml_viewport_width(), rr_rml_viewport_height()});
     if (!g_context) {
         Rml::Shutdown();
         renderHost_.shutdown();
+        uiBridge_.setRmlUiEnabled(false);
         return false;
     }
     g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
@@ -6950,6 +10444,10 @@ void GameRmlUi::setPanelHtml(const std::string& html)
     });
     const bool autoModalWillOpen = openModalId_.empty() && autoModal != modals.end();
     const bool activeModalRemainsValid = openModalId_.empty() || findModal(modals, openModalId_);
+    const bool modalHierarchyRemainsValid = activeModalRemainsValid
+        && std::all_of(modalStack_.begin(), modalStack_.end(), [&](const std::string& modalId) {
+            return findModal(modals, modalId) != nullptr;
+        });
     const ViewportMetrics viewport = host_.viewportMetrics();
     const bool viewportUnchanged = layoutViewportWidth_ == viewport.logicalWidth
         && layoutViewportHeight_ == viewport.logicalHeight;
@@ -6958,7 +10456,7 @@ void GameRmlUi::setPanelHtml(const std::string& html)
         && structureUnchanged
         && nextPanelMode == panelMode_
         && openModalId_.empty()
-        && activeModalRemainsValid
+        && modalHierarchyRemainsValid
         && !autoModalWillOpen
         && !g_displayPreferenceChanged
         && viewportUnchanged;
@@ -6966,14 +10464,19 @@ void GameRmlUi::setPanelHtml(const std::string& html)
     panelHtml_ = html;
     panelMode_ = nextPanelMode;
     buttonBindings_ = extractButtonBindings(panelHtml_);
-    if (!openModalId_.empty() && !findModal(modals, openModalId_)) {
+    if (!openModalId_.empty() && !modalHierarchyRemainsValid) {
+        clearFocusTargets();
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
+        focusedId_ = modalReturnFocusId_;
+        modalReturnFocusId_.clear();
+        hasLastFocusCenter_ = false;
     }
     if (openModalId_.empty()) {
         if (autoModal != modals.end()) {
             modalReturnFocusId_ = focusedId_;
+            clearFocusTargets();
             openModalId_ = autoModal->id;
             focusedId_.clear();
             hasLastFocusCenter_ = false;
@@ -7006,7 +10509,8 @@ void GameRmlUi::setPanelHtml(const std::string& html)
         bindLoadedButtons(panelBody);
         g_context->Update();
         collectFocusTargets(false);
-        if (controllerPresentationActive_ && !g_focusTargets.empty()) {
+        const bool appliedPendingFocus = applyPendingFocusIfAvailable();
+        if (!appliedPendingFocus && controllerPresentationActive_ && !g_focusTargets.empty()) {
             FocusTarget* target = findFocusTarget(focusedId_);
             if (!target && hasLastFocusCenter_) {
                 target = nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_);
@@ -7117,6 +10621,11 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
     }
     if (button == 0 && overUi) {
         pressedButton_ = buttonElementAtPoint(*g_context, {static_cast<float>(x), static_cast<float>(y)});
+        if (pressedButton_ && modalOpen() && !pressedButton_->Closest("#rr-modal")) {
+            // The scrim owns the full viewport while a modal is active. Never
+            // retain a button found in the panel beneath it.
+            pressedButton_ = nullptr;
+        }
         if (pressedButton_) {
             pressedButtonAtSeconds_ = rr_rml_now_seconds();
         }
@@ -7137,6 +10646,9 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     }
     const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
     Rml::Element* releasedButton = buttonElementAtPoint(*g_context, point);
+    if (releasedButton && modalOpen() && !releasedButton->Closest("#rr-modal")) {
+        releasedButton = nullptr;
+    }
     Rml::Element* pressedButton = pressedButton_;
     const double pressedAt = pressedButtonAtSeconds_;
     pressedButton_ = nullptr;
@@ -7159,7 +10671,10 @@ bool GameRmlUi::mouseWheel(int x, int y, double deltaY)
         return false;
     }
     g_context->ProcessMouseMove(x, y, 0);
-    g_context->ProcessMouseWheel(static_cast<float>(-deltaY / 90.0), 0);
+    // Both browser deltaY and the SDL adapter use the DOM convention here:
+    // positive means the user scrolled down. Preserve that sign for RmlUi;
+    // negating it reverses every mouse wheel direction.
+    g_context->ProcessMouseWheel(static_cast<float>(deltaY / 90.0), 0);
     return true;
 }
 
@@ -7188,10 +10703,11 @@ bool GameRmlUi::hitTest(int x, int y) const
 bool GameRmlUi::navigate(UiDirection direction)
 {
     if (!initialized_ || !g_document) {
-        return rr_rml_dom_navigate(static_cast<int>(direction)) != 0;
+        return false;
     }
-    if (g_focusTargets.empty()) {
-        collectFocusTargets(modalOpen());
+    const bool modalScope = modalOpen();
+    if (g_focusTargets.empty() || g_focusTargetsModalScoped != modalScope) {
+        collectFocusTargets(modalScope);
     }
     if (g_focusTargets.empty()) {
         return false;
@@ -7211,7 +10727,7 @@ bool GameRmlUi::navigate(UiDirection direction)
                 select->SetSelection(next);
                 // Programmatic RmlUi selection does not emit Change on its
                 // own. Dispatch it explicitly so controller left/right has
-                // the same persistence behavior as the DOM fallback.
+                // the same persistence behavior as direct pointer input.
                 Rml::Dictionary parameters;
                 parameters["value"] = select->GetValue();
                 select->DispatchEvent(Rml::EventId::Change, parameters);
@@ -7221,56 +10737,81 @@ bool GameRmlUi::navigate(UiDirection direction)
     }
 
     const ControllerFocusRow currentRow = controllerFocusRow(*current);
-    if (currentRow != ControllerFocusRow::None) {
-        if (direction == UiDirection::Left || direction == UiDirection::Right) {
-            return applyControllerFocus(
-                cycleControllerRowTarget(*current, direction),
-                focusedId_,
-                lastFocusCenterX_,
-                lastFocusCenterY_,
-                hasLastFocusCenter_);
+    if ((direction == UiDirection::Left || direction == UiDirection::Right) && currentRow == ControllerFocusRow::SurfaceChoices) {
+        return applyControllerFocus(
+            directionalControllerRowTarget(*current, currentRow, direction),
+            focusedId_,
+            lastFocusCenterX_,
+            lastFocusCenterY_,
+            hasLastFocusCenter_);
+    }
+    if ((direction == UiDirection::Right && currentRow == ControllerFocusRow::DroneChoices) ||
+        (direction == UiDirection::Left && currentRow == ControllerFocusRow::DroneLoadout)) {
+        // Stay within the visible pane while there is another actionable
+        // control in that direction. At its edge, cross the roster/loadout
+        // split instead of allowing focus to become trapped in the roster.
+        if (FocusTarget* adjacent = directionalControllerRowTarget(*current, currentRow, direction)) {
+            return applyControllerFocus(adjacent, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
         }
-        const ControllerFocusRow destinationRow = direction == UiDirection::Down && currentRow == ControllerFocusRow::Choices
-            ? ControllerFocusRow::Actions
-            : (direction == UiDirection::Up && currentRow == ControllerFocusRow::Actions ? ControllerFocusRow::Choices : ControllerFocusRow::None);
-        if (destinationRow != ControllerFocusRow::None) {
-            return applyControllerFocus(
-                nearestControllerRowTarget(destinationRow, current->centerX),
-                focusedId_,
-                lastFocusCenterX_,
-                lastFocusCenterY_,
-                hasLastFocusCenter_);
-        }
+        const ControllerFocusRow adjacentPane = currentRow == ControllerFocusRow::DroneChoices
+            ? ControllerFocusRow::DroneLoadout
+            : ControllerFocusRow::DroneChoices;
+        return applyControllerFocus(
+            directionalControllerRowTarget(*current, adjacentPane, direction),
+            focusedId_,
+            lastFocusCenterX_,
+            lastFocusCenterY_,
+            hasLastFocusCenter_);
     }
 
-    FocusTarget* bestTarget = nullptr;
-    float bestScore = std::numeric_limits<float>::max();
-    for (FocusTarget& candidate : g_focusTargets) {
-        if (&candidate == current) {
-            continue;
-        }
-        const float dx = candidate.centerX - current->centerX;
-        const float dy = candidate.centerY - current->centerY;
-        const float primary = (direction == UiDirection::Left || direction == UiDirection::Right) ? std::abs(dx) : std::abs(dy);
-        const float secondary = (direction == UiDirection::Left || direction == UiDirection::Right) ? std::abs(dy) : std::abs(dx);
-        const bool ahead = (direction == UiDirection::Left && dx < -1.0f) || (direction == UiDirection::Right && dx > 1.0f) ||
-            (direction == UiDirection::Up && dy < -1.0f) || (direction == UiDirection::Down && dy > 1.0f);
-        if (!ahead) {
-            continue;
-        }
-        const float score = primary * 10.0f + secondary * 2.0f + (secondary * secondary) / std::max(1.0f, primary);
-        if (score < bestScore) {
-            bestScore = score;
-            bestTarget = &candidate;
-        }
+    const ControllerFocusRow destinationRow =
+        direction == UiDirection::Up && currentRow == ControllerFocusRow::SurfaceChoices
+        ? ControllerFocusRow::SurfaceCallout
+        : (direction == UiDirection::Down && currentRow == ControllerFocusRow::SurfaceCallout
+            ? ControllerFocusRow::SurfaceChoices
+            : (direction == UiDirection::Up && currentRow == ControllerFocusRow::DroneChoices
+                ? ControllerFocusRow::Utilities
+                : (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities && current->element->Closest(".drone-workspace")
+                    ? ControllerFocusRow::DroneChoices
+                    : (direction == UiDirection::Up && currentRow == ControllerFocusRow::Utilities
+                        ? ControllerFocusRow::Titlebar
+                        : (direction == UiDirection::Down && currentRow == ControllerFocusRow::Titlebar
+                            ? ControllerFocusRow::Utilities
+                            : ControllerFocusRow::None)))));
+    if (destinationRow != ControllerFocusRow::None) {
+        const bool semanticWorkspaceHandoff = currentRow == ControllerFocusRow::DroneChoices
+            || destinationRow == ControllerFocusRow::DroneChoices
+            || currentRow == ControllerFocusRow::SurfaceChoices
+            || destinationRow == ControllerFocusRow::SurfaceChoices;
+        return applyControllerFocus(
+            semanticWorkspaceHandoff
+                ? directionalControllerRowTarget(*current, destinationRow, direction)
+                : rightAlignedControllerRowTarget(*current, destinationRow),
+            focusedId_,
+            lastFocusCenterX_,
+            lastFocusCenterY_,
+            hasLastFocusCenter_);
     }
+
+    std::vector<UiFocusRect> bounds;
+    bounds.reserve(g_focusTargets.size());
+    for (const FocusTarget& target : g_focusTargets) {
+        bounds.push_back(target.bounds);
+    }
+    const std::size_t currentIndex = static_cast<std::size_t>(current - g_focusTargets.data());
+    const std::optional<std::size_t> nextIndex = directionalFocusTarget(bounds, currentIndex, direction);
+    FocusTarget* bestTarget = nextIndex ? &g_focusTargets[*nextIndex] : nullptr;
     return applyControllerFocus(bestTarget, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
 }
 
 bool GameRmlUi::activateFocused()
 {
     if (!initialized_ || !g_document) {
-        return rr_rml_dom_activate() != 0;
+        return false;
+    }
+    const bool modalScope = modalOpen();
+    if (g_focusTargets.empty() || g_focusTargetsModalScoped != modalScope) {
+        collectFocusTargets(modalScope);
     }
     FocusTarget* target = findFocusTarget(focusedId_);
     if (!target) {
@@ -7295,7 +10836,7 @@ bool GameRmlUi::activateFocused()
 bool GameRmlUi::cancel()
 {
     if (!initialized_) {
-        return rr_rml_dom_cancel() != 0;
+        return false;
     }
     if (!openModalId_.empty()) {
         const std::vector<ModalTemplate> modals = extractModals(panelHtml_);
@@ -7319,7 +10860,11 @@ bool GameRmlUi::cancel()
 bool GameRmlUi::scroll(float amount)
 {
     if (!initialized_ || !g_document) {
-        return rr_rml_dom_scroll(amount) != 0;
+        return false;
+    }
+    const bool modalScope = modalOpen();
+    if (g_focusTargets.empty() || g_focusTargetsModalScoped != modalScope) {
+        collectFocusTargets(modalScope);
     }
     Rml::Element* element = nullptr;
     if (FocusTarget* target = findFocusTarget(focusedId_)) {
@@ -7343,12 +10888,12 @@ bool GameRmlUi::scroll(float amount)
 
 bool GameRmlUi::modalOpen() const
 {
-    return initialized_ ? !openModalId_.empty() : rr_rml_dom_modal_open() != 0;
+    return initialized_ && !openModalId_.empty();
 }
 
 void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
 {
-    rr_rml_dom_set_controller_presentation(active ? 1 : 0, static_cast<int>(family));
+    uiBridge_.setControllerPresentation(active, family);
     if (controllerPresentationActive_ == active && controllerFamily_ == family) {
         return;
     }
@@ -7361,7 +10906,7 @@ void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
 
 void GameRmlUi::setControllerFocusVisible(bool visible)
 {
-    rr_rml_dom_set_controller_focus_visible(visible ? 1 : 0);
+    uiBridge_.setControllerFocusVisible(visible);
     if (controllerFocusVisible_ == visible) {
         return;
     }
@@ -7373,7 +10918,7 @@ void GameRmlUi::setControllerFocusVisible(bool visible)
 
 void GameRmlUi::setControllerResumeBlocked(bool blocked, bool controllerConnected)
 {
-    rr_rml_dom_set_controller_resume_blocked(blocked ? 1 : 0, controllerConnected ? 1 : 0);
+    uiBridge_.setControllerResumeBlocked(blocked, controllerConnected);
     if (controllerResumeBlocked_ == blocked && controllerResumeConnected_ == controllerConnected) {
         return;
     }
@@ -7386,18 +10931,23 @@ void GameRmlUi::setControllerResumeBlocked(bool blocked, bool controllerConnecte
 
 std::string GameRmlUi::focusedId() const
 {
-    if (initialized_) {
-        return focusedId_;
+    return initialized_ ? focusedId_ : std::string {};
+}
+
+void GameRmlUi::requestFocus(std::string_view id)
+{
+    if (id.empty()) {
+        return;
     }
-    char buffer[256] = {};
-    rr_rml_dom_focused_id(buffer, static_cast<int>(sizeof(buffer)));
-    return buffer;
+    if (!initialized_) {
+        return;
+    }
+    pendingFocusId_ = std::string(id);
 }
 
 void GameRmlUi::openModal(const std::string& id)
 {
     if (!initialized_) {
-        rr_rml_dom_open_modal(id.c_str());
         return;
     }
     if (id.empty() || id == openModalId_) {
@@ -7413,6 +10963,7 @@ void GameRmlUi::openModal(const std::string& id)
     } else {
         modalReturnFocusId_ = focusedId_;
     }
+    clearFocusTargets();
     openModalId_ = id;
     focusedId_.clear();
     hasLastFocusCenter_ = false;
@@ -7422,7 +10973,9 @@ void GameRmlUi::openModal(const std::string& id)
 void GameRmlUi::closeModal()
 {
     if (!initialized_) {
-        rr_rml_dom_close_modal();
+        return;
+    }
+    if (openModalId_.empty()) {
         return;
     }
     std::string closeAction;
@@ -7432,6 +10985,7 @@ void GameRmlUi::closeModal()
             closeAction = modal->closeAction;
         }
     }
+    clearFocusTargets();
     if (!modalStack_.empty()) {
         openModalId_ = modalStack_.back();
         modalStack_.pop_back();
@@ -7454,6 +11008,7 @@ void GameRmlUi::dispatchAction(const std::string& action)
 {
     const bool closesModal = !openModalId_.empty();
     if (closesModal) {
+        clearFocusTargets();
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
@@ -7462,9 +11017,35 @@ void GameRmlUi::dispatchAction(const std::string& action)
     if (actionHandler_) {
         actionHandler_(action);
     }
+    constexpr std::string_view refitSelectionPrefix = "select_refit_offer:";
+    if (action.starts_with(refitSelectionPrefix) && action.size() > refitSelectionPrefix.size()) {
+        // Refit cards are selection controls. Confirming one should continue
+        // naturally at its newly revealed installation action, but only when
+        // that action is actually enabled in the next panel render.
+        pendingFocusId_ = "action:buy_offer:" + action.substr(refitSelectionPrefix.size());
+    }
     if (closesModal) {
         rebuildDocument();
     }
+}
+
+bool GameRmlUi::applyPendingFocusIfAvailable()
+{
+    if (pendingFocusId_.empty()) {
+        return false;
+    }
+    const std::string requestedId = std::move(pendingFocusId_);
+    pendingFocusId_.clear();
+    FocusTarget* target = findFocusTarget(requestedId);
+    if (!target) {
+        return false;
+    }
+    return applyControllerFocus(
+        target,
+        focusedId_,
+        lastFocusCenterX_,
+        lastFocusCenterY_,
+        hasLastFocusCenter_);
 }
 
 void GameRmlUi::refresh()
@@ -7559,7 +11140,7 @@ void GameRmlUi::setPerformanceStats(const PerformanceStats& stats, bool visible)
     if (visibilityChanged) {
         performanceElement->SetClass(
             "performance-hidden",
-            !performanceStatsVisible_ || performanceStatsHtml_.empty());
+            !openModalId_.empty() || !performanceStatsVisible_ || performanceStatsHtml_.empty());
     }
 }
 
@@ -7577,10 +11158,10 @@ void GameRmlUi::rebuildDocument()
     ++pendingDocumentRebuilds_;
 
     if (g_document) {
+        clearFocusTargets();
         g_context->UnloadDocument(g_document);
         g_document = nullptr;
         g_elementButtonBindings.clear();
-        g_focusTargets.clear();
     }
 
     layoutViewportWidth_ = rr_rml_viewport_width();
@@ -7603,7 +11184,11 @@ void GameRmlUi::rebuildDocument()
         g_document->Show();
         g_context->Update();
         collectFocusTargets(!openModalId_.empty());
-        if (controllerPresentationActive_ && !g_focusTargets.empty()) {
+        const bool appliedPendingFocus = applyPendingFocusIfAvailable();
+        const bool shouldRestoreFocus = controllerPresentationActive_
+            || !openModalId_.empty()
+            || !focusedId_.empty();
+        if (!appliedPendingFocus && shouldRestoreFocus && !g_focusTargets.empty()) {
             FocusTarget* target = findFocusTarget(focusedId_);
             if (!target && hasLastFocusCenter_) {
                 target = nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_);
@@ -7616,6 +11201,7 @@ void GameRmlUi::rebuildDocument()
     } else {
         g_elementButtonBindings.clear();
         g_focusTargets.clear();
+        g_focusTargetsModalScoped = false;
         Rml::Log::Message(Rml::Log::LT_ERROR, "Failed to load Rocket Rogue RmlUi document.");
     }
 }
@@ -7627,6 +11213,7 @@ void GameRmlUi::shutdown()
     }
     if (g_context) {
         if (g_document) {
+            clearFocusTargets();
             g_context->UnloadDocument(g_document);
             g_document = nullptr;
         }
@@ -7637,6 +11224,7 @@ void GameRmlUi::shutdown()
     renderHost_.shutdown();
     g_elementButtonBindings.clear();
     g_focusTargets.clear();
+    g_focusTargetsModalScoped = false;
     rr_rml_set_enabled(0);
     pendingDocumentRebuilds_ = 0;
     uiDiagnostics_ = {};

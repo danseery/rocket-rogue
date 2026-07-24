@@ -3215,43 +3215,175 @@ void refreshTargetCell(MiningRunState& mining)
     }
 }
 
-void advanceDepthZone(GameState& state, const ContentCatalog& catalog)
+void storeActiveDepthLayer(MiningRunState& mining)
+{
+    mining.depthLayers.erase(
+        std::remove_if(
+            mining.depthLayers.begin(),
+            mining.depthLayers.end(),
+            [&](const MiningDepthLayerState& layer) { return layer.depthZone == mining.depthZone; }),
+        mining.depthLayers.end());
+    MiningDepthLayerState layer;
+    layer.depthZone = mining.depthZone;
+    layer.terrain = std::move(mining.terrain);
+    layer.enemies = std::move(mining.enemies);
+    layer.artifact = std::move(mining.artifact);
+    layer.gate = std::move(mining.gate);
+    layer.downwardTransitionX = mining.downwardTransitionX;
+    layer.hasDownwardTransition = mining.hasDownwardTransition;
+    mining.depthLayers.push_back(std::move(layer));
+}
+
+bool restoreDepthLayer(MiningRunState& mining, int depthZone)
+{
+    const auto found = std::find_if(
+        mining.depthLayers.begin(),
+        mining.depthLayers.end(),
+        [depthZone](const MiningDepthLayerState& layer) { return layer.depthZone == depthZone; });
+    if (found == mining.depthLayers.end()) {
+        return false;
+    }
+    mining.depthZone = found->depthZone;
+    mining.terrain = std::move(found->terrain);
+    mining.enemies = std::move(found->enemies);
+    mining.artifact = std::move(found->artifact);
+    mining.gate = std::move(found->gate);
+    mining.downwardTransitionX = found->downwardTransitionX;
+    mining.hasDownwardTransition = found->hasDownwardTransition;
+    mining.depthLayers.erase(found);
+    std::fill(
+        mining.terrain.dirtyChunks.begin(),
+        mining.terrain.dirtyChunks.end(),
+        static_cast<std::uint8_t>(1));
+    return true;
+}
+
+void resetMiningFollowersAfterDepthTransition(MiningRunState& mining)
+{
+    for (std::size_t index = 0; index < mining.miniDrones.size(); ++index) {
+        MiningMiniDroneAgent& agent = mining.miniDrones[index];
+        const double lane = (static_cast<double>(index % 3) - 1.0) * 0.55;
+        agent.x = std::clamp(mining.droneX + lane, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+        agent.y = std::clamp(mining.droneY - 0.8, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+        agent.velocityX = 0.0;
+        agent.velocityY = 0.0;
+        agent.behavior = MiningMiniDroneBehavior::Following;
+        agent.targetCellX = -1;
+        agent.targetCellY = -1;
+        agent.targetEnemyIndex = -1;
+        agent.finishTargetBeforeReturn = false;
+    }
+    mining.combatProjectiles.clear();
+    mining.damageNumbers.clear();
+}
+
+void openDepthAscentShaft(MiningTerrain& terrain)
+{
+    const int centerX = terrain.width / 2;
+    for (int y = 0; y < std::min(5, terrain.height); ++y) {
+        for (int x = std::max(0, centerX - 2); x <= std::min(terrain.width - 1, centerX + 2); ++x) {
+            if (MiningCell* cell = miningCellAt(terrain, x, y)) {
+                *cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false, MiningCellFeature::MainTunnel};
+            }
+        }
+    }
+}
+
+void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int direction)
 {
     MiningRunState& mining = state.run.mining;
     const Destination* destination = catalog.findDestination(mining.destinationId);
-    if (destination == nullptr) {
+    if (destination == nullptr || direction == 0) {
         return;
     }
-    mining.depthZone += 1;
-    mining.hazardDelta += tuning::mining::depthHazardRisk;
+    const int targetDepth = mining.depthZone + (direction > 0 ? 1 : -1);
+    if (targetDepth < mining.entryDepthZone) {
+        return;
+    }
+
+    MiningArtifactObject travelingArtifact;
+    const bool artifactTravels = mining.artifact.present && mining.artifact.tethered;
+    if (artifactTravels) {
+        travelingArtifact = std::move(mining.artifact);
+        mining.artifact = {};
+    }
+    if (direction > 0) {
+        mining.downwardTransitionX = mining.droneX;
+        mining.hasDownwardTransition = true;
+    }
+    storeActiveDepthLayer(mining);
+
+    const bool revisiting = restoreDepthLayer(mining, targetDepth);
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     const MiningArenaRules arenaRules = resolveMiningArenaRules(miningArenaRequest(mining.arenaMetadata));
-    mining.terrain = generateMiningTerrainForRules(
-        state,
-        *destination,
-        mining.siteProfile,
-        mining.depthZone,
-        stats.terrainWidth,
-        stats.terrainHeight,
-        arenaRules);
-    normalizeRichTerrainDeposits(mining.terrain, arenaRules, mining.rewardBudget, 0, 0);
-    applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
-    mining.enemies.clear();
-    spawnMiningEnemies(mining, *destination, arenaRules);
-    markMiningGateDerivedStateDirty(mining);
-    mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
-    mining.droneY = 4.0;
-    mining.returnZoneX = miningShipStartX(mining);
-    mining.returnZoneY = mining.droneY;
+    if (!revisiting) {
+        mining.depthZone = targetDepth;
+        mining.terrain = generateMiningTerrainForRules(
+            state,
+            *destination,
+            mining.siteProfile,
+            mining.depthZone,
+            stats.terrainWidth,
+            stats.terrainHeight,
+            arenaRules);
+        openDepthAscentShaft(mining.terrain);
+        normalizeRichTerrainDeposits(mining.terrain, arenaRules, mining.rewardBudget, 0, 0);
+        applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
+        mining.enemies.clear();
+        spawnMiningEnemies(mining, *destination, arenaRules);
+        mining.artifact = {};
+        mining.gate = {};
+        mining.downwardTransitionX = 0.0;
+        mining.hasDownwardTransition = false;
+        if (direction > 0) {
+            mining.hazardDelta += tuning::mining::depthHazardRisk;
+            mining.deepestDepthZone = std::max(mining.deepestDepthZone, mining.depthZone);
+        }
+    }
+
+    if (direction > 0) {
+        mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
+        mining.droneY = 4.0;
+    } else {
+        mining.droneX = mining.hasDownwardTransition
+            ? std::clamp(mining.downwardTransitionX, 1.0, static_cast<double>(mining.terrain.width - 2))
+            : static_cast<double>(mining.terrain.width) * 0.5;
+        mining.droneY = std::max(2.0, static_cast<double>(mining.terrain.height) - 3.5);
+    }
+    if (artifactTravels) {
+        mining.artifact = std::move(travelingArtifact);
+        mining.artifact.x = mining.droneX;
+        mining.artifact.y = std::clamp(
+            mining.droneY + (direction > 0 ? -1.5 : 1.5),
+            1.0,
+            static_cast<double>(mining.terrain.height - 2));
+        mining.artifact.velocityX = 0.0;
+        mining.artifact.velocityY = 0.0;
+    }
     mining.aimX = mining.droneX;
-    mining.aimY = mining.droneY + 1.0;
+    mining.aimY = mining.droneY + (direction > 0 ? 1.0 : -1.0);
     mining.aimDirX = 0.0;
-    mining.aimDirY = 1.0;
+    mining.aimDirY = direction > 0 ? 1.0 : -1.0;
     mining.hullDirX = 0.0;
-    mining.hullDirY = 1.0;
-    revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
+    mining.hullDirY = mining.aimDirY;
+    mining.depthTransitionCooldownSeconds = 0.65;
+    resetMiningFollowersAfterDepthTransition(mining);
+    if (mining.depthZone == mining.entryDepthZone) {
+        revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
+    }
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
+    markMiningGateDerivedStateDirty(mining);
     refreshTargetCell(mining);
+    const int levelsFromShip = std::max(0, mining.depthZone - mining.entryDepthZone);
+    if (direction > 0) {
+        state.statusLine = "Descended to depth +" + std::to_string(levelsFromShip) +
+            ". Ship is " + std::to_string(levelsFromShip) + (levelsFromShip == 1 ? " level" : " levels") + " above.";
+    } else if (levelsFromShip == 0) {
+        state.statusLine = "Entry depth reached. Return to the shuttle.";
+    } else {
+        state.statusLine = "Ascended to depth +" + std::to_string(levelsFromShip) +
+            ". Ship is " + std::to_string(levelsFromShip) + (levelsFromShip == 1 ? " level" : " levels") + " above.";
+    }
 }
 
 void triggerMiningFailure(GameState& state, std::string message)
@@ -3668,7 +3800,7 @@ bool repairMiningDrone(GameState& state)
 
 bool miningAtReturnZone(const MiningRunState& mining)
 {
-    if (!mining.active) {
+    if (!mining.active || mining.depthZone != mining.entryDepthZone) {
         return false;
     }
     const double dx = mining.droneX - mining.returnZoneX;
@@ -4064,6 +4196,8 @@ SurfaceActionOutcome startMiningRun(
     mining.destinationId = expedition.destinationId;
     mining.siteProfile = expedition.siteProfile;
     mining.depthZone = expedition.depth;
+    mining.entryDepthZone = mining.depthZone;
+    mining.deepestDepthZone = mining.depthZone;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.oxygenSeconds = stats.oxygenSeconds;
     mining.fuelCycleProgress = 0.0;
@@ -4359,6 +4493,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     // Keep older active saves aligned with the current visual ship lane.
     mining.returnZoneX = miningShipStartX(mining);
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
+    mining.depthTransitionCooldownSeconds = std::max(0.0, mining.depthTransitionCooldownSeconds - dt);
     if (mining.failurePending) {
         advanceMiningCombatVisuals(mining, dt);
         mining.elapsedSeconds += dt;
@@ -4488,8 +4623,15 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     }
 
-    if (mining.droneY > static_cast<double>(mining.terrain.height - 3) && canOccupy(mining.terrain, mining.droneX, mining.droneY + 0.8)) {
-        advanceDepthZone(state, catalog);
+    if (mining.depthTransitionCooldownSeconds <= 0.0 &&
+        mining.depthZone > mining.entryDepthZone &&
+        mining.droneY < 3.0 &&
+        canOccupy(mining.terrain, mining.droneX, mining.droneY - 0.8)) {
+        transitionDepthZone(state, catalog, -1);
+    } else if (mining.depthTransitionCooldownSeconds <= 0.0 &&
+        mining.droneY > static_cast<double>(mining.terrain.height - 3) &&
+        canOccupy(mining.terrain, mining.droneX, mining.droneY + 0.8)) {
+        transitionDepthZone(state, catalog, 1);
     }
 
     refreshTargetCell(mining);
@@ -4614,7 +4756,7 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     expedition.bankedMiningMaterials = mining.stowedMaterials;
     expedition.temporaryArtifacts.insert(expedition.temporaryArtifacts.end(), mining.stowedArtifacts.begin(), mining.stowedArtifacts.end());
     expedition.cargo += mining.stowedCargo;
-    expedition.depth = std::max(expedition.depth, mining.depthZone);
+    expedition.depth = std::max(expedition.depth, mining.deepestDepthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
     outcome.extractionRiskDelta = std::max(0.0, outcome.hazardDelta);
     if (emergencyRecall) {

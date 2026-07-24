@@ -1,6 +1,7 @@
 file(REMOVE_RECURSE "${ROCKET_STAGING}")
 file(MAKE_DIRECTORY
     "${ROCKET_STAGING}/assets"
+    "${ROCKET_STAGING}/assets/fonts"
     "${ROCKET_STAGING}/assets/shaders"
     "${ROCKET_STAGING}/licenses")
 file(COPY "${ROCKET_EXECUTABLE}" DESTINATION "${ROCKET_STAGING}")
@@ -16,6 +17,22 @@ foreach(ROCKET_ATLAS_ASSET scene-atlas-0.png scene-atlas-1.png scene-atlas.json)
     endif()
 endforeach()
 
+if(NOT IS_DIRECTORY "${ROCKET_ASSETS}/fonts")
+    message(FATAL_ERROR "Required runtime asset directory is missing: fonts")
+endif()
+file(COPY
+    "${ROCKET_ASSETS}/fonts"
+    DESTINATION "${ROCKET_STAGING}/assets")
+foreach(ROCKET_FONT_ASSET
+    SourceCodePro-Regular.ttf
+    SourceCodePro-Semibold.ttf
+    SourceCodePro-It.ttf
+    LICENSE.md)
+    if(NOT EXISTS "${ROCKET_STAGING}/assets/fonts/${ROCKET_FONT_ASSET}")
+        message(FATAL_ERROR "Required packaged Source Code Pro asset is missing: ${ROCKET_FONT_ASSET}")
+    endif()
+endforeach()
+
 # Copy third-party notices directly to stable names. Several dependencies call
 # their source notice LICENSE.txt, so copying and then renaming would silently
 # overwrite the previous dependency's notice.
@@ -25,6 +42,7 @@ set(ROCKET_LICENSE_FILES
     "${ROCKET_LODEPNG_LICENSE}|LodePNG.txt"
     "${ROCKET_SDL_LICENSE}|SDL3.txt"
     "${ROCKET_FREETYPE_LICENSE}|FreeType.txt"
+    "${ROCKET_ASSETS}/fonts/LICENSE.md|SourceCodePro.md"
     "${ROCKET_VULKAN_HEADERS_LICENSE}|Vulkan-Headers.txt"
     "${ROCKET_VOLK_LICENSE}|Volk.txt"
     "${ROCKET_VMA_LICENSE}|VulkanMemoryAllocator.txt")

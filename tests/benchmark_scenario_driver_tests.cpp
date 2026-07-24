@@ -13,9 +13,13 @@
 #include <string>
 #include <utility>
 
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
+
 namespace {
 
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0x079a56a29778fbecbULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0x432b379d478a4c39ULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:
@@ -76,7 +80,7 @@ class FakeRenderer final : public rocket::IGameRenderer {
 public:
     FakeRenderer()
     {
-        composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
         for (std::size_t index = 1; index < rocket::textureIndex(rocket::TextureId::Count); ++index) {
             composer.setTextureReady(static_cast<rocket::TextureId>(index), true);
         }
@@ -161,14 +165,6 @@ public:
     void setControllerPresentation(bool, rocket::ControllerFamily) override {}
     void setControllerFocusVisible(bool) override {}
     void setControllerResumeBlocked(bool, bool) override {}
-    bool navigate(rocket::UiDirection) override { return false; }
-    bool activate() override { return false; }
-    bool cancel() override { return false; }
-    bool scroll(double) override { return false; }
-    bool modalOpen() const override { return false; }
-    bool openModal(std::string_view) override { return false; }
-    void closeModal() override {}
-    std::string focusedId() const override { return {}; }
     void preferencesChanged(const rocket::AppPreferences&) override {}
 };
 
@@ -260,6 +256,15 @@ void testScenarioRoutingAndSaveSuppression()
     assert(surfaceOps.setup.screen == rocket::Screen::SurfaceExpedition);
     assert(surfaceOps.inputContext == rocket::InputContext::Ui);
     assert(surfaceOps.saveWrites == 0);
+
+    const Observation surfaceScan = observe(NativeBenchmarkScenario::SurfaceScan);
+    const Observation repeatedSurfaceScan = observe(NativeBenchmarkScenario::SurfaceScan);
+    assert(surfaceScan.setup);
+    assert(surfaceScan.setup.screen == rocket::Screen::SurfaceScan);
+    assert(surfaceScan.inputContext == rocket::InputContext::SurfaceScan);
+    assert(surfaceScan.saveWrites == 0);
+    assert(surfaceScan.setup.gameplayStateHash.has_value());
+    assert(surfaceScan.setup.gameplayStateHash == repeatedSurfaceScan.setup.gameplayStateHash);
 }
 
 void testFixedSeedHighEntityMining()
@@ -371,6 +376,10 @@ void testLongRunMiningRunnerHash()
 
 int main()
 {
+#if defined(_MSC_VER) && defined(_DEBUG)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
     testScenarioRoutingAndSaveSuppression();
     testFixedSeedHighEntityMining();
     testDisabledOptionsAreRejectedWithoutMutation();

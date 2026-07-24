@@ -7,7 +7,7 @@
 namespace rocket {
 
 struct SaveData {
-    int version = 4;
+    int version = 5;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 100.0;
     int destinationIndex = 0;

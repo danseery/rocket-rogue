@@ -93,6 +93,20 @@ if (webShell.includes("RocketDesktop")) {
   console.error("web/shell.html still references the retired Electron fullscreen bridge");
   failed = true;
 }
+const rmlUiOwnershipFence = /#panel,\s*#modal-root,\s*#controller-prompt-bar,\s*#toast-root,\s*#scene-launch-control,\s*#scene-ship-service,\s*#telemetry-chart-legend,\s*#surface-scan-scene-readout\s*\{\s*display:\s*none\s*!important;\s*pointer-events:\s*none\s*!important;\s*\}/s;
+if (!rmlUiOwnershipFence.test(webShell)) {
+  console.error("web/shell.html missing the RmlUi renderer ownership fence");
+  failed = true;
+}
+for (const token of [
+  '<div id="ui-startup-status" role="status">Starting RmlUi...</div>',
+  'body[data-ui-renderer="rmlui"] #ui-startup-status'
+]) {
+  if (!webShell.includes(token)) {
+    console.error(`web/shell.html missing fail-loud RmlUi startup status: ${token}`);
+    failed = true;
+  }
+}
 for (const token of ["requestFullscreen", "exitFullscreen", "fullscreenchange"]) {
   if (!webShell.includes(token)) {
     console.error(`web/shell.html missing browser fullscreen support: ${token}`);
@@ -110,12 +124,81 @@ for (const token of [
     failed = true;
   }
 }
+for (const token of [
+  "function rmlUiOwnsModalRendering()",
+  "function modalInputFenceActive()",
+  "function nonDomModalOwnsControllerInput()",
+  "body.rmlui-modal-open .telemetry-chart-legend",
+  "autoModal && !rmlUiOwnsModalRendering()",
+  "if (rmlUiOwnsModalRendering()) return false;"
+]) {
+  if (!webShell.includes(token)) {
+    console.error(`web modal authority contract missing token: ${token}`);
+    failed = true;
+  }
+}
 
 const gameRmlUi = existsSync("src/game/GameRmlUi.cpp") ? readFileSync("src/game/GameRmlUi.cpp", "utf8") : "";
+const nativeCssRuleBody = (selector) => {
+  const selectorStart = gameRmlUi.indexOf(selector);
+  if (selectorStart < 0) return "";
+  const bodyStart = gameRmlUi.indexOf("{", selectorStart);
+  const bodyEnd = bodyStart < 0 ? -1 : gameRmlUi.indexOf("}", bodyStart);
+  return bodyStart < 0 || bodyEnd < 0 ? "" : gameRmlUi.slice(bodyStart + 1, bodyEnd);
+};
+const requireNativeCssRule = (selector, tokens, contract) => {
+  const body = nativeCssRuleBody(selector);
+  for (const token of tokens) {
+    if (!body.includes(token)) {
+      console.error(`native RmlUi ${contract} missing ${selector} token: ${token}`);
+      failed = true;
+    }
+  }
+};
+
+for (const [pattern, contract] of [
+  [/const int modalOutcomeHeight\s*=\s*std::max\(1,\s*std::min\(\d+,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped launch outcome height"],
+  [/const int modalOutcomeTop\s*=\s*std::max\(modalGutter,\s*\(viewportHeight - modalOutcomeHeight\) \/ 2\);/, "centered launch outcome position"],
+  [/const bool modalOutcomeNeedsScroll\s*=\s*modalOutcomeHeight < \d+;/, "short-height launch outcome scrolling"]
+]) {
+  if (!pattern.test(gameRmlUi)) {
+    console.error(`native RmlUi modal layout contract missing: ${contract}`);
+    failed = true;
+  }
+}
+requireNativeCssRule("#rr-modal-scrim", ["z-index: 100;"], "modal stacking");
+requireNativeCssRule("#rr-modal {", ["box-sizing: border-box;", "z-index: 101;", "display: flex;", "overflow: hidden;"], "modal containment");
+requireNativeCssRule(
+  "#rr-modal.modal-launch_outcome {",
+  ["modalOutcomeTop", "modalOutcomeHeight"],
+  "launch outcome geometry");
+requireNativeCssRule(
+  "#rr-modal.modal-launch_outcome .modal-scroll-body {",
+  ["display: flex;", "flex-direction: column;", "modalOutcomeNeedsScroll"],
+  "launch outcome short-height body");
+requireNativeCssRule(
+  ".launch-outcome-summary {",
+  ["flex: 1 1 auto;", "min-height: 0px;", "height: 100%;"],
+  "launch outcome shrinkable summary");
+requireNativeCssRule(
+  ".launch-outcome-actions {",
+  ["flex: 0 0 40px;", "height: 40px;", "margin-top: auto;", "flex-wrap: nowrap;"],
+  "launch outcome persistent action lane");
+requireNativeCssRule(
+  ".launch-outcome-actions button {",
+  ["height: 40px;", "min-height: 0px;"],
+  "launch outcome action target");
+requireNativeCssRule(
+  "#rr-modal.modal-launch_outcome .ui-outcome-rows > div {",
+  ["min-height: 40px;", "height: 40px;"],
+  "launch outcome compact consequence rows");
+
 for (const token of [
   "data-frame-limit-select",
   "rr_rml_set_frame_limit_preference",
-  "selectCurrentFrameLimit"
+  "selectCurrentFrameLimit",
+  "if (activeModal == nullptr) {",
+  "document += nativeSceneOverlayMarkup(panelHtml);"
 ]) {
   if (!gameRmlUi.includes(token)) {
     console.error(`native RmlUi frame-limit preference missing token: ${token}`);
@@ -155,6 +238,33 @@ for (const token of [
 }
 
 const webMain = existsSync("src/platform/web/WebMain.cpp") ? readFileSync("src/platform/web/WebMain.cpp", "utf8") : "";
+const webPlatform = existsSync("src/platform/web/WebPlatform.cpp") ? readFileSync("src/platform/web/WebPlatform.cpp", "utf8") : "";
+const singleRendererSources = `${webMain}\n${webPlatform}\n${gameRmlUi}\n${webShell}`;
+for (const token of [
+  "WebDomFallbackUi",
+  "rr_force_dom_fallback_requested",
+  "force_dom_fallback",
+  "ui_renderer",
+  "forceDomFallback",
+  "rr_rml_dom_",
+  "rr_web_ui_action",
+  "rr_web_focused_id",
+  "rr_web_request_focus"
+]) {
+  if (singleRendererSources.includes(token)) {
+    console.error(`single-renderer web contract still exposes fallback token: ${token}`);
+    failed = true;
+  }
+}
+for (const token of [
+  "std::make_unique<rocket::GameRmlUi>",
+  "std::make_unique<rocket::WebGlRmlRenderHost>"
+]) {
+  if (!webMain.includes(token)) {
+    console.error(`WebMain missing required RmlUi renderer construction: ${token}`);
+    failed = true;
+  }
+}
 for (const token of ["void rr_new_game", "g_app->newGame()", "void rr_continue_game", "g_app->continueGame()"]) {
   if (!webMain.includes(token)) {
     console.error(`WebMain title action export missing token: ${token}`);

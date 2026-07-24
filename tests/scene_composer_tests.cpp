@@ -1,4 +1,6 @@
+#include "core/UiViewportLayout.h"
 #include "render/SceneAtlas.h"
+#include "render/SceneClip.h"
 #include "render/SceneComposer.h"
 
 #include <array>
@@ -9,6 +11,10 @@
 #include <limits>
 #include <type_traits>
 #include <vector>
+
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 
 namespace rocket {
 
@@ -25,6 +31,13 @@ struct SceneComposerTestAccess {
         composer.finalizePacket();
         return composer.packet_;
     }
+
+    static ScenePacket beginFramePacket(SceneComposer& composer, const RenderSnapshot& snapshot)
+    {
+        composer.beginFrame(snapshot);
+        composer.finalizePacket();
+        return composer.packet_;
+    }
 };
 
 } // namespace rocket
@@ -33,6 +46,7 @@ namespace {
 
 using rocket::Color;
 using rocket::CoordinateSpace;
+using rocket::FramebufferSceneClip;
 using rocket::PipelineClass;
 using rocket::PackedSceneInstance;
 using rocket::PackedSceneVertex;
@@ -47,6 +61,10 @@ using rocket::ScenePacket;
 using rocket::SceneVertex;
 using rocket::SceneVertexStream;
 using rocket::TextureId;
+using rocket::UiLayoutClass;
+using rocket::UiRect;
+using rocket::UiSurfaceKind;
+using rocket::UiViewportLayout;
 
 static_assert(std::is_standard_layout_v<SceneVertex>);
 static_assert(std::is_trivially_copyable_v<SceneVertex>);
@@ -128,6 +146,307 @@ bool sameVertex(const PackedSceneVertex& left, const PackedSceneVertex& right)
 bool sameInstance(const PackedSceneInstance& left, const PackedSceneInstance& right)
 {
     return std::memcmp(&left, &right, sizeof(PackedSceneInstance)) == 0;
+}
+
+void assertRect(const UiRect& actual, const UiRect& expected)
+{
+    assert(actual == expected);
+}
+
+void assertLayoutInvariants(const UiViewportLayout& layout, int width, int height)
+{
+    const UiRect viewport {0, 0, width, height};
+    assert(rocket::uiRectContains(viewport, layout.sceneRect));
+    assert(rocket::uiRectContains(viewport, layout.panelRect));
+    assert(rocket::uiRectContains(viewport, layout.topPanelRect));
+    assert(rocket::uiRectContains(viewport, layout.hudSafeRect));
+    assert(rocket::uiRectContains(layout.sceneRect, layout.hudSafeRect));
+    assert(!rocket::uiRectsIntersect(layout.sceneRect, layout.panelRect));
+    assert(!rocket::uiRectsIntersect(layout.sceneRect, layout.topPanelRect));
+    if (layout.layoutClass == UiLayoutClass::MiningHud) {
+        assert(layout.topPanelRect.width > 0);
+        assert(layout.topPanelRect.height > 0);
+    } else {
+        assert(layout.topPanelRect == UiRect {});
+    }
+}
+
+void testUiViewportLayoutGeometry()
+{
+    const UiViewportLayout stress = rocket::resolveUiViewportLayout(1024, 768, UiSurfaceKind::PersistentPanel);
+    assert(stress.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(stress.panelRect, {12, 12, 280, 744});
+    assertRect(stress.sceneRect, {304, 12, 708, 744});
+    assertRect(stress.hudSafeRect, {316, 24, 684, 720});
+    assertLayoutInvariants(stress, 1024, 768);
+
+    const UiViewportLayout minimum = rocket::resolveUiViewportLayout(1280, 720, UiSurfaceKind::PersistentPanel);
+    assert(minimum.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(minimum.panelRect, {12, 12, 307, 696});
+    assertRect(minimum.sceneRect, {331, 12, 937, 696});
+    assertRect(minimum.hudSafeRect, {343, 24, 913, 672});
+    assertLayoutInvariants(minimum, 1280, 720);
+
+    const UiViewportLayout deck = rocket::resolveUiViewportLayout(1280, 800, UiSurfaceKind::PersistentPanel);
+    assert(deck.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(deck.panelRect, {12, 12, 307, 776});
+    assertRect(deck.sceneRect, {331, 12, 937, 776});
+    assertRect(deck.hudSafeRect, {343, 24, 913, 752});
+    assertLayoutInvariants(deck, 1280, 800);
+
+    const UiViewportLayout fullHd = rocket::resolveUiViewportLayout(1920, 1080, UiSurfaceKind::PersistentPanel);
+    assert(fullHd.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(fullHd.panelRect, {16, 16, 340, 1048});
+    assertRect(fullHd.sceneRect, {372, 16, 1532, 1048});
+    assertRect(fullHd.hudSafeRect, {388, 32, 1500, 1016});
+    assertLayoutInvariants(fullHd, 1920, 1080);
+
+    const UiViewportLayout quadHd = rocket::resolveUiViewportLayout(2560, 1440, UiSurfaceKind::PersistentPanel);
+    assert(quadHd.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(quadHd.panelRect, {16, 16, 340, 1408});
+    assertRect(quadHd.sceneRect, {372, 16, 2172, 1408});
+    assertRect(quadHd.hudSafeRect, {388, 32, 2140, 1376});
+    assertLayoutInvariants(quadHd, 2560, 1440);
+
+    const UiViewportLayout fourK = rocket::resolveUiViewportLayout(3840, 2160, UiSurfaceKind::PersistentPanel);
+    assert(fourK.layoutClass == UiLayoutClass::LandscapeRail);
+    assertRect(fourK.panelRect, {16, 16, 340, 2128});
+    assertRect(fourK.sceneRect, {372, 16, 3452, 2128});
+    assertRect(fourK.hudSafeRect, {388, 32, 3420, 2096});
+    assertLayoutInvariants(fourK, 3840, 2160);
+
+    const UiViewportLayout narrow = rocket::resolveUiViewportLayout(900, 600, UiSurfaceKind::PersistentPanel);
+    assert(narrow.layoutClass == UiLayoutClass::BottomDock);
+    assertRect(narrow.panelRect, {12, 420, 876, 168});
+    assertRect(narrow.sceneRect, {12, 12, 876, 396});
+    assertRect(narrow.hudSafeRect, {24, 24, 852, 372});
+    assertLayoutInvariants(narrow, 900, 600);
+
+    const UiViewportLayout fullscreen = rocket::resolveUiViewportLayout(1280, 800, UiSurfaceKind::Fullscreen);
+    assert(fullscreen.layoutClass == UiLayoutClass::Fullscreen);
+    assertRect(fullscreen.sceneRect, {0, 0, 1280, 800});
+    assertRect(fullscreen.panelRect, {});
+    assertRect(fullscreen.hudSafeRect, {12, 12, 1256, 776});
+    assertLayoutInvariants(fullscreen, 1280, 800);
+}
+
+void testMiningViewportReservesBothHudLanes()
+{
+    const UiViewportLayout mining = rocket::resolveUiViewportLayout(1280, 800, UiSurfaceKind::Mining);
+    assert(mining.layoutClass == UiLayoutClass::MiningHud);
+    assertRect(mining.sceneRect, {12, 104, 1256, 552});
+    assertRect(mining.panelRect, {12, 668, 1256, 120});
+    assertRect(mining.topPanelRect, {12, 12, 1256, 80});
+    assertRect(mining.hudSafeRect, {24, 116, 1232, 528});
+    assertLayoutInvariants(mining, 1280, 800);
+
+    assert(!rocket::uiRectsIntersect(mining.topPanelRect, mining.sceneRect));
+    assert(!rocket::uiRectsIntersect(mining.panelRect, mining.sceneRect));
+    assert(!rocket::uiRectsIntersect(mining.topPanelRect, mining.panelRect));
+    assert(rocket::uiRectBottom(mining.topPanelRect) < mining.sceneRect.y);
+    assert(rocket::uiRectBottom(mining.sceneRect) < mining.panelRect.y);
+
+    const UiViewportLayout wideMining = rocket::resolveUiViewportLayout(1920, 1080, UiSurfaceKind::Mining);
+    assertRect(wideMining.topPanelRect, {16, 16, 1888, 88});
+    assertRect(wideMining.sceneRect, {16, 120, 1888, 800});
+    assertRect(wideMining.panelRect, {16, 936, 1888, 128});
+    assertRect(wideMining.hudSafeRect, {32, 136, 1856, 768});
+    assertLayoutInvariants(wideMining, 1920, 1080);
+}
+
+void testScreenSurfaceMapping()
+{
+    assert(rocket::uiSurfaceKindForScreen(rocket::Screen::Results) == UiSurfaceKind::Fullscreen);
+    assert(rocket::uiSurfaceKindForScreen(rocket::Screen::ArrivalFanfare) == UiSurfaceKind::Fullscreen);
+    assert(rocket::uiSurfaceKindForScreen(rocket::Screen::StoryBriefing) == UiSurfaceKind::Fullscreen);
+    assert(rocket::uiSurfaceKindForScreen(rocket::Screen::DroneOps) == UiSurfaceKind::Fullscreen);
+    assert(rocket::uiSurfaceKindForScreen(rocket::Screen::Mining) == UiSurfaceKind::Mining);
+
+    constexpr std::array workspaceScreens {
+        rocket::Screen::Hangar,
+        rocket::Screen::ArrivalOps,
+        rocket::Screen::Research,
+        rocket::Screen::SurfaceExpedition,
+        rocket::Screen::SurfaceUpgrade,
+        rocket::Screen::Upgrade,
+        rocket::Screen::Legacy,
+        rocket::Screen::Navigation
+    };
+    for (const rocket::Screen screen : workspaceScreens) {
+        assert(rocket::uiSurfaceKindForScreen(screen) == UiSurfaceKind::Fullscreen);
+    }
+
+    constexpr std::array persistentScreens {
+        rocket::Screen::Launch,
+        rocket::Screen::Flyby,
+        rocket::Screen::Orbit,
+        rocket::Screen::SurfaceScan,
+        rocket::Screen::SurfacePush
+    };
+    for (const rocket::Screen screen : persistentScreens) {
+        assert(rocket::uiSurfaceKindForScreen(screen) == UiSurfaceKind::PersistentPanel);
+    }
+}
+
+void testSceneComposerUsesResolvedSceneRect()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Hangar;
+    const ScenePacket workspacePacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform workspaceTransform = workspacePacket.transform;
+    assert(std::abs(workspaceTransform.pixelCenterX - 640.0F) < 0.001F);
+    assert(std::abs(workspaceTransform.pixelCenterY - 400.0F) < 0.001F);
+    assert(std::abs(workspaceTransform.worldUnitX - 368.0F) < 0.001F);
+    assert(std::abs(workspaceTransform.worldUnitY - 368.0F) < 0.001F);
+    assertRect(workspacePacket.logicalSceneClip, {0, 0, 1280, 800});
+
+    snapshot.screen = rocket::Screen::Mining;
+    const ScenePacket miningPacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform miningTransform = miningPacket.transform;
+    assert(std::abs(miningTransform.pixelCenterX - 640.0F) < 0.001F);
+    assert(std::abs(miningTransform.pixelCenterY - 420.0F) < 0.001F);
+    assert(std::abs(miningTransform.worldUnitX - 276.0F) < 0.001F);
+    assert(std::abs(miningTransform.worldUnitY - 276.0F) < 0.001F);
+    assertRect(miningPacket.logicalSceneClip, {12, 104, 1256, 552});
+
+    snapshot.titleScreen = true;
+    const ScenePacket titlePacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform titleTransform = titlePacket.transform;
+    assert(std::abs(titleTransform.pixelCenterX - 640.0F) < 0.001F);
+    assert(std::abs(titleTransform.pixelCenterY - 400.0F) < 0.001F);
+    assert(std::abs(titleTransform.worldUnitX - 368.0F) < 0.001F);
+    assertRect(titlePacket.logicalSceneClip, {0, 0, 1280, 800});
+
+    snapshot.titleScreen = false;
+    snapshot.screen = rocket::Screen::Results;
+    const ScenePacket resultsPacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform resultsTransform = resultsPacket.transform;
+    assert(std::abs(resultsTransform.pixelCenterX - 640.0F) < 0.001F);
+    assert(std::abs(resultsTransform.pixelCenterY - 400.0F) < 0.001F);
+    assert(std::abs(resultsTransform.worldUnitX - 368.0F) < 0.001F);
+    assertRect(resultsPacket.logicalSceneClip, {0, 0, 1280, 800});
+
+    snapshot.screen = rocket::Screen::DroneOps;
+    const ScenePacket droneOpsPacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform droneOpsTransform = droneOpsPacket.transform;
+    assert(std::abs(droneOpsTransform.pixelCenterX - 640.0F) < 0.001F);
+    assert(std::abs(droneOpsTransform.pixelCenterY - 400.0F) < 0.001F);
+    assert(std::abs(droneOpsTransform.worldUnitX - 368.0F) < 0.001F);
+    assertRect(droneOpsPacket.logicalSceneClip, {0, 0, 1280, 800});
+
+    composer.setViewport({900, 600, 900, 600, 1.0F});
+    snapshot.screen = rocket::Screen::Hangar;
+    const ScenePacket compactWorkspacePacket =
+        rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+    const rocket::SceneTransform compactWorkspaceTransform = compactWorkspacePacket.transform;
+    assert(std::abs(compactWorkspaceTransform.pixelCenterX - 450.0F) < 0.001F);
+    assert(std::abs(compactWorkspaceTransform.pixelCenterY - 300.0F) < 0.001F);
+    assert(std::abs(compactWorkspaceTransform.worldUnitX - 276.0F) < 0.001F);
+    assertRect(compactWorkspacePacket.logicalSceneClip, {0, 0, 900, 600});
+}
+
+void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+
+    RenderSnapshot snapshot;
+    for (const rocket::Screen screen : {rocket::Screen::Flyby, rocket::Screen::Orbit}) {
+        snapshot = {};
+        snapshot.screen = screen;
+        const ScenePacket activePacket =
+            rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+        assertRect(activePacket.logicalSceneClip, {331, 12, 937, 776});
+        assert(std::abs(activePacket.transform.pixelCenterX - 799.5F) < 0.001F);
+        assert(std::abs(activePacket.transform.pixelCenterY - 400.0F) < 0.001F);
+
+        snapshot.flybyCompleted = screen == rocket::Screen::Flyby;
+        snapshot.orbitCompleted = screen == rocket::Screen::Orbit;
+        const ScenePacket completedPacket =
+            rocket::SceneComposerTestAccess::beginFramePacket(composer, snapshot);
+        assertRect(completedPacket.logicalSceneClip, {0, 0, 1280, 800});
+        assert(std::abs(completedPacket.transform.pixelCenterX - 640.0F) < 0.001F);
+        assert(std::abs(completedPacket.transform.pixelCenterY - 400.0F) < 0.001F);
+        assert(std::abs(completedPacket.transform.worldUnitX - 368.0F) < 0.001F);
+        assert(std::abs(completedPacket.transform.worldUnitY - 368.0F) < 0.001F);
+    }
+}
+
+void testLogicalSceneClipScalesToFramebuffer()
+{
+    const UiRect miningLogicalClip {12, 104, 1256, 552};
+    const FramebufferSceneClip miningAtOneX = rocket::resolveSceneFramebufferClip(
+        miningLogicalClip,
+        1280,
+        800,
+        1280,
+        800);
+    assert(miningAtOneX == FramebufferSceneClip({12, 104, 1256, 552}));
+    assert(rocket::openGlSceneScissorY(miningAtOneX, 800) == 144);
+
+    const FramebufferSceneClip miningAtOneAndQuarterX = rocket::resolveSceneFramebufferClip(
+        miningLogicalClip,
+        1280,
+        800,
+        1600,
+        1000);
+    assert(miningAtOneAndQuarterX == FramebufferSceneClip({15, 130, 1570, 690}));
+    assert(rocket::openGlSceneScissorY(miningAtOneAndQuarterX, 1000) == 180);
+
+    const FramebufferSceneClip miningAtTwoX = rocket::resolveSceneFramebufferClip(
+        miningLogicalClip,
+        1280,
+        800,
+        2560,
+        1600);
+    assert(miningAtTwoX == FramebufferSceneClip({24, 208, 2512, 1104}));
+    assert(rocket::openGlSceneScissorY(miningAtTwoX, 1600) == 288);
+
+    const FramebufferSceneClip dock = rocket::resolveSceneFramebufferClip(
+        {12, 12, 876, 396},
+        900,
+        600,
+        1800,
+        1200);
+    assert(dock == FramebufferSceneClip({24, 24, 1752, 792}));
+    assert(rocket::openGlSceneScissorY(dock, 1200) == 384);
+
+    const FramebufferSceneClip mining = rocket::resolveSceneFramebufferClip(
+        {12, 104, 1256, 552},
+        1280,
+        800,
+        2560,
+        1200);
+    assert(mining == FramebufferSceneClip({24, 156, 2512, 828}));
+    assert(rocket::openGlSceneScissorY(mining, 1200) == 216);
+
+    // Fractional, asymmetric density must round outward on every edge.
+    const FramebufferSceneClip fractional = rocket::resolveSceneFramebufferClip(
+        {1, 1, 1, 1},
+        3,
+        3,
+        10,
+        8);
+    assert(fractional == FramebufferSceneClip({3, 2, 4, 4}));
+    assert(rocket::openGlSceneScissorY(fractional, 8) == 2);
+
+    const FramebufferSceneClip clamped = rocket::resolveSceneFramebufferClip(
+        {-10, -5, 20, 10},
+        100,
+        50,
+        200,
+        100);
+    assert(clamped == FramebufferSceneClip({0, 0, 20, 10}));
+    assert(rocket::resolveSceneFramebufferClip({}, 1280, 800, 2560, 1600).empty());
+    assert(rocket::resolveSceneFramebufferClip({0, 0, 10, 10}, 0, 800, 2560, 1600).empty());
 }
 
 void testPackedVertexConversion()
@@ -260,7 +579,7 @@ void testManifestAndLogicalTextureMapping()
 void testCampaignIntroductionDrawsHeroicCapybara()
 {
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setTextureReady(TextureId::LocalSolarBackground, true);
     composer.setTextureReady(TextureId::HeroicCapybara, true);
 
@@ -318,7 +637,7 @@ void testPolygonInstanceMatchesTriangleFan()
 void testOrderedBatchingAndWideLineInstancing()
 {
     SceneComposer composer;
-    composer.setViewport({1280, 800, 2560, 1600, 2.0F, -1.0F});
+    composer.setViewport({1280, 800, 2560, 1600, 2.0F});
     composer.setPresentationTime(0.0);
     composer.setTextureReady(TextureId::LocalSolarBackground, true);
     composer.setTextureReady(TextureId::Earth, true);
@@ -411,7 +730,7 @@ void testOrderedBatchingAndWideLineInstancing()
 void testUniformAndGradientLineOrdering()
 {
     SceneComposer composer;
-    composer.setViewport({1280, 800, 2560, 1200, 1.5F, -1.0F});
+    composer.setViewport({1280, 800, 2560, 1200, 1.5F});
 
     constexpr Color firstColor {0.20F, 0.40F, 0.60F, 0.80F};
     constexpr Color secondColor {0.90F, 0.30F, 0.10F, 0.50F};
@@ -533,7 +852,7 @@ void testUniformAndGradientLineOrdering()
 void testAtlasPageBatchingAcrossLogicalTextures()
 {
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setPresentationTime(0.0);
     composer.setTextureReady(TextureId::RocketOpen, true);
     composer.setTextureReady(TextureId::MiningDrone, true);
@@ -603,6 +922,7 @@ RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
     snapshot.miningTargetY = mining.targetTipY;
     snapshot.miningReturnZoneX = mining.returnZoneX;
     snapshot.miningReturnZoneY = mining.returnZoneY;
+    snapshot.miningShipPresent = mining.depthZone == mining.entryDepthZone;
     snapshot.bindMiningFrameViews(mining);
     return snapshot;
 }
@@ -610,7 +930,7 @@ RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
 std::vector<PackedSceneInstance> attackDroneInstances(const RenderSnapshot& snapshot)
 {
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setPresentationTime(1.0);
     composer.setTextureReady(TextureId::MiniDroneAttack, true);
     const ScenePacket& packet = composer.compose(snapshot);
@@ -687,7 +1007,7 @@ void testMiningRigSlerpsVerticalDuringExtraction()
     snapshot.miningHullDirY = 0.0;
 
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setTextureReady(TextureId::MiningDrone, true);
 
     composer.setPresentationTime(1.0);
@@ -735,7 +1055,7 @@ void testMiningRigStaysVisibleAndTracksHeading()
     snapshot.miningMoveX = 1.0;
 
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setTextureReady(TextureId::MiningDrone, true);
     composer.setTextureReady(TextureId::DrillBit, true);
 
@@ -905,7 +1225,7 @@ void testMiningTerrainPersistentStreamInvalidation()
     snapshot.miningScannerRadius = 7.0;
 
     SceneComposer composer;
-    composer.setViewport({1280, 800, 1280, 800, 1.0F, -1.0F});
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setPresentationTime(1.0);
     const ScenePacket& first = composer.compose(snapshot);
     assertValidDrawRanges(first);
@@ -966,6 +1286,16 @@ void testMiningTerrainPersistentStreamInvalidation()
 
 int main()
 {
+#if defined(_MSC_VER) && defined(_DEBUG)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+#endif
+    testUiViewportLayoutGeometry();
+    testMiningViewportReservesBothHudLanes();
+    testScreenSurfaceMapping();
+    testSceneComposerUsesResolvedSceneRect();
+    testCompletedFlybyAndOrbitUseFullscreenSceneSurface();
+    testLogicalSceneClipScalesToFramebuffer();
     testPackedVertexConversion();
     testManifestAndLogicalTextureMapping();
     testCampaignIntroductionDrawsHeroicCapybara();

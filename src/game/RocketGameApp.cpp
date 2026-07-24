@@ -7,6 +7,7 @@
 #include "core/LaunchStatus.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
+#include "core/RefitPresentation.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
 #include "game/GamePanel.h"
@@ -289,6 +290,7 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
         : (state_.run.refitEntitled ? std::string(text::status::refitWindowOpened) : std::string(text::status::refitWindowClosed));
     if (state_.screen == Screen::Upgrade) {
         generateModuleOffers(state_, catalog_, rng_);
+        selectedRefitOfferIndex_ = 0;
     }
 }
 
@@ -769,6 +771,18 @@ void RocketGameApp::clearControllerPause()
 
 void RocketGameApp::dispatchControllerAction(InputContext context, GameInputAction action)
 {
+    // Once a modal is visible, only its focused Accept/Cancel contract may
+    // receive controller actions. Nested modal buttons are opened through
+    // ActivateFocused, so blocking direct shortcuts here cannot make them
+    // unreachable.
+    if (services_.ui.modalOpen()
+        && action != GameInputAction::ActivateFocused
+        && action != GameInputAction::CancelFocused
+        && action != GameInputAction::Count) {
+        lastControllerAction_ = "modal_blocked_" + std::string(controllerActionName(action));
+        return;
+    }
+
     lastControllerAction_ = std::string(controllerActionName(action));
     if (action != GameInputAction::EnterUiFocus && action != GameInputAction::Count) {
         queueControllerHapticCue(ControllerHapticCue::Confirmation);
@@ -776,7 +790,13 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 
     switch (action) {
     case GameInputAction::ActivateFocused:
-        services_.ui.activateFocused();
+        if (!services_.ui.activateFocused()) {
+            if (context == InputContext::SurfaceScan) {
+                scanSurfacePulse();
+            } else if (context == InputContext::SurfacePush) {
+                pushSurfaceStep();
+            }
+        }
         break;
     case GameInputAction::CancelFocused:
         if (pauseReason_ == PauseReason::ControllerDisconnected || pauseReason_ == PauseReason::PageHidden) {
@@ -928,12 +948,12 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
     if (input.has(GameInputAction::EnterUiFocus)) {
         dispatchControllerAction(context, GameInputAction::EnterUiFocus);
         if (input.navigation) {
-            services_.ui.navigate(*input.navigation);
+            uiNavigate(*input.navigation);
         }
         return;
     }
     if (input.navigation) {
-        services_.ui.navigate(*input.navigation);
+        uiNavigate(*input.navigation);
     }
     if (std::abs(input.scroll) > 0.10) {
         services_.ui.scroll(static_cast<float>(input.scroll * 48.0));
@@ -1111,8 +1131,14 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
         clearControllerPause();
     }
 
-    if (pauseReason_ == PauseReason::None && services_.ui.modalOpen() && realtimeControllerContext(gameplayContext)) {
+    const bool modalOpen = services_.ui.modalOpen();
+    if (modalOpen) {
+        // Modal opening is also a realtime-input fence. Clear both input
+        // sources before routing this frame so movement, steering, or drilling
+        // cannot continue beneath an overlay.
         releaseRealtimeInputs(true);
+    }
+    if (pauseReason_ == PauseReason::None && modalOpen && realtimeControllerContext(gameplayContext)) {
         pauseReason_ = PauseReason::BlockingModal;
     }
 
@@ -1565,6 +1591,7 @@ void RocketGameApp::next()
         }
         if (state_.run.refitEntitled) {
             generateModuleOffers(state_, catalog_, rng_);
+            selectedRefitOfferIndex_ = 0;
             state_.screen = Screen::Upgrade;
             state_.statusLine = std::string(text::status::refitWindowOpened);
         } else {
@@ -1846,6 +1873,7 @@ void RocketGameApp::extractSurface()
     state_.statusLine = surfaceActionSummary(outcome);
     if (state_.run.refitEntitled) {
         generateModuleOffers(state_, catalog_, rng_);
+        selectedRefitOfferIndex_ = 0;
         state_.screen = Screen::Upgrade;
     } else {
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
@@ -2240,9 +2268,9 @@ void RocketGameApp::miningFailureAck()
         return;
     }
 
-    // Controller acknowledgment is routed directly instead of activating a
-    // focused DOM/RmlUi element. Close the auto-modal and remove its safety
-    // pause here so every input source leaves the failure state consistently.
+    // The shared modal focus scope activates this recovery action for every
+    // input source. DOM fallback dispatches before closing its modal, while
+    // native RmlUi closes before dispatch, so tolerate either lifecycle order.
     if (services_.ui.modalOpen()) {
         services_.ui.closeModal();
     }
@@ -2585,6 +2613,19 @@ void RocketGameApp::debugShowResearch()
     panelDirty_ = true;
 }
 
+void RocketGameApp::debugShowRefit()
+{
+    beginDebugSandbox("Debug Refit board. No save data will be written.");
+    state_.run.refitEntitled = true;
+    state_.run.credits = std::max(state_.run.credits, 100.0);
+    generateModuleOffers(state_, catalog_, rng_);
+    selectedRefitOfferIndex_ = 0;
+    state_.screen = Screen::Upgrade;
+    state_.statusLine = "Debug Refit board. Inspect and navigate permanent offers without touching your save.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugShowSurfaceUpgrade()
 {
     beginDebugSandbox("Debug Surface Upgrade board. No save data will be written.");
@@ -2832,12 +2873,26 @@ void RocketGameApp::selectNavigationDestination(int index)
     refreshPanel();
 }
 
+void RocketGameApp::selectRefitOffer(int index)
+{
+    if (state_.screen == Screen::Upgrade && index >= 0 && index < 3) {
+        selectedRefitOfferIndex_ = index;
+        const RefitWindowPresentation refitWindow = refitWindowPresentation(state_, catalog_);
+        if (static_cast<std::size_t>(index) < refitWindow.offers.size() &&
+            refitWindow.offers[static_cast<std::size_t>(index)].affordable) {
+            services_.ui.requestFocus("action:" + ui::actions::buyOffer(index));
+        }
+        panelDirty_ = true;
+    }
+}
+
 void RocketGameApp::buyOffer(int index)
 {
     if (state_.screen != Screen::Upgrade) {
         return;
     }
     if (rocket::buyOffer(state_, catalog_, index)) {
+        selectedRefitOfferIndex_ = 0;
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         save();
     }
@@ -2848,6 +2903,7 @@ void RocketGameApp::rerollOffers()
 {
     if (state_.screen == Screen::Upgrade) {
         if (rocket::rerollOffers(state_, catalog_, rng_)) {
+            selectedRefitOfferIndex_ = 0;
             save();
         }
         panelDirty_ = true;
@@ -3020,7 +3076,18 @@ bool RocketGameApp::uiHitTest(int x, int y) const
 
 bool RocketGameApp::uiNavigate(UiDirection direction)
 {
-    return services_.ui.navigate(direction);
+    const bool navigated = services_.ui.navigate(direction);
+    if (!navigated || state_.screen != Screen::Upgrade) {
+        return navigated;
+    }
+
+    int offerIndex = 0;
+    if (consumeIndexedAction(services_.ui.focusedId(), "refit-offer:", offerIndex) &&
+        offerIndex >= 0 && offerIndex < 3 && offerIndex != selectedRefitOfferIndex_) {
+        selectedRefitOfferIndex_ = offerIndex;
+        panelDirty_ = true;
+    }
+    return true;
 }
 
 bool RocketGameApp::uiActivateFocused()
@@ -3111,6 +3178,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         hasSavedGame_,
         titleNotice_,
         firstTimeIntroductionsEnabled_,
+        selectedRefitOfferIndex_,
     };
 }
 
@@ -3149,6 +3217,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         newGame();
     } else if (action == ui::actions::continueGame) {
         continueGame();
+    } else if (consumeIndexedAction(action, ui::actions::selectRefitOfferPrefix, index)) {
+        selectRefitOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
         buyOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::researchProjectPrefix, index)) {
@@ -3384,6 +3454,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDroneHealth = mining.droneHealth;
         result.miningReturnZoneX = mining.returnZoneX;
         result.miningReturnZoneY = mining.returnZoneY;
+        result.miningShipPresent = mining.depthZone == mining.entryDepthZone;
         result.miningAtReturnZone = miningAtReturnZone(mining);
         const MiningLoadStats loadStats = miningLoadStats(state_, catalog_);
         result.miningLoad = loadStats.currentLoad;

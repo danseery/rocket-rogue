@@ -61,6 +61,43 @@ std::string joinInts(const std::vector<int>& values, char delimiter)
     return out.str();
 }
 
+std::string encodeSaveBlob(std::string_view text)
+{
+    static constexpr char digits[] = "0123456789abcdef";
+    std::string encoded;
+    encoded.reserve(text.size() * 2 + 1);
+    encoded.push_back('x');
+    for (const unsigned char value : text) {
+        encoded.push_back(digits[value >> 4]);
+        encoded.push_back(digits[value & 0x0f]);
+    }
+    return encoded;
+}
+
+std::string decodeSaveBlob(std::string_view encoded)
+{
+    if (encoded.empty() || encoded.front() != 'x' || encoded.size() % 2 == 0) {
+        return {};
+    }
+    auto nibble = [](char value) -> int {
+        if (value >= '0' && value <= '9') return value - '0';
+        if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+        if (value >= 'A' && value <= 'F') return value - 'A' + 10;
+        return -1;
+    };
+    std::string decoded;
+    decoded.reserve((encoded.size() - 1) / 2);
+    for (std::size_t index = 1; index + 1 < encoded.size(); index += 2) {
+        const int high = nibble(encoded[index]);
+        const int low = nibble(encoded[index + 1]);
+        if (high < 0 || low < 0) {
+            return {};
+        }
+        decoded.push_back(static_cast<char>((high << 4) | low));
+    }
+    return decoded;
+}
+
 int statusToInt(CrewStatus status)
 {
     switch (status) {
@@ -1582,6 +1619,69 @@ MiningArtifactObject parseMiningArtifact(std::string_view text)
     return artifact;
 }
 
+std::string serializeMiningDepthRoute(const MiningRunState& mining)
+{
+    std::ostringstream out;
+    out << mining.entryDepthZone
+        << save_schema::crewFieldDelimiter << mining.deepestDepthZone
+        << save_schema::crewFieldDelimiter << (mining.hasDownwardTransition ? 1 : 0)
+        << save_schema::crewFieldDelimiter << mining.downwardTransitionX;
+    return out.str();
+}
+
+void parseMiningDepthRoute(std::string_view text, MiningRunState& mining)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) mining.entryDepthZone = std::max(0, parseInt(fields[0], mining.depthZone));
+    if (fields.size() > 1) mining.deepestDepthZone = std::max(mining.entryDepthZone, parseInt(fields[1], mining.depthZone));
+    if (fields.size() > 2) mining.hasDownwardTransition = parseInt(fields[2], 0) != 0;
+    if (fields.size() > 3) mining.downwardTransitionX = parseDouble(fields[3], mining.downwardTransitionX);
+}
+
+std::string serializeMiningDepthLayers(const std::vector<MiningDepthLayerState>& layers)
+{
+    std::ostringstream out;
+    for (std::size_t index = 0; index < layers.size(); ++index) {
+        if (index > 0) out << '~';
+        const MiningDepthLayerState& layer = layers[index];
+        out << layer.depthZone << '^'
+            << (layer.hasDownwardTransition ? 1 : 0) << '^'
+            << layer.downwardTransitionX << '^'
+            << encodeSaveBlob(serializeMiningTerrainSize(layer.terrain)) << '^'
+            << encodeSaveBlob(serializeMiningCells(layer.terrain)) << '^'
+            << encodeSaveBlob(serializeMiningEnemies(layer.enemies)) << '^'
+            << encodeSaveBlob(serializeMiningArtifact(layer.artifact)) << '^'
+            << encodeSaveBlob(serializeMiningGateRuntime(layer.gate));
+    }
+    return out.str();
+}
+
+std::vector<MiningDepthLayerState> parseMiningDepthLayers(std::string_view text)
+{
+    std::vector<MiningDepthLayerState> layers;
+    for (const std::string& record : split(text, '~')) {
+        const std::vector<std::string> fields = split(record, '^');
+        if (fields.size() < 8) {
+            continue;
+        }
+        MiningDepthLayerState layer;
+        layer.depthZone = std::max(0, parseInt(fields[0], 0));
+        layer.hasDownwardTransition = parseInt(fields[1], 0) != 0;
+        layer.downwardTransitionX = parseDouble(fields[2], 0.0);
+        parseMiningTerrainSize(decodeSaveBlob(fields[3]), layer.terrain);
+        parseMiningCells(decodeSaveBlob(fields[4]), layer.terrain);
+        layer.enemies = parseMiningEnemies(decodeSaveBlob(fields[5]));
+        layer.artifact = parseMiningArtifact(decodeSaveBlob(fields[6]));
+        parseMiningGateRuntime(decodeSaveBlob(fields[7]), layer.gate);
+        if (layer.terrain.depthZone != layer.depthZone ||
+            static_cast<int>(layer.terrain.cells.size()) != layer.terrain.width * layer.terrain.height) {
+            continue;
+        }
+        layers.push_back(std::move(layer));
+    }
+    return layers;
+}
+
 void normalizeLegacyMiningArtifact(MiningRunState& mining)
 {
     if (!mining.active) {
@@ -1882,6 +1982,33 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
     state.run.mining = save.mining;
+    if (state.run.mining.active) {
+        MiningRunState& mining = state.run.mining;
+        if (save.version < 5) {
+            // Older runs moved the shuttle with every one-way depth change, so
+            // their current layer is the only safe entry layer to restore.
+            mining.entryDepthZone = mining.depthZone;
+            mining.deepestDepthZone = mining.depthZone;
+            mining.depthLayers.clear();
+            mining.hasDownwardTransition = false;
+            mining.downwardTransitionX = 0.0;
+        } else {
+            mining.entryDepthZone = std::clamp(mining.entryDepthZone, 0, mining.depthZone);
+            mining.deepestDepthZone = std::max({mining.entryDepthZone, mining.depthZone, mining.deepestDepthZone});
+            mining.depthLayers.erase(
+                std::remove_if(
+                    mining.depthLayers.begin(),
+                    mining.depthLayers.end(),
+                    [&](const MiningDepthLayerState& layer) {
+                        return layer.depthZone < mining.entryDepthZone ||
+                            layer.depthZone == mining.depthZone ||
+                            layer.terrain.depthZone != layer.depthZone ||
+                            static_cast<int>(layer.terrain.cells.size()) != layer.terrain.width * layer.terrain.height;
+                    }),
+                mining.depthLayers.end());
+        }
+        mining.depthTransitionCooldownSeconds = 0.0;
+    }
     if (state.run.mining.active) {
         state.run.surfaceExpedition.miningSitePrepared = true;
         state.run.surfaceExpedition.miningRunUsed = true;
@@ -2249,6 +2376,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningDrill, serializePair(save.mining.drillHeat, save.mining.drillIntegrity));
     writeField(out, save_schema::field::miningThermalLock, save.mining.drillThermalLock ? 1 : 0);
     writeField(out, save_schema::field::miningDepth, save.mining.depthZone);
+    writeField(out, save_schema::field::miningDepthRoute, serializeMiningDepthRoute(save.mining));
+    writeField(out, save_schema::field::miningDepthLayers, serializeMiningDepthLayers(save.mining.depthLayers));
     writeField(out, save_schema::field::miningCargo, save.mining.cargo);
     writeField(out, save_schema::field::miningMaterials, serializeMaterials(save.mining.temporaryMaterials));
     writeField(out, save_schema::field::miningArtifacts, serializeArtifacts(save.mining.temporaryArtifacts));
@@ -2519,6 +2648,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.drillThermalLock = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDepth) {
             save.mining.depthZone = parseInt(value, save.mining.depthZone);
+        } else if (key == save_schema::field::miningDepthRoute) {
+            parseMiningDepthRoute(value, save.mining);
+        } else if (key == save_schema::field::miningDepthLayers) {
+            save.mining.depthLayers = parseMiningDepthLayers(value);
         } else if (key == save_schema::field::miningCargo) {
             save.mining.cargo = parseInt(value, save.mining.cargo);
         } else if (key == save_schema::field::miningMaterials) {

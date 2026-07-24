@@ -1,5 +1,6 @@
 #include "render/vulkan/VulkanGraphicsBackend.h"
 
+#include "render/SceneClip.h"
 #include "render/vulkan/VulkanPolicy.h"
 
 #include <SDL3/SDL_vulkan.h>
@@ -1161,8 +1162,7 @@ void VulkanGraphicsBackend::render(const RenderSnapshot& snapshot)
         viewport.logicalHeight,
         viewport.drawableWidth,
         viewport.drawableHeight,
-        viewport.densityRatio,
-        viewport.sceneLeftNdc
+        viewport.densityRatio
     });
     composer_.setPresentationTime(host_.monotonicSeconds());
     const ScenePacket& packet = composer_.compose(snapshot);
@@ -1378,8 +1378,29 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
         .minDepth = 0.0F,
         .maxDepth = 1.0F
     };
-    const VkRect2D scissor {{0, 0}, swapchainExtent_};
     vkCmdSetViewport(activeFrame_->commandBuffer, 0, 1, &viewport);
+    const int framebufferWidth = static_cast<int>(std::min<std::uint32_t>(
+        swapchainExtent_.width,
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
+    const int framebufferHeight = static_cast<int>(std::min<std::uint32_t>(
+        swapchainExtent_.height,
+        static_cast<std::uint32_t>(std::numeric_limits<int>::max())));
+    const FramebufferSceneClip sceneClip = resolveSceneFramebufferClip(
+        packet.logicalSceneClip,
+        std::max(1, static_cast<int>(std::lround(packet.transform.cssWidth))),
+        std::max(1, static_cast<int>(std::lround(packet.transform.cssHeight))),
+        framebufferWidth,
+        framebufferHeight);
+    if (sceneClip.empty()) {
+        return;
+    }
+    const VkRect2D scissor {
+        {sceneClip.x, sceneClip.y},
+        {
+            static_cast<std::uint32_t>(sceneClip.width),
+            static_cast<std::uint32_t>(sceneClip.height),
+        },
+    };
     vkCmdSetScissor(activeFrame_->commandBuffer, 0, 1, &scissor);
     const VkDeviceSize vertexOffset = 0;
     vulkan_policy::SceneVertexBindingState vertexBinding;

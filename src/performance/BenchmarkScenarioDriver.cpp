@@ -20,6 +20,8 @@ Screen expectedScreen(NativeBenchmarkScenario scenario)
         return Screen::Orbit;
     case NativeBenchmarkScenario::SurfaceOps:
         return Screen::SurfaceExpedition;
+    case NativeBenchmarkScenario::SurfaceScan:
+        return Screen::SurfaceScan;
     case NativeBenchmarkScenario::Mining:
         return Screen::Mining;
     }
@@ -68,6 +70,9 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
         break;
     case NativeBenchmarkScenario::SurfaceOps:
         app.debugShowSurfaceOps();
+        break;
+    case NativeBenchmarkScenario::SurfaceScan:
+        app.debugStartSurfaceScan();
         break;
     case NativeBenchmarkScenario::Mining:
         // Act III level 10 exercises the largest terrain/combat presentation

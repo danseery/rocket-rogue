@@ -2805,7 +2805,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = scanHazardDelta;
     outcome.message = scan.pulses >= scan.maxPulses
-        ? "Full spectrum scan complete. Bank the payload before the window collapses."
+        ? "Full spectrum scan complete. Bank the forecast before the window collapses."
         : "Scan mapped layer +" + std::to_string(depthOffset) + ". Use Push Deeper to test that forecast.";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
@@ -2826,7 +2826,7 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
 
     outcome.applied = true;
     if (scan.busted) {
-        outcome.message = "Scan window closed. No payload banked.";
+        outcome.message = "Scan window closed. No forecast banked.";
     } else {
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
             const SurfaceDepthProspect* existing = findSurfaceDepthProspect(expedition, prospect.absoluteDepth);
@@ -2859,7 +2859,7 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state)
         return outcome;
     }
     outcome.applied = true;
-    outcome.message = "Surface scan recalled. No scan payload banked.";
+    outcome.message = "Surface scan recalled. No forecast banked.";
     appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
     resetSurfaceScan(state);
     state.screen = Screen::SurfaceExpedition;

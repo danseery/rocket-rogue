@@ -7,6 +7,7 @@ const outputDir = "dist/azure-static-web-app";
 const requiredFiles = [
   "rocket_rogue.html",
   "rocket_rogue.js",
+  "rocket_rogue.data",
   "rocket_rogue.wasm"
 ];
 
@@ -14,6 +15,13 @@ const requiredSceneAtlasFiles = [
   "scene-atlas-0.png",
   "scene-atlas-1.png",
   "scene-atlas.json"
+];
+
+const requiredFontFiles = [
+  "SourceCodePro-Regular.ttf",
+  "SourceCodePro-Semibold.ttf",
+  "SourceCodePro-It.ttf",
+  "LICENSE.md"
 ];
 
 function copyDirectory(source, target) {
@@ -60,6 +68,13 @@ for (const file of requiredSceneAtlasFiles) {
   const path = join(buildDir, "assets", "scene-atlas", file);
   if (!existsSync(path)) {
     console.error(`Missing generated scene atlas asset: ${path}`);
+    process.exit(1);
+  }
+}
+for (const file of requiredFontFiles) {
+  const path = join(buildDir, "assets", "fonts", file);
+  if (!existsSync(path)) {
+    console.error(`Missing Source Code Pro runtime asset: ${path}`);
     process.exit(1);
   }
 }

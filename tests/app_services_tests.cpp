@@ -1,14 +1,27 @@
 #include "game/GameRunner.h"
+#include "game/GamePanel.h"
+#include "game/GameRmlUi.h"
+#include "game/IRmlRenderHost.h"
+#include "core/ContentIds.h"
+#include "core/GameState.h"
 #include "core/GameUi.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
 #include "platform/AppServices.h"
 
+#include "../.deps/RmlUi/Include/RmlUi/Core/RenderInterface.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <functional>
+
+#if defined(_MSC_VER)
+#include <crtdbg.h>
+#endif
 
 namespace {
 
@@ -70,7 +83,7 @@ public:
     void log(rocket::PlatformLogLevel, std::string_view) override {}
     bool haptic(double, double, double) override { ++hapticCount; return true; }
     mutable double now = 1.0;
-    rocket::ViewportMetrics metrics {1280, 800, 2560, 1600, 2.0F, -1.0F};
+    rocket::ViewportMetrics metrics {1280, 800, 2560, 1600, 2.0F};
     bool fullscreenValue = false;
     int hapticCount = 0;
 };
@@ -114,6 +127,7 @@ public:
         titleScreen = snapshot.titleScreen;
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
+        flybyInputY = snapshot.flybyInputY;
         if (snapshot.screen == rocket::Screen::Mining) {
             miningViewsObserved = true;
             const std::size_t expectedCells = static_cast<std::size_t>(
@@ -167,6 +181,7 @@ public:
     double animationTime = 0.0;
     double shipDamage = 0.0;
     double miningHeat = 0.0;
+    double flybyInputY = 0.0;
     double miningViewChecksum = 0.0;
     rocket::Screen screen = rocket::Screen::Hangar;
     bool titleScreen = false;
@@ -193,17 +208,42 @@ public:
     bool mouseUp(int, int, int) override { return false; }
     bool mouseWheel(int, int, double) override { return false; }
     bool hitTest(int, int) const override { return false; }
-    bool navigate(rocket::UiDirection) override { return true; }
-    bool activateFocused() override { return true; }
-    bool cancel() override { return true; }
+    bool navigate(rocket::UiDirection direction) override
+    {
+        lastNavigation = direction;
+        return navigateResult;
+    }
+    bool activateFocused() override
+    {
+        ++activateFocusedCount;
+        return activateFocusedResult;
+    }
+    bool cancel() override
+    {
+        ++cancelCount;
+        if (cancelClosesModal) {
+            modalOpenValue = false;
+        }
+        return cancelResult;
+    }
     bool scroll(float) override { return true; }
-    bool modalOpen() const override { return false; }
+    bool modalOpen() const override { return modalOpenValue; }
     void setControllerPresentation(bool, rocket::ControllerFamily) override {}
     void setControllerFocusVisible(bool) override {}
     void setControllerResumeBlocked(bool, bool) override {}
-    std::string focusedId() const override { return "action:primary"; }
-    void openModal(const std::string&) override {}
-    void closeModal() override {}
+    std::string focusedId() const override { return focusedIdValue; }
+    void requestFocus(std::string_view id) override { requestedFocusId = std::string(id); }
+    void openModal(const std::string& id) override
+    {
+        modalOpenValue = true;
+        lastOpenedModal = id;
+        ++openModalCount;
+    }
+    void closeModal() override
+    {
+        modalOpenValue = false;
+        ++closeModalCount;
+    }
     void dispatchAction(const std::string& action) override { if (actionHandler) actionHandler(action); }
     void refresh() override {}
     bool activateButtonLabel(const std::string&) override { return false; }
@@ -223,6 +263,19 @@ public:
     int hudSetCount = 0;
     int performanceStatsSetCount = 0;
     bool performanceStatsVisible = false;
+    bool navigateResult = true;
+    bool activateFocusedResult = true;
+    bool cancelResult = true;
+    bool cancelClosesModal = true;
+    bool modalOpenValue = false;
+    int activateFocusedCount = 0;
+    int cancelCount = 0;
+    int openModalCount = 0;
+    int closeModalCount = 0;
+    std::string lastOpenedModal;
+    rocket::UiDirection lastNavigation = rocket::UiDirection::Up;
+    std::string focusedIdValue = "action:primary";
+    std::string requestedFocusId;
     rocket::RealtimeHudState hud;
     rocket::PerformanceStats lastPerformanceStats;
     std::function<void()> renderTimingHook;
@@ -242,14 +295,6 @@ public:
     void setControllerPresentation(bool, rocket::ControllerFamily) override {}
     void setControllerFocusVisible(bool) override {}
     void setControllerResumeBlocked(bool, bool) override {}
-    bool navigate(rocket::UiDirection) override { return false; }
-    bool activate() override { return false; }
-    bool cancel() override { return false; }
-    bool scroll(double) override { return false; }
-    bool modalOpen() const override { return false; }
-    bool openModal(std::string_view) override { return false; }
-    void closeModal() override {}
-    std::string focusedId() const override { return {}; }
     void preferencesChanged(const rocket::AppPreferences& value) override
     {
         lastPreferences = value;
@@ -262,6 +307,68 @@ public:
     rocket::AppPreferences lastPreferences;
     rocket::RealtimeHudState hud;
 };
+
+class NullRmlRenderInterface final : public Rml::RenderInterface {
+public:
+    Rml::CompiledGeometryHandle CompileGeometry(
+        Rml::Span<const Rml::Vertex>,
+        Rml::Span<const int>) override
+    {
+        return nextHandle_++;
+    }
+    void RenderGeometry(
+        Rml::CompiledGeometryHandle,
+        Rml::Vector2f,
+        Rml::TextureHandle) override
+    {
+    }
+    void ReleaseGeometry(Rml::CompiledGeometryHandle) override {}
+    Rml::TextureHandle LoadTexture(Rml::Vector2i& dimensions, const Rml::String&) override
+    {
+        dimensions = {1, 1};
+        return nextHandle_++;
+    }
+    Rml::TextureHandle GenerateTexture(
+        Rml::Span<const Rml::byte>,
+        Rml::Vector2i) override
+    {
+        return nextHandle_++;
+    }
+    void ReleaseTexture(Rml::TextureHandle) override {}
+    void EnableScissorRegion(bool) override {}
+    void SetScissorRegion(Rml::Rectanglei) override {}
+
+private:
+    std::uintptr_t nextHandle_ = 1;
+};
+
+class NullRmlRenderHost final : public rocket::IRmlRenderHost {
+public:
+    bool initialize() override { return true; }
+    Rml::RenderInterface& renderInterface() override { return renderer_; }
+    void setViewport(const rocket::RmlRenderViewport&) override {}
+    void setRootClip(const rocket::RmlRenderClip&) override {}
+    bool beginFrame() override { return true; }
+    void endFrame() override {}
+    rocket::UiDiagnostics diagnostics() const override { return {}; }
+    void shutdown() override {}
+
+private:
+    NullRmlRenderInterface renderer_;
+};
+
+std::string repositoryRootForRmlTests()
+{
+    std::filesystem::path candidate = std::filesystem::current_path();
+    for (int depth = 0; depth < 5; ++depth) {
+        if (std::filesystem::exists(candidate / "assets" / "fonts" / "SourceCodePro-Regular.ttf")) {
+            return candidate.string();
+        }
+        candidate = candidate.parent_path();
+    }
+    assert(false && "RmlUi tests could not locate the repository font assets");
+    return {};
+}
 
 struct AppFixture {
     FakeSaveStore saves;
@@ -299,10 +406,261 @@ std::string freshSurfaceExpeditionSave()
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string activeDroneBaySurfaceExpeditionSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xD20E0F5ULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
+    state.meta.droneBaySlots = 2;
+    rocket::ensureDroneBayState(state, catalog);
+    rocket::ui::briefings::acknowledge(
+        state.meta.acknowledgedActivityBriefingIds,
+        rocket::ui::briefings::miniDrones);
+    state.screen = rocket::Screen::SurfaceExpedition;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 } // namespace
 
 int main()
 {
+#if defined(_MSC_VER)
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+
+#if !defined(__EMSCRIPTEN__)
+    // Surface Ops presents its immediate operations as one visible horizontal
+    // action row. Left/right follows Mine -> Survey -> Push -> Extract, while
+    // Up returns to the Drone Ops callout above the row.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState state = rocket::createNewGame(catalog, 0x5A7FACEULL);
+        state.run.destinationIndex = 2;
+        rocket::startSurfaceExpedition(state, catalog);
+        state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
+        state.meta.droneBaySlots = 2;
+        rocket::ensureDroneBayState(state, catalog);
+        rocket::ui::briefings::acknowledge(
+            state.meta.acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::miniDrones);
+        state.run.surfaceExpedition.miningSitePrepared = true;
+        state.screen = rocket::Screen::SurfaceExpedition;
+        rocket::Random rng(0x5A7FACEULL);
+        const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
+        rocket::PanelRenderContext panelContext {state, catalog, launch, launch};
+        panelContext.firstTimeIntroductionsEnabled = false;
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        host.metrics = {1861, 618, 4337, 1440, 2.33F};
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        std::string pointerAction;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([&pointerAction](const std::string& action) {
+            pointerAction = action;
+        }));
+        const std::string surfaceHtml = rocket::buildGamePanelHtml(panelContext);
+        assert(surfaceHtml.find("data-ui-focus-id=\"action:drone_ops\"") != std::string::npos);
+        ui.setPanelHtml(surfaceHtml);
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+        ui.requestFocus("action:mine_surface");
+        ui.refresh();
+
+        constexpr std::array<std::string_view, 4> focusPath {
+            "action:mine_surface",
+            "action:survey_surface",
+            "action:push_surface",
+            "action:extract_surface",
+        };
+        assert(ui.focusedId() == focusPath.front());
+        assert(!ui.navigate(rocket::UiDirection::Left));
+        assert(ui.focusedId() == focusPath.front());
+        for (std::size_t index = 1; index < focusPath.size(); ++index) {
+            assert(ui.navigate(rocket::UiDirection::Right));
+            assert(ui.focusedId() == focusPath[index]);
+        }
+        assert(!ui.navigate(rocket::UiDirection::Right));
+        for (std::size_t index = focusPath.size() - 1; index > 0; --index) {
+            assert(ui.navigate(rocket::UiDirection::Left));
+            assert(ui.focusedId() == focusPath[index - 1]);
+        }
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "action:drone_ops");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() != "action:drone_ops");
+
+        // The shared titlebar is a horizontal row. Left/right follows its
+        // visible order and stops at the row edges instead of wrapping.
+        ui.requestFocus("modal:inventory");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:inventory");
+        assert(ui.navigate(rocket::UiDirection::Left));
+        assert(ui.focusedId() == "modal:map");
+        assert(!ui.navigate(rocket::UiDirection::Left));
+        assert(ui.focusedId() == "modal:map");
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "modal:inventory");
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "modal:system_menu");
+        assert(!ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "modal:system_menu");
+
+        // Right-aligned utility rows map vertically to the matching titlebar
+        // controls even when responsive transforms move the board itself.
+        ui.requestFocus("modal:mission_log");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:mission_log");
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "modal:system_menu");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "modal:mission_log");
+        ui.requestFocus("modal:surface");
+        ui.refresh();
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "modal:inventory");
+
+        // A wide, short workspace still caps its centered work lane at 1200
+        // px. Every Surface Ops card button must remain pointer-reachable
+        // inside that lane instead of being positioned from the outer monitor
+        // width.
+        constexpr std::array<std::string_view, 4> surfaceActions {
+            rocket::ui::actions::mineSurface,
+            rocket::ui::actions::surveySurface,
+            rocket::ui::actions::pushSurface,
+            rocket::ui::actions::extractSurface,
+        };
+        std::array<bool, surfaceActions.size()> pointerReachable {};
+        for (int x = 340; x <= 1520; x += 10) {
+            for (int y = 340; y <= 610; y += 10) {
+                pointerAction.clear();
+                ui.mouseDown(x, y, 0);
+                ui.mouseUp(x, y, 0);
+                for (std::size_t index = 0; index < surfaceActions.size(); ++index) {
+                    pointerReachable[index] = pointerReachable[index]
+                        || pointerAction == surfaceActions[index];
+                }
+            }
+        }
+        assert(std::all_of(pointerReachable.begin(), pointerReachable.end(), [](bool reachable) {
+            return reachable;
+        }));
+        ui.shutdown();
+    }
+
+    // Drone Ops owns the full viewport. Its right-aligned titlebar and
+    // workspace actions must stay inside the panel's 16 px edge even when
+    // button padding is present at a compact resolution.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState state = rocket::createNewGame(catalog, 0xD20E0F5ULL);
+        state.run.destinationIndex = 2;
+        rocket::startSurfaceExpedition(state, catalog);
+        state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
+        state.meta.droneBaySlots = 2;
+        rocket::ensureDroneBayState(state, catalog);
+        rocket::ui::briefings::acknowledge(
+            state.meta.acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::miniDrones);
+        state.screen = rocket::Screen::DroneOps;
+        rocket::Random rng(0xD20E0F5ULL);
+        const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
+        rocket::PanelRenderContext panelContext {state, catalog, launch, launch};
+        panelContext.firstTimeIntroductionsEnabled = false;
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        host.metrics = {1010, 1000, 1010, 1000, 1.0F};
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        std::string pointerAction;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([&pointerAction](const std::string& action) {
+            pointerAction = action;
+        }));
+        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+
+        // Details is part of every drone card's controller path, and must
+        // promote its full profile into the matching modal rather than
+        // forcing a mouse-only route to the bundled capability chips.
+        ui.requestFocus("modal:drone_details_0");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:drone_details_0");
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        ui.closeModal();
+
+        // An empty bay still has to connect the shared titlebar, Drone Ops
+        // workspace controls, and the roster. Otherwise controller focus can
+        // become stranded in Map / Inventory / Menu after the last unequip.
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+        ui.requestFocus("modal:map");
+        ui.refresh();
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "modal:surface");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId().starts_with("modal:drone_details_"));
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "modal:surface");
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "modal:map");
+
+        // Active Drone Controls actions must be able to leave the roster for
+        // Active Loadout, then return through the same horizontal seam.
+        rocket::GameState loadedState = state;
+        loadedState.meta.equippedDroneIds.push_back(rocket::content::drone::miningDrone);
+        rocket::Random loadedRng(0xD20E0F6ULL);
+        const rocket::PreparedLaunch loadedLaunch = rocket::prepareLaunch(loadedState, catalog, loadedRng);
+        rocket::PanelRenderContext loadedPanelContext {loadedState, catalog, loadedLaunch, loadedLaunch};
+        loadedPanelContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelHtml(rocket::buildGamePanelHtml(loadedPanelContext));
+        ui.requestFocus("action:equip_drone:0");
+        ui.refresh();
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId().starts_with("modal:drone_details_"));
+        while (ui.navigate(rocket::UiDirection::Right)) {
+            if (ui.focusedId() == "action:unequip_drone_slot:0") {
+                break;
+            }
+        }
+        assert(ui.focusedId() == "action:unequip_drone_slot:0");
+        assert(ui.navigate(rocket::UiDirection::Left));
+        assert(ui.focusedId().starts_with("modal:drone_details_"));
+
+        const auto click = [&ui](int x, int y) {
+            ui.mouseDown(x, y, 0);
+            ui.mouseUp(x, y, 0);
+        };
+
+        click(1002, 35);
+        assert(!ui.modalOpen());
+        click(950, 35);
+        assert(ui.modalOpen());
+        ui.closeModal();
+
+        pointerAction.clear();
+        click(1002, 112);
+        assert(pointerAction.empty());
+        click(900, 112);
+        assert(pointerAction == rocket::ui::actions::backToSurfaceOps);
+        ui.shutdown();
+    }
+#endif
+
     // Render views must alias authoritative storage and retain the complete
     // enemy array so a mini-drone's gameplay target index is unchanged.
     rocket::MiningRunState renderViewFixture;
@@ -408,6 +766,78 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Refit cards install directly; no separate preview-selection action or
+    // duplicate selected-offer panel is required.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugShowRefit();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+        assert(fixture.ui.html.find("data-rr-action=\"buy_offer:0\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"buy_offer:1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"buy_offer:2\"") != std::string::npos);
+        assert(fixture.ui.html.find("selected-refit-detail") == std::string::npos);
+        fixture.runner.shutdown();
+    }
+
+    // Field Upgrade cards commit directly; no preview-selection state or
+    // duplicate selected-offer section is required.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugShowSurfaceUpgrade();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceUpgrade));
+        assert(fixture.ui.html.find("data-rr-action=\"surface_upgrade:0\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"surface_upgrade:1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"surface_upgrade:2\"") != std::string::npos);
+        assert(fixture.ui.html.find("selected-upgrade-detail") == std::string::npos);
+
+        fixture.ui.dispatchAction("surface_upgrade:1");
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        fixture.runner.shutdown();
+    }
+
+    // Surface minigame Confirm remains useful after D-pad navigation even if
+    // the UI bridge temporarily has no valid focused control.
+    for (const bool scanScreen : {true, false}) {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        if (scanScreen) {
+            fixture.runner.app().debugStartSurfaceScan();
+        } else {
+            fixture.runner.app().debugStartSurfacePush();
+        }
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        const std::string initialPanel = fixture.ui.html;
+
+        fixture.ui.activateFocusedResult = false;
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.navigation = rocket::UiDirection::Right;
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::DpadRight));
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+
+        fixture.controllers.frame.navigation.reset();
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::South));
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+
+        assert(fixture.ui.activateFocusedCount == 1);
+        assert(fixture.ui.html != initialPanel);
+        fixture.runner.shutdown();
+    }
+
     // New Game must atomically replace any previous valid save with a fresh,
     // immediately resumable initial state.
     {
@@ -491,6 +921,62 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Drone Ops is a Surface Ops sub-screen: loadout edits persist while it is
+    // open, and both its explicit Done action and controller Cancel return to
+    // the still-active Surface Expedition.
+    {
+        AppFixture fixture;
+        fixture.saves.value = activeDroneBaySurfaceExpeditionSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+
+        fixture.ui.dispatchAction("drone_ops");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
+        std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(saved->screen == rocket::Screen::DroneOps);
+        assert(saved->surfaceExpedition.active);
+
+        fixture.ui.dispatchAction("equip_drone:0");
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(std::find(
+            saved->equippedDroneIds.begin(),
+            saved->equippedDroneIds.end(),
+            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
+
+        fixture.ui.dispatchAction("back_to_surface_ops");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(saved->screen == rocket::Screen::SurfaceExpedition);
+        assert(saved->surfaceExpedition.active);
+        assert(std::find(
+            saved->equippedDroneIds.begin(),
+            saved->equippedDroneIds.end(),
+            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
+
+        fixture.ui.dispatchAction("drone_ops");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::East));
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(saved->screen == rocket::Screen::SurfaceExpedition);
+        assert(saved->surfaceExpedition.active);
+        assert(std::find(
+            saved->equippedDroneIds.begin(),
+            saved->equippedDroneIds.end(),
+            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
+        fixture.runner.shutdown();
+    }
+
     // Failed replacement preserves both the prior save and the title barrier.
     {
         AppFixture fixture;
@@ -507,6 +993,112 @@ int main()
         assert(fixture.saves.storeCount == 1);
         assert(fixture.saves.clearCount == 0);
         assert(fixture.saves.value == originalSave);
+        fixture.runner.shutdown();
+    }
+
+    // A global modal is the only controller focus scope while it is visible.
+    // Mapped Accept activates its focused control, direct shortcuts cannot
+    // replace it, and one mapped Cancel closes only that modal layer.
+    {
+        AppFixture fixture;
+        fixture.preferences.value.controller.swapConfirmCancel = true;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugStartFlyby();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::FlybyActive);
+        assert(std::abs(fixture.renderer.flybyInputY) < 0.000001);
+
+        fixture.ui.openModal("settings");
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.leftY = 0.85;
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::East));
+        const std::uint64_t stateBeforeModalInput = fixture.runner.app().deterministicStateHash();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Paused);
+        assert(fixture.ui.activateFocusedCount == 1);
+        assert(fixture.ui.cancelCount == 0);
+        assert(fixture.ui.modalOpenValue);
+        assert(std::abs(fixture.renderer.flybyInputY) < 0.000001);
+        assert(fixture.runner.app().deterministicStateHash() == stateBeforeModalInput);
+
+        const int modalOpenCountBeforeShortcut = fixture.ui.openModalCount;
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::Menu));
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.ui.openModalCount == modalOpenCountBeforeShortcut);
+        assert(fixture.ui.lastOpenedModal == "settings");
+        assert(fixture.ui.modalOpenValue);
+        assert(fixture.runner.app().deterministicStateHash() == stateBeforeModalInput);
+
+        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::South));
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.ui.cancelCount == 1);
+        assert(!fixture.ui.modalOpenValue);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Paused);
+        assert(fixture.runner.app().deterministicStateHash() == stateBeforeModalInput);
+
+        fixture.controllers.frame.leftY = 0.0;
+        fixture.controllers.frame.meaningfulInput = false;
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::FlybyActive);
+        assert(fixture.ui.cancelCount == 1);
+        fixture.runner.shutdown();
+    }
+
+    // Returning to Earth resolves into a non-dismissible launch outcome modal.
+    // D-pad navigation may remain active inside that modal, but it must not
+    // advance the result-scene animation underneath the focused Continue action.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("new_game");
+        fixture.ui.dispatchAction("acknowledge_story_briefing");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+
+        fixture.runner.app().prepareForLaunch();
+        fixture.runner.app().startLaunch();
+        for (int frame = 0;
+             frame < 600 && fixture.runner.app().inputContext() != rocket::InputContext::Launch;
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
+
+        fixture.runner.app().returnHome();
+        for (int frame = 0;
+             frame < 600 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch);
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
+        assert(fixture.ui.html.find("<template data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"next\"") != std::string::npos);
+
+        fixture.ui.openModal(std::string(rocket::ui::modals::launchOutcome));
+        fixture.ui.focusedIdValue = "action:next";
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.navigation = rocket::UiDirection::Down;
+        fixture.controllers.frame.leftY = 0.85;
+        const double resultAnimationBeforeNavigation = fixture.renderer.animationTime;
+        const std::uint64_t stateBeforeNavigation = fixture.runner.app().deterministicStateHash();
+
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Paused);
+        assert(fixture.ui.lastNavigation == rocket::UiDirection::Down);
+        assert(fixture.ui.focusedIdValue == "action:next");
+        assert(std::abs(fixture.renderer.animationTime - resultAnimationBeforeNavigation) < 0.000001);
+        assert(fixture.runner.app().deterministicStateHash() == stateBeforeNavigation);
         fixture.runner.shutdown();
     }
 

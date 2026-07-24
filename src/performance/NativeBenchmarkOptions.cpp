@@ -75,6 +75,7 @@ std::optional<NativeBenchmarkScenario> parseScenario(std::string_view text)
     if (text == "flyby") return NativeBenchmarkScenario::Flyby;
     if (text == "orbit") return NativeBenchmarkScenario::Orbit;
     if (text == "surface-ops") return NativeBenchmarkScenario::SurfaceOps;
+    if (text == "surface-scan") return NativeBenchmarkScenario::SurfaceScan;
     if (text == "mining") return NativeBenchmarkScenario::Mining;
     return std::nullopt;
 }
@@ -272,7 +273,7 @@ NativeBenchmarkParseResult parseNativeBenchmarkOptions(
             const auto scenario = parseScenario(value);
             if (!scenario) {
                 return parseError("Invalid benchmark scenario '" + std::string(value)
-                    + "'. Expected title, hangar, launch, flyby, orbit, surface-ops, or mining.");
+                    + "'. Expected title, hangar, launch, flyby, orbit, surface-ops, surface-scan, or mining.");
             }
             result.options.scenario = *scenario;
             scenarioSpecified = true;
@@ -421,7 +422,7 @@ std::string nativeBenchmarkHelpText(std::string_view executableName)
         << "  " << executableName << " [benchmark options]\n"
         << "  " << executableName << " --help\n\n"
         << "Required benchmark options:\n"
-        << "  --benchmark-scenario <title|hangar|launch|flyby|orbit|surface-ops|mining>\n"
+        << "  --benchmark-scenario <title|hangar|launch|flyby|orbit|surface-ops|surface-scan|mining>\n"
         << "  --benchmark-json <path>             Machine-readable report destination.\n"
         << "  --benchmark-profile-dir <path>      Dedicated save/preferences directory.\n\n"
         << "Capture options:\n"
@@ -449,6 +450,7 @@ std::string_view nativeBenchmarkScenarioName(NativeBenchmarkScenario scenario)
     case NativeBenchmarkScenario::Flyby: return "flyby";
     case NativeBenchmarkScenario::Orbit: return "orbit";
     case NativeBenchmarkScenario::SurfaceOps: return "surface-ops";
+    case NativeBenchmarkScenario::SurfaceScan: return "surface-scan";
     case NativeBenchmarkScenario::Mining: return "mining";
     }
     return "mining";

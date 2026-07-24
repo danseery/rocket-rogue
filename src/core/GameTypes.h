@@ -984,6 +984,20 @@ struct MiningArtifactObject {
     bool revealed = false;
 };
 
+// A mining run owns one active depth in MiningRunState and keeps every other
+// visited depth here. Moving between depths swaps the complete world state so
+// carved tunnels, threats, gates, and abandoned artifacts remain where the
+// player left them.
+struct MiningDepthLayerState {
+    int depthZone = 0;
+    MiningTerrain terrain;
+    std::vector<MiningEnemy> enemies;
+    MiningArtifactObject artifact;
+    MiningGateRuntime gate;
+    double downwardTransitionX = 0.0;
+    bool hasDownwardTransition = false;
+};
+
 struct MiningRunState {
     bool active = false;
     MiningArenaMetadata arenaMetadata;
@@ -1025,6 +1039,11 @@ struct MiningRunState {
     double contactSpeedRecovery = 1.0;
     double scannerPulseSeconds = 0.0;
     int depthZone = 0;
+    int entryDepthZone = 0;
+    int deepestDepthZone = 0;
+    double downwardTransitionX = 0.0;
+    bool hasDownwardTransition = false;
+    double depthTransitionCooldownSeconds = 0.0;
     int cargo = 0;
     MaterialInventory temporaryMaterials;
     std::vector<ArtifactRecord> temporaryArtifacts;
@@ -1062,6 +1081,7 @@ struct MiningRunState {
     std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;
     MiningGateRuntime gate;
+    std::vector<MiningDepthLayerState> depthLayers;
 };
 
 struct RunState {

@@ -62,6 +62,7 @@ struct RenderSnapshot {
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
     double miningReturnZoneY = 0.0;
+    bool miningShipPresent = false;
     bool miningAtReturnZone = false;
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;

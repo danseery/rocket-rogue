@@ -121,11 +121,12 @@ jobs:
           if ($listing -match '(?i)electron|chromium|node\.exe|\.wasm(?:\s|$)|rocket_rogue\.html|vulkan-1\.dll|libvulkan|assets\\art') {
             throw "A browser runtime, Vulkan loader, or duplicate source-art directory escaped into the native archive."
           }
-          if ($listing -notmatch 'RocketRogue\.exe' -or $listing -notmatch 'assets\\scene-atlas' -or $listing -notmatch 'licenses') {
-            throw "Native archive is missing the executable, scene atlas, or licenses."
+          if ($listing -notmatch 'RocketRogue\.exe' -or $listing -notmatch 'assets\\scene-atlas' -or $listing -notmatch 'assets\\fonts' -or $listing -notmatch 'licenses') {
+            throw "Native archive is missing the executable, scene atlas, fonts, or licenses."
           }
           $required = @(
             'scene-atlas-0.png', 'scene-atlas-1.png', 'scene-atlas.json',
+            'SourceCodePro-Regular.ttf', 'SourceCodePro-Semibold.ttf', 'SourceCodePro-It.ttf', 'SourceCodePro.md',
             'scene.vert.spv', 'scene.frag.spv', 'scene_instance.vert.spv', 'scene_instance.frag.spv',
             'rml_ui.vert.spv', 'rml_ui.frag.spv',
             'Vulkan-Headers.txt', 'Volk.txt', 'VulkanMemoryAllocator.txt'
@@ -305,9 +306,11 @@ jobs:
           fi
           printf '%s\n' "$listing" | grep -Eq '(^|/)RocketRogue$'
           printf '%s\n' "$listing" | grep -Eq '(^|/)assets/scene-atlas/'
+          printf '%s\n' "$listing" | grep -Eq '(^|/)assets/fonts/'
           printf '%s\n' "$listing" | grep -Eq '(^|/)licenses/'
           for required in \
             scene-atlas-0.png scene-atlas-1.png scene-atlas.json \
+            SourceCodePro-Regular.ttf SourceCodePro-Semibold.ttf SourceCodePro-It.ttf SourceCodePro.md \
             scene.vert.spv scene.frag.spv scene_instance.vert.spv scene_instance.frag.spv \
             rml_ui.vert.spv rml_ui.frag.spv \
             Vulkan-Headers.txt Volk.txt VulkanMemoryAllocator.txt; do

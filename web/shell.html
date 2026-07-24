@@ -5,8 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OREBIT</title>
   <style>
+    @font-face {
+      font-family: "Source Code Pro";
+      src: url("/assets/fonts/SourceCodePro-Regular.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Source Code Pro";
+      src: url("/assets/fonts/SourceCodePro-Semibold.ttf") format("truetype");
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "Source Code Pro";
+      src: url("/assets/fonts/SourceCodePro-It.ttf") format("truetype");
+      font-style: italic;
+      font-weight: 400;
+      font-display: swap;
+    }
+
     :root {
       color-scheme: dark;
+      --font-ui: "Source Code Pro", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      --font-display: "Source Code Pro", ui-monospace, monospace;
+      --type-xs: 10px;
+      --type-sm: 12px;
+      --type-md: 14px;
+      --type-lg: 18px;
+      --leading-tight: 1.15;
+      --leading-ui: 1.35;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --space-4: 16px;
+      --radius-sm: 4px;
+      --radius-md: 8px;
       --bg: #090b0f;
       --panel: rgba(13, 18, 25, 0.88);
       --panel-border: rgba(137, 178, 211, 0.28);
@@ -16,6 +54,29 @@
       --danger: #ff6c5c;
       --ok: #72e0a8;
       --warn: #ffd166;
+      --cockpit-void: #030c12;
+      --cockpit-card: #08161e;
+      --cockpit-border: #34596a;
+      --cockpit-text: #e9f7fb;
+      --cockpit-muted: #8faabd;
+      --cockpit-cyan: #21d8ef;
+      --cockpit-amber: #f1b72b;
+      --cockpit-green: #55d86d;
+      --cockpit-red: #ff5e55;
+      --ui-outer-margin: 12px;
+      --ui-layout-gap: 12px;
+      --ui-panel-x: 12px;
+      --ui-panel-y: 12px;
+      --ui-panel-width: clamp(280px, 24vw, 340px);
+      --ui-panel-height: calc(100dvh - 24px);
+      --ui-top-panel-x: 0px;
+      --ui-top-panel-y: 0px;
+      --ui-top-panel-width: 0px;
+      --ui-top-panel-height: 0px;
+      --ui-scene-x: calc(24px + clamp(280px, 24vw, 340px));
+      --ui-scene-y: 12px;
+      --ui-scene-width: calc(100vw - 36px - clamp(280px, 24vw, 340px));
+      --ui-scene-height: calc(100dvh - 24px);
     }
 
     * {
@@ -27,7 +88,8 @@
       overflow: hidden;
       background: var(--bg);
       color: var(--text);
-      font-family: neuropol, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: var(--font-ui);
+      line-height: var(--leading-ui);
     }
 
     #canvas {
@@ -56,7 +118,34 @@
       box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
     }
 
-    body.rmlui-enabled #panel {
+    /* RmlUi is the only production game-UI renderer. The shell retains a
+       non-rendering state mirror for WebGL scene coordination, but these
+       elements are never allowed to become an alternate visible interface. */
+    #panel,
+    #modal-root,
+    #controller-prompt-bar,
+    #toast-root,
+    #scene-launch-control,
+    #scene-ship-service,
+    #telemetry-chart-legend,
+    #surface-scan-scene-readout {
+      display: none !important;
+      pointer-events: none !important;
+    }
+
+    #ui-startup-status {
+      position: fixed;
+      inset: 50% auto auto 50%;
+      z-index: 20;
+      max-width: min(520px, calc(100vw - 48px));
+      padding: 12px 16px;
+      color: #9fb2c2;
+      font: 14px/1.4 "Source Code Pro", "IBM Plex Mono", monospace;
+      text-align: center;
+      transform: translate(-50%, -50%);
+    }
+
+    body[data-ui-renderer="rmlui"] #ui-startup-status {
       display: none;
     }
 
@@ -73,6 +162,45 @@
     #panel.arrival-fanfare-panel-mode > .status,
     #panel.arrival-fanfare-panel-mode > .panel-kpis {
       display: none;
+    }
+
+    #panel.results-panel-mode {
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      overflow: hidden;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      pointer-events: none;
+    }
+
+    #panel.results-panel-mode > .panel-head,
+    #panel.results-panel-mode > .status,
+    #panel.results-panel-mode > .panel-kpis {
+      display: none;
+    }
+
+    #panel.results-panel-mode > .results-panel {
+      position: absolute;
+      inset: 50% auto auto 50%;
+      width: min(640px, calc(100vw - 32px));
+      height: min(220px, calc(100dvh - 32px));
+      overflow: hidden;
+      padding: 14px;
+      border: 1px solid #6d5d35;
+      border-radius: 10px;
+      background: var(--panel);
+      transform: translate(-50%, -50%);
+    }
+
+    #panel.results-panel-mode .debrief-hero {
+      width: 100%;
+      margin-block: 0;
     }
 
     #panel.phase-board-panel {
@@ -504,6 +632,11 @@
 
     h1, h2, h3, p {
       margin: 0;
+    }
+
+    h1, h2, h3,
+    .game-mark {
+      font-family: var(--font-display);
     }
 
     h1 {
@@ -957,6 +1090,34 @@
       pointer-events: none;
     }
 
+    .surface-scan-scene-readout {
+      position: fixed;
+      z-index: 9;
+      display: none;
+      box-sizing: border-box;
+      width: 68px;
+      height: 24px;
+      padding: 4px 6px;
+      color: var(--cockpit-text);
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 14px;
+      text-align: center;
+      pointer-events: none;
+      border: 1px solid rgba(33, 216, 239, 0.72);
+      border-radius: var(--radius-sm);
+      background: rgba(3, 12, 18, 0.92);
+      box-shadow: 0 0 16px rgba(33, 216, 239, 0.18);
+    }
+
+    .surface-scan-scene-readout.is-visible {
+      display: block;
+    }
+
+    body.rmlui-modal-open .surface-scan-scene-readout {
+      display: none;
+    }
+
     .arrival-fanfare-panel {
       box-sizing: border-box;
       width: 100%;
@@ -1208,6 +1369,16 @@
 
     .telemetry-chart-legend.is-visible {
       display: grid;
+    }
+
+    /* Modal scope owns the complete foreground. This CSS fence prevents a
+       one-frame scene-overlay flash while the DOM/native modal signal and
+       overlay layout are reconciling. */
+    body.rmlui-modal-open .scene-launch-control,
+    body.rmlui-modal-open .scene-ship-service,
+    body.rmlui-modal-open .telemetry-chart-legend,
+    body.rmlui-modal-open .surface-scan-scene-readout {
+      display: none !important;
     }
 
     .telemetry-chart-legend .telemetry-legend-chip {
@@ -3047,7 +3218,8 @@
       line-height: 1;
     }
 
-    .mining-run-title small {
+    .mining-run-title small,
+    .mining-run-title .mining-run-objective {
       display: block;
       margin-top: 4px;
       color: rgba(215, 232, 234, 0.78);
@@ -3867,8 +4039,10 @@
     }
 
     .phase-board-hangar .ops-card .card-footer button {
-      width: 92px;
-      min-width: 92px;
+      width: 112px;
+      min-width: 112px;
+      font-size: 11px;
+      white-space: nowrap;
     }
 
     .phase-board-research .ops-card {
@@ -4389,7 +4563,7 @@
       width: 42%;
       background: linear-gradient(90deg, transparent, rgba(141, 224, 179, 0.18), transparent);
       transform: rotate(12deg);
-      animation: upgrade-card-sheen 3.8s ease-in-out infinite;
+      animation: upgrade-card-sheen 3.8s ease-in-out 1 both;
       pointer-events: none;
     }
 
@@ -4695,7 +4869,6 @@
       padding: 20px;
     }
 
-    .modal-root[data-modal-id="launch_outcome"] #modal-content,
     .modal-root[data-modal-id="launch_introduction"] #modal-content,
     .modal-root[data-modal-id="approach_introduction"] #modal-content,
     .modal-root[data-modal-id="flyby_introduction"] #modal-content,
@@ -4830,6 +5003,30 @@
 
     body:not(.rmlui-enabled) .controller-prompt-bar.is-visible {
       display: flex;
+    }
+
+    body:not(.rmlui-enabled).controller-prompt-panel-bound[data-ui-surface="persistent"] #panel[data-ui-viewport-special="0"] {
+      padding-bottom: 72px;
+      scroll-padding-bottom: 72px;
+    }
+
+    body:not(.rmlui-enabled).controller-prompt-panel-bound[data-ui-surface="persistent"] .controller-prompt-bar.is-visible {
+      left: calc(var(--ui-panel-x) + 4px);
+      right: auto;
+      top: calc(var(--ui-panel-y) + var(--ui-panel-height) - 64px);
+      bottom: auto;
+      width: calc(var(--ui-panel-width) - 8px);
+      height: 60px;
+      min-height: 0;
+      max-width: none;
+      padding: 4px 7px;
+      transform: none;
+      flex-wrap: wrap;
+      justify-content: flex-start;
+      gap: 4px 8px;
+      overflow: hidden;
+      white-space: normal;
+      font-size: 10px;
     }
 
     .controller-prompt-bar.mining-input-helper {
@@ -6331,10 +6528,3138 @@
         grid-template-columns: 1fr;
       }
     }
+
+    /*
+      DOM fallback viewport contract. The canvas remains viewport-sized so the
+      renderer keeps its normal drawable resolution, while SceneComposer and
+      this shell reserve the same non-overlapping scene and command regions.
+      Full-screen title, story, mining, and arrival-stamp presentations keep
+      their purpose-built geometry and opt out through data-ui-viewport-special.
+    */
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"],
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] {
+      inset: auto !important;
+      left: var(--ui-panel-x) !important;
+      top: var(--ui-panel-y) !important;
+      width: var(--ui-panel-width) !important;
+      min-width: 0 !important;
+      height: var(--ui-panel-height) !important;
+      min-height: 0 !important;
+      max-height: var(--ui-panel-height) !important;
+      overflow-x: hidden;
+      overflow-y: auto;
+      scroll-padding-block: 64px;
+      background: rgba(10, 16, 23, 0.95);
+      box-shadow: inset 0 0 0 1px rgba(137, 178, 211, 0.05);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] {
+      padding: 12px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] {
+      padding: 10px 14px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-head,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .panel-head {
+      position: sticky;
+      z-index: 8;
+      top: 0;
+      width: 100% !important;
+      max-width: none !important;
+      margin: 0 !important;
+      padding: 4px 0 8px;
+      background: linear-gradient(180deg, rgba(10, 16, 23, 1) 0 82%, rgba(10, 16, 23, 0));
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .status,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-lane,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-title-row,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-footer-lane,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .status,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .panel-kpis,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-lane,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-title-row,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-footer-lane {
+      box-sizing: border-box;
+      width: 100% !important;
+      max-width: none !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .surface-command,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .resource-bank,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-hero {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .summary-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .upgrade-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .draft-card-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .nav-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .result-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .surface-kpi-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .pilot-card-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .drone-control-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-build-guidance,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-combat-forecast {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-action-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-grid {
+      flex-flow: column nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-card-slot,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .surface-action-slot,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .drone-loadout-slot,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .drone-control-card {
+      flex-basis: auto;
+      width: 100%;
+      max-width: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .compact-tools,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .compact-tools {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .status {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .panel-kpis {
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-head {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-head .panel-head-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-head .panel-head-actions button {
+      min-width: 0;
+      padding-inline: 4px;
+      font-size: 11px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .surface-choice-list,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-choice-list {
+      display: grid;
+      gap: 6px;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .surface-choice-row,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-choice-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(84px, 104px) !important;
+      gap: 8px;
+      width: 100%;
+      min-height: 58px;
+      margin: 0;
+      padding: 7px 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-summary,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-cues {
+      min-width: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-cues {
+      display: grid;
+      gap: 1px;
+      margin-top: 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-cues span {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      text-transform: none;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-row.surface-primary-action h3 {
+      margin-top: 0;
+      font-size: 14px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-row button,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-choice-row.surface-primary-action button {
+      min-width: 0;
+      min-height: 34px;
+      padding-inline: 5px;
+      font-size: 11px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-readout {
+      grid-template-columns: minmax(128px, 0.9fr) minmax(0, 1.1fr);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metrics,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metric-row {
+      width: 100%;
+      min-width: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metrics .metric {
+      min-width: 0;
+      padding: 6px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metrics .metric strong,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metrics .metric span {
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-push .minigame-metrics .metric strong {
+      font-size: 14px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-ops-screen .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-ops-screen .surface-quickbar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-ops-screen .drone-ops-callout {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-choice-list {
+      grid-auto-columns: 198px;
+      grid-auto-flow: column;
+      grid-template-columns: none;
+      overflow-x: auto;
+      overscroll-behavior-inline: contain;
+      padding-bottom: 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-choice-row {
+      grid-template-columns: minmax(0, 1fr) 82px !important;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .primary-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .final-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .primary-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .final-actions {
+      position: sticky;
+      z-index: 7;
+      bottom: 0;
+      padding-block: 8px 4px;
+      background: linear-gradient(0deg, rgba(10, 16, 23, 1) 0 82%, rgba(10, 16, 23, 0));
+    }
+
+    /* Production visual families emitted by GamePanel. These selectors come
+       after the legacy desktop cards so the DOM fallback uses the same compact
+       semantic lanes as native RmlUi instead of retaining 168-430px cards. */
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] > .panel-head.ui-family-management,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] > .panel-head.ui-family-decision,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] > .panel-head.ui-family-live-hud,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] > .panel-head.ui-family-selection {
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row {
+      display: block;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 56px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 8px 9px;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 5px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-copy,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .chip-strip,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-copy {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-title,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-title {
+      min-height: 0;
+      margin: 2px 0 4px;
+      overflow: hidden;
+      color: var(--cockpit-text);
+      font-size: 13px;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-topline,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-kicker,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-topline {
+      min-height: 0;
+      color: var(--cockpit-muted);
+      font-size: 9px;
+      line-height: 1.1;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-footer,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 34px;
+      margin-top: 4px;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .management-choice-row .card-footer button,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-footer button {
+      width: auto;
+      min-width: 82px;
+      min-height: 32px;
+      height: 32px;
+      padding: 3px 7px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-arrival > h2,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-research .board-primary > h2,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-navigation .navigation-map > h2 {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-card,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 68px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 8px;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-status,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-card .chip-strip,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot .chip-strip {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-grid {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-header {
+      display: flex;
+      flex-flow: row nowrap;
+      align-items: flex-start;
+      justify-content: space-between;
+      width: 100%;
+      margin: 0 0 12px;
+      padding: 0 0 10px;
+      border-bottom: 1px solid var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-header > div {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-header h2 {
+      margin: 0 0 4px;
+      color: var(--cockpit-text);
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1.05;
+      text-transform: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-header p {
+      margin: 0;
+      color: var(--cockpit-amber);
+      font-size: 11px;
+      line-height: 1.15;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-header button {
+      flex: 0 0 82px;
+      width: 82px;
+      min-height: 36px;
+      height: 36px;
+      margin-left: 8px;
+      padding-inline: 4px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-readout {
+      display: flex;
+      flex-flow: row nowrap;
+      width: 100%;
+      margin: 0 0 12px;
+      gap: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-readout .metric {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      min-height: 64px;
+      margin: 0;
+      padding: 8px 5px;
+      overflow: hidden;
+      text-align: center;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-readout .metric strong {
+      overflow: hidden;
+      font-size: 16px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-actions {
+      display: flex;
+      width: 100%;
+      margin-top: 12px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .live-hud-actions button {
+      width: 100%;
+      min-height: 48px;
+      color: var(--cockpit-red);
+      background: transparent;
+      border-color: var(--cockpit-red);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-hud .primary-actions,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-hud .system-actions {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-hud .primary-actions button,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .flight-hud .system-actions button {
+      width: 100%;
+      min-height: 48px;
+      margin-bottom: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-card-grid {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 88px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector.selected {
+      background: #0a2028;
+      border-color: var(--cockpit-cyan);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card {
+      color: #e9f7fb;
+      font: inherit;
+      text-align: left;
+      background: #08161e;
+      border: 1px solid #34596a;
+      border-radius: 5px;
+      box-shadow: inset 3px 0 0 transparent;
+      transition: background-color 100ms ease, border-color 100ms ease, box-shadow 100ms ease;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card.selected {
+      color: #fff;
+      background: #0a2028;
+      border-color: var(--cockpit-cyan);
+      box-shadow: inset 3px 0 0 var(--cockpit-cyan);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card:hover,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card:focus-within {
+      background: #12313b;
+      border-color: var(--cockpit-amber);
+      box-shadow: inset 3px 0 0 var(--cockpit-amber);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-selector {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      cursor: pointer;
+      appearance: none;
+      color: transparent;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      outline: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-selector:hover,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-selector:focus-visible,
+    body.controller-input-active.controller-focus-visible:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-selector.controller-focused {
+      background: rgba(16, 40, 50, 0.30);
+      border-color: var(--cockpit-amber);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card .card-title {
+      color: #e9f7fb;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card .pilot-card-top span {
+      color: var(--cockpit-cyan);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card .refit-offer-cost {
+      color: var(--cockpit-green);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .refit-offer-card .refit-offer-cost.unaffordable {
+      color: var(--cockpit-red);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .chip-strip,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .module-impact {
+      display: none;
+    }
+
+    .ui-selected-detail {
+      display: block;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 124px;
+      margin: 12px 0;
+      padding: 12px;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-cyan);
+      border-radius: 5px;
+    }
+
+    .ui-selected-detail > span {
+      color: var(--cockpit-cyan);
+      font-size: 10px;
+    }
+
+    .ui-selected-detail h3 {
+      margin: 5px 0;
+      color: var(--cockpit-text);
+      font-size: 16px;
+    }
+
+    .ui-selected-detail p {
+      margin: 0 0 8px;
+      color: var(--cockpit-muted);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    .ui-selected-detail > button {
+      width: 100%;
+      min-height: 40px;
+      margin-top: 8px;
+      color: var(--cockpit-green);
+      border-color: var(--cockpit-green);
+    }
+
+    .ui-selected-detail > button.disabled,
+    .ui-selected-detail > button:disabled {
+      color: var(--cockpit-red);
+      background: #252b31;
+      border-color: var(--cockpit-red);
+    }
+
+    .ui-outcome-rows {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      margin-top: 12px;
+    }
+
+    .ui-outcome-rows > div {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 42px;
+      padding: 9px 10px;
+      background: var(--cockpit-card);
+      border-bottom: 1px solid var(--cockpit-border);
+    }
+
+    .ui-outcome-rows span {
+      color: var(--cockpit-muted);
+      font-size: 10px;
+    }
+
+    .ui-outcome-rows strong {
+      color: var(--cockpit-text);
+      font-size: 11px;
+      font-weight: 400;
+      text-align: right;
+    }
+
+    /* BottomDock composes the persistent chrome in a fixed top band and uses
+       only the remaining panelRect for choices/actions. No dimensions here
+       infer the viewport or alter the C++-supplied scene/hud rectangles. */
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) {
+      overflow: hidden;
+      scroll-padding: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head {
+      position: absolute;
+      inset: 5px 14px auto;
+      z-index: 10;
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      width: auto !important;
+      height: 40px;
+      margin: 0 !important;
+      padding: 0 0 5px;
+      background: var(--cockpit-void);
+      border-bottom: 1px solid var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head .panel-title {
+      flex: 0 1 200px;
+      width: 200px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head .game-mark {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head h1 {
+      overflow: hidden;
+      font-size: 15px;
+      line-height: 1.1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head .panel-head-actions {
+      flex: 0 0 284px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+      width: 284px;
+      margin-left: auto;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-head .panel-head-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 32px;
+      height: 32px;
+      padding: 2px 4px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .status.panel-objective {
+      position: absolute;
+      z-index: 11;
+      left: 14px;
+      top: 24px;
+      width: 196px !important;
+      margin: 0;
+      overflow: hidden;
+      color: var(--cockpit-amber);
+      font-size: 9px;
+      line-height: 1.1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-kpis {
+      position: absolute;
+      z-index: 12;
+      top: 5px;
+      right: 306px;
+      left: 222px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 4px;
+      width: auto !important;
+      height: 36px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--cockpit-void);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-kpis .metric {
+      min-width: 0;
+      min-height: 36px;
+      height: 36px;
+      padding: 4px;
+      overflow: hidden;
+      text-align: center;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-kpis .metric strong {
+      overflow: hidden;
+      font-size: 12px;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .panel-kpis .metric span {
+      display: block;
+      overflow: hidden;
+      font-size: 8px;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"]:not(.surface-scan-panel) > .phase-board {
+      position: absolute;
+      inset: 49px 14px 7px;
+      width: auto !important;
+      height: auto;
+      margin: 0 !important;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > h2,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .objective-strip,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .hangar-detail-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-arrival > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-advisory,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .focus-metrics,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-navigation > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops > .drone-top-row,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .section-heading,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-hero,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-recovery-note,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-board > .phase-titlebar {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 238px;
+      gap: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research .board-primary > .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-arrival > .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .navigation-map > .nav-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-card-grid {
+      display: grid;
+      grid-auto-columns: 198px;
+      grid-auto-flow: column;
+      grid-template-columns: none;
+      gap: 6px;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0 0 3px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      overscroll-behavior-inline: contain;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .management-choice-row,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .decision-choice-row {
+      width: 198px;
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      padding: 6px 7px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .management-choice-row .card-footer,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-footer {
+      min-height: 30px;
+      margin-top: 2px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .management-choice-row .card-footer button,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .decision-choice-row .card-footer button {
+      min-width: 78px;
+      min-height: 30px;
+      height: 30px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-navigation > .navigation-map,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .board-primary {
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .hangar-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .actions {
+      position: static;
+      z-index: 7;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: minmax(34px, 1fr);
+      gap: 5px;
+      width: 238px;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      background: var(--cockpit-void);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .hangar-actions button,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-research > .actions button {
+      min-width: 0;
+      min-height: 34px;
+      height: auto;
+      padding: 4px;
+      font-size: 10px;
+      line-height: 1.05;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-arrival,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-navigation {
+      display: block;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-arrival > .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-navigation > .navigation-map {
+      width: 100%;
+      height: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-roster,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-bench {
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-card,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot {
+      width: 198px;
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-board {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px 190px;
+      gap: 8px;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector {
+      width: 198px;
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .pilot-card-top {
+      font-size: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .card-title {
+      min-height: 0;
+      margin: 3px 0;
+      overflow: hidden;
+      font-size: 12px;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .draft-card-footer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 86px;
+      gap: 4px;
+      margin-top: 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .refit-offer-cost {
+      overflow: hidden;
+      font-size: 11px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .draft-card-footer button {
+      min-width: 0;
+      min-height: 30px;
+      height: 30px;
+      padding: 3px;
+      font-size: 9px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail {
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      padding: 7px 8px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail h3 {
+      margin: 2px 0;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail p {
+      display: -webkit-box;
+      margin: 0 0 3px;
+      overflow: hidden;
+      font-size: 9px;
+      line-height: 1.1;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail .chip-strip,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail .module-impact {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail > button {
+      min-height: 30px;
+      height: 30px;
+      margin-top: 2px;
+      padding: 3px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-actions {
+      position: static;
+      z-index: 7;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 5px;
+      width: 190px;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      background: var(--cockpit-void);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-actions button {
+      min-width: 0;
+      min-height: 34px;
+      height: auto;
+      padding: 4px;
+      font-size: 10px;
+      line-height: 1.05;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-header {
+      position: absolute;
+      z-index: 7;
+      left: 14px;
+      top: 49px;
+      bottom: 7px;
+      width: 202px;
+      margin: 0;
+      padding: 8px;
+      overflow: hidden;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 5px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-header h2 {
+      overflow: hidden;
+      font-size: 14px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-header p {
+      display: -webkit-box;
+      overflow: hidden;
+      font-size: 10px;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-header button {
+      flex-basis: 62px;
+      width: 62px;
+      min-height: 30px;
+      height: 30px;
+      margin-left: 5px;
+      font-size: 9px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-readout {
+      position: absolute;
+      z-index: 7;
+      top: 49px;
+      right: 240px;
+      bottom: 7px;
+      left: 224px;
+      width: auto;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-readout .metric {
+      min-height: 0;
+      height: 100%;
+      padding: 24px 4px 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud {
+      position: absolute;
+      z-index: 8;
+      top: 49px;
+      right: 14px;
+      bottom: 7px;
+      width: 218px;
+      height: auto;
+      margin: 0;
+      padding: 7px;
+      overflow-y: auto;
+      background: var(--cockpit-void);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 5px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .live-hud-actions button {
+      min-height: 100%;
+      height: 100%;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .objective-strip,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .telemetry-status {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .cockpit-label {
+      min-height: 18px;
+      padding: 0 0 3px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .cockpit-label span {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .cockpit-label strong {
+      overflow: hidden;
+      font-size: 10px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .cockpit-hold-copy {
+      margin-top: 5px;
+      overflow: hidden;
+      font-size: 9px;
+      line-height: 1.15;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .primary-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .system-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      margin: 4px 0 0;
+      padding: 0;
+      background: transparent;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .primary-actions button,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] > .flight-hud .system-actions button {
+      min-height: 34px;
+      height: 34px;
+      margin: 0;
+      padding: 3px;
+      font-size: 9px;
+      line-height: 1.05;
+    }
+
+    /* Production Surface Scan rail. Geometry comes from the C++ viewport
+       payload; this block only arranges information inside panelRect. */
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .phase-board-scan,
+    body:not(.rmlui-enabled)[data-ui-layout] #panel[data-ui-viewport-special="0"] .surface-scan-rail {
+      box-sizing: border-box;
+      width: 100% !important;
+      max-width: none !important;
+      min-height: 0;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .surface-scan-rail .ui-kicker,
+    .surface-scan-rail .ui-kpi span {
+      color: var(--cockpit-muted);
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .surface-scan-rail .scan-header {
+      display: block;
+      width: 100%;
+      margin: 0 0 14px;
+      padding: 0 0 14px;
+      border-bottom: 1px solid var(--cockpit-border);
+    }
+
+    .surface-scan-rail .scan-heading .ui-kicker {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .surface-scan-rail .scan-heading h2 {
+      margin: 0;
+      color: var(--cockpit-text);
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1.05;
+    }
+
+    .surface-scan-rail .scan-utility-actions {
+      display: flex;
+      flex-flow: row nowrap;
+      width: 100%;
+      margin-top: 13px;
+      gap: 8px;
+    }
+
+    .surface-scan-rail .scan-utility-actions button {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      min-height: 40px;
+      height: 40px;
+      margin: 0;
+      padding: 0 4px;
+      color: var(--cockpit-muted);
+      font-size: 12px;
+      background: var(--cockpit-void);
+      border-color: var(--cockpit-border);
+    }
+
+    .surface-scan-rail .scan-objective {
+      margin: 0 0 14px;
+      color: var(--cockpit-amber);
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .surface-scan-rail .scan-kpis {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .surface-scan-rail .scan-kpis .ui-kpi {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 68px;
+      padding: 9px 5px;
+      text-align: center;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 6px;
+    }
+
+    .surface-scan-rail .scan-kpis .ui-kpi strong {
+      display: block;
+      margin-top: 7px;
+      overflow: hidden;
+      color: var(--cockpit-text);
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .surface-scan-rail .scan-signal-card {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 96px;
+      margin-bottom: 16px;
+      padding: 12px;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 6px;
+    }
+
+    .surface-scan-rail .scan-signal-copy span {
+      color: var(--cockpit-muted);
+      font-size: 10px;
+    }
+
+    .surface-scan-rail .scan-signal-copy strong {
+      display: block;
+      margin-top: 4px;
+      color: var(--cockpit-text);
+      font-size: 20px;
+      font-weight: 400;
+    }
+
+    .surface-scan-rail .scan-signal-track {
+      position: relative;
+      width: 100%;
+      height: 14px;
+      margin-top: 8px;
+      overflow: visible;
+      background: #031019;
+      border: 1px solid #174153;
+    }
+
+    .surface-scan-rail .scan-signal-fill {
+      display: block;
+      height: 12px;
+      background: var(--cockpit-cyan);
+    }
+
+    .surface-scan-rail .scan-signal-0 { width: 0%; }
+    .surface-scan-rail .scan-signal-10 { width: 10%; }
+    .surface-scan-rail .scan-signal-20 { width: 20%; }
+    .surface-scan-rail .scan-signal-30 { width: 30%; }
+    .surface-scan-rail .scan-signal-40 { width: 40%; }
+    .surface-scan-rail .scan-signal-50 { width: 50%; }
+    .surface-scan-rail .scan-signal-60 { width: 60%; }
+    .surface-scan-rail .scan-signal-70 { width: 70%; }
+    .surface-scan-rail .scan-signal-80 { width: 80%; }
+    .surface-scan-rail .scan-signal-90 { width: 90%; }
+    .surface-scan-rail .scan-signal-100 { width: 100%; }
+
+    .surface-scan-rail .scan-signal-risk-marker {
+      position: absolute;
+      top: -4px;
+      right: 31%;
+      width: 2px;
+      height: 20px;
+      background: var(--cockpit-amber);
+    }
+
+    .surface-scan-rail .scan-layer-readout {
+      display: flex;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 56px;
+      margin-bottom: 18px;
+      padding: 8px;
+      text-align: center;
+      background: #07151d;
+      border: 1px solid var(--cockpit-amber);
+      border-radius: 6px;
+    }
+
+    .surface-scan-rail .scan-layer-readout strong {
+      color: var(--cockpit-green);
+      font-size: 16px;
+      font-weight: 400;
+    }
+
+    .surface-scan-rail .scan-layer-readout.rare strong { color: var(--cockpit-amber); }
+    .surface-scan-rail .scan-layer-readout.exotic strong { color: #ff70d6; }
+    .surface-scan-rail .scan-layer-readout.artifact strong { color: #b692ff; }
+    .surface-scan-rail .scan-layer-readout.empty strong { color: var(--cockpit-muted); }
+
+    .surface-scan-rail .scan-actions {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      padding-top: 16px;
+      border-top: 1px solid var(--cockpit-border);
+    }
+
+    .surface-scan-rail .scan-actions button {
+      width: 100%;
+      min-height: 64px;
+      margin: 0 0 12px;
+      padding: 8px;
+      color: var(--cockpit-text);
+      font-size: 18px;
+      font-weight: 400;
+      line-height: 1;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 6px;
+    }
+
+    .surface-scan-rail .scan-actions .scan-pulse-action {
+      color: var(--cockpit-cyan);
+      border-color: var(--cockpit-cyan);
+    }
+
+    .surface-scan-rail .scan-actions .scan-bank-action,
+    .surface-scan-rail .scan-actions .scan-return-action {
+      color: var(--cockpit-green);
+      border-color: var(--cockpit-green);
+      background: #0b261b;
+    }
+
+    .surface-scan-rail .scan-actions .scan-abort-action {
+      min-height: 42px;
+      margin-top: 8px;
+      color: var(--cockpit-red);
+      font-size: 14px;
+      text-align: left;
+      background: transparent;
+      border-width: 1px 0 0;
+      border-color: var(--cockpit-border);
+      border-radius: 0;
+    }
+
+    .surface-scan-scene-marker {
+      display: none;
+    }
+
+    /* At the 900x600 stress size C++ selects BottomDock. The scanner becomes
+       one internally scrolling horizontal command strip and never enters the
+       scene above it. */
+    body:not(.rmlui-enabled) #panel.surface-scan-panel > .panel-head {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel.surface-scan-panel {
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] #panel[data-ui-viewport-special="0"] .surface-scan-rail {
+      display: grid;
+      grid-template-columns: 150px 210px 180px 260px;
+      grid-template-rows: 44px 64px;
+      gap: 6px 8px;
+      width: max(100%, 824px) !important;
+      height: 114px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-header {
+      grid-column: 1;
+      grid-row: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 62px;
+      gap: 4px;
+      height: 44px;
+      margin: 0;
+      padding: 0 0 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-heading .ui-kicker {
+      margin: 0;
+      font-size: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-heading h2 {
+      overflow: hidden;
+      font-size: 14px;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-utility-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 3px;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-utility-actions button {
+      min-height: 28px;
+      height: 28px;
+      padding: 0 2px;
+      font-size: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-objective {
+      grid-column: 1;
+      grid-row: 2;
+      align-self: start;
+      margin: 0;
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-kpis {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      gap: 4px;
+      height: 114px;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-kpis .ui-kpi {
+      min-height: 0;
+      height: 114px;
+      padding: 30px 3px 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-kpis .ui-kpi strong {
+      margin-top: 7px;
+      font-size: 16px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-card {
+      grid-column: 3;
+      grid-row: 1;
+      min-height: 0;
+      height: 44px;
+      margin: 0;
+      padding: 4px 6px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-copy {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-copy strong {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-track {
+      height: 9px;
+      margin-top: 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-fill {
+      height: 7px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-signal-risk-marker {
+      top: -3px;
+      height: 13px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-layer-readout {
+      grid-column: 3;
+      grid-row: 2;
+      min-height: 0;
+      height: 64px;
+      margin: 0;
+      padding: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-layer-readout strong {
+      font-size: 12px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-actions {
+      grid-column: 4;
+      grid-row: 1 / span 2;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: 70px 38px;
+      gap: 6px;
+      height: 114px;
+      padding: 0;
+      border: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-actions button {
+      min-height: 0;
+      height: 70px;
+      margin: 0;
+      padding: 4px;
+      font-size: 12px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .surface-scan-rail .scan-actions .scan-abort-action {
+      grid-column: 1 / span 2;
+      height: 38px;
+      margin: 0;
+      font-size: 11px;
+    }
+
+    /* Forced DOM fallback consumes the same Mining rectangles as C++ and
+       RmlUi. Both HUD rails stay wholly outside the terrain/click rectangle. */
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-top-rail {
+      inset: auto;
+      left: var(--ui-top-panel-x);
+      top: var(--ui-top-panel-y);
+      width: var(--ui-top-panel-width);
+      min-height: 0;
+      height: var(--ui-top-panel-height);
+      padding: 0;
+      box-sizing: border-box;
+      background: var(--cockpit-void);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-artifact-strip {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-run-title {
+      display: block;
+      position: absolute;
+      left: 16px;
+      top: 10px;
+      width: clamp(150px, calc(23% - 20px), 280px);
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-run-title strong {
+      display: block;
+      overflow: hidden;
+      color: var(--cockpit-text);
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-run-title small,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-run-title .mining-run-objective {
+      display: block;
+      margin-top: 7px;
+      overflow: hidden;
+      color: var(--cockpit-muted);
+      font-size: 10px;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-objective-strip {
+      left: calc(var(--ui-top-panel-x) + 9px);
+      top: calc(var(--ui-top-panel-y) + 4px);
+      width: clamp(220px, 23vw, 300px);
+      height: calc(var(--ui-top-panel-height) - 8px);
+      margin: 0;
+      padding: 4px 0;
+      box-sizing: border-box;
+      overflow: hidden;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-objective-strip span {
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-objective-strip strong {
+      font-size: 12px;
+      line-height: 1.15;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-objective-strip p {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vitals {
+      position: absolute;
+      left: calc(clamp(220px, 23%, 300px) + 20px);
+      right: 300px;
+      top: 7px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(72px, 1fr));
+      gap: 5px;
+      width: auto;
+      max-width: 435px;
+      margin: 0;
+      transform: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vitals .metric,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vitals .mining-vital-tile {
+      box-sizing: border-box;
+      width: auto;
+      min-height: 44px;
+      height: calc(var(--ui-top-panel-height) - 14px);
+      min-width: 0;
+      padding: 7px 8px;
+      overflow: hidden;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vitals .metric strong,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile strong,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-tile strong {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--cockpit-text);
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 0.95;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vitals .metric span,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile span,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-tile span {
+      color: var(--cockpit-muted);
+      font-size: 10px;
+      font-weight: 400;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile small {
+      display: flex;
+      flex-flow: row nowrap;
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--cockpit-amber);
+      font-size: 9px;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile small b,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile small i {
+      display: inline-block;
+      color: var(--cockpit-amber);
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-vital-tile small b {
+      margin-right: 6px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-utility-cluster {
+      top: 12px;
+      right: 8px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px;
+      width: clamp(236px, 23vw, 296px);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-utility-cluster > span {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-utility-cluster button {
+      width: 100%;
+      min-width: 0;
+      min-height: 34px;
+      margin: 0;
+      padding: 4px 2px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-playfield-space {
+      inset: auto;
+      left: var(--ui-scene-x);
+      top: var(--ui-scene-y);
+      width: var(--ui-scene-width);
+      height: var(--ui-scene-height);
+      box-sizing: border-box;
+      border: 1px solid var(--cockpit-cyan);
+      border-radius: 5px;
+      box-shadow: inset 0 0 18px rgba(33, 216, 239, 0.05);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-depth-route-overlay {
+      position: absolute;
+      left: var(--ui-scene-x);
+      top: var(--ui-scene-y);
+      width: var(--ui-scene-width);
+      height: var(--ui-scene-height);
+      pointer-events: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-depth-route-overlay span {
+      position: absolute;
+      left: 50%;
+      width: 240px;
+      min-height: 22px;
+      padding: 5px 8px;
+      transform: translateX(-50%);
+      box-sizing: border-box;
+      color: var(--cockpit-cyan);
+      font-size: 9px;
+      line-height: 1;
+      text-align: center;
+      background: var(--cockpit-void);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-depth-route-overlay .mining-route-up {
+      top: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-depth-route-overlay .mining-route-down {
+      bottom: 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-bottom-rail {
+      inset: auto;
+      left: var(--ui-panel-x);
+      top: var(--ui-panel-y);
+      width: var(--ui-panel-width);
+      min-height: 0;
+      height: var(--ui-panel-height);
+      padding: 8px 10px 28px;
+      box-sizing: border-box;
+      background: var(--cockpit-void);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-strip {
+      display: flex;
+      flex-flow: row nowrap;
+      gap: 8px;
+      width: clamp(360px, 40%, 500px);
+      min-width: 0;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-manifest {
+      flex: 1 1 auto;
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 54px;
+      padding: 5px 7px;
+      overflow: hidden;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-manifest header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--cockpit-muted);
+      font-size: 8px;
+      line-height: 1;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-manifest header small {
+      color: var(--cockpit-muted);
+      font-size: 8px;
+      font-weight: 400;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-manifest-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 5px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry {
+      min-width: 0;
+      padding: 0 4px;
+      text-align: center;
+      border-right: 1px solid color-mix(in srgb, var(--cockpit-border) 60%, transparent);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry:first-child {
+      padding-left: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry:last-child {
+      padding-right: 0;
+      border-right: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry span {
+      display: block;
+      overflow: hidden;
+      color: var(--cockpit-muted);
+      font-size: 8px;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry strong {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: var(--cockpit-text);
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry.rare strong {
+      color: var(--cockpit-amber);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-ore-entry.exotic strong {
+      color: var(--cockpit-green);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-strip .stat-chip,
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-tile {
+      flex: 0 0 80px;
+      box-sizing: border-box;
+      width: 80px;
+      min-width: 0;
+      min-height: 54px;
+      margin: 0;
+      padding: 7px 8px;
+      overflow: hidden;
+      text-align: center;
+      background: var(--cockpit-card);
+      border: 1px solid var(--cockpit-border);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-payload-tile.artifact.active strong {
+      color: var(--cockpit-green);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock {
+      top: 8px;
+      right: 10px;
+      left: calc(clamp(360px, 40%, 500px) + 24px);
+      width: auto;
+      min-width: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .system-actions {
+      display: flex;
+      flex-flow: row nowrap;
+      justify-content: stretch;
+      gap: 8px;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .system-actions button {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      min-height: 54px;
+      height: 54px;
+      margin: 0;
+      padding: 5px 8px;
+      color: var(--cockpit-cyan);
+      font-size: 12px;
+      font-weight: 400;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-cyan);
+      border-radius: 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .mining-tether-action {
+      color: var(--cockpit-amber);
+      border-color: var(--cockpit-amber);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .mining-recall-action {
+      color: var(--cockpit-red);
+      border-color: var(--cockpit-red);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .mining-bank-action {
+      color: var(--cockpit-green);
+      border-color: var(--cockpit-green);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-command-dock .mining-repair-action {
+      color: var(--cockpit-amber);
+      border-color: var(--cockpit-amber);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-recall-dock {
+      top: min(44px, calc(var(--ui-panel-height) - 48px));
+      bottom: auto;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] #panel.mining-fullscreen-panel .mining-recall-dock .system-actions button {
+      min-height: 34px;
+      padding: 5px 4px;
+      font-size: 12px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="mining"] .controller-prompt-bar.mining-input-helper {
+      left: calc(var(--ui-panel-x) + 4px);
+      right: calc(var(--ui-panel-x) + 4px);
+      bottom: var(--ui-outer-margin);
+      width: auto;
+      max-width: none;
+      min-height: 22px;
+      height: 22px;
+      padding: 2px 6px;
+      box-sizing: border-box;
+      transform: none;
+      flex-wrap: nowrap;
+      justify-content: center;
+      gap: 8px;
+      overflow: hidden;
+      white-space: nowrap;
+      font-size: 9px;
+    }
+
+    /* Final rail-family reset. This deliberately outranks the legacy desktop
+       card dimensions so hidden detail copy cannot leave empty 182 px cards. */
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .status.panel-objective {
+      display: block;
+      min-height: 0;
+      margin: 0 0 8px;
+      padding: 0;
+      color: var(--cockpit-amber);
+      font-size: 11px;
+      line-height: 1.2;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis {
+      display: flex;
+      flex-flow: row nowrap;
+      gap: 6px;
+      width: 100%;
+      margin: 0 0 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis .metric {
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      min-height: 54px;
+      height: 54px;
+      margin: 0;
+      padding: 6px 4px;
+      overflow: hidden;
+      text-align: center;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis .metric strong {
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] > .panel-kpis .metric span {
+      overflow: hidden;
+      font-size: 8px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 0;
+      margin: 0;
+      padding: 0 0 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > h2,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar > .objective-strip,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival > h2,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .navigation-map > h2,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .board-primary > h2 {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .hangar-detail-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      width: 100%;
+      margin: 0 0 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .hangar-detail-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 32px;
+      height: 32px;
+      margin: 0;
+      padding: 3px;
+      font-size: 9px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .ops-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      width: 100%;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-card,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .arrival-card {
+      flex: 0 0 auto;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 68px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 8px 9px;
+      overflow: hidden;
+      background: var(--cockpit-card);
+      border-color: var(--cockpit-border);
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-card .ops-detail,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card > p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card .stat-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card > p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card .stat-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card .module-impact,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .arrival-card > p {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-card h3,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card h3,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card h3,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .arrival-card h3 {
+      min-height: 0;
+      margin: 0 0 3px;
+      overflow: hidden;
+      font-size: 13px;
+      line-height: 1.05;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-card .card-footer,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card .card-footer,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card .card-footer,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .arrival-card .card-footer {
+      min-height: 32px;
+      height: 32px;
+      margin: 3px 0 0;
+      padding: 0;
+      border-top: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .ops-card .card-footer button,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation .nav-card .card-footer button,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research .ops-card .card-footer button,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival .arrival-card .card-footer button {
+      min-height: 32px;
+      height: 32px;
+      padding: 3px 6px;
+      font-size: 10px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .hangar-actions,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .actions {
+      display: grid;
+      position: sticky;
+      z-index: 7;
+      bottom: 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      width: 100%;
+      margin: 4px 0 0;
+      padding: 8px 0 4px;
+      background: linear-gradient(0deg, rgba(3, 12, 18, 1) 0 84%, rgba(3, 12, 18, 0));
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-hangar .hangar-actions button,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 48px;
+      height: auto;
+      margin: 0;
+      padding: 5px;
+      font-size: 10px;
+      line-height: 1.05;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-arrival > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-navigation > .ark-status {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-titlebar,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops > .phase-titlebar {
+      min-height: 40px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-titlebar p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops > .phase-titlebar p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-advisory span,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .section-heading p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-status,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-card .stat-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot .stat-grid {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .phase-advisory {
+      min-height: 42px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 7px 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .focus-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 5px;
+      width: 100%;
+      margin: 0 0 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-research > .focus-metrics .metric {
+      width: 100%;
+      min-width: 0;
+      min-height: 48px;
+      height: 48px;
+      margin: 0;
+      padding: 5px 3px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-bay-strip {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 64px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 6px 8px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-roster,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-bench {
+      width: 100%;
+      margin: 0 0 8px;
+      padding: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .section-heading {
+      min-height: 22px;
+      height: 22px;
+      margin: 0 0 4px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-grid,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-grid {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-control-card,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-drone-ops .drone-loadout-slot {
+      flex: 0 0 68px;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 68px;
+      height: 68px;
+      margin: 0 0 8px;
+      padding: 7px 8px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-hero {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-hero p,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room > .draft-recovery-note,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-board > .phase-titlebar p {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-board > .phase-titlebar {
+      min-height: 38px;
+      height: auto;
+      margin: 0 0 8px;
+      padding: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-card-grid {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      margin: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector {
+      position: relative;
+      display: block;
+      flex: 0 0 72px;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 72px;
+      height: 72px;
+      margin: 0 0 8px;
+      padding: 7px 8px;
+      overflow: hidden;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .pilot-card-top,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .card-title {
+      width: calc(100% - 98px);
+      min-height: 0;
+      height: auto;
+      margin: 0 0 3px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .pilot-card-top strong {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .pilot-card-top,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .card-title,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .draft-card-footer {
+      min-height: 0;
+      height: auto;
+      margin-block: 0 3px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .draft-card-footer {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      display: block;
+      width: 88px;
+      height: 56px;
+      margin: 0;
+      padding: 0;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .refit-offer-cost {
+      display: block;
+      width: 88px;
+      min-height: 14px;
+      margin: 0 0 3px;
+      overflow: hidden;
+      font-size: 11px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .compact-draft-selector .draft-card-footer button {
+      width: 88px;
+      min-height: 30px;
+      height: 30px;
+      padding: 3px;
+      font-size: 9px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail {
+      min-height: 108px;
+      height: auto;
+      margin: 8px 0;
+      padding: 8px 9px;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail .chip-strip,
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .ui-selected-detail .module-impact {
+      display: none;
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-actions {
+      display: grid;
+      position: sticky;
+      z-index: 7;
+      bottom: 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      width: 100%;
+      margin: 0;
+      padding: 8px 0 4px;
+      background: linear-gradient(0deg, rgba(3, 12, 18, 1) 0 84%, rgba(3, 12, 18, 0));
+    }
+
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] #panel[data-ui-viewport-special="0"] .phase-board-draft-room .draft-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 48px;
+      height: auto;
+      margin: 0;
+    }
+
+    /* Keep optional developer controls inside the reserved command region. */
+    body:not(.rmlui-enabled)[data-ui-layout="rail"] .debug-tools.is-visible,
+    body:not(.rmlui-enabled)[data-ui-layout="dock"] .debug-tools.is-visible {
+      right: auto;
+      bottom: var(--ui-outer-margin);
+      left: var(--ui-panel-x);
+      width: min(340px, var(--ui-panel-width));
+      max-height: calc(var(--ui-panel-height) - 8px);
+      box-shadow: none;
+    }
+
+    /* Drone Ops is a full-screen management workspace. Its toolbar and bay
+       summary remain fixed while the readable roster and active loadout own
+       independent scroll regions. */
+    /*
+      Non-gameplay families own the viewport. They retain the established
+      cockpit styling, but use a generous centered work lane and one vertical
+      scroller instead of compressing cards, labels, and actions into the
+      protected gameplay rail.
+    */
+    #panel.phase-board-panel.workspace-panel {
+      position: fixed;
+      inset: 0;
+      display: block;
+      box-sizing: border-box;
+      width: 100vw;
+      min-width: 0;
+      max-width: none;
+      height: 100dvh;
+      min-height: 0;
+      max-height: none;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 16px 24px 28px;
+      border: 0;
+      border-radius: 0;
+      background: #030c12;
+      box-shadow: none;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-head,
+    #panel.phase-board-panel.workspace-panel > .status,
+    #panel.phase-board-panel.workspace-panel > .panel-kpis,
+    #panel.phase-board-panel.workspace-panel > .phase-board {
+      box-sizing: border-box;
+      width: min(1200px, 100%);
+      max-width: 1200px;
+      margin-right: auto;
+      margin-left: auto;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-head {
+      position: sticky;
+      z-index: 8;
+      top: 0;
+      display: flex;
+      align-items: center;
+      min-height: 58px;
+      margin-bottom: 12px;
+      padding: 0 0 10px;
+      border-bottom: 1px solid #34596a;
+      background: #030c12;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-head .panel-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin: 0;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-head .panel-head-actions {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(88px, 112px));
+      gap: 8px;
+      width: auto;
+      margin: 0;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-head .panel-head-actions button {
+      box-sizing: border-box;
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      margin: 0;
+      padding: 8px 10px;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .status {
+      margin-top: 0;
+      margin-bottom: 10px;
+      padding: 8px 10px;
+      white-space: normal;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .panel-kpis {
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    #panel.phase-board-panel.workspace-panel > .phase-board {
+      min-height: 0;
+      height: auto;
+      max-height: none;
+      margin-top: 0;
+      padding-bottom: 24px;
+      overflow: visible;
+    }
+
+    #panel.workspace-panel .phase-lane,
+    #panel.workspace-panel .phase-title-row,
+    #panel.workspace-panel .phase-footer-lane,
+    #panel.workspace-panel .board-primary,
+    #panel.workspace-panel .draft-hero,
+    #panel.workspace-panel .draft-board,
+    #panel.workspace-panel .resource-bank,
+    #panel.workspace-panel .surface-command {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: none;
+      margin-right: 0;
+      margin-left: 0;
+    }
+
+    #panel.workspace-panel .ops-grid,
+    #panel.workspace-panel .nav-grid,
+    #panel.workspace-panel .upgrade-grid,
+    #panel.workspace-panel .draft-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      width: 100%;
+      max-width: none;
+    }
+
+    #panel.workspace-panel .ops-card,
+    #panel.workspace-panel .nav-card,
+    #panel.workspace-panel .pilot-card,
+    #panel.workspace-panel .upgrade-card,
+    #panel.workspace-panel .upgrade-draft-card,
+    #panel.workspace-panel .management-choice-row,
+    #panel.workspace-panel .decision-choice-row {
+      box-sizing: border-box;
+      width: 100%;
+      min-width: 0;
+      max-width: none;
+      min-height: 0;
+      height: auto;
+      max-height: none;
+      overflow: visible;
+    }
+
+    #panel.workspace-panel .card-title,
+    #panel.workspace-panel .card-copy,
+    #panel.workspace-panel .module-impact,
+    #panel.workspace-panel .metric,
+    #panel.workspace-panel .stat-chip {
+      max-width: 100%;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    #panel.workspace-panel button {
+      box-sizing: border-box;
+      min-height: 40px;
+      white-space: normal;
+    }
+
+    #panel.workspace-panel .primary-actions,
+    #panel.workspace-panel .final-actions,
+    #panel.workspace-panel .draft-actions {
+      box-sizing: border-box;
+      width: 100%;
+      margin-top: 12px;
+      padding: 8px 0 0;
+    }
+
+    @media (max-width: 900px) {
+      #panel.phase-board-panel.workspace-panel {
+        padding: 12px 14px 24px;
+      }
+
+      #panel.phase-board-panel.workspace-panel > .panel-head {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      #panel.phase-board-panel.workspace-panel > .panel-head .panel-head-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        width: 100%;
+      }
+
+      #panel.workspace-panel .ops-grid,
+      #panel.workspace-panel .nav-grid,
+      #panel.workspace-panel .upgrade-grid,
+      #panel.workspace-panel .draft-card-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    #panel.drone-workspace-panel {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      max-height: none;
+      overflow: hidden;
+      padding: 14px 16px;
+      border: 0;
+      border-radius: 0;
+      background: #030c12;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+
+    #panel.drone-workspace-panel > .panel-head {
+      flex: 0 0 58px;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      width: 100%;
+      height: 58px;
+      margin: 0 0 10px;
+      padding: 0 0 10px;
+      border-bottom: 1px solid #34596a;
+    }
+
+    #panel.drone-workspace-panel > .panel-head .panel-title {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel > .panel-head .panel-title h1 {
+      margin: 1px 0 0;
+      font-size: 22px;
+    }
+
+    #panel.drone-workspace-panel > .panel-head .panel-head-actions {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(3, clamp(72px, 9vw, 112px));
+      gap: 8px;
+      width: auto;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel > .panel-head .panel-head-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      height: 40px;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .phase-board-drone-ops {
+      flex: 1 1 auto;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-toolbar {
+      flex: 0 0 72px;
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      width: 100%;
+      height: 72px;
+      margin: 0 0 10px;
+      padding: 8px 12px;
+      border: 1px solid #34596a;
+      border-radius: 7px;
+      background: #08161e;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-heading {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-heading .ui-kicker,
+    #panel.drone-workspace-panel .section-heading .ui-kicker,
+    #panel.drone-workspace-panel .drone-bay-copy .ui-kicker {
+      color: #21d8ef;
+      font-size: 9px;
+      letter-spacing: 1px;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-heading h2 {
+      margin: 2px 0 1px;
+      font-size: 20px;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-heading p {
+      margin: 0;
+      color: #9ab0bc;
+      font-size: 11px;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-actions {
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: repeat(2, clamp(76px, 9vw, 112px)) minmax(150px, 232px);
+      gap: 8px;
+      width: auto;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-actions button {
+      width: 100%;
+      min-width: 0;
+      min-height: 46px;
+      height: 46px;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-done-action {
+      color: #dffcff;
+      border-color: #21d8ef;
+      background: #10323b;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #panel.drone-workspace-panel .drone-done-action:hover,
+    #panel.drone-workspace-panel .drone-done-action:focus,
+    #panel.drone-workspace-panel .drone-done-action.controller-focused {
+      color: #fff;
+      border-color: #f1b72b;
+      background: #16414b;
+    }
+
+    #panel.drone-workspace-panel .drone-top-row {
+      flex: 0 0 92px;
+      display: block;
+      width: 100%;
+      max-width: none;
+      height: 92px;
+      margin: 0 0 10px;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-strip {
+      box-sizing: border-box;
+      display: flex;
+      align-items: center;
+      width: 100%;
+      max-width: none;
+      min-height: 92px;
+      height: 92px;
+      margin: 0;
+      padding: 10px 12px;
+      border-color: #34596a;
+      background: #08161e;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-copy {
+      flex: 0 0 220px;
+      width: 220px;
+      margin-right: 12px;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-copy h2 {
+      margin: 2px 0 1px;
+      font-size: 17px;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-copy p {
+      margin: 0;
+      color: #9ab0bc;
+      font-size: 10px;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-strip .drone-bay-stats {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: repeat(6, minmax(70px, 1fr));
+      gap: 6px;
+      min-width: 0;
+      margin: 0 12px 0 0;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-strip .stat-chip {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 48px;
+      height: 48px;
+      margin: 0;
+      padding: 7px 6px;
+      font-size: 10px;
+      text-align: center;
+    }
+
+    #panel.drone-workspace-panel .drone-bay-strip > button {
+      flex: 0 0 126px;
+      width: 126px;
+      min-height: 44px;
+      height: 44px;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-workspace-main {
+      flex: 1 1 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);
+      gap: 10px;
+      width: 100%;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    #panel.drone-workspace-panel .drone-roster,
+    #panel.drone-workspace-panel .drone-loadout-bench {
+      box-sizing: border-box;
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      margin: 0;
+      padding: 12px;
+      overflow-x: hidden;
+      overflow-y: auto;
+      border: 1px solid #34596a;
+      border-radius: 7px;
+      background: #06121a;
+      scrollbar-gutter: stable;
+    }
+
+    #panel.drone-workspace-panel .drone-roster {
+      grid-column: 1;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-bench {
+      grid-column: 2;
+      max-width: none;
+    }
+
+    #panel.drone-workspace-panel .section-heading {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      width: 100%;
+      min-height: 45px;
+      margin: 0 0 10px;
+    }
+
+    #panel.drone-workspace-panel .section-heading h2 {
+      margin: 2px 0 0;
+      font-size: 17px;
+    }
+
+    #panel.drone-workspace-panel .section-heading p {
+      max-width: 220px;
+      margin: 0 0 2px 10px;
+      color: #9ab0bc;
+      font-size: 10px;
+      text-align: right;
+    }
+
+    #panel.drone-workspace-panel .drone-control-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 8px;
+      width: 100%;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card {
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-width: 0;
+      min-height: 252px;
+      height: auto;
+      margin: 0;
+      padding: 10px;
+      overflow: hidden;
+      border: 1px solid #34596a;
+      border-radius: 7px;
+      background: #0a1b24;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card.rarity-uncommon {
+      border-color: #31865f;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card.rarity-rare {
+      border-color: #8b6a16;
+    }
+
+    #panel.drone-workspace-panel .drone-control-status {
+      display: block;
+      min-height: 16px;
+      height: auto;
+      margin: 6px 0 4px;
+      color: #21d8ef;
+      font-size: 11px;
+    }
+
+    #panel.drone-workspace-panel .drone-card-description,
+    #panel.drone-workspace-panel .drone-build-hook,
+    #panel.drone-workspace-panel .drone-upgrade-summary {
+      display: block;
+      min-height: 0;
+      height: auto;
+      margin: 4px 0;
+      overflow: visible;
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    #panel.drone-workspace-panel .drone-card-description {
+      color: #c5d3da;
+    }
+
+    #panel.drone-workspace-panel .drone-build-hook {
+      padding: 5px 6px;
+      color: #bfeef7;
+      border: 1px solid #234856;
+      border-radius: 4px;
+      background: #0a2028;
+    }
+
+    #panel.drone-workspace-panel .drone-upgrade-summary {
+      color: #f1b72b;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card .stat-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      width: 100%;
+      min-height: 34px;
+      height: auto;
+      margin: 5px 0 7px;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card .stat-chip {
+      flex: 1 1 84px;
+      box-sizing: border-box;
+      min-width: 84px;
+      min-height: 28px;
+      height: auto;
+      margin: 0;
+      padding: 4px 5px;
+      font-size: 9px;
+      white-space: normal;
+      overflow: visible;
+      overflow-wrap: anywhere;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card .card-footer {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      width: 100%;
+      min-height: 42px;
+      height: auto;
+      margin: auto 0 0;
+      padding: 7px 0 0;
+      border-top: 1px solid #234856;
+    }
+
+    #panel.drone-workspace-panel .drone-control-card .card-footer button {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      height: 40px;
+      margin: 0;
+      padding: 4px 6px;
+      font-size: 10px;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 100%;
+      margin: 0;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-slot {
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      width: 100%;
+      min-height: 112px;
+      height: auto;
+      margin: 0;
+      padding: 9px 10px;
+      overflow: hidden;
+      border: 1px solid #34596a;
+      border-radius: 7px;
+      background: #0a1b24;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-slot .slot-card-head button {
+      min-width: 96px;
+      min-height: 36px;
+      height: 36px;
+      font-size: 10px;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-slot .stat-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 7px 0 0;
+    }
+
+    #panel.drone-workspace-panel .drone-loadout-slot .stat-chip {
+      min-width: 82px;
+      min-height: 25px;
+      height: auto;
+      margin: 0;
+      padding: 4px 5px;
+      font-size: 9px;
+    }
+
+    @media (max-width: 980px) {
+      #panel.drone-workspace-panel .drone-bay-copy {
+        flex-basis: 170px;
+        width: 170px;
+      }
+
+      #panel.drone-workspace-panel .drone-bay-copy p {
+        display: none;
+      }
+
+      #panel.drone-workspace-panel .drone-bay-strip .drone-bay-stats {
+        grid-template-columns: repeat(3, minmax(70px, 1fr));
+      }
+
+      #panel.drone-workspace-panel .drone-bay-strip .stat-chip {
+        min-height: 32px;
+        height: 32px;
+        padding: 3px 5px;
+      }
+
+      #panel.drone-workspace-panel .drone-workspace-main {
+        grid-template-columns: minmax(0, 1fr) 280px;
+      }
+
+      #panel.drone-workspace-panel .drone-control-grid {
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+    }
+
+    @media (max-width: 820px) {
+      #panel.drone-workspace-panel {
+        overflow-y: auto;
+      }
+
+      #panel.drone-workspace-panel .phase-board-drone-ops {
+        flex: 0 0 auto;
+        min-height: auto;
+        height: auto;
+        overflow: visible;
+      }
+
+      #panel.drone-workspace-panel .drone-workspace-main {
+        display: flex;
+        flex-direction: column;
+        min-height: auto;
+        overflow: visible;
+      }
+
+      #panel.drone-workspace-panel .drone-roster,
+      #panel.drone-workspace-panel .drone-loadout-bench {
+        flex: 0 0 auto;
+        grid-column: auto;
+        width: 100%;
+        max-width: none;
+        height: auto;
+        overflow: visible;
+      }
+
+      #panel.drone-workspace-panel .drone-roster {
+        margin-bottom: 10px;
+      }
+    }
+
+    #modal-root .drone-synergy-modal {
+      width: 100%;
+    }
+
+    #modal-root .drone-synergy-summary {
+      margin: 0 0 10px;
+      padding: 0 0 10px;
+      border-bottom: 1px solid #34596a;
+    }
+
+    #modal-root .drone-synergy-summary h3 {
+      margin: 3px 0;
+      color: #dffcff;
+      font-size: 16px;
+    }
+
+    #modal-root .drone-synergy-summary p,
+    #modal-root .drone-synergy-row p {
+      margin: 3px 0;
+      color: #b8cbd3;
+      font-size: 11px;
+      line-height: 1.3;
+    }
+
+    #modal-root .drone-synergy-summary .stat-grid {
+      margin: 8px 0 0;
+    }
+
+    #modal-root .drone-synergy-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+    }
+
+    #modal-root .drone-synergy-row {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #34596a;
+      border-radius: 5px;
+      background: #08161e;
+    }
+
+    #modal-root .drone-synergy-row.active {
+      border-color: #21d8ef;
+    }
+
+    #modal-root .drone-synergy-row.signature {
+      border-color: #8b6a16;
+    }
+
+    #modal-root .drone-synergy-row.active.signature {
+      border-color: #21d8ef;
+    }
+
+    #modal-root .drone-synergy-row .recipe-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #dffcff;
+      font-size: 12px;
+    }
+
+    #modal-root .drone-synergy-row .recipe-topline span {
+      color: #21d8ef;
+      font-size: 10px;
+    }
+
+    #modal-root .drone-synergy-row .drone-synergy-requirements {
+      color: #f1b72b;
+    }
   </style>
 </head>
 <body>
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  <div id="ui-startup-status" role="status">Starting RmlUi...</div>
   <aside id="panel">
     <h1>OREBIT</h1>
     <p class="status">Loading WebAssembly...</p>
@@ -6350,6 +9675,7 @@
     <div class="telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong><small>thermal buildup over the burn</small></div>
     <div class="telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong><small>where the burn starts feeling spicy</small></div>
   </div>
+  <div id="surface-scan-scene-readout" class="surface-scan-scene-readout" hidden aria-hidden="true"></div>
   <aside id="debug-tools" class="debug-tools" aria-label="Debug screen tools">
     <h2>Debug screens</h2>
     <p>Sandbox screens use default settings and do not write save data.</p>
@@ -6463,25 +9789,23 @@
       </section>
       <section class="debug-accordion-item">
         <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-research-surface" data-debug-menu-toggle>
-          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>4 destinations</small></span>
+          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>5 destinations</small></span>
           <span class="debug-accordion-caret" aria-hidden="true">&gt;</span>
         </button>
         <div class="debug-accordion-panel" id="debug-menu-research-surface" hidden>
           <button type="button" data-debug-action="research">Research board</button>
+          <button type="button" data-debug-action="refit">Refit board</button>
           <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
           <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
           <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
         </div>
       </section>
     </div>
-    <div class="debug-exit-action">
-      <button class="ghost" type="button" data-debug-action="exit">Exit debug / reload save</button>
-    </div>
   </aside>
   <aside id="controller-prompt-bar" class="controller-prompt-bar" aria-live="polite" aria-label="Controller shortcuts"></aside>
   <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
   <div id="modal-root" class="modal-root" hidden>
-    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
       <div class="modal-head">
         <h2 id="modal-title"></h2>
         <button class="modal-close ghost" type="button" aria-label="Close" data-ui-close-modal="1" data-ui-focus-id="modal:close">Close</button>
@@ -6491,9 +9815,12 @@
   </div>
 
   <script>
+    document.body.dataset.uiRenderer = "initializing";
+
     const panel = document.getElementById("panel");
     const canvas = document.getElementById("canvas");
     const modalRoot = document.getElementById("modal-root");
+    const modalPanel = modalRoot.querySelector(".modal-panel");
     const modalTitle = document.getElementById("modal-title");
     const modalContent = document.getElementById("modal-content");
     const modalClose = modalRoot.querySelector(".modal-close");
@@ -6503,6 +9830,7 @@
     const sceneRepairDrill = document.getElementById("scene-repair-drill");
     const sceneRepairDrone = document.getElementById("scene-repair-drone");
     const telemetryChartLegend = document.getElementById("telemetry-chart-legend");
+    const surfaceScanSceneReadout = document.getElementById("surface-scan-scene-readout");
     const controllerPromptBar = document.getElementById("controller-prompt-bar");
     const debugTools = document.getElementById("debug-tools");
     const debugActOneLabel = document.getElementById("debug-act-one-label");
@@ -6524,6 +9852,103 @@
       action: document.getElementById("debug-controller-action"),
       pause: document.getElementById("debug-controller-pause")
     });
+    const uiLayoutClasses = new Set(["fullscreen", "rail", "dock", "mining"]);
+    let currentUiViewportLayout = null;
+
+    function clampUiLayout(value, minimum, maximum) {
+      return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    function activePanelMode() {
+      return panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
+    }
+
+    function normalizedSuppliedUiRect(rect) {
+      const value = rect && typeof rect === "object" ? rect : {};
+      const number = (field) => {
+        const candidate = Number(value[field]);
+        return Number.isFinite(candidate) ? Math.max(0, Math.round(candidate)) : 0;
+      };
+      return { x: number("x"), y: number("y"), width: number("width"), height: number("height") };
+    }
+
+    function normalizedSuppliedUiLayout(layout) {
+      const layoutClass = uiLayoutClasses.has(layout?.layoutClass) ? layout.layoutClass : "fullscreen";
+      const sceneRect = normalizedSuppliedUiRect(layout?.sceneRect);
+      const panelRect = normalizedSuppliedUiRect(layout?.panelRect);
+      const topPanelRect = normalizedSuppliedUiRect(layout?.topPanelRect);
+      const hudSafeRect = normalizedSuppliedUiRect(layout?.hudSafeRect);
+      const surfaceKind = layoutClass === "mining"
+        ? "mining"
+        : (layoutClass === "fullscreen" ? "fullscreen" : "persistent");
+      const outerMargin = Math.max(0, hudSafeRect.x - sceneRect.x);
+      let gap = outerMargin;
+      if (layoutClass === "rail") {
+        gap = Math.max(0, sceneRect.x - panelRect.x - panelRect.width);
+      } else if (layoutClass === "dock") {
+        gap = Math.max(0, panelRect.y - sceneRect.y - sceneRect.height);
+      } else if (layoutClass === "mining") {
+        gap = Math.max(0, sceneRect.y - topPanelRect.y - topPanelRect.height);
+      }
+      return {
+        layoutClass,
+        surfaceKind,
+        outerMargin,
+        gap,
+        sceneRect,
+        panelRect,
+        topPanelRect,
+        hudSafeRect
+      };
+    }
+
+    function activeUiSurfaceKind() {
+      return currentUiViewportLayout?.surfaceKind || "fullscreen";
+    }
+
+    function applyUiViewportLayout() {
+      const layout = currentUiViewportLayout;
+      if (!layout) return null;
+      const panelMode = activePanelMode();
+      document.body.dataset.uiLayout = layout.layoutClass;
+      document.body.dataset.uiSurface = layout.surfaceKind;
+      document.body.dataset.uiPanelMode = panelMode || "default";
+      document.body.classList.toggle(
+        "controller-prompt-panel-bound",
+        controllerPromptBar.classList.contains("is-visible")
+          && !domModalVisible()
+          && layout.surfaceKind === "persistent"
+      );
+      panel.dataset.uiViewportSpecial = layout.surfaceKind === "persistent" ? "0" : "1";
+
+      const rootStyle = document.documentElement.style;
+      rootStyle.setProperty("--ui-outer-margin", `${layout.outerMargin}px`);
+      rootStyle.setProperty("--ui-layout-gap", `${layout.gap}px`);
+      rootStyle.setProperty("--ui-panel-x", `${layout.panelRect.x}px`);
+      rootStyle.setProperty("--ui-panel-y", `${layout.panelRect.y}px`);
+      rootStyle.setProperty("--ui-panel-width", `${layout.panelRect.width}px`);
+      rootStyle.setProperty("--ui-panel-height", `${layout.panelRect.height}px`);
+      rootStyle.setProperty("--ui-top-panel-x", `${layout.topPanelRect.x}px`);
+      rootStyle.setProperty("--ui-top-panel-y", `${layout.topPanelRect.y}px`);
+      rootStyle.setProperty("--ui-top-panel-width", `${layout.topPanelRect.width}px`);
+      rootStyle.setProperty("--ui-top-panel-height", `${layout.topPanelRect.height}px`);
+      rootStyle.setProperty("--ui-scene-x", `${layout.sceneRect.x}px`);
+      rootStyle.setProperty("--ui-scene-y", `${layout.sceneRect.y}px`);
+      rootStyle.setProperty("--ui-scene-width", `${layout.sceneRect.width}px`);
+      rootStyle.setProperty("--ui-scene-height", `${layout.sceneRect.height}px`);
+      rootStyle.setProperty("--ui-hud-safe-x", `${layout.hudSafeRect.x}px`);
+      rootStyle.setProperty("--ui-hud-safe-y", `${layout.hudSafeRect.y}px`);
+      rootStyle.setProperty("--ui-hud-safe-width", `${layout.hudSafeRect.width}px`);
+      rootStyle.setProperty("--ui-hud-safe-height", `${layout.hudSafeRect.height}px`);
+      return layout;
+    }
+
+    function setSuppliedUiViewportLayout(layout) {
+      currentUiViewportLayout = normalizedSuppliedUiLayout(layout);
+      applyUiViewportLayout();
+      syncSceneOverlays();
+    }
+
     let lastToastText = "";
     let lastToastAt = 0;
     const resolutionStorageKey = "rocket_rogue_resolution";
@@ -6904,26 +10329,34 @@
       const item = (button, action) => `<span><strong>${button}</strong> ${action}</span>`;
       const describedItem = (action, button, purpose = "") =>
         `<span>${action} (${button})${purpose ? ` - ${purpose}` : ""}</span>`;
-      controllerPromptBar.classList.toggle("mining-input-helper", mining && modalRoot.hidden);
+      controllerPromptBar.classList.toggle("mining-input-helper", mining && !domModalVisible());
+      document.body.classList.remove("controller-prompt-panel-bound");
+      const showPrompt = () => {
+        controllerPromptBar.classList.add("is-visible");
+        document.body.classList.toggle(
+          "controller-prompt-panel-bound",
+          !domModalVisible() && activeUiSurfaceKind() === "persistent"
+        );
+      };
 
       if (!controllerActive) {
-        if (!modalRoot.hidden || !gameplayHelper) {
+        if (domModalVisible() || !gameplayHelper) {
           controllerPromptBar.innerHTML = "";
           controllerPromptBar.classList.remove("is-visible");
           return;
         }
         if (mining) {
           controllerPromptBar.innerHTML = describedItem("Move / Face", "WASD / Arrows") +
-            describedItem("Drill", "Space", "Extracts terrain") +
-            describedItem("Pulse Scanner", "E", "Reveals nearby resources") +
+            describedItem("Drill", "Space") +
+            describedItem("Scan", "E") +
             (panel.querySelector("[data-rr-action='mining_tether']")
-              ? describedItem("Tether Artifact", "T", "Requires an exposed nearby target") : "") +
+              ? describedItem("Tether", "T") : "") +
             (panel.querySelector("[data-mining-drones='1']")
-              ? describedItem("Assigned Drones", "Automatic", "Execute their roles automatically") : "") +
+              ? describedItem("Drones", "Automatic") : "") +
             (panel.querySelector("[data-rr-action='mining_stow']")
-              ? describedItem("Bank Cargo", "R", "Secures the payload") : "") +
+              ? describedItem("Bank / Leave", "R") : "") +
             (panel.querySelector("[data-rr-action='mining_abort']")
-              ? describedItem("Emergency Recall", "Esc", "Ends the run") : "");
+              ? describedItem("Recall", "Esc") : "");
         } else if (flyby) {
           controllerPromptBar.innerHTML = describedItem("Accelerate / Slow", "W/S or Up/Down") +
             describedItem("Turn", "A/D or Left/Right") + describedItem("Abort", "Esc", "Records a Miss");
@@ -6931,11 +10364,11 @@
           controllerPromptBar.innerHTML = describedItem("Prograde / Retrograde", "W/S or Up/Down") +
             describedItem("Tighten / Widen", "A/D or Left/Right") + describedItem("Abort", "Esc", "Records a Miss");
         }
-        controllerPromptBar.classList.add("is-visible");
+        showPrompt();
         return;
       }
 
-      if (!modalRoot.hidden) {
+      if (domModalVisible()) {
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") +
           (modalRoot.dataset.dismissible === "0" ? "" : item(cancel, "Back")) + item("R-stick", "Scroll");
       } else if (panel.querySelector("[data-panel-mode='title']")) {
@@ -6944,18 +10377,18 @@
         controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
       } else if (mining) {
         controllerPromptBar.innerHTML = describedItem("Move / Face", "L-stick") +
-          describedItem("Drill", label.rt, "Extracts terrain") +
-          describedItem("Pulse Scanner", label.west, "Reveals nearby resources") +
+          describedItem("Drill", label.rt) +
+          describedItem("Scan", label.west) +
           (panel.querySelector("[data-rr-action='mining_tether']")
-            ? describedItem("Tether Artifact", label.north, "Requires an exposed nearby target") : "") +
+            ? describedItem("Tether", label.north) : "") +
           (panel.querySelector("[data-mining-drones='1']")
-            ? describedItem("Assigned Drones", "Automatic", "Execute their roles automatically") : "") +
-          (panel.querySelector("[data-drill-visible='1']") ? describedItem("Repair Drill", label.lb) : "") +
-          (panel.querySelector("[data-drone-visible='1']") ? describedItem("Repair Rig", label.rb) : "") +
+            ? describedItem("Drones", "Automatic") : "") +
+          (panel.querySelector("[data-drill-visible='1']") ? describedItem("Drill Repair", label.lb) : "") +
+          (panel.querySelector("[data-drone-visible='1']") ? describedItem("Rig Repair", label.rb) : "") +
           (panel.querySelector("[data-rr-action='mining_stow']")
-            ? describedItem("Bank Cargo", label.south, "Secures the payload") : "") +
+            ? describedItem("Bank / Leave", label.south) : "") +
           (panel.querySelector("[data-rr-action='mining_abort']")
-            ? describedItem("Emergency Recall", label.east, "Hold to end the run") : "") + item(label.menu, "Pause");
+            ? describedItem("Recall", label.east, "Hold") : "") + item(label.menu, "Pause");
       } else if (flyby) {
         controllerPromptBar.innerHTML = describedItem("Accelerate / Slow", "L-stick vertical") +
           describedItem("Turn", "L-stick horizontal") + describedItem("Abort", label.east, "Hold to record a Miss") + item(label.menu, "Pause");
@@ -6974,7 +10407,7 @@
         controllerPromptBar.innerHTML = item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(cancel, "Back") +
           item("R-stick", "Scroll") + item(label.menu, "Pause");
       }
-      controllerPromptBar.classList.add("is-visible");
+      showPrompt();
     }
 
     function setControllerPresentation(active, family) {
@@ -7014,31 +10447,41 @@
       syncControllerResumeControls(root);
     }
 
-    function sceneMetrics() {
-      const width = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
-      const height = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
-      let leftPx = 0;
-      if (panel && width > 720 && !isMiningActive()) {
-        const rect = panel.getBoundingClientRect();
-        leftPx = Math.max(0, rect.right + 24);
-        if (width - leftPx < 520) {
-          leftPx = 0;
-        }
-      }
-      const sceneWidth = Math.max(1, width - leftPx);
-      const unit = Math.max(1, Math.min(sceneWidth, height) * 0.5 * 0.92);
+    function clampOverlayRect(x, y, width, height, bounds) {
+      const fittedWidth = Math.min(Math.max(0, width), Math.max(0, bounds.width));
+      const fittedHeight = Math.min(Math.max(0, height), Math.max(0, bounds.height));
+      const maxX = bounds.x + Math.max(0, bounds.width - fittedWidth);
+      const maxY = bounds.y + Math.max(0, bounds.height - fittedHeight);
       return {
-        width,
-        height,
-        left: leftPx,
-        centerX: leftPx + sceneWidth * 0.5,
-        centerY: height * 0.5,
+        x: clampUiLayout(x, bounds.x, maxX),
+        y: clampUiLayout(y, bounds.y, maxY),
+        width: fittedWidth,
+        height: fittedHeight
+      };
+    }
+
+    function sceneMetrics(layout = currentUiViewportLayout || applyUiViewportLayout()) {
+      if (!layout) return null;
+      const sceneRect = layout.sceneRect;
+      const sceneWidth = Math.max(1, sceneRect.width);
+      const sceneHeight = Math.max(1, sceneRect.height);
+      const scenePadding = layout.surfaceKind === "mining" ? 1.0 : (layout.layoutClass === "dock" ? 0.56 : 0.92);
+      const unit = Math.max(1, Math.min(sceneWidth, sceneHeight) * 0.5 * scenePadding);
+      return {
+        width: sceneWidth,
+        height: sceneHeight,
+        left: sceneRect.x,
+        top: sceneRect.y,
+        centerX: sceneRect.x + sceneWidth * 0.5,
+        centerY: sceneRect.y + sceneHeight * 0.5,
+        hudSafeRect: layout.hudSafeRect,
         unit
       };
     }
 
     function worldToScreen(x, y) {
       const scene = sceneMetrics();
+      if (!scene) return { x: 0, y: 0 };
       return {
         x: scene.centerX + x * scene.unit,
         y: scene.centerY - y * scene.unit,
@@ -7047,8 +10490,8 @@
     }
 
     function miningShipServiceAnchor(marker) {
-      const width = Math.max(1, canvas.clientWidth || window.innerWidth || 1);
-      const height = Math.max(1, canvas.clientHeight || window.innerHeight || 1);
+      const scene = sceneMetrics();
+      if (!scene) return null;
       const terrainWidth = Number(marker?.dataset.miningWidth || 0);
       const terrainHeight = Number(marker?.dataset.miningHeight || 0);
       const returnX = Number(marker?.dataset.miningReturnX || 0);
@@ -7057,19 +10500,19 @@
         return null;
       }
 
-      const aspect = Math.max(0.1, width / height);
+      const aspect = Math.max(0.1, scene.width / scene.height);
       const cellWidth = (aspect * 2) / terrainWidth;
       const cellHeight = 1.82 / terrainHeight;
       const cellSize = Math.min(cellWidth, cellHeight);
       const shipX = -aspect + (returnX + 0.5) * cellWidth;
       const shipGroundY = 0.82 - returnY * cellHeight;
-      const desiredSpriteSize = cellSize * 9.5;
-      const maxSpriteSize = Math.max(cellSize * 2, (0.82 - shipGroundY - cellHeight * 0.85) / 0.955);
+      const desiredSpriteSize = cellSize * 8.5;
+      const maxSpriteSize = Math.max(cellSize * 7.25, (0.82 - shipGroundY - cellHeight * 0.85) / 0.955);
       const spriteSize = Math.min(desiredSpriteSize, maxSpriteSize);
       const shipY = shipGroundY + spriteSize * 0.455;
-      const shipCenterX = (shipX + 1) * 0.5 * width;
-      const shipCenterY = (1 - shipY) * 0.5 * height;
-      const spritePixelWidth = spriteSize * width * 0.5;
+      const shipCenterX = scene.centerX + shipX * scene.unit;
+      const shipCenterY = scene.centerY - shipY * scene.unit;
+      const spritePixelWidth = spriteSize * scene.unit;
       return {
         right: shipCenterX - spritePixelWidth * 0.5 - 12,
         y: shipCenterY
@@ -7077,6 +10520,9 @@
     }
 
     function syncSceneOverlays() {
+      const layout = applyUiViewportLayout();
+      if (!layout) return;
+      const hudSafeRect = layout.hudSafeRect;
       const preflightMarker = panel.querySelector("[data-preflight-launch]");
       const preflight = Boolean(preflightMarker);
       const preflightReady = preflightMarker?.dataset.preflightReady === "1";
@@ -7093,6 +10539,7 @@
       // fallback only; leaving both enabled duplicates their visuals and
       // creates competing click targets.
       const useShellSceneOverlays = !document.body.classList.contains("rmlui-enabled");
+      const scanSceneMarker = panel.querySelector(".surface-scan-scene-marker");
       const shipServiceMarker = panel.querySelector("[data-mining-ship-service]");
       const drillRepairVisible = shipServiceMarker?.dataset.drillVisible === "1";
       const droneRepairVisible = shipServiceMarker?.dataset.droneVisible === "1";
@@ -7101,7 +10548,7 @@
       const showShipService = useShellSceneOverlays
         && !repairsRenderInPanel
         && Boolean(shipServiceMarker && (drillRepairVisible || droneRepairVisible) && !rmlModalOpen);
-      debugTools.classList.toggle("hud-suppressed", miningFullscreen || titleScreen);
+      debugTools.classList.toggle("hud-suppressed", miningFullscreen || titleScreen || rmlModalOpen);
 
       const showLaunchControl = useShellSceneOverlays && preflight && !phaseBoard && !rmlModalOpen;
       sceneLaunchControl.classList.toggle("is-visible", showLaunchControl);
@@ -7110,8 +10557,16 @@
       sceneLaunchControl.textContent = preflightReady ? "Launch" : "Securing Drone";
       if (showLaunchControl) {
         const anchor = worldToScreen(-0.18, -0.50);
-        sceneLaunchControl.style.left = `${Math.round(anchor.x)}px`;
-        sceneLaunchControl.style.top = `${Math.round(anchor.y)}px`;
+        const launchWidth = sceneLaunchControl.offsetWidth || 190;
+        const launchHeight = sceneLaunchControl.offsetHeight || 70;
+        const launchRect = clampOverlayRect(
+          anchor.x - launchWidth * 0.5,
+          anchor.y - launchHeight * 0.5,
+          launchWidth,
+          launchHeight,
+          hudSafeRect);
+        sceneLaunchControl.style.left = `${Math.round(launchRect.x + launchRect.width * 0.5)}px`;
+        sceneLaunchControl.style.top = `${Math.round(launchRect.y + launchRect.height * 0.5)}px`;
         sceneLaunchControl.style.transform = "translate(-50%, -50%)";
       }
 
@@ -7128,10 +10583,14 @@
         if (anchor) {
           const dockWidth = sceneShipService.offsetWidth || 196;
           const dockHeight = sceneShipService.offsetHeight || 54;
-          const rightEdge = Math.max(dockWidth + 10, Math.min(window.innerWidth - 10, anchor.right));
-          const centerY = Math.max(dockHeight * 0.5 + 84, Math.min(window.innerHeight - dockHeight * 0.5 - 10, anchor.y));
-          sceneShipService.style.left = `${Math.round(rightEdge)}px`;
-          sceneShipService.style.top = `${Math.round(centerY)}px`;
+          const serviceRect = clampOverlayRect(
+            anchor.right - dockWidth,
+            anchor.y - dockHeight * 0.5,
+            dockWidth,
+            dockHeight,
+            hudSafeRect);
+          sceneShipService.style.left = `${Math.round(serviceRect.x + serviceRect.width)}px`;
+          sceneShipService.style.top = `${Math.round(serviceRect.y + serviceRect.height * 0.5)}px`;
         }
       }
 
@@ -7142,17 +10601,50 @@
       if (showLegend) {
         const graphTopLeft = worldToScreen(0.18, -0.58);
         const graphRight = worldToScreen(0.94, -0.58);
-        const graphWidth = Math.max(300, graphRight.x - graphTopLeft.x);
-        telemetryChartLegend.style.left = `${Math.round(graphTopLeft.x)}px`;
-        telemetryChartLegend.style.top = `${Math.round(graphTopLeft.y - 42)}px`;
+        const graphWidth = Math.min(hudSafeRect.width, Math.max(300, graphRight.x - graphTopLeft.x));
         telemetryChartLegend.style.width = `${Math.round(graphWidth)}px`;
         telemetryChartLegend.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr))";
+        const legendHeight = telemetryChartLegend.offsetHeight || 30;
+        const legendRect = clampOverlayRect(
+          graphTopLeft.x,
+          graphTopLeft.y - 42,
+          graphWidth,
+          legendHeight,
+          hudSafeRect);
+        telemetryChartLegend.style.left = `${Math.round(legendRect.x)}px`;
+        telemetryChartLegend.style.top = `${Math.round(legendRect.y)}px`;
       }
 
-      const scene = sceneMetrics();
-      const toastWidth = Math.min(420, Math.max(240, scene.width - 48));
-      toastRoot.style.left = `${Math.round(scene.centerX)}px`;
+      const showScanReadout = useShellSceneOverlays && Boolean(scanSceneMarker) && !rmlModalOpen;
+      surfaceScanSceneReadout.classList.toggle("is-visible", showScanReadout);
+      surfaceScanSceneReadout.hidden = !showScanReadout;
+      surfaceScanSceneReadout.setAttribute("aria-hidden", showScanReadout ? "false" : "true");
+      if (showScanReadout) {
+        surfaceScanSceneReadout.textContent = scanSceneMarker.dataset.scanSignal
+          || scanSceneMarker.textContent?.trim()
+          || "0%";
+        const scene = sceneMetrics(layout);
+        const readoutRect = clampOverlayRect(
+          scene.centerX - 34,
+          Math.max(hudSafeRect.y, scene.centerY - 214),
+          68,
+          24,
+          hudSafeRect);
+        surfaceScanSceneReadout.style.left = `${Math.round(readoutRect.x)}px`;
+        surfaceScanSceneReadout.style.top = `${Math.round(readoutRect.y)}px`;
+      }
+
+      const toastWidth = Math.min(420, Math.max(0, hudSafeRect.width));
       toastRoot.style.width = `${Math.round(toastWidth)}px`;
+      const toastHeight = toastRoot.offsetHeight || 0;
+      const toastRect = clampOverlayRect(
+        hudSafeRect.x + (hudSafeRect.width - toastWidth) * 0.5,
+        Math.max(24, hudSafeRect.y),
+        toastWidth,
+        toastHeight,
+        hudSafeRect);
+      toastRoot.style.left = `${Math.round(toastRect.x + toastRect.width * 0.5)}px`;
+      toastRoot.style.top = `${Math.round(toastRect.y)}px`;
     }
 
     function showToast(message) {
@@ -7178,6 +10670,7 @@
       while (toastRoot.children.length > 3) {
         toastRoot.firstElementChild?.remove();
       }
+      syncSceneOverlays();
       window.setTimeout(() => {
         toast.remove();
       }, 7000);
@@ -7186,7 +10679,13 @@
     let controllerFocusedId = "";
     let controllerLastFocusCenter = null;
     let controllerActivationAuthorized = false;
+    let pendingRefitInstallFocusId = "";
     let modalReturnFocusId = "";
+    let modalReturnDomFocusId = "";
+    let modalReturnFocusCenter = null;
+    let modalReturnFocusElement = null;
+    let rmlUiModalOpen = false;
+    let modalInputFenceWasActive = false;
     const panelModalStack = [];
 
     function semanticFocusId(control) {
@@ -7215,16 +10714,50 @@
       return "";
     }
 
+    function domModalVisible() {
+      return !modalRoot.hidden;
+    }
+
+    function rmlUiOwnsModalRendering() {
+      return document.body.classList.contains("rmlui-enabled");
+    }
+
+    function modalInputFenceActive() {
+      return domModalVisible() || rmlUiModalOpen;
+    }
+
+    function nonDomModalOwnsControllerInput() {
+      return !domModalVisible() && modalInputFenceActive();
+    }
+
+    function activeControllerRoot() {
+      return domModalVisible() ? modalRoot : panel;
+    }
+
+    function copiedFocusCenter(value = controllerLastFocusCenter) {
+      return value ? { x: value.x, y: value.y } : null;
+    }
+
+    function focusedElementId(root = activeControllerRoot()) {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement) || !root.contains(active)) return "";
+      return active.dataset.controllerFocusId || semanticFocusId(active);
+    }
+
     function controllerFocusTargets() {
-      const root = modalRoot.hidden ? panel : modalRoot;
+      const root = activeControllerRoot();
       const candidates = Array.from(root.querySelectorAll("button, select, input[type='checkbox']"));
       const seen = new Map();
       return candidates.flatMap((control) => {
         const baseId = semanticFocusId(control);
-        const rect = control.getBoundingClientRect();
-        const hidden = control.disabled || control.hidden || !baseId || rect.width <= 1 || rect.height <= 1 ||
+        const controlRect = control.getBoundingClientRect();
+        const hidden = control.disabled || control.hidden || !baseId || controlRect.width <= 1 || controlRect.height <= 1 ||
           getComputedStyle(control).visibility === "hidden" || getComputedStyle(control).display === "none";
         if (hidden) return [];
+        const geometryElement = control.closest(
+          ".ui-choice-row, .surface-choice-row, .upgrade-draft-card, .pilot-card, .drone-loadout-slot, .drone-ops-callout"
+        ) || control;
+        const rect = geometryElement.getBoundingClientRect();
         const count = seen.get(baseId) || 0;
         seen.set(baseId, count + 1);
         const id = count ? `${baseId}#${count}` : baseId;
@@ -7234,28 +10767,74 @@
           id,
           x: rect.left + rect.width * 0.5,
           y: rect.top + rect.height * 0.5,
-          controllerRow: control.closest(".controller-choice-row") ? "choices" : (control.closest(".controller-action-row") ? "actions" : "")
+          bounds: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom
+          },
+          controllerRow: control.closest(".controller-choice-row")
+            ? "choices"
+            : (control.closest(".panel-head-actions")
+              ? "titlebar"
+              : (control.closest(".utility-actions") ? "utilities" : ""))
         }];
       });
     }
 
-    function cycleControllerRowTarget(targets, current, direction) {
-      if (!current.controllerRow || (direction !== 2 && direction !== 3)) return null;
-      const row = targets.filter((target) => target.controllerRow === current.controllerRow).sort((left, right) => left.x - right.x);
-      const index = row.indexOf(current);
-      if (index < 0 || !row.length) return null;
-      return row[(index + (direction === 2 ? row.length - 1 : 1)) % row.length];
+    function rightAlignedControllerRowTarget(targets, current, destinationRow) {
+      const sourceTargets = targets.filter((target) => target.controllerRow === current.controllerRow);
+      const destinationTargets = targets.filter((target) => target.controllerRow === destinationRow);
+      const sourceIndex = sourceTargets.indexOf(current);
+      if (sourceIndex < 0 || !destinationTargets.length) return null;
+      const distanceFromRight = sourceTargets.length - sourceIndex - 1;
+      const destinationIndex = destinationTargets.length - Math.min(distanceFromRight + 1, destinationTargets.length);
+      return destinationTargets[destinationIndex];
     }
 
-    function nearestControllerRowTarget(targets, row, x) {
-      return targets.filter((target) => target.controllerRow === row).reduce((nearest, target) => {
-        if (!nearest || Math.abs(target.x - x) < Math.abs(nearest.x - x)) return target;
-        return nearest;
-      }, null);
+    function directionalControllerTarget(targets, current, direction) {
+      const horizontal = direction === 2 || direction === 3;
+      const directionSign = direction === 0 || direction === 2 ? -1 : 1;
+      let best = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+      targets.forEach((candidate) => {
+        if (candidate === current) return;
+        const primary = directionSign * (horizontal
+          ? candidate.x - current.x
+          : candidate.y - current.y);
+        if (primary <= 1) return;
+
+        const secondary = Math.abs(horizontal
+          ? candidate.y - current.y
+          : candidate.x - current.x);
+        const currentSecondarySize = horizontal
+          ? Math.max(0, current.bounds.bottom - current.bounds.top)
+          : Math.max(0, current.bounds.right - current.bounds.left);
+        const candidateSecondarySize = horizontal
+          ? Math.max(0, candidate.bounds.bottom - candidate.bounds.top)
+          : Math.max(0, candidate.bounds.right - candidate.bounds.left);
+        const coneAllowance =
+          primary * 1.5 + (currentSecondarySize + candidateSecondarySize) * 0.25 + 8;
+        if (secondary > coneAllowance) return;
+
+        const secondaryGap = horizontal
+          ? Math.max(0, current.bounds.top - candidate.bounds.bottom, candidate.bounds.top - current.bounds.bottom)
+          : Math.max(0, current.bounds.left - candidate.bounds.right, candidate.bounds.left - current.bounds.right);
+        // Keep Left/Right inside a visible row while allowing Up/Down to
+        // bridge staggered cards and centered footer actions.
+        const laneGapAllowance = horizontal ? 12 : 160;
+        if (secondaryGap > laneGapAllowance) return;
+        const score = primary + secondaryGap * 4 + secondary * 0.25;
+        if (score < bestScore) {
+          best = candidate;
+          bestScore = score;
+        }
+      });
+      return best;
     }
 
     function applyControllerFocus(target) {
-      if (!target) return false;
+      if (!target || !activeControllerRoot().contains(target.control)) return false;
       panel.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
       modalRoot.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
       target.control.classList.add("controller-focused");
@@ -7298,10 +10877,11 @@
     }
 
     function controllerNavigate(direction) {
+      if (nonDomModalOwnsControllerInput()) return true;
       const targets = controllerFocusTargets();
-      if (!targets.length) return false;
+      if (!targets.length) return domModalVisible();
       let current = targets.find((target) => target.id === controllerFocusedId);
-      if (!current) return restoreControllerFocus();
+      if (!current) return restoreControllerFocus() || domModalVisible();
       if ((direction === 2 || direction === 3) && current.control instanceof HTMLSelectElement) {
         const delta = direction === 2 ? -1 : 1;
         const next = Math.max(0, Math.min(current.control.options.length - 1, current.control.selectedIndex + delta));
@@ -7311,43 +10891,26 @@
           return true;
         }
       }
-      if (current.controllerRow) {
-        if (direction === 2 || direction === 3) {
-          return applyControllerFocus(cycleControllerRowTarget(targets, current, direction));
-        }
-        const destinationRow = direction === 1 && current.controllerRow === "choices"
-          ? "actions"
-          : (direction === 0 && current.controllerRow === "actions" ? "choices" : "");
-        if (destinationRow) {
-          return applyControllerFocus(nearestControllerRowTarget(targets, destinationRow, current.x));
-        }
+      const destinationRow = direction === 0 && current.controllerRow === "utilities"
+        ? "titlebar"
+        : (direction === 1 && current.controllerRow === "titlebar" ? "utilities" : "");
+      if (destinationRow) {
+        return applyControllerFocus(
+          rightAlignedControllerRowTarget(targets, current, destinationRow)
+        ) || domModalVisible();
       }
-      let best = null;
-      let bestScore = Number.POSITIVE_INFINITY;
-      targets.forEach((candidate) => {
-        if (candidate === current) return;
-        const dx = candidate.x - current.x;
-        const dy = candidate.y - current.y;
-        const ahead = (direction === 0 && dy < -1) || (direction === 1 && dy > 1) || (direction === 2 && dx < -1) || (direction === 3 && dx > 1);
-        if (!ahead) return;
-        const primary = direction >= 2 ? Math.abs(dx) : Math.abs(dy);
-        const secondary = direction >= 2 ? Math.abs(dy) : Math.abs(dx);
-        const score = primary * 10 + secondary * 2 + secondary * secondary / Math.max(1, primary);
-        if (score < bestScore) {
-          best = candidate;
-          bestScore = score;
-        }
-      });
-      return applyControllerFocus(best);
+      const best = directionalControllerTarget(targets, current, direction);
+      return applyControllerFocus(best) || domModalVisible();
     }
 
     function controllerActivate() {
+      if (nonDomModalOwnsControllerInput()) return true;
       let target = controllerFocusTargets().find((candidate) => candidate.id === controllerFocusedId);
       if (!target) {
-        if (!restoreControllerFocus()) return false;
+        if (!restoreControllerFocus()) return domModalVisible();
         target = controllerFocusTargets().find((candidate) => candidate.id === controllerFocusedId);
       }
-      if (!target) return false;
+      if (!target) return domModalVisible();
       if (target.control instanceof HTMLSelectElement) return true;
       controllerActivationAuthorized = true;
       try {
@@ -7359,8 +10922,9 @@
     }
 
     function controllerCancel() {
-      if (!modalRoot.hidden) {
-        if (modalRoot.dataset.dismissible === "0") return false;
+      if (nonDomModalOwnsControllerInput()) return true;
+      if (domModalVisible()) {
+        if (modalRoot.dataset.dismissible === "0") return true;
         closePanelModal();
         return true;
       }
@@ -7373,17 +10937,26 @@
     }
 
     function controllerScroll(amount) {
+      if (nonDomModalOwnsControllerInput()) return true;
+      const root = activeControllerRoot();
       const current = controllerFocusTargets().find((target) => target.id === controllerFocusedId)?.control;
       let scroller = current?.parentElement || null;
-      while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) scroller = scroller.parentElement;
-      scroller ||= modalRoot.hidden ? panel : modalContent;
-      if (!scroller) return false;
+      while (scroller && scroller !== root && scroller.scrollHeight <= scroller.clientHeight + 1) {
+        scroller = scroller.parentElement;
+      }
+      if (!scroller || scroller === root || !root.contains(scroller)) {
+        scroller = domModalVisible() ? modalContent : panel;
+      }
+      if (!scroller) return domModalVisible();
       scroller.scrollTop += Math.abs(amount) <= 1 ? amount * 100 : amount;
       return true;
     }
 
     window.RocketBridge = {
       syncSceneOverlays,
+      setUiViewportLayout: setSuppliedUiViewportLayout,
+      setModalOpen: setRmlUiModalOpen,
+      uiViewportLayout: () => currentUiViewportLayout,
       syncSettingsControls() {
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
@@ -7396,14 +10969,6 @@
       setControllerPreference,
       setControllerPresentation,
       setControllerResumeBlocked,
-      controllerNavigate,
-      controllerActivate,
-      controllerCancel,
-      controllerScroll,
-      controllerModalOpen: () => !modalRoot.hidden,
-      controllerFocusedId: () => controllerFocusedId,
-      controllerOpenModal: (id) => openPanelModal(id),
-      controllerCloseModal: () => closePanelModal(),
       resolutionPreset: () => resolutionPreset(),
       setResolutionPreset: (value) => {
         const normalized = setResolutionPreset(value);
@@ -7413,31 +10978,52 @@
       },
       setPanel(html) {
         panel.innerHTML = html;
+        if (rmlUiOwnsModalRendering() && domModalVisible()) {
+          closePanelModal(true, false);
+        }
         syncLocalControls(panel);
         syncOpeningControlGuides(panel);
         updateControllerPromptBar();
         const mode = panel.querySelector("[data-panel-mode]")?.dataset.panelMode || "";
-        const phaseBoard = mode === "phase-board";
+        const workspace = mode === "workspace";
+        const phaseBoard = mode === "phase-board" || workspace;
+        const results = mode === "results";
+        const droneWorkspace = mode === "drone-workspace";
         const miningFullscreen = mode === "mining-fullscreen";
         const titleScreen = mode === "title";
         const storyBriefing = mode === "story-briefing";
         const arrivalFanfarePanel = mode === "arrival-fanfare" || mode === "mission-stamp";
+        const surfaceScanPanel = Boolean(panel.querySelector(".surface-scan-rail"));
         panel.classList.toggle("phase-board-panel", phaseBoard);
+        panel.classList.toggle("workspace-panel", workspace);
+        panel.classList.toggle("results-panel-mode", results);
+        panel.classList.toggle("drone-workspace-panel", droneWorkspace);
         panel.classList.toggle("mining-fullscreen-panel", miningFullscreen);
         panel.classList.toggle("title-screen-panel", titleScreen);
         panel.classList.toggle("title-screen-panel-mode", titleScreen);
         panel.classList.toggle("story-briefing-panel-mode", storyBriefing);
         panel.classList.toggle("arrival-fanfare-panel-mode", arrivalFanfarePanel);
+        panel.classList.toggle("surface-scan-panel", surfaceScanPanel);
         panel.classList.toggle("surface-ops-panel", phaseBoard && Boolean(panel.querySelector(".surface-ops-screen")));
-        panel.classList.toggle("drone-ops-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-drone-ops")));
+        panel.classList.toggle("drone-ops-panel", (phaseBoard || droneWorkspace) && Boolean(panel.querySelector(".phase-board-drone-ops")));
         panel.classList.toggle("navigation-panel", phaseBoard && Boolean(panel.querySelector(".phase-board-navigation")));
+        applyUiViewportLayout();
         if (phaseBoard) {
           showToast(panel.querySelector(".phase-status")?.textContent || "");
         }
         syncSceneOverlays();
         const autoModal = panel.querySelector("template[data-auto-modal='1']");
-        if (autoModal && modalRoot.hidden) {
+        if (autoModal && !rmlUiOwnsModalRendering() && !domModalVisible()) {
           openPanelModal(autoModal.dataset.modal || "");
+        } else if (pendingRefitInstallFocusId && !domModalVisible()) {
+          const requestedFocusId = pendingRefitInstallFocusId;
+          pendingRefitInstallFocusId = "";
+          const target = controllerFocusTargets().find((candidate) => candidate.id === requestedFocusId);
+          if (target) {
+            applyControllerFocus(target);
+          } else if (document.body.classList.contains("controller-input-active")) {
+            restoreControllerFocus();
+          }
         } else if (document.body.classList.contains("controller-input-active")) {
           restoreControllerFocus();
         }
@@ -7525,6 +11111,7 @@
       arkJump: () => rrCall("rr_ark_jump"),
       selectNavigationDestination: (index) => rrCall("rr_select_navigation", [index], ["number"]),
       buyOffer: (index) => rrCall("rr_buy_offer", [index], ["number"]),
+      selectRefitOffer: (index) => rrCall("rr_select_refit_offer", [index], ["number"]),
       rerollOffers: () => rrCall("rr_reroll_offers"),
       acknowledgeApproachIntroduction: () => rrCall("rr_acknowledge_approach_introduction"),
       acknowledgeProspectorCompletion: () => rrCall("rr_acknowledge_prospector_completion"),
@@ -7586,6 +11173,7 @@
       debugResults: () => rrCall("rr_debug_results"),
       debugArrivalOps: () => rrCall("rr_debug_arrival_ops"),
       debugResearch: () => rrCall("rr_debug_research"),
+      debugRefit: () => rrCall("rr_debug_refit"),
       debugSurfaceUpgrade: () => rrCall("rr_debug_surface_upgrade"),
       debugDroneOps: () => rrCall("rr_debug_drone_ops"),
       debugNavigation: () => rrCall("rr_debug_navigation"),
@@ -7608,7 +11196,10 @@
       rmlMouseDown: (x, y, button) => rrCall("rr_rml_mouse_down", [x, y, button], ["number", "number", "number"], "number") === 1,
       rmlMouseUp: (x, y, button) => rrCall("rr_rml_mouse_up", [x, y, button], ["number", "number", "number"], "number") === 1,
       rmlWheel: (x, y, deltaY) => rrCall("rr_rml_wheel", [x, y, deltaY], ["number", "number", "number"], "number") === 1,
-      rmlHitTest: (x, y) => rrCall("rr_rml_hit_test", [x, y], ["number", "number"], "number") === 1
+      rmlHitTest: (x, y) => rrCall("rr_rml_hit_test", [x, y], ["number", "number"], "number") === 1,
+      uiNavigate: (direction) => rrCall("rr_ui_navigate", [direction], ["number"], "number") === 1,
+      uiActivateFocused: () => rrCall("rr_ui_activate_focused", [], [], "number") === 1,
+      uiCancel: () => rrCall("rr_ui_cancel", [], [], "number") === 1
     };
 
     const rrActionIds = Object.freeze({
@@ -7629,6 +11220,7 @@
       arkJump: "ark_jump",
       selectNavigationDestinationPrefix: "select_navigation:",
       buyOfferPrefix: "buy_offer:",
+      selectRefitOfferPrefix: "select_refit_offer:",
       researchProjectPrefix: "research_project:",
       surfaceUpgradePrefix: "surface_upgrade:",
       droneOps: "drone_ops",
@@ -7817,6 +11409,7 @@
       results: () => rr.debugResults(),
       "arrival-ops": () => rr.debugArrivalOps(),
       research: () => rr.debugResearch(),
+      refit: () => rr.debugRefit(),
       "surface-upgrade": () => rr.debugSurfaceUpgrade(),
       "drone-ops": () => rr.debugDroneOps(),
       navigation: () => rr.debugNavigation(),
@@ -7941,19 +11534,153 @@
       return target && typeof target.closest === "function" ? target.closest(selector) : null;
     }
 
-    function openPanelModal(id, pushCurrent = true, preferredFocusId = "") {
+    function elementInActiveDomUi(element) {
+      if (!element) return false;
+      return domModalVisible() ? modalRoot.contains(element) : panel.contains(element);
+    }
+
+    function syncModalInputFencePresentation() {
+      const active = modalInputFenceActive();
+      document.body.classList.toggle("rmlui-modal-open", active);
+      if (active && !modalInputFenceWasActive) {
+        controllerActivationAuthorized = false;
+        cancelAllHeldPanelActions();
+        releaseRealtimeInputs();
+      }
+      modalInputFenceWasActive = active;
+      syncSceneOverlays();
+    }
+
+    function setDomModalOpen() {
+      syncModalInputFencePresentation();
+    }
+
+    function setRmlUiModalOpen(open) {
+      rmlUiModalOpen = Boolean(open);
+      if (rmlUiModalOpen) {
+        panel.querySelectorAll(".controller-focused")
+          .forEach((element) => element.classList.remove("controller-focused"));
+        if (panel.contains(document.activeElement) && document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+        controllerFocusedId = "";
+      }
+      syncModalInputFencePresentation();
+    }
+
+    function setDomModalBackgroundInert(inert) {
+      [panel, canvas, debugTools, sceneLaunchControl, sceneShipService].forEach((element) => {
+        if (element) element.inert = Boolean(inert);
+      });
+      if (inert) {
+        panel.setAttribute("aria-hidden", "true");
+      } else {
+        panel.removeAttribute("aria-hidden");
+      }
+    }
+
+    function clearStaleFocusForModalOpen() {
+      panel.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
+      modalRoot.querySelectorAll(".controller-focused").forEach((element) => element.classList.remove("controller-focused"));
+      const active = document.activeElement;
+      if (active instanceof HTMLElement) active.blur();
+      controllerActivationAuthorized = false;
+      cancelAllHeldPanelActions();
+      releaseRealtimeInputs();
+    }
+
+    function usableModalControl(control) {
+      if (!(control instanceof HTMLElement) || control.hidden || control.matches(":disabled")) return false;
+      const style = getComputedStyle(control);
+      const rect = control.getBoundingClientRect();
+      return rect.width > 1 && rect.height > 1 && style.display !== "none" && style.visibility !== "hidden";
+    }
+
+    function ensureExplicitModalDefaultFocus() {
+      const authored = Array.from(modalContent.querySelectorAll("[data-ui-default-focus='1']"))
+        .find(usableModalControl);
+      if (authored) return authored;
+
+      const selectors = [
+        ".modal-actions button.ok",
+        ".modal-actions button[data-rr-action]:not(.ghost)",
+        ".modal-actions button[data-ui-close-modal]:not(.ghost)",
+        ".modal-actions button:not(.ghost)",
+        "button[data-rr-action]",
+        "button[data-ui-modal]",
+        "select",
+        "input[type='checkbox']"
+      ];
+      for (const selector of selectors) {
+        const control = Array.from(modalContent.querySelectorAll(selector)).find(usableModalControl);
+        if (!control) continue;
+        control.dataset.uiDefaultFocus = "1";
+        control.dataset.shellDefaultFocus = "1";
+        return control;
+      }
+      return !modalClose.hidden && usableModalControl(modalClose) ? modalClose : null;
+    }
+
+    function focusDomModalTarget(preferredId = "") {
+      const targets = controllerFocusTargets();
+      const target = targets.find((candidate) => candidate.id === preferredId)
+        || defaultControllerFocusTarget(targets);
+      if (!target || !modalRoot.contains(target.control)) {
+        modalPanel.focus({ preventScroll: true });
+        return document.activeElement === modalPanel;
+      }
+      target.control.focus({ preventScroll: true });
+      target.control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      controllerFocusedId = target.id;
+      controllerLastFocusCenter = { x: target.x, y: target.y };
+      return true;
+    }
+
+    function restoreBackgroundDomFocus(element, preferredId = "") {
+      if (element instanceof HTMLElement && element.isConnected && !element.matches(":disabled") && !element.closest("[inert]")) {
+        element.focus({ preventScroll: true });
+        return true;
+      }
+      const target = controllerFocusTargets().find((candidate) => candidate.id === preferredId);
+      if (!target) return false;
+      target.control.focus({ preventScroll: true });
+      target.control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      return true;
+    }
+
+    function openPanelModal(
+      id,
+      pushCurrent = true,
+      preferredFocusId = "",
+      preferredDomFocusId = "",
+      preferredFocusCenter = null
+    ) {
+      if (rmlUiOwnsModalRendering()) return false;
       const template = Array.from(panel.querySelectorAll("template[data-modal]"))
         .find((candidate) => candidate.dataset.modal === id);
       if (!template) {
         return false;
       }
 
-      if (pushCurrent && !modalRoot.hidden && modalRoot.dataset.modalId && modalRoot.dataset.modalId !== id) {
-        panelModalStack.push({ id: modalRoot.dataset.modalId, focusId: controllerFocusedId });
-      } else if (modalRoot.hidden) {
+      const activeBeforeOpen = document.activeElement;
+      if (pushCurrent && domModalVisible() && modalRoot.dataset.modalId && modalRoot.dataset.modalId !== id) {
+        panelModalStack.push({
+          id: modalRoot.dataset.modalId,
+          focusId: controllerFocusedId,
+          focusCenter: copiedFocusCenter(),
+          domFocusId: focusedElementId(modalRoot)
+        });
+      } else if (!domModalVisible()) {
         modalReturnFocusId = controllerFocusedId;
+        modalReturnDomFocusId = focusedElementId(panel)
+          || (activeBeforeOpen instanceof HTMLElement ? semanticFocusId(activeBeforeOpen) : "");
+        modalReturnFocusCenter = copiedFocusCenter();
+        modalReturnFocusElement = activeBeforeOpen instanceof HTMLElement && !modalRoot.contains(activeBeforeOpen)
+          ? activeBeforeOpen
+          : null;
       }
-      controllerLastFocusCenter = null;
+      controllerLastFocusCenter = copiedFocusCenter(preferredFocusCenter);
+      clearStaleFocusForModalOpen();
 
       modalTitle.textContent = template.dataset.title || "Details";
       modalContent.innerHTML = template.innerHTML;
@@ -7964,13 +11691,15 @@
       modalClose.hidden = !dismissible || template.dataset.modalHideClose === "1";
       syncLocalControls(modalContent);
       modalRoot.hidden = false;
+      setDomModalBackgroundInert(true);
+      setDomModalOpen(true);
+      ensureExplicitModalDefaultFocus();
       updateControllerPromptBar();
       controllerFocusedId = preferredFocusId;
       if (document.body.classList.contains("controller-input-active")) {
-        restoreControllerFocus(preferredFocusId);
+        restoreControllerFocus(preferredFocusId || preferredDomFocusId);
       } else {
-        (modalContent.querySelector("[data-ui-default-focus='1']")
-          || (!modalClose.hidden ? modalClose : modalContent.querySelector("button")))?.focus();
+        focusDomModalTarget(preferredDomFocusId || preferredFocusId);
       }
       return true;
     }
@@ -7978,10 +11707,14 @@
     function closePanelModal(closeAll = false, dispatchCloseAction = true) {
       if (!closeAll && panelModalStack.length) {
         const parent = panelModalStack.pop();
-        openPanelModal(parent.id, false, parent.focusId);
+        openPanelModal(parent.id, false, parent.focusId, parent.domFocusId, parent.focusCenter);
         return;
       }
       const closeAction = dispatchCloseAction ? (modalRoot.dataset.closeAction || "") : "";
+      const returnFocusId = modalReturnFocusId;
+      const returnDomFocusId = modalReturnDomFocusId;
+      const returnFocusCenter = copiedFocusCenter(modalReturnFocusCenter);
+      const returnFocusElement = modalReturnFocusElement;
       modalRoot.hidden = true;
       delete modalRoot.dataset.dismissible;
       delete modalRoot.dataset.modalId;
@@ -7989,11 +11722,23 @@
       modalClose.hidden = false;
       modalTitle.textContent = "";
       modalContent.innerHTML = "";
+      setDomModalBackgroundInert(false);
+      setDomModalOpen(false);
       if (closeAll) panelModalStack.length = 0;
-      controllerFocusedId = modalReturnFocusId;
+      controllerFocusedId = returnFocusId;
+      controllerLastFocusCenter = returnFocusCenter;
       modalReturnFocusId = "";
+      modalReturnDomFocusId = "";
+      modalReturnFocusCenter = null;
+      modalReturnFocusElement = null;
       updateControllerPromptBar();
-      if (document.body.classList.contains("controller-input-active")) restoreControllerFocus();
+      const requestedFocusId = pendingRefitInstallFocusId;
+      pendingRefitInstallFocusId = "";
+      if (document.body.classList.contains("controller-input-active")) {
+        restoreControllerFocus(requestedFocusId || returnFocusId || returnDomFocusId);
+      } else {
+        restoreBackgroundDomFocus(returnFocusElement, returnDomFocusId || returnFocusId);
+      }
       if (closeAction) runPanelAction(closeAction);
     }
 
@@ -8008,7 +11753,61 @@
       return false;
     }
 
+    function handleRefitNavigationKey(event) {
+      if (!panel.querySelector(".phase-board-refit") || event.ctrlKey || event.metaKey || event.altKey) {
+        return false;
+      }
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement || target?.isContentEditable) {
+        return false;
+      }
+      const directions = {
+        ArrowUp: 0,
+        ArrowDown: 1,
+        ArrowLeft: 2,
+        ArrowRight: 3,
+        w: 0,
+        s: 1,
+        a: 2,
+        d: 3
+      };
+      const direction = directions[event.key] ?? directions[event.key.toLowerCase()];
+      if (direction !== undefined) {
+        rr.uiNavigate(direction);
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && (event.key === "Enter" || event.key === " ")) {
+        rr.uiActivateFocused();
+        event.preventDefault();
+        return true;
+      }
+      if (!event.repeat && event.key === "Escape") {
+        rr.uiCancel();
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    }
+
     function runPanelAction(action) {
+      if (action.startsWith(rrActionIds.selectRefitOfferPrefix)) {
+        const rawIndex = action.slice(rrActionIds.selectRefitOfferPrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          pendingRefitInstallFocusId = `action:buy_offer:${index}`;
+          rr.selectRefitOffer(index);
+          return true;
+        }
+        return false;
+      }
+
       if (action.startsWith(rrActionIds.buyOfferPrefix)) {
         const rawIndex = action.slice(rrActionIds.buyOfferPrefix.length);
         if (!/^\d+$/.test(rawIndex)) {
@@ -8166,7 +11965,7 @@
 
     function handlePanelAction(event) {
       const button = closestFromEvent(event, "button[data-rr-action]");
-      const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
+      const validContainer = elementInActiveDomUi(button);
       if (!button || !validContainer || button.disabled) {
         return;
       }
@@ -8195,7 +11994,7 @@
 
     function handleModalTrigger(event) {
       const button = closestFromEvent(event, "button[data-ui-modal]");
-      const validContainer = button && (panel.contains(button) || modalRoot.contains(button));
+      const validContainer = elementInActiveDomUi(button);
       if (!button || !validContainer || button.disabled) {
         return;
       }
@@ -8215,7 +12014,7 @@
 
     function handleSettingsChange(event) {
       const resolutionSelect = closestFromEvent(event, "[data-resolution-select]");
-      if (resolutionSelect && (panel.contains(resolutionSelect) || modalRoot.contains(resolutionSelect))) {
+      if (elementInActiveDomUi(resolutionSelect)) {
         setResolutionPreset(resolutionSelect.value);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
@@ -8224,7 +12023,7 @@
       }
 
       const select = closestFromEvent(event, "[data-game-speed-select]");
-      if (select && (panel.contains(select) || modalRoot.contains(select))) {
+      if (elementInActiveDomUi(select)) {
         setGameSpeedMultiplier(select.value);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
@@ -8232,7 +12031,7 @@
       }
 
       const frameLimitSelect = closestFromEvent(event, "[data-frame-limit-select]");
-      if (frameLimitSelect && (panel.contains(frameLimitSelect) || modalRoot.contains(frameLimitSelect))) {
+      if (elementInActiveDomUi(frameLimitSelect)) {
         setFrameLimitMode(frameLimitSelect.value);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
@@ -8240,7 +12039,7 @@
       }
 
       const drillModeSelect = closestFromEvent(event, "[data-keyboard-drill-mode-select]");
-      if (drillModeSelect && (panel.contains(drillModeSelect) || modalRoot.contains(drillModeSelect))) {
+      if (elementInActiveDomUi(drillModeSelect)) {
         setKeyboardDrillMode(drillModeSelect.value);
         syncLocalControls(panel);
         syncLocalControls(modalRoot);
@@ -8248,19 +12047,19 @@
       }
 
       const promptSelect = closestFromEvent(event, "[data-controller-prompt-select]");
-      if (promptSelect && (panel.contains(promptSelect) || modalRoot.contains(promptSelect))) {
+      if (elementInActiveDomUi(promptSelect)) {
         setControllerPreference("promptFamily", promptSelect.value);
         return;
       }
 
       const deadzoneSelect = closestFromEvent(event, "[data-controller-deadzone-select]");
-      if (deadzoneSelect && (panel.contains(deadzoneSelect) || modalRoot.contains(deadzoneSelect))) {
+      if (elementInActiveDomUi(deadzoneSelect)) {
         setControllerPreference("stickDeadzone", deadzoneSelect.value);
         return;
       }
 
       const helpToggle = closestFromEvent(event, "[data-help-toggle]");
-      if (helpToggle && (panel.contains(helpToggle) || modalRoot.contains(helpToggle))) {
+      if (elementInActiveDomUi(helpToggle)) {
         const nextDisabled = "checked" in helpToggle ? !helpToggle.checked : !helpDisabled();
         setHelpDisabled(nextDisabled);
         syncLocalControls(panel);
@@ -8269,7 +12068,7 @@
       }
 
       const cameraShakeToggle = closestFromEvent(event, "[data-camera-shake-toggle]");
-      if (cameraShakeToggle && (panel.contains(cameraShakeToggle) || modalRoot.contains(cameraShakeToggle))) {
+      if (elementInActiveDomUi(cameraShakeToggle)) {
         const nextDisabled = "checked" in cameraShakeToggle ? !cameraShakeToggle.checked : !cameraShakeDisabled();
         setCameraShakeDisabled(nextDisabled);
         syncLocalControls(panel);
@@ -8278,7 +12077,7 @@
       }
 
       const debugToggle = closestFromEvent(event, "[data-debug-tools-toggle]");
-      if (debugToggle && (panel.contains(debugToggle) || modalRoot.contains(debugToggle))) {
+      if (elementInActiveDomUi(debugToggle)) {
         const nextVisible = "checked" in debugToggle ? debugToggle.checked : !debugTools.classList.contains("is-visible");
         setDebugToolsVisible(nextVisible);
         syncLocalControls(panel);
@@ -8289,7 +12088,7 @@
     function handleControllerPreferenceToggle(event) {
       const button = closestFromEvent(event,
         "button[data-controller-invert-toggle], button[data-controller-swap-toggle], button[data-controller-vibration-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button))) return;
+      if (!elementInActiveDomUi(button)) return;
       event.preventDefault();
       event.stopPropagation();
       const preferences = controllerPreferences();
@@ -8300,7 +12099,7 @@
 
     function handleHelpToggle(event) {
       const button = closestFromEvent(event, "button[data-help-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+      if (!elementInActiveDomUi(button)) {
         return;
       }
       event.preventDefault();
@@ -8312,7 +12111,7 @@
 
     function handleCameraShakeToggle(event) {
       const button = closestFromEvent(event, "button[data-camera-shake-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+      if (!elementInActiveDomUi(button)) {
         return;
       }
       event.preventDefault();
@@ -8324,7 +12123,7 @@
 
     async function handleFullscreenToggle(event) {
       const button = closestFromEvent(event, "button[data-desktop-fullscreen-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button)) || !fullscreenAvailable()) {
+      if (!elementInActiveDomUi(button) || !fullscreenAvailable()) {
         return;
       }
       event.preventDefault();
@@ -8345,7 +12144,7 @@
 
     function handleDebugToolsToggle(event) {
       const button = closestFromEvent(event, "button[data-debug-tools-toggle]");
-      if (!button || !(panel.contains(button) || modalRoot.contains(button))) {
+      if (!elementInActiveDomUi(button)) {
         return;
       }
       event.preventDefault();
@@ -8357,13 +12156,72 @@
 
     function handleModalCloseButton(event) {
       const button = closestFromEvent(event, "button[data-ui-close-modal]");
-      if (!button || modalRoot.hidden || !modalRoot.contains(button)) {
+      if (!button || button.disabled || !domModalVisible() || !modalRoot.contains(button)) {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
       closePanelModal();
     }
+
+    function focusModalTabTarget(target) {
+      if (!target || !modalRoot.contains(target.control)) return false;
+      target.control.focus({ preventScroll: true });
+      target.control.scrollIntoView({ block: "nearest", inline: "nearest" });
+      controllerFocusedId = target.id;
+      controllerLastFocusCenter = { x: target.x, y: target.y };
+      return true;
+    }
+
+    function trapDomModalInput(event) {
+      if (!domModalVisible()) return;
+      const target = event.target;
+      const insideModal = target instanceof Node && modalRoot.contains(target);
+      if (!insideModal) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.type === "keydown" && event.key === "Escape" && modalRoot.dataset.dismissible !== "0") {
+          closePanelModal();
+        } else if (event.type === "keydown") {
+          focusDomModalTarget(controllerFocusedId);
+        }
+        return;
+      }
+
+      if (event.type === "keydown" && event.key === "Escape") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (modalRoot.dataset.dismissible !== "0") closePanelModal();
+        return;
+      }
+      if (event.type !== "keydown" || event.key !== "Tab") return;
+      const targets = controllerFocusTargets();
+      if (!targets.length) {
+        event.preventDefault();
+        event.stopPropagation();
+        focusDomModalTarget();
+        return;
+      }
+      const activeIndex = targets.findIndex((candidate) => candidate.control === document.activeElement);
+      const step = event.shiftKey ? -1 : 1;
+      const nextIndex = activeIndex < 0
+        ? (event.shiftKey ? targets.length - 1 : 0)
+        : (activeIndex + step + targets.length) % targets.length;
+      event.preventDefault();
+      event.stopPropagation();
+      focusModalTabTarget(targets[nextIndex]);
+    }
+
+    function trapDomModalFocus(event) {
+      if (!domModalVisible() || (event.target instanceof Node && modalRoot.contains(event.target))) return;
+      event.stopImmediatePropagation();
+      focusDomModalTarget(controllerFocusedId);
+    }
+
+    ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "contextmenu", "wheel", "change"]
+      .forEach((eventName) => document.addEventListener(eventName, trapDomModalInput, { capture: true, passive: false }));
+    document.addEventListener("keydown", trapDomModalInput, true);
+    document.addEventListener("focusin", trapDomModalFocus, true);
 
     document.addEventListener("pointerdown", handleModalTrigger, true);
     document.addEventListener("click", handleModalTrigger, true);
@@ -8379,6 +12237,11 @@
     document.addEventListener("pointerup", cancelAllHeldPanelActions, true);
     document.addEventListener("pointercancel", cancelAllHeldPanelActions, true);
     panel.addEventListener("keydown", (event) => {
+      if (domModalVisible()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       if (event.key !== "Enter" && event.key !== " ") {
         return;
       }
@@ -8390,6 +12253,11 @@
       if (launchOutcomeConfirmReleaseGuard && modalRoot.dataset.modalId === "launch_outcome") {
         event.preventDefault();
         event.stopPropagation();
+        return;
+      }
+      const closeButton = closestFromEvent(event, "button[data-ui-close-modal]");
+      if (closeButton && !closeButton.disabled && modalRoot.contains(closeButton)) {
+        handleModalCloseButton(event);
         return;
       }
       handleModalTrigger(event);
@@ -8638,12 +12506,12 @@
       }
     }
 
-    function shouldSkipMouseFallback(event) {
+    function shouldSkipSyntheticMouseEvent(event) {
       return event.type.startsWith("mouse") && performance.now() - lastRmlPointerEventTime < 350;
     }
 
     function forwardRmlDown(event) {
-      if (shouldSkipMouseFallback(event)) {
+      if (shouldSkipSyntheticMouseEvent(event)) {
         return false;
       }
       notePointerEvent(event);
@@ -8651,7 +12519,7 @@
     }
 
     function forwardRmlMove(event) {
-      if (shouldSkipMouseFallback(event)) {
+      if (shouldSkipSyntheticMouseEvent(event)) {
         return false;
       }
       notePointerEvent(event);
@@ -8659,7 +12527,7 @@
     }
 
     function forwardRmlUp(event) {
-      if (shouldSkipMouseFallback(event)) {
+      if (shouldSkipSyntheticMouseEvent(event)) {
         return false;
       }
       notePointerEvent(event);
@@ -8769,18 +12637,48 @@
     }, { passive: false });
 
     window.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !modalRoot.hidden && modalRoot.dataset.dismissible !== "0") {
+      if (event.key === "Escape" && domModalVisible() && modalRoot.dataset.dismissible !== "0") {
+        event.preventDefault();
+        event.stopPropagation();
         closePanelModal();
+        return;
+      }
+      if (nonDomModalOwnsControllerInput()) {
+        const directions = {
+          ArrowUp: 0,
+          ArrowDown: 1,
+          Tab: 1,
+          ArrowLeft: 2,
+          ArrowRight: 3,
+          w: 0,
+          s: 1,
+          a: 2,
+          d: 3
+        };
+        const direction = directions[event.key] ?? directions[event.key.toLowerCase()];
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (direction !== undefined) {
+          rr.uiNavigate(direction);
+        } else if (!event.repeat && (event.key === "Enter" || event.key === " ")
+          && !(launchOutcomeConfirmReleaseGuard && panel.querySelector(".phase-board-results"))) {
+          rr.uiActivateFocused();
+        } else if (!event.repeat && event.key === "Escape") {
+          rr.uiCancel();
+        }
         return;
       }
       // Modal controls own the keyboard while open. Never allow a key handled
       // by a modal (or an unrelated movement key) to reach gameplay beneath it.
-      if (!modalRoot.hidden || document.body.classList.contains("rmlui-modal-open")) {
+      if (modalInputFenceActive()) {
         return;
       }
       // A valid save is restored into resident memory before the title appears,
       // but no gameplay shortcut may reach that state until Continue is chosen.
       if (isTitleScreenActive()) {
+        return;
+      }
+      if (handleRefitNavigationKey(event)) {
         return;
       }
       if (panel.querySelector("[data-arrival-fanfare]") && (event.key === " " || event.key === "Enter")) {
@@ -8800,10 +12698,19 @@
       if (handleMiningKeyDown(event)) {
         return;
       }
-      if (!event.repeat && event.key === " " && panel.querySelector(".push-minigame [data-rr-action=\"surface_push_step\"]")) {
-        rr.surfacePushStep();
-        event.preventDefault();
-        return;
+      if (!event.repeat && event.key === " ") {
+        const scanPulse = panel.querySelector(".scan-minigame [data-rr-action=\"surface_scan_pulse\"]:not(:disabled)");
+        const pushStep = panel.querySelector(".push-minigame [data-rr-action=\"surface_push_step\"]:not(:disabled)");
+        if (scanPulse) {
+          rr.surfaceScanPulse();
+          event.preventDefault();
+          return;
+        }
+        if (pushStep) {
+          rr.surfacePushStep();
+          event.preventDefault();
+          return;
+        }
       }
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) {
         return;

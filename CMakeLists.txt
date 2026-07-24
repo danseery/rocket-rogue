@@ -32,6 +32,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+set(ROCKET_FONT_ASSET_DIRECTORY "${CMAKE_SOURCE_DIR}/assets/fonts")
+set(ROCKET_REQUIRED_FONT_ASSETS
+    SourceCodePro-Regular.ttf
+    SourceCodePro-Semibold.ttf
+    SourceCodePro-It.ttf
+    LICENSE.md)
+foreach(ROCKET_FONT_ASSET IN LISTS ROCKET_REQUIRED_FONT_ASSETS)
+    if(NOT EXISTS "${ROCKET_FONT_ASSET_DIRECTORY}/${ROCKET_FONT_ASSET}")
+        message(FATAL_ERROR
+            "Required Source Code Pro runtime asset is missing: "
+            "${ROCKET_FONT_ASSET_DIRECTORY}/${ROCKET_FONT_ASSET}")
+    endif()
+endforeach()
+
 include(FetchContent)
 
 add_library(rocket_core
@@ -228,16 +242,19 @@ if(EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/scene-atlas"
             "${CMAKE_CURRENT_BINARY_DIR}/assets/scene-atlas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ROCKET_FONT_ASSET_DIRECTORY}"
+            "${CMAKE_CURRENT_BINARY_DIR}/assets/fonts"
         COMMENT "Copying Rocket Rogue web assets")
     add_dependencies(rocket_rogue copy_rocket_assets)
 
     set(ROCKET_EXPORTED_FUNCTIONS
-        "['_main','_rr_new_game','_rr_continue_game','_rr_prepare_launch','_rr_current_screen','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_skip_arrival_fanfare','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_open_navigation','_rr_ark_jump','_rr_select_navigation','_rr_buy_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_flyby_move','_rr_flyby_abort','_rr_flyby_continue','_rr_arrival_orbit','_rr_orbit_move','_rr_orbit_abort','_rr_orbit_continue','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_surface_scan_pulse','_rr_surface_scan_bank','_rr_surface_scan_abort','_rr_surface_push_step','_rr_surface_push_bank','_rr_surface_push_abort','_rr_surface_upgrade','_rr_drone_ops','_rr_surface_ops','_rr_equip_drone','_rr_unequip_drone_slot','_rr_upgrade_drone','_rr_upgrade_drone_slot','_rr_mining_move','_rr_mining_aim','_rr_mining_drill','_rr_mining_scanner','_rr_mining_stow','_rr_mining_abort','_rr_mining_failure_ack','_rr_debug_mining','_rr_debug_combat_mining','_rr_debug_mining_arena','_rr_debug_mining_preview','_rr_debug_surface_scan','_rr_debug_surface_push','_rr_debug_flyby','_rr_debug_orbit','_rr_debug_act_one_start','_rr_debug_act_one_previous','_rr_debug_act_one_next','_rr_debug_act_one_checkpoint','_rr_debug_exit','_rr_repair_ship','_rr_recruit_crew','_rr_recruit_candidate','_rr_train_crew','_rr_rest_crew','_rr_reset_save','_rr_rml_mouse_move','_rr_rml_mouse_down','_rr_rml_mouse_up','_rr_rml_wheel','_rr_rml_hit_test','_rr_controller_debug_status','_rr_controller_app_debug_status','_rr_debug_controller_set','_rr_debug_controller_clear','_rr_controller_haptic']")
+        "['_main','_rr_new_game','_rr_continue_game','_rr_prepare_launch','_rr_current_screen','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_skip_arrival_fanfare','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_open_navigation','_rr_ark_jump','_rr_select_navigation','_rr_buy_offer','_rr_select_refit_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_flyby_move','_rr_flyby_abort','_rr_flyby_continue','_rr_arrival_orbit','_rr_orbit_move','_rr_orbit_abort','_rr_orbit_continue','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_surface_scan_pulse','_rr_surface_scan_bank','_rr_surface_scan_abort','_rr_surface_push_step','_rr_surface_push_bank','_rr_surface_push_abort','_rr_surface_upgrade','_rr_drone_ops','_rr_surface_ops','_rr_equip_drone','_rr_unequip_drone_slot','_rr_upgrade_drone','_rr_upgrade_drone_slot','_rr_mining_move','_rr_mining_aim','_rr_mining_drill','_rr_mining_scanner','_rr_mining_stow','_rr_mining_abort','_rr_mining_failure_ack','_rr_debug_mining','_rr_debug_combat_mining','_rr_debug_mining_arena','_rr_debug_mining_preview','_rr_debug_surface_scan','_rr_debug_surface_push','_rr_debug_flyby','_rr_debug_orbit','_rr_debug_hangar','_rr_debug_results','_rr_debug_arrival_ops','_rr_debug_research','_rr_debug_refit','_rr_debug_surface_upgrade','_rr_debug_drone_ops','_rr_debug_navigation','_rr_debug_act_one_start','_rr_debug_act_one_previous','_rr_debug_act_one_next','_rr_debug_act_one_checkpoint','_rr_debug_exit','_rr_repair_ship','_rr_recruit_crew','_rr_recruit_candidate','_rr_train_crew','_rr_rest_crew','_rr_reset_save','_rr_rml_mouse_move','_rr_rml_mouse_down','_rr_rml_mouse_up','_rr_rml_wheel','_rr_rml_hit_test','_rr_ui_navigate','_rr_ui_activate_focused','_rr_ui_cancel','_rr_controller_debug_status','_rr_controller_app_debug_status','_rr_debug_controller_set','_rr_debug_controller_clear','_rr_controller_haptic']")
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"
         SUFFIX ".html"
         LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html"
-        LINK_FLAGS "--shell-file ${CMAKE_SOURCE_DIR}/web/shell.html -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sUSE_FREETYPE=1 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
+        LINK_FLAGS "--shell-file ${CMAKE_SOURCE_DIR}/web/shell.html --preload-file ${CMAKE_CURRENT_BINARY_DIR}/assets/fonts@/assets/fonts -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sUSE_FREETYPE=1 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
 else()
     if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Native Rocket Rogue builds currently support only Windows and Linux.")
@@ -382,6 +399,9 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/assets/shaders"
             "$<TARGET_FILE_DIR:RocketRogue>/assets/shaders"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ROCKET_FONT_ASSET_DIRECTORY}"
+            "$<TARGET_FILE_DIR:RocketRogue>/assets/fonts"
         COMMENT "Copying native Rocket Rogue assets")
     add_dependencies(RocketRogue copy_native_assets)
 

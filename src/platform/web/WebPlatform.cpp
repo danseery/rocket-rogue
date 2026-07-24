@@ -13,6 +13,23 @@
 namespace rocket {
 namespace {
 
+UiSurfaceKind uiSurfaceKindForPanelHtml(std::string_view html) noexcept
+{
+    if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
+        return UiSurfaceKind::Mining;
+    }
+    if (html.find("data-panel-mode=\"title\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"story-briefing\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"results\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"workspace\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"drone-workspace\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos
+        || html.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos) {
+        return UiSurfaceKind::Fullscreen;
+    }
+    return UiSurfaceKind::PersistentPanel;
+}
+
 EM_JS(char*, rr_web_string_preference, (int field), {
     let value = "";
     try {
@@ -173,19 +190,6 @@ EM_JS(int, rr_web_metric, (int field), {
     return Math.max(1, (canvas && canvas.height) || innerHeight || 1);
 });
 
-EM_JS(double, rr_web_scene_left_ndc, (), {
-    const canvas = document.getElementById("canvas");
-    const panel = document.getElementById("panel");
-    const width = (canvas && canvas.clientWidth) || innerWidth || 1;
-    if (width <= 720 || (panel && panel.querySelector(".mining-fullscreen, [data-panel-mode='title']"))) return -1;
-    const flybyVisible = panel && panel.querySelector("[data-flyby-run]");
-    const left = document.body.classList.contains("rmlui-enabled") && flybyVisible
-        ? 16 + 482 + 24
-        : (panel ? Math.max(0, panel.getBoundingClientRect().right + 24) : 0);
-    if (width - left < 520) return -1;
-    return Math.max(-1, Math.min(0.45, left / width * 2 - 1));
-});
-
 EM_JS(int, rr_web_environment, (int field), {
     if (field === 0) return document.hasFocus() ? 1 : 0;
     if (field === 1) return document.visibilityState === "visible" ? 1 : 0;
@@ -263,33 +267,43 @@ EM_JS(void, rr_web_set_realtime_hud, (const char* valuePtr), {
     catch (error) { console.warn("Rocket Rogue realtime HUD update failed", error); }
 });
 EM_JS(void, rr_web_set_rml_enabled, (int value), {
-    document.body.classList.toggle("rmlui-enabled", value !== 0);
+    const rmlEnabled = value !== 0;
+    document.body.classList.toggle("rmlui-enabled", rmlEnabled);
+    document.body.dataset.uiRenderer = rmlEnabled ? "rmlui" : "unavailable";
+    const startupStatus = document.getElementById("ui-startup-status");
+    if (startupStatus && !rmlEnabled) {
+        startupStatus.textContent = "RmlUi initialization failed. Check the browser console for details.";
+    }
+    if (window.RocketBridge && RocketBridge.syncSceneOverlays) RocketBridge.syncSceneOverlays();
     Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
 });
+EM_JS(void, rr_web_set_ui_viewport_layout,
+    (int layoutClass,
+        int sceneX, int sceneY, int sceneWidth, int sceneHeight,
+        int panelX, int panelY, int panelWidth, int panelHeight,
+        int topPanelX, int topPanelY, int topPanelWidth, int topPanelHeight,
+        int hudX, int hudY, int hudWidth, int hudHeight), {
+    if (!window.RocketBridge || !RocketBridge.setUiViewportLayout) return;
+    const layoutClassNames = ["fullscreen", "rail", "dock", "mining"];
+    RocketBridge.setUiViewportLayout({
+        layoutClass: layoutClassNames[layoutClass] || "fullscreen",
+        sceneRect: {x: sceneX, y: sceneY, width: sceneWidth, height: sceneHeight},
+        panelRect: {x: panelX, y: panelY, width: panelWidth, height: panelHeight},
+        topPanelRect: {x: topPanelX, y: topPanelY, width: topPanelWidth, height: topPanelHeight},
+        hudSafeRect: {x: hudX, y: hudY, width: hudWidth, height: hudHeight}
+    });
+});
 EM_JS(void, rr_web_set_modal_open, (int value), {
-    const open = value !== 0; document.body.classList.toggle("rmlui-modal-open", open);
-    const control = document.getElementById("scene-launch-control");
-    if (control && open) { control.classList.remove("is-visible"); control.hidden = true; control.setAttribute("aria-hidden", "true"); }
-    else if (control) { control.removeAttribute("aria-hidden"); if (window.RocketBridge && RocketBridge.syncSceneOverlays) RocketBridge.syncSceneOverlays(); }
+    const open = value !== 0;
+    if (window.RocketBridge && RocketBridge.setModalOpen) {
+        RocketBridge.setModalOpen(open);
+        return;
+    }
+    document.body.classList.toggle("rmlui-modal-open", open);
 });
 EM_JS(void, rr_web_controller_presentation, (int active, int family), { if (window.RocketBridge && RocketBridge.setControllerPresentation) RocketBridge.setControllerPresentation(active !== 0, family); });
 EM_JS(void, rr_web_controller_focus, (int value), { document.body.classList.toggle("controller-focus-visible", value !== 0); });
 EM_JS(void, rr_web_controller_resume, (int blocked, int connected), { if (window.RocketBridge && RocketBridge.setControllerResumeBlocked) RocketBridge.setControllerResumeBlocked(blocked !== 0, connected !== 0); });
-EM_JS(int, rr_web_ui_action, (int action, double value, const char* stringPtr), {
-    if (!window.RocketBridge) return 0;
-    if (action === 0 && RocketBridge.controllerNavigate) return RocketBridge.controllerNavigate(value) ? 1 : 0;
-    if (action === 1 && RocketBridge.controllerActivate) return RocketBridge.controllerActivate() ? 1 : 0;
-    if (action === 2 && RocketBridge.controllerCancel) return RocketBridge.controllerCancel() ? 1 : 0;
-    if (action === 3 && RocketBridge.controllerScroll) return RocketBridge.controllerScroll(value) ? 1 : 0;
-    if (action === 4 && RocketBridge.controllerModalOpen) return RocketBridge.controllerModalOpen() ? 1 : 0;
-    if (action === 5 && RocketBridge.controllerOpenModal) return RocketBridge.controllerOpenModal(UTF8ToString(stringPtr || 0)) ? 1 : 0;
-    if (action === 6 && RocketBridge.controllerCloseModal) { RocketBridge.controllerCloseModal(); return 1; }
-    return 0;
-});
-EM_JS(char*, rr_web_focused_id, (), {
-    const value = window.RocketBridge && RocketBridge.controllerFocusedId ? String(RocketBridge.controllerFocusedId() || "") : "";
-    const length = lengthBytesUTF8(value) + 1, result = _malloc(length); stringToUTF8(value, result, length); return result;
-});
 EM_JS(void, rr_web_preferences_changed, (const char* resolutionPtr, int debugTools, int performanceStats), {
     const resolution = UTF8ToString(resolutionPtr || 0);
     document.body.dataset.renderResolution = resolution;
@@ -495,7 +509,6 @@ ViewportMetrics WebPlatformHost::viewportMetrics()
     cachedViewportMetrics_.drawableHeight = rr_web_metric(3);
     cachedViewportMetrics_.densityRatio = static_cast<float>(cachedViewportMetrics_.drawableWidth)
         / static_cast<float>(std::max(1, cachedViewportMetrics_.logicalWidth));
-    cachedViewportMetrics_.sceneLeftNdc = static_cast<float>(rr_web_scene_left_ndc());
     viewportRevision_ = revision;
     return cachedViewportMetrics_;
 }
@@ -561,7 +574,39 @@ std::optional<DecodedImageView> WebTextureSource::decodedImage(std::string_view 
 void WebTextureSource::releaseDecodedImage(std::string_view key) { decodedImages_.erase(std::string(key)); }
 std::string WebTextureSource::lastError() const { return lastError_; }
 
-void WebUiBridge::setPanelHtml(std::string_view html) { const std::string copy(html); rr_web_set_panel(copy.c_str()); }
+void WebUiBridge::setUiViewportLayout(const UiViewportLayout& layout)
+{
+    rr_web_set_ui_viewport_layout(
+        static_cast<int>(layout.layoutClass),
+        layout.sceneRect.x,
+        layout.sceneRect.y,
+        layout.sceneRect.width,
+        layout.sceneRect.height,
+        layout.panelRect.x,
+        layout.panelRect.y,
+        layout.panelRect.width,
+        layout.panelRect.height,
+        layout.topPanelRect.x,
+        layout.topPanelRect.y,
+        layout.topPanelRect.width,
+        layout.topPanelRect.height,
+        layout.hudSafeRect.x,
+        layout.hudSafeRect.y,
+        layout.hudSafeRect.width,
+        layout.hudSafeRect.height);
+}
+
+UiSurfaceKind WebUiBridge::viewportSurfaceKind() const noexcept
+{
+    return viewportSurfaceKind_;
+}
+
+void WebUiBridge::setPanelHtml(std::string_view html)
+{
+    viewportSurfaceKind_ = uiSurfaceKindForPanelHtml(html);
+    const std::string copy(html);
+    rr_web_set_panel(copy.c_str());
+}
 void WebUiBridge::setRealtimeHudState(const RealtimeHudState& state)
 {
     const std::string json = encodeRealtimeHudState(state);
@@ -572,14 +617,6 @@ void WebUiBridge::setModalOpen(bool open) { rr_web_set_modal_open(open); }
 void WebUiBridge::setControllerPresentation(bool active, ControllerFamily family) { rr_web_controller_presentation(active, static_cast<int>(family)); }
 void WebUiBridge::setControllerFocusVisible(bool visible) { rr_web_controller_focus(visible); }
 void WebUiBridge::setControllerResumeBlocked(bool blocked, bool connected) { rr_web_controller_resume(blocked, connected); }
-bool WebUiBridge::navigate(UiDirection direction) { return rr_web_ui_action(0, static_cast<int>(direction), nullptr) != 0; }
-bool WebUiBridge::activate() { return rr_web_ui_action(1, 0, nullptr) != 0; }
-bool WebUiBridge::cancel() { return rr_web_ui_action(2, 0, nullptr) != 0; }
-bool WebUiBridge::scroll(double amount) { return rr_web_ui_action(3, amount, nullptr) != 0; }
-bool WebUiBridge::modalOpen() const { return rr_web_ui_action(4, 0, nullptr) != 0; }
-bool WebUiBridge::openModal(std::string_view id) { const std::string copy(id); return rr_web_ui_action(5, 0, copy.c_str()) != 0; }
-void WebUiBridge::closeModal() { rr_web_ui_action(6, 0, nullptr); }
-std::string WebUiBridge::focusedId() const { return takeJsString(rr_web_focused_id()); }
 void WebUiBridge::preferencesChanged(const AppPreferences& preferences)
 {
     rr_web_preferences_changed(

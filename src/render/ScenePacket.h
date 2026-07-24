@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/UiViewportLayout.h"
+
 #include <array>
 #include <algorithm>
 #include <bit>
@@ -423,6 +425,9 @@ struct ScenePacket {
     std::span<const PackedSceneInstance> miningTerrainInstances;
     std::span<const SceneDraw> draws;
     SceneTransform transform;
+    // Logical pixels, top-left origin. Backends scale this to their actual
+    // framebuffer before recording scene draws; UI rendering owns its own clip.
+    UiRect logicalSceneClip;
     Color clearColor {0.02F, 0.03F, 0.05F, 1.0F};
     std::uint64_t miningTerrainRevision = 0;
 };

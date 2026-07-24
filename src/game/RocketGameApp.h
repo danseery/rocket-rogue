@@ -61,6 +61,7 @@ public:
     void openNavigation();
     void arkJump();
     void selectNavigationDestination(int index);
+    void selectRefitOffer(int index);
     void buyOffer(int index);
     void rerollOffers();
     void acknowledgeApproachIntroduction();
@@ -117,6 +118,7 @@ public:
     void debugShowResults();
     void debugShowArrivalOps();
     void debugShowResearch();
+    void debugShowRefit();
     void debugShowSurfaceUpgrade();
     void debugShowSurfaceOps();
     void debugShowDroneOps();
@@ -265,6 +267,7 @@ private:
     std::string titleNotice_;
     bool panelDirty_ = true;
     bool realtimeHudDirty_ = true;
+    int selectedRefitOfferIndex_ = 0;
     std::uint64_t panelStructureKey_ = 0;
     RealtimeHudState realtimeHudState_;
     bool debugSessionActive_ = false;

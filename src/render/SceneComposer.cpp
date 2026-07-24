@@ -1,5 +1,7 @@
 #include "render/SceneComposer.h"
 
+#include "core/UiViewportLayout.h"
+
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/Tuning.h"
@@ -15,6 +17,11 @@ namespace {
 
 constexpr float kPi = 3.1415926535F;
 constexpr float kSceneViewportPadding = 0.92F;
+// The bottom dock produces a deliberately shallow scene. The local-system
+// backdrop reaches roughly 1.75 world units below center (the large authored
+// Earth sprite), so this scale keeps that complete body inside sceneRect rather
+// than letting the dock clip its lower edge.
+constexpr float kBottomDockSceneViewportPadding = 0.56F;
 constexpr float kMiningLightRadiusCells = 2.15F;
 constexpr float kMiningScannerPulseSeconds = 0.9F;
 constexpr float kMiningPickupTextLifetimeSeconds = 1.45F;
@@ -652,6 +659,12 @@ int pickupDigitMask(char digit)
     return 0;
 }
 
+bool usesCompletedMissionStampSurface(const RenderSnapshot& snapshot) noexcept
+{
+    return (snapshot.screen == Screen::Flyby && snapshot.flybyCompleted)
+        || (snapshot.screen == Screen::Orbit && snapshot.orbitCompleted);
+}
+
 } // namespace
 
 SceneComposer::SceneComposer()
@@ -744,27 +757,34 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
 
     sceneCssWidth_ = std::max(1.0F, static_cast<float>(cssWidth));
     sceneCssHeight_ = std::max(1.0F, static_cast<float>(cssHeight));
-    const float sceneLeftNdc = viewport_.sceneLeftNdc;
-    scenePixelLeft_ = (sceneLeftNdc + 1.0F) * 0.5F * sceneCssWidth_;
-    scenePixelRight_ = sceneCssWidth_;
+    const UiSurfaceKind surface = snapshot.titleScreen || usesCompletedMissionStampSurface(snapshot)
+        ? UiSurfaceKind::Fullscreen
+        : uiSurfaceKindForScreen(snapshot.screen);
+    const UiViewportLayout layout = resolveUiViewportLayout(
+        static_cast<int>(cssWidth),
+        static_cast<int>(cssHeight),
+        surface);
+    packet_.logicalSceneClip = layout.sceneRect;
+    scenePixelLeft_ = static_cast<float>(layout.sceneRect.x);
+    scenePixelRight_ = static_cast<float>(uiRectRight(layout.sceneRect));
     const float sceneWidthPixels = std::max(1.0F, scenePixelRight_ - scenePixelLeft_);
-    const float sceneHeightPixels = sceneCssHeight_;
+    const float sceneHeightPixels = std::max(1.0F, static_cast<float>(layout.sceneRect.height));
     scenePixelCenterX_ = scenePixelLeft_ + sceneWidthPixels * 0.5F;
-    scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
-    sceneWorldUnit_ = std::max(1.0F, std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * kSceneViewportPadding);
+    // UiRect is top-left-origin while the render transform's Y offset is
+    // bottom-left-origin.
+    scenePixelCenterY_ = sceneCssHeight_
+        - (static_cast<float>(layout.sceneRect.y) + sceneHeightPixels * 0.5F);
+    const float scenePadding = surface == UiSurfaceKind::Mining
+        ? 1.0F
+        : (layout.layoutClass == UiLayoutClass::BottomDock
+            ? kBottomDockSceneViewportPadding
+            : kSceneViewportPadding);
+    sceneWorldUnit_ = std::max(
+        1.0F,
+        std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * scenePadding);
     sceneWorldUnitX_ = sceneWorldUnit_;
     sceneWorldUnitY_ = sceneWorldUnit_;
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
-    if (snapshot.screen == Screen::Mining) {
-        scenePixelLeft_ = 0.0F;
-        scenePixelRight_ = sceneCssWidth_;
-        scenePixelCenterX_ = sceneCssWidth_ * 0.5F;
-        scenePixelCenterY_ = sceneCssHeight_ * 0.5F;
-        sceneAspect_ = std::max(0.10F, sceneCssWidth_ / sceneCssHeight_);
-        sceneWorldUnit_ = std::max(1.0F, sceneCssHeight_ * 0.5F);
-        sceneWorldUnitX_ = sceneWorldUnit_;
-        sceneWorldUnitY_ = sceneWorldUnit_;
-    }
     const bool cameraShakeEnabled = cameraShakeEnabled_;
     const float launchShake = cameraShakeEnabled ? static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0)) : 0.0F;
     if (launchShake > 0.0F) {
@@ -1932,32 +1952,34 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     const Color serviceColor = snapshot.miningAtReturnZone
         ? Color {0.30F, 1.0F, 0.76F, 0.54F + servicePulse * 0.14F}
         : Color {0.28F, 0.82F, 1.0F, 0.20F + servicePulse * 0.07F};
-    drawRadialGlow(
-        shipBay.x,
-        shipBay.y,
-        std::max(serviceRadiusX, serviceRadiusY) * 1.15F,
-        {serviceColor.r, serviceColor.g, serviceColor.b, snapshot.miningAtReturnZone ? 0.055F : 0.026F},
-        36);
-    drawEllipseLine(shipBay.x, shipBay.y, serviceRadiusX, serviceRadiusY, serviceColor, 56, 0.0F, kPi * 2.0F);
-    drawEllipseLine(
-        shipBay.x,
-        shipBay.y,
-        serviceRadiusX * 0.82F,
-        serviceRadiusY * 0.82F,
-        {serviceColor.r, serviceColor.g, serviceColor.b, serviceColor.a * 0.42F},
-        56,
-        0.0F,
-        kPi * 2.0F);
-    for (const Vec2 marker : std::array<Vec2, 4> {{{-1.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, -1.0F}, {0.0F, 1.0F}}}) {
-        const Vec2 inner {
-            shipBay.x + marker.x * serviceRadiusX * 0.88F,
-            shipBay.y + marker.y * serviceRadiusY * 0.88F
-        };
-        const Vec2 outer {
-            shipBay.x + marker.x * serviceRadiusX * 1.08F,
-            shipBay.y + marker.y * serviceRadiusY * 1.08F
-        };
-        drawLine(inner.x, inner.y, outer.x, outer.y, serviceColor, snapshot.miningAtReturnZone ? 2.4F : 1.5F);
+    if (snapshot.miningShipPresent) {
+        drawRadialGlow(
+            shipBay.x,
+            shipBay.y,
+            std::max(serviceRadiusX, serviceRadiusY) * 1.15F,
+            {serviceColor.r, serviceColor.g, serviceColor.b, snapshot.miningAtReturnZone ? 0.055F : 0.026F},
+            36);
+        drawEllipseLine(shipBay.x, shipBay.y, serviceRadiusX, serviceRadiusY, serviceColor, 56, 0.0F, kPi * 2.0F);
+        drawEllipseLine(
+            shipBay.x,
+            shipBay.y,
+            serviceRadiusX * 0.82F,
+            serviceRadiusY * 0.82F,
+            {serviceColor.r, serviceColor.g, serviceColor.b, serviceColor.a * 0.42F},
+            56,
+            0.0F,
+            kPi * 2.0F);
+        for (const Vec2 marker : std::array<Vec2, 4> {{{-1.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, -1.0F}, {0.0F, 1.0F}}}) {
+            const Vec2 inner {
+                shipBay.x + marker.x * serviceRadiusX * 0.88F,
+                shipBay.y + marker.y * serviceRadiusY * 0.88F
+            };
+            const Vec2 outer {
+                shipBay.x + marker.x * serviceRadiusX * 1.08F,
+                shipBay.y + marker.y * serviceRadiusY * 1.08F
+            };
+            drawLine(inner.x, inner.y, outer.x, outer.y, serviceColor, snapshot.miningAtReturnZone ? 2.4F : 1.5F);
+        }
     }
     const float extractionProgress = static_cast<float>(std::clamp(snapshot.miningExtractionProgress, 0.0, 1.0));
     const auto smoothExtraction = [](float value) {
@@ -1994,7 +2016,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             shipSpriteY - shipSpriteSize * (0.52F + extractionLaunch * 0.52F),
             {0.32F, 0.90F, 1.0F, 0.58F + extractionLaunch * 0.34F});
     }
-    if (snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
+    if (snapshot.miningShipPresent && snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
         drawSpriteRotated(
             shipBay.x,
             shipSpriteY,
@@ -2004,7 +2026,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             1.0F,
             {1.0F, 1.0F, 1.0F, 1.0F - extractionClose},
             RocketOpenAsset);
-    } else if (textureReady(RocketClosedAsset)) {
+    } else if (snapshot.miningShipPresent && textureReady(RocketClosedAsset)) {
         drawSpriteRotated(
             shipBay.x,
             shipSpriteY,
@@ -2014,7 +2036,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             1.0F,
             {1.0F, 1.0F, 1.0F, 0.96F},
             RocketClosedAsset);
-    } else {
+    } else if (snapshot.miningShipPresent) {
         drawTriangle(shipBay.x, shipSpriteY + cellH * 1.10F, shipBay.x - cellW * 0.64F, shipGroundY, shipBay.x + cellW * 0.64F, shipGroundY, {0.76F, 0.94F, 1.0F, 0.84F});
     }
 
@@ -3041,18 +3063,82 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
 {
-    drawBackdrop(snapshot);
-    const Vec2 destination = routePoint(snapshot, 1.0F);
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.008F, 0.016F, 0.026F, 1.0F}, false);
+    drawSolarBackground(snapshot, 0.82F, true);
+    const Vec2 destination {0.0F, 0.045F};
     const float time = static_cast<float>(snapshot.animationTime);
     const float signal = static_cast<float>(std::clamp(snapshot.surfaceScanSignal, 0.0, 1.0));
     const float interference = static_cast<float>(std::clamp(snapshot.surfaceScanInterference, 0.0, 1.0));
     const float risk = static_cast<float>(std::clamp(snapshot.surfaceScanBustRisk, 0.0, 1.0));
-    const float baseRadius = 0.16F + static_cast<float>(snapshot.destinationTier) * 0.012F;
-    const float surfaceRadius = snapshot.destinationTier == 1
-        ? 0.104F
-        : std::min(baseRadius * 0.72F, 0.098F + static_cast<float>(snapshot.destinationTier) * 0.007F);
+    const float baseRadius = 0.15F;
+    const float surfaceRadius = 0.105F;
     const float sweep = std::fmod(time * 0.38F + signal * 0.18F, 1.0F) * 2.0F * kPi;
     const int maxScanLayers = std::max(1, snapshot.surfaceScanMaxPulses);
+
+    // The home body is deliberately cropped by the protected scene clip. It
+    // supplies the same scale cue as the mockup without moving or replacing
+    // any destination artwork.
+    if (textureReady(EarthAsset)) {
+        drawRadialGlow(0.92F, -0.92F, 0.68F, {0.18F, 0.62F, 1.0F, 0.12F}, 72);
+        drawSprite(0.92F, -0.92F, 1.06F, 1.06F, {0.90F, 0.97F, 1.0F, 0.94F}, EarthAsset);
+    }
+
+    const float outerRadius = 0.56F;
+    const Color reticleColor {0.16F, 0.62F, 0.78F, 0.44F};
+    drawRadialGlow(destination.x, destination.y, outerRadius * 1.04F, {0.05F, 0.40F, 0.54F, 0.035F}, 72);
+    drawEllipseLine(destination.x, destination.y, outerRadius, outerRadius, reticleColor, 96, 0.0F, 2.0F * kPi);
+    auto drawDashedRing = [&](float radius, Color color, int dashCount) {
+        const float step = 2.0F * kPi / static_cast<float>(std::max(1, dashCount));
+        for (int dash = 0; dash < dashCount; ++dash) {
+            const float start = static_cast<float>(dash) * step;
+            drawEllipseLine(
+                destination.x,
+                destination.y,
+                radius,
+                radius,
+                color,
+                4,
+                start,
+                start + step * 0.58F);
+        }
+    };
+    drawDashedRing(0.47F, {0.18F, 0.64F, 0.80F, 0.34F}, 34);
+    drawDashedRing(0.37F, {0.22F, 0.72F, 0.86F, 0.42F}, 30);
+    drawDashedRing(0.27F, {0.26F, 0.78F, 0.90F, 0.48F}, 26);
+
+    for (int tick = 0; tick < 8; ++tick) {
+        const float angle = static_cast<float>(tick) * kPi * 0.25F;
+        const float inner = tick % 2 == 0 ? outerRadius - 0.022F : outerRadius - 0.012F;
+        const float outer = tick % 2 == 0 ? outerRadius + 0.022F : outerRadius + 0.012F;
+        drawLine(
+            destination.x + std::cos(angle) * inner,
+            destination.y + std::sin(angle) * inner,
+            destination.x + std::cos(angle) * outer,
+            destination.y + std::sin(angle) * outer,
+            {0.22F, 0.74F, 0.88F, tick % 2 == 0 ? 0.52F : 0.28F},
+            tick % 2 == 0 ? 1.5F : 1.0F);
+    }
+
+    const float sweepRadius = 0.46F;
+    const float sweepX = destination.x + std::cos(sweep) * sweepRadius;
+    const float sweepY = destination.y + std::sin(sweep) * sweepRadius;
+    drawLine(destination.x, destination.y, sweepX, sweepY, {0.08F, 0.92F, 1.0F, 0.14F}, 6.0F);
+    drawLine(destination.x, destination.y, sweepX, sweepY, {0.12F, 0.94F, 1.0F, 0.82F}, 2.0F);
+    drawEllipseLine(
+        destination.x,
+        destination.y,
+        sweepRadius,
+        sweepRadius,
+        {1.0F, 0.72F, 0.18F, 0.10F + risk * 0.32F},
+        28,
+        sweep - 0.20F,
+        sweep + 0.04F);
+
+    const int destinationAsset = destinationBodyAsset(snapshot);
+    drawRadialGlow(destination.x, destination.y, 0.18F, {0.94F, 0.50F, 0.12F, 0.10F + signal * 0.05F}, 48);
+    if (textureReady(destinationAsset)) {
+        drawSprite(destination.x, destination.y, 0.23F, 0.23F, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
+    }
     auto scanLayerRadiusScale = [&](int layer) {
         const float depthT = maxScanLayers <= 1
             ? 0.0F
@@ -3117,7 +3203,7 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
 
     if (snapshot.surfaceScanBusted) {
         drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.98F, surfaceRadius * 0.74F, {1.0F, 0.24F, 0.12F, 0.45F}, 64, 0.0F, 2.0F * kPi);
-        drawRadialGlow(destination.x, destination.y, surfaceRadius * 1.05F, {0.95F, 0.12F, 0.08F, 0.040F}, 48);
+        drawRadialGlow(destination.x, destination.y, outerRadius * 1.02F, {0.95F, 0.12F, 0.08F, 0.055F + interference * 0.035F}, 64);
     }
 }
 
