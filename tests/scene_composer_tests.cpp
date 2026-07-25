@@ -359,6 +359,7 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
 
     RenderSnapshot snapshot;
+    float activeFlybyWorldUnit = 0.0F;
     for (const rocket::Screen screen : {rocket::Screen::Flyby, rocket::Screen::Orbit}) {
         snapshot = {};
         snapshot.screen = screen;
@@ -367,6 +368,12 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
         assertRect(activePacket.logicalSceneClip, {331, 12, 937, 776});
         assert(std::abs(activePacket.transform.pixelCenterX - 799.5F) < 0.001F);
         assert(std::abs(activePacket.transform.pixelCenterY - 400.0F) < 0.001F);
+        if (screen == rocket::Screen::Flyby) {
+            activeFlybyWorldUnit = activePacket.transform.worldUnitX;
+        } else {
+            assert(std::abs(activePacket.transform.worldUnitX - activeFlybyWorldUnit * 1.66F) < 0.001F);
+            assert(std::abs(activePacket.transform.worldUnitY - activeFlybyWorldUnit * 1.66F) < 0.001F);
+        }
 
         snapshot.flybyCompleted = screen == rocket::Screen::Flyby;
         snapshot.orbitCompleted = screen == rocket::Screen::Orbit;

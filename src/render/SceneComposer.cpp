@@ -17,6 +17,10 @@ namespace {
 
 constexpr float kPi = 3.1415926535F;
 constexpr float kSceneViewportPadding = 0.92F;
+// Orbit's authored world is intentionally sparse. Enlarge the complete
+// orbital playfield, rather than individual sprites, so the band, ship, and
+// trajectory remain legible on a Steam Deck without changing simulation.
+constexpr float kOrbitSceneScale = 1.66F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
@@ -782,6 +786,9 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     sceneWorldUnit_ = std::max(
         1.0F,
         std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * scenePadding);
+    if (snapshot.screen == Screen::Orbit && !snapshot.orbitCompleted) {
+        sceneWorldUnit_ *= kOrbitSceneScale;
+    }
     sceneWorldUnitX_ = sceneWorldUnit_;
     sceneWorldUnitY_ = sceneWorldUnit_;
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);

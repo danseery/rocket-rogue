@@ -557,6 +557,114 @@ int main()
         ui.shutdown();
     }
 
+    // Screen templates without a utility row still need an explicit way out
+    // of the shared Map / Inventory / Menu titlebar. Approach is the compact
+    // representative: Down must enter the Flyby / Orbit / Landing lane.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState state = rocket::createNewGame(catalog, 0xA770ACULL);
+        rocket::LaunchOutcome moonArrival;
+        moonArrival.type = rocket::LaunchResultType::MissionComplete;
+        moonArrival.frontierTransfer = true;
+        moonArrival.destinationId = rocket::content::destination::moon;
+        rocket::startArrivalOps(state, moonArrival);
+        state.screen = rocket::Screen::ArrivalOps;
+        rocket::Random rng(0xA770ACULL);
+        const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
+        rocket::PanelRenderContext panelContext {state, catalog, launch, launch};
+        panelContext.firstTimeIntroductionsEnabled = false;
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        host.metrics = {1280, 800, 1280, 800, 1.0F};
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([](const std::string&) {}));
+        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+        ui.requestFocus("modal:map");
+        ui.refresh();
+
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:arrival_flyby");
+        ui.shutdown();
+    }
+
+    // Hangar has a visual hierarchy below the shared titlebar: details,
+    // operations, then launch. Keep that bridge explicit so a controller
+    // cannot become stranded in Map / Inventory / Menu on the Steam Deck.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState state = rocket::createNewGame(catalog, 0x48A6A2ULL);
+        state.screen = rocket::Screen::Hangar;
+        rocket::Random rng(0x48A6A2ULL);
+        const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
+        rocket::PanelRenderContext panelContext {state, catalog, launch, launch};
+        panelContext.firstTimeIntroductionsEnabled = false;
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        host.metrics = {1280, 800, 1280, 800, 1.0F};
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([](const std::string&) {}));
+        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+        ui.requestFocus("modal:map");
+        ui.refresh();
+
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "modal:crew");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() != "modal:crew");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:prepare_launch");
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId().starts_with("modal:"));
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "modal:map"
+            || ui.focusedId() == "modal:inventory"
+            || ui.focusedId() == "modal:system_menu");
+
+        // Disabled controls are correctly absent from the focus list, but an
+        // entirely disabled operation row must not break the route between
+        // Details and the launch actions below it.
+        state.run.credits = 0.0;
+        state.run.shipDamage = 0;
+        if (rocket::Astronaut* pilot = rocket::activeAstronaut(state)) {
+            pilot->stress = 0;
+        }
+        const rocket::PreparedLaunch unavailableOpsLaunch = rocket::prepareLaunch(state, catalog, rng);
+        rocket::PanelRenderContext unavailableOpsContext {
+            state,
+            catalog,
+            unavailableOpsLaunch,
+            unavailableOpsLaunch};
+        unavailableOpsContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelHtml(rocket::buildGamePanelHtml(unavailableOpsContext));
+        ui.requestFocus("modal:crew");
+        ui.refresh();
+
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:prepare_launch");
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId().starts_with("modal:"));
+        ui.shutdown();
+    }
+
     // Drone Ops owns the full viewport. Its right-aligned titlebar and
     // workspace actions must stay inside the panel's 16 px edge even when
     // button padding is present at a compact resolution.

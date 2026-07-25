@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -6399,7 +6400,10 @@ body.controller-focus-visible .rr-controller-focus {
 }
 body.panel-input-helper-visible #rr-panel.phase-board-panel,
 body.panel-input-helper-visible #rr-panel.control-panel {
-    padding-bottom: 72px;
+    /* The helper is 60 px tall with a 4 px bottom inset. Reserve exactly
+       that footprint so a Deck-height rail does not grow a cosmetic scroll
+       range while the final control remains clear of the prompt. */
+    padding-bottom: 64px;
 }
 #rr-controller-prompt-bar.mining-input-helper {
     left: )" + std::to_string(miningInset + 4) + R"(px;
@@ -9846,6 +9850,8 @@ bool g_displayPreferenceChanged = false;
 enum class ControllerFocusRow {
     None,
     Choices,
+    HangarChoices,
+    HangarActions,
     DroneChoices,
     DroneLoadout,
     SurfaceChoices,
@@ -9859,6 +9865,12 @@ ControllerFocusRow controllerFocusRow(const FocusTarget& target)
 {
     if (!target.element) {
         return ControllerFocusRow::None;
+    }
+    if (target.element->Closest(".hangar-controller-choice-row")) {
+        return ControllerFocusRow::HangarChoices;
+    }
+    if (target.element->Closest(".hangar-controller-action-row")) {
+        return ControllerFocusRow::HangarActions;
     }
     if (target.element->Closest(".drone-controller-choice-row")) {
         return ControllerFocusRow::DroneChoices;
@@ -9921,6 +9933,19 @@ FocusTarget* directionalControllerRowTarget(
     return best;
 }
 
+FocusTarget* firstDirectionalControllerRowTarget(
+    FocusTarget& current,
+    UiDirection direction,
+    std::initializer_list<ControllerFocusRow> destinationRows)
+{
+    for (const ControllerFocusRow destinationRow : destinationRows) {
+        if (FocusTarget* target = directionalControllerRowTarget(current, destinationRow, direction)) {
+            return target;
+        }
+    }
+    return nullptr;
+}
+
 FocusTarget* rightAlignedControllerRowTarget(
     FocusTarget& current,
     ControllerFocusRow destinationRow)
@@ -9946,6 +9971,33 @@ FocusTarget* rightAlignedControllerRowTarget(
         distanceFromRight + 1,
         destinationTargets.size());
     return destinationTargets[destinationIndex];
+}
+
+// The shared titlebar appears above several screen templates whose main
+// controls are neither a utility row nor a specialised workspace row (for
+// example Approach's Flyby / Orbit / Landing cards). Treat the first visible
+// control below the titlebar as the primary content lane so every template
+// has a controller route out of Map / Inventory / Menu.
+FocusTarget* titlebarContentTarget(FocusTarget& current)
+{
+    FocusTarget* best = nullptr;
+    float bestScore = std::numeric_limits<float>::max();
+    for (FocusTarget& target : g_focusTargets) {
+        if (controllerFocusRow(target) == ControllerFocusRow::Titlebar) {
+            continue;
+        }
+        const float verticalDistance = target.centerY - current.centerY;
+        if (verticalDistance <= 1.0f) {
+            continue;
+        }
+        const float horizontalDistance = std::abs(target.centerX - current.centerX);
+        const float score = verticalDistance + horizontalDistance * 0.25f;
+        if (score < bestScore) {
+            bestScore = score;
+            best = &target;
+        }
+    }
+    return best;
 }
 
 class RmlSettingsEventListener final : public Rml::EventListener {
@@ -10764,29 +10816,70 @@ bool GameRmlUi::navigate(UiDirection direction)
             hasLastFocusCenter_);
     }
 
-    const ControllerFocusRow destinationRow =
-        direction == UiDirection::Up && currentRow == ControllerFocusRow::SurfaceChoices
-        ? ControllerFocusRow::SurfaceCallout
-        : (direction == UiDirection::Down && currentRow == ControllerFocusRow::SurfaceCallout
-            ? ControllerFocusRow::SurfaceChoices
-            : (direction == UiDirection::Up && currentRow == ControllerFocusRow::DroneChoices
-                ? ControllerFocusRow::Utilities
-                : (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities && current->element->Closest(".drone-workspace")
-                    ? ControllerFocusRow::DroneChoices
-                    : (direction == UiDirection::Up && currentRow == ControllerFocusRow::Utilities
-                        ? ControllerFocusRow::Titlebar
-                        : (direction == UiDirection::Down && currentRow == ControllerFocusRow::Titlebar
-                            ? ControllerFocusRow::Utilities
-                            : ControllerFocusRow::None)))));
+    ControllerFocusRow destinationRow = ControllerFocusRow::None;
+    if (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities
+        && current->element->Closest(".phase-board-hangar")) {
+        // Hangar operation buttons disappear from the focus graph when every
+        // operation is unavailable. Treat that empty logical row as
+        // transparent so Details still reaches the always-actionable launch
+        // row instead of splitting the screen into two focus islands.
+        return applyControllerFocus(
+            firstDirectionalControllerRowTarget(
+                *current,
+                direction,
+                {ControllerFocusRow::HangarChoices, ControllerFocusRow::HangarActions}),
+            focusedId_,
+            lastFocusCenterX_,
+            lastFocusCenterY_,
+            hasLastFocusCenter_);
+    }
+    if (direction == UiDirection::Up && currentRow == ControllerFocusRow::HangarActions) {
+        return applyControllerFocus(
+            firstDirectionalControllerRowTarget(
+                *current,
+                direction,
+                {ControllerFocusRow::HangarChoices, ControllerFocusRow::Utilities}),
+            focusedId_,
+            lastFocusCenterX_,
+            lastFocusCenterY_,
+            hasLastFocusCenter_);
+    }
+
+    if (direction == UiDirection::Up && currentRow == ControllerFocusRow::HangarChoices) {
+        destinationRow = ControllerFocusRow::Utilities;
+    } else if (direction == UiDirection::Down && currentRow == ControllerFocusRow::HangarChoices) {
+        destinationRow = ControllerFocusRow::HangarActions;
+    } else if (direction == UiDirection::Up && currentRow == ControllerFocusRow::SurfaceChoices) {
+        destinationRow = ControllerFocusRow::SurfaceCallout;
+    } else if (direction == UiDirection::Down && currentRow == ControllerFocusRow::SurfaceCallout) {
+        destinationRow = ControllerFocusRow::SurfaceChoices;
+    } else if (direction == UiDirection::Up && currentRow == ControllerFocusRow::DroneChoices) {
+        destinationRow = ControllerFocusRow::Utilities;
+    } else if (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities
+        && current->element->Closest(".drone-workspace")) {
+        destinationRow = ControllerFocusRow::DroneChoices;
+    } else if (direction == UiDirection::Up && currentRow == ControllerFocusRow::Utilities) {
+        destinationRow = ControllerFocusRow::Titlebar;
+    } else if (direction == UiDirection::Down && currentRow == ControllerFocusRow::Titlebar) {
+        destinationRow = ControllerFocusRow::Utilities;
+    }
     if (destinationRow != ControllerFocusRow::None) {
-        const bool semanticWorkspaceHandoff = currentRow == ControllerFocusRow::DroneChoices
+        const bool semanticWorkspaceHandoff = currentRow == ControllerFocusRow::HangarChoices
+            || destinationRow == ControllerFocusRow::HangarChoices
+            || currentRow == ControllerFocusRow::HangarActions
+            || destinationRow == ControllerFocusRow::HangarActions
+            || currentRow == ControllerFocusRow::DroneChoices
             || destinationRow == ControllerFocusRow::DroneChoices
             || currentRow == ControllerFocusRow::SurfaceChoices
             || destinationRow == ControllerFocusRow::SurfaceChoices;
+        FocusTarget* destination = semanticWorkspaceHandoff
+            ? directionalControllerRowTarget(*current, destinationRow, direction)
+            : rightAlignedControllerRowTarget(*current, destinationRow);
+        if (!destination && direction == UiDirection::Down && currentRow == ControllerFocusRow::Titlebar) {
+            destination = titlebarContentTarget(*current);
+        }
         return applyControllerFocus(
-            semanticWorkspaceHandoff
-                ? directionalControllerRowTarget(*current, destinationRow, direction)
-                : rightAlignedControllerRowTarget(*current, destinationRow),
+            destination,
             focusedId_,
             lastFocusCenterX_,
             lastFocusCenterY_,

@@ -2599,7 +2599,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
                 : "Flight Data " + std::to_string(state.run.frontierReadiness) + "/" + std::to_string(required))
             << "</p></section>";
     }
-    out << "<div class=\"utility-row compact-tools hangar-detail-actions\">"
+    out << "<div class=\"utility-row compact-tools utility-actions hangar-detail-actions\">"
         << modalButton("Ship details", ui::modals::ship, "ghost")
         << modalButton("Crew details", ui::modals::crew, "ghost")
         << modalButton("Frontier details", ui::modals::frontier, "ghost")
@@ -2607,7 +2607,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
         << "</div>";
 
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
-    out << "<div class=\"ops-grid controller-choice-row\">";
+    out << "<div class=\"ops-grid controller-choice-row hangar-controller-choice-row\">";
     for (const HangarOperationCardPresentation& card : hangarOperationCards(state, catalog)) {
         if (astronaut == nullptr && card.actionId == ui::actions::recruitCrew) {
             out << operationModalCard(card, "Choose pilot", ui::modals::pilotIntake);
@@ -2620,7 +2620,7 @@ std::string buildGamePanelHtml(const PanelRenderContext& context)
     const bool showLaunchIntroduction = context.firstTimeIntroductionsEnabled
         && currentFrontier.id == content::destination::earthOrbit
         && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
-    out << "<div class=\"actions action-row hangar-actions controller-action-row primary-actions\">";
+    out << "<div class=\"actions action-row hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
     }

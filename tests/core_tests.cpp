@@ -8458,8 +8458,8 @@ void hangarHtmlShowsPilotIntakeModal()
         "hangar operations should keep left/right navigation inside the operation-card row");
     require(html.find("hangar-actions controller-action-row") != std::string::npos,
         "hangar launch controls should form the separate up/down controller action row");
-    require(html.find("hangar-actions controller-action-row primary-actions") != std::string::npos,
-        "hangar launch controls should be marked as the sticky primary action area");
+    require(html.find("hangar-actions controller-action-row hangar-controller-action-row primary-actions") != std::string::npos,
+        "hangar launch controls should be marked as the sticky primary action area and controller destination row");
     require(html.find("summary-card") == std::string::npos
             && html.find("hangar-detail-actions") != std::string::npos,
         "hangar should replace duplicate summary cards with compact detail utilities");
