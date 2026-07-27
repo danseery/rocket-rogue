@@ -417,6 +417,70 @@ MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& rawRequest)
     return rules;
 }
 
+bool isIoMiningDestination(std::string_view destinationId)
+{
+    return destinationId == content::destination::jupiter;
+}
+
+MiningArenaRules resolveDestinationMiningArenaRules(
+    const MiningArenaRequest& request,
+    std::string_view destinationId)
+{
+    MiningArenaRules rules = resolveMiningArenaRules(request);
+    if (!isIoMiningDestination(destinationId)) {
+        return rules;
+    }
+
+    rules.mechanics.fogAndScanner = true;
+    rules.mechanics.oxygenAndFuel = true;
+    rules.mechanics.drillHeat = true;
+    rules.mechanics.drillIntegrity = true;
+    rules.mechanics.contactRebound = true;
+    rules.mechanics.fieldRepairs = true;
+    rules.mechanics.cargoDrag = true;
+    rules.mechanics.environmentalHazards = true;
+    rules.mechanics.artifactRecovery = true;
+    rules.mechanics.artifactTethering = true;
+    rules.mechanics.siteAndDepthVariation = true;
+    rules.mechanics.passiveDroneCombat = false;
+
+    rules.allowedMaterials.fill(false);
+    allow(rules.allowedMaterials, MiningCellMaterial::Empty);
+    allow(rules.allowedMaterials, MiningCellMaterial::Regolith);
+    // Common Ore is an allowed post-treatment material, but Io generation
+    // never places it directly.
+    allow(rules.allowedMaterials, MiningCellMaterial::CommonOre);
+    allow(rules.allowedMaterials, MiningCellMaterial::ArtifactCache);
+    allow(rules.allowedMaterials, MiningCellMaterial::HazardPocket);
+    allow(rules.allowedMaterials, MiningCellMaterial::Bedrock);
+
+    rules.allowedAffinities.fill(false);
+    allow(rules.allowedAffinities, MiningElementalAffinity::None);
+    allow(rules.allowedAffinities, MiningElementalAffinity::Thermal);
+    rules.allowedEnemyTypes.fill(false);
+    rules.maxActiveEnemies = 0;
+    rules.maxSpawners = 0;
+
+    rules.allowedGateTypes.fill(false);
+    allowGate(rules, MiningGateType::HazardCocoon);
+    rules.fixedStoryGate = MiningGateType::HazardCocoon;
+    rules.maximumGateLocks = 1;
+    rules.rewardBudget = {};
+
+    rules.referenceDrones = {};
+    rules.referenceDrones.slots = 2;
+    rules.referenceDrones.maximumMark = 1;
+    addReferenceRole(rules.referenceDrones, MiniDroneRole::Hazard);
+    rules.referenceDrones.summary = "Hazard Drone Mk I";
+    rules.complication = "Two-stage lava seal";
+    rules.tutorialCallout =
+        "Io regolith is inert. Cool marked lava with Hazard support, then drill the gray Common Ore.";
+    rules.mineralAvailability = "Common Ore inside Thermal lava only";
+    rules.knownEnemyRoles = "No hostile contacts";
+    rules.recommendedCounters = "Hazard Drone Mk I";
+    return rules;
+}
+
 std::string_view miningGateName(MiningGateType type)
 {
     switch (type) {
@@ -514,7 +578,7 @@ MiningGateDefinition resolveMiningGateDefinition(
     case MiningGateType::FragileExcavation:
         gate.fragileArtifact = true;
         gate.requiredCapability = "Controlled surrounding excavation";
-        gate.alternatives = "Mining Drone, scanner information, low rebound, or careful manual excavation.";
+        gate.alternatives = "Prospector Support Drone, scanner information, low rebound, or careful manual excavation.";
         break;
     case MiningGateType::HeavyTow:
         gate.heavyTow = true;

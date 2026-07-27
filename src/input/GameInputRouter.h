@@ -27,6 +27,7 @@ enum class GameInputAction : std::size_t {
     MiningScan,
     MiningTether,
     MiningStow,
+    MiningOperatorToggle,
     MiningRepairDrill,
     MiningRepairRig,
     MiningFailureAcknowledge,
@@ -42,6 +43,10 @@ struct RoutedGameInput {
     double scroll = 0.0;
     double moveX = 0.0;
     double moveY = 0.0;
+    double aimX = 0.0;
+    double aimY = 0.0;
+    double operatorToggleProgress = 0.0;
+    bool firing = false;
     bool drilling = false;
 
     bool has(GameInputAction action) const
@@ -62,6 +67,7 @@ public:
         double focusedActivationHoldSeconds = 0.0)
     {
         RoutedGameInput result;
+        const std::bitset<controllerButtonCount> holdTriggeredBeforeUpdate = holdTriggered_;
         if (!lastContext_) {
             lastContext_ = context;
         } else if (*lastContext_ != context) {
@@ -210,14 +216,26 @@ public:
             enterUiFocusFromDpad(frame, result);
             result.moveX = frame.leftX;
             result.moveY = frame.leftY;
-            result.drilling = frame.isDown(ControllerButton::RightTrigger);
+            result.aimX = frame.rightX;
+            result.aimY = frame.rightY;
+            result.firing = frame.isDown(ControllerButton::RightTrigger);
+            result.drilling = frame.isDown(ControllerButton::LeftTrigger);
+            result.operatorToggleProgress = frame.isDown(ControllerButton::South)
+                ? std::clamp(frame.heldFor(ControllerButton::South) / operatorToggleHoldSeconds, 0.0, 1.0)
+                : 0.0;
             if (frame.wasPressed(ControllerButton::West)) {
                 add(GameInputAction::MiningScan);
             }
             if (frame.wasPressed(ControllerButton::North)) {
                 add(GameInputAction::MiningTether);
             }
-            if (frame.wasPressed(ControllerButton::South)) {
+            if (holdCrossed(frame, ControllerButton::South, operatorToggleHoldSeconds)
+                || (frame.wasReleased(ControllerButton::South)
+                    && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::South))
+                    && frame.heldFor(ControllerButton::South) >= operatorToggleHoldSeconds)) {
+                add(GameInputAction::MiningOperatorToggle);
+            } else if (frame.wasReleased(ControllerButton::South)
+                && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::South))) {
                 add(GameInputAction::MiningStow);
             }
             if (frame.wasPressed(ControllerButton::LeftBumper)) {
@@ -253,6 +271,8 @@ public:
     }
 
 private:
+    static constexpr double operatorToggleHoldSeconds = 0.6;
+
     static bool dpadPressed(const ControllerFrame& frame)
     {
         return frame.wasPressed(ControllerButton::DpadUp)

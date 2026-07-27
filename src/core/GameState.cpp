@@ -1168,10 +1168,65 @@ const Destination* nextDestination(const GameState& state, const ContentCatalog&
     return &catalog.destinations[static_cast<std::size_t>(nextIndex)];
 }
 
+FrontierGateStatus frontierGateStatusForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    FrontierGateStatus status;
+    status.destinationId = std::string(destinationId);
+    if (catalog.findDestination(destinationId) == nullptr) {
+        return status;
+    }
+
+    if (destinationId == content::destination::mars) {
+        status.kind = FrontierGateKind::LunarProspector;
+        status.current = std::clamp(
+            state.meta.prospectorCommonOreRecovered,
+            0,
+            tuning::research::prospectorCommonOreGoal);
+        status.required = tuning::research::prospectorCommonOreGoal;
+        status.satisfied = state.meta.lunarProspectorClaimed;
+        return status;
+    }
+    if (destinationId == content::destination::jupiter) {
+        status.kind = FrontierGateKind::MarsBayExpansion;
+        status.current = std::clamp(
+            state.meta.marsCommonOreRecovered,
+            0,
+            tuning::research::marsBayCommonOreGoal);
+        status.required = tuning::research::marsBayCommonOreGoal;
+        status.satisfied = state.meta.marsBayExpansionClaimed;
+        return status;
+    }
+    if (destinationId == content::destination::saturn) {
+        status.kind = FrontierGateKind::SaturnSlingshot;
+        status.current = state.meta.saturnSlingshotPerfect ? 1 : 0;
+        status.required = 1;
+        status.satisfied = state.meta.saturnRouteUnlocked;
+        return status;
+    }
+
+    status.kind = FrontierGateKind::FlightData;
+    status.current = std::max(0, state.run.frontierReadiness);
+    status.required = frontierReadinessRequired(state, catalog);
+    status.satisfied = status.required > 0 && status.current >= status.required;
+    return status;
+}
+
+FrontierGateStatus frontierGateStatus(const GameState& state, const ContentCatalog& catalog)
+{
+    const Destination* next = nextDestination(state, catalog);
+    if (next == nullptr) {
+        return {};
+    }
+    return frontierGateStatusForDestination(state, catalog, next->id);
+}
+
 bool canCommitToNextFrontier(const GameState& state, const ContentCatalog& catalog)
 {
-    const int required = frontierReadinessRequired(state, catalog);
-    return nextDestination(state, catalog) != nullptr && required > 0 && state.run.frontierReadiness >= required;
+    const FrontierGateStatus gate = frontierGateStatus(state, catalog);
+    return !gate.destinationId.empty() && gate.satisfied;
 }
 
 bool bankFrontierReadiness(GameState& state, const ContentCatalog& catalog)
@@ -1213,9 +1268,25 @@ bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog)
         return false;
     }
 
-    const int required = frontierReadinessRequired(state, catalog);
-    if (state.run.frontierReadiness < required) {
-        state.statusLine = text::moreFlightDataNeeded(next->name);
+    const FrontierGateStatus gate = frontierGateStatusForDestination(state, catalog, next->id);
+    if (!gate.satisfied) {
+        switch (gate.kind) {
+        case FrontierGateKind::LunarProspector:
+            state.statusLine = "Install Prospector Mk I before plotting the Mars route.";
+            break;
+        case FrontierGateKind::MarsBayExpansion:
+            state.statusLine = "Fabricate Drone Bay Slot 2 before plotting the Jupiter route.";
+            break;
+        case FrontierGateKind::SaturnSlingshot:
+            state.statusLine = "Saturn is locked. Complete and claim a Perfect Io flyby.";
+            break;
+        case FrontierGateKind::FlightData:
+            state.statusLine = text::moreFlightDataNeeded(next->name);
+            break;
+        case FrontierGateKind::None:
+            state.statusLine = std::string(text::status::noFartherFrontier);
+            break;
+        }
         return false;
     }
 

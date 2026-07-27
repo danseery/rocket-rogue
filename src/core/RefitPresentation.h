@@ -145,10 +145,10 @@ inline std::string moduleThreat(const ShipModule& module)
         return std::string(text::moduleThreats::opensDeeperShaft);
     }
     if (module.stats.miningStorage > 0.0) {
-        return "Gives the mining drone more free carry before load drag";
+        return "Gives the Mining Rig more free carry before load drag";
     }
     if (module.stats.miningEngineEfficiency > 0.0) {
-        return "Keeps the mining drone faster and cheaper under load";
+        return "Keeps the Mining Rig faster and cheaper under load";
     }
 
     switch (module.slot) {

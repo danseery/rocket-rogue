@@ -76,6 +76,24 @@ struct RenderSnapshot {
     double miningMoveY = 0.0;
     double miningHullDirX = 0.0;
     double miningHullDirY = 1.0;
+    bool miningOperatorPresent = false;
+    bool miningOperatorActive = false;
+    double miningOperatorX = 0.0;
+    double miningOperatorY = 0.0;
+    double miningOperatorVelocityX = 0.0;
+    double miningOperatorVelocityY = 0.0;
+    double miningOperatorAimX = 0.0;
+    double miningOperatorAimY = 1.0;
+    double miningOperatorThrustX = 0.0;
+    double miningOperatorThrustY = 0.0;
+    double miningOperatorIntegrity = 1.0;
+    double miningOperatorToggleProgress = 0.0;
+    double miningOperatorFirePulse = 0.0;
+    bool miningRigPresent = true;
+    bool miningRigDisabled = false;
+    bool miningAnchorValid = false;
+    double miningAnchorX = 0.0;
+    double miningAnchorY = 0.0;
     double miningBounce = 0.0;
     double miningBounceRelief = 0.0;
     bool miningTargetDrillable = false;
@@ -91,6 +109,7 @@ struct RenderSnapshot {
     std::span<const MiningCell> miningCells;
     std::span<const MiningEnemy> miningEnemies;
     std::span<const MiningMiniDroneAgent> miningMiniDrones;
+    std::span<const MiningLooseChunk> miningLooseChunks;
     std::span<const MiningProjectileVisual> miningProjectiles;
     std::span<const MiningDamageNumber> miningDamageNumbers;
     bool flybyCompleted = false;
@@ -149,6 +168,7 @@ struct RenderSnapshot {
         miningCells = mining.terrain.cells;
         miningEnemies = mining.enemies;
         miningMiniDrones = mining.miniDrones;
+        miningLooseChunks = mining.looseChunks;
         miningProjectiles = mining.combatProjectiles;
         miningDamageNumbers = mining.damageNumbers;
     }

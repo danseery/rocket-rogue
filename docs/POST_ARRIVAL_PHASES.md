@@ -1,24 +1,26 @@
 # Post-Arrival Phases
 
-For the latest agent-facing design priority order, see `docs/AGENT_DESIGN_CONTEXT.md`. USG Notes is the primary source for surface, mining, animal class, and drone direction.
+For the latest agent-facing design priority order, see `docs/AGENT_DESIGN_CONTEXT.md`. USG Notes is the primary source for surface, mining, animal class, and Support Drone direction.
 
 This note extends the current launch/refit prototype with the next two layers: research and landed exploration. The goal is to keep the press-your-luck rocket loop as the spine, then make successful arrivals feel like new opportunities instead of just a bigger payout screen.
 
 ## Phase Structure
 
-Earth Orbit and Moon stay focused on proving the agency can travel and return safely. The player should be collecting flight data, upgrading the vehicle, training crew, and deciding when a transfer attempt is worth the risk.
+Earth Orbit stays focused on proving the agency can travel and return safely. The Moon preserves that story framing while adding the first explicit surface objective: safely deliver 3 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
 
 Mars is the first research frontier. After a successful Mars arrival, the game opens a post-arrival sequence:
 
 1. Arrival summary: confirms the transfer succeeded and shows what the agency can investigate.
 2. Research phase: spend recovered materials and blueprints to unlock new module families, crew facilities, surface tools, and artifact analysis threads.
-3. Surface expedition: spend action kits to survey/push/extract and spend shared fuel to deploy the mining drone.
+3. Surface expedition: spend action kits to survey/push/extract and spend shared fuel to deploy the player-controlled Mining Rig.
 4. Recovery decision: return with the payload before hazard, cargo weight, low action kits, or low fuel makes extraction too risky.
 5. Refit window: use credits, research unlocks, and recovered materials to improve the next launch cycle.
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Each optional activity introduces its progression value at the moment the player first selects it. Flyby and Orbit explicitly frame blueprint progress as the route to permanent ship upgrades. Landing introduces surface operations. The first Mining brief states the 3-Common-Ore Prospector contract before deployment, and its live objective distinguishes ore home, aboard, and carried. Safely completing the contract produces a saved `PROSPECTOR ONLINE` celebration that unlocks the first Mining Drone; later support-drone research expands the bay without cluttering the initial brief.
+Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first unique Support Drone. Mars repeats the lesson with 4 local Common Ore and `Fabricate Drone Bay Slot 2`, leaving the slot empty until a specialist is deliberately commissioned or equipped.
+
+The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The story site presents outer and inner four-segment lava seals, then requires artifact towing and safe Surface extraction. The minor artifact grants one persistent, player-selected free Support Drone upgrade. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward.
 
 ## Research Phase
 
@@ -36,7 +38,7 @@ Research outputs:
 - Module families: thermal control, pressure control, recovery systems, guidance AI, deep-range power.
 - Crew facilities: better simulators, medical bays, psychology/coaching rooms, mission analysis labs.
 - Surface tools: better drills, cargo harnesses, suit supplies, probes, hazard scanners.
-- Drone systems: Drone Bay, helper drones, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
+- Support Drone systems: Drone Bay, unique role units, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
 - Artifact threads: story and late-game build options, intentionally undefined until the narrative direction is clearer. For now, each identified artifact adds a small capped blueprint insight bonus to future research.
 
 Design rule: research should mostly unlock variety and new decisions, not permanent raw stat inflation. Better parts can be stronger, but the reward should feel like a wider tool belt rather than a passive +10% forever.
@@ -47,8 +49,8 @@ The current POC treats research facilities and surface tools as small unlock lay
 - Field probes add action-kit margin and improve survey yield.
 - Surface drills improve mining yield and rare-material odds.
 - Cargo return rigs reduce extraction risk, especially when cargo gets heavy.
-- The Prospector contract unlocks the first Mining Drone and Drone Ops; Drone Support research adds the remaining environmental helpers.
-- Arkfall grants Mk I Attack/Defense drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
+- The Moon Prospector contract unlocks the unique Prospector Support Drone and Slot 1; the Mars contract unlocks empty Slot 2; Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the unique Hazard Support Drone.
+- Arkfall grants Mk I Attack/Defense Support Drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
 
 These are research unlocks, not refit cards, so the player has a reason to care about Mars research even before enemy encounters exist.
 
@@ -62,7 +64,7 @@ Core resources:
 
 - Site profile: each expedition rolls a site such as Survey Basin, Ore Shelf, or Fracture Field. The site changes action yield, hazard, extraction pressure, or artifact odds.
 - Action kits: the surface action clock. Surveying, pushing deeper, and hazard responses spend it.
-- Shared fuel: the shuttle and mining drone reserve. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains; before the Ark, it is labeled shared fuel, and after Ark discovery it is framed as Ark fuel.
+- Shared fuel: the shuttle and Mining Rig reserve. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains; before the Ark, it is labeled shared fuel, and after Ark discovery it is framed as Ark fuel.
 - Cargo: increases reward but raises extraction risk.
 - Hazard: destination difficulty plus depth pressure.
 - Materials: banked only if extraction succeeds enough to recover the payload.
@@ -71,9 +73,9 @@ Core resources:
 Core actions:
 
 - Survey site: low-risk, low-reward; improves knowledge and finds common materials.
-- Mine deposit: opens one direct-control drone mining run for the current surface loop. It spends shared fuel, not action kits.
+- Mine deposit: opens one direct-control Mining Rig run for the current surface loop. It spends shared fuel, not action kits.
 - Push Deeper: raises hazard and potential reward; this is the surface version of overburning. It is disabled after mining because the mining run commits the field team to extracting or wrapping the current site.
-- Extract payload: attempts to bring home the current cargo; risk rises with hazard, cargo, low action kits, and spent fuel.
+- Extract payload: attempts to recover the current cargo to the shuttle; risk rises with hazard, cargo, low action kits, and spent fuel.
 
 Surface actions should be presented as decision cards, not mystery buttons. Each card should show action-kit or fuel cost, current hazard/extraction risk, a short explanation of the payoff, and the action button. The player should understand why a field-kit unlock changed the odds without needing to inspect code or external notes.
 
@@ -103,7 +105,7 @@ These events should remain short, readable pulses attached to menu actions. They
 
 The surface screen keeps a short recent mission log. It should preserve the last few site/action/hazard/event summaries so the player can understand why action kits, fuel, cargo, hazard, or blueprints changed after several clicks. Keep it bounded and lightweight; it is a memory aid, not a full journal.
 
-The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The mining drone digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and then returns to the ship to bank and leave or aborts back into the same surface outcome model. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
+The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The Mining Rig digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and then returns to the ship to bank and leave or aborts back into the same surface outcome model. Autonomous Mining, Resource, Survey, Hazard, Attack, and Defense units are consistently labeled Support Drones. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
 
 ## Post-Solar Enemy Layer
 
@@ -111,20 +113,20 @@ Enemy encounters arrive as a tonal shift after the solar system. That keeps the 
 
 For enemy encounters, use the Unity prototype's passive defense direction rather than turning Rocket Rogue into a precision shooter:
 
-- Drones, turrets, shields, and area fields are equipment choices.
+- Support Drones, turrets, shields, and area fields are equipment choices.
 - The player survives through build planning, positioning, and extraction timing.
 - Enemy pressure competes with mining greed: stay longer for resources, or leave before the planet overwhelms the expedition.
 
-Current POC implementation: post-solar-system expeditions can trigger hostile contact as a surface event, and hostile mining terrain grows from simple encounter rooms into hives, miniboss lairs, spawners, and Act 3 boss chambers. Contact costs action kits, can damage cargo, raises site hazard, or damages the mining drone. Arkfall grants passive Mk I Attack/Defense coverage without adding direct combat controls; Perimeter Coordination research unlocks advanced combat tuning and synergies.
+Current POC implementation: post-solar-system expeditions can trigger hostile contact as a surface event, and hostile mining terrain grows from simple encounter rooms into hives, miniboss lairs, spawners, and Act 3 boss chambers. Contact costs action kits, can damage cargo, raises site hazard, or damages the Mining Rig. Arkfall grants passive Mk I Attack/Defense Support Drone coverage without adding direct combat controls; Perimeter Coordination research unlocks advanced combat tuning and synergies.
 
 ## Unity Prototype Takeaways
 
 Bring forward:
 
-- Tool-forward exploration: jetpack, grappling, drones, mining tools, and special equipment all fit the fantasy of a small expedition crew improvising under pressure.
-- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; drone loadouts may still use explicit equipment slots.
+- Tool-forward exploration: jetpack, grappling, Support Drones, mining tools, and special equipment all fit the fantasy of a small expedition crew improvising under pressure.
+- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; Support Drone loadouts use explicit equipment slots with at most one unit of each type.
 - Procedural chambers: generated corridors, rooms, vaults, and deposits are a strong fit for repeatable surface expeditions.
-- Passive defense upgrades: drones, shields, and area control can make combat strategic without requiring twitch-shooter controls.
+- Passive defense upgrades: Support Drones, shields, and area control can make combat strategic without requiring twitch-shooter controls.
 - Artifact goals: the prototype's artifact collection idea fits the research/story loop cleanly.
 
 Adapt carefully:
@@ -155,13 +157,13 @@ The current shared C++ native/web application should keep this scope focused:
 - Identified artifacts provide capped blueprint insight for later research, giving recovery/decoding a mechanical reward before story content exists.
 - The Legacy archive lists recovered artifacts by origin and decoded status without inventing final story lore.
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
-- Mining uses a direct-control drone screen with 30s baseline oxygen, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
-- Shared fuel is displayed as a shuttle/drone tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as "Mining drone offline" with disabled button copy "Unavailable".
-- Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the drone is offline.
+- Mining uses a direct-control Mining Rig screen with a normal 30s oxygen baseline, the Io story site's 60s baseline, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
+- Shared fuel is displayed as a shuttle/Mining Rig tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as `Mining Rig offline` with disabled button copy `Unavailable`.
+- Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the rig is offline.
 - Solar-system surface expeditions have environmental risk only.
 - Khepri Prime and later post-Arkfall surface expeditions can trigger hostile contact events.
 - Khepri Prime and later mining runs can include enemy tunnel networks and passive-defense combat pressure.
-- Arkfall introduces Mk I Attack and Defense drones for those later expeditions; Perimeter Drone Network research advances their coordination.
+- Arkfall introduces Mk I Attack and Defense Support Drones for those later expeditions; Perimeter Drone Network research advances their coordination.
 
 This is enough to prove whether post-arrival phases improve the launch loop without building a second full game too early.
 
@@ -172,5 +174,5 @@ These are the decisions that need taste, not just implementation:
 - Surface presentation: keep both menu-driven Surface Ops and the compact mining screen, or push more of survey/depth/extraction into the playable 2D scene?
 - Mars pacing: one short surface expedition after each successful Mars transfer, or multiple surface sorties before returning to the launch loop?
 - Artifact tone: ancient alien mystery, lost human probes, cosmic horror, or grounded scientific anomaly?
-- Player avatar: astronaut on foot, remote rover, mining drone, or abstract expedition team?
+- EVA emphasis: how often should suit-only routes pull control away from the Mining Rig without weakening the vehicle-first identity?
 - Combat escalation: how quickly should enemy pressure grow after Arkfall at Khepri Prime, and which artifact or Ark systems should explain it?

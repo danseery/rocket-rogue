@@ -10,6 +10,7 @@
 #include <cmath>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocket {
@@ -307,15 +308,42 @@ inline CrewFatePresentation launchOutcomeCrewFate(const LaunchOutcome& outcome)
     return {};
 }
 
-inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGroups(const LaunchOutcome& outcome)
+inline std::string launchOutcomeRecoveryLabel(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const LaunchOutcome& outcome)
 {
+    if (outcome.recoveryMethod != RecoveryMethod::ReturnHome) {
+        return std::string(toString(outcome.recoveryMethod));
+    }
+
+    const Destination* destination = catalog.findDestination(outcome.destinationId);
+    if (destination == nullptr) {
+        destination = &currentDestination(state, catalog);
+    }
+    const Destination* saturn = catalog.findDestination(content::destination::saturn);
+    const bool outerExpedition = destination != nullptr &&
+        saturn != nullptr &&
+        destination->tier >= saturn->tier;
+    return text::enums::recovery::returnLabel(
+        arkDiscovered(state),
+        outerExpedition);
+}
+
+inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGroups(
+    const LaunchOutcome& outcome,
+    std::string recoveryLabel = {})
+{
+    if (recoveryLabel.empty()) {
+        recoveryLabel = std::string(toString(outcome.recoveryMethod));
+    }
     return {
         {
             text::panel::sections::missionResult,
             "primary",
             {
                 {text::labels::outcome, std::string(launchOutcomeLabel(outcome))},
-                {text::labels::recovery, std::string(toString(outcome.recoveryMethod))},
+                {text::labels::recovery, std::move(recoveryLabel)},
                 {text::labels::creditDelta, display::signedMoney(outcome.payout - outcome.recoveryCost)}
             }
         },
@@ -345,6 +373,24 @@ inline LaunchOutcomePresentation launchOutcomePresentation(const LaunchOutcome& 
         launchOutcomeNextActionLabel(outcome, opensPostArrivalPhases),
         launchOutcomeCrewFate(outcome),
         launchOutcomeMetricGroups(outcome),
+        launchOutcomeNotes(outcome, opensPostArrivalPhases),
+        launchOutcomeAchievements(outcome)
+    };
+}
+
+inline LaunchOutcomePresentation launchOutcomePresentation(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    bool opensPostArrivalPhases = false)
+{
+    const LaunchOutcome& outcome = state.lastOutcome;
+    return {
+        launchOutcomeLabel(outcome),
+        launchOutcomeNextActionLabel(outcome, opensPostArrivalPhases),
+        launchOutcomeCrewFate(outcome),
+        launchOutcomeMetricGroups(
+            outcome,
+            launchOutcomeRecoveryLabel(state, catalog, outcome)),
         launchOutcomeNotes(outcome, opensPostArrivalPhases),
         launchOutcomeAchievements(outcome)
     };

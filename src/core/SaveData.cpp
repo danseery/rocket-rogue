@@ -218,6 +218,8 @@ int artifactRewardToInt(ArtifactRewardType reward)
         return 2;
     case ArtifactRewardType::BlueprintInsight:
         return 3;
+    case ArtifactRewardType::DroneUpgradeCredit:
+        return 4;
     }
     return 0;
 }
@@ -231,6 +233,8 @@ ArtifactRewardType artifactRewardFromInt(int value)
         return ArtifactRewardType::ArkFuel;
     case 3:
         return ArtifactRewardType::BlueprintInsight;
+    case 4:
+        return ArtifactRewardType::DroneUpgradeCredit;
     default:
         return ArtifactRewardType::None;
     }
@@ -770,7 +774,11 @@ std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
         << save_schema::crewFieldDelimiter << (gate.burrowBreach ? 1 : 0)
         << save_schema::crewFieldDelimiter << gate.anchorX
         << save_schema::crewFieldDelimiter << gate.anchorY
-        << save_schema::crewFieldDelimiter << markers.str();
+        << save_schema::crewFieldDelimiter << markers.str()
+        << save_schema::crewFieldDelimiter << gate.outerShellTilesTotal
+        << save_schema::crewFieldDelimiter << gate.outerShellTilesRemaining
+        << save_schema::crewFieldDelimiter << gate.innerShellTilesTotal
+        << save_schema::crewFieldDelimiter << gate.innerShellTilesRemaining;
     return out.str();
 }
 
@@ -818,6 +826,10 @@ void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
             });
         }
     }
+    gate.outerShellTilesTotal = std::max(0, intAt(25));
+    gate.outerShellTilesRemaining = std::max(0, intAt(26));
+    gate.innerShellTilesTotal = std::max(0, intAt(27));
+    gate.innerShellTilesRemaining = std::max(0, intAt(28));
 }
 
 std::string serializeMiningStorySites(const std::vector<MiningStorySiteProgress>& sites)
@@ -946,6 +958,34 @@ bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::st
         save.droneUpgrades = parseDroneUpgrades(value);
     } else if (key == save_schema::field::prospectorCommonOreRecovered) {
         save.prospectorCommonOreRecovered = parseInt(value, save.prospectorCommonOreRecovered);
+    } else if (key == save_schema::field::lunarMiningBriefingAcknowledged) {
+        save.lunarMiningBriefingAcknowledged = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::lunarProspectorClaimed) {
+        save.lunarProspectorClaimed = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::marsCommonOreRecovered) {
+        save.marsCommonOreRecovered = parseInt(value, save.marsCommonOreRecovered);
+    } else if (key == save_schema::field::marsMiningBriefingAcknowledged) {
+        save.marsMiningBriefingAcknowledged = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::marsBayExpansionClaimed) {
+        save.marsBayExpansionClaimed = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::ioVolcanicBriefingAcknowledged) {
+        save.ioVolcanicBriefingAcknowledged = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::ioHazardDroneCommissioned) {
+        save.ioHazardDroneCommissioned = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::ioArtifactRecovered) {
+        save.ioArtifactRecovered = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::droneUpgradeCredits) {
+        save.droneUpgradeCredits = parseInt(value, save.droneUpgradeCredits);
+    } else if (key == save_schema::field::saturnSlingshotBriefingAcknowledged) {
+        save.saturnSlingshotBriefingAcknowledged = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::saturnSlingshotPerfect) {
+        save.saturnSlingshotPerfect = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::saturnRouteUnlocked) {
+        save.saturnRouteUnlocked = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::saturnSlingshotFailed) {
+        save.saturnSlingshotFailed = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::saturnSlingshotFailureAcknowledged) {
+        save.saturnSlingshotFailureAcknowledged = parseInt(value, 0) != 0;
     } else if (key == save_schema::field::artifacts) {
         save.artifacts = parseArtifacts(value);
     } else if (key == save_schema::field::furthestTier) {
@@ -1189,7 +1229,8 @@ std::string serializeMiningCells(const MiningTerrain& terrain)
             << save_schema::crewFieldDelimiter << miningCellFeatureToInt(cell.feature)
             << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(cell.enemy)
             << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(cell.hazardAffinity)
-            << save_schema::crewFieldDelimiter << (cell.gateAssociated ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (cell.gateAssociated ? 1 : 0)
+            << save_schema::crewFieldDelimiter << (cell.suitOnlyPassage ? 1 : 0);
     }
     return out.str();
 }
@@ -1228,6 +1269,9 @@ void parseMiningCells(std::string_view text, MiningTerrain& terrain)
         }
         if (fields.size() > 8) {
             cell.gateAssociated = parseInt(fields[8], 0) != 0;
+        }
+        if (fields.size() > 9) {
+            cell.suitOnlyPassage = parseInt(fields[9], 0) != 0;
         }
         terrain.cells.push_back(cell);
     }
@@ -1420,7 +1464,10 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << (agent.defenseAngleInitialized ? 1 : 0)
             << save_schema::crewFieldDelimiter << agent.shieldCharge
             << save_schema::crewFieldDelimiter << agent.shieldRechargeSeconds
-            << save_schema::crewFieldDelimiter << agent.shieldImpactSeconds;
+            << save_schema::crewFieldDelimiter << agent.shieldImpactSeconds
+            << save_schema::crewFieldDelimiter << static_cast<int>(agent.anchorTarget)
+            << save_schema::crewFieldDelimiter << agent.stableFormationSlot
+            << save_schema::crewFieldDelimiter << agent.orbitPhaseRadians;
     }
     return out.str();
 }
@@ -1496,9 +1543,66 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         if (fields.size() > 22) {
             agent.shieldImpactSeconds = std::max(0.0, parseDouble(fields[22], agent.shieldImpactSeconds));
         }
+        if (fields.size() > 23) {
+            agent.anchorTarget = static_cast<MiningAnchorTarget>(std::clamp(
+                parseInt(fields[23], static_cast<int>(MiningAnchorTarget::ControlledActor)),
+                static_cast<int>(MiningAnchorTarget::ControlledActor),
+                static_cast<int>(MiningAnchorTarget::Operator)));
+        }
+        if (fields.size() > 24) {
+            agent.stableFormationSlot = std::max(0, parseInt(fields[24], agent.stableFormationSlot));
+        }
+        if (fields.size() > 25) {
+            agent.orbitPhaseRadians = parseDouble(fields[25], agent.orbitPhaseRadians);
+        }
         agents.push_back(agent);
     }
     return agents;
+}
+
+std::string serializeMiningLooseChunks(const std::vector<MiningLooseChunk>& chunks)
+{
+    std::ostringstream out;
+    for (std::size_t index = 0; index < chunks.size(); ++index) {
+        if (index > 0) {
+            out << save_schema::listDelimiter;
+        }
+        const MiningLooseChunk& chunk = chunks[index];
+        out << miningMaterialToInt(chunk.material)
+            << save_schema::crewFieldDelimiter << chunk.x
+            << save_schema::crewFieldDelimiter << chunk.y
+            << save_schema::crewFieldDelimiter << chunk.velocityX
+            << save_schema::crewFieldDelimiter << chunk.velocityY
+            << save_schema::crewFieldDelimiter << chunk.cargoValue
+            << save_schema::crewFieldDelimiter << (chunk.active ? 1 : 0);
+    }
+    return out.str();
+}
+
+std::vector<MiningLooseChunk> parseMiningLooseChunks(std::string_view text)
+{
+    std::vector<MiningLooseChunk> chunks;
+    for (const std::string& record : split(text, save_schema::listDelimiter)) {
+        if (record.empty()) {
+            continue;
+        }
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 6) {
+            continue;
+        }
+        MiningLooseChunk chunk;
+        chunk.material = miningMaterialFromInt(parseInt(fields[0], miningMaterialToInt(chunk.material)));
+        chunk.x = parseDouble(fields[1], chunk.x);
+        chunk.y = parseDouble(fields[2], chunk.y);
+        chunk.velocityX = parseDouble(fields[3], chunk.velocityX);
+        chunk.velocityY = parseDouble(fields[4], chunk.velocityY);
+        chunk.cargoValue = std::max(0, parseInt(fields[5], chunk.cargoValue));
+        if (fields.size() > 6) {
+            chunk.active = parseInt(fields[6], chunk.active ? 1 : 0) != 0;
+        }
+        chunks.push_back(chunk);
+    }
+    return chunks;
 }
 
 std::string serializeArtifacts(const std::vector<ArtifactRecord>& artifacts)
@@ -1619,6 +1723,84 @@ MiningArtifactObject parseMiningArtifact(std::string_view text)
     return artifact;
 }
 
+std::string serializeMiningRigState(const MiningRunState& mining)
+{
+    std::ostringstream out;
+    out << mining.rigVelocityX
+        << save_schema::crewFieldDelimiter << mining.rigVelocityY
+        << save_schema::crewFieldDelimiter << (mining.rigDisabled ? 1 : 0)
+        << save_schema::crewFieldDelimiter << mining.rigDepthZone;
+    return out.str();
+}
+
+void parseMiningRigState(std::string_view text, MiningRunState& mining)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) mining.rigVelocityX = parseDouble(fields[0], mining.rigVelocityX);
+    if (fields.size() > 1) mining.rigVelocityY = parseDouble(fields[1], mining.rigVelocityY);
+    if (fields.size() > 2) mining.rigDisabled = parseInt(fields[2], mining.rigDisabled ? 1 : 0) != 0;
+    if (fields.size() > 3) mining.rigDepthZone = std::max(0, parseInt(fields[3], mining.rigDepthZone));
+}
+
+std::string serializeMiningOperatorState(const MiningRunState& mining)
+{
+    std::ostringstream out;
+    out << static_cast<int>(mining.operatorMode)
+        << save_schema::crewFieldDelimiter << (mining.operatorPresent ? 1 : 0)
+        << save_schema::crewFieldDelimiter << mining.operatorX
+        << save_schema::crewFieldDelimiter << mining.operatorY
+        << save_schema::crewFieldDelimiter << mining.operatorVelocityX
+        << save_schema::crewFieldDelimiter << mining.operatorVelocityY
+        << save_schema::crewFieldDelimiter << mining.operatorAimDirX
+        << save_schema::crewFieldDelimiter << mining.operatorAimDirY
+        << save_schema::crewFieldDelimiter << mining.operatorIntegrity
+        << save_schema::crewFieldDelimiter << mining.operatorFireCooldownSeconds
+        << save_schema::crewFieldDelimiter << mining.operatorFirePulseSeconds;
+    return out.str();
+}
+
+void parseMiningOperatorState(std::string_view text, MiningRunState& mining)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) {
+        mining.operatorMode = static_cast<MiningOperatorMode>(std::clamp(
+            parseInt(fields[0], static_cast<int>(MiningOperatorMode::Rig)),
+            static_cast<int>(MiningOperatorMode::Rig),
+            static_cast<int>(MiningOperatorMode::Jetpack)));
+    }
+    if (fields.size() > 1) mining.operatorPresent = parseInt(fields[1], mining.operatorPresent ? 1 : 0) != 0;
+    if (fields.size() > 2) mining.operatorX = parseDouble(fields[2], mining.operatorX);
+    if (fields.size() > 3) mining.operatorY = parseDouble(fields[3], mining.operatorY);
+    if (fields.size() > 4) mining.operatorVelocityX = parseDouble(fields[4], mining.operatorVelocityX);
+    if (fields.size() > 5) mining.operatorVelocityY = parseDouble(fields[5], mining.operatorVelocityY);
+    if (fields.size() > 6) mining.operatorAimDirX = parseDouble(fields[6], mining.operatorAimDirX);
+    if (fields.size() > 7) mining.operatorAimDirY = parseDouble(fields[7], mining.operatorAimDirY);
+    if (fields.size() > 8) mining.operatorIntegrity = std::clamp(parseDouble(fields[8], mining.operatorIntegrity), 0.0, 1.0);
+    if (fields.size() > 9) {
+        mining.operatorFireCooldownSeconds = std::max(0.0, parseDouble(fields[9], mining.operatorFireCooldownSeconds));
+    }
+    if (fields.size() > 10) {
+        mining.operatorFirePulseSeconds = std::max(0.0, parseDouble(fields[10], mining.operatorFirePulseSeconds));
+    }
+}
+
+std::string serializeMiningGravity(const MiningRunState& mining)
+{
+    std::ostringstream out;
+    out << mining.gravityDirectionX
+        << save_schema::crewFieldDelimiter << mining.gravityDirectionY
+        << save_schema::crewFieldDelimiter << mining.gravityStrength;
+    return out.str();
+}
+
+void parseMiningGravity(std::string_view text, MiningRunState& mining)
+{
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (!fields.empty()) mining.gravityDirectionX = parseDouble(fields[0], mining.gravityDirectionX);
+    if (fields.size() > 1) mining.gravityDirectionY = parseDouble(fields[1], mining.gravityDirectionY);
+    if (fields.size() > 2) mining.gravityStrength = std::max(0.0, parseDouble(fields[2], mining.gravityStrength));
+}
+
 std::string serializeMiningDepthRoute(const MiningRunState& mining)
 {
     std::ostringstream out;
@@ -1651,7 +1833,8 @@ std::string serializeMiningDepthLayers(const std::vector<MiningDepthLayerState>&
             << encodeSaveBlob(serializeMiningCells(layer.terrain)) << '^'
             << encodeSaveBlob(serializeMiningEnemies(layer.enemies)) << '^'
             << encodeSaveBlob(serializeMiningArtifact(layer.artifact)) << '^'
-            << encodeSaveBlob(serializeMiningGateRuntime(layer.gate));
+            << encodeSaveBlob(serializeMiningGateRuntime(layer.gate)) << '^'
+            << encodeSaveBlob(serializeMiningLooseChunks(layer.looseChunks));
     }
     return out.str();
 }
@@ -1673,6 +1856,9 @@ std::vector<MiningDepthLayerState> parseMiningDepthLayers(std::string_view text)
         layer.enemies = parseMiningEnemies(decodeSaveBlob(fields[5]));
         layer.artifact = parseMiningArtifact(decodeSaveBlob(fields[6]));
         parseMiningGateRuntime(decodeSaveBlob(fields[7]), layer.gate);
+        if (fields.size() > 8) {
+            layer.looseChunks = parseMiningLooseChunks(decodeSaveBlob(fields[8]));
+        }
         if (layer.terrain.depthZone != layer.depthZone ||
             static_cast<int>(layer.terrain.cells.size()) != layer.terrain.width * layer.terrain.height) {
             continue;
@@ -1737,6 +1923,141 @@ void normalizeLegacyMiningReturnZone(MiningRunState& mining)
     mining.drillIntegrity = std::clamp(mining.drillIntegrity, 0.0, 1.0);
     mining.stowedCargo = std::max(0, mining.stowedCargo);
     mining.cargo = std::max(0, mining.cargo);
+}
+
+void normalizeLegacyIoArtifactForVersionSeven(
+    GameState& state,
+    bool artifactAlreadyRecovered)
+{
+    auto isIoStorySite = [](const MiningStorySiteProgress& site) {
+        return site.destinationId == content::destination::jupiter
+            && site.gateType == MiningGateType::HazardCocoon;
+    };
+    auto siteForArtifact = [&](std::string_view artifactId) -> MiningStorySiteProgress* {
+        const auto site = std::find_if(
+            state.meta.miningStorySites.begin(),
+            state.meta.miningStorySites.end(),
+            [&](const MiningStorySiteProgress& candidate) {
+                return isIoStorySite(candidate)
+                    && (artifactId.empty() || candidate.artifactId == artifactId);
+            });
+        return site == state.meta.miningStorySites.end() ? nullptr : &*site;
+    };
+    auto ensureSite = [&](
+                          std::string_view artifactId,
+                          std::string_view siteId,
+                          const MiningArenaMetadata& metadata) -> MiningStorySiteProgress& {
+        MiningStorySiteProgress* site = siteForArtifact(artifactId);
+        if (site == nullptr) {
+            const auto pending = std::find_if(
+                state.meta.miningStorySites.begin(),
+                state.meta.miningStorySites.end(),
+                [&](const MiningStorySiteProgress& candidate) {
+                    return isIoStorySite(candidate) && !candidate.completed;
+                });
+            if (pending != state.meta.miningStorySites.end()) {
+                site = &*pending;
+            }
+        }
+        if (site == nullptr) {
+            MiningStorySiteProgress migrated;
+            migrated.siteId = siteId.empty()
+                ? std::string(content::destination::jupiter)
+                    + "_story_gate_"
+                    + std::to_string(static_cast<int>(MiningGateType::HazardCocoon))
+                : std::string(siteId);
+            migrated.destinationId = std::string(content::destination::jupiter);
+            migrated.act = metadata.act;
+            migrated.difficulty = std::clamp(metadata.difficulty, 1, 10);
+            migrated.seed = metadata.seed;
+            migrated.gateType = MiningGateType::HazardCocoon;
+            migrated.artifactId = std::string(artifactId);
+            migrated.discovered = true;
+            state.meta.miningStorySites.push_back(std::move(migrated));
+            site = &state.meta.miningStorySites.back();
+        }
+        if (site->siteId.empty()) {
+            site->siteId = std::string(content::destination::jupiter)
+                + "_story_gate_"
+                + std::to_string(static_cast<int>(MiningGateType::HazardCocoon));
+        }
+        if (!artifactId.empty()) {
+            site->artifactId = std::string(artifactId);
+        }
+        site->destinationId = std::string(content::destination::jupiter);
+        site->gateType = MiningGateType::HazardCocoon;
+        site->discovered = true;
+        return *site;
+    };
+    auto normalizeRecord = [&](ArtifactRecord& artifact, const MiningArenaMetadata& metadata) {
+        if (artifact.originDestinationId != content::destination::jupiter) {
+            return;
+        }
+        const bool matchesStorySite = siteForArtifact(artifact.id) != nullptr;
+        if (artifact.kind != ArtifactKind::Story && !matchesStorySite) {
+            return;
+        }
+        (void)ensureSite(artifact.id, {}, metadata);
+        artifact.kind = ArtifactKind::Boost;
+        artifact.rewardType = ArtifactRewardType::DroneUpgradeCredit;
+        if (artifactAlreadyRecovered) {
+            artifact.rewardApplied = true;
+        }
+    };
+
+    MiningRunState& mining = state.run.mining;
+    if (mining.active
+        && mining.destinationId == content::destination::jupiter
+        && mining.gate.active
+        && mining.gate.type == MiningGateType::HazardCocoon) {
+        std::string artifactId = mining.artifact.present
+            ? mining.artifact.id
+            : mining.gate.artifactId;
+        if (artifactId.empty()) {
+            artifactId = std::string(content::destination::jupiter)
+                + "_story_gate_"
+                + std::to_string(static_cast<int>(MiningGateType::HazardCocoon))
+                + "_artifact";
+        }
+        MiningStorySiteProgress& site = ensureSite(
+            artifactId,
+            mining.gate.siteId,
+            mining.arenaMetadata);
+        mining.gate.storyCritical = true;
+        mining.gate.discovered = true;
+        mining.gate.siteId = site.siteId;
+        mining.gate.artifactId = site.artifactId;
+        mining.gate.hazardAffinity = MiningElementalAffinity::Thermal;
+        mining.gate.requiredHazardMark = std::max(1, mining.gate.requiredHazardMark);
+        mining.gate.derivedStateDirty = true;
+        mining.arenaMetadata.gateType = MiningGateType::HazardCocoon;
+        if (mining.artifact.present) {
+            mining.artifact.id = site.artifactId;
+            mining.artifact.kind = ArtifactKind::Boost;
+            mining.artifact.rewardType = ArtifactRewardType::DroneUpgradeCredit;
+        }
+        for (ArtifactRecord& artifact : mining.temporaryArtifacts) {
+            normalizeRecord(artifact, mining.arenaMetadata);
+        }
+        for (ArtifactRecord& artifact : mining.stowedArtifacts) {
+            normalizeRecord(artifact, mining.arenaMetadata);
+        }
+    }
+
+    const MiningArenaMetadata bankedMetadata =
+        state.run.surfaceExpedition.bankedMiningArenaValid
+        ? state.run.surfaceExpedition.bankedMiningArenaMetadata
+        : MiningArenaMetadata {
+              MiningAct::ActOne,
+              8,
+              state.seed,
+              0,
+              MiningGateType::HazardCocoon,
+              true,
+          };
+    for (ArtifactRecord& artifact : state.run.surfaceExpedition.temporaryArtifacts) {
+        normalizeRecord(artifact, bankedMetadata);
+    }
 }
 
 MiningElementalAffinity legacyHazardAffinity(const MiningRunState& mining, int x)
@@ -1904,6 +2225,20 @@ SaveData captureSaveData(const GameState& state)
     save.equippedDroneIds = state.meta.equippedDroneIds;
     save.droneUpgrades = state.meta.droneUpgrades;
     save.prospectorCommonOreRecovered = state.meta.prospectorCommonOreRecovered;
+    save.lunarMiningBriefingAcknowledged = state.meta.lunarMiningBriefingAcknowledged;
+    save.lunarProspectorClaimed = state.meta.lunarProspectorClaimed;
+    save.marsCommonOreRecovered = state.meta.marsCommonOreRecovered;
+    save.marsMiningBriefingAcknowledged = state.meta.marsMiningBriefingAcknowledged;
+    save.marsBayExpansionClaimed = state.meta.marsBayExpansionClaimed;
+    save.ioVolcanicBriefingAcknowledged = state.meta.ioVolcanicBriefingAcknowledged;
+    save.ioHazardDroneCommissioned = state.meta.ioHazardDroneCommissioned;
+    save.ioArtifactRecovered = state.meta.ioArtifactRecovered;
+    save.droneUpgradeCredits = state.meta.droneUpgradeCredits;
+    save.saturnSlingshotBriefingAcknowledged = state.meta.saturnSlingshotBriefingAcknowledged;
+    save.saturnSlingshotPerfect = state.meta.saturnSlingshotPerfect;
+    save.saturnRouteUnlocked = state.meta.saturnRouteUnlocked;
+    save.saturnSlingshotFailed = state.meta.saturnSlingshotFailed;
+    save.saturnSlingshotFailureAcknowledged = state.meta.saturnSlingshotFailureAcknowledged;
     save.artifacts = state.meta.artifacts;
     save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
     save.miningStorySites = state.meta.miningStorySites;
@@ -1982,6 +2317,81 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
     state.run.mining = save.mining;
+    {
+        MiningRunState& mining = state.run.mining;
+        constexpr double tau = 6.28318530717958647692;
+        if (save.version < 6) {
+            // Version-five mining only had the rig actor. Restore that exact
+            // seated state, then seed the additive EVA and formation fields
+            // deterministically so old runs never wake up in an invalid mode.
+            mining.rigVelocityX = 0.0;
+            mining.rigVelocityY = 0.0;
+            mining.rigDisabled = false;
+            mining.rigDepthZone = mining.depthZone;
+            mining.operatorMode = MiningOperatorMode::Rig;
+            mining.operatorPresent = false;
+            mining.operatorX = mining.droneX;
+            mining.operatorY = mining.droneY;
+            mining.operatorVelocityX = 0.0;
+            mining.operatorVelocityY = 0.0;
+            mining.operatorAimDirX = mining.hullDirX;
+            mining.operatorAimDirY = mining.hullDirY;
+            mining.operatorIntegrity = 1.0;
+            mining.operatorFireCooldownSeconds = 0.0;
+            mining.operatorFirePulseSeconds = 0.0;
+            mining.looseChunks.clear();
+            for (MiningDepthLayerState& layer : mining.depthLayers) {
+                layer.looseChunks.clear();
+            }
+
+            if (const Destination* destination = catalog.findDestination(mining.destinationId)) {
+                mining.gravityDirectionX = destination->gravityDirectionX;
+                mining.gravityDirectionY = destination->gravityDirectionY;
+                mining.gravityStrength =
+                    tuning::mining::baseGravityCellsPerSecondSquared * std::max(0.0, destination->gravityScale);
+            }
+
+            std::array<int, 6> roleSlots {};
+            for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+                const int role = std::clamp(
+                    static_cast<int>(agent.role),
+                    static_cast<int>(MiniDroneRole::Mining),
+                    static_cast<int>(MiniDroneRole::Defense));
+                agent.anchorTarget = MiningAnchorTarget::ControlledActor;
+                agent.stableFormationSlot = roleSlots[static_cast<std::size_t>(role)]++;
+                agent.orbitPhaseRadians =
+                    tau * static_cast<double>(role) / static_cast<double>(roleSlots.size());
+            }
+        }
+
+        mining.rigDepthZone = std::max(0, mining.rigDepthZone);
+        mining.operatorIntegrity = std::clamp(mining.operatorIntegrity, 0.0, 1.0);
+        mining.operatorFireCooldownSeconds = std::max(0.0, mining.operatorFireCooldownSeconds);
+        mining.operatorFirePulseSeconds = std::max(0.0, mining.operatorFirePulseSeconds);
+        mining.operatorToggleProgress = 0.0;
+        mining.firing = false;
+
+        const auto normalizeDirection = [](double& x, double& y, double fallbackX, double fallbackY) {
+            const double length = std::sqrt(x * x + y * y);
+            if (length <= 0.0001) {
+                x = fallbackX;
+                y = fallbackY;
+            } else {
+                x /= length;
+                y /= length;
+            }
+        };
+        normalizeDirection(mining.operatorAimDirX, mining.operatorAimDirY, 0.0, 1.0);
+        normalizeDirection(mining.gravityDirectionX, mining.gravityDirectionY, 0.0, 1.0);
+        mining.gravityStrength = std::max(0.0, mining.gravityStrength);
+        for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+            agent.stableFormationSlot = std::max(0, agent.stableFormationSlot);
+            agent.orbitPhaseRadians = std::fmod(agent.orbitPhaseRadians, tau);
+            if (agent.orbitPhaseRadians < 0.0) {
+                agent.orbitPhaseRadians += tau;
+            }
+        }
+    }
     if (state.run.mining.active) {
         MiningRunState& mining = state.run.mining;
         if (save.version < 5) {
@@ -2099,6 +2509,23 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         save.prospectorCommonOreRecovered,
         0,
         tuning::research::prospectorCommonOreGoal);
+    state.meta.lunarMiningBriefingAcknowledged = save.lunarMiningBriefingAcknowledged;
+    state.meta.lunarProspectorClaimed = save.lunarProspectorClaimed;
+    state.meta.marsCommonOreRecovered = std::clamp(
+        save.marsCommonOreRecovered,
+        0,
+        tuning::research::marsBayCommonOreGoal);
+    state.meta.marsMiningBriefingAcknowledged = save.marsMiningBriefingAcknowledged;
+    state.meta.marsBayExpansionClaimed = save.marsBayExpansionClaimed;
+    state.meta.ioVolcanicBriefingAcknowledged = save.ioVolcanicBriefingAcknowledged;
+    state.meta.ioHazardDroneCommissioned = save.ioHazardDroneCommissioned;
+    state.meta.ioArtifactRecovered = save.ioArtifactRecovered;
+    state.meta.droneUpgradeCredits = std::max(0, save.droneUpgradeCredits);
+    state.meta.saturnSlingshotBriefingAcknowledged = save.saturnSlingshotBriefingAcknowledged;
+    state.meta.saturnSlingshotPerfect = save.saturnSlingshotPerfect;
+    state.meta.saturnRouteUnlocked = save.saturnRouteUnlocked;
+    state.meta.saturnSlingshotFailed = save.saturnSlingshotFailed;
+    state.meta.saturnSlingshotFailureAcknowledged = save.saturnSlingshotFailureAcknowledged;
     state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
     const bool legacyDroneBayUnlocked = hasUnlock(state.meta, content::unlock::droneBay);
     const bool legacyMiningSeen = ui::briefings::acknowledged(
@@ -2135,6 +2562,116 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.miningFirstClearProgress = save.miningFirstClearProgress;
     state.meta.miningStorySites = save.miningStorySites;
     state.meta.furthestTier = save.furthestTier;
+    {
+        const int marsIndex = [&]() {
+            const Destination* destination = catalog.findDestination(content::destination::mars);
+            return destination == nullptr
+                ? -1
+                : static_cast<int>(std::distance(catalog.destinations.data(), destination));
+        }();
+        const int jupiterIndex = [&]() {
+            const Destination* destination = catalog.findDestination(content::destination::jupiter);
+            return destination == nullptr
+                ? -1
+                : static_cast<int>(std::distance(catalog.destinations.data(), destination));
+        }();
+        const int saturnIndex = [&]() {
+            const Destination* destination = catalog.findDestination(content::destination::saturn);
+            return destination == nullptr
+                ? -1
+                : static_cast<int>(std::distance(catalog.destinations.data(), destination));
+        }();
+        const bool reachedMars = (marsIndex >= 0 && state.run.destinationIndex >= marsIndex)
+            || state.meta.furthestTier >= 2;
+        const bool reachedJupiter = (jupiterIndex >= 0 && state.run.destinationIndex >= jupiterIndex)
+            || state.meta.furthestTier >= 3;
+        const bool reachedSaturn = (saturnIndex >= 0 && state.run.destinationIndex >= saturnIndex)
+            || state.meta.furthestTier >= 4;
+        const bool completedLegacyIoSite = std::any_of(
+            state.meta.miningStorySites.begin(),
+            state.meta.miningStorySites.end(),
+            [](const MiningStorySiteProgress& site) {
+                return site.destinationId == content::destination::jupiter && site.completed;
+            });
+
+        if (save.version < 7) {
+            const bool legacyIoArtifactAlreadyRecovered =
+                state.meta.ioArtifactRecovered
+                || completedLegacyIoSite
+                || reachedSaturn;
+            normalizeLegacyIoArtifactForVersionSeven(
+                state,
+                legacyIoArtifactAlreadyRecovered);
+            if (hasUnlock(state.meta, content::unlock::droneBay) || reachedMars) {
+                state.meta.lunarMiningBriefingAcknowledged = true;
+                state.meta.lunarProspectorClaimed = true;
+                state.meta.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
+            }
+            if (reachedJupiter) {
+                state.meta.marsMiningBriefingAcknowledged = true;
+                state.meta.marsBayExpansionClaimed = true;
+                state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
+            }
+            if (hasUnlock(state.meta, content::unlock::droneSupportSuite)
+                || std::find(
+                    state.meta.ownedDroneIds.begin(),
+                    state.meta.ownedDroneIds.end(),
+                    content::drone::hazardDrone) != state.meta.ownedDroneIds.end()) {
+                state.meta.ioVolcanicBriefingAcknowledged = true;
+                state.meta.ioHazardDroneCommissioned = true;
+            }
+            if (completedLegacyIoSite || reachedSaturn) {
+                state.meta.ioVolcanicBriefingAcknowledged = true;
+                state.meta.ioHazardDroneCommissioned = true;
+                if (!state.meta.ioArtifactRecovered) {
+                    state.meta.droneUpgradeCredits += 1;
+                }
+                state.meta.ioArtifactRecovered = true;
+            }
+            if (reachedSaturn) {
+                state.meta.saturnSlingshotBriefingAcknowledged = true;
+                state.meta.saturnSlingshotPerfect = true;
+                state.meta.saturnRouteUnlocked = true;
+                state.meta.saturnSlingshotFailureAcknowledged = true;
+            }
+        }
+
+        // Older campaigns could purchase Slot 2 before the explicit Mars
+        // contract existed. Preserve that earned capacity and treat its
+        // matching story reward as already claimed, including saves that were
+        // previously rewritten as v7 before this invariant was added.
+        if (reachedMars
+            && state.meta.droneBaySlots >= 2
+            && !state.meta.marsBayExpansionClaimed) {
+            state.meta.marsMiningBriefingAcknowledged = true;
+            state.meta.marsBayExpansionClaimed = true;
+            state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
+        }
+
+        if (state.meta.lunarProspectorClaimed) {
+            state.meta.lunarMiningBriefingAcknowledged = true;
+            state.meta.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
+            appendUnique(state.meta.unlockKeys, content::unlock::droneBay);
+            state.meta.droneBaySlots = std::max(1, state.meta.droneBaySlots);
+        }
+        if (state.meta.marsBayExpansionClaimed) {
+            state.meta.marsMiningBriefingAcknowledged = true;
+            state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
+            appendUnique(state.meta.unlockKeys, content::unlock::droneBay);
+            state.meta.droneBaySlots = std::max(2, state.meta.droneBaySlots);
+        }
+        if (state.meta.ioHazardDroneCommissioned) {
+            state.meta.ioVolcanicBriefingAcknowledged = true;
+            appendUnique(state.meta.unlockKeys, content::unlock::ioHazardDrone);
+            appendUnique(state.meta.ownedDroneIds, content::drone::hazardDrone);
+        }
+        if (state.meta.saturnRouteUnlocked) {
+            state.meta.ioArtifactRecovered = true;
+            state.meta.saturnSlingshotBriefingAcknowledged = true;
+            state.meta.saturnSlingshotPerfect = true;
+        }
+        ensureDroneBayState(state, catalog);
+    }
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
     state.meta.closestSurvivalMargin = std::max(0.0, save.closestSurvivalMargin);
@@ -2370,6 +2907,9 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningFuelCycle, save.mining.fuelCycleProgress);
     writeField(out, save_schema::field::miningFuelSpent, save.mining.fuelSpent);
     writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
+    writeField(out, save_schema::field::miningRigState, serializeMiningRigState(save.mining));
+    writeField(out, save_schema::field::miningOperatorState, serializeMiningOperatorState(save.mining));
+    writeField(out, save_schema::field::miningGravity, serializeMiningGravity(save.mining));
     writeField(out, save_schema::field::miningReturnZone, serializePair(save.mining.returnZoneX, save.mining.returnZoneY));
     writeField(out, save_schema::field::miningAim, serializePair(save.mining.aimX, save.mining.aimY));
     writeField(out, save_schema::field::miningHullHeading, serializePair(save.mining.hullDirX, save.mining.hullDirY));
@@ -2389,6 +2929,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningCellsBroken, save.mining.cellsBroken);
     writeField(out, save_schema::field::miningEnemies, serializeMiningEnemies(save.mining.enemies));
     writeField(out, save_schema::field::miningMiniDrones, serializeMiningMiniDrones(save.mining.miniDrones));
+    writeField(out, save_schema::field::miningLooseChunks, serializeMiningLooseChunks(save.mining.looseChunks));
     writeField(
         out,
         save_schema::field::miningCombat,
@@ -2412,6 +2953,20 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::equippedDrones, join(save.equippedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
     writeField(out, save_schema::field::prospectorCommonOreRecovered, save.prospectorCommonOreRecovered);
+    writeField(out, save_schema::field::lunarMiningBriefingAcknowledged, save.lunarMiningBriefingAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::lunarProspectorClaimed, save.lunarProspectorClaimed ? 1 : 0);
+    writeField(out, save_schema::field::marsCommonOreRecovered, save.marsCommonOreRecovered);
+    writeField(out, save_schema::field::marsMiningBriefingAcknowledged, save.marsMiningBriefingAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::marsBayExpansionClaimed, save.marsBayExpansionClaimed ? 1 : 0);
+    writeField(out, save_schema::field::ioVolcanicBriefingAcknowledged, save.ioVolcanicBriefingAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::ioHazardDroneCommissioned, save.ioHazardDroneCommissioned ? 1 : 0);
+    writeField(out, save_schema::field::ioArtifactRecovered, save.ioArtifactRecovered ? 1 : 0);
+    writeField(out, save_schema::field::droneUpgradeCredits, save.droneUpgradeCredits);
+    writeField(out, save_schema::field::saturnSlingshotBriefingAcknowledged, save.saturnSlingshotBriefingAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::saturnSlingshotPerfect, save.saturnSlingshotPerfect ? 1 : 0);
+    writeField(out, save_schema::field::saturnRouteUnlocked, save.saturnRouteUnlocked ? 1 : 0);
+    writeField(out, save_schema::field::saturnSlingshotFailed, save.saturnSlingshotFailed ? 1 : 0);
+    writeField(out, save_schema::field::saturnSlingshotFailureAcknowledged, save.saturnSlingshotFailureAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
     writeField(out, save_schema::field::miningStorySites, serializeMiningStorySites(save.miningStorySites));
@@ -2621,6 +3176,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.fuelSpent = parseInt(value, save.mining.fuelSpent);
         } else if (key == save_schema::field::miningDrone) {
             parsePair(value, save.mining.droneX, save.mining.droneY);
+        } else if (key == save_schema::field::miningRigState) {
+            parseMiningRigState(value, save.mining);
+        } else if (key == save_schema::field::miningOperatorState) {
+            parseMiningOperatorState(value, save.mining);
+        } else if (key == save_schema::field::miningGravity) {
+            parseMiningGravity(value, save.mining);
         } else if (key == save_schema::field::miningReturnZone) {
             parsePair(value, save.mining.returnZoneX, save.mining.returnZoneY);
         } else if (key == save_schema::field::miningAim) {
@@ -2674,6 +3235,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.enemies = parseMiningEnemies(value);
         } else if (key == save_schema::field::miningMiniDrones) {
             save.mining.miniDrones = parseMiningMiniDrones(value);
+        } else if (key == save_schema::field::miningLooseChunks) {
+            save.mining.looseChunks = parseMiningLooseChunks(value);
         } else if (key == save_schema::field::miningCombat) {
             const std::vector<std::string> fields = split(value, save_schema::crewFieldDelimiter);
             if (!fields.empty()) {

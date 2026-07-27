@@ -69,6 +69,16 @@ inline constexpr std::string_view miningStow = "mining_stow";
 inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
 inline constexpr std::string_view acknowledgeProspectorCompletion = "acknowledge_prospector_completion";
+inline constexpr std::string_view acknowledgeLunarMiningBriefing = "acknowledge_lunar_mining_briefing";
+inline constexpr std::string_view claimLunarProspector = "claim_lunar_prospector";
+inline constexpr std::string_view acknowledgeMarsMiningBriefing = "acknowledge_mars_mining_briefing";
+inline constexpr std::string_view claimMarsBayExpansion = "claim_mars_bay_expansion";
+inline constexpr std::string_view commissionIoHazardDrone = "commission_io_hazard_drone";
+inline constexpr std::string_view beginSaturnSlingshot = "begin_saturn_slingshot";
+inline constexpr std::string_view retrySaturnSlingshot = "retry_saturn_slingshot";
+inline constexpr std::string_view acknowledgeSaturnSlingshotFailure = "acknowledge_saturn_slingshot_failure";
+inline constexpr std::string_view claimSaturnCourse = "claim_saturn_course";
+inline constexpr std::string_view redeemDroneUpgradeCreditPrefix = "redeem_drone_upgrade_credit:";
 
 inline std::string buyOffer(int index)
 {
@@ -114,6 +124,11 @@ inline std::string upgradeDrone(int index)
 {
     return std::string(upgradeDronePrefix) + std::to_string(index);
 }
+
+inline std::string redeemDroneUpgradeCredit(int index)
+{
+    return std::string(redeemDroneUpgradeCreditPrefix) + std::to_string(index);
+}
 } // namespace actions
 
 namespace modals {
@@ -141,6 +156,12 @@ inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introducti
 inline constexpr std::string_view droneSynergies = "drone_synergies";
 inline constexpr std::string_view miningIntroduction = "mining_introduction";
 inline constexpr std::string_view prospectorCompletion = "prospector_completion";
+inline constexpr std::string_view lunarMiningBriefing = "lunar_mining_briefing";
+inline constexpr std::string_view marsMiningBriefing = "mars_mining_briefing";
+inline constexpr std::string_view marsBayCompletion = "mars_bay_completion";
+inline constexpr std::string_view ioVolcanicBriefing = "io_volcanic_briefing";
+inline constexpr std::string_view saturnSlingshotBriefing = "saturn_slingshot_briefing";
+inline constexpr std::string_view saturnSlingshotFailure = "saturn_slingshot_failure";
 } // namespace modals
 
 namespace briefings {

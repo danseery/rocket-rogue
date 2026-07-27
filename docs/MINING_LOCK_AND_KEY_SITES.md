@@ -8,7 +8,7 @@ This is the implementation contract for deterministic artifact-site gates. `Mini
 |---|---:|---|---|
 | Hazard Cocoon | Act 1 L8 | Hazard Mk I; Toxic uses Mk II; Radiation uses Mk III | None for story cocoons. Every marked shell tile must be treated. |
 | Enemy-Sealed Chamber | Act 2 L2 | Passive combat strength | Any Attack, Defense, terrain, and utility combination that clears the assigned group and spawner descendants. |
-| Survey Triangulation | Act 1 L8 | Survey support | Move the rig between all marked origins and spend scanner pulses. |
+| Survey Triangulation | Act 1 L8 | Survey Support Drone | Move the rig between all marked origins and spend scanner pulses. |
 | Fragile Excavation | Act 1 L8 | Mining support and drill control | Excavate around the cache, scan first, and minimize rebound. Story progress survives damage; condition changes secondary value. |
 | Heavy Tow | Act 1 L9 | Resource support or tow upgrades | Empty cargo and a wide, direct return tunnel. |
 | Endurance Vault | Act 1 L9 | Resource support or oxygen upgrades | Shortcuts, disciplined fuel use, and route pre-clearance. |
@@ -24,7 +24,7 @@ Act 1 uses at most one lock, Act 2 uses at most two, and Act 3 uses at most thre
 - `MiningArenaRules` declares legal gates, the fixed story gate, and maximum lock count alongside mechanics, roster, scaling, and reward budgets.
 - `MiningGateDefinition` is the immutable contract: components, Hazard mark/affinity, player-facing key, and alternatives.
 - `MiningGateRuntime` owns discovery, shell cells, assigned enemies, scan markers, open/completed state, artifact identity, and soft-lock modifiers.
-- `MiningCapabilityProfile` derives role marks and rig capability from equipped drones, upgrades, crew, and ship. It is forecast-only and never changes arena difficulty.
+- `MiningCapabilityProfile` derives role marks and rig capability from equipped Support Drones, upgrades, crew, and ship. It is forecast-only and never changes arena difficulty.
 - Gate-associated cells and enemies serialize with the active arena. `MiningStorySiteProgress` stores destination, Act/level, seed, gate, artifact identity, discovery, and completion in `MetaProgress`.
 
 Fixed story sites reuse their saved request and artifact identity until the artifact is delivered, banked, and survives Surface extraction. Abort, rig loss, artifact destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by artifact identity, not merely by Story kind.
@@ -34,7 +34,7 @@ Fixed story sites reuse their saved request and artifact identity until the arti
 - Hazard shell cells reject drill damage. Hazard treatment preserves gate association; refined minerals still use the unified rich-reward ledger.
 - Hard-locked caches reject drill and tether bypass until every required component completes.
 - Enemy seals count only gate-associated enemies. Children from an associated spawner inherit the association.
-- Triangulation origins are visible world markers. Survey drones expand efficient coverage; manual repositioning remains valid.
+- Triangulation origins are visible world markers. Survey Support Drones expand efficient coverage; manual repositioning remains valid.
 - Heavy Tow increases tether cargo burden and reduces tether response. Endurance Vault uses a deep/far anchor. Shield Corridor stamps a ranged extraction lane.
 - Burrow bedrock is immune to the rig but accepts Mammal burrow damage. A replacement Mammal spawns while the breach is closed.
 - Story artifacts do not spend rare/exotic mineral budget. Mineral cells, enemy drops, and Hazard refinement still share the arena ledger.
@@ -47,4 +47,4 @@ Arena Lab includes a gate override and prints the gate, requirement, and alterna
 
 ## Verification
 
-`mining_progression_tests` table-tests introductions and Act restrictions, Hazard mark escalation, illegal overrides, capability forecasts, story identity persistence, extraction credit, hard-lock behavior, assigned enemy clearance, and save/load. Existing core and economy suites cover artifact physics, rich caps, drone behavior, deterministic terrain, and campaign regression.
+`mining_progression_tests` table-tests introductions and Act restrictions, Hazard mark escalation, illegal overrides, capability forecasts, story identity persistence, extraction credit, hard-lock behavior, assigned enemy clearance, and save/load. Existing core and economy suites cover artifact physics, rich caps, Support Drone behavior, deterministic terrain, and campaign regression.

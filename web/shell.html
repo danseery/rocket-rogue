@@ -1833,6 +1833,103 @@
     .objective-strip span { color: #ffd166; font-size: 11px; text-transform: uppercase; }
     .objective-strip strong { display: block; color: #fff2c0; font-size: 14px; }
     .objective-strip p { margin: 3px 0 0; color: rgba(255, 244, 205, 0.78); font-size: 11px; }
+    .campaign-objective {
+      box-sizing: border-box;
+      padding: 8px 11px;
+    }
+    .campaign-objective-head,
+    .campaign-objective-foot,
+    .campaign-progress {
+      display: flex;
+      align-items: center;
+    }
+    .campaign-objective-head,
+    .campaign-objective-foot {
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .campaign-objective-head em {
+      padding: 2px 6px;
+      border: 1px solid rgba(255, 209, 102, 0.58);
+      color: #ffd166;
+      font-size: 9px;
+      font-style: normal;
+      letter-spacing: 0.06em;
+    }
+    .campaign-objective > strong { margin-top: 3px; }
+    .campaign-progress { gap: 4px; margin-top: 5px; }
+    .campaign-progress i {
+      width: 24px;
+      height: 6px;
+      background: rgba(119, 136, 142, 0.34);
+    }
+    .campaign-progress i.is-filled { background: #63e5ff; }
+    .campaign-progress b { margin-left: 4px; color: #dff8ff; font-size: 10px; }
+    .campaign-objective-foot { margin-top: 6px; }
+    .campaign-objective-foot small { color: #9fd2dd; font-size: 9px; }
+    .campaign-objective-foot button { min-height: 28px; padding: 4px 9px; }
+    .phase-board-surface.surface-ops-screen.campaign-surface > .surface-quickbar {
+      display: none;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      box-sizing: border-box;
+      min-height: 48px;
+      padding: 4px 8px;
+      margin-bottom: 4px;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-head {
+      flex: 0 0 126px;
+      width: 126px;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective > strong {
+      flex: 0 0 164px;
+      width: 164px;
+      margin: 0 8px;
+      font-size: 12px;
+      line-height: 1.1;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective .campaign-progress {
+      flex: 0 0 150px;
+      width: 150px;
+      margin-top: 0;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot {
+      flex: 1 1 auto;
+      min-width: 0;
+      margin-top: 0;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot small {
+      font-size: 8px;
+      line-height: 1.1;
+    }
+    .phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot button {
+      min-height: 24px;
+      padding: 2px 6px;
+      font-size: 10px;
+    }
+    .campaign-objective.state-locked {
+      border-color: rgba(119, 136, 142, 0.36);
+      background: rgba(21, 27, 31, 0.88);
+    }
+    .campaign-objective.state-locked .campaign-objective-head em {
+      border-color: rgba(119, 136, 142, 0.44);
+      color: #84949a;
+    }
+    .campaign-objective.state-ready {
+      border-color: rgba(255, 209, 102, 0.86);
+      background: rgba(50, 39, 12, 0.94);
+    }
+    .campaign-objective.state-complete {
+      border-color: rgba(99, 229, 255, 0.58);
+      background: rgba(7, 42, 49, 0.90);
+    }
+    .campaign-objective.state-complete .campaign-objective-head em {
+      border-color: rgba(99, 229, 255, 0.58);
+      color: #63e5ff;
+    }
     .mining-objective-strip { position: absolute; left: 16px; top: 92px; width: min(520px, calc(100vw - 32px)); z-index: 4; }
 
     .phase-lane,
@@ -2264,6 +2361,33 @@
       max-width: 704px;
       margin-top: 6px;
       margin-bottom: 6px;
+    }
+
+    .phase-board-drone-ops .drone-credit-callout {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 52px;
+      margin: 0 0 8px;
+      padding: 7px 10px;
+      border-color: #ffd166;
+      background: rgba(48, 39, 15, 0.94);
+    }
+
+    .phase-board-drone-ops .drone-credit-callout h2 {
+      margin: 1px 0;
+      color: #fff0b7;
+      font-size: 14px;
+    }
+
+    .phase-board-drone-ops .drone-credit-callout p,
+    .phase-board-drone-ops .drone-credit-callout > strong {
+      margin: 0;
+      color: #d8c88c;
+      font-size: 10px;
     }
 
     .phase-board-drone-ops .drone-top-row .resource-bank {
@@ -3195,6 +3319,46 @@
       display: block;
     }
 
+    .io-seal-progress {
+      position: absolute;
+      z-index: 6;
+      top: 86px;
+      left: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: min(420px, calc(100vw - 32px));
+      min-height: 48px;
+      padding: 6px 8px;
+      border: 1px solid rgba(255, 129, 54, 0.66);
+      border-radius: 6px;
+      background: rgba(28, 10, 4, 0.90);
+      transform: translateX(-50%);
+    }
+
+    .io-seal-progress > div { width: 108px; }
+    .io-seal-progress > div > span,
+    .io-seal-progress > div > b { color: #ffc18b; font-size: 9px; }
+    .io-seal-progress > div > section {
+      display: flex;
+      gap: 3px;
+      margin: 3px 0 2px;
+    }
+    .io-seal-progress i {
+      width: 17px;
+      height: 6px;
+      background: #8f2818;
+    }
+    .io-seal-progress i.is-cleared { background: #aebcc2; }
+    .io-seal-progress > div.is-locked { opacity: 0.46; }
+    .io-seal-progress > strong {
+      width: 142px;
+      color: #fff0d8;
+      font-size: 9px;
+      line-height: 1.18;
+      text-align: right;
+    }
+
     .mining-run-title {
       width: 240px;
       flex: 0 0 auto;
@@ -3376,6 +3540,98 @@
       position: absolute;
       inset: 118px 18px calc(156px + var(--mining-input-helper-reserve));
       pointer-events: none;
+    }
+
+    .mining-eva-readout {
+      position: absolute;
+      top: 38px;
+      left: 10px;
+      width: 258px;
+      padding: 8px;
+      color: #e9f7fb;
+      background: rgba(3, 12, 18, 0.88);
+      border: 1px solid #34596a;
+      border-radius: 4px;
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+
+    .mining-eva-readout.is-eva {
+      border-color: #f1b72b;
+    }
+
+    .mining-eva-readout header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #203b49;
+    }
+
+    .mining-eva-readout header span,
+    .mining-eva-status-grid i {
+      color: #8faabd;
+      font-size: 8px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 1;
+    }
+
+    .mining-eva-readout header strong {
+      color: #21d8ef;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1;
+    }
+
+    .mining-eva-readout.is-eva header strong {
+      color: #f1b72b;
+    }
+
+    .mining-eva-status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      margin-top: 5px;
+    }
+
+    .mining-eva-status-grid > span {
+      min-width: 0;
+      min-height: 26px;
+      padding: 4px 5px;
+      background: #08161e;
+      border: 1px solid #203b49;
+      border-radius: 3px;
+      box-sizing: border-box;
+    }
+
+    .mining-eva-status-grid i,
+    .mining-eva-status-grid b {
+      display: block;
+    }
+
+    .mining-eva-status-grid b {
+      margin-top: 3px;
+      overflow: hidden;
+      color: #e9f7fb;
+      font-size: 9px;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mining-eva-readout footer {
+      margin-top: 5px;
+      padding-top: 5px;
+      border-top: 1px solid #203b49;
+    }
+
+    .mining-eva-readout footer span {
+      color: #55d86d;
+      font-size: 9px;
+      line-height: 1;
     }
 
     .mining-bottom-rail {
@@ -4863,7 +5119,13 @@
     .modal-root[data-modal-id="orbit_introduction"] .modal-panel,
     .modal-root[data-modal-id="landing_introduction"] .modal-panel,
     .modal-root[data-modal-id="mini_drone_introduction"] .modal-panel,
-    .modal-root[data-modal-id="mining_introduction"] .modal-panel {
+    .modal-root[data-modal-id="mining_introduction"] .modal-panel,
+    .modal-root[data-modal-id="lunar_mining_briefing"] .modal-panel,
+    .modal-root[data-modal-id="mars_mining_briefing"] .modal-panel,
+    .modal-root[data-modal-id="mars_bay_completion"] .modal-panel,
+    .modal-root[data-modal-id="io_volcanic_briefing"] .modal-panel,
+    .modal-root[data-modal-id="saturn_slingshot_briefing"] .modal-panel,
+    .modal-root[data-modal-id="saturn_slingshot_failure"] .modal-panel {
       width: min(560px, calc(100vw - 36px));
       max-height: min(320px, calc(100dvh - 36px));
       padding: 20px;
@@ -4875,7 +5137,13 @@
     .modal-root[data-modal-id="orbit_introduction"] #modal-content,
     .modal-root[data-modal-id="landing_introduction"] #modal-content,
     .modal-root[data-modal-id="mini_drone_introduction"] #modal-content,
-    .modal-root[data-modal-id="mining_introduction"] #modal-content {
+    .modal-root[data-modal-id="mining_introduction"] #modal-content,
+    .modal-root[data-modal-id="lunar_mining_briefing"] #modal-content,
+    .modal-root[data-modal-id="mars_mining_briefing"] #modal-content,
+    .modal-root[data-modal-id="mars_bay_completion"] #modal-content,
+    .modal-root[data-modal-id="io_volcanic_briefing"] #modal-content,
+    .modal-root[data-modal-id="saturn_slingshot_briefing"] #modal-content,
+    .modal-root[data-modal-id="saturn_slingshot_failure"] #modal-content {
       overflow-y: hidden;
       scrollbar-gutter: auto;
     }
@@ -5114,6 +5382,39 @@
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }
+
+    .solar-map-campaign-track {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .solar-map-campaign-track > div {
+      padding: 7px 8px;
+      border: 1px solid rgba(103, 210, 255, 0.22);
+      border-radius: 5px;
+      background: rgba(13, 28, 38, 0.78);
+    }
+
+    .solar-map-campaign-track span,
+    .solar-map-campaign-track strong {
+      display: block;
+      font-size: 10px;
+    }
+
+    .solar-map-campaign-track span { color: var(--muted); }
+    .solar-map-campaign-track strong { margin-top: 3px; color: #b6c4cb; }
+    .solar-map-campaign-track > div.is-active {
+      border-color: #ffd166;
+      background: rgba(48, 39, 15, 0.92);
+    }
+    .solar-map-campaign-track > div.is-active strong { color: #fff0b7; }
+    .solar-map-campaign-track > div.is-complete {
+      border-color: #63e5ff;
+      background: rgba(10, 45, 53, 0.92);
+    }
+    .solar-map-campaign-track > div.is-complete strong { color: #9ff1ff; }
+    .solar-map-campaign-track > div.is-locked { opacity: 0.48; }
 
     .solar-map-summary > div {
       padding: 8px 10px;
@@ -10297,10 +10598,10 @@
 
     function controllerPromptLabels() {
       const family = resolvedControllerPromptFamily();
-      if (family === "playstation") return { south: "Cross", east: "Circle", west: "Square", north: "Triangle", lb: "L1", rb: "R1", rt: "R2", menu: "Options", view: "Create" };
-      if (family === "xbox") return { south: "A", east: "B", west: "X", north: "Y", lb: "LB", rb: "RB", rt: "RT", menu: "Menu", view: "View" };
-      if (family === "steamdeck") return { south: "A", east: "B", west: "X", north: "Y", lb: "L1", rb: "R1", rt: "R2", menu: "Menu", view: "View" };
-      return { south: "South", east: "East", west: "West", north: "North", lb: "LB", rb: "RB", rt: "RT", menu: "Menu", view: "View" };
+      if (family === "playstation") return { south: "Cross", east: "Circle", west: "Square", north: "Triangle", lb: "L1", rb: "R1", lt: "L2", rt: "R2", menu: "Options", view: "Create" };
+      if (family === "xbox") return { south: "A", east: "B", west: "X", north: "Y", lb: "LB", rb: "RB", lt: "LT", rt: "RT", menu: "Menu", view: "View" };
+      if (family === "steamdeck") return { south: "A", east: "B", west: "X", north: "Y", lb: "L1", rb: "R1", lt: "L2", rt: "R2", menu: "Menu", view: "View" };
+      return { south: "South", east: "East", west: "West", north: "North", lb: "LB", rb: "RB", lt: "LT", rt: "RT", menu: "Menu", view: "View" };
     }
 
     function syncOpeningControlGuides(root = panel) {
@@ -10311,6 +10612,7 @@
       root.querySelectorAll("[data-controller-north]").forEach((element) => { element.textContent = label.north; });
       root.querySelectorAll("[data-controller-lb]").forEach((element) => { element.textContent = label.lb; });
       root.querySelectorAll("[data-controller-rb]").forEach((element) => { element.textContent = label.rb; });
+      root.querySelectorAll("[data-controller-lt]").forEach((element) => { element.textContent = label.lt; });
       root.querySelectorAll("[data-controller-rt]").forEach((element) => { element.textContent = label.rt; });
       root.querySelectorAll("[data-controller-menu]").forEach((element) => { element.textContent = label.menu; });
       root.querySelectorAll("[data-controller-view]").forEach((element) => { element.textContent = label.view; });
@@ -10322,7 +10624,9 @@
       const confirm = swapConfirmCancel ? label.east : label.south;
       const cancel = swapConfirmCancel ? label.south : label.east;
       const controllerActive = document.body.classList.contains("controller-input-active");
-      const mining = Boolean(panel.querySelector("[data-panel-mode='mining-fullscreen']"));
+      const miningPanel = panel.querySelector("[data-panel-mode='mining-fullscreen']");
+      const mining = Boolean(miningPanel);
+      const evaMining = miningPanel?.dataset.miningOperatorMode === "eva";
       const flyby = Boolean(panel.querySelector("[data-flyby-run][data-flyby-completed='0']"));
       const orbit = Boolean(panel.querySelector("[data-orbit-run][data-orbit-completed='0']"));
       const gameplayHelper = mining || flyby || orbit;
@@ -10346,11 +10650,18 @@
           return;
         }
         if (mining) {
-          controllerPromptBar.innerHTML = describedItem("Move / Face", "WASD / Arrows") +
-            describedItem("Drill", "Space") +
-            describedItem("Scan", "E") +
-            (panel.querySelector("[data-rr-action='mining_tether']")
+          controllerPromptBar.innerHTML = (evaMining
+            ? describedItem("Thrust", "WASD / Arrows") +
+              describedItem("Aim", "Mouse") +
+              describedItem("Fire", "Left click") +
+              describedItem("Drill", "Right click") +
+              describedItem("Scan", "E")
+            : describedItem("Move", "WASD / Arrows") +
+              describedItem("Drill", "Space / Left click") +
+              describedItem("Scan", "E")) +
+            (evaMining || panel.querySelector("[data-rr-action='mining_tether']")
               ? describedItem("Tether", "T") : "") +
+            describedItem(evaMining ? "Enter rig" : "Exit rig", "F") +
             (panel.querySelector("[data-mining-drones='1']")
               ? describedItem("Drones", "Automatic") : "") +
             (panel.querySelector("[data-rr-action='mining_stow']")
@@ -10376,17 +10687,22 @@
       } else if (panel.querySelector("[data-panel-mode='story-briefing'], [data-panel-mode='mission-stamp'], [data-panel-mode='arrival-fanfare']")) {
         controllerPromptBar.innerHTML = item(label.south, "Continue") + item(label.menu, "Pause");
       } else if (mining) {
-        controllerPromptBar.innerHTML = describedItem("Move / Face", "L-stick") +
-          describedItem("Drill", label.rt) +
-          describedItem("Scan", label.west) +
-          (panel.querySelector("[data-rr-action='mining_tether']")
+        controllerPromptBar.innerHTML = (evaMining
+          ? describedItem("Thrust", "L-stick") +
+            describedItem("Aim", "R-stick") +
+            describedItem("Fire", label.rt) +
+            describedItem("Drill", label.lt) +
+            describedItem("Scan", label.west)
+          : describedItem("Move", "L-stick") +
+            describedItem("Drill", label.rt) +
+            describedItem("Scan", label.west)) +
+          (evaMining || panel.querySelector("[data-rr-action='mining_tether']")
             ? describedItem("Tether", label.north) : "") +
           (panel.querySelector("[data-mining-drones='1']")
             ? describedItem("Drones", "Automatic") : "") +
-          (panel.querySelector("[data-drill-visible='1']") ? describedItem("Drill Repair", label.lb) : "") +
-          (panel.querySelector("[data-drone-visible='1']") ? describedItem("Rig Repair", label.rb) : "") +
+          describedItem(evaMining ? "Enter rig" : "Exit rig", `Hold ${label.south}`) +
           (panel.querySelector("[data-rr-action='mining_stow']")
-            ? describedItem("Bank / Leave", label.south) : "") +
+            ? describedItem("Bank / Leave", `Tap ${label.south}`) : "") +
           (panel.querySelector("[data-rr-action='mining_abort']")
             ? describedItem("Recall", label.east, "Hold") : "") + item(label.menu, "Pause");
       } else if (flyby) {
@@ -10554,7 +10870,7 @@
       sceneLaunchControl.classList.toggle("is-visible", showLaunchControl);
       sceneLaunchControl.hidden = !showLaunchControl;
       sceneLaunchControl.disabled = !preflightReady;
-      sceneLaunchControl.textContent = preflightReady ? "Launch" : "Securing Drone";
+      sceneLaunchControl.textContent = preflightReady ? "Launch" : "Securing Mining Rig";
       if (showLaunchControl) {
         const anchor = worldToScreen(-0.18, -0.50);
         const launchWidth = sceneLaunchControl.offsetWidth || 190;
@@ -11115,6 +11431,15 @@
       rerollOffers: () => rrCall("rr_reroll_offers"),
       acknowledgeApproachIntroduction: () => rrCall("rr_acknowledge_approach_introduction"),
       acknowledgeProspectorCompletion: () => rrCall("rr_acknowledge_prospector_completion"),
+      acknowledgeLunarMiningBriefing: () => rrCall("rr_acknowledge_lunar_mining_briefing"),
+      claimLunarProspector: () => rrCall("rr_claim_lunar_prospector"),
+      acknowledgeMarsMiningBriefing: () => rrCall("rr_acknowledge_mars_mining_briefing"),
+      claimMarsBayExpansion: () => rrCall("rr_claim_mars_bay_expansion"),
+      commissionIoHazardDrone: () => rrCall("rr_commission_io_hazard_drone"),
+      beginSaturnSlingshot: () => rrCall("rr_begin_saturn_slingshot"),
+      retrySaturnSlingshot: () => rrCall("rr_retry_saturn_slingshot"),
+      acknowledgeSaturnSlingshotFailure: () => rrCall("rr_acknowledge_saturn_slingshot_failure"),
+      claimSaturnCourse: () => rrCall("rr_claim_saturn_course"),
       arrivalFlyby: () => rrCall("rr_arrival_flyby"),
       flybyMove: (xAxis, yAxis) => rrCall("rr_flyby_move", [xAxis, yAxis], ["number", "number"]),
       flybyAbort: () => rrCall("rr_flyby_abort"),
@@ -11142,13 +11467,18 @@
       equipDrone: (index) => rrCall("rr_equip_drone", [index], ["number"]),
       unequipDroneSlot: (slotIndex) => rrCall("rr_unequip_drone_slot", [slotIndex], ["number"]),
       upgradeDrone: (index) => rrCall("rr_upgrade_drone", [index], ["number"]),
+      redeemDroneUpgradeCredit: (index) => rrCall("rr_redeem_drone_upgrade_credit", [index], ["number"]),
       upgradeDroneSlot: () => rrCall("rr_upgrade_drone_slot"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningAim: (x, y) => rrCall("rr_mining_aim", [x, y], ["number", "number"]),
+      miningPointerAim: (x, y) => rrCall("rr_mining_pointer_aim", [x, y], ["number", "number"]),
+      miningFire: (active) => rrCall("rr_mining_fire", [active ? 1 : 0], ["number"]),
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
       miningKeyboardDrill: (active) => rrCall("rr_mining_keyboard_drill", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
       miningTether: () => rrCall("rr_mining_tether"),
+      miningOperatorToggle: () => rrCall("rr_mining_operator_toggle"),
+      miningOperatorToggleProgress: (progress) => rrCall("rr_mining_operator_toggle_progress", [progress], ["number"]),
       miningRepairDrill: () => rrCall("rr_mining_repair_drill"),
       miningRepairDrone: () => rrCall("rr_mining_repair_drone"),
       miningStow: () => rrCall("rr_mining_stow"),
@@ -11228,10 +11558,20 @@
       equipDronePrefix: "equip_drone:",
       unequipDroneSlotPrefix: "unequip_drone_slot:",
       upgradeDronePrefix: "upgrade_drone:",
+      redeemDroneUpgradeCreditPrefix: "redeem_drone_upgrade_credit:",
       upgradeDroneSlot: "upgrade_drone_slot",
       rerollOffers: "reroll_offers",
       acknowledgeApproachIntroduction: "acknowledge_approach_introduction",
       acknowledgeProspectorCompletion: "acknowledge_prospector_completion",
+      acknowledgeLunarMiningBriefing: "acknowledge_lunar_mining_briefing",
+      claimLunarProspector: "claim_lunar_prospector",
+      acknowledgeMarsMiningBriefing: "acknowledge_mars_mining_briefing",
+      claimMarsBayExpansion: "claim_mars_bay_expansion",
+      commissionIoHazardDrone: "commission_io_hazard_drone",
+      beginSaturnSlingshot: "begin_saturn_slingshot",
+      retrySaturnSlingshot: "retry_saturn_slingshot",
+      acknowledgeSaturnSlingshotFailure: "acknowledge_saturn_slingshot_failure",
+      claimSaturnCourse: "claim_saturn_course",
       arrivalFlyby: "arrival_flyby",
       flybyAbort: "flyby_abort",
       flybyContinue: "flyby_continue",
@@ -11286,6 +11626,15 @@
       [rrActionIds.rerollOffers]: () => rr.rerollOffers(),
       [rrActionIds.acknowledgeApproachIntroduction]: () => rr.acknowledgeApproachIntroduction(),
       [rrActionIds.acknowledgeProspectorCompletion]: () => rr.acknowledgeProspectorCompletion(),
+      [rrActionIds.acknowledgeLunarMiningBriefing]: () => rr.acknowledgeLunarMiningBriefing(),
+      [rrActionIds.claimLunarProspector]: () => rr.claimLunarProspector(),
+      [rrActionIds.acknowledgeMarsMiningBriefing]: () => rr.acknowledgeMarsMiningBriefing(),
+      [rrActionIds.claimMarsBayExpansion]: () => rr.claimMarsBayExpansion(),
+      [rrActionIds.commissionIoHazardDrone]: () => rr.commissionIoHazardDrone(),
+      [rrActionIds.beginSaturnSlingshot]: () => rr.beginSaturnSlingshot(),
+      [rrActionIds.retrySaturnSlingshot]: () => rr.retrySaturnSlingshot(),
+      [rrActionIds.acknowledgeSaturnSlingshotFailure]: () => rr.acknowledgeSaturnSlingshotFailure(),
+      [rrActionIds.claimSaturnCourse]: () => rr.claimSaturnCourse(),
       [rrActionIds.arrivalFlyby]: () => rr.arrivalFlyby(),
       [rrActionIds.flybyAbort]: () => rr.flybyAbort(),
       [rrActionIds.flybyContinue]: () => rr.flybyContinue(),
@@ -11898,6 +12247,21 @@
         return false;
       }
 
+      if (action.startsWith(rrActionIds.redeemDroneUpgradeCreditPrefix)) {
+        const rawIndex = action.slice(rrActionIds.redeemDroneUpgradeCreditPrefix.length);
+        if (!/^\d+$/.test(rawIndex)) {
+          return false;
+        }
+        const index = Number.parseInt(rawIndex, 10);
+        if (Number.isInteger(index)) {
+          lastPanelAction = action;
+          lastPanelActionAt = performance.now();
+          rr.redeemDroneUpgradeCredit(index);
+          return true;
+        }
+        return false;
+      }
+
       if (action.startsWith(rrActionIds.selectNavigationDestinationPrefix)) {
         const rawIndex = action.slice(rrActionIds.selectNavigationDestinationPrefix.length);
         if (!/^\d+$/.test(rawIndex)) {
@@ -12289,11 +12653,18 @@
     const flybyKeys = new Set();
     const orbitKeys = new Set();
     const miningKeys = new Set();
-    let miningPointerDown = false;
+    let miningPrimaryPointerDown = false;
+    let miningSecondaryPointerDown = false;
+
+    function miningPointerDown() {
+      return miningPrimaryPointerDown || miningSecondaryPointerDown;
+    }
 
     function releaseMiningDrill() {
-      miningPointerDown = false;
+      miningPrimaryPointerDown = false;
+      miningSecondaryPointerDown = false;
       rr.miningKeyboardDrill(false);
+      rr.miningFire(false);
       rr.miningDrill(false);
     }
 
@@ -12472,6 +12843,11 @@
         event.preventDefault();
         return true;
       }
+      if (!event.repeat && key === "f") {
+        rr.miningOperatorToggle();
+        event.preventDefault();
+        return true;
+      }
       if (!event.repeat && key === "r") {
         rr.miningStow();
         event.preventDefault();
@@ -12549,7 +12925,7 @@
     }, true);
 
     window.addEventListener("mouseup", (event) => {
-      if (forwardRmlUp(event) && !miningPointerDown) {
+      if (forwardRmlUp(event) && !miningPointerDown()) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -12573,9 +12949,17 @@
       if (!isMiningActive()) {
         return;
       }
-      miningPointerDown = true;
+      if (event.button === 0) {
+        miningPrimaryPointerDown = true;
+        rr.miningFire(true);
+      } else if (event.button === 2) {
+        miningSecondaryPointerDown = true;
+        rr.miningDrill(true);
+      } else {
+        return;
+      }
       canvas.setPointerCapture?.(event.pointerId);
-      rr.miningDrill(true);
+      rr.miningPointerAim(event.clientX, event.clientY);
       event.preventDefault();
     });
 
@@ -12588,17 +12972,24 @@
         event.preventDefault();
         return;
       }
+      rr.miningPointerAim(event.clientX, event.clientY);
     });
 
     canvas.addEventListener("pointerup", (event) => {
       const overRmlUi = forwardRmlUp(event);
-      if (!miningPointerDown) {
+      if (!miningPointerDown()) {
         if (overRmlUi) {
           event.preventDefault();
         }
         return;
       }
-      releaseMiningDrill();
+      if (event.button === 0) {
+        miningPrimaryPointerDown = false;
+        rr.miningFire(false);
+      } else if (event.button === 2) {
+        miningSecondaryPointerDown = false;
+        rr.miningDrill(false);
+      }
       canvas.releasePointerCapture?.(event.pointerId);
       event.preventDefault();
     });
@@ -12625,7 +13016,7 @@
     });
 
     canvas.addEventListener("mouseup", (event) => {
-      if (forwardRmlUp(event) && !miningPointerDown) {
+      if (forwardRmlUp(event) && !miningPointerDown()) {
         event.preventDefault();
       }
     });
@@ -12635,6 +13026,12 @@
         event.preventDefault();
       }
     }, { passive: false });
+
+    canvas.addEventListener("contextmenu", (event) => {
+      if (isMiningActive()) {
+        event.preventDefault();
+      }
+    });
 
     window.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && domModalVisible() && modalRoot.dataset.dismissible !== "0") {

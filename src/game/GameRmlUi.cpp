@@ -929,7 +929,7 @@ std::string nativeSceneOverlayMarkup(std::string_view panelHtml)
             markup += " disabled=\"1\"";
         }
         markup += ">";
-        markup += ready ? "Launch" : "Securing Drone";
+        markup += ready ? "Launch" : "Securing Mining Rig";
         markup += "</button>";
         return markup;
     }
@@ -1985,6 +1985,57 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     box-sizing: border-box;
     display: block;
 }
+.io-seal-progress {
+    position: absolute;
+    left: )" + std::to_string(miningSceneRect.x + std::max(0, miningSceneRect.width / 2 - 190)) + R"(px;
+    top: )" + std::to_string(miningPlayfieldTop + 8) + R"(px;
+    width: 380px;
+    min-height: 48px;
+    padding: 6px 8px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-width: 1px;
+    border-color: rgba(255, 129, 54, 0.66);
+    border-radius: 6px;
+    background-color: rgba(28, 10, 4, 0.90);
+    z-index: 6;
+}
+.io-seal-progress > div {
+    width: 104px;
+}
+.io-seal-progress > div > span,
+.io-seal-progress > div > b {
+    color: #ffc18b;
+    font-size: 9px;
+}
+.io-seal-progress > div > section {
+    display: flex;
+    flex-direction: row;
+    margin-top: 3px;
+    margin-bottom: 2px;
+}
+.io-seal-progress i {
+    width: 17px;
+    height: 6px;
+    margin-right: 3px;
+    background-color: #8f2818;
+}
+.io-seal-progress i.is-cleared {
+    background-color: #aebcc2;
+}
+.io-seal-progress > div.is-locked {
+    opacity: 0.46;
+}
+.io-seal-progress > strong {
+    width: 132px;
+    color: #fff0d8;
+    font-size: 9px;
+    line-height: 1.18;
+    text-align: right;
+}
 .mining-run-title {
     display: none;
 }
@@ -2316,6 +2367,122 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .objective-strip span { color: #ffd166; font-size: 11px; }
 .objective-strip strong { display: block; color: #fff2c0; font-size: 14px; }
 .objective-strip p { margin: 3px 0 0 0; color: rgba(255, 244, 205, 0.78); font-size: 11px; }
+.campaign-objective {
+    box-sizing: border-box;
+    padding: 8px 11px;
+}
+.campaign-objective-head,
+.campaign-objective-foot,
+.campaign-progress {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+.campaign-objective-head,
+.campaign-objective-foot {
+    justify-content: space-between;
+}
+.campaign-objective-head em {
+    padding: 2px 6px;
+    border-width: 1px;
+    border-color: rgba(255, 209, 102, 0.58);
+    color: #ffd166;
+    font-size: 9px;
+    font-style: normal;
+}
+.campaign-objective > strong {
+    margin-top: 3px;
+}
+.campaign-progress {
+    margin-top: 5px;
+}
+.campaign-progress i {
+    width: 24px;
+    height: 6px;
+    margin-right: 4px;
+    background-color: rgba(119, 136, 142, 0.34);
+}
+.campaign-progress i.is-filled {
+    background-color: #63e5ff;
+}
+.campaign-progress b {
+    margin-left: 4px;
+    color: #dff8ff;
+    font-size: 10px;
+}
+.campaign-objective-foot {
+    margin-top: 6px;
+}
+.campaign-objective-foot small {
+    color: #9fd2dd;
+    font-size: 9px;
+}
+.campaign-objective-foot button {
+    min-height: 28px;
+    padding: 4px 9px;
+}
+.phase-board-surface.surface-ops-screen.campaign-surface > .surface-quickbar {
+    display: none;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 48px;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-head {
+    flex: 0 0 126px;
+    width: 126px;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective > strong {
+    flex: 0 0 164px;
+    width: 164px;
+    margin: 0px 8px;
+    font-size: 12px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective .campaign-progress {
+    flex: 0 0 150px;
+    width: 150px;
+    margin-top: 0px;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot {
+    flex: 1 1 auto;
+    min-width: 0px;
+    margin-top: 0px;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot small {
+    font-size: 8px;
+    line-height: 1.1;
+}
+.phase-board-surface.surface-ops-screen > .campaign-objective .campaign-objective-foot button {
+    min-height: 24px;
+    padding: 2px 6px;
+    font-size: 10px;
+}
+.campaign-objective.state-locked {
+    border-color: rgba(119, 136, 142, 0.36);
+    background-color: rgba(21, 27, 31, 0.88);
+}
+.campaign-objective.state-locked .campaign-objective-head em {
+    border-color: rgba(119, 136, 142, 0.44);
+    color: #84949a;
+}
+.campaign-objective.state-ready {
+    border-color: rgba(255, 209, 102, 0.86);
+    background-color: rgba(50, 39, 12, 0.94);
+}
+.campaign-objective.state-complete {
+    border-color: rgba(99, 229, 255, 0.58);
+    background-color: rgba(7, 42, 49, 0.90);
+}
+.campaign-objective.state-complete .campaign-objective-head em {
+    border-color: rgba(99, 229, 255, 0.58);
+    color: #63e5ff;
+}
 .mining-objective-strip {
     position: absolute;
     left: )" + std::to_string(miningInset + 9) + R"(px;
@@ -4683,6 +4850,38 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     width: 888px;
     margin-bottom: 10px;
 }
+.solar-map-campaign-track {
+    display: flex;
+    flex-direction: row;
+    width: 888px;
+    margin-bottom: 10px;
+}
+.solar-map-campaign-track > div {
+    width: 207px;
+    margin-right: 8px;
+    padding: 6px 7px;
+    border-width: 1px;
+    border-color: #334a5b;
+    background-color: #111b24;
+}
+.solar-map-campaign-track span,
+.solar-map-campaign-track strong {
+    display: block;
+    font-size: 9px;
+}
+.solar-map-campaign-track span { color: #8495a3; }
+.solar-map-campaign-track strong { margin-top: 3px; color: #b6c4cb; }
+.solar-map-campaign-track > div.is-active {
+    border-color: #ffd166;
+    background-color: #30270f;
+}
+.solar-map-campaign-track > div.is-active strong { color: #fff0b7; }
+.solar-map-campaign-track > div.is-complete {
+    border-color: #63e5ff;
+    background-color: #0a2d35;
+}
+.solar-map-campaign-track > div.is-complete strong { color: #9ff1ff; }
+.solar-map-campaign-track > div.is-locked { opacity: 0.48; }
 .solar-map-summary > div {
     width: 276px;
     margin-right: 8px;
@@ -6197,7 +6396,13 @@ button.settings-toggle:hover {
 #rr-modal.modal-orbit_introduction .modal-scroll-body,
 #rr-modal.modal-landing_introduction .modal-scroll-body,
 #rr-modal.modal-mini_drone_introduction .modal-scroll-body,
-#rr-modal.modal-mining_introduction .modal-scroll-body {
+#rr-modal.modal-mining_introduction .modal-scroll-body,
+#rr-modal.modal-lunar_mining_briefing .modal-scroll-body,
+#rr-modal.modal-mars_mining_briefing .modal-scroll-body,
+#rr-modal.modal-mars_bay_completion .modal-scroll-body,
+#rr-modal.modal-io_volcanic_briefing .modal-scroll-body,
+#rr-modal.modal-saturn_slingshot_briefing .modal-scroll-body,
+#rr-modal.modal-saturn_slingshot_failure .modal-scroll-body {
     overflow-y: hidden;
     padding-right: 0px;
 }
@@ -6207,7 +6412,13 @@ button.settings-toggle:hover {
 #rr-modal.modal-orbit_introduction,
 #rr-modal.modal-landing_introduction,
 #rr-modal.modal-mini_drone_introduction,
-#rr-modal.modal-mining_introduction {
+#rr-modal.modal-mining_introduction,
+#rr-modal.modal-lunar_mining_briefing,
+#rr-modal.modal-mars_mining_briefing,
+#rr-modal.modal-mars_bay_completion,
+#rr-modal.modal-io_volcanic_briefing,
+#rr-modal.modal-saturn_slingshot_briefing,
+#rr-modal.modal-saturn_slingshot_failure {
     left: )" + std::to_string(modalActivityLeft) + R"(px;
     top: )" + std::to_string(modalActivityTop) + R"(px;
     width: )" + std::to_string(modalActivityWidth) + R"(px;
@@ -6220,7 +6431,13 @@ button.settings-toggle:hover {
 #rr-modal.modal-orbit_introduction .modal-head,
 #rr-modal.modal-landing_introduction .modal-head,
 #rr-modal.modal-mini_drone_introduction .modal-head,
-#rr-modal.modal-mining_introduction .modal-head {
+#rr-modal.modal-mining_introduction .modal-head,
+#rr-modal.modal-lunar_mining_briefing .modal-head,
+#rr-modal.modal-mars_mining_briefing .modal-head,
+#rr-modal.modal-mars_bay_completion .modal-head,
+#rr-modal.modal-io_volcanic_briefing .modal-head,
+#rr-modal.modal-saturn_slingshot_briefing .modal-head,
+#rr-modal.modal-saturn_slingshot_failure .modal-head {
     margin-bottom: 12px;
 }
 #rr-modal.modal-launch_outcome .modal-head button,
@@ -6230,7 +6447,13 @@ button.settings-toggle:hover {
 #rr-modal.modal-orbit_introduction .modal-head button,
 #rr-modal.modal-landing_introduction .modal-head button,
 #rr-modal.modal-mini_drone_introduction .modal-head button,
-#rr-modal.modal-mining_introduction .modal-head button {
+#rr-modal.modal-mining_introduction .modal-head button,
+#rr-modal.modal-lunar_mining_briefing .modal-head button,
+#rr-modal.modal-mars_mining_briefing .modal-head button,
+#rr-modal.modal-mars_bay_completion .modal-head button,
+#rr-modal.modal-io_volcanic_briefing .modal-head button,
+#rr-modal.modal-saturn_slingshot_briefing .modal-head button,
+#rr-modal.modal-saturn_slingshot_failure .modal-head button {
     box-sizing: border-box;
     width: 72px;
     height: 34px;
@@ -7049,6 +7272,92 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     border-color: #21d8ef;
     border-radius: 5px;
     pointer-events: none;
+}
+.mining-eva-readout {
+    position: absolute;
+    left: 10px;
+    top: 38px;
+    width: 258px;
+    padding: 8px;
+    box-sizing: border-box;
+    background-color: rgba(3, 12, 18, 0.88);
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+    pointer-events: none;
+}
+.mining-eva-readout.is-eva {
+    border-color: #f1b72b;
+}
+.mining-eva-readout header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    padding-bottom: 6px;
+    border-bottom-width: 1px;
+    border-color: #203b49;
+}
+.mining-eva-readout header span,
+.mining-eva-status-grid i {
+    color: #8faabd;
+    font-size: 8px;
+    font-style: normal;
+    font-weight: normal;
+    line-height: 1.0;
+}
+.mining-eva-readout header strong {
+    color: #21d8ef;
+    font-size: 11px;
+    font-weight: normal;
+    line-height: 1.0;
+}
+.mining-eva-readout.is-eva header strong {
+    color: #f1b72b;
+}
+.mining-eva-status-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    margin-top: 5px;
+}
+.mining-eva-status-grid > span {
+    display: block;
+    width: 116px;
+    min-height: 26px;
+    margin-right: 4px;
+    margin-bottom: 4px;
+    padding: 4px 5px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #203b49;
+    border-radius: 3px;
+}
+.mining-eva-status-grid i,
+.mining-eva-status-grid b {
+    display: block;
+}
+.mining-eva-status-grid b {
+    margin-top: 3px;
+    color: #e9f7fb;
+    font-size: 9px;
+    font-style: normal;
+    font-weight: normal;
+    line-height: 1.0;
+}
+.mining-eva-readout footer {
+    width: 100%;
+    margin-top: 1px;
+    padding-top: 5px;
+    border-top-width: 1px;
+    border-color: #203b49;
+}
+.mining-eva-readout footer span {
+    color: #55d86d;
+    font-size: 9px;
+    line-height: 1.0;
 }
 .mining-top-rail,
 .mining-bottom-rail {
@@ -8465,6 +8774,31 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     height: )" + std::to_string(droneTopRowHeight) + R"(px;
     margin: 0px 0px )" + std::to_string(droneTopRowGap) + R"(px 0px;
 }
+#rr-panel.drone-workspace-panel .drone-credit-callout {
+    flex: 0 0 52px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: )" + std::to_string(droneWorkspaceInnerWidth) + R"(px;
+    min-height: 52px;
+    height: 52px;
+    margin: 0px 0px 8px 0px;
+    padding: 6px 10px;
+    border-color: #ffd166;
+    background-color: #30270f;
+}
+#rr-panel.drone-workspace-panel .drone-credit-callout h2 {
+    margin: 1px 0px;
+    color: #fff0b7;
+    font-size: 14px;
+}
+#rr-panel.drone-workspace-panel .drone-credit-callout p,
+#rr-panel.drone-workspace-panel .drone-credit-callout > strong {
+    color: #d8c88c;
+    font-size: 9px;
+}
 #rr-panel.drone-workspace-panel .drone-bay-strip {
     box-sizing: border-box;
     display: flex;
@@ -9426,6 +9760,7 @@ struct ControllerPromptLabels {
     const char* north;
     const char* leftBumper;
     const char* rightBumper;
+    const char* leftTrigger;
     const char* rightTrigger;
     const char* menu;
     const char* view;
@@ -9435,14 +9770,14 @@ ControllerPromptLabels controllerPromptLabels(ControllerFamily family)
 {
     switch (family) {
     case ControllerFamily::Xbox:
-        return {"A", "B", "X", "Y", "LB", "RB", "RT", "Menu", "View"};
+        return {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "Menu", "View"};
     case ControllerFamily::PlayStation:
-        return {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "R2", "Options", "Create"};
+        return {"Cross", "Circle", "Square", "Triangle", "L1", "R1", "L2", "R2", "Options", "Create"};
     case ControllerFamily::SteamDeck:
-        return {"A", "B", "X", "Y", "L1", "R1", "R2", "Menu", "View"};
+        return {"A", "B", "X", "Y", "L1", "R1", "L2", "R2", "Menu", "View"};
     case ControllerFamily::Generic:
     default:
-        return {"South", "East", "West", "North", "LB", "RB", "RT", "Menu", "View"};
+        return {"South", "East", "West", "North", "LB", "RB", "LT", "RT", "Menu", "View"};
     }
 }
 
@@ -9462,6 +9797,7 @@ std::string withOpeningControllerLabels(std::string markup, ControllerFamily fam
     replaceToken("{{controller_north}}", labels.north);
     replaceToken("{{controller_lb}}", labels.leftBumper);
     replaceToken("{{controller_rb}}", labels.rightBumper);
+    replaceToken("{{controller_lt}}", labels.leftTrigger);
     replaceToken("{{controller_rt}}", labels.rightTrigger);
     replaceToken("{{controller_menu}}", labels.menu);
     replaceToken("{{controller_view}}", labels.view);
@@ -9487,6 +9823,7 @@ std::string inputPromptBar(
     const char* confirm = swapConfirmCancel ? labels.east : labels.south;
     const char* cancel = swapConfirmCancel ? labels.south : labels.east;
     const bool mining = panelHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos;
+    const bool evaMining = mining && panelHtml.find("data-mining-operator-mode=\"eva\"") != std::string_view::npos;
     const bool flyby = panelHtml.find("data-flyby-completed=\"0\"") != std::string_view::npos;
     const bool orbit = panelHtml.find("data-orbit-completed=\"0\"") != std::string_view::npos;
     const bool persistentPanel = panelUsesResponsiveViewport(panelModeForHtml(panelHtml));
@@ -9516,12 +9853,21 @@ std::string inputPromptBar(
 
     if (!controllerActive) {
         if (mining) {
-            prompt += describedItem("Move", "WASD / Arrows")
-                + describedItem("Drill", "Space / Mouse")
-                + describedItem("Scan", "E");
-            if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
+            if (evaMining) {
+                prompt += describedItem("Thrust", "WASD / Arrows")
+                    + describedItem("Aim", "Mouse")
+                    + describedItem("Fire", "Left click")
+                    + describedItem("Drill", "Right click")
+                    + describedItem("Scan", "E");
+            } else {
+                prompt += describedItem("Move", "WASD / Arrows")
+                    + describedItem("Drill", "Space / Left click")
+                    + describedItem("Scan", "E");
+            }
+            if (evaMining || panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
                 prompt += describedItem("Tether", "T");
             }
+            prompt += describedItem(evaMining ? "Enter rig" : "Exit rig", "F");
             if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
                 prompt += describedItem("Bank / Leave", "R");
             }
@@ -9553,18 +9899,23 @@ std::string inputPromptBar(
                panelHtml.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos) {
         prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
     } else if (mining) {
-        prompt += describedItem("Move", "L-stick")
-            + describedItem("Drill", labels.rightTrigger)
-            + describedItem("Scan", labels.west);
-        if (panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
+        if (evaMining) {
+            prompt += describedItem("Thrust", "L-stick")
+                + describedItem("Aim", "R-stick")
+                + describedItem("Fire", labels.rightTrigger)
+                + describedItem("Drill", labels.leftTrigger)
+                + describedItem("Scan", labels.west);
+        } else {
+            prompt += describedItem("Move", "L-stick")
+                + describedItem("Drill", labels.rightTrigger)
+                + describedItem("Scan", labels.west);
+        }
+        if (evaMining || panelHtml.find("data-rr-action=\"mining_tether\"") != std::string_view::npos) {
             prompt += describedItem("Tether", labels.north);
         }
-        if (panelHtml.find("data-drill-visible=\"1\"") != std::string_view::npos
-            || panelHtml.find("data-drone-visible=\"1\"") != std::string_view::npos) {
-            prompt += describedItem("Service", std::string(labels.leftBumper) + " / " + labels.rightBumper);
-        }
+        prompt += describedItem(evaMining ? "Enter rig" : "Exit rig", std::string("Hold ") + labels.south);
         if (panelHtml.find("data-rr-action=\"mining_stow\"") != std::string_view::npos) {
-            prompt += describedItem("Bank / Leave", labels.south);
+            prompt += describedItem("Bank / Leave", std::string("Tap ") + labels.south);
         }
         if (panelHtml.find("data-rr-action=\"mining_abort\"") != std::string_view::npos) {
             prompt += describedItem("Recall", labels.east);

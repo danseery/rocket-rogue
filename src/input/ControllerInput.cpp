@@ -429,7 +429,12 @@ ControllerFrame ControllerTracker::update(
         if (nowDown && !wasDown) {
             downSinceSeconds_[index] = realTimeSeconds;
         }
-        frame.heldSeconds[index] = nowDown ? std::max(0.0, realTimeSeconds - downSinceSeconds_[index]) : 0.0;
+        // Preserve the completed duration on the release edge. Routed input
+        // uses it to distinguish a short South/A tap from the EVA hold action
+        // even when a low-cadence frame skips directly across the threshold.
+        frame.heldSeconds[index] = (nowDown || (!nowDown && wasDown))
+            ? std::max(0.0, realTimeSeconds - downSinceSeconds_[index])
+            : 0.0;
     }
 
     constexpr double sourceActivityAxisDelta = 0.08;

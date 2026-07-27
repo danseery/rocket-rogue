@@ -22,6 +22,10 @@ MiningProgressionBand miningProgressionBandForDifficulty(int difficulty);
 std::string_view miningActName(MiningAct act);
 std::string_view miningProgressionBandName(MiningProgressionBand band);
 MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& request);
+bool isIoMiningDestination(std::string_view destinationId);
+MiningArenaRules resolveDestinationMiningArenaRules(
+    const MiningArenaRequest& request,
+    std::string_view destinationId);
 MiningGateType selectMiningGateType(const MiningArenaRules& rules);
 MiningGateDefinition resolveMiningGateDefinition(
     const MiningArenaRules& rules,

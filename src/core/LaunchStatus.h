@@ -17,6 +17,7 @@ struct LaunchStatusContext {
     bool returnDriftHome = false;
     bool pastDataGoal = false;
     double returnProgress = 0.0;
+    bool outerExpedition = false;
 };
 
 inline std::string launchStatusLine(const LaunchStatusContext& context)
@@ -31,12 +32,16 @@ inline std::string launchStatusLine(const LaunchStatusContext& context)
 
         if (context.returnProgress < tuning::session::returnEarlyProgressThreshold) {
             return context.returnDriftHome
-                ? text::status::fuelReserveGoneForHome(context.arkKnown)
+                ? text::status::fuelReserveGoneForHome(
+                      context.arkKnown,
+                      context.outerExpedition)
                 : std::string(text::status::returnBurnRotating);
         }
 
         return context.returnDriftHome
-            ? text::status::coastingHomeForHome(context.arkKnown)
+            ? text::status::coastingHomeForHome(
+                  context.arkKnown,
+                  context.outerExpedition)
             : std::string(text::status::returnBurnUnderway);
     }
 
@@ -60,8 +65,12 @@ inline std::string launchStatusLine(const LaunchStatusContext& context)
     }
 
     return context.pastDataGoal
-        ? text::status::dataGoalReachedForHome(context.arkKnown)
-        : text::status::provingBurnStableForHome(context.arkKnown);
+        ? text::status::dataGoalReachedForHome(
+              context.arkKnown,
+              context.outerExpedition)
+        : text::status::provingBurnStableForHome(
+              context.arkKnown,
+              context.outerExpedition);
 }
 
 } // namespace rocket

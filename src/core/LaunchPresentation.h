@@ -48,13 +48,20 @@ inline std::string launchSectionTitle(const FlightActionState& actions, bool fro
     return std::string(frontierTransfer ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight);
 }
 
-inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions, bool arkKnown)
+inline std::vector<FlightActionButtonPresentation> primaryFlightActions(
+    const FlightActionState& actions,
+    bool arkKnown,
+    bool outerExpedition = false)
 {
     std::vector<FlightActionButtonPresentation> buttons;
     if (actions.returningHome) {
-        buttons.push_back(disabledFlightActionButton(text::buttons::returningHomeLabel(arkKnown)));
+        buttons.push_back(disabledFlightActionButton(
+            text::buttons::returningHomeLabel(arkKnown, outerExpedition)));
     } else {
-        buttons.push_back(flightActionButton(text::buttons::returnHomeLabel(arkKnown), ui::actions::returnHome, "ok"));
+        buttons.push_back(flightActionButton(
+            text::buttons::returnHomeLabel(arkKnown, outerExpedition),
+            ui::actions::returnHome,
+            "ok"));
     }
     buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
     return buttons;
@@ -100,6 +107,14 @@ inline const Destination& launchDisplayDestination(const GameState& state, const
         return *destination;
     }
     return currentDestination(state, catalog);
+}
+
+inline bool launchUsesOuterExpeditionRecovery(
+    const ContentCatalog& catalog,
+    const Destination& destination)
+{
+    const Destination* saturn = catalog.findDestination(content::destination::saturn);
+    return saturn != nullptr && destination.tier >= saturn->tier;
 }
 
 inline bool advancedFlightControlsUnlocked(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel)
@@ -150,7 +165,10 @@ inline LaunchPanelPresentation launchPanelPresentation(
     const auto samples = telemetrySamples(event);
     presentation.telemetry.assign(samples.begin(), samples.end());
     presentation.telemetryMessage = event.message;
-    presentation.primaryActions = primaryFlightActions(actions, arkDiscovered(state));
+    presentation.primaryActions = primaryFlightActions(
+        actions,
+        arkDiscovered(state),
+        launchUsesOuterExpeditionRecovery(catalog, destination));
     if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
         presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
     }

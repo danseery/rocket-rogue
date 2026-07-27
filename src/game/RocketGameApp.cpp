@@ -4,13 +4,16 @@
 #include "core/ContentIds.h"
 #include "core/GameUi.h"
 #include "core/GameText.h"
+#include "core/LaunchPresentation.h"
 #include "core/LaunchStatus.h"
+#include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/RefitPresentation.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
 #include "game/GamePanel.h"
+#include "input/MiningInputTransform.h"
 
 #include <algorithm>
 #include <array>
@@ -494,6 +497,12 @@ void RocketGameApp::setFirstTimeIntroductionsEnabled(bool enabled)
 
 void RocketGameApp::setActiveInputSource(InputSource source)
 {
+    if (activeInputSource_ != source && activeInputSource_ != InputSource::None) {
+        // A held action belongs to the source that began it. Releasing both
+        // realtime lanes here prevents mouse/controller handoff from carrying
+        // fire, drill, movement, or the EVA hold into the new source.
+        releaseRealtimeInputs(true);
+    }
     activeInputSource_ = source;
     if (source != InputSource::Controller) {
         controllerClaimedInput_ = false;
@@ -612,6 +621,7 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::MiningScan: return "mining_scan";
     case GameInputAction::MiningTether: return "mining_tether";
     case GameInputAction::MiningStow: return "mining_stow";
+    case GameInputAction::MiningOperatorToggle: return "mining_operator_toggle";
     case GameInputAction::MiningRepairDrill: return "mining_repair_drill";
     case GameInputAction::MiningRepairRig: return "mining_repair_rig";
     case GameInputAction::MiningFailureAcknowledge: return "mining_failure_acknowledge";
@@ -721,6 +731,9 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     state_.run.mining.moveX = 0.0;
     state_.run.mining.moveY = 0.0;
     state_.run.mining.drilling = false;
+    setMiningFire(state_, false);
+    setMiningOperatorToggleProgress(state_, 0.0);
+    miningOperatorToggleConfirmationSeconds_ = 0.0;
 }
 
 void RocketGameApp::applyRealtimeInputs()
@@ -738,7 +751,22 @@ void RocketGameApp::applyRealtimeInputs()
         break;
     case Screen::Mining:
         setMiningMove(state_, moveX, moveY);
-        setMiningDrilling(state_, useController ? controllerRealtimeInput_.drilling : keyboardRealtimeInput_.drilling);
+        {
+            const RealtimeInputState& miningInput = useController
+                ? controllerRealtimeInput_
+                : keyboardRealtimeInput_;
+            const bool operatorActive =
+                state_.run.mining.operatorMode == MiningOperatorMode::Jetpack;
+            if (std::hypot(miningInput.aimX, miningInput.aimY) > 0.01) {
+                setMiningAim(state_, miningInput.aimX, miningInput.aimY);
+            }
+            // The primary control remains the rig drill, but becomes suit
+            // fire after EVA. The secondary control is the suit hand drill.
+            setMiningFire(state_, operatorActive && miningInput.firing);
+            setMiningDrilling(
+                state_,
+                operatorActive ? miningInput.drilling : (miningInput.firing || miningInput.drilling));
+        }
         break;
     default:
         break;
@@ -901,6 +929,9 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::MiningStow:
         miningStow();
         break;
+    case GameInputAction::MiningOperatorToggle:
+        miningOperatorToggle();
+        break;
     case GameInputAction::MiningRepairDrill:
         miningRepairDrill();
         break;
@@ -934,6 +965,17 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
     } else {
         controllerRealtimeInput_.moveX = 0.0;
         controllerRealtimeInput_.moveY = 0.0;
+    }
+    if (context == InputContext::MiningActive || context == InputContext::MiningService) {
+        controllerRealtimeInput_.aimX = input.aimX;
+        controllerRealtimeInput_.aimY = input.aimY;
+        controllerRealtimeInput_.firing = input.firing;
+        setMiningOperatorToggleProgress(state_, input.operatorToggleProgress);
+    } else {
+        controllerRealtimeInput_.aimX = 0.0;
+        controllerRealtimeInput_.aimY = 0.0;
+        controllerRealtimeInput_.firing = false;
+        setMiningOperatorToggleProgress(state_, 0.0);
     }
     controllerRealtimeInput_.drilling = (context == InputContext::MiningActive || context == InputContext::MiningService)
         && input.drilling;
@@ -1166,6 +1208,16 @@ void RocketGameApp::tick(double deltaSeconds)
         return;
     }
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
+    if (miningOperatorToggleConfirmationSeconds_ > 0.0) {
+        miningOperatorToggleConfirmationSeconds_ = std::max(
+            0.0,
+            miningOperatorToggleConfirmationSeconds_ -
+                std::clamp(deltaSeconds, 0.0, 0.25));
+        if (miningOperatorToggleConfirmationSeconds_ <= 0.0) {
+            setMiningOperatorToggleProgress(state_, 0.0);
+            realtimeHudDirty_ = true;
+        }
+    }
 
     if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
         return;
@@ -1212,7 +1264,8 @@ void RocketGameApp::tick(double deltaSeconds)
                     arkDiscovered(state_),
                     session_.controls.returnDriftHome,
                     false,
-                    returnProgress
+                    returnProgress,
+                    launchUsesOuterExpeditionRecovery(catalog_, destination)
                 });
             }
         } else {
@@ -1240,7 +1293,8 @@ void RocketGameApp::tick(double deltaSeconds)
                     arkDiscovered(state_),
                     session_.controls.returnDriftHome,
                     pastDataGoal,
-                    0.0
+                    0.0,
+                    launchUsesOuterExpeditionRecovery(catalog_, destination)
                 });
             }
         }
@@ -1282,16 +1336,30 @@ void RocketGameApp::tick(double deltaSeconds)
         const bool wasCompleted = state_.run.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
         if (!wasCompleted && state_.run.flyby.completed) {
+            const bool saturnSlingshot = state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot;
+            if (saturnSlingshot) {
+                if (state_.run.flyby.result == FlybyGrade::Perfect) {
+                    state_.meta.saturnSlingshotPerfect = true;
+                } else {
+                    state_.meta.saturnSlingshotFailed = true;
+                }
+            }
             switch (state_.run.flyby.result) {
             case FlybyGrade::Perfect:
-                state_.statusLine = "Perfect slingshot. Next launch gets fuel margin and speed.";
+                state_.statusLine = saturnSlingshot
+                    ? "Perfect corridor held. Lock the Saturn course."
+                    : "Perfect slingshot. Next launch gets fuel margin and speed.";
                 break;
             case FlybyGrade::Good:
-                state_.statusLine = "Clean flyby. Recon data secured.";
+                state_.statusLine = saturnSlingshot
+                    ? "Clean flyby, but insufficient slingshot. Saturn remains locked."
+                    : "Clean flyby. Recon data secured.";
                 break;
             case FlybyGrade::Miss:
             default:
-                state_.statusLine = "Missed flyby window. Approach options remain open.";
+                state_.statusLine = saturnSlingshot
+                    ? "Slingshot corridor lost. Saturn remains locked."
+                    : "Missed flyby window. Approach options remain open.";
                 break;
             }
             save();
@@ -1409,9 +1477,16 @@ void RocketGameApp::startLaunch()
 
     session_.launchQueued = false;
     session_.flightArmed = true;
+    const Destination* activeDestination =
+        catalog_.findDestination(session_.preparedLaunch.config.destinationId);
+    const Destination& destination = activeDestination == nullptr
+        ? currentDestination(state_, catalog_)
+        : *activeDestination;
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
-        : text::status::provingBurnStartedForHome(arkDiscovered(state_));
+        : text::status::provingBurnStartedForHome(
+              arkDiscovered(state_),
+              launchUsesOuterExpeditionRecovery(catalog_, destination));
     refreshPanel();
 }
 
@@ -1449,7 +1524,9 @@ void RocketGameApp::returnHome()
     session_.controls.actions.returningHome = true;
     session_.controls.actions.cutEnginesActive = false;
     state_.statusLine = session_.controls.returnDriftHome
-        ? text::status::fuelReserveGoneForHome(arkDiscovered(state_))
+        ? text::status::fuelReserveGoneForHome(
+              arkDiscovered(state_),
+              launchUsesOuterExpeditionRecovery(catalog_, destination))
         : std::string(text::status::returnBurnRotating);
     panelDirty_ = true;
 }
@@ -1646,19 +1723,172 @@ void RocketGameApp::acknowledgeApproachIntroduction()
 
 void RocketGameApp::acknowledgeProspectorCompletion()
 {
-    if (!hasUnlock(state_.meta, content::unlock::droneBay)) {
+    // Kept as a compatibility alias for older web/native bindings.
+    claimLunarProspector();
+}
+
+void RocketGameApp::acknowledgeLunarMiningBriefing()
+{
+    if (!acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::LunarProspector)) {
         return;
     }
 
     ui::briefings::acknowledge(
         state_.meta.acknowledgedActivityBriefingIds,
+        ui::briefings::mining);
+    state_.statusLine = "Lunar Prospector contract accepted. Recover 3 gray-seamed Common Ore.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::claimLunarProspector()
+{
+    if (!rocket::claimLunarProspector(state_, catalog_)) {
+        return;
+    }
+
+    // The named claim teaches the first support craft, so suppress the older
+    // optional helper-drone introduction.
+    ui::briefings::acknowledge(
+        state_.meta.acknowledgedActivityBriefingIds,
         ui::briefings::prospectorComplete);
-    // The completion beat already teaches the player's first Mining Drone.
-    // Do not immediately repeat the generic Drone Ops introduction.
     ui::briefings::acknowledge(
         state_.meta.acknowledgedActivityBriefingIds,
         ui::briefings::miniDrones);
-    state_.statusLine = "Prospector Mk I assigned. Your Mining Drone is ready for the next dig.";
+    state_.statusLine = "Prospector Mk I installed. Support Drone Slot 1 is online.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::acknowledgeMarsMiningBriefing()
+{
+    if (!acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::MarsBayExpansion)) {
+        return;
+    }
+
+    state_.statusLine = "Mars bay-expansion contract accepted. Recover 4 local Common Ore.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::claimMarsBayExpansion()
+{
+    if (!rocket::claimMarsBayExpansion(state_, catalog_)) {
+        return;
+    }
+
+    state_.statusLine = "Support Drone Slot 2 fabricated. The new bay is empty and ready.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::commissionIoHazardDrone()
+{
+    acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::IoVolcanicDescent);
+    if (!rocket::commissionIoHazardDrone(state_, catalog_)) {
+        return;
+    }
+
+    const bool hazardEquipped = std::find(
+        state_.meta.equippedDroneIds.begin(),
+        state_.meta.equippedDroneIds.end(),
+        content::drone::hazardDrone) != state_.meta.equippedDroneIds.end();
+    if (!hazardEquipped) {
+        ensureDroneBayState(state_, catalog_);
+        state_.screen = Screen::DroneOps;
+        state_.statusLine = "Hazard Drone commissioned. Free a slot, then assign it for the Io descent.";
+    } else {
+        state_.statusLine = "Hazard Drone commissioned. Cool every lava seal before drilling.";
+    }
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::beginSaturnSlingshot()
+{
+    if (state_.screen != Screen::Hangar) {
+        return;
+    }
+
+    acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::SaturnSlingshot);
+    if (!startSaturnSlingshotRun(state_, catalog_)) {
+        state_.statusLine = "Saturn remains locked. Recover the Io artifact before attempting the slingshot.";
+        panelDirty_ = true;
+        return;
+    }
+
+    state_.statusLine = "Saturn slingshot active. Hold the gold corridor for a Perfect pass.";
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::retrySaturnSlingshot()
+{
+    const bool completedFailure = state_.screen == Screen::Flyby
+        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
+        && state_.run.flyby.completed
+        && state_.run.flyby.result != FlybyGrade::Perfect;
+    const bool savedFailure = state_.screen == Screen::Hangar
+        && state_.meta.saturnSlingshotFailed
+        && !state_.meta.saturnSlingshotPerfect;
+    if (!completedFailure && !savedFailure) {
+        return;
+    }
+
+    if (completedFailure) {
+        completeFlybyRun(state_, catalog_);
+    }
+    rocket::acknowledgeSaturnSlingshotFailure(state_);
+    if (!startSaturnSlingshotRun(state_, catalog_)) {
+        state_.statusLine = "Slingshot retry unavailable. Review the Jupiter departure objective.";
+    } else {
+        state_.statusLine = "Slingshot retry active. Perfect corridor required.";
+    }
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::acknowledgeSaturnSlingshotFailure()
+{
+    const bool completedFailure = state_.screen == Screen::Flyby
+        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
+        && state_.run.flyby.completed
+        && state_.run.flyby.result != FlybyGrade::Perfect;
+    const bool savedFailure = state_.screen == Screen::Hangar
+        && state_.meta.saturnSlingshotFailed
+        && !state_.meta.saturnSlingshotPerfect;
+    if (!completedFailure && !savedFailure) {
+        return;
+    }
+
+    if (completedFailure) {
+        completeFlybyRun(state_, catalog_);
+    }
+    rocket::acknowledgeSaturnSlingshotFailure(state_);
+    state_.statusLine = "Saturn remains locked. Retry the Perfect Jupiter slingshot from the Hangar.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::claimSaturnCourse()
+{
+    const bool completedPerfect = state_.screen == Screen::Flyby
+        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
+        && state_.run.flyby.completed
+        && state_.run.flyby.result == FlybyGrade::Perfect;
+    if (completedPerfect) {
+        completeFlybyRun(state_, catalog_);
+    }
+    if (!rocket::claimSaturnCourse(state_, catalog_)) {
+        return;
+    }
+
+    state_.statusLine = "Saturn course locked. The one-way outer expedition is ready.";
+    syncLaunchConfig(state_, catalog_);
     save();
     panelDirty_ = true;
 }
@@ -1678,8 +1908,11 @@ void RocketGameApp::flybyAbort()
     if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
         return;
     }
+    const bool saturnSlingshot = state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot;
     abortFlybyRun(state_);
-    state_.statusLine = "Flyby aborted. No recon reward earned.";
+    state_.statusLine = saturnSlingshot
+        ? "Slingshot aborted. Saturn remains locked until a Perfect corridor pass."
+        : "Flyby aborted. No recon reward earned.";
     save();
     panelDirty_ = true;
 }
@@ -1691,6 +1924,14 @@ void RocketGameApp::flybyContinue()
     }
 
     const FlybyGrade grade = state_.run.flyby.result;
+    if (state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot) {
+        if (grade == FlybyGrade::Perfect) {
+            claimSaturnCourse();
+        } else {
+            acknowledgeSaturnSlingshotFailure();
+        }
+        return;
+    }
     completeFlybyRun(state_, catalog_);
     switch (grade) {
     case FlybyGrade::Perfect:
@@ -1836,6 +2077,36 @@ void RocketGameApp::mineSurface()
     if (state_.screen != Screen::SurfaceExpedition) {
         return;
     }
+    const std::string& destinationId = state_.run.surfaceExpedition.destinationId;
+    if (destinationId == content::destination::moon
+        && !state_.meta.lunarMiningBriefingAcknowledged) {
+        state_.statusLine = "Accept the Lunar Prospector Contract before deploying the Mining Rig.";
+        panelDirty_ = true;
+        return;
+    }
+    if (destinationId == content::destination::mars
+        && !state_.meta.marsMiningBriefingAcknowledged) {
+        state_.statusLine = "Accept the Mars Bay Expansion contract before deploying the Mining Rig.";
+        panelDirty_ = true;
+        return;
+    }
+    if (destinationId == content::destination::jupiter) {
+        if (!state_.meta.ioHazardDroneCommissioned) {
+            state_.statusLine = "Commission Hazard Drone Mk I before beginning the Io descent.";
+            panelDirty_ = true;
+            return;
+        }
+        const bool hazardEquipped = std::find(
+            state_.meta.equippedDroneIds.begin(),
+            state_.meta.equippedDroneIds.end(),
+            content::drone::hazardDrone) != state_.meta.equippedDroneIds.end();
+        if (!hazardEquipped) {
+            state_.screen = Screen::DroneOps;
+            state_.statusLine = "Equip Hazard Drone Mk I before beginning the Io descent.";
+            panelDirty_ = true;
+            return;
+        }
+    }
 
     const SurfaceActionOutcome outcome = startMiningRun(state_, catalog_);
     if (outcome.applied) {
@@ -1898,7 +2169,7 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
 void RocketGameApp::openDroneOps()
 {
     if (state_.screen != Screen::SurfaceExpedition || !state_.run.surfaceExpedition.active || !droneBayUnlocked(state_)) {
-        state_.statusLine = "Complete the Prospector contract before assigning helper drones.";
+        state_.statusLine = "Complete the Prospector contract before assigning Support Drones.";
         panelDirty_ = true;
         return;
     }
@@ -1906,7 +2177,7 @@ void RocketGameApp::openDroneOps()
     ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
     ensureDroneBayState(state_, catalog_);
     state_.screen = Screen::DroneOps;
-    state_.statusLine = "Choose helper drones for the next mining run.";
+    state_.statusLine = "Choose Support Drones for the next mining run.";
     save();
     panelDirty_ = true;
 }
@@ -1961,6 +2232,20 @@ void RocketGameApp::upgradeDrone(int index)
     panelDirty_ = true;
 }
 
+void RocketGameApp::redeemDroneUpgradeCredit(int index)
+{
+    if (state_.screen != Screen::DroneOps) {
+        return;
+    }
+
+    if (rocket::redeemDroneUpgradeCredit(state_, catalog_, index)) {
+        captureDebugDroneLoadout();
+        state_.statusLine = "Artifact credit applied. The selected Support Drone is upgraded.";
+        save();
+    }
+    panelDirty_ = true;
+}
+
 void RocketGameApp::upgradeDroneSlot()
 {
     if (state_.screen != Screen::DroneOps) {
@@ -1986,10 +2271,35 @@ void RocketGameApp::miningMove(double xAxis, double yAxis)
 
 void RocketGameApp::miningAim(double normalizedX, double normalizedY)
 {
-    if (miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
         return;
     }
+    keyboardRealtimeInput_.aimX = normalizedX;
+    keyboardRealtimeInput_.aimY = normalizedY;
     setMiningAim(state_, normalizedX, normalizedY);
+}
+
+void RocketGameApp::miningPointerAim(double viewportX, double viewportY)
+{
+    const ViewportMetrics viewport = services_.host.viewportMetrics();
+    const MiningPointerAim aim = miningPointerAimFromViewport(
+        viewportX,
+        viewportY,
+        viewport.logicalWidth,
+        viewport.logicalHeight);
+    if (aim.valid) {
+        miningAim(aim.x, aim.y);
+    }
+}
+
+void RocketGameApp::miningFire(bool active)
+{
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+        keyboardRealtimeInput_.firing = false;
+        return;
+    }
+    keyboardRealtimeInput_.firing = active;
+    applyRealtimeInputs();
 }
 
 void RocketGameApp::miningDrill(bool active)
@@ -1999,6 +2309,36 @@ void RocketGameApp::miningDrill(bool active)
     }
     keyboardRealtimeInput_.drilling = active;
     applyRealtimeInputs();
+}
+
+void RocketGameApp::miningOperatorToggle()
+{
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+        return;
+    }
+    const bool toggled = toggleMiningOperator(state_);
+    keyboardRealtimeInput_.firing = false;
+    keyboardRealtimeInput_.drilling = false;
+    controllerRealtimeInput_.firing = false;
+    controllerRealtimeInput_.drilling = false;
+    setMiningFire(state_, false);
+    setMiningDrilling(state_, false);
+    // A successful immediate F toggle gets the same one-frame confirmation
+    // pulse as the completed controller hold ring, then clears independently
+    // of a keyboard key-up event.
+    setMiningOperatorToggleProgress(state_, toggled ? 1.0 : 0.0);
+    miningOperatorToggleConfirmationSeconds_ = toggled ? 0.18 : 0.0;
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
+}
+
+void RocketGameApp::miningOperatorToggleProgress(double progress)
+{
+    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+        return;
+    }
+    setMiningOperatorToggleProgress(state_, std::clamp(progress, 0.0, 1.0));
+    realtimeHudDirty_ = true;
 }
 
 void RocketGameApp::miningKeyboardDrill(bool active)
@@ -2080,15 +2420,34 @@ void RocketGameApp::miningRepairDrone()
         return;
     }
     MiningRunState& mining = state_.run.mining;
-    const int cost = miningDroneRepairCost(mining);
+    const bool evaActive =
+        mining.operatorMode == MiningOperatorMode::Jetpack &&
+        mining.operatorPresent;
+    const int cost = evaActive
+        ? (mining.operatorIntegrity < 1.0
+                ? static_cast<int>(tuning::mining::operatorIntegrityRepairCommonCost)
+                : 0)
+        : miningDroneRepairCost(mining);
     if (!miningAtReturnZone(mining)) {
-        state_.statusLine = "Return to the ship to repair the mining drone.";
+        state_.statusLine = evaActive
+            ? "Return to the shuttle to repair the EVA suit."
+            : "Return to the ship to repair the Mining Rig.";
     } else if (cost <= 0) {
-        state_.statusLine = "Mining drone health is already full.";
+        state_.statusLine = evaActive
+            ? "EVA suit integrity is already full."
+            : "Mining Rig integrity is already full.";
     } else if (mining.stowedMaterials.common < cost) {
-        state_.statusLine = "Need " + std::to_string(cost) + " banked common materials to repair the mining drone.";
-    } else if (repairMiningDrone(state_)) {
-        state_.statusLine = "Mining drone repaired for " + std::to_string(cost) + " common materials.";
+        state_.statusLine =
+            "Need " + std::to_string(cost) +
+            " banked common materials to repair the " +
+            (evaActive ? "EVA suit." : "Mining Rig.");
+    } else if (evaActive
+                   ? repairMiningOperator(state_)
+                   : repairMiningDrone(state_)) {
+        state_.statusLine =
+            std::string(evaActive ? "EVA suit" : "Mining Rig") +
+            " repaired for " + std::to_string(cost) +
+            " common materials.";
         save();
     }
     panelDirty_ = true;
@@ -2127,7 +2486,7 @@ void RocketGameApp::miningStow()
         state_.screen = Screen::Mining;
     }
     state_.statusLine = outcome.applied
-        ? "Payload banked. Mini-drones returning to bay."
+        ? "Payload banked. Support Drones returning to bay."
         : std::string(text::status::miningStowed);
     save();
     panelDirty_ = true;
@@ -2656,7 +3015,7 @@ void RocketGameApp::debugShowDroneOps()
     seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::nearbyStar);
     applyDebugDroneLoadout();
     state_.screen = Screen::DroneOps;
-    state_.statusLine = "Debug Drone Ops. All 6 slots and drone types are available; this loadout carries into Mining and Combat Mining.";
+    state_.statusLine = "Debug Drone Ops. All 6 slots and Support Drone types are available; this loadout carries into Mining and Combat Mining.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -3231,6 +3590,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         unequipDroneSlot(index);
     } else if (consumeIndexedAction(action, ui::actions::upgradeDronePrefix, index)) {
         upgradeDrone(index);
+    } else if (consumeIndexedAction(action, ui::actions::redeemDroneUpgradeCreditPrefix, index)) {
+        redeemDroneUpgradeCredit(index);
     } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
         selectNavigationDestination(index);
     } else if (consumeIndexedAction(action, ui::actions::recruitCandidatePrefix, index)) {
@@ -3271,6 +3632,24 @@ void RocketGameApp::runUiAction(const std::string& action)
         acknowledgeApproachIntroduction();
     } else if (action == ui::actions::acknowledgeProspectorCompletion) {
         acknowledgeProspectorCompletion();
+    } else if (action == ui::actions::acknowledgeLunarMiningBriefing) {
+        acknowledgeLunarMiningBriefing();
+    } else if (action == ui::actions::claimLunarProspector) {
+        claimLunarProspector();
+    } else if (action == ui::actions::acknowledgeMarsMiningBriefing) {
+        acknowledgeMarsMiningBriefing();
+    } else if (action == ui::actions::claimMarsBayExpansion) {
+        claimMarsBayExpansion();
+    } else if (action == ui::actions::commissionIoHazardDrone) {
+        commissionIoHazardDrone();
+    } else if (action == ui::actions::beginSaturnSlingshot) {
+        beginSaturnSlingshot();
+    } else if (action == ui::actions::retrySaturnSlingshot) {
+        retrySaturnSlingshot();
+    } else if (action == ui::actions::acknowledgeSaturnSlingshotFailure) {
+        acknowledgeSaturnSlingshotFailure();
+    } else if (action == ui::actions::claimSaturnCourse) {
+        claimSaturnCourse();
     } else if (action == ui::actions::arrivalFlyby) {
         runArrivalFlyby();
     } else if (action == ui::actions::flybyAbort) {
@@ -3462,7 +3841,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
-        result.miningScannerRadius = miningStats.scannerRadius;
+        result.miningScannerRadius =
+            mining.operatorMode == MiningOperatorMode::Jetpack
+            ? tuning::mining::scannerRevealRadius
+            : miningStats.scannerRadius;
         result.miningBounceRelief = miningStats.hardRockBounceRelief;
         result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
         result.miningRecoilX = mining.recoilX;
@@ -3471,6 +3853,28 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningMoveY = mining.moveY;
         result.miningHullDirX = mining.hullDirX;
         result.miningHullDirY = mining.hullDirY;
+        result.miningOperatorPresent = mining.operatorPresent;
+        result.miningOperatorActive =
+            mining.operatorMode == MiningOperatorMode::Jetpack &&
+            mining.operatorPresent;
+        result.miningOperatorX = mining.operatorX;
+        result.miningOperatorY = mining.operatorY;
+        result.miningOperatorVelocityX = mining.operatorVelocityX;
+        result.miningOperatorVelocityY = mining.operatorVelocityY;
+        result.miningOperatorAimX = mining.operatorAimDirX;
+        result.miningOperatorAimY = mining.operatorAimDirY;
+        result.miningOperatorThrustX = result.miningOperatorActive ? mining.moveX : 0.0;
+        result.miningOperatorThrustY = result.miningOperatorActive ? mining.moveY : 0.0;
+        result.miningOperatorIntegrity = mining.operatorIntegrity;
+        result.miningOperatorToggleProgress = mining.operatorToggleProgress;
+        result.miningOperatorFirePulse =
+            std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
+        result.miningRigPresent = mining.rigDepthZone == mining.depthZone;
+        result.miningRigDisabled = mining.rigDisabled;
+        const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining);
+        result.miningAnchorValid = anchor.valid;
+        result.miningAnchorX = anchor.x;
+        result.miningAnchorY = anchor.y;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
         const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
         result.miningBounce = mining.contactBounce;

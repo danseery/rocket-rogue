@@ -281,7 +281,14 @@ bool SdlPlatform::processEvents(RocketGameApp& app)
         mouseMotionPending = false;
         if (!frameLifecycle_.visible()) return;
         noteKeyboardPointerActivity();
-        app.uiMouseMove(static_cast<int>(mouseX_), static_cast<int>(mouseY_));
+        const bool overUi = app.uiMouseMove(
+            static_cast<int>(mouseX_),
+            static_cast<int>(mouseY_));
+        if (!overUi
+            && (app.inputContext() == InputContext::MiningActive
+                || app.inputContext() == InputContext::MiningService)) {
+            app.miningPointerAim(mouseX_, mouseY_);
+        }
     };
 
     const auto dispatchEvent = [&](const SDL_Event& event) {
@@ -451,9 +458,12 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
             static_cast<int>(mouseY_),
             rmlMouseButton(event.button.button));
         if (!overUi
-            && event.button.button == SDL_BUTTON_LEFT
             && app.inputContext() == InputContext::MiningActive) {
-            app.miningDrill(true);
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                app.miningFire(true);
+            } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                app.miningDrill(true);
+            }
         }
         break;
     }
@@ -465,7 +475,8 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
             static_cast<int>(mouseX_),
             static_cast<int>(mouseY_),
             rmlMouseButton(event.button.button));
-        if (event.button.button == SDL_BUTTON_LEFT) app.miningDrill(false);
+        if (event.button.button == SDL_BUTTON_LEFT) app.miningFire(false);
+        if (event.button.button == SDL_BUTTON_RIGHT) app.miningDrill(false);
         break;
     case SDL_EVENT_MOUSE_WHEEL:
         noteKeyboardPointerActivity();
@@ -610,6 +621,7 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
     case InputContext::MiningService:
         if (event.key == SDLK_E) app.miningScanner();
         else if (event.key == SDLK_T) app.miningTether();
+        else if (event.key == SDLK_F) app.miningOperatorToggle();
         else if (event.key == SDLK_R) app.miningStow();
         else if (event.key == SDLK_ESCAPE) app.miningAbort();
         break;
@@ -631,7 +643,9 @@ void SdlPlatform::releaseRealtimeInputs(RocketGameApp& app)
     app.orbitMove(0.0, 0.0);
     app.miningMove(0.0, 0.0);
     app.miningKeyboardDrill(false);
+    app.miningFire(false);
     app.miningDrill(false);
+    app.miningOperatorToggleProgress(0.0);
     // Focus loss cannot reliably deliver a key-up event. There is no
     // carry-over confirmation once the window is no longer receiving input.
     launchOutcomeConfirmReleaseGuard_ = false;

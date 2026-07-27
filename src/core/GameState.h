@@ -87,6 +87,11 @@ void unlockFromBlueprints(GameState& state);
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& outcome);
 int frontierReadinessRequired(const GameState& state, const ContentCatalog& catalog);
 int frontierReadinessCap(const GameState& state, const ContentCatalog& catalog);
+FrontierGateStatus frontierGateStatusForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId);
+FrontierGateStatus frontierGateStatus(const GameState& state, const ContentCatalog& catalog);
 bool canCommitToNextFrontier(const GameState& state, const ContentCatalog& catalog);
 double missionPressureModifier(const GameState& state, const ContentCatalog& catalog, const Destination& destination);
 

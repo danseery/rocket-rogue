@@ -6,6 +6,26 @@
 
 namespace rocket {
 
+MiniDroneAnchorFrame resolveMiniDroneAnchor(
+    const MiningRunState& mining,
+    MiningAnchorTarget target = MiningAnchorTarget::ControlledActor);
+void transferMiniDroneSwarmAnchor(
+    MiningRunState& mining,
+    MiningOperatorMode previousMode,
+    MiningOperatorMode nextMode,
+    bool depthTransition = false);
+
+double miniDroneOrbitRadius(MiniDroneRole role);
+
+struct MiniDroneCoordinationPoint {
+    double x = 0.0;
+    double y = 0.0;
+};
+
+MiniDroneCoordinationPoint miniDroneOrbitPoint(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent);
+
 class MiniDroneTaskCoordinator {
 public:
     virtual ~MiniDroneTaskCoordinator() = default;
@@ -55,11 +75,6 @@ private:
     std::unordered_map<int, MiningMiniDroneAgent*> reservations_;
 };
 
-struct MiniDroneCoordinationPoint {
-    double x = 0.0;
-    double y = 0.0;
-};
-
 class AttackDroneCoordinator final : public MiniDroneTaskCoordinator {
 public:
     explicit AttackDroneCoordinator(MiningRunState& mining);
@@ -73,14 +88,17 @@ public:
 
 private:
     bool targetValid(int enemyIndex) const;
-    int findPriorityTarget() const;
-    bool targetVisibleToSquad(const MiningEnemy& enemy) const;
+    int findPriorityTarget(const MiningMiniDroneAgent& agent) const;
+    bool targetVisibleToSquad(
+        const MiningEnemy& enemy,
+        const MiningMiniDroneAgent& agent) const;
     int formationSlot(const MiningMiniDroneAgent& agent) const;
-    int assignedDroneCount(int enemyIndex) const;
+    int assignedDroneCount(
+        int enemyIndex,
+        MiningAnchorTarget anchorTarget) const;
 
     MiningRunState& mining_;
     std::vector<MiningMiniDroneAgent*> attackDrones_;
-    int focusTargetIndex_ = -1;
 };
 
 struct DefenseShieldImpact {
@@ -106,13 +124,12 @@ public:
 
 private:
     bool targetValid(int enemyIndex) const;
-    int findClosestThreat() const;
+    int findClosestThreat(const MiningMiniDroneAgent& agent) const;
     int formationSlot(const MiningMiniDroneAgent& agent) const;
     double desiredAngle(const MiningMiniDroneAgent& agent) const;
 
     MiningRunState& mining_;
     std::vector<MiningMiniDroneAgent*> defenseDrones_;
-    int focusTargetIndex_ = -1;
 };
 
 class SurveyDroneCoordinator final : public MiniDroneTaskCoordinator {
@@ -126,11 +143,15 @@ public:
 
 private:
     bool isCandidateCell(int x, int y) const;
-    bool isAnchoredAhead(int x, int y) const;
+    bool isAnchoredAhead(
+        const MiningMiniDroneAgent& agent,
+        int x,
+        int y) const;
     bool isInAssignedLane(const MiningMiniDroneAgent& agent, int x) const;
     int formationSlot(const MiningMiniDroneAgent& agent) const;
+    int anchoredDroneCount(const MiningMiniDroneAgent& agent) const;
     double laneCenterX(const MiningMiniDroneAgent& agent) const;
-    double laneHalfWidth() const;
+    double laneHalfWidth(const MiningMiniDroneAgent& agent) const;
     int cellKey(int x, int y) const;
     void clearAssignment(MiningMiniDroneAgent& agent);
 

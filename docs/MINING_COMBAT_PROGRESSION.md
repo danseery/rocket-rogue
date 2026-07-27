@@ -6,6 +6,8 @@ Status: authoritative implementation contract for mining progression, procedural
 
 This document defines which rules an arena may use. `resolveMiningArenaRules({act, difficulty, seed})` in `src/core/MiningProgression.cpp` is the executable source of truth. Campaign and debug entry points must both create a `MiningArenaRequest` and must not add enemies, rewards, hazards, or room features after resolving it.
 
+The rig/EVA physics and recovery loop use *Solar Jetman* as an internal mechanical touchstone, as documented with primary/manual links in [MINING_MINIGAME_PLAN.md](MINING_MINIGAME_PLAN.md#mechanical-touchstone-solar-jetman). Enemy timing and deterministic arena gates remain OREBIT's own progression contract.
+
 ## Player-facing progression
 
 Each act has ten difficulty levels split into four teaching bands:
@@ -17,7 +19,7 @@ Each act has ten difficulty levels split into four teaching bands:
 | Pressure | 7-8 | Add counters and overlapping pressures. |
 | Mastery | 9-10 | Test the act's complete rule set before the next act changes the problem. |
 
-A tutorial callout appears at a band transition, not at every number. Combat remains passive: drones select and attack targets while the player pilots, drills, scans, manages endurance, and chooses routes. Mining remains the single fuel-only deployment opened by Survey Site or Push Deeper in a surface loop.
+A tutorial callout appears at a band transition, not at every number. Swarm combat remains autonomous, while the EVA operator can aim a limited sidearm for vulnerable self-defense. The player pilots, drills, scans, tethers, manages endurance, and chooses routes. Mining remains the single fuel-only deployment opened by Survey Site or Push Deeper in a surface loop.
 
 ### Act 1: learn the mining rig
 
@@ -25,24 +27,24 @@ Act 1 never creates enemies or exotic minerals.
 
 | Level | New rules introduced | Reference capability |
 |---:|---|---|
-| 1 | Open main route, movement, drilling, return zone, Regolith, Common Ore | Main rig |
-| 2 | Fog/scanner and oxygen/shared-fuel endurance | Main rig |
-| 3 | Hard Rock and branch routes | Main rig |
+| 1 | Open main route, rig gravity/inertia, drilling, return zone, Regolith, Common Ore | Main rig |
+| 2 | Voluntary EVA, suit gravity/inertia, re-entry, fog/scanner, oxygen/shared-fuel endurance | Rig + operator |
+| 3 | Hand drill, loose chunks, suit-only branch routes, hard rock | Rig + operator |
 | 4 | Drill heat, integrity, rebound, field repairs, first Rare Ore | Mining/Resource Mk I, up to 2 slots |
-| 5 | Cargo drag | Mining/Resource Mk I, up to 2 slots |
+| 5 | Cargo drag, artifact tether burden, active-actor swarm transfer | Mining/Resource Mk I, up to 2 slots |
 | 6 | Combine all heat, damage, cargo, and route decisions | Mining/Resource Mk I, up to 2 slots |
 | 7 | Thermal and Cryo terrain pockets; site/depth variation | Survey/Hazard Mk I, up to 3 slots |
 | 8 | Physical artifacts, recovery, and tethering | Survey/Hazard Mk I, up to 3 slots |
-| 9 | Toxic terrain pockets | Environmental drones up to Mk II, up to 4 slots |
-| 10 | Complete noncombat combinations | Environmental drones up to Mk II, up to 4 slots |
+| 9 | Toxic terrain pockets | Environmental Support Drones up to Mk II, up to 4 slots |
+| 10 | Complete noncombat combinations | Environmental Support Drones up to Mk II, up to 4 slots |
 
-### Act 2: learn passive drone combat
+### Act 2: learn autonomous Support Drone combat
 
 Act 2 carries forward the complete Act 1 mining rules. It never creates Mammals, Radiation affinity, or Boss Chambers.
 
 | Level | New rules introduced | Reference capability |
 |---:|---|---|
-| 1 | Ant melee contact and simple Encounter Zones | Attack + Defense Mk I, 3 slots minimum |
+| 1 | Ant melee contact, operator sidearm self-defense, and simple Encounter Zones | Attack + Defense Mk I, 3 slots minimum |
 | 2 | More Ant positioning within the Learn cap | Attack + Defense Mk I, 3 slots minimum |
 | 3 | Ant pressure combined with excavation decisions | Attack + Defense Mk I, 3 slots minimum |
 | 4 | Flying ranged enemies and Treasure Vault routes | Attack + Defense + one utility role |
@@ -85,7 +87,7 @@ Enemy movement speed remains archetype-defined. Health and damage use:
 
 Active-enemy caps by Learn/Combine/Pressure/Mastery are `2/4/6/8` in Act 2 and `6/8/11/14` in Act 3. Act 2 level 10 permits one spawner. Act 3 levels 1-3 permit none, levels 4-8 permit one, and levels 9-10 permit two.
 
-Rich-material values are `{first-clear guarantee / hard arena cap}`. All procedural ore, stamped prospects, room deposits, enemy drops, and Hazard Drone refinement share these caps.
+Rich-material values are `{first-clear guarantee / hard arena cap}`. All procedural ore, stamped prospects, room deposits, enemy drops, and Hazard Support Drone refinement share these caps.
 
 | Act | Learn | Combine | Pressure | Mastery |
 |---|---|---|---|---|
@@ -117,6 +119,8 @@ First-clear progress is stored per act/band in `MetaProgress::miningFirstClearPr
 | 9 - Ouroboros | Act 3, levels 5-8 |
 | 10 - Ascent | Act 3, levels 9-10 |
 
+Jupiter's stable route id presents its surface as Io and specializes the Act 1 Hazard Cocoon into a Thermal-only story arena: non-paying Regolith, no direct ore deposits, two staged four-segment lava seals, deterministic lava-to-Common treatment, a 60-second baseline oxygen budget, and a minor artifact that grants one explicit Support Drone upgrade credit after safe extraction.
+
 In Chapter 7 the base is level 4 after the first successful hostile sortie, level 5 after the second, and level 6 after the third. Surface depth then adds up to four levels, capped at 10.
 
 `deriveMiningArenaSeed` combines the campaign seed, destination ID, landing ordinal, and surface depth. Identical inputs reproduce the same arena. A new landing ordinal or Randomize seed produces another deterministic arena. Difficulty never reads the equipped loadout, so upgrades cannot cause enemy rubber-banding.
@@ -128,13 +132,13 @@ The stable shared types live in `GameTypes.h`:
 - `MiningAct`, `MiningProgressionBand`
 - `MiningArenaRequest { act, difficulty, seed }`
 - `MiningRewardBudget { rareGuarantee, exoticGuarantee, rareCap, exoticCap }`
-- `MiningArenaRules`, including mechanic gates, material/enemy/affinity/room whitelists, encounter limits, scaling, copy, and reference drones
+- `MiningArenaRules`, including mechanic gates, material/enemy/affinity/room whitelists, encounter limits, scaling, copy, and reference Support Drones
 - `MiningArenaMetadata { act, difficulty, seed, rulesVersion }`
 - `MiningFirstClearProgress { rareBanked, exoticBanked }`
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
+Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. Save version 7 retains separate rig/operator state, destination gravity, loose chunks, disabled-rig state, artifact tether state, and each Support Drone's anchor target, stable formation slot, orbit phase, position, velocity, haul, shield state, recharge, and cooldowns while adding explicit Moon/Mars/Io/Saturn progression. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Legacy saves restore the operator seated in the rig; their drones migrate to `ControlledActor` with slots derived from equipped order and deterministic phases, and repeated loadout IDs are de-duplicated. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
 
 The current `miningArenaRulesVersion` is `1`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
 
@@ -145,5 +149,8 @@ The current `miningArenaRulesVersion` is `1`. Increment it only when a rule chan
 - Surface threat forecasting reads the same enemy roster and caps used by mining generation.
 - Debug arenas never write campaign save data or first-clear progress.
 - Act 1 has no enemies or Exotic Veins. Act 2 has no Mammals, Radiation, or Boss Chambers.
-- Player weapons are out of scope; mining combat remains drone-controlled.
+- No enemy may appear before Arkfall near Khepri Prime; the solar system and Aaru Vale remain enemy-free.
+- The operator sidearm is fixed equipment: infinite fire, 2.4 damage, 8-cell range, 0.18-second cadence, deterministic first hit, no piercing or critical hits, and terrain output capped at 30% of hand-drill output. It cannot damage the rig, shuttle, artifact, or Support Drones.
+- Support Drone combat remains autonomous and centered on the active actor. Defense interception routes remaining damage to rig health or suit integrity.
+- Suit-drilled ore and suit-killed enemy rewards become loose chunks. The suit carries zero ore; only a tethered artifact is exempt.
 - Baseline mining oxygen is 30 seconds and total upgraded capacity is capped at 120 seconds by mining stat integration.

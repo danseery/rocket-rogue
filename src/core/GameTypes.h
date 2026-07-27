@@ -130,6 +130,22 @@ enum class MiningMiniDroneBehavior {
     Docked
 };
 
+enum class MiningOperatorMode {
+    Rig,
+    Jetpack
+};
+
+enum class MiningAnchorTarget {
+    ControlledActor,
+    Rig,
+    Operator
+};
+
+enum class MiningActorIdentity {
+    Rig,
+    Operator
+};
+
 enum class MiningCellMaterial {
     Empty,
     Regolith,
@@ -334,6 +350,10 @@ struct MiningGateRuntime {
     int requiredHazardMark = 0;
     int shellTilesTotal = 0;
     int shellTilesRemaining = 0;
+    int outerShellTilesTotal = 0;
+    int outerShellTilesRemaining = 0;
+    int innerShellTilesTotal = 0;
+    int innerShellTilesRemaining = 0;
     int assignedEnemiesRemaining = 0;
     int requiredSurveyOrigins = 0;
     int surveyOriginsCompleted = 0;
@@ -380,7 +400,8 @@ enum class ArtifactRewardType {
     None,
     Credits,
     ArkFuel,
-    BlueprintInsight
+    BlueprintInsight,
+    DroneUpgradeCredit
 };
 
 enum class MiningArtifactState {
@@ -396,6 +417,49 @@ enum class FlybyGrade {
     Miss,
     Good,
     Perfect
+};
+
+enum class FlybyPurpose {
+    Recon,
+    SaturnSlingshot
+};
+
+enum class CampaignObjectiveId {
+    LunarProspector,
+    MarsBayExpansion,
+    IoVolcanicDescent,
+    SaturnSlingshot
+};
+
+enum class CampaignObjectiveState {
+    Locked,
+    Active,
+    ReadyToClaim,
+    Complete
+};
+
+struct CampaignObjectiveStatus {
+    CampaignObjectiveId id = CampaignObjectiveId::LunarProspector;
+    CampaignObjectiveState state = CampaignObjectiveState::Locked;
+    int current = 0;
+    int required = 0;
+    bool briefingAcknowledged = false;
+};
+
+enum class FrontierGateKind {
+    None,
+    FlightData,
+    LunarProspector,
+    MarsBayExpansion,
+    SaturnSlingshot
+};
+
+struct FrontierGateStatus {
+    FrontierGateKind kind = FrontierGateKind::None;
+    std::string destinationId;
+    int current = 0;
+    int required = 0;
+    bool satisfied = false;
 };
 
 enum class OrbitGrade {
@@ -598,6 +662,9 @@ struct Destination {
     double baseReward = 10.0;
     double hazard = 1.0;
     std::string unlockKey = content::unlock::starter;
+    double gravityDirectionX = 0.0;
+    double gravityDirectionY = 1.0;
+    double gravityScale = 1.0;
 };
 
 struct LaunchConfig {
@@ -675,6 +742,20 @@ struct MetaProgress {
     std::vector<std::string> equippedDroneIds;
     std::vector<DroneUpgradeRecord> droneUpgrades;
     int prospectorCommonOreRecovered = 0;
+    bool lunarMiningBriefingAcknowledged = false;
+    bool lunarProspectorClaimed = false;
+    int marsCommonOreRecovered = 0;
+    bool marsMiningBriefingAcknowledged = false;
+    bool marsBayExpansionClaimed = false;
+    bool ioVolcanicBriefingAcknowledged = false;
+    bool ioHazardDroneCommissioned = false;
+    bool ioArtifactRecovered = false;
+    int droneUpgradeCredits = 0;
+    bool saturnSlingshotBriefingAcknowledged = false;
+    bool saturnSlingshotPerfect = false;
+    bool saturnRouteUnlocked = false;
+    bool saturnSlingshotFailed = false;
+    bool saturnSlingshotFailureAcknowledged = false;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
     std::vector<MiningStorySiteProgress> miningStorySites;
@@ -723,6 +804,7 @@ struct FlybyTrailPoint {
 struct FlybyRunState {
     bool active = false;
     std::string destinationId;
+    FlybyPurpose purpose = FlybyPurpose::Recon;
     double elapsedSeconds = 0.0;
     double durationSeconds = 18.0;
     double shipX = -0.68;
@@ -866,6 +948,7 @@ struct MiningCell {
     MiningEnemyType enemy = MiningEnemyType::None;
     MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
     bool gateAssociated = false;
+    bool suitOnlyPassage = false;
 };
 
 struct MiningTerrain {
@@ -943,6 +1026,29 @@ struct MiningDamageNumber {
     bool rigDamage = false;
 };
 
+struct MiningLooseChunk {
+    MiningCellMaterial material = MiningCellMaterial::CommonOre;
+    double x = 0.0;
+    double y = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
+    int cargoValue = 1;
+    bool active = true;
+};
+
+struct MiniDroneAnchorFrame {
+    MiningActorIdentity actor = MiningActorIdentity::Rig;
+    double x = 0.0;
+    double y = 0.0;
+    double velocityX = 0.0;
+    double velocityY = 0.0;
+    double facingX = 0.0;
+    double facingY = 1.0;
+    double colliderRadius = 0.48;
+    int depthZone = 0;
+    bool valid = false;
+};
+
 struct MiningMiniDroneAgent {
     MiniDroneRole role = MiniDroneRole::Mining;
     int roleIndex = 0;
@@ -965,6 +1071,9 @@ struct MiningMiniDroneAgent {
     MaterialInventory haulMaterials;
     bool finishTargetBeforeReturn = false;
     bool defenseAngleInitialized = false;
+    MiningAnchorTarget anchorTarget = MiningAnchorTarget::ControlledActor;
+    int stableFormationSlot = 0;
+    double orbitPhaseRadians = 0.0;
 };
 
 struct MiningArtifactObject {
@@ -993,6 +1102,7 @@ struct MiningDepthLayerState {
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
     MiningArtifactObject artifact;
+    std::vector<MiningLooseChunk> looseChunks;
     MiningGateRuntime gate;
     double downwardTransitionX = 0.0;
     bool hasDownwardTransition = false;
@@ -1012,6 +1122,26 @@ struct MiningRunState {
     int fuelSpent = 0;
     double droneX = 32.0;
     double droneY = 4.0;
+    double rigVelocityX = 0.0;
+    double rigVelocityY = 0.0;
+    bool rigDisabled = false;
+    int rigDepthZone = 0;
+    MiningOperatorMode operatorMode = MiningOperatorMode::Rig;
+    bool operatorPresent = false;
+    double operatorX = 32.0;
+    double operatorY = 4.0;
+    double operatorVelocityX = 0.0;
+    double operatorVelocityY = 0.0;
+    double operatorAimDirX = 0.0;
+    double operatorAimDirY = 1.0;
+    double operatorIntegrity = 1.0;
+    double operatorFireCooldownSeconds = 0.0;
+    double operatorFirePulseSeconds = 0.0;
+    double operatorToggleProgress = 0.0;
+    bool firing = false;
+    double gravityDirectionX = 0.0;
+    double gravityDirectionY = 1.0;
+    double gravityStrength = 0.0;
     double moveX = 0.0;
     double moveY = 0.0;
     double aimX = 32.0;
@@ -1077,6 +1207,7 @@ struct MiningRunState {
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
     std::vector<MiningMiniDroneAgent> miniDrones;
+    std::vector<MiningLooseChunk> looseChunks;
     std::vector<MiningProjectileVisual> combatProjectiles;
     std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;

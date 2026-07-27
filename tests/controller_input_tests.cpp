@@ -1,5 +1,6 @@
 #include "input/ControllerInput.h"
 #include "input/GameInputRouter.h"
+#include "input/MiningInputTransform.h"
 #include "input/UiFocusNavigation.h"
 
 #include <array>
@@ -146,6 +147,13 @@ void buttonEdgesHoldsAndDisconnect()
     require(!frame.wasPressed(ControllerButton::South) && frame.heldFor(ControllerButton::South) >= 0.59, "held duration should use real time");
     require(frame.meaningfulInput && !frame.meaningfulActivity, "a held button should not continuously reclaim the input source");
 
+    pads[0].buttons[index(ControllerButton::South)] = 0.0;
+    frame = tracker.update(pads, 10.75);
+    require(frame.wasReleased(ControllerButton::South) && frame.heldFor(ControllerButton::South) >= 0.64,
+        "the release edge should preserve its completed hold duration for routed tap-versus-hold actions");
+
+    pads[0].buttons[index(ControllerButton::South)] = 1.0;
+    frame = tracker.update(pads, 10.76);
     pads.clear();
     frame = tracker.update(pads, 10.8);
     require(frame.justDisconnected && frame.wasReleased(ControllerButton::South), "disconnect should release every held button");
@@ -629,13 +637,18 @@ void routerMapsEveryGameplayContext()
     frame = routedFrame();
     frame.leftX = -0.5;
     frame.leftY = 0.25;
+    frame.rightX = 0.8;
+    frame.rightY = -0.4;
     frame.down.set(index(ControllerButton::RightTrigger));
+    frame.down.set(index(ControllerButton::LeftTrigger));
     frame.pressed.set(index(ControllerButton::West));
     frame.pressed.set(index(ControllerButton::North));
     frame.pressed.set(index(ControllerButton::LeftBumper));
     frame.pressed.set(index(ControllerButton::RightBumper));
     input = router.route(InputContext::MiningActive, frame, preferences);
-    require(input.drilling && input.moveX == -0.5 && input.moveY == 0.25, "mining should route movement and held RT drilling");
+    require(input.firing && input.drilling && input.moveX == -0.5 && input.moveY == 0.25,
+        "mining should route movement, held RT fire, and held LT drilling independently");
+    require(input.aimX == 0.8 && input.aimY == -0.4, "mining should route both right-stick aim axes");
     require(input.has(GameInputAction::MiningScan) && input.has(GameInputAction::MiningTether), "mining should route scanner and tether edges");
     require(input.has(GameInputAction::MiningRepairDrill) && input.has(GameInputAction::MiningRepairRig), "mining should route both service bumpers");
 
@@ -664,8 +677,8 @@ void routerTableCoversEveryInputContext()
         {InputContext::OrbitComplete, GameInputAction::StartOrContinue, true},
         {InputContext::SurfaceScan, GameInputAction::PrimarySurfaceAction, true},
         {InputContext::SurfacePush, GameInputAction::PrimarySurfaceAction, true},
-        {InputContext::MiningActive, GameInputAction::MiningStow, true},
-        {InputContext::MiningService, GameInputAction::MiningStow, true},
+        {InputContext::MiningActive, GameInputAction::MiningStow, false},
+        {InputContext::MiningService, GameInputAction::MiningStow, false},
         {InputContext::MiningFailure, GameInputAction::MiningFailureAcknowledge, true},
         {InputContext::Stamp, GameInputAction::StartOrContinue, true},
         {InputContext::Paused, GameInputAction::ActivateFocused, true},
@@ -687,6 +700,122 @@ void routerTableCoversEveryInputContext()
         require(input.has(GameInputAction::OpenSystemMenu),
             "Menu should remain available in every input context");
     }
+}
+
+void miningSouthTapAndHoldRemainDistinct()
+{
+    using namespace rocket;
+    GameInputRouter router;
+    ControllerPreferences preferences;
+
+    ControllerFrame frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    RoutedGameInput input = router.route(InputContext::MiningActive, frame, preferences);
+    require(!input.has(GameInputAction::MiningStow)
+            && !input.has(GameInputAction::MiningOperatorToggle),
+        "South press should wait until tap release or the EVA hold threshold");
+    require(input.operatorToggleProgress == 0.0,
+        "a new South hold should begin with an empty operator-toggle progress ring");
+
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.30;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(std::abs(input.operatorToggleProgress - 0.5) < 0.000001,
+        "operator-toggle progress should track the 600ms hold in realtime");
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "operator toggle must not fire before 600ms");
+
+    frame.down.reset(index(ControllerButton::South));
+    frame.released.set(index(ControllerButton::South));
+    frame.heldSeconds[index(ControllerButton::South)] = 0.30;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::MiningStow)
+            && !input.has(GameInputAction::MiningOperatorToggle),
+        "a short South release should preserve the existing bank/leave action");
+
+    router.reset();
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    router.route(InputContext::MiningActive, frame, preferences);
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.60;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::MiningOperatorToggle)
+            && !input.has(GameInputAction::MiningStow)
+            && input.operatorToggleProgress == 1.0,
+        "a 600ms South hold should toggle the operator exactly once");
+    frame.heldSeconds[index(ControllerButton::South)] = 1.20;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "a continued South hold should not repeat the operator toggle");
+    frame.down.reset(index(ControllerButton::South));
+    frame.released.set(index(ControllerButton::South));
+    frame.heldSeconds[index(ControllerButton::South)] = 1.20;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(!input.has(GameInputAction::MiningStow)
+            && !input.has(GameInputAction::MiningOperatorToggle),
+        "releasing after a completed hold must not also bank or leave");
+
+    router.reset();
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    router.route(InputContext::MiningActive, frame, preferences);
+    frame = routedFrame();
+    frame.released.set(index(ControllerButton::South));
+    frame.heldSeconds[index(ControllerButton::South)] = 0.70;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::MiningOperatorToggle)
+            && !input.has(GameInputAction::MiningStow),
+        "a low-cadence release that crosses 600ms should still perform the hold action");
+
+    router.reset();
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    router.route(InputContext::MiningActive, frame, preferences);
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.30;
+    router.route(InputContext::Paused, frame, preferences);
+    frame.heldSeconds[index(ControllerButton::South)] = 0.80;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "an A hold carried through a pause must be released before toggling the operator");
+    frame.down.reset(index(ControllerButton::South));
+    frame.released.set(index(ControllerButton::South));
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(!input.has(GameInputAction::MiningStow),
+        "releasing the A hold fenced by a pause must not perform its short-tap action");
+}
+
+void miningPointerAimUsesTheSharedSceneViewport()
+{
+    using namespace rocket;
+    constexpr int width = 1280;
+    constexpr int height = 800;
+    const UiRect scene = resolveUiViewportLayout(width, height, UiSurfaceKind::Mining).sceneRect;
+
+    MiningPointerAim aim = miningPointerAimFromViewport(
+        scene.x + scene.width * 0.5,
+        scene.y + scene.height * 0.5,
+        width,
+        height);
+    require(aim.valid && std::abs(aim.x) < 0.000001 && std::abs(aim.y) < 0.000001,
+        "the center of the protected mining scene should map to neutral aim");
+
+    aim = miningPointerAimFromViewport(
+        uiRectRight(scene),
+        scene.y,
+        width,
+        height);
+    require(aim.x == 1.0 && aim.y == -1.0,
+        "the mining scene's top-right corner should map to full up-right aim");
+
+    aim = miningPointerAimFromViewport(-100.0, 900.0, width, height);
+    require(aim.x == -1.0 && aim.y == 1.0,
+        "pointer positions outside the scene should clamp to a stable full-scale direction");
 }
 
 void routerContextualFocusPreservesDedicatedBindings()
@@ -848,6 +977,8 @@ int main()
     globalModalOwnsEveryControllerContext();
     routerMapsEveryGameplayContext();
     routerTableCoversEveryInputContext();
+    miningSouthTapAndHoldRemainDistinct();
+    miningPointerAimUsesTheSharedSceneViewport();
     routerContextualFocusPreservesDedicatedBindings();
     routerHonorsConfirmSwapAndRealTimeHolds();
     std::cout << "Controller input tests passed.\n";

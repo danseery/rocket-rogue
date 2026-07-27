@@ -41,7 +41,7 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 ## Screen-Specific Notes
 
 - Hangar: keep Hangar ops three-wide when possible. Cost/status and action controls need their own footer area.
-- Flight: controls should help the player act under pressure. Telemetry needs readable values and stable button rows that do not shift after choosing Return to Earth.
+- Flight: controls should help the player act under pressure. Telemetry needs readable values and stable button rows that do not shift after choosing `Return to Earth`, post-Saturn `Recover to Expedition`, or post-discovery `Return to Ark`.
 - Debrief: present the outcome first, then mission result, burn profile, peak telemetry, achievements, and one centered next action.
 - Refit: cards should feel collectible and tactile. Preserve the Pokemon-card-like framing, art/glyph area, stat chips, and clear install/skip affordance.
 - Settings: dropdowns must look intentional. Avoid stray arrow artifacts and expose the selected value clearly.

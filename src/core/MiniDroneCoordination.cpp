@@ -71,7 +71,191 @@ double shortestAngleDelta(double from, double to)
     return std::remainder(to - from, kTau);
 }
 
+MiniDroneAnchorFrame agentAnchor(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent)
+{
+    return resolveMiniDroneAnchor(mining, agent.anchorTarget);
+}
+
 } // namespace
+
+MiniDroneAnchorFrame resolveMiniDroneAnchor(
+    const MiningRunState& mining,
+    MiningAnchorTarget target)
+{
+    const auto rigFrame = [&]() {
+        return MiniDroneAnchorFrame {
+            MiningActorIdentity::Rig,
+            mining.droneX,
+            mining.droneY,
+            mining.rigVelocityX,
+            mining.rigVelocityY,
+            mining.hullDirX,
+            mining.hullDirY,
+            tuning::mining::rigColliderRadiusCells,
+            mining.rigDepthZone,
+            !mining.rigDisabled && mining.rigDepthZone == mining.depthZone
+        };
+    };
+    const auto operatorFrame = [&]() {
+        return MiniDroneAnchorFrame {
+            MiningActorIdentity::Operator,
+            mining.operatorX,
+            mining.operatorY,
+            mining.operatorVelocityX,
+            mining.operatorVelocityY,
+            mining.operatorAimDirX,
+            mining.operatorAimDirY,
+            tuning::mining::operatorColliderRadiusCells,
+            mining.depthZone,
+            mining.operatorPresent
+        };
+    };
+
+    switch (target) {
+    case MiningAnchorTarget::Rig:
+        return rigFrame();
+    case MiningAnchorTarget::Operator:
+        return operatorFrame();
+    case MiningAnchorTarget::ControlledActor:
+        break;
+    }
+
+    if (mining.operatorMode == MiningOperatorMode::Jetpack) {
+        MiniDroneAnchorFrame frame = operatorFrame();
+        if (frame.valid) {
+            return frame;
+        }
+        return rigFrame();
+    }
+    MiniDroneAnchorFrame frame = rigFrame();
+    if (frame.valid) {
+        return frame;
+    }
+    return operatorFrame();
+}
+
+void transferMiniDroneSwarmAnchor(
+    MiningRunState& mining,
+    MiningOperatorMode previousMode,
+    MiningOperatorMode nextMode,
+    bool depthTransition)
+{
+    if (previousMode == nextMode && !depthTransition) {
+        return;
+    }
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        if (!depthTransition &&
+            agent.anchorTarget != MiningAnchorTarget::ControlledActor) {
+            continue;
+        }
+        agent.targetCellX = -1;
+        agent.targetCellY = -1;
+        agent.targetEnemyIndex = -1;
+        agent.taskProgressSeconds = 0.0;
+        agent.finishTargetBeforeReturn = false;
+        agent.surveyPulseSeconds = 0.0;
+        agent.behavior = MiningMiniDroneBehavior::Returning;
+        if (depthTransition) {
+            MiniDroneAnchorFrame anchor =
+                resolveMiniDroneAnchor(mining, agent.anchorTarget);
+            MiniDroneCoordinationPoint orbit;
+            if (anchor.valid) {
+                orbit = miniDroneOrbitPoint(mining, agent);
+            } else {
+                const MiningAnchorTarget savedTarget = agent.anchorTarget;
+                agent.anchorTarget = MiningAnchorTarget::ControlledActor;
+                anchor = resolveMiniDroneAnchor(
+                    mining,
+                    MiningAnchorTarget::ControlledActor);
+                orbit = miniDroneOrbitPoint(mining, agent);
+                agent.anchorTarget = savedTarget;
+            }
+            agent.x = std::clamp(orbit.x, 0.5, static_cast<double>(mining.terrain.width) - 0.5);
+            agent.y = std::clamp(orbit.y, 0.5, static_cast<double>(mining.terrain.height) - 0.5);
+            agent.velocityX = anchor.velocityX;
+            agent.velocityY = anchor.velocityY;
+        }
+    }
+    mining.combatProjectiles.clear();
+    mining.damageNumbers.clear();
+}
+
+double miniDroneOrbitRadius(MiniDroneRole role)
+{
+    switch (role) {
+    case MiniDroneRole::Mining:
+        return tuning::mining::miniDroneMiningOrbitRadiusCells;
+    case MiniDroneRole::Resource:
+        return tuning::mining::miniDroneResourceOrbitRadiusCells;
+    case MiniDroneRole::Survey:
+        return tuning::mining::miniDroneSurveyOrbitRadiusCells;
+    case MiniDroneRole::Hazard:
+        return tuning::mining::miniDroneHazardOrbitRadiusCells;
+    case MiniDroneRole::Attack:
+        return tuning::mining::miniDroneAttackOrbitRadiusCells;
+    case MiniDroneRole::Defense:
+        return tuning::mining::miniDroneDefenseOrbitRadiusCells;
+    }
+    return tuning::mining::miniDroneMiningOrbitRadiusCells;
+}
+
+MiniDroneCoordinationPoint miniDroneOrbitPoint(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent)
+{
+    const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining, agent.anchorTarget);
+    if (!anchor.valid) {
+        return {agent.x, agent.y};
+    }
+
+    const int roleCount = std::max(1, static_cast<int>(std::count_if(
+        mining.miniDrones.begin(),
+        mining.miniDrones.end(),
+        [&](const MiningMiniDroneAgent& candidate) {
+            return candidate.role == agent.role && candidate.anchorTarget == agent.anchorTarget;
+        })));
+    const int slot = std::clamp(agent.stableFormationSlot, 0, roleCount - 1);
+    const double direction = static_cast<int>(agent.role) % 2 == 0 ? 1.0 : -1.0;
+    const double angle = direction * agent.orbitPhaseRadians +
+        kTau * static_cast<double>(slot) / static_cast<double>(roleCount);
+    const double centerX = anchor.x + anchor.velocityX * tuning::mining::miniDroneAnchorVelocityLeadSeconds;
+    const double centerY = anchor.y + anchor.velocityY * tuning::mining::miniDroneAnchorVelocityLeadSeconds;
+    const double radius = miniDroneOrbitRadius(agent.role);
+    MiniDroneCoordinationPoint desired {
+        centerX + std::cos(angle) * radius,
+        centerY + std::sin(angle) * radius
+    };
+
+    const auto validPoint = [&](double x, double y) {
+        if (x < 0.5 || y < 0.5 ||
+            x > static_cast<double>(mining.terrain.width) - 0.5 ||
+            y > static_cast<double>(mining.terrain.height) - 0.5) {
+            return false;
+        }
+        const MiningCell* cell = miningCellAt(
+            mining.terrain,
+            std::clamp(static_cast<int>(std::floor(x)), 0, mining.terrain.width - 1),
+            std::clamp(static_cast<int>(std::floor(y)), 0, mining.terrain.height - 1));
+        return cell != nullptr && !miningMaterialSolid(cell->material);
+    };
+    if (validPoint(desired.x, desired.y)) {
+        return desired;
+    }
+    for (int step = 1; step <= 8; ++step) {
+        const double t = static_cast<double>(step) / 8.0;
+        const double projectedX = desired.x + (centerX - desired.x) * t;
+        const double projectedY = desired.y + (centerY - desired.y) * t;
+        if (validPoint(projectedX, projectedY)) {
+            return {projectedX, projectedY};
+        }
+    }
+    return {
+        std::clamp(anchor.x, 0.5, static_cast<double>(mining.terrain.width) - 0.5),
+        std::clamp(anchor.y, 0.5, static_cast<double>(mining.terrain.height) - 0.5)
+    };
+}
 
 MiningDroneCoordinator::MiningDroneCoordinator(MiningRunState& mining)
     : mining_(mining)
@@ -85,7 +269,8 @@ void MiningDroneCoordinator::synchronizeAssignments()
         if (agent.role != MiniDroneRole::Mining) {
             continue;
         }
-        if (!isCandidateCell(agent.targetCellX, agent.targetCellY)) {
+        if (!agentAnchor(mining_, agent).valid ||
+            !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
             clearAssignment(agent);
             continue;
         }
@@ -99,7 +284,9 @@ void MiningDroneCoordinator::synchronizeAssignments()
 
 bool MiningDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
 {
-    if (agent.role != MiniDroneRole::Mining || !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
+    if (agent.role != MiniDroneRole::Mining ||
+        !agentAnchor(mining_, agent).valid ||
+        !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
@@ -109,16 +296,20 @@ bool MiningDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
 {
     releaseAssignment(agent);
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
 
     const double acquireRadius = tuning::mining::miningDroneAcquireRadiusCells;
     const double acquireRangeSq = acquireRadius * acquireRadius;
     double bestScore = 1.0e9;
     int bestX = -1;
     int bestY = -1;
-    const int minX = std::max(0, static_cast<int>(std::floor(mining_.droneX - acquireRadius)));
-    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(mining_.droneX + acquireRadius)));
-    const int minY = std::max(0, static_cast<int>(std::floor(mining_.droneY - acquireRadius)));
-    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(mining_.droneY + acquireRadius)));
+    const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - acquireRadius)));
+    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(anchor.x + acquireRadius)));
+    const int minY = std::max(0, static_cast<int>(std::floor(anchor.y - acquireRadius)));
+    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(anchor.y + acquireRadius)));
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             if (!isCandidateCell(x, y) || reservations_.contains(cellKey(x, y))) {
@@ -126,8 +317,8 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             }
             const double centerX = static_cast<double>(x) + 0.5;
             const double centerY = static_cast<double>(y) + 0.5;
-            const double mamaDx = centerX - mining_.droneX;
-            const double mamaDy = centerY - mining_.droneY;
+            const double mamaDx = centerX - anchor.x;
+            const double mamaDy = centerY - anchor.y;
             if (mamaDx * mamaDx + mamaDy * mamaDy > acquireRangeSq) {
                 continue;
             }
@@ -207,7 +398,8 @@ void HazardDroneCoordinator::synchronizeAssignments()
         return lhs->roleIndex < rhs->roleIndex;
     });
     for (MiningMiniDroneAgent* agent : hazardDrones_) {
-        if (!isCandidateCell(*agent, agent->targetCellX, agent->targetCellY)) {
+        if (!agentAnchor(mining_, *agent).valid ||
+            !isCandidateCell(*agent, agent->targetCellX, agent->targetCellY)) {
             clearAssignment(*agent);
             continue;
         }
@@ -220,7 +412,9 @@ void HazardDroneCoordinator::synchronizeAssignments()
 
 bool HazardDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
 {
-    if (agent.role != MiniDroneRole::Hazard || !isCandidateCell(agent, agent.targetCellX, agent.targetCellY)) {
+    if (agent.role != MiniDroneRole::Hazard ||
+        !agentAnchor(mining_, agent).valid ||
+        !isCandidateCell(agent, agent.targetCellX, agent.targetCellY)) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
@@ -230,15 +424,19 @@ bool HazardDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
 {
     releaseAssignment(agent);
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
     const double radius = tuning::mining::hazardDroneAcquireRadiusCells;
     const double radiusSq = radius * radius;
     double bestScore = 1.0e12;
     int bestX = -1;
     int bestY = -1;
-    const int minX = std::max(0, static_cast<int>(std::floor(mining_.droneX - radius)));
-    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(mining_.droneX + radius)));
-    const int minY = std::max(0, static_cast<int>(std::floor(mining_.droneY - radius)));
-    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(mining_.droneY + radius)));
+    const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - radius)));
+    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(anchor.x + radius)));
+    const int minY = std::max(0, static_cast<int>(std::floor(anchor.y - radius)));
+    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(anchor.y + radius)));
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             if (!isCandidateCell(agent, x, y) || reservations_.contains(cellKey(x, y))) {
@@ -246,14 +444,15 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             }
             const double centerX = static_cast<double>(x) + 0.5;
             const double centerY = static_cast<double>(y) + 0.5;
-            const double rigDx = centerX - mining_.droneX;
-            const double rigDy = centerY - mining_.droneY;
+            const double rigDx = centerX - anchor.x;
+            const double rigDy = centerY - anchor.y;
             if (rigDx * rigDx + rigDy * rigDy > radiusSq) {
                 continue;
             }
             const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
             const double agentDistance = std::hypot(centerX - agent.x, centerY - agent.y);
             const double intensityPriority = static_cast<double>(tuning::mining::hazardDroneRequiredMark(cell->hazardAffinity));
+            const double storySealPriority = cell->gateAssociated ? 100000.0 : 0.0;
             int eligibleNeighbors = 0;
             for (int neighborY = y - 1; neighborY <= y + 1; ++neighborY) {
                 for (int neighborX = x - 1; neighborX <= x + 1; ++neighborX) {
@@ -267,7 +466,8 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             const int usefulNeighbors = std::min(
                 eligibleNeighbors,
                 tuning::mining::hazardDroneBatchSize(agent.upgradeLevel) - 1);
-            const double score = -intensityPriority * 1000.0 - static_cast<double>(usefulNeighbors) * 25.0 +
+            const double score = -storySealPriority - intensityPriority * 1000.0 -
+                static_cast<double>(usefulNeighbors) * 25.0 +
                 agentDistance + static_cast<double>(y * mining_.terrain.width + x) * 0.00001;
             if (score < bestScore) {
                 bestScore = score;
@@ -344,31 +544,20 @@ void AttackDroneCoordinator::synchronizeAssignments()
         return lhs->roleIndex < rhs->roleIndex;
     });
 
-    double bestExistingScore = 1.0e12;
-    for (const MiningMiniDroneAgent* agent : attackDrones_) {
-        if (!targetValid(agent->targetEnemyIndex)) {
-            continue;
-        }
-        const MiningEnemy& enemy = mining_.enemies[static_cast<std::size_t>(agent->targetEnemyIndex)];
-        const double dx = enemy.x - mining_.droneX;
-        const double dy = enemy.y - mining_.droneY;
-        const double score = dx * dx + dy * dy;
-        if (score < bestExistingScore) {
-            bestExistingScore = score;
-            focusTargetIndex_ = agent->targetEnemyIndex;
-        }
-    }
-    if (!targetValid(focusTargetIndex_)) {
-        focusTargetIndex_ = findPriorityTarget();
-    }
-
     for (MiningMiniDroneAgent* agent : attackDrones_) {
-        if (focusTargetIndex_ < 0) {
+        int targetIndex = agent->targetEnemyIndex;
+        if (!targetValid(targetIndex) ||
+            !targetVisibleToSquad(
+                mining_.enemies[static_cast<std::size_t>(targetIndex)],
+                *agent)) {
+            targetIndex = findPriorityTarget(*agent);
+        }
+        if (targetIndex < 0) {
             releaseAssignment(*agent);
             continue;
         }
-        const bool targetChanged = agent->targetEnemyIndex != focusTargetIndex_;
-        agent->targetEnemyIndex = focusTargetIndex_;
+        const bool targetChanged = agent->targetEnemyIndex != targetIndex;
+        agent->targetEnemyIndex = targetIndex;
         agent->behavior = MiningMiniDroneBehavior::Engaging;
         if (targetChanged) {
             agent->actionCooldownSeconds = std::max(
@@ -380,7 +569,9 @@ void AttackDroneCoordinator::synchronizeAssignments()
 
 bool AttackDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
 {
-    return agent.role == MiniDroneRole::Attack && targetValid(agent.targetEnemyIndex) && agent.targetEnemyIndex == focusTargetIndex_;
+    return agent.role == MiniDroneRole::Attack &&
+        targetValid(agent.targetEnemyIndex) &&
+        agentAnchor(mining_, agent).valid;
 }
 
 bool AttackDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
@@ -388,14 +579,12 @@ bool AttackDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     if (agent.role != MiniDroneRole::Attack) {
         return false;
     }
-    if (!targetValid(focusTargetIndex_)) {
-        focusTargetIndex_ = findPriorityTarget();
-    }
-    if (focusTargetIndex_ < 0) {
+    const int targetIndex = findPriorityTarget(agent);
+    if (targetIndex < 0) {
         releaseAssignment(agent);
         return false;
     }
-    agent.targetEnemyIndex = focusTargetIndex_;
+    agent.targetEnemyIndex = targetIndex;
     agent.behavior = MiningMiniDroneBehavior::Engaging;
     return true;
 }
@@ -411,13 +600,16 @@ void AttackDroneCoordinator::releaseAssignment(MiningMiniDroneAgent& agent)
 MiniDroneCoordinationPoint AttackDroneCoordinator::formationPoint(const MiningMiniDroneAgent& agent) const
 {
     if (!hasAssignment(agent)) {
-        return {mining_.droneX, mining_.droneY};
+        return miniDroneOrbitPoint(mining_, agent);
     }
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
     const MiningEnemy& target = mining_.enemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
-    const double towardRigX = mining_.droneX - target.x;
-    const double towardRigY = mining_.droneY - target.y;
+    const double towardRigX = anchor.x - target.x;
+    const double towardRigY = anchor.y - target.y;
     const double baseAngle = std::atan2(towardRigY, towardRigX);
-    const int count = std::max(1, assignedDroneCount(agent.targetEnemyIndex));
+    const int count = std::max(
+        1,
+        assignedDroneCount(agent.targetEnemyIndex, agent.anchorTarget));
     const int slot = formationSlot(agent);
     const double angle = baseAngle + 3.14159265358979323846 / static_cast<double>(count) +
         2.0 * 3.14159265358979323846 * static_cast<double>(slot) / static_cast<double>(count);
@@ -425,8 +617,8 @@ MiniDroneCoordinationPoint AttackDroneCoordinator::formationPoint(const MiningMi
         target.x + std::cos(angle) * tuning::mining::attackDroneStandoffCells,
         target.y + std::sin(angle) * tuning::mining::attackDroneStandoffCells
     };
-    double rigDx = point.x - mining_.droneX;
-    double rigDy = point.y - mining_.droneY;
+    double rigDx = point.x - anchor.x;
+    double rigDy = point.y - anchor.y;
     double rigDistance = std::sqrt(rigDx * rigDx + rigDy * rigDy);
     if (rigDistance < tuning::mining::attackDroneRigClearanceCells) {
         if (rigDistance <= 0.0001) {
@@ -434,8 +626,8 @@ MiniDroneCoordinationPoint AttackDroneCoordinator::formationPoint(const MiningMi
             rigDy = std::sin(angle);
             rigDistance = 1.0;
         }
-        point.x = mining_.droneX + rigDx / rigDistance * tuning::mining::attackDroneRigClearanceCells;
-        point.y = mining_.droneY + rigDy / rigDistance * tuning::mining::attackDroneRigClearanceCells;
+        point.x = anchor.x + rigDx / rigDistance * tuning::mining::attackDroneRigClearanceCells;
+        point.y = anchor.y + rigDy / rigDistance * tuning::mining::attackDroneRigClearanceCells;
     }
     point.x = std::clamp(point.x, 0.5, static_cast<double>(mining_.terrain.width) - 0.5);
     point.y = std::clamp(point.y, 0.5, static_cast<double>(mining_.terrain.height) - 0.5);
@@ -448,17 +640,22 @@ bool AttackDroneCoordinator::targetValid(int enemyIndex) const
         mining_.enemies[static_cast<std::size_t>(enemyIndex)].active;
 }
 
-int AttackDroneCoordinator::findPriorityTarget() const
+int AttackDroneCoordinator::findPriorityTarget(
+    const MiningMiniDroneAgent& agent) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return -1;
+    }
     double bestScore = 1.0e12;
     int bestIndex = -1;
     for (std::size_t i = 0; i < mining_.enemies.size(); ++i) {
         const MiningEnemy& enemy = mining_.enemies[i];
-        if (!enemy.active || !targetVisibleToSquad(enemy)) {
+        if (!enemy.active || !targetVisibleToSquad(enemy, agent)) {
             continue;
         }
-        const double dx = enemy.x - mining_.droneX;
-        const double dy = enemy.y - mining_.droneY;
+        const double dx = enemy.x - anchor.x;
+        const double dy = enemy.y - anchor.y;
         const double score = dx * dx + dy * dy;
         if (score < bestScore) {
             bestScore = score;
@@ -468,17 +665,26 @@ int AttackDroneCoordinator::findPriorityTarget() const
     return bestIndex;
 }
 
-bool AttackDroneCoordinator::targetVisibleToSquad(const MiningEnemy& enemy) const
+bool AttackDroneCoordinator::targetVisibleToSquad(
+    const MiningEnemy& enemy,
+    const MiningMiniDroneAgent& agent) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
     const double rangeSq = tuning::mining::attackDroneFieldOfViewCells * tuning::mining::attackDroneFieldOfViewCells;
-    const double rigDx = enemy.x - mining_.droneX;
-    const double rigDy = enemy.y - mining_.droneY;
+    const double rigDx = enemy.x - anchor.x;
+    const double rigDy = enemy.y - anchor.y;
     if (rigDx * rigDx + rigDy * rigDy <= rangeSq) {
         return true;
     }
-    return std::any_of(attackDrones_.begin(), attackDrones_.end(), [&](const MiningMiniDroneAgent* agent) {
-        const double dx = enemy.x - agent->x;
-        const double dy = enemy.y - agent->y;
+    return std::any_of(attackDrones_.begin(), attackDrones_.end(), [&](const MiningMiniDroneAgent* candidate) {
+        if (candidate->anchorTarget != agent.anchorTarget) {
+            return false;
+        }
+        const double dx = enemy.x - candidate->x;
+        const double dy = enemy.y - candidate->y;
         return dx * dx + dy * dy <= rangeSq;
     });
 }
@@ -490,17 +696,22 @@ int AttackDroneCoordinator::formationSlot(const MiningMiniDroneAgent& agent) con
         if (candidate == &agent) {
             return slot;
         }
-        if (candidate->targetEnemyIndex == agent.targetEnemyIndex || agent.targetEnemyIndex < 0) {
+        if (candidate->anchorTarget == agent.anchorTarget &&
+            (candidate->targetEnemyIndex == agent.targetEnemyIndex ||
+                agent.targetEnemyIndex < 0)) {
             ++slot;
         }
     }
     return slot;
 }
 
-int AttackDroneCoordinator::assignedDroneCount(int enemyIndex) const
+int AttackDroneCoordinator::assignedDroneCount(
+    int enemyIndex,
+    MiningAnchorTarget anchorTarget) const
 {
     return static_cast<int>(std::count_if(attackDrones_.begin(), attackDrones_.end(), [&](const MiningMiniDroneAgent* agent) {
-        return agent->targetEnemyIndex == enemyIndex;
+        return agent->targetEnemyIndex == enemyIndex &&
+            agent->anchorTarget == anchorTarget;
     }));
 }
 
@@ -521,11 +732,16 @@ void DefenseDroneCoordinator::synchronizeAssignments()
         return lhs->roleIndex < rhs->roleIndex;
     });
 
-    focusTargetIndex_ = findClosestThreat();
     for (MiningMiniDroneAgent* agent : defenseDrones_) {
+        const MiniDroneAnchorFrame anchor = agentAnchor(mining_, *agent);
+        if (!anchor.valid) {
+            releaseAssignment(*agent);
+            agent->behavior = MiningMiniDroneBehavior::Returning;
+            continue;
+        }
         if (!agent->defenseAngleInitialized) {
-            const double dx = agent->x - mining_.droneX;
-            const double dy = agent->y - mining_.droneY;
+            const double dx = agent->x - anchor.x;
+            const double dy = agent->y - anchor.y;
             agent->defenseAngleRadians = std::hypot(dx, dy) > 0.001
                 ? normalizedAngle(std::atan2(dy, dx))
                 : normalizedAngle(
@@ -533,8 +749,8 @@ void DefenseDroneCoordinator::synchronizeAssignments()
                     static_cast<double>(std::max<std::size_t>(1, defenseDrones_.size())));
             agent->defenseAngleInitialized = true;
         }
-        agent->targetEnemyIndex = focusTargetIndex_;
-        agent->behavior = focusTargetIndex_ >= 0
+        agent->targetEnemyIndex = findClosestThreat(*agent);
+        agent->behavior = agent->targetEnemyIndex >= 0
             ? MiningMiniDroneBehavior::Guarding
             : MiningMiniDroneBehavior::Following;
     }
@@ -542,8 +758,9 @@ void DefenseDroneCoordinator::synchronizeAssignments()
 
 bool DefenseDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
 {
-    return agent.role == MiniDroneRole::Defense && targetValid(focusTargetIndex_) &&
-        agent.targetEnemyIndex == focusTargetIndex_;
+    return agent.role == MiniDroneRole::Defense &&
+        targetValid(agent.targetEnemyIndex) &&
+        agentAnchor(mining_, agent).valid;
 }
 
 bool DefenseDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
@@ -551,14 +768,11 @@ bool DefenseDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     if (agent.role != MiniDroneRole::Defense) {
         return false;
     }
-    if (!targetValid(focusTargetIndex_)) {
-        focusTargetIndex_ = findClosestThreat();
-    }
-    agent.targetEnemyIndex = focusTargetIndex_;
-    agent.behavior = focusTargetIndex_ >= 0
+    agent.targetEnemyIndex = findClosestThreat(agent);
+    agent.behavior = agent.targetEnemyIndex >= 0
         ? MiningMiniDroneBehavior::Guarding
         : MiningMiniDroneBehavior::Following;
-    return focusTargetIndex_ >= 0;
+    return agent.targetEnemyIndex >= 0;
 }
 
 void DefenseDroneCoordinator::releaseAssignment(MiningMiniDroneAgent& agent)
@@ -593,13 +807,17 @@ void DefenseDroneCoordinator::advanceFormation(double dt)
 
 MiniDroneCoordinationPoint DefenseDroneCoordinator::formationPoint(const MiningMiniDroneAgent& agent) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return {agent.x, agent.y};
+    }
     return {
         std::clamp(
-            mining_.droneX + std::cos(agent.defenseAngleRadians) * tuning::mining::defenseDroneGuardDistanceCells,
+            anchor.x + std::cos(agent.defenseAngleRadians) * tuning::mining::defenseDroneGuardDistanceCells,
             0.5,
             static_cast<double>(mining_.terrain.width) - 0.5),
         std::clamp(
-            mining_.droneY + std::sin(agent.defenseAngleRadians) * tuning::mining::defenseDroneGuardDistanceCells,
+            anchor.y + std::sin(agent.defenseAngleRadians) * tuning::mining::defenseDroneGuardDistanceCells,
             0.5,
             static_cast<double>(mining_.terrain.height) - 0.5)
     };
@@ -612,24 +830,37 @@ DefenseShieldImpact DefenseDroneCoordinator::absorbIncomingDamage(
 {
     DefenseShieldImpact impact;
     impact.remainingDamage = std::max(0.0, rawDamage);
-    impact.impactX = mining_.droneX;
-    impact.impactY = mining_.droneY;
-    if (impact.remainingDamage <= 0.0 || defenseDrones_.empty()) {
+    const MiniDroneAnchorFrame activeAnchor =
+        resolveMiniDroneAnchor(mining_, MiningAnchorTarget::ControlledActor);
+    impact.impactX = activeAnchor.x;
+    impact.impactY = activeAnchor.y;
+    if (impact.remainingDamage <= 0.0 || defenseDrones_.empty() ||
+        !activeAnchor.valid) {
         return impact;
     }
 
-    const double sourceAngle = std::atan2(sourceY - mining_.droneY, sourceX - mining_.droneX);
     const double halfArc = tuning::mining::defenseDroneShieldArcRadians * 0.5;
     double bestDelta = 1.0e12;
+    MiniDroneAnchorFrame interceptorAnchor;
     for (MiningMiniDroneAgent* agent : defenseDrones_) {
         if (agent->shieldCharge <= 0.0 || agent->shieldRechargeSeconds > 0.0) {
             continue;
         }
-        const double guardAngle = std::atan2(agent->y - mining_.droneY, agent->x - mining_.droneX);
+        const MiniDroneAnchorFrame anchor = agentAnchor(mining_, *agent);
+        if (!anchor.valid || anchor.actor != activeAnchor.actor ||
+            anchor.depthZone != activeAnchor.depthZone) {
+            continue;
+        }
+        const double sourceAngle =
+            std::atan2(sourceY - anchor.y, sourceX - anchor.x);
+        const double guardAngle = std::atan2(
+            agent->y - anchor.y,
+            agent->x - anchor.x);
         const double delta = std::abs(shortestAngleDelta(guardAngle, sourceAngle));
         if (delta <= halfArc && delta < bestDelta) {
             bestDelta = delta;
             impact.interceptor = agent;
+            interceptorAnchor = anchor;
         }
     }
     if (impact.interceptor == nullptr) {
@@ -653,9 +884,13 @@ DefenseShieldImpact DefenseDroneCoordinator::absorbIncomingDamage(
 
     const double impactRadius = tuning::mining::defenseDroneGuardDistanceCells +
         tuning::mining::defenseDroneShieldArcOffsetCells;
-    const double guardAngle = std::atan2(interceptor.y - mining_.droneY, interceptor.x - mining_.droneX);
-    impact.impactX = mining_.droneX + std::cos(guardAngle) * impactRadius;
-    impact.impactY = mining_.droneY + std::sin(guardAngle) * impactRadius;
+    const double guardAngle = std::atan2(
+        interceptor.y - interceptorAnchor.y,
+        interceptor.x - interceptorAnchor.x);
+    impact.impactX =
+        interceptorAnchor.x + std::cos(guardAngle) * impactRadius;
+    impact.impactY =
+        interceptorAnchor.y + std::sin(guardAngle) * impactRadius;
     return impact;
 }
 
@@ -665,8 +900,13 @@ bool DefenseDroneCoordinator::targetValid(int enemyIndex) const
         mining_.enemies[static_cast<std::size_t>(enemyIndex)].active;
 }
 
-int DefenseDroneCoordinator::findClosestThreat() const
+int DefenseDroneCoordinator::findClosestThreat(
+    const MiningMiniDroneAgent& agent) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return -1;
+    }
     double bestDistanceSq = 1.0e12;
     int bestIndex = -1;
     for (std::size_t i = 0; i < mining_.enemies.size(); ++i) {
@@ -674,8 +914,8 @@ int DefenseDroneCoordinator::findClosestThreat() const
         if (!enemy.active) {
             continue;
         }
-        const double dx = enemy.x - mining_.droneX;
-        const double dy = enemy.y - mining_.droneY;
+        const double dx = enemy.x - anchor.x;
+        const double dy = enemy.y - anchor.y;
         const double distanceSq = dx * dx + dy * dy;
         if (distanceSq < bestDistanceSq) {
             bestDistanceSq = distanceSq;
@@ -687,20 +927,37 @@ int DefenseDroneCoordinator::findClosestThreat() const
 
 int DefenseDroneCoordinator::formationSlot(const MiningMiniDroneAgent& agent) const
 {
-    const auto match = std::find(defenseDrones_.begin(), defenseDrones_.end(), &agent);
-    return match == defenseDrones_.end()
-        ? std::max(0, agent.roleIndex)
-        : static_cast<int>(std::distance(defenseDrones_.begin(), match));
+    int slot = 0;
+    for (const MiningMiniDroneAgent* candidate : defenseDrones_) {
+        if (candidate == &agent) {
+            return slot;
+        }
+        if (candidate->anchorTarget == agent.anchorTarget) {
+            ++slot;
+        }
+    }
+    return std::max(0, agent.stableFormationSlot);
 }
 
 double DefenseDroneCoordinator::desiredAngle(const MiningMiniDroneAgent& agent) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
     double baseAngle = 0.0;
-    if (targetValid(focusTargetIndex_)) {
-        const MiningEnemy& enemy = mining_.enemies[static_cast<std::size_t>(focusTargetIndex_)];
-        baseAngle = std::atan2(enemy.y - mining_.droneY, enemy.x - mining_.droneX);
+    if (anchor.valid && targetValid(agent.targetEnemyIndex)) {
+        const MiningEnemy& enemy =
+            mining_.enemies[static_cast<std::size_t>(agent.targetEnemyIndex)];
+        baseAngle = std::atan2(
+            enemy.y - anchor.y,
+            enemy.x - anchor.x);
     }
-    const int count = std::max(1, static_cast<int>(defenseDrones_.size()));
+    const int count = std::max(
+        1,
+        static_cast<int>(std::count_if(
+            defenseDrones_.begin(),
+            defenseDrones_.end(),
+            [&](const MiningMiniDroneAgent* candidate) {
+                return candidate->anchorTarget == agent.anchorTarget;
+            })));
     return normalizedAngle(baseAngle +
         kTau * static_cast<double>(formationSlot(agent)) / static_cast<double>(count));
 }
@@ -725,7 +982,7 @@ void SurveyDroneCoordinator::synchronizeAssignments()
     reservations_.clear();
     for (MiningMiniDroneAgent* agent : surveyDrones_) {
         if (!isCandidateCell(agent->targetCellX, agent->targetCellY) ||
-            !isAnchoredAhead(agent->targetCellX, agent->targetCellY) ||
+            !isAnchoredAhead(*agent, agent->targetCellX, agent->targetCellY) ||
             !isInAssignedLane(*agent, agent->targetCellX)) {
             clearAssignment(*agent);
             continue;
@@ -739,7 +996,9 @@ void SurveyDroneCoordinator::synchronizeAssignments()
 
 bool SurveyDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
 {
-    if (agent.role != MiniDroneRole::Survey || !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
+    if (agent.role != MiniDroneRole::Survey ||
+        !agentAnchor(mining_, agent).valid ||
+        !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
@@ -749,16 +1008,22 @@ bool SurveyDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 bool SurveyDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
 {
     releaseAssignment(agent);
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
     double bestScore = 1.0e12;
     int bestX = -1;
     int bestY = -1;
-    const double formationHalfWidth = tuning::mining::surveyDroneFormationHalfWidthCells(static_cast<int>(surveyDrones_.size()));
+    const double formationHalfWidth =
+        tuning::mining::surveyDroneFormationHalfWidthCells(
+            anchoredDroneCount(agent));
     const double assignedLaneCenterX = laneCenterX(agent);
-    const double assignedLaneHalfWidth = laneHalfWidth();
-    const int minX = std::max(0, static_cast<int>(std::floor(mining_.droneX - formationHalfWidth)));
-    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(mining_.droneX + formationHalfWidth)));
-    const int minY = std::max(0, static_cast<int>(std::floor(mining_.droneY + tuning::mining::surveyDroneMinimumLeadCells)));
-    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(mining_.droneY + tuning::mining::surveyDroneMaximumLeadCells)));
+    const double assignedLaneHalfWidth = laneHalfWidth(agent);
+    const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - formationHalfWidth)));
+    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(anchor.x + formationHalfWidth)));
+    const int minY = std::max(0, static_cast<int>(std::floor(anchor.y + tuning::mining::surveyDroneMinimumLeadCells)));
+    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(anchor.y + tuning::mining::surveyDroneMaximumLeadCells)));
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             if (!isCandidateCell(x, y) || reservations_.contains(cellKey(x, y))) {
@@ -771,7 +1036,7 @@ bool SurveyDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             if (laneDistance > assignedLaneHalfWidth) {
                 continue;
             }
-            const double forwardDepth = centerY - mining_.droneY;
+            const double forwardDepth = centerY - anchor.y;
             const double agentDistance = std::hypot(centerX - agent.x, centerY - agent.y);
             const double score = surveyTargetPriority(cell->material) * 1000.0 - forwardDepth * 8.0 +
                 laneDistance * 4.0 + agentDistance * 0.10;
@@ -810,39 +1075,69 @@ bool SurveyDroneCoordinator::isCandidateCell(int x, int y) const
     return cell != nullptr && !cell->revealed;
 }
 
-bool SurveyDroneCoordinator::isAnchoredAhead(int x, int y) const
+bool SurveyDroneCoordinator::isAnchoredAhead(
+    const MiningMiniDroneAgent& agent,
+    int x,
+    int y) const
 {
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
     const double centerX = static_cast<double>(x) + 0.5;
     const double centerY = static_cast<double>(y) + 0.5;
-    return std::abs(centerX - mining_.droneX) <=
-            tuning::mining::surveyDroneFormationHalfWidthCells(static_cast<int>(surveyDrones_.size())) &&
-        centerY >= mining_.droneY + tuning::mining::surveyDroneMinimumLeadCells &&
-        centerY <= mining_.droneY + tuning::mining::surveyDroneMaximumLeadCells;
+    return std::abs(centerX - anchor.x) <=
+            tuning::mining::surveyDroneFormationHalfWidthCells(
+                anchoredDroneCount(agent)) &&
+        centerY >= anchor.y + tuning::mining::surveyDroneMinimumLeadCells &&
+        centerY <= anchor.y + tuning::mining::surveyDroneMaximumLeadCells;
 }
 
 bool SurveyDroneCoordinator::isInAssignedLane(const MiningMiniDroneAgent& agent, int x) const
 {
-    return std::abs(static_cast<double>(x) + 0.5 - laneCenterX(agent)) <= laneHalfWidth();
+    return std::abs(static_cast<double>(x) + 0.5 - laneCenterX(agent)) <=
+        laneHalfWidth(agent);
 }
 
 int SurveyDroneCoordinator::formationSlot(const MiningMiniDroneAgent& agent) const
 {
-    const auto match = std::find(surveyDrones_.begin(), surveyDrones_.end(), &agent);
-    return match == surveyDrones_.end()
-        ? std::max(0, agent.roleIndex)
-        : static_cast<int>(std::distance(surveyDrones_.begin(), match));
+    int slot = 0;
+    for (const MiningMiniDroneAgent* candidate : surveyDrones_) {
+        if (candidate == &agent) {
+            return slot;
+        }
+        if (candidate->anchorTarget == agent.anchorTarget) {
+            ++slot;
+        }
+    }
+    return std::max(0, agent.stableFormationSlot);
+}
+
+int SurveyDroneCoordinator::anchoredDroneCount(
+    const MiningMiniDroneAgent& agent) const
+{
+    return std::max(
+        1,
+        static_cast<int>(std::count_if(
+            surveyDrones_.begin(),
+            surveyDrones_.end(),
+            [&](const MiningMiniDroneAgent* candidate) {
+                return candidate->anchorTarget == agent.anchorTarget;
+            })));
 }
 
 double SurveyDroneCoordinator::laneCenterX(const MiningMiniDroneAgent& agent) const
 {
-    return mining_.droneX + tuning::mining::surveyDroneFormationOffsetCells(
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    return anchor.x + tuning::mining::surveyDroneFormationOffsetCells(
         formationSlot(agent),
-        static_cast<int>(surveyDrones_.size()));
+        anchoredDroneCount(agent));
 }
 
-double SurveyDroneCoordinator::laneHalfWidth() const
+double SurveyDroneCoordinator::laneHalfWidth(
+    const MiningMiniDroneAgent& agent) const
 {
-    return surveyDrones_.size() <= 1
+    return anchoredDroneCount(agent) <= 1
         ? tuning::mining::surveyDroneAnchorHalfWidthCells
         : tuning::mining::surveyDroneSearchLaneHalfWidthCells;
 }

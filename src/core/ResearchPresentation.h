@@ -260,7 +260,7 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
     addPercentChip(chips, "Ore yield", stats.oreYieldChance);
     addDoubleChip(chips, "Scanner", stats.scannerRadius);
     addPercentChip(chips, text::labels::hazard, stats.hazardRelief);
-    addDoubleChip(chips, "Drone speed", stats.droneSpeed);
+    addDoubleChip(chips, "Rig speed", stats.droneSpeed);
     if (stats.oxygenSeconds > 0.0) {
         chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
     }
@@ -419,7 +419,7 @@ inline std::string miniDroneBestUpgradePayoff(const MiniDroneStats& current, con
 inline std::string miniDroneUpgradeSummary(const MiniDrone& drone, bool owned, int upgradeLevel)
 {
     if (!owned) {
-        return "Acquire drone to upgrade";
+        return "Acquire Support Drone to upgrade";
     }
     if (upgradeLevel >= 3) {
         return "Mk 3 max upgrade";
@@ -463,7 +463,7 @@ inline std::string miniDroneBuildHook(MiniDroneRole role)
     case MiniDroneRole::Defense:
         return "Pairs with Attack for Killbox Screen and Hazard/Resource for containment-heavy endurance builds.";
     }
-    return "Equip complementary roles to unlock named drone synergies.";
+    return "Equip complementary roles to unlock named Support Drone synergies.";
 }
 
 inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& drone, const GameState& state, int index)
@@ -478,15 +478,17 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
     const bool coordinationRequired = combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination);
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
     std::string status = unlocked
-        ? (equippedCount > 0 ? ("Equipped x" + std::to_string(equippedCount)) : (owned ? "Ready" : "Not owned"))
-        : ("Locked: " + std::string(unlockDisplayName(drone.unlockKey)));
+        ? (equippedCount > 0 ? "Assigned" : (owned ? "Ready" : "Not owned"))
+        : "Locked";
     PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
     std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
     if (owned && unlocked && upgradeLevel < 3 && coordinationRequired) {
         upgradeSummary = "Mk " + std::to_string(upgradeLevel) + " tuning locked: complete Perimeter Drone Network research";
     }
     if (owned && unlocked) {
-        action = hasFreeSlot ? panelActionButton("Add copy", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full");
+        action = equippedCount > 0
+            ? disabledPanelButton("Assigned")
+            : (hasFreeSlot ? panelActionButton("Assign", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full"));
         upgradeAction = upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
             : (coordinationRequired
@@ -516,7 +518,7 @@ inline std::string miniDroneNameSummary(const GameState& state, const ContentCat
         return "Not unlocked";
     }
     if (state.meta.equippedDroneIds.empty()) {
-        return "No drones assigned";
+        return "No Support Drones assigned";
     }
     struct DroneNameCount {
         std::string name;
@@ -547,7 +549,7 @@ inline std::string miniDroneNameSummary(const GameState& state, const ContentCat
             summary += " x" + std::to_string(count.count);
         }
     }
-    return summary.empty() ? "No drones assigned" : summary;
+    return summary.empty() ? "No Support Drones assigned" : summary;
 }
 
 inline std::string miniDroneSynergySummary(const MiniDroneLoadoutEffects& effects)
@@ -588,15 +590,15 @@ inline std::string droneBuildTitle(const MiniDroneLoadoutEffects& effects)
 inline std::string droneBuildDetail(const MiniDroneLoadoutEffects& effects)
 {
     if (effects.names.empty()) {
-        return "Assign drones to create passive mining, combat, shield, scanner, and endurance synergies before the run starts.";
+        return "Assign Support Drones to create passive mining, combat, shield, scanner, and endurance synergies before the run starts.";
     }
     if (!effects.signatureName.empty()) {
         return effects.signatureDetail;
     }
     if (!effects.synergyNames.empty()) {
-        return "Active synergies change how the rig survives while you mine: " + miniDroneSynergySummary(effects) + ".";
+        return "Active synergies change how the Mining Rig survives while you mine: " + miniDroneSynergySummary(effects) + ".";
     }
-    return "This loadout has useful solo drone effects. Add complementary roles to unlock named synergies.";
+    return "This loadout has useful solo Support Drone effects. Add complementary roles to unlock named synergies.";
 }
 
 inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniDroneLoadoutEffects& effects)
@@ -619,7 +621,7 @@ inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniD
         panelMetric("Auto-mine", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + "/min") : "None")
     };
     if (effects.names.empty()) {
-        chips.push_back(panelMetric("Build state", "No drones"));
+        chips.push_back(panelMetric("Build state", "No Support Drones"));
     } else if (!effects.signatureName.empty()) {
         chips.push_back(panelMetric("Build state", "Signature"));
     } else if (!effects.synergyNames.empty()) {
@@ -721,7 +723,7 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
                     "Open slot",
                     "Empty",
                     "Ready",
-                    "Equip a drone from the roster to add another passive ability to the build.",
+                    "Equip a Support Drone from the roster to add another passive ability to the build.",
                     "open",
                     {
                         panelMetric("Slot", std::to_string(slotNumber)),
@@ -927,7 +929,7 @@ inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state,
         bool signature = false;
     };
     const std::vector<Candidate> candidates {
-        {"Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Add scanner paint to raise crit chance and drone fire rate.", false},
+        {"Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Add scanner paint to raise crit chance and Support Drone fire rate.", false},
         {"Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Pair cover fire with shields so close threats trigger counter-hits.", false},
         {"Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Turn ore tempo into area-control pressure around the work zone.", false},
         {"Containment Screen", {MiniDroneRole::Defense, MiniDroneRole::Hazard}, "Pair remediation with environmental shielding for safer long digs.", false},
@@ -971,7 +973,7 @@ inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state,
             "None",
             droneTunePriority(state, catalog, effects),
             droneRunPosture(effects),
-            "Every build recipe is active. Spend materials on favorite drones and push hostile mining depth."
+            "Every build recipe is active. Spend materials on favorite Support Drones and push hostile mining depth."
         };
     }
     if (state.meta.equippedDroneIds.empty()) {
@@ -1000,12 +1002,13 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     const int nextSlot = state.meta.droneBaySlots + 1;
     const MaterialInventory nextCost = droneSlotUpgradeCost(nextSlot);
     const bool maxed = state.meta.droneBaySlots >= 6;
-    const bool affordable = !maxed && canAffordMaterials(state.meta.materials, nextCost);
+    const bool marsGateComplete = state.meta.marsBayExpansionClaimed;
+    const bool canAddSlot = canUpgradeDroneSlot(state);
 
     DroneOpsPresentation presentation;
     presentation.metrics = {
         panelMetric("Slots", std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "/" + std::to_string(std::max(0, state.meta.droneBaySlots))),
-        panelMetric("Owned drones", std::to_string(static_cast<int>(state.meta.ownedDroneIds.size()))),
+        panelMetric("Owned Support Drones", std::to_string(static_cast<int>(state.meta.ownedDroneIds.size()))),
         panelMetric(text::labels::commonMaterials, std::to_string(state.meta.materials.common)),
         panelMetric(text::labels::rareMaterials, std::to_string(state.meta.materials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(state.meta.materials.exotic))
@@ -1015,7 +1018,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     presentation.buildChips = {
         panelMetric("Signature", effects.signatureName.empty() ? "None" : effects.signatureName),
         panelMetric("Active synergies", std::to_string(static_cast<int>(effects.synergyNames.size()))),
-        panelMetric("Upgraded drones", std::to_string(tunedDroneCount(state))),
+        panelMetric("Upgraded Support Drones", std::to_string(tunedDroneCount(state))),
         panelMetric("Crit chance", display::percent(std::clamp(tuning::mining::alliedCritChance + effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum))),
         panelMetric("Volley", std::to_string(1 + effects.sentryVolleyBonus)),
         panelMetric("Fire rate", effects.alliedFireRateBonus > 0.0 ? ("+" + display::percent(effects.alliedFireRateBonus)) : "Base")
@@ -1036,19 +1039,19 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
         detailPresentationRow("Build guidance", guidance.detail),
         detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
-        detailPresentationRow("Drone copies", std::string("Drone controls add another copy of an owned type. Drone Loadout slots unequip one copy at a time.")),
-        detailPresentationRow("Drone upgrades", std::to_string(tunedDroneCount(state)) + " drone types above Mk I. Tuning scales every equipped copy of that type."),
+        detailPresentationRow("Unique units", std::string("Each owned Support Drone can occupy only one loadout slot. Free that slot before assigning it elsewhere.")),
+        detailPresentationRow("Support Drone upgrades", std::to_string(tunedDroneCount(state)) + " Support Drones above Mk I. Tuning applies to that unique unit."),
         detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
         detailPresentationRow("Stability support", effects.hardRockBounceRelief > 0.0 ? display::percent(effects.hardRockBounceRelief) + " less hard-rock bounce" : "None"),
-        detailPresentationRow("Passive combat plan", std::string("During hostile mining, the rig mines while equipped mini-drones auto-fire, shield, slow, and counter-hit enemies.")),
+        detailPresentationRow("Passive combat plan", std::string("During hostile mining, the Mining Rig drills while equipped Support Drones auto-fire, shield, slow, and counter-hit enemies.")),
         detailPresentationRow("Combat forecast", std::string("The forecast row shows the passive combat profile that will carry into the next hostile mining run.")),
         detailPresentationRow("Upgrade path", std::string("Material-paid bay slots are the build lever: more slots mean more passive abilities active while you focus on ore and artifacts.")),
         detailPresentationRow("Combat support", effects.sentryDamagePerSecond > 0.0 || effects.enemyDamageRelief > 0.0
             ? display::fixed(effects.sentryDamagePerSecond + effects.areaControlDamagePerSecond, 1) + "/s sentry output, " + display::percent(effects.enemyDamageRelief + effects.environmentalShieldRelief) + " shield relief"
-            : "Attack and Defense drones unlock after hostile surface encounters beyond the solar system.")
+            : "Attack and Defense Support Drones unlock after hostile surface encounters beyond the solar system.")
     };
     if (state.run.surfaceExpedition.active && !state.run.surfaceExpedition.destinationId.empty()) {
         const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
@@ -1078,13 +1081,19 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     for (int index = 0; index < static_cast<int>(catalog.miniDrones.size()); ++index) {
         presentation.drones.push_back(miniDroneCardPresentation(catalog.miniDrones[static_cast<std::size_t>(index)], state, index));
     }
-    presentation.nextSlotCost = maxed ? "MAX" : compactMaterialSummary(nextCost);
+    presentation.nextSlotCost = maxed
+        ? "MAX"
+        : (marsGateComplete ? compactMaterialSummary(nextCost) : "MARS CLAIM");
     const std::string blockedSlotLabel = "Need mats";
     presentation.upgradeSlotAction = maxed
         ? disabledPanelButton("Bay maxed")
-        : (affordable ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok") : disabledPanelButton(blockedSlotLabel));
+        : (!marsGateComplete
+              ? disabledPanelButton("Complete Mars")
+              : (canAddSlot
+                    ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok")
+                    : disabledPanelButton(blockedSlotLabel)));
     presentation.backAction = panelActionButton(
-        "Done — Return to Surface Ops",
+        state.run.surfaceExpedition.active ? "Done - Return to Surface Ops" : "Done - Return to Hangar",
         ui::actions::backToSurfaceOps,
         "drone-done-action");
     return presentation;
@@ -1339,7 +1348,22 @@ inline bool hasSurfacePayload(const SurfaceExpeditionState& expedition)
         || !expedition.temporaryArtifacts.empty();
 }
 
-inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExpeditionState& expedition, double extractionRisk, bool arkKnown)
+inline bool surfaceUsesOuterExpeditionRecovery(
+    const SurfaceExpeditionState& expedition,
+    const ContentCatalog& catalog)
+{
+    const Destination* destination = catalog.findDestination(expedition.destinationId);
+    const Destination* saturn = catalog.findDestination(content::destination::saturn);
+    return destination != nullptr &&
+        saturn != nullptr &&
+        destination->tier >= saturn->tier;
+}
+
+inline SurfaceExpeditionPresentation surfacePosturePresentation(
+    const SurfaceExpeditionState& expedition,
+    double extractionRisk,
+    bool arkKnown,
+    bool outerExpedition = false)
 {
     SurfaceExpeditionPresentation presentation;
     const bool payloadLoaded = hasSurfacePayload(expedition);
@@ -1352,7 +1376,10 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(const SurfaceExp
     }
     if (expedition.supply <= 0 && !miningWindowOpen) {
         presentation.postureTitle = std::string(text::panel::messages::surfacePostureExtract);
-        presentation.postureDetail = text::panel::messages::surfacePostureExtractDetailForHome(arkKnown);
+        presentation.postureDetail =
+            text::panel::messages::surfacePostureExtractDetailForHome(
+                arkKnown,
+                outerExpedition);
         presentation.postureClass = "danger";
         return presentation;
     }
@@ -1483,21 +1510,21 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     std::vector<DetailPresentationRow> rows {
         detailPresentationRow(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
         detailPresentationRow(text::labels::fieldKit, surfaceFieldKitSummary(meta)),
-        detailPresentationRow("Drone loadout", hasUnlock(meta, content::unlock::droneBay)
-            ? std::string("Configure persistent helper drones from Drone Ops before mining.")
+        detailPresentationRow("Support Drone loadout", hasUnlock(meta, content::unlock::droneBay)
+            ? std::string("Configure persistent Support Drones from Drone Ops before mining.")
             : std::string("Prospector contract: ") +
                 std::to_string(std::clamp(meta.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal)) +
                 "/" + std::to_string(tuning::research::prospectorCommonOreGoal) +
                 " Common Ore safely recovered."),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
-        detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and drone operations"),
+        detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and Mining Rig operations"),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
         detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then layers available through Push Deeper. Dust can still burn extra action kits.")),
-        detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only drone run for this surface loop; pushing deeper closes once the run is used.")),
-        detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper commits the actual layer depth and marks what the mining drone should find there.")),
+        detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only Mining Rig run for this surface loop; pushing deeper closes once the run is used.")),
+        detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper commits the actual layer depth and marks what the Mining Rig should find there.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,
@@ -1520,6 +1547,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
     const double extractionRisk = surfaceExtractionRisk(state);
     const bool arkKnown = arkDiscovered(state);
+    const bool outerExpedition =
+        surfaceUsesOuterExpeditionRecovery(expedition, catalog);
     const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
     const MiningGateType gateType = selectMiningGateType(arenaRules);
     const MiningGateDefinition gate = resolveMiningGateDefinition(
@@ -1527,7 +1556,11 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         gateType,
         arenaRules.fixedStoryGate == gateType || arenaRules.request.gateOverrideEnabled);
     const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
-    SurfaceExpeditionPresentation presentation = surfacePosturePresentation(expedition, extractionRisk, arkKnown);
+    SurfaceExpeditionPresentation presentation = surfacePosturePresentation(
+        expedition,
+        extractionRisk,
+        arkKnown,
+        outerExpedition);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
     presentation.siteDetail = std::string(surfaceSiteProfileDetail(expedition.siteProfile));
     presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
@@ -1627,15 +1660,50 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(pushPreview));
 
-    presentation.actions.push_back(surfaceActionPreview(
-        text::buttons::returnHomeLabel(arkKnown),
-        text::panel::messages::surfaceExtractDetailForHome(arkKnown),
+    const int marsContractCommonAboard =
+        expedition.destinationId == content::destination::mars
+            && !state.meta.marsBayExpansionClaimed
+            && expedition.bankedMiningArenaValid
+            && expedition.bankedMiningProgressionEligible
+        ? std::max(
+              0,
+              std::min(
+                  expedition.bankedMiningMaterials.common,
+                  expedition.temporaryMaterials.common))
+        : 0;
+    const std::string extractionTitle = marsContractCommonAboard > 0
+        ? "Extract Mars Payload"
+        : text::buttons::returnHomeLabel(arkKnown, outerExpedition);
+    const std::string extractionDetail = marsContractCommonAboard > 0
+        ? "Safely extract the aboard Mars Common to advance Bay Expansion. No second Support Drone is required."
+        : text::panel::messages::surfaceExtractDetailForHome(
+              arkKnown,
+              outerExpedition);
+    SurfaceActionPreviewPresentation extractionPreview = surfaceActionPreview(
+        extractionTitle,
+        extractionDetail,
         expedition.supply,
         0,
         display::percent(extractionRisk),
         std::string(text::labels::extractionRisk),
         extractPayoffChips(expedition),
-        panelActionButton(text::buttons::returnHomeLabel(arkKnown), ui::actions::extractSurface, "ok")));
+        panelActionButton(
+            extractionTitle,
+            ui::actions::extractSurface,
+            "ok"));
+    if (marsContractCommonAboard > 0) {
+        const int remaining = std::max(
+            0,
+            tuning::research::marsBayCommonOreGoal
+                - state.meta.marsCommonOreRecovered);
+        extractionPreview.payoffChips.insert(
+            extractionPreview.payoffChips.begin(),
+            panelMetric(
+                "Mars delivery",
+                "+" + std::to_string(
+                    std::min(remaining, marsContractCommonAboard))));
+    }
+    presentation.actions.push_back(std::move(extractionPreview));
     return presentation;
 }
 

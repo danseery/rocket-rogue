@@ -51,6 +51,7 @@ double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
+MiningDrillStats miningOperatorDrillStats();
 MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog);
 bool miningCapabilityReadyForGate(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
 std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
@@ -72,8 +73,12 @@ SurfaceActionOutcome startMiningRun(
 void setMiningMove(GameState& state, double xAxis, double yAxis);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);
+void setMiningFire(GameState& state, bool firing);
+void setMiningOperatorToggleProgress(GameState& state, double progress);
+bool toggleMiningOperator(GameState& state);
 void toggleMiningTether(GameState& state);
 void pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
+bool repairMiningOperator(GameState& state);
 void updateMiningRun(GameState& state, const ContentCatalog& catalog, double deltaSeconds);
 SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& catalog, bool abort);
 

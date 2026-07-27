@@ -19,7 +19,7 @@
 
 namespace {
 
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0x432b379d478a4c39ULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0xabb2904ada76f290ULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:
@@ -335,9 +335,15 @@ void testLongRunMiningSubmissionBudget()
     }
     assert(stateHash == kExpectedLongRunMiningHash);
     assert(fixture.renderer.draws.size() <= 33U);
-    assert(fixture.renderer.draws.size() == 5U);
+    if (fixture.renderer.draws.size() != 7U || triangles != 0U || instances != 7U) {
+        std::fprintf(stderr, "Long-run mining draws: total=%llu triangles=%llu instances=%llu\n",
+            static_cast<unsigned long long>(fixture.renderer.draws.size()),
+            static_cast<unsigned long long>(triangles),
+            static_cast<unsigned long long>(instances));
+    }
+    assert(fixture.renderer.draws.size() == 7U);
     assert(triangles == 0U);
-    assert(instances == 5U);
+    assert(instances == 7U);
     fixture.app.shutdown();
 }
 

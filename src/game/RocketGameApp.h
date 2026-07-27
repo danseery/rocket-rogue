@@ -66,6 +66,15 @@ public:
     void rerollOffers();
     void acknowledgeApproachIntroduction();
     void acknowledgeProspectorCompletion();
+    void acknowledgeLunarMiningBriefing();
+    void claimLunarProspector();
+    void acknowledgeMarsMiningBriefing();
+    void claimMarsBayExpansion();
+    void commissionIoHazardDrone();
+    void beginSaturnSlingshot();
+    void retrySaturnSlingshot();
+    void acknowledgeSaturnSlingshotFailure();
+    void claimSaturnCourse();
     void runArrivalFlyby();
     void flybyMove(double xAxis, double yAxis);
     void flybyAbort();
@@ -93,11 +102,16 @@ public:
     void equipDrone(int index);
     void unequipDroneSlot(int slotIndex);
     void upgradeDrone(int index);
+    void redeemDroneUpgradeCredit(int index);
     void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);
+    void miningPointerAim(double viewportX, double viewportY);
+    void miningFire(bool active);
     void miningDrill(bool active);
     void miningKeyboardDrill(bool active);
+    void miningOperatorToggle();
+    void miningOperatorToggleProgress(double progress);
     void miningScanner();
     void miningTether();
     void miningRepairDrill();
@@ -231,6 +245,9 @@ private:
     struct RealtimeInputState {
         double moveX = 0.0;
         double moveY = 0.0;
+        double aimX = 0.0;
+        double aimY = 0.0;
+        bool firing = false;
         bool drilling = false;
     };
 
@@ -262,6 +279,7 @@ private:
     bool lastMiningFailurePending_ = false;
     double lastControllerInputSeconds_ = 0.0;
     double visualTimeSeconds_ = 0.0;
+    double miningOperatorToggleConfirmationSeconds_ = 0.0;
     bool titleScreenActive_ = true;
     bool hasSavedGame_ = false;
     std::string titleNotice_;

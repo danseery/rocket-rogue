@@ -7,7 +7,7 @@ Rocket Rogue's native Windows/Linux and web builds share one controller-complete
 - `src/input/ControllerInput.*` owns portable controller types, radial deadzones, trigger hysteresis, button edges, hold timing, navigation repeat, active-pad selection, prompt-family detection, and input-source arbitration.
 - `src/platform/web/WebGamepadSource.*` maps Emscripten gamepads into `RawControllerSnapshot`; `src/platform/sdl/SdlPlatform.*` does the same for SDL gamepads and owns native connect/disconnect lifecycle and rumble.
 - `GameRunner::frame` samples the active `IControllerSource` exactly once per host frame before scaled fixed simulation steps. `RocketGameApp::inputFrame` resolves the authoritative context and applies semantic actions. Hold and repeat clocks use unscaled platform monotonic time, so changing game speed never changes a controller gesture.
-- `GameRmlUi` owns stable semantic focus IDs, spatial navigation, activation, cancellation, modal focus traps, scrolling, and focus restoration across document rebuilds. The browser fallback mirrors the same operations.
+- `GameRmlUi` owns stable semantic focus IDs, spatial navigation, activation, cancellation, modal focus traps, scrolling, and focus restoration across document rebuilds. Native and web builds consume the same semantic focus/action model and presentation contract.
 - Controller preferences are device-local and separate from campaign saves. Web stores them under `rocket_rogue_controller_preferences_v1`; native stores them in `preferences_v1.txt` beneath the SDL per-user preference path.
 
 The shared controller preference values are shown below. Web serializes this JSON object; native stores the same fields with a `controller.` prefix in `preferences_v1.txt`.
@@ -31,15 +31,22 @@ Controller names use positions so the same rule applies to every prompt family: 
 | Context | Controls |
 |---|---|
 | Menus, cards, drafts, settings, modals | Left stick or D-pad navigates; South confirms; East backs out; right stick scrolls; Menu opens the system menu; View opens Map; North opens Inventory outside real-time play. |
-| Preflight, fanfare, results | South launches or continues. During drone transfer, South queues launch and the burn begins automatically when the bay seals. |
-| Active launch | South immediately starts Return; hold East 0.75 s to Eject; West toggles engines; North opens or closes pressure relief; hold RB 0.45 s to jettison cargo. |
+| Preflight, fanfare, results | South launches or continues. During Mining Rig transfer, South queues launch and the burn begins automatically when the bay seals. |
+| Active launch | South immediately starts the context-appropriate recovery; hold East 0.75 s to Eject; West toggles engines; North opens or closes pressure relief; hold RB 0.45 s to jettison cargo. |
 | Flyby | Left stick steers and throttles; South continues after completion; hold East 0.45 s to abort. |
 | Orbit | Left stick supplies radial and tangential thrust; South continues after completion; hold East 0.45 s to abort. |
 | Surface Scan / Push Deeper | South pulses or pushes; West banks; hold East 0.45 s to abort. Screen actions remain spatially focusable. |
-| Mining | Left stick moves and faces the rig; RT drills; West scans; North tethers; South leaves and banks at the ship or acknowledges failure; LB repairs the drill; RB repairs the rig; hold East 0.45 s for emergency recall. |
+| Mining - rig | Left stick thrusts and faces the rig; RT drills; West scans; North tethers; release South quickly to use the existing bank/leave action; hold South 0.6 s to exit; LB repairs the drill; RB repairs the rig; hold East 0.45 s for emergency recall. |
+| Mining - EVA | Left stick thrusts; right stick aims independently; RT fires the sidearm; LT hand-drills; West scans; North tethers; release South quickly to bank/leave when valid; hold South 0.6 s to enter the rig; hold East 0.45 s for emergency recall. |
 | Real-time UI access | Preflight and active launch never enter D-pad UI focus: South launches or returns, and dedicated flight buttons stay authoritative. Options/Menu explicitly opens the system menu. Steering and drilling contexts still use D-pad UI focus and pause. Gameplay input remains suppressed while a modal is open. |
 
-The mining drill stays forward-facing and drone combat remains passive. There is no weapon aim or twin-stick drill aim.
+The Mining Rig drill stays forward-facing. EVA uses twin-stick movement and independent aim: the right stick rotates the reticle while RT fires an immediate shot and continues at a 0.18-second cadence. LT is the suit hand drill. Support Drone targeting remains autonomous around the active actor.
+
+Keyboard and mouse use WASD/arrows for thrust, mouse for operator aim, left click for sidearm fire, right click for the hand drill, `E` for scan, `T` for tether, and `F` for immediate exit/entry. Space retains the rig drill's configured Toggle/Hold behavior, and `R` retains bank/leave at the shuttle.
+
+Holding South displays an `EXIT` or `ENTER` progress ring around the rig. The threshold is exactly 0.6 seconds; releasing before it fires routes through the existing tap action. `F` switches immediately and produces a confirmation pulse.
+
+Native and web input adapters must use the same mining viewport transform for pointer aim. A click consumed by RmlUi cannot also fire or drill, and the browser context menu is suppressed during mining.
 
 ## Focus and pause rules
 
@@ -48,7 +55,7 @@ The mining drill stays forward-facing and drone combat remains passive. There is
 - Focus survives per-frame Rml document rebuilds. If the prior target disappears, focus moves to the nearest enabled control in its region, then to the screen default.
 - Modals trap focus and return it to their opener. Mining Failure behaves as a blocking modal even when it opens automatically; South acknowledges it directly even if a document rebuild has not restored focus yet.
 - Select controls change with left/right; South toggles checkboxes. Focus automatically scrolls into view.
-- System menus, blocking modals, host focus/visibility loss, and active-controller loss pause real-time simulation and clear gameplay axes, thrust, and drilling immediately. Reconnection requires an observed neutral frame followed by explicit Resume.
+- System menus, blocking modals, host focus/visibility loss, input-source switching, and active-controller loss pause real-time simulation and immediately clear gameplay axes, aim, thrust, fire, drilling, and operator-toggle progress. Reconnection requires an observed neutral frame followed by explicit Resume.
 - Entering preflight clears prior menu focus. Preflight and active launch do not expose D-pad UI focus: Cross/South always launches, queues launch, or returns according to the flight phase. Opening a modal or the system menu still pauses and takes input priority.
 - A neutral connected controller does not steal the active source or release a held keyboard input.
 
@@ -58,13 +65,14 @@ The mining drill stays forward-facing and drone combat remains passive. There is
 - Menu engage/release hysteresis: 0.55 / 0.35.
 - Navigation repeat: 350 ms initial delay, then 120 ms.
 - Trigger press/release hysteresis: 0.35 / 0.20.
+- Mining operator-toggle hold: 0.60 s, with a progress ring and no tap-action dispatch after the hold completes.
 - Launch reset-save confirmation: 0.75 s hold, with Cancel focused by default.
 - Optional haptics: confirmation, hard mining contact, damage, and failure. Unsupported SDL devices and browser actuators are silent no-ops.
 
 ## Verification matrix
 
-Automated checks cover deadzones, trigger hysteresis, button edges, holds, repeats, active-pad selection, source arbitration, prompt detection/override, and disconnect release. Player-route verification should cover Hangar, Navigation, Launch, Results, Arrival, Flyby, Orbit, Research, Surface Ops, Scan, Push Deeper, Mining, Drone Ops, both drafts, Settings, Map, Inventory, and failure/confirmation modals.
+Automated checks cover deadzones, trigger hysteresis, button edges, holds, repeats, active-pad selection, source arbitration, prompt detection/override, disconnect release, rig/EVA tap-versus-hold behavior, independent aim, held-action clearing, UI-consumed pointer clicks, and context-menu suppression. Player-route verification should cover Hangar, Navigation, Launch, Results, Arrival, Flyby, Orbit, Research, Surface Ops, Scan, Push Deeper, Mining, Drone Ops, both drafts, Settings, Map, Inventory, and failure/confirmation modals.
 
-Before release, perform physical passes with Xbox, DualShock 4, DualSense, and Steam Deck on native Windows/Linux plus the web build at localhost and production HTTPS. Include disconnect/reconnect while moving and while holding RT to drill. Check RmlUi prompt and focus layout at 1280x800, 1080p, 1440p, and 4K on native and web; run the forced DOM fallback matrix on web only.
+Before release, perform physical passes with Xbox, DualShock 4, DualSense, and Steam Deck on native Windows/Linux plus the web build at localhost and production HTTPS. Include disconnect/reconnect and source switching while moving, aiming, firing, drilling, and holding the operator-toggle action. Check RmlUi prompt and focus layout at 1280x800, 1080p, 1440p, and 4K on native and web.
 
 Developer forms remain mouse/keyboard tools. The debug Controller Lab is for inspecting devices, axes, buttons, resolved context, focus, actions, pause state, and deterministic synthetic input. Synthetic frames use a separate preview-only router: they may move focus and report the semantic action that would fire, but they never dispatch gameplay actions or touch campaign saves.

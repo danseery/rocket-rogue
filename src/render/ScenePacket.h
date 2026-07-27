@@ -57,6 +57,7 @@ enum class TextureId : std::uint8_t {
     MiniDroneAttack,
     MiniDroneDefense,
     HeroicCapybara,
+    JetpackCapybara,
     Count
 };
 

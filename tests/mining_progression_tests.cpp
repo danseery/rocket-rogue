@@ -339,7 +339,9 @@ void miningGateContractsAndRuntimeAreDeterministic()
     };
 
     GameState hazardState = createNewGame(catalog, 501);
-    prepareSurface(hazardState, content::destination::jupiter);
+    // Exercise the generic cocoon contract here. Jupiter now resolves to Io's
+    // staged seal, where cooled Common Ore must also be drilled away.
+    prepareSurface(hazardState, content::destination::mars);
     const MiningArenaRequest hazardRequest {MiningAct::ActOne, 8, 0xCAFE, true, MiningGateType::HazardCocoon};
     require(startMiningRun(hazardState, catalog, hazardRequest, false).applied, "Hazard Cocoon debug arena should start");
     require(hazardState.run.mining.gate.type == MiningGateType::HazardCocoon
@@ -379,7 +381,7 @@ void miningGateContractsAndRuntimeAreDeterministic()
         "enemy seal should open only after its assigned encounter is cleared");
 
     GameState surveyState = createNewGame(catalog, 503);
-    prepareSurface(surveyState, content::destination::jupiter);
+    prepareSurface(surveyState, content::destination::mars);
     const MiningArenaRequest surveyRequest {MiningAct::ActOne, 8, 0x5151, true, MiningGateType::SurveyTriangulation};
     require(startMiningRun(surveyState, catalog, surveyRequest, false).applied, "Survey Triangulation debug arena should start");
     require(surveyState.run.mining.gate.markers.size() == 3, "triangulation should stamp three distinct scanner origins");
@@ -445,6 +447,44 @@ void miningGateContractsAndRuntimeAreDeterministic()
         "active gate state and persistent story identity should survive save/load while transient derived state reloads dirty");
 }
 
+void ioDestinationRulesAreThermalAndStoryLocked()
+{
+    const MiningArenaRequest request {MiningAct::ActOne, 7, 0x10A0ULL};
+    const MiningArenaRules generic = resolveDestinationMiningArenaRules(
+        request,
+        content::destination::mars);
+    const MiningArenaRules io = resolveDestinationMiningArenaRules(
+        request,
+        content::destination::jupiter);
+
+    require(!isIoMiningDestination(content::destination::mars)
+            && isIoMiningDestination(content::destination::jupiter),
+        "Jupiter's stable destination id should select the Io mining profile");
+    require(generic.fixedStoryGate == MiningGateType::None,
+        "destination specialization should leave non-Io arena contracts unchanged");
+    require(io.fixedStoryGate == MiningGateType::HazardCocoon
+            && miningGateAllowed(io, MiningGateType::HazardCocoon),
+        "Io should always expose its fixed lava-cocoon story site");
+    require(io.mechanics.environmentalHazards
+            && io.mechanics.artifactRecovery
+            && io.mechanics.artifactTethering,
+        "Io should enable its lava treatment and artifact recovery mechanics");
+    require(miningAffinityAllowed(io, MiningElementalAffinity::Thermal)
+            && !miningAffinityAllowed(io, MiningElementalAffinity::Cryo)
+            && !miningAffinityAllowed(io, MiningElementalAffinity::Toxic)
+            && !miningAffinityAllowed(io, MiningElementalAffinity::Radiation),
+        "Io should permit Thermal lava and no other hazard affinity");
+    require(io.rewardBudget.rareGuarantee == 0
+            && io.rewardBudget.rareCap == 0
+            && io.rewardBudget.exoticGuarantee == 0
+            && io.rewardBudget.exoticCap == 0,
+        "Io should not inject normal rich-deposit rewards");
+    require(io.referenceDrones.roleCount == 1
+            && io.referenceDrones.roles[0] == MiniDroneRole::Hazard
+            && io.referenceDrones.maximumMark == 1,
+        "Io should teach the commissioned Hazard Drone Mk I");
+}
+
 } // namespace
 
 int main()
@@ -454,6 +494,7 @@ int main()
     deterministicSeedsAndRewardProgressAreStable();
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
+    ioDestinationRulesAreThermalAndStoryLocked();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;
 }

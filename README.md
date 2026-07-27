@@ -8,15 +8,15 @@ OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications fo
 - Native SDL 3 application with direct Vulkan 1.3 rendering, a Vulkan RmlUi host, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
 - Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
-- Saved campaign and activity onboarding: New Game opens with the proving-flight brief, and the first launch, approach, flyby, orbit, landing, mining run, mini-drone encounter, and Prospector completion explain their progression value once without repeating on later saves.
-- Frontier ladder: prove Earth Orbit, then reach Moon, Mars, Jupiter, Saturn, Uranus, and Neptune in order before continuing to Khepri Prime and the Rift Belt. Each successful arrival unlocks exactly the next destination; flyby, orbit, landing, and mining remain optional.
+- Saved campaign and activity onboarding: New Game opens with the proving-flight brief, and mandatory saved objectives explicitly introduce the Moon Prospector contract, Mars bay expansion, Io lava recovery, and Jupiter-to-Saturn slingshot before their rewards can be claimed.
+- Frontier ladder: prove Earth Orbit, then reach Moon, Mars, the Jupiter system/Io, Saturn, Uranus, and Neptune in order before continuing to Khepri Prime and the Rift Belt. Moon and Mars mining contracts, the Io artifact, and a Perfect Jupiter Flyby are explicit route gates rather than implicit arrival rewards.
 - Arrival operations: flyby, orbit, and landing gates with saved first-use briefs. Perfect orbit rewards show both science and mission credits.
-- Post-arrival research and surface expeditions starting at Mars, including materials, artifacts, field upgrades, and extraction risk.
-- Mining mini-game with direct drone control, destructible chunked terrain, fog-of-war scanning, ore pockets, physical artifact tethering, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and return/abort decisions.
-- Shared surface fuel: the shuttle and mining drone draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, drones, and field upgrades can extend it up to the 120-second cap.
-- Deterministic mining progression: chapter and surface depth select an Act and level, teaching noncombat excavation in Act 1, passive-drone combat in Act 2, and counter-heavy mastery in Act 3 without scaling difficulty from the equipped loadout. Rich-material guarantees and caps share one reward ledger.
+- Post-arrival research and surface expeditions starting at the Moon, including materials, artifacts, field upgrades, and extraction risk.
+- Mining mini-game with direct Mining Rig control, autonomous Support Drones, destructible chunked terrain, fog-of-war scanning, ore pockets, physical artifact tethering, oxygen, drill integrity, a keyboard Toggle/Hold drill preference, thermal cutoff at 100% heat, and return/abort decisions.
+- Shared surface fuel: the shuttle and player-controlled Mining Rig draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, Support Drones, and field upgrades can extend it up to the 120-second cap.
+- Deterministic mining progression: chapter and surface depth select an Act and level, teaching noncombat excavation in Act 1, passive Support Drone combat in Act 2, and counter-heavy mastery in Act 3 without scaling difficulty from the equipped loadout. Rich-material guarantees and caps share one reward ledger.
 - Lock-and-key artifact sites: forecasted Hazard, Survey, Mining, Resource, Attack, and Defense capabilities can open deterministic gates, while most sites preserve systemic alternatives such as manual triangulation, route preparation, terrain cover, or encounter clearance.
-- The first mining contract reserves 3 safely recovered Common Ore to fabricate the Prospector Mk I, permanently unlocking one Mining Drone and one Drone Bay slot. Later research expands the bay with resource, survey, and hazard support; combat drones remain gated behind post-solar hostile-system progression.
+- The Moon contract reserves 3 safely recovered lunar Common Ore for Prospector Mk I and Drone Bay Slot 1. Mars reserves 4 local Common Ore for an empty Slot 2; Io then commissions the unique Hazard Support Drone. Resource and Survey Support Drones remain research unlocks, while Attack and Defense Support Drones remain gated behind post-solar hostile-system progression.
 - Permanent refit tracks: useful Flight Data or a successful arrival grants one saved shipyard opportunity. The pre-Moon ladder offers the next unique Reach, Control, and Recovery system; later boards return to randomized, role-diverse offers. Installed systems survive replacement ships even when expedition damage takes one offline.
 - Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. The first Ark jump reaches friendly Aaru Vale; the second causes Arkfall near hostile Khepri Prime, where Navigation, Ark fuel, and passive combat take over.
 - Harsh legacy failure: ship losses, astronaut memorials, expedition system outages, blueprint progress, and unlock variety without deleting permanent system ownership.
@@ -255,21 +255,21 @@ All player-facing screens in the native and web builds support standard-mapped X
 Use the on-screen mission-control buttons or their controller prompts:
 
 - Launch proving flights from the current frontier to bank flight data.
-- The yellow marker is the mission brief. Returning safely from farther beyond it brings home richer findings and more mission funding.
-- During flight, choose `Return home`, `Cut engines`, or `Eject`.
+- The yellow marker is the mission brief. Recovering safely from farther beyond it banks richer findings and more mission funding.
+- During inner-system flight, choose `Return to Earth`, `Cut engines`, or `Eject`. After the one-way Saturn commitment, recovery becomes `Recover to Expedition`; after the Straylight discovery, it becomes `Return to Ark`.
 - `Cut engines` lowers heat and vibration, slows the burn, and increases navigation drift.
 - `Relief valve` vents physical pressure at the cost of navigation drift, with a small failure/decompression risk.
-- `Jettison cargo` stabilizes fuel mix, but worsens navigation, vibration, and return-home risk.
+- `Jettison cargo` stabilizes fuel mix, but worsens navigation, vibration, and recovery risk.
 - Seeded telemetry incidents create temporary one-or-two-system spikes, so a bad PRESS, VIB, MIX, NAV, or ABORT read can become a short decision window rather than a guaranteed cascade.
 - New frontiers carry high mission pressure; repeated attempts and successful profiles reduce it, while pressure-control modules dampen the `PRESS` telemetry channel.
 - Useful Flight Data or a successful arrival earns one permanent refit opportunity; crashes, shallow returns, and already-capped data do not.
 - Before the Moon, choose the next unique Reach, Control, or Recovery upgrade, or keep the credits. Later refit boards return to randomized, role-diverse offers without duplicates.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.
-- Use Push Deeper through the frontier ladder only after enough proving data is banked.
-- Successful arrivals can open flyby/orbit/landing operations. Their first selections pause for saved, one-time briefs: flyby and orbit explain that blueprint progress unlocks permanent ship upgrades, while landing explains surface work. The first mining brief presents the 3-Common-Ore Prospector contract before deployment; safely extracted ore advances its saved objective, and completion receives a one-time `PROSPECTOR ONLINE` acknowledgment before the Mining Drone joins future digs.
-- Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the mining drone once per surface loop; after that, the drone is offline and deeper pushes are unavailable.
+- Use Push Deeper through the frontier ladder only after the current visible story objective and navigation readiness are complete.
+- Successful arrivals can open flyby/orbit/landing operations. Mandatory briefs present each early campaign gate before play: return 3 lunar Common Ore and explicitly install Prospector Mk I; return 4 Mars Common Ore and fabricate an empty second bay slot; commission the Hazard Support Drone Mk I on Io, cool and mine its lava seals, and safely extract the minor artifact; then score and claim a Perfect Jupiter slingshot to open Saturn. Objective strips distinguish carried, aboard, delivered, ready-to-claim, and completed states.
+- Surface Ops uses action kits for survey/push/extract decisions and shared fuel for mining. `Mine deposit` deploys the Mining Rig once per surface loop; after that, the rig is offline and deeper pushes are unavailable.
 - Mining keyboard controls: WASD/arrows move and face the rig, Space or mouse hold drills, `E` pulses the scanner, `T` tethers or releases an artifact, `R` leaves and banks the run while inside the ship ring, and Esc aborts.
-- Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South leaves and banks at the ship, LB/RB service the drill/rig, and holding East recalls. Combat drones remain passive and the drill remains forward-facing.
+- Mining controller controls: left stick moves and faces the rig, RT drills, West scans, North tethers, South leaves and banks at the ship, LB/RB service the drill/rig, and holding East recalls. Attack and Defense Support Drones remain autonomous and the drill remains forward-facing.
 
 ## Deploy to Azure Static Web Apps
 

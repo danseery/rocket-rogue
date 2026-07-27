@@ -307,6 +307,96 @@ void rr_acknowledge_prospector_completion()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_acknowledge_lunar_mining_briefing()
+{
+    if (g_app) {
+        g_app->acknowledgeLunarMiningBriefing();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_claim_lunar_prospector()
+{
+    if (g_app) {
+        g_app->claimLunarProspector();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_acknowledge_mars_mining_briefing()
+{
+    if (g_app) {
+        g_app->acknowledgeMarsMiningBriefing();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_claim_mars_bay_expansion()
+{
+    if (g_app) {
+        g_app->claimMarsBayExpansion();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_commission_io_hazard_drone()
+{
+    if (g_app) {
+        g_app->commissionIoHazardDrone();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_begin_saturn_slingshot()
+{
+    if (g_app) {
+        g_app->beginSaturnSlingshot();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_retry_saturn_slingshot()
+{
+    if (g_app) {
+        g_app->retrySaturnSlingshot();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_acknowledge_saturn_slingshot_failure()
+{
+    if (g_app) {
+        g_app->acknowledgeSaturnSlingshotFailure();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_claim_saturn_course()
+{
+    if (g_app) {
+        g_app->claimSaturnCourse();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_arrival_flyby()
 {
     if (g_app) {
@@ -577,6 +667,16 @@ void rr_upgrade_drone(int index)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_redeem_drone_upgrade_credit(int index)
+{
+    if (g_app) {
+        g_app->redeemDroneUpgradeCredit(index);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_upgrade_drone_slot()
 {
     if (g_app) {
@@ -601,6 +701,26 @@ void rr_mining_aim(double normalizedX, double normalizedY)
 {
     if (g_app) {
         g_app->miningAim(normalizedX, normalizedY);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_pointer_aim(double viewportX, double viewportY)
+{
+    if (g_app) {
+        g_app->miningPointerAim(viewportX, viewportY);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_fire(int active)
+{
+    if (g_app) {
+        g_app->miningFire(active != 0);
     }
 }
 
@@ -641,6 +761,26 @@ void rr_mining_tether()
 {
     if (g_app) {
         g_app->miningTether();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_operator_toggle()
+{
+    if (g_app) {
+        g_app->miningOperatorToggle();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_mining_operator_toggle_progress(double progress)
+{
+    if (g_app) {
+        g_app->miningOperatorToggleProgress(progress);
     }
 }
 

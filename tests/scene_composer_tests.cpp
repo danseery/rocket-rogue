@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #if defined(_MSC_VER) && defined(_DEBUG)
@@ -37,6 +38,29 @@ struct SceneComposerTestAccess {
         composer.beginFrame(snapshot);
         composer.finalizePacket();
         return composer.packet_;
+    }
+
+    static Color miningOreSparkleColor(
+        SceneComposer& composer,
+        MiningCellMaterial material)
+    {
+        RenderSnapshot snapshot;
+        composer.beginFrame(snapshot);
+        composer.drawMiningOreSparkle(
+            0.0F,
+            0.0F,
+            0.10F,
+            static_cast<int>(material),
+            0.0F,
+            0.0F);
+        composer.finalizePacket();
+        if (!composer.packet_.instances.empty()) {
+            return unpackSceneInstance(composer.packet_.instances.front()).color;
+        }
+        assert(!composer.packet_.vertices.empty());
+        const SceneVertex vertex =
+            unpackSceneVertex(composer.packet_.vertices.front());
+        return {vertex.r, vertex.g, vertex.b, vertex.a};
     }
 };
 
@@ -581,6 +605,12 @@ void testManifestAndLogicalTextureMapping()
     assert(capybara.sourceWidth == 1024U);
     assert(capybara.sourceHeight == 1024U);
     assert(capybara.frameCount == 1U);
+
+    const rocket::SceneAtlasTexture& jetpackCapybara =
+        rocket::kSceneAtlasTextures[rocket::textureIndex(TextureId::JetpackCapybara)];
+    assert(jetpackCapybara.sourceWidth >= 512U);
+    assert(jetpackCapybara.sourceHeight == jetpackCapybara.sourceWidth);
+    assert(jetpackCapybara.frameCount == 1U);
 }
 
 void testCampaignIntroductionDrawsHeroicCapybara()
@@ -878,7 +908,7 @@ void testAtlasPageBatchingAcrossLogicalTextures()
         TextureId::RocketClosed,
     };
     std::size_t logicalTextureIndex = 0;
-    const SceneDraw* sharedDraw = nullptr;
+    std::array<const SceneDraw*, logicalTextures.size()> logicalDraws {};
     for (const SceneDraw& draw : packet.draws) {
         if (draw.drawType != SceneDrawType::InstancedQuad) {
             continue;
@@ -900,20 +930,20 @@ void testAtlasPageBatchingAcrossLogicalTextures()
             assert(std::abs(actual.v0 - expected.v0) < tolerance);
             assert(std::abs(actual.u1 - expected.u1) < tolerance);
             assert(std::abs(actual.v1 - expected.v1) < tolerance);
-            if (sharedDraw == nullptr) {
-                sharedDraw = &draw;
-            } else {
-                assert(sharedDraw == &draw);
-            }
+            logicalDraws[logicalTextureIndex] = &draw;
             ++logicalTextureIndex;
         }
     }
     assert(logicalTextureIndex == logicalTextures.size());
-    assert(sharedDraw != nullptr);
-    assert(sharedDraw->texture == TextureId::RocketOpen);
-    assert(sharedDraw->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketOpen));
-    assert(sharedDraw->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::MiningDrone));
-    assert(sharedDraw->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketClosed));
+    assert(logicalDraws[0] != nullptr && logicalDraws[1] != nullptr && logicalDraws[2] != nullptr);
+    assert(logicalDraws[0]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketOpen));
+    assert(logicalDraws[1]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::MiningDrone));
+    assert(logicalDraws[2]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketClosed));
+    assert(logicalDraws[0] != logicalDraws[1]);
+    assert(logicalDraws[1] != logicalDraws[2]);
+    // RocketOpen and RocketClosed share a page, but the intervening rig page
+    // is an order barrier, so the renderer must not merge them out of order.
+    assert(logicalDraws[0] != logicalDraws[2]);
 }
 
 RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
@@ -1006,6 +1036,362 @@ SceneInstance miningDrillBitInstance(const ScenePacket& packet)
     return spriteInstance(packet, TextureId::DrillBit, 0.0F, 0.0F, 1.0F / 6.0F, 1.0F);
 }
 
+struct ScenePoint {
+    float x = 0.0F;
+    float y = 0.0F;
+};
+
+ScenePoint miningDrillCollar(const SceneInstance& drill)
+{
+    // The bit is drawn with forward = -drillDirection, so its positive axis-Y
+    // endpoint is the authored collar/root at the rig mount.
+    return {drill.centerX + drill.axisYx, drill.centerY + drill.axisYy};
+}
+
+void assertMiningDrillMounted(const SceneInstance& rig, const SceneInstance& drill)
+{
+    const float rigHalfHeight = std::hypot(rig.axisYx, rig.axisYy);
+    assert(rigHalfHeight > 0.001F);
+    const float forwardX = -rig.axisYx / rigHalfHeight;
+    const float forwardY = -rig.axisYy / rigHalfHeight;
+    const ScenePoint collar = miningDrillCollar(drill);
+    const float offsetX = collar.x - rig.centerX;
+    const float offsetY = collar.y - rig.centerY;
+    const float forwardOffset = offsetX * forwardX + offsetY * forwardY;
+    const float perpendicularOffset = offsetX * forwardY - offsetY * forwardX;
+    assert(std::abs(perpendicularOffset) < 0.0005F);
+    assert(std::abs(forwardOffset - rigHalfHeight * 2.0F * 0.18F) < 0.0005F);
+}
+
+std::vector<PackedSceneInstance> nonTexturedFrameInstances(const ScenePacket& packet)
+{
+    std::vector<PackedSceneInstance> result;
+    for (const PackedSceneInstance& packed : packet.instances) {
+        if (!rocket::unpackSceneInstance(packed).textured) {
+            result.push_back(packed);
+        }
+    }
+    return result;
+}
+
+bool samePackedInstances(
+    const std::vector<PackedSceneInstance>& left,
+    const std::vector<PackedSceneInstance>& right)
+{
+    return left.size() == right.size()
+        && (left.empty() || std::memcmp(
+            left.data(),
+            right.data(),
+            left.size() * sizeof(PackedSceneInstance)) == 0);
+}
+
+std::uint8_t miningMaterialMarkerSegments(rocket::MiningCellMaterial material)
+{
+    switch (material) {
+    case rocket::MiningCellMaterial::CommonOre:
+        return 6U;
+    case rocket::MiningCellMaterial::RareOre:
+        return 4U;
+    case rocket::MiningCellMaterial::ExoticVein:
+        return 3U;
+    default:
+        return 0U;
+    }
+}
+
+bool containsMiningMaterialMarker(
+    const ScenePacket& packet,
+    rocket::MiningCellMaterial material,
+    Color expectedColor)
+{
+    const std::uint8_t expectedSegments = miningMaterialMarkerSegments(material);
+    for (const PackedSceneInstance& packed : packet.instances) {
+        const SceneInstance instance = rocket::unpackSceneInstance(packed);
+        if (!instance.textured
+            && instance.shape == SceneInstanceShape::Polygon
+            && instance.segments == expectedSegments
+            && std::abs(instance.color.r - expectedColor.r) < 0.015F
+            && std::abs(instance.color.g - expectedColor.g) < 0.015F
+            && std::abs(instance.color.b - expectedColor.b) < 0.015F) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void testMiningEVAUsesDedicatedTextureWithoutFallback()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningOperatorPresent = true;
+    snapshot.miningOperatorActive = true;
+    snapshot.miningOperatorX = 2.0;
+    snapshot.miningOperatorY = 2.0;
+    snapshot.miningOperatorAimX = 1.0;
+    snapshot.miningOperatorAimY = 0.0;
+    snapshot.miningAnchorValid = true;
+    snapshot.miningAnchorX = snapshot.miningOperatorX;
+    snapshot.miningAnchorY = snapshot.miningOperatorY;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::MiningDrone, true);
+    composer.setTextureReady(TextureId::JetpackCapybara, true);
+    const ScenePacket& packet = composer.compose(snapshot);
+    assertValidDrawRanges(packet);
+    const SceneInstance rig = miningRigInstance(packet);
+    const SceneInstance suit = spriteInstance(
+        packet,
+        TextureId::JetpackCapybara,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F);
+    assert(std::abs(rig.centerX - suit.centerX) > 0.01F);
+    assert(std::abs(rig.centerY - suit.centerY) > 0.01F);
+
+    SceneComposer missingTextureComposer;
+    missingTextureComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    missingTextureComposer.setTextureReady(TextureId::MiningDrone, true);
+    const std::vector<PackedSceneInstance> missingTextureSolids =
+        nonTexturedFrameInstances(missingTextureComposer.compose(snapshot));
+
+    snapshot.miningOperatorPresent = false;
+    SceneComposer absentOperatorComposer;
+    absentOperatorComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    absentOperatorComposer.setTextureReady(TextureId::MiningDrone, true);
+    const ScenePacket& absentPacket = absentOperatorComposer.compose(snapshot);
+    const std::vector<PackedSceneInstance> absentOperatorSolids =
+        nonTexturedFrameInstances(absentPacket);
+    assert(samePackedInstances(missingTextureSolids, absentOperatorSolids));
+    assert(std::none_of(absentPacket.draws.begin(), absentPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::JetpackCapybara;
+    }));
+}
+
+void testMiningActiveAnchorOwnsDefenseEffects()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 0.5;
+    mining.droneY = 0.5;
+    mining.targetTipX = 2.0;
+    mining.targetTipY = 2.0;
+    rocket::MiningMiniDroneAgent defense;
+    defense.role = rocket::MiniDroneRole::Defense;
+    defense.behavior = rocket::MiningMiniDroneBehavior::Guarding;
+    defense.x = 3.0;
+    defense.y = 1.5;
+    defense.shieldCharge = 1.0;
+    mining.miniDrones.push_back(defense);
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningOperatorActive = true;
+    snapshot.miningOperatorPresent = false;
+    snapshot.miningOperatorX = 1.25;
+    snapshot.miningOperatorY = 1.25;
+    snapshot.miningAnchorValid = true;
+    snapshot.miningAnchorX = snapshot.miningOperatorX;
+    snapshot.miningAnchorY = snapshot.miningOperatorY;
+
+    const auto composeSolids = [](const RenderSnapshot& source) {
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        composer.setTextureReady(TextureId::MiningDrone, true);
+        composer.setTextureReady(TextureId::MiniDroneDefense, true);
+        return nonTexturedFrameInstances(composer.compose(source));
+    };
+
+    const std::vector<PackedSceneInstance> base = composeSolids(snapshot);
+    snapshot.miningDroneX = 2.75;
+    snapshot.miningDroneY = 2.75;
+    const std::vector<PackedSceneInstance> movedRig = composeSolids(snapshot);
+    assert(samePackedInstances(base, movedRig));
+
+    snapshot.miningOperatorX = 2.25;
+    snapshot.miningOperatorY = 2.25;
+    snapshot.miningAnchorX = snapshot.miningOperatorX;
+    snapshot.miningAnchorY = snapshot.miningOperatorY;
+    const std::vector<PackedSceneInstance> movedAnchor = composeSolids(snapshot);
+    assert(!samePackedInstances(base, movedAnchor));
+}
+
+void testMiningLooseChunksAreVisibleWorldEntities()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 1.0;
+    mining.droneY = 1.0;
+    mining.targetTipX = 1.0;
+    mining.targetTipY = 2.0;
+
+    RenderSnapshot baselineSnapshot = miningSnapshot(mining);
+    baselineSnapshot.miningShipPresent = false;
+    SceneComposer baselineComposer;
+    baselineComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& baseline = baselineComposer.compose(baselineSnapshot);
+    const std::size_t baselineVertices = baseline.vertices.size();
+    const std::size_t baselineInstances = baseline.instances.size();
+
+    const std::array<std::pair<rocket::MiningCellMaterial, Color>, 3> materials {{
+        {rocket::MiningCellMaterial::CommonOre, {0.74F, 0.78F, 0.84F, 1.0F}},
+        {rocket::MiningCellMaterial::RareOre, {1.0F, 0.74F, 0.24F, 1.0F}},
+        {rocket::MiningCellMaterial::ExoticVein, {0.78F, 0.42F, 1.0F, 1.0F}},
+    }};
+    for (const auto& [material, color] : materials) {
+        mining.looseChunks.clear();
+        rocket::MiningLooseChunk chunk;
+        chunk.material = material;
+        chunk.x = 2.0;
+        chunk.y = 2.0;
+        chunk.velocityX = 0.4;
+        chunk.velocityY = -0.2;
+        chunk.cargoValue = 2;
+        mining.looseChunks.push_back(chunk);
+        RenderSnapshot chunkSnapshot = miningSnapshot(mining);
+        chunkSnapshot.miningShipPresent = false;
+        SceneComposer chunkComposer;
+        chunkComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+        const ScenePacket& withChunk = chunkComposer.compose(chunkSnapshot);
+        assert(withChunk.vertices.size() >= baselineVertices);
+        assert(withChunk.instances.size() > baselineInstances);
+        assert(containsMiningMaterialMarker(withChunk, material, color));
+    }
+}
+
+void testMiningCellsAndScannerMarksUseMaterialSilhouettes()
+{
+    const std::array<std::pair<rocket::MiningCellMaterial, Color>, 3> materials {{
+        {rocket::MiningCellMaterial::CommonOre, {0.74F, 0.78F, 0.84F, 1.0F}},
+        {rocket::MiningCellMaterial::RareOre, {1.0F, 0.74F, 0.24F, 1.0F}},
+        {rocket::MiningCellMaterial::ExoticVein, {0.78F, 0.42F, 1.0F, 1.0F}},
+    }};
+    for (const auto& [material, color] : materials) {
+        rocket::MiningRunState mining;
+        mining.terrain.width = 4;
+        mining.terrain.height = 4;
+        mining.terrain.cells.resize(16);
+        mining.droneX = 0.5;
+        mining.droneY = 0.5;
+        mining.targetTipX = 0.5;
+        mining.targetTipY = 1.5;
+        mining.terrain.cells[5].material = rocket::MiningCellMaterial::Empty;
+        mining.terrain.cells[5].revealed = true;
+        mining.terrain.cells[6].material = material;
+        mining.terrain.cells[6].maxToughness = 1.0;
+        mining.terrain.cells[6].remainingToughness = 1.0;
+
+        RenderSnapshot scannerSnapshot = miningSnapshot(mining);
+        scannerSnapshot.miningShipPresent = false;
+        scannerSnapshot.miningScannerPulse = 0.9;
+        SceneComposer scannerComposer;
+        scannerComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+        const ScenePacket& scannerPacket = scannerComposer.compose(scannerSnapshot);
+        assert(containsMiningMaterialMarker(scannerPacket, material, color));
+
+        mining.terrain.cells[6].revealed = true;
+        RenderSnapshot cellSnapshot = miningSnapshot(mining);
+        cellSnapshot.miningShipPresent = false;
+        SceneComposer cellComposer;
+        cellComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+        const ScenePacket& cellPacket = cellComposer.compose(cellSnapshot);
+        assert(containsMiningMaterialMarker(cellPacket, material, color));
+    }
+}
+
+void testSurfaceScannerMarksUseMaterialSilhouettes()
+{
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::SurfaceScan;
+    snapshot.animationTime = 1.0;
+    snapshot.surfaceScanPulses = 1;
+    snapshot.surfaceScanMaxPulses = 3;
+    snapshot.surfaceScanPreviewMarkers = {
+        rocket::MiningCellMaterial::CommonOre,
+        rocket::MiningCellMaterial::RareOre,
+        rocket::MiningCellMaterial::ExoticVein,
+    };
+    snapshot.surfaceScanPreviewDepthOffsets = {0, 1, 2};
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& packet = composer.compose(snapshot);
+    assert(containsMiningMaterialMarker(
+        packet,
+        rocket::MiningCellMaterial::CommonOre,
+        {0.74F, 0.78F, 0.84F, 1.0F}));
+    assert(containsMiningMaterialMarker(
+        packet,
+        rocket::MiningCellMaterial::RareOre,
+        {1.0F, 0.74F, 0.24F, 1.0F}));
+    assert(containsMiningMaterialMarker(
+        packet,
+        rocket::MiningCellMaterial::ExoticVein,
+        {0.95F, 0.28F, 0.78F, 1.0F}));
+}
+
+Color miningTerrainMaterialColor(rocket::MiningCellMaterial material)
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 0.5;
+    mining.droneY = 0.5;
+    mining.targetTipX = 0.5;
+    mining.targetTipY = 1.5;
+    rocket::MiningCell& cell = mining.terrain.cells[5];
+    cell.material = material;
+    cell.maxToughness = 1.0;
+    cell.remainingToughness = 1.0;
+    cell.revealed = true;
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.destinationTier = 3;
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& packet = composer.compose(snapshot);
+    assert(!packet.miningTerrainInstances.empty());
+    return rocket::unpackSceneInstance(
+        packet.miningTerrainInstances.back()).color;
+}
+
+void testMiningOrePaletteMakesCommonSilverAndRareGold()
+{
+    const Color commonTerrain =
+        miningTerrainMaterialColor(rocket::MiningCellMaterial::CommonOre);
+    const Color rareTerrain =
+        miningTerrainMaterialColor(rocket::MiningCellMaterial::RareOre);
+    assert(commonTerrain.b >= commonTerrain.g
+        && commonTerrain.g >= commonTerrain.r
+        && commonTerrain.b - commonTerrain.r < 0.12F);
+    assert(rareTerrain.r > rareTerrain.g
+        && rareTerrain.g > rareTerrain.b
+        && rareTerrain.r - rareTerrain.b > 0.30F);
+
+    SceneComposer commonComposer;
+    const Color commonShimmer =
+        rocket::SceneComposerTestAccess::miningOreSparkleColor(
+            commonComposer,
+            rocket::MiningCellMaterial::CommonOre);
+    SceneComposer rareComposer;
+    const Color rareShimmer =
+        rocket::SceneComposerTestAccess::miningOreSparkleColor(
+            rareComposer,
+            rocket::MiningCellMaterial::RareOre);
+    assert(std::abs(commonShimmer.r - commonShimmer.g) < 0.08F
+        && std::abs(commonShimmer.g - commonShimmer.b) < 0.08F);
+    assert(rareShimmer.r > rareShimmer.g
+        && rareShimmer.g > rareShimmer.b
+        && rareShimmer.r - rareShimmer.b > 0.50F);
+}
+
 void testMiningRigSlerpsVerticalDuringExtraction()
 {
     rocket::MiningRunState mining = miningState(20.0, 20.0);
@@ -1082,6 +1468,7 @@ void testMiningRigStaysVisibleAndTracksHeading()
     const float firstDrillLength = std::hypot(firstDrill.axisYx, firstDrill.axisYy);
     assert((first.axisYx * firstDrill.axisYx + first.axisYy * firstDrill.axisYy)
         / (firstLength * firstDrillLength) > 0.999F);
+    assertMiningDrillMounted(first, firstDrill);
 
     // A large presentation-time step snaps to the new heading, avoiding the
     // intentional short steering Slerp while checking the opposite direction.
@@ -1107,6 +1494,7 @@ void testMiningRigStaysVisibleAndTracksHeading()
         - std::hypot(first.axisXx, first.axisXy)) < 0.001F);
     assert((reversed.axisYx * reversedDrill.axisYx + reversed.axisYy * reversedDrill.axisYy)
         / (reversedLength * reversedDrillLength) > 0.999F);
+    assertMiningDrillMounted(reversed, reversedDrill);
 
     // Diagonal steering must rotate the body and drill together rather than
     // leaving the body on either cardinal orientation.
@@ -1124,6 +1512,66 @@ void testMiningRigStaysVisibleAndTracksHeading()
     const float diagonalDrillLength = std::hypot(diagonalDrill.axisYx, diagonalDrill.axisYy);
     assert((diagonal.axisYx * diagonalDrill.axisYx + diagonal.axisYy * diagonalDrill.axisYy)
         / (diagonalLength * diagonalDrillLength) > 0.999F);
+    assertMiningDrillMounted(diagonal, diagonalDrill);
+}
+
+void testMiningRigDrillStaysMountedThroughRecoilAndExtension()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningHullDirX = 0.0;
+    snapshot.miningHullDirY = 1.0;
+    snapshot.miningMoveY = 1.0;
+    snapshot.miningTargetDrillable = false;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::MiningDrone, true);
+    composer.setTextureReady(TextureId::DrillBit, true);
+
+    composer.setPresentationTime(1.0);
+    const ScenePacket& restingPacket = composer.compose(snapshot);
+    const SceneInstance restingRig = miningRigInstance(restingPacket);
+    const SceneInstance restingDrill = miningDrillBitInstance(restingPacket);
+    const ScenePoint restingCollar = miningDrillCollar(restingDrill);
+    assertMiningDrillMounted(restingRig, restingDrill);
+
+    snapshot.miningBounce = 1.0;
+    snapshot.miningRecoilX = -1.0;
+    composer.setPresentationTime(1.016);
+    const ScenePacket& recoilPacket = composer.compose(snapshot);
+    const SceneInstance recoiledRig = miningRigInstance(recoilPacket);
+    const SceneInstance recoiledDrill = miningDrillBitInstance(recoilPacket);
+    const ScenePoint recoiledCollar = miningDrillCollar(recoiledDrill);
+    const float rigDeltaX = recoiledRig.centerX - restingRig.centerX;
+    const float rigDeltaY = recoiledRig.centerY - restingRig.centerY;
+    assert(std::hypot(rigDeltaX, rigDeltaY) > 0.001F);
+    assert(std::abs((recoiledCollar.x - restingCollar.x) - rigDeltaX) < 0.0005F);
+    assert(std::abs((recoiledCollar.y - restingCollar.y) - rigDeltaY) < 0.0005F);
+    assertMiningDrillMounted(recoiledRig, recoiledDrill);
+
+    snapshot.miningBounce = 0.0;
+    snapshot.miningRecoilX = 0.0;
+    composer.setPresentationTime(2.0);
+    const ScenePacket& shortPacket = composer.compose(snapshot);
+    const SceneInstance shortRig = miningRigInstance(shortPacket);
+    const SceneInstance shortDrill = miningDrillBitInstance(shortPacket);
+    const ScenePoint shortCollar = miningDrillCollar(shortDrill);
+
+    snapshot.miningTargetDrillable = true;
+    snapshot.miningTargetX = 1;
+    snapshot.miningTargetY = 32;
+    composer.setPresentationTime(2.016);
+    const ScenePacket& extendedPacket = composer.compose(snapshot);
+    const SceneInstance extendedRig = miningRigInstance(extendedPacket);
+    const SceneInstance extendedDrill = miningDrillBitInstance(extendedPacket);
+    const ScenePoint extendedCollar = miningDrillCollar(extendedDrill);
+    assert(std::hypot(extendedDrill.axisYx, extendedDrill.axisYy)
+        > std::hypot(shortDrill.axisYx, shortDrill.axisYy) + 0.001F);
+    assert(std::abs(extendedCollar.x - shortCollar.x) < 0.0005F);
+    assert(std::abs(extendedCollar.y - shortCollar.y) < 0.0005F);
+    assertMiningDrillMounted(shortRig, shortDrill);
+    assertMiningDrillMounted(extendedRig, extendedDrill);
 }
 
 rocket::MiningRunState miningState(double inactiveEnemyX, double activeEnemyX)
@@ -1310,8 +1758,15 @@ int main()
     testOrderedBatchingAndWideLineInstancing();
     testUniformAndGradientLineOrdering();
     testAtlasPageBatchingAcrossLogicalTextures();
+    testMiningEVAUsesDedicatedTextureWithoutFallback();
+    testMiningActiveAnchorOwnsDefenseEffects();
+    testMiningLooseChunksAreVisibleWorldEntities();
+    testMiningCellsAndScannerMarksUseMaterialSilhouettes();
+    testSurfaceScannerMarksUseMaterialSilhouettes();
+    testMiningOrePaletteMakesCommonSilverAndRareGold();
     testMiningRigSlerpsVerticalDuringExtraction();
     testMiningRigStaysVisibleAndTracksHeading();
+    testMiningRigDrillStaysMountedThroughRecoilAndExtension();
     testFrameViewsKeepAuthoritativeEnemyIndices();
     testMiningTerrainPersistentStreamInvalidation();
     return 0;

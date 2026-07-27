@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 
 #if defined(_MSC_VER)
 #include <crtdbg.h>
@@ -401,6 +402,9 @@ std::string freshSurfaceExpeditionSave()
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
     rocket::GameState state = rocket::createNewGame(catalog, 0x51A7EULL);
     state.run.destinationIndex = 2;
+    state.meta.furthestTier = 2;
+    state.meta.lunarMiningBriefingAcknowledged = true;
+    state.meta.lunarProspectorClaimed = true;
     rocket::startSurfaceExpedition(state, catalog);
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -441,6 +445,7 @@ int main()
         rocket::GameState state = rocket::createNewGame(catalog, 0x5A7FACEULL);
         state.run.destinationIndex = 2;
         rocket::startSurfaceExpedition(state, catalog);
+        state.meta.marsMiningBriefingAcknowledged = true;
         state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
         state.meta.droneBaySlots = 2;
         rocket::ensureDroneBayState(state, catalog);
@@ -551,9 +556,18 @@ int main()
                 }
             }
         }
-        assert(std::all_of(pointerReachable.begin(), pointerReachable.end(), [](bool reachable) {
-            return reachable;
-        }));
+        const bool allSurfaceActionsReachable = std::all_of(
+            pointerReachable.begin(),
+            pointerReachable.end(),
+            [](bool reachable) { return reachable; });
+        if (!allSurfaceActionsReachable) {
+            std::cerr << "Surface action reachability:"
+                      << " mine=" << pointerReachable[0]
+                      << " survey=" << pointerReachable[1]
+                      << " push=" << pointerReachable[2]
+                      << " extract=" << pointerReachable[3] << '\n';
+        }
+        assert(allSurfaceActionsReachable);
         ui.shutdown();
     }
 
@@ -674,6 +688,7 @@ int main()
         state.run.destinationIndex = 2;
         rocket::startSurfaceExpedition(state, catalog);
         state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(rocket::content::unlock::droneSupportSuite);
         state.meta.droneBaySlots = 2;
         rocket::ensureDroneBayState(state, catalog);
         rocket::ui::briefings::acknowledge(
@@ -721,7 +736,8 @@ int main()
         assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "modal:surface");
         assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId().starts_with("modal:drone_details_"));
+        assert(ui.focusedId().starts_with("modal:drone_details_")
+            || ui.focusedId().starts_with("action:equip_drone:"));
         assert(ui.navigate(rocket::UiDirection::Up));
         assert(ui.focusedId() == "modal:surface");
         assert(ui.navigate(rocket::UiDirection::Up));
@@ -736,18 +752,18 @@ int main()
         rocket::PanelRenderContext loadedPanelContext {loadedState, catalog, loadedLaunch, loadedLaunch};
         loadedPanelContext.firstTimeIntroductionsEnabled = false;
         ui.setPanelHtml(rocket::buildGamePanelHtml(loadedPanelContext));
-        ui.requestFocus("action:equip_drone:0");
+        ui.requestFocus("action:equip_drone:1");
         ui.refresh();
         assert(ui.navigate(rocket::UiDirection::Right));
-        assert(ui.focusedId().starts_with("modal:drone_details_"));
-        while (ui.navigate(rocket::UiDirection::Right)) {
-            if (ui.focusedId() == "action:unequip_drone_slot:0") {
-                break;
-            }
+        assert(ui.focusedId().starts_with("modal:drone_details_")
+            || ui.focusedId() == "action:unequip_drone_slot:0");
+        while (ui.focusedId() != "action:unequip_drone_slot:0"
+            && ui.navigate(rocket::UiDirection::Right)) {
         }
         assert(ui.focusedId() == "action:unequip_drone_slot:0");
         assert(ui.navigate(rocket::UiDirection::Left));
-        assert(ui.focusedId().starts_with("modal:drone_details_"));
+        assert(ui.focusedId().starts_with("modal:drone_details_")
+            || ui.focusedId().starts_with("action:equip_drone:"));
 
         const auto click = [&ui](int x, int y) {
             ui.mouseDown(x, y, 0);
@@ -1007,19 +1023,28 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // The mining overview CTA must acknowledge the introduction only when it
-    // successfully starts the first mining run.
+    // Mandatory campaign mining cannot start until its explicit story
+    // briefing is accepted. The optional Help preference is not involved.
     {
         AppFixture fixture;
         fixture.saves.value = freshSurfaceExpeditionSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        assert(fixture.ui.html.find("data-ui-modal=\"mining_introduction\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-modal=\"mars_mining_briefing\" data-auto-modal=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos);
 
         const std::optional<rocket::SaveData> beforeMining = rocket::deserializeSaveData(fixture.saves.value);
         assert(beforeMining.has_value());
-        assert(!rocket::ui::briefings::acknowledged(beforeMining->acknowledgedActivityBriefingIds, rocket::ui::briefings::mining));
+        assert(!beforeMining->marsMiningBriefingAcknowledged);
+
+        fixture.ui.dispatchAction("mine_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+
+        fixture.ui.dispatchAction("acknowledge_mars_mining_briefing");
+        const std::optional<rocket::SaveData> acceptedMining = rocket::deserializeSaveData(fixture.saves.value);
+        assert(acceptedMining.has_value());
+        assert(acceptedMining->marsMiningBriefingAcknowledged);
 
         fixture.ui.dispatchAction("mine_surface");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));

@@ -38,6 +38,7 @@ private:
     void drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace = true);
     void drawCircle(float cx, float cy, float radius, Color color, int segments = 36, bool worldSpace = true);
     void drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments = 48, bool worldSpace = true);
+    void drawMiningMaterialMarker(float cx, float cy, float radius, int material, Color color, bool worldSpace = true);
     void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age);
@@ -178,6 +179,9 @@ private:
     float miningVisualRecoilY_ = 0.0F;
     double miningVisualHeadingTime_ = -1.0;
     bool miningVisualHeadingInitialized_ = false;
+    bool miningOperatorModeInitialized_ = false;
+    bool previousMiningOperatorActive_ = false;
+    double miningOperatorTogglePulseStartedAt_ = -1.0;
     float sceneCssWidth_ = 1280.0F;
     float sceneCssHeight_ = 720.0F;
     float scenePixelLeft_ = 0.0F;

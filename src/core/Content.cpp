@@ -275,10 +275,10 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.miniDrones = {
-        miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the main rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
+        miniDrone(content::drone::miningDrone, "Prospector Support Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
         miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneSupportSuite, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneSupportSuite, {"exploration", "navigation"}),
-        miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::droneSupportSuite, {"engineering", "remediation"}),
+        miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::ioHazardDrone, {"engineering", "remediation"}),
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
         miniDrone(content::drone::defenseDrone, "Defense Drone", "Holds a rotating charged shield arc, recharges after a break, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
@@ -289,7 +289,7 @@ ContentCatalog createDefaultContent()
         researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
         researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner blueprints.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
         researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
-        researchProject(content::research::droneBayProgram, "Drone Support Program", "Expand the Prospector cradle for helper drones that support scouting, logistics, and hazard work.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneSupportSuite, {"surface", "drone", "logistics"}),
+        researchProject(content::research::droneBayProgram, "Drone Support Program", "Expand the Prospector cradle for support drones that handle scouting and logistics.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneSupportSuite, {"surface", "drone", "logistics"}),
         researchProject(content::research::cargoReturnRig, "Cargo Return Rig", "Prototype restraint frames that make heavier payloads less terrifying to extract.", Rarity::Uncommon, 2, 3, {.common = 3}, content::unlock::recovery, content::unlock::cargoRigs, {"surface", "extraction"}),
         researchProject(content::research::prototypeSchematic, "Prototype Schematic", "Use rare samples to unlock experimental ship components.", Rarity::Rare, 2, 4, {.common = 1, .rare = 1}, content::unlock::starter, content::unlock::thermal, {"prototype", "ship"}),
         researchProject(content::research::xenogeologyProgram, "Xenogeology Program", "Study outer-system deposits for deep-space unlocks.", Rarity::Rare, 3, 5, {.rare = 2}, content::unlock::deepSpace, content::unlock::ai, {"materials", "deep_space"}),
@@ -314,15 +314,15 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.destinations = {
-        {content::destination::earthOrbit, "Earth Orbit", 0, 1.45, 1.05, 2.25, 12.0, 0.65, content::unlock::starter},
-        {content::destination::moon, "Moon", 1, 1.95, 1.10, 3.10, 20.0, 0.95, content::unlock::starter},
-        {content::destination::mars, "Mars", 2, 2.65, 1.15, 4.15, 34.0, 1.35, content::unlock::starter},
-        {content::destination::jupiter, "Jupiter", 3, 3.15, 1.18, 5.00, 44.0, 1.55, content::unlock::deepSpace},
-        {content::destination::saturn, "Saturn", 4, 3.45, 1.20, 5.40, 52.0, 1.70, content::unlock::deepSpace},
-        {content::destination::uranus, "Uranus", 5, 3.80, 1.22, 5.85, 62.0, 1.85, content::unlock::deepSpace},
-        {content::destination::neptune, "Neptune", 6, 4.20, 1.24, 6.35, 76.0, 2.05, content::unlock::deepSpace},
-        {content::destination::nearbyStar, "Khepri Prime", 7, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace},
-        {content::destination::nearbyGalaxy, "Rift Belt", 8, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic}
+        {content::destination::earthOrbit, "Earth Orbit", 0, 1.45, 1.05, 2.25, 12.0, 0.65, content::unlock::starter, 0.0, 1.0, 0.15},
+        {content::destination::moon, "Moon", 1, 1.95, 1.10, 3.10, 20.0, 0.95, content::unlock::starter, 0.0, 1.0, 0.35},
+        {content::destination::mars, "Mars", 2, 2.65, 1.15, 4.15, 34.0, 1.35, content::unlock::starter, 0.0, 1.0, 0.60},
+        {content::destination::jupiter, "Jupiter", 3, 3.15, 1.18, 5.00, 44.0, 1.55, content::unlock::deepSpace, 0.0, 1.0, 1.15},
+        {content::destination::saturn, "Saturn", 4, 3.45, 1.20, 5.40, 52.0, 1.70, content::unlock::deepSpace, 0.0, 1.0, 0.95},
+        {content::destination::uranus, "Uranus", 5, 3.80, 1.22, 5.85, 62.0, 1.85, content::unlock::deepSpace, 0.0, 1.0, 0.80},
+        {content::destination::neptune, "Neptune", 6, 4.20, 1.24, 6.35, 76.0, 2.05, content::unlock::deepSpace, 0.0, 1.0, 1.05},
+        {content::destination::nearbyStar, "Khepri Prime", 7, 5.10, 1.25, 7.85, 88.0, 2.45, content::unlock::deepSpace, 0.0, 1.0, 1.20},
+        {content::destination::nearbyGalaxy, "Rift Belt", 8, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic, 0.0, 1.0, 0.25}
     };
 
     return catalog;
@@ -378,6 +378,9 @@ std::string unlockDisplayName(std::string_view key)
     if (key == content::unlock::droneSupportSuite) {
         return "Drone support suite";
     }
+    if (key == content::unlock::ioHazardDrone) {
+        return "Io hazard drone";
+    }
     return {};
 }
 
@@ -393,6 +396,11 @@ bool isCrewUpgradeUnlocked(const MetaProgress& meta, const CrewUpgrade& upgrade)
 
 bool isMiniDroneUnlocked(const MetaProgress& meta, const MiniDrone& drone)
 {
+    if (drone.id == content::drone::hazardDrone
+        && hasUnlock(meta, content::unlock::droneSupportSuite)
+        && std::find(meta.ownedDroneIds.begin(), meta.ownedDroneIds.end(), drone.id) != meta.ownedDroneIds.end()) {
+        return true;
+    }
     return hasUnlock(meta, drone.unlockKey);
 }
 

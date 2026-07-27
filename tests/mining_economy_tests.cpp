@@ -7,6 +7,8 @@
 #include "core/SaveData.h"
 #include "core/Tuning.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
@@ -210,6 +212,231 @@ void oxygenCapacityHasAHardCeiling()
         "combined upgrades should never exceed the 120-second mining oxygen ceiling");
 }
 
+void regolithNeverProducesCommonOre()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 707);
+    prepareSurface(state, content::destination::mars);
+    require(startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 3, 0xD17AULL},
+                false)
+            .applied,
+        "regolith reward test arena should start");
+
+    MiningRunState& mining = state.run.mining;
+    mining.cellsBroken = 3;
+    mining.droneX = 32.0;
+    mining.droneY = 4.0;
+    setMiningMove(state, 1.0, 0.0);
+    setMiningMove(state, 0.0, 0.0);
+    MiningCell* dirt = miningCellAt(mining.terrain, 33, 4);
+    require(dirt != nullptr, "regolith reward test cell should exist");
+    *dirt = {
+        MiningCellMaterial::Regolith,
+        0.01,
+        0.01,
+        true,
+        false
+    };
+    const MaterialInventory before = mining.temporaryMaterials;
+    setMiningDrilling(state, true);
+    for (int tick = 0;
+         tick < 8 && dirt->material != MiningCellMaterial::Empty;
+         ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(dirt->material == MiningCellMaterial::Empty,
+        "regolith reward test cell should be drilled");
+    require(mining.temporaryMaterials.common == before.common
+            && mining.temporaryMaterials.rare == before.rare
+            && mining.temporaryMaterials.exotic == before.exotic,
+        "breaking the old fourth-cell threshold should still award nothing from regolith");
+}
+
+void ioTerrainAndArtifactSealAreDeterministic()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const MiningArenaRequest request {
+        MiningAct::ActOne,
+        7,
+        0x10A510A5ULL
+    };
+    auto makeIoState = [&](std::uint64_t stateSeed) {
+        GameState state = createNewGame(catalog, stateSeed);
+        state.meta.ioHazardDroneCommissioned = true;
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+        state.meta.droneBaySlots = 2;
+        state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
+        state.meta.equippedDroneIds.push_back(content::drone::hazardDrone);
+        state.meta.droneUpgrades.push_back({content::drone::hazardDrone, 1});
+        prepareSurface(state, content::destination::jupiter);
+        state.run.surfaceExpedition.prospectMaterials = {
+            .common = 5,
+            .rare = 2,
+            .exotic = 1
+        };
+        require(startMiningRun(state, catalog, request, true).applied,
+            "Io story arena should start");
+        return state;
+    };
+
+    GameState first = makeIoState(808);
+    GameState second = makeIoState(909);
+    MiningRunState& mining = first.run.mining;
+    const MiningRunState& repeat = second.run.mining;
+    require(mining.terrain.cells.size() == repeat.terrain.cells.size(),
+        "matching Io arena requests should produce matching terrain sizes");
+    require(mining.oxygenSeconds >= tuning::mining::ioArtifactOxygenSeconds,
+        "the fixed Io artifact expedition should start with at least 60 seconds of oxygen");
+    require(mining.artifact.present
+            && mining.artifact.rewardType == ArtifactRewardType::DroneUpgradeCredit
+            && mining.artifact.kind == ArtifactKind::Boost,
+        "the Io artifact should grant a drone credit without using Ark story-artifact semantics");
+    require(mining.gate.outerShellTilesTotal == 4
+            && mining.gate.outerShellTilesRemaining == 4
+            && mining.gate.innerShellTilesTotal == 4
+            && mining.gate.innerShellTilesRemaining == 4,
+        "the Io artifact should begin behind staged four-segment outer and inner seals");
+
+    int thermalLava = 0;
+    for (std::size_t index = 0;
+         index < mining.terrain.cells.size();
+         ++index) {
+        const MiningCell& cell = mining.terrain.cells[index];
+        const MiningCell& repeated = repeat.terrain.cells[index];
+        require(cell.material == repeated.material
+                && cell.hazardAffinity == repeated.hazardAffinity,
+            "matching Io arena requests should reproduce material and affinity placement");
+        require(cell.material != MiningCellMaterial::CommonOre
+                && cell.material != MiningCellMaterial::RareOre
+                && cell.material != MiningCellMaterial::ExoticVein,
+            "Io should contain no directly generated ore deposits");
+        if (cell.material == MiningCellMaterial::HazardPocket) {
+            ++thermalLava;
+            require(cell.hazardAffinity == MiningElementalAffinity::Thermal,
+                "every Io lava pocket should use the Thermal affinity");
+        }
+    }
+    require(thermalLava > mining.gate.shellTilesTotal,
+        "Io should contain deterministic mineable lava beyond the story seal");
+
+    const int anchorX = static_cast<int>(std::floor(mining.gate.anchorX));
+    const int anchorY = static_cast<int>(std::floor(mining.gate.anchorY));
+    constexpr std::array<std::pair<int, int>, 4> innerOffsets {{
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1}
+    }};
+    for (const auto& [dx, dy] : innerOffsets) {
+        const MiningCell* inner = miningCellAt(
+            mining.terrain,
+            anchorX + dx,
+            anchorY + dy);
+        require(inner != nullptr && !inner->revealed,
+            "the inner Io seal should remain hidden while the outer seal stands");
+    }
+
+    constexpr std::array<std::pair<int, int>, 4> outerOffsets {{
+        {0, -2}, {2, 0}, {0, 2}, {-2, 0}
+    }};
+    for (const auto& [dx, dy] : outerOffsets) {
+        MiningCell* outer = miningCellAt(
+            mining.terrain,
+            anchorX + dx,
+            anchorY + dy);
+        require(outer != nullptr, "outer Io seal segment should exist");
+        *outer = {};
+    }
+    mining.gate.derivedStateDirty = true;
+    updateMiningRun(first, catalog, 0.01);
+    require(mining.gate.outerShellTilesRemaining == 0
+            && mining.gate.innerShellTilesRemaining == 4,
+        "clearing the outer seal should expose but not complete the inner seal");
+    for (const auto& [dx, dy] : innerOffsets) {
+        const MiningCell* inner = miningCellAt(
+            mining.terrain,
+            anchorX + dx,
+            anchorY + dy);
+        require(inner != nullptr && inner->revealed,
+            "all four inner Io seal segments should reveal together");
+    }
+}
+
+void ioLavaAlwaysCoolsIntoMineableCommonOre()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1001);
+    state.meta.ioHazardDroneCommissioned = true;
+    state.meta.unlockKeys = {
+        content::unlock::droneBay,
+        content::unlock::ioHazardDrone
+    };
+    state.meta.droneBaySlots = 2;
+    state.meta.ownedDroneIds = {content::drone::hazardDrone};
+    state.meta.equippedDroneIds = {content::drone::hazardDrone};
+    state.meta.droneUpgrades = {{content::drone::hazardDrone, 1}};
+    prepareSurface(state, content::destination::jupiter);
+    require(startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 7, 0x1A7AULL},
+                true)
+            .applied,
+        "Io lava treatment arena should start");
+
+    MiningRunState& mining = state.run.mining;
+    const int targetX = std::clamp(
+        static_cast<int>(std::floor(mining.droneX)) + 1,
+        1,
+        mining.terrain.width - 2);
+    const int targetY = std::clamp(
+        static_cast<int>(std::floor(mining.droneY)) + 2,
+        1,
+        mining.terrain.height - 2);
+    for (int y = std::max(1, targetY - 7);
+         y <= std::min(mining.terrain.height - 2, targetY + 7);
+         ++y) {
+        for (int x = std::max(1, targetX - 7);
+             x <= std::min(mining.terrain.width - 2, targetX + 7);
+             ++x) {
+            MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            if (cell != nullptr && cell->material == MiningCellMaterial::HazardPocket
+                && !cell->gateAssociated) {
+                *cell = {
+                    MiningCellMaterial::Regolith,
+                    1.0,
+                    1.0,
+                    true,
+                    false
+                };
+            }
+        }
+    }
+    MiningCell* lava = miningCellAt(mining.terrain, targetX, targetY);
+    require(lava != nullptr, "Io lava treatment test cell should exist");
+    *lava = {
+        MiningCellMaterial::HazardPocket,
+        1.0,
+        1.0,
+        true,
+        true
+    };
+    lava->hazardAffinity = MiningElementalAffinity::Thermal;
+    const MaterialInventory before = mining.temporaryMaterials;
+    for (int tick = 0;
+         tick < 300 && lava->material == MiningCellMaterial::HazardPocket;
+         ++tick) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    require(lava->material == MiningCellMaterial::CommonOre
+            && lava->revealed
+            && !lava->hazard,
+        "Io Thermal lava should deterministically cool into a mineable gray Common Ore cell");
+    require(mining.temporaryMaterials.common == before.common,
+        "Hazard treatment should create ore for drilling rather than award it immediately");
+}
+
 } // namespace
 
 int main()
@@ -220,6 +447,9 @@ int main()
         firstClearCreditsOnlyExtractedMiningMaterials();
         rewardLedgerAndPendingCreditRoundTrip();
         oxygenCapacityHasAHardCeiling();
+        regolithNeverProducesCommonOre();
+        ioTerrainAndArtifactSealAreDeterministic();
+        ioLavaAlwaysCoolsIntoMineableCommonOre();
         std::cout << "Mining economy tests passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception& error) {

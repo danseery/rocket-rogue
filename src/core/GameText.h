@@ -46,11 +46,11 @@ inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault con
 inline constexpr std::string_view surfaceUnexpectedDeposit = "Field team uncovered an unexpected deposit.";
 inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added a blueprint lead.";
 inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced the field team into a defensive retreat.";
-inline constexpr std::string_view miningStarted = "Mining drone deployed. Mine outward, return to the ship to bank and refill oxygen, then leave or push again.";
+inline constexpr std::string_view miningStarted = "Mining Rig deployed. Mine outward, return to the ship to bank and refill oxygen, then leave or push again.";
 inline constexpr std::string_view miningStowed = "Payload banked at ship. Oxygen replenished.";
 inline constexpr std::string_view miningAborted = "Emergency recall fired. Banked payload is safe; carried payload was lost.";
 inline constexpr std::string_view miningDrillFailed = "Drill offline. Return, bank, tether, or recall.";
-inline constexpr std::string_view miningOxygenFailed = "O2 depleted: drone health draining.";
+inline constexpr std::string_view miningOxygenFailed = "O2 depleted: Mining Rig integrity draining.";
 inline constexpr std::string_view miningThermalHazard = "Thermal pocket contact: rig plating is taking damage. Back away while the Hazard Drone treats it.";
 inline constexpr std::string_view miningCryoHazard = "Cryo pocket contact: rig movement is impaired. Clear the pocket or route around it.";
 inline constexpr std::string_view miningToxicHazard = "Toxic pocket contact: drill integrity is degrading. Clear the pocket or route around it.";
@@ -58,9 +58,9 @@ inline constexpr std::string_view miningRadiationHazard = "Radiation pocket cont
 inline constexpr std::string_view miningReturnToShip = "Return to ship to bank haul and replenish oxygen.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
 inline constexpr std::string_view launchCrewBlocked = "Choose a pilot before launch.";
-inline constexpr std::string_view droneStowing = "Mining drone transfer in progress. Press launch now to queue the burn for bay seal.";
-inline constexpr std::string_view launchQueued = "Launch queued. The burn will begin as soon as the mining drone is secured and the bay seals.";
-inline constexpr std::string_view preflightReady = "Mining drone secured. Bay sealed and launch control online.";
+inline constexpr std::string_view droneStowing = "Mining Rig transfer in progress. Press launch now to queue the burn for bay seal.";
+inline constexpr std::string_view launchQueued = "Launch queued. The burn will begin as soon as the Mining Rig is secured and the bay seals.";
+inline constexpr std::string_view preflightReady = "Mining Rig secured. Bay sealed and launch control online.";
 inline constexpr std::string_view preflightReadyWithoutDrone = "Flight systems checked. Bay sealed and launch control online.";
 inline constexpr std::string_view provingBurnStarted = "Proving burn underway. Return to Earth to bank data; eject only when the vehicle leaves you no choice.";
 inline constexpr std::string_view transferBurnStarted = "Transfer attempt committed. Survive to the required burn, or abort before the ship decides for you.";
@@ -73,35 +73,55 @@ inline constexpr std::string_view enginesCut = "Engines cut. Cooler burn, less v
 inline constexpr std::string_view transferBurnStable = "Transfer burn stable. Survive to the required burn or abort.";
 inline constexpr std::string_view dataGoalReached = "Data goal reached. Return to Earth now, or overburn for extra telemetry.";
 inline constexpr std::string_view provingBurnStable = "Proving burn stable. Push for more data or return to Earth.";
-inline std::string provingBurnStartedForHome(bool arkKnown)
+inline std::string provingBurnStartedForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Proving burn underway. Return to Ark to bank data; eject only when the vehicle leaves you no choice."
-        : std::string(provingBurnStarted);
+    if (arkKnown) {
+        return "Proving burn underway. Return to Ark to bank data; eject only when the vehicle leaves you no choice.";
+    }
+    if (outerExpedition) {
+        return "Proving burn underway. Recover to expedition staging to bank data; eject only when the vehicle leaves you no choice.";
+    }
+    return std::string(provingBurnStarted);
 }
-inline std::string fuelReserveGoneForHome(bool arkKnown)
+inline std::string fuelReserveGoneForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Fuel reserve is gone. Coasting back to the Ark on gravity and uncomfortable math."
-        : std::string(fuelReserveGone);
+    if (arkKnown) {
+        return "Fuel reserve is gone. Coasting back to the Ark on gravity and uncomfortable math.";
+    }
+    if (outerExpedition) {
+        return "Fuel reserve is gone. Coasting back to expedition staging on gravity and uncomfortable math.";
+    }
+    return std::string(fuelReserveGone);
 }
-inline std::string coastingHomeForHome(bool arkKnown)
+inline std::string coastingHomeForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Coasting back to the Ark. No thrust, less control, plenty of silence."
-        : std::string(coastingHome);
+    if (arkKnown) {
+        return "Coasting back to the Ark. No thrust, less control, plenty of silence.";
+    }
+    if (outerExpedition) {
+        return "Coasting back to expedition staging. No thrust, less control, plenty of silence.";
+    }
+    return std::string(coastingHome);
 }
-inline std::string dataGoalReachedForHome(bool arkKnown)
+inline std::string dataGoalReachedForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Data goal reached. Return to Ark now, or overburn for extra telemetry."
-        : std::string(dataGoalReached);
+    if (arkKnown) {
+        return "Data goal reached. Return to Ark now, or overburn for extra telemetry.";
+    }
+    if (outerExpedition) {
+        return "Data goal reached. Recover to expedition staging now, or overburn for extra telemetry.";
+    }
+    return std::string(dataGoalReached);
 }
-inline std::string provingBurnStableForHome(bool arkKnown)
+inline std::string provingBurnStableForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Proving burn stable. Push for more data or return to Ark."
-        : std::string(provingBurnStable);
+    if (arkKnown) {
+        return "Proving burn stable. Push for more data or return to Ark.";
+    }
+    if (outerExpedition) {
+        return "Proving burn stable. Push for more data or recover to expedition staging.";
+    }
+    return std::string(provingBurnStable);
 }
 inline constexpr std::string_view engineCutConfirmed = "Engine cut confirmed. Ship is running cooler, but guidance drift is widening.";
 inline constexpr std::string_view thrustRestored = "Thrust restored. Burn is climbing again, and so are the hot systems.";
@@ -184,7 +204,7 @@ inline constexpr std::string_view arkFuel = "Ark fuel";
 inline constexpr std::string_view sharedFuel = "Shared fuel";
 inline constexpr std::string_view drillHeat = "Drill heat";
 inline constexpr std::string_view drillIntegrity = "Drill integrity";
-inline constexpr std::string_view droneHealth = "Drone health";
+inline constexpr std::string_view droneHealth = "Rig health";
 inline constexpr std::string_view drillBit = "Drill bit";
 inline constexpr std::string_view carried = "Carried";
 inline constexpr std::string_view banked = "Banked";
@@ -209,9 +229,9 @@ inline std::string_view reserveLabel(bool arkKnown)
 inline std::string deployDetail(bool arkKnown)
 {
     if (arkKnown) {
-        return " Deploying the drone spends the same Ark reserve used for shuttle routes.";
+        return " Deploying the Mining Rig spends the same Ark reserve used for shuttle routes.";
     }
-    return " Deploying the drone uses the same shared fuel supply as the shuttle.";
+    return " Deploying the Mining Rig uses the same shared fuel supply as the shuttle.";
 }
 
 inline std::string blocked(bool arkKnown)
@@ -224,16 +244,16 @@ inline std::string availability(bool arkKnown)
     return arkKnown ? "Ark fuel ready" : "Shared fuel ready";
 }
 
-inline constexpr std::string_view offline = "Mining drone offline";
+inline constexpr std::string_view offline = "Mining Rig offline";
 
 inline std::string drawDetail(bool arkKnown)
 {
     const std::string cadence = "1 " + std::string(reserveLabel(arkKnown)) +
         " on deploy, then 1 whenever the fuel cycle completes while oxygen remains.";
     if (arkKnown) {
-        return cadence + " Returning to the Ark replenishes the shuttle and drone from Ark reserves.";
+        return cadence + " Returning to the Ark replenishes the shuttle and Mining Rig from Ark reserves.";
     }
-    return cadence + " Returning to base replenishes the shuttle and drone.";
+    return cadence + " Returning to base replenishes the shuttle and Mining Rig.";
 }
 
 inline std::string miningRunTarget(bool arkKnown)
@@ -247,30 +267,30 @@ inline std::string miningRunTarget(bool arkKnown)
 inline std::string miningBlockedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Ark fuel reserve is empty. Recover fuel before deploying the mining drone.";
+        return "Ark fuel reserve is empty. Recover fuel before deploying the Mining Rig.";
     }
-    return "Shared fuel is empty. Return to base before deploying the mining drone.";
+    return "Shared fuel is empty. Return to base before deploying the Mining Rig.";
 }
 
 inline std::string miningFailedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Ark fuel reserve is dry. Mining drone is being recalled so the shuttle still has a route home.";
+        return "Ark fuel reserve is dry. The Mining Rig is being recalled so the shuttle keeps a recovery route.";
     }
-    return "Shared fuel is dry. Mining drone is being recalled so the shuttle still has a route home.";
+    return "Shared fuel is dry. The Mining Rig is being recalled so the shuttle keeps a recovery route.";
 }
 
 inline std::string miningStartedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Mining drone deployed from Ark reserves.";
+        return "Mining Rig deployed from Ark reserves.";
     }
-    return "Mining drone deployed from shared shuttle fuel.";
+    return "Mining Rig deployed from shared shuttle fuel.";
 }
 
 inline std::string miningLog(bool arkKnown)
 {
-    return "Mining drone deployed: -1 " + std::string(reserveLabel(arkKnown)) + ".";
+    return "Mining Rig deployed: -1 " + std::string(reserveLabel(arkKnown)) + ".";
 }
 } // namespace fuel
 
@@ -318,6 +338,14 @@ inline constexpr std::string_view none = "None";
 inline constexpr std::string_view returnHome = "Return to Earth";
 inline constexpr std::string_view manualEject = "Manual Eject";
 inline constexpr std::string_view transferArrival = "Transfer Arrival";
+
+inline std::string returnLabel(bool arkKnown, bool outerExpedition = false)
+{
+    if (arkKnown) {
+        return "Return to Ark";
+    }
+    return outerExpedition ? "Expedition Recovery" : std::string(returnHome);
+}
 } // namespace recovery
 } // namespace enums
 
@@ -387,13 +415,19 @@ inline constexpr std::string_view opensDeeperShaft = "Opens deeper mining lanes"
 namespace buttons {
 inline constexpr std::string_view returnHome = "Return to Earth";
 inline constexpr std::string_view returningHome = "Returning to Earth";
-inline std::string returnHomeLabel(bool arkKnown)
+inline std::string returnHomeLabel(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown ? "Return to Ark" : std::string(returnHome);
+    if (arkKnown) {
+        return "Return to Ark";
+    }
+    return outerExpedition ? "Recover to Expedition" : std::string(returnHome);
 }
-inline std::string returningHomeLabel(bool arkKnown)
+inline std::string returningHomeLabel(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown ? "Returning to Ark" : std::string(returningHome);
+    if (arkKnown) {
+        return "Returning to Ark";
+    }
+    return outerExpedition ? "Recovering to Expedition" : std::string(returningHome);
 }
 inline constexpr std::string_view arrivalOps = "Approach";
 inline constexpr std::string_view eject = "Eject";
@@ -663,20 +697,28 @@ inline constexpr std::string_view surfacePostureExtract = "Required: extract now
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
 inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
 inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining layer first; extra pulses preview layers available through Push Deeper.";
-inline constexpr std::string_view surfaceMineDetail = "Deploy the mining drone once for this surface loop; mining spends fuel, not action kits.";
+inline constexpr std::string_view surfaceMineDetail = "Deploy the Mining Rig once for this surface loop; mining spends fuel, not action kits.";
 inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";
 inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to Earth. Cargo rigs reduce extraction risk.";
-inline std::string surfacePostureExtractDetailForHome(bool arkKnown)
+inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "No action kits remain for field work. Bring the payload back to the Ark before conditions get worse."
-        : std::string(surfacePostureExtractDetail);
+    if (arkKnown) {
+        return "No action kits remain for field work. Bring the payload back to the Ark before conditions get worse.";
+    }
+    if (outerExpedition) {
+        return "No action kits remain for field work. Recover the payload to expedition staging before conditions get worse.";
+    }
+    return std::string(surfacePostureExtractDetail);
 }
-inline std::string surfaceExtractDetailForHome(bool arkKnown)
+inline std::string surfaceExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
-    return arkKnown
-        ? "Recover the payload and return to the Ark. Cargo rigs reduce extraction risk."
-        : std::string(surfaceExtractDetail);
+    if (arkKnown) {
+        return "Recover the payload and return to the Ark. Cargo rigs reduce extraction risk.";
+    }
+    if (outerExpedition) {
+        return "Recover the payload to the expedition. Cargo rigs reduce extraction risk.";
+    }
+    return std::string(surfaceExtractDetail);
 }
 
 inline std::string supplyCost(int cost)

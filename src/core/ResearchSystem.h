@@ -135,6 +135,24 @@ struct SurfaceActionOutcome {
     double extractionRiskDelta = 0.0;
 };
 
+CampaignObjectiveStatus campaignObjectiveStatus(const GameState& state, CampaignObjectiveId objective);
+bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId objective);
+int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int safelyExtractedCommonOre);
+bool canClaimLunarProspector(const GameState& state);
+bool claimLunarProspector(GameState& state, const ContentCatalog& catalog);
+bool canClaimMarsBayExpansion(const GameState& state);
+bool claimMarsBayExpansion(GameState& state, const ContentCatalog& catalog);
+bool canCommissionIoHazardDrone(const GameState& state, const ContentCatalog& catalog);
+bool commissionIoHazardDrone(GameState& state, const ContentCatalog& catalog);
+bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact);
+bool canRedeemDroneUpgradeCredit(const GameState& state, const ContentCatalog& catalog, int index);
+bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, int index);
+bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
+bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
+bool canClaimSaturnCourse(const GameState& state);
+bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog);
+bool acknowledgeSaturnSlingshotFailure(GameState& state);
+
 bool destinationSupportsResearch(const Destination& destination);
 bool destinationSupportsSurface(const Destination& destination);
 bool destinationAllowsEnemyEncounters(const Destination& destination);

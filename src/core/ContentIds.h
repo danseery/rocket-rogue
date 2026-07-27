@@ -18,6 +18,7 @@ inline constexpr const char* perimeterCoordination = "perimeter_coordination";
 inline constexpr const char* arkScaffold = "ark_scaffold";
 inline constexpr const char* droneBay = "drone_bay";
 inline constexpr const char* droneSupportSuite = "drone_support_suite";
+inline constexpr const char* ioHazardDrone = "io_hazard_drone";
 } // namespace unlock
 
 namespace module {

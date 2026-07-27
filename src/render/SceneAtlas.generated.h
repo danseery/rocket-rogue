@@ -37,69 +37,70 @@ struct SceneAtlasTexture {
 
 inline constexpr std::array<SceneAtlasPage, 3U> kSceneAtlasPages {{
     {"scene_atlas_0", "assets/scene-atlas/scene-atlas-0.png", 3774U, 3774U},
-    {"scene_atlas_1", "assets/scene-atlas/scene-atlas-1.png", 3740U, 3664U},
-    {"scene_atlas_2", "assets/scene-atlas/scene-atlas-2.png", 1548U, 516U},
+    {"scene_atlas_1", "assets/scene-atlas/scene-atlas-1.png", 3774U, 3678U},
+    {"scene_atlas_2", "assets/scene-atlas/scene-atlas-2.png", 3612U, 2064U},
 }};
 
-inline constexpr std::array<SceneAtlasFrame, 54U>
+inline constexpr std::array<SceneAtlasFrame, 55U>
     kSceneAtlasFrames {{
-    {1U, 1030U, 2420U, 512U, 512U}, // TextureId::Earth frame 0
-    {1U, 2578U, 3090U, 512U, 512U}, // TextureId::Moon frame 0
-    {1U, 1546U, 2420U, 512U, 512U}, // TextureId::Mars frame 0
-    {1U, 2518U, 1030U, 1024U, 1024U}, // TextureId::RocketClosed frame 0
-    {1U, 3610U, 2U, 128U, 128U}, // TextureId::Explosion frame 0
-    {1U, 3610U, 134U, 128U, 128U}, // TextureId::Explosion frame 1
-    {1U, 3610U, 266U, 128U, 128U}, // TextureId::Explosion frame 2
-    {1U, 3610U, 398U, 128U, 128U}, // TextureId::Explosion frame 3
-    {1U, 3610U, 530U, 128U, 128U}, // TextureId::Explosion frame 4
-    {1U, 3610U, 662U, 128U, 128U}, // TextureId::Explosion frame 5
-    {1U, 3610U, 794U, 128U, 128U}, // TextureId::Explosion frame 6
-    {1U, 3610U, 926U, 128U, 128U}, // TextureId::Explosion frame 7
-    {1U, 3610U, 1058U, 128U, 128U}, // TextureId::Thrust frame 0
-    {1U, 3610U, 1190U, 128U, 128U}, // TextureId::Thrust frame 1
-    {1U, 3610U, 1322U, 128U, 128U}, // TextureId::Thrust frame 2
-    {1U, 3610U, 1454U, 128U, 128U}, // TextureId::Thrust frame 3
-    {1U, 3610U, 1586U, 128U, 128U}, // TextureId::Thrust frame 4
-    {1U, 3610U, 1718U, 128U, 128U}, // TextureId::Thrust frame 5
-    {1U, 3094U, 2574U, 512U, 512U}, // TextureId::MiningDrone frame 0
-    {1U, 3610U, 1850U, 112U, 112U}, // TextureId::DrillBit frame 0
-    {1U, 3610U, 1966U, 112U, 112U}, // TextureId::DrillBit frame 1
-    {1U, 3610U, 2082U, 112U, 112U}, // TextureId::DrillBit frame 2
-    {1U, 3610U, 2198U, 112U, 112U}, // TextureId::DrillBit frame 3
-    {1U, 3610U, 2314U, 112U, 112U}, // TextureId::DrillBit frame 4
-    {1U, 3610U, 2430U, 112U, 112U}, // TextureId::DrillBit frame 5
-    {1U, 2U, 3086U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 0
-    {1U, 2U, 1260U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 1
-    {1U, 1030U, 1260U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 2
-    {1U, 1030U, 1840U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 3
-    {1U, 1546U, 2936U, 512U, 512U}, // TextureId::Mercury frame 0
-    {2U, 1034U, 2U, 512U, 512U}, // TextureId::Venus frame 0
-    {1U, 1030U, 2936U, 512U, 512U}, // TextureId::Jupiter frame 0
-    {2U, 2U, 2U, 512U, 512U}, // TextureId::Saturn frame 0
-    {2U, 518U, 2U, 512U, 512U}, // TextureId::Uranus frame 0
-    {1U, 3094U, 3090U, 512U, 512U}, // TextureId::Neptune frame 0
-    {1U, 1260U, 2U, 1254U, 1254U}, // TextureId::ArkOperational frame 0
-    {1U, 2U, 2U, 1254U, 1254U}, // TextureId::ArkDamaged frame 0
-    {0U, 2U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet01 frame 0
-    {0U, 1260U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet02 frame 0
-    {0U, 2518U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet03 frame 0
-    {0U, 2U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet04 frame 0
-    {0U, 2U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet05 frame 0
-    {0U, 1260U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet06 frame 0
-    {0U, 2518U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet07 frame 0
-    {0U, 1260U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet08 frame 0
-    {0U, 2518U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet09 frame 0
-    {1U, 2U, 2058U, 1024U, 1024U}, // TextureId::RocketOpen frame 0
-    {1U, 2062U, 2574U, 512U, 512U}, // TextureId::MiniDroneMining frame 0
-    {1U, 2062U, 3090U, 512U, 512U}, // TextureId::MiniDroneResource frame 0
-    {1U, 2578U, 2574U, 512U, 512U}, // TextureId::MiniDroneSurvey frame 0
-    {1U, 3094U, 2058U, 512U, 512U}, // TextureId::MiniDroneHazard frame 0
-    {1U, 2062U, 2058U, 512U, 512U}, // TextureId::MiniDroneAttack frame 0
-    {1U, 2578U, 2058U, 512U, 512U}, // TextureId::MiniDroneDefense frame 0
-    {1U, 2518U, 2U, 1024U, 1024U}, // TextureId::HeroicCapybara frame 0
+    {1U, 3086U, 1260U, 512U, 512U}, // TextureId::Earth frame 0
+    {2U, 2582U, 2U, 512U, 512U}, // TextureId::Moon frame 0
+    {1U, 3086U, 2292U, 512U, 512U}, // TextureId::Mars frame 0
+    {1U, 2U, 2288U, 1024U, 1024U}, // TextureId::RocketClosed frame 0
+    {1U, 3606U, 1260U, 128U, 128U}, // TextureId::Explosion frame 0
+    {1U, 3606U, 1392U, 128U, 128U}, // TextureId::Explosion frame 1
+    {1U, 3606U, 1524U, 128U, 128U}, // TextureId::Explosion frame 2
+    {1U, 3606U, 1656U, 128U, 128U}, // TextureId::Explosion frame 3
+    {1U, 3606U, 1788U, 128U, 128U}, // TextureId::Explosion frame 4
+    {1U, 3606U, 1920U, 128U, 128U}, // TextureId::Explosion frame 5
+    {1U, 3606U, 2052U, 128U, 128U}, // TextureId::Explosion frame 6
+    {1U, 3606U, 2184U, 128U, 128U}, // TextureId::Explosion frame 7
+    {1U, 3606U, 2316U, 128U, 128U}, // TextureId::Thrust frame 0
+    {1U, 3606U, 2448U, 128U, 128U}, // TextureId::Thrust frame 1
+    {1U, 3606U, 2580U, 128U, 128U}, // TextureId::Thrust frame 2
+    {1U, 3606U, 2712U, 128U, 128U}, // TextureId::Thrust frame 3
+    {1U, 3606U, 2844U, 128U, 128U}, // TextureId::Thrust frame 4
+    {1U, 3606U, 2976U, 128U, 128U}, // TextureId::Thrust frame 5
+    {2U, 2066U, 2U, 512U, 512U}, // TextureId::MiningDrone frame 0
+    {1U, 3606U, 3108U, 112U, 112U}, // TextureId::DrillBit frame 0
+    {1U, 3606U, 3224U, 112U, 112U}, // TextureId::DrillBit frame 1
+    {1U, 2U, 3448U, 112U, 112U}, // TextureId::DrillBit frame 2
+    {1U, 2U, 3316U, 112U, 112U}, // TextureId::DrillBit frame 3
+    {1U, 2U, 3564U, 112U, 112U}, // TextureId::DrillBit frame 4
+    {1U, 118U, 3448U, 112U, 112U}, // TextureId::DrillBit frame 5
+    {1U, 2058U, 1260U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 0
+    {1U, 2058U, 1840U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 1
+    {1U, 1030U, 2288U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 2
+    {1U, 1030U, 2868U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 3
+    {1U, 2058U, 2808U, 512U, 512U}, // TextureId::Mercury frame 0
+    {2U, 2U, 1550U, 512U, 512U}, // TextureId::Venus frame 0
+    {1U, 3086U, 1776U, 512U, 512U}, // TextureId::Jupiter frame 0
+    {2U, 2U, 518U, 512U, 512U}, // TextureId::Saturn frame 0
+    {2U, 2U, 1034U, 512U, 512U}, // TextureId::Uranus frame 0
+    {2U, 3098U, 2U, 512U, 512U}, // TextureId::Neptune frame 0
+    {1U, 2518U, 2U, 1254U, 1254U}, // TextureId::ArkOperational frame 0
+    {1U, 1260U, 2U, 1254U, 1254U}, // TextureId::ArkDamaged frame 0
+    {0U, 1260U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet01 frame 0
+    {0U, 2518U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet02 frame 0
+    {0U, 2U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet03 frame 0
+    {0U, 2U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet04 frame 0
+    {0U, 1260U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet05 frame 0
+    {0U, 2518U, 1260U, 1254U, 1254U}, // TextureId::OuterPlanet06 frame 0
+    {0U, 1260U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet07 frame 0
+    {0U, 2518U, 2518U, 1254U, 1254U}, // TextureId::OuterPlanet08 frame 0
+    {1U, 2U, 2U, 1254U, 1254U}, // TextureId::OuterPlanet09 frame 0
+    {1U, 1030U, 1260U, 1024U, 1024U}, // TextureId::RocketOpen frame 0
+    {2U, 518U, 2U, 512U, 512U}, // TextureId::MiniDroneMining frame 0
+    {2U, 1034U, 2U, 512U, 512U}, // TextureId::MiniDroneResource frame 0
+    {2U, 1550U, 2U, 512U, 512U}, // TextureId::MiniDroneSurvey frame 0
+    {2U, 2U, 2U, 512U, 512U}, // TextureId::MiniDroneHazard frame 0
+    {1U, 2574U, 2808U, 512U, 512U}, // TextureId::MiniDroneAttack frame 0
+    {1U, 3090U, 2808U, 512U, 512U}, // TextureId::MiniDroneDefense frame 0
+    {1U, 2U, 1260U, 1024U, 1024U}, // TextureId::HeroicCapybara frame 0
+    {0U, 2U, 2U, 1254U, 1254U}, // TextureId::JetpackCapybara frame 0
 }};
 
-inline constexpr std::array<SceneAtlasTexture, 35U>
+inline constexpr std::array<SceneAtlasTexture, 36U>
     kSceneAtlasTextures {{
     {}, // TextureId::None
     {512U, 512U, 512U, 512U, 0U, 1U, 1U, 1U}, // TextureId::Earth
@@ -136,6 +137,7 @@ inline constexpr std::array<SceneAtlasTexture, 35U>
     {512U, 512U, 512U, 512U, 51U, 1U, 1U, 1U}, // TextureId::MiniDroneAttack
     {512U, 512U, 512U, 512U, 52U, 1U, 1U, 1U}, // TextureId::MiniDroneDefense
     {1024U, 1024U, 1024U, 1024U, 53U, 1U, 1U, 1U}, // TextureId::HeroicCapybara
+    {1254U, 1254U, 1254U, 1254U, 54U, 1U, 1U, 1U}, // TextureId::JetpackCapybara
 }};
 
 static_assert(kSceneAtlasTextures.size() == textureIndex(TextureId::Count));

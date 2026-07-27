@@ -15,7 +15,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 1. Configure the ship in the hangar.
 2. Launch a proving flight on the current frontier.
 3. Watch multiplier, telemetry channels, return risk, and distance climb.
-4. Return home to bank data, cut engines to cool the ship while risking navigation drift, or eject for an expensive rescue.
+4. Use the current recovery action to bank data, cut engines to cool the ship while risking navigation drift, or eject for an expensive rescue. Recovery is `Return to Earth` before Saturn, `Recover to Expedition` on the one-way outer route, and `Return to Ark` after the Straylight discovery.
 5. A flight that banks new Flight Data or reaches a destination earns one saved refit opportunity. Buy one permanent ship system or keep the credits; crashes, shallow returns, and capped proving data go directly to the next phase.
 6. Return to hangar operations: repair damage, recruit crew, train, rest, and plan the next flight.
 7. Repeat proving flights until enough frontier readiness is banked.
@@ -23,26 +23,37 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 
 ## Post-arrival research loop
 
-Research and surface expeditions start at Mars. Earth Orbit and Moon remain about proving the rocket program; Mars is the first destination where the agency can land, investigate, and turn discoveries into better long-term capability.
+Surface expeditions start at the Moon with a narrow mining lesson; broader research still starts at Mars. Earth Orbit proves the rocket program, the Moon teaches inert regolith versus gray Common Ore and explicit contract delivery, and Mars turns that lesson into the second Drone Bay slot and wider long-term capability.
 
 See `docs/POST_ARRIVAL_PHASES.md` for the detailed phase breakdown and Unity prototype takeaways.
-See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay / helper-drone layer.
+See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay / Support Drone layer.
+See `docs/MINING_MINIGAME_PLAN.md` for the authoritative rig/EVA physics, controls, failure, loose-chunk, and tether contract.
 
 The first implemented phase model is:
 
-1. Complete a frontier-transfer arrival at Mars or beyond.
+1. Complete a frontier-transfer arrival at the Moon or beyond.
 2. Choose from generated research projects that convert blueprints and recovered materials into unlock variety.
 3. Start a surface expedition with action kits, shared fuel, a rolled site profile, and a short mission log.
-4. Survey, use Push Deeper, or deploy the mining drone for one fuel-gated mining run.
+4. Survey, use Push Deeper, or deploy the player-controlled Mining Rig for one fuel-gated mining run.
 5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
 
-The first selection of Flyby, Orbit, Landing, and Mining opens a short, saved introduction before starting the activity. Flyby and Orbit connect blueprint progress to permanent shipyard upgrades; Landing connects the player to surface work. The first Mining brief presents the Prospector contract: safely recover 3 Common Ore to fabricate the first autonomous Mining Drone. The live objective separates ore already home from ore aboard or carried, and contract completion receives a saved, acknowledgment-focused modal before Drone Ops becomes part of later surface loops.
+The first selection of optional Flyby and Orbit activities retains saved introductions. Campaign-critical surface beats use mandatory, non-dismissible briefings and explicit claims: deliver 3 lunar Common Ore and install Prospector Mk I/Slot 1; deliver 4 Mars Common Ore and fabricate empty Slot 2; commission the Hazard Support Drone Mk I on Io, cool and mine two four-segment lava seals, and safely extract the minor artifact; then claim a Perfect Jupiter slingshot to open Saturn. Live objectives expose carried, aboard, delivered, ready-to-claim, and complete state rather than advancing silently.
 
-Surface exploration should stay distinct from the launch gamble. The launch loop asks "can we get there and back?" The surface loop asks "how much can we safely bring home before the expedition overextends?" The solar system and Aaru Vale do not have enemies. Enemy encounters begin only after Arkfall near Khepri Prime, when the game leaves familiar exploration and introduces hostile unknowns.
+Surface exploration should stay distinct from the launch gamble. Before Saturn, the launch loop asks "can we get there and back?" The surface loop asks "how much can we safely recover before the expedition overextends?" Claiming the Saturn course commits the expedition outward; later recovery copy says `Recover to Expedition`, never promises a return to Earth, and changes to `Return to Ark` only after the Straylight discovery. The solar system and Aaru Vale do not have enemies. Enemy encounters begin only after Arkfall near Khepri Prime, when the game leaves familiar exploration and introduces hostile unknowns.
 
-Shared fuel is intentional friction in the surface loop. The shuttle and mining drone draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. The current mining baseline is 30 seconds of oxygen. Oxygen tank improvements can come from crew class, Drone Bay loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the drone is offline and `Push Deeper` is unavailable.
+Shared fuel is intentional friction in the surface loop. The shuttle and Mining Rig draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. The current normal mining baseline is 30 seconds of oxygen; the fixed Io artifact introduction uses 60 seconds. Oxygen improvements can come from crew class, Support Drone loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the rig is offline and `Push Deeper` is unavailable.
 
-Deterministic artifact sites turn those mining tools into forecastable keys without rubber-banding arena difficulty from the equipped loadout. Surface Ops and Drone Ops should name the upcoming gate, direct capability, current readiness, and systemic alternatives. Hazard treatment, Survey triangulation, careful excavation, heavy towing, endurance, passive combat, terrain cover, and route planning must all reuse the same saved Act/level/seed gate contract as generation and runtime validation. Story sites complete only when their specific artifact is delivered, banked, and survives Surface extraction.
+Deterministic artifact sites turn those mining tools into forecastable keys without rubber-banding arena difficulty from the equipped loadout. Surface Ops and Drone Ops should name the upcoming gate, direct capability, current readiness, and systemic alternatives. Hazard treatment, Survey triangulation, careful excavation, heavy towing, endurance, autonomous swarm combat, EVA self-defense, terrain cover, and route planning must all reuse the same saved Act/level/seed gate contract as generation and runtime validation. Story sites complete only when their specific artifact is delivered, banked, and survives Surface extraction.
+
+### Mechanical touchstone and EVA identity
+
+*Solar Jetman* is an internal mechanical touchstone for destination-sensitive gravity, inertia, vehicle-versus-pilot roles, towing burden, vulnerable recovery, and physically returning discoveries home: [original NES manual](https://www.gamingalexandria.com/highquality/NES/Solar%20Jetman/Solar%20Jetman%20-%20Manual%20%28Searchable%29.pdf) and [official Rare Replay manual](https://dlassets-ssl.xboxlive.com/public/content/367297b7-c6a3-4496-83ad-cb70c52ce8cd/GameManual/2e5e2560-e901-414b-87fa-081a07f24c6c/en-SA/index.html#SolarJetman). OREBIT differs through voluntary EVA, twin-stick aim, hand-drilled terrain, suit-only passages, Support Drones, and explicit tether control.
+
+Mining runs start in the rig. The rig reaches `7.2 cells/s` with `14 cells/s²` acceleration, `20 cells/s²` braking, and a `0.48`-cell collider. The suit reaches `4.6 cells/s` with `28 cells/s²` acceleration, `24 cells/s²` braking, and a `0.25`-cell collider. Both use vector gravity with base strength `6 cells/s²` multiplied by destination scale: Earth Orbit `0.15`, Moon `0.35`, Mars `0.60`, Jupiter `1.15`, Saturn `0.95`, Uranus `0.80`, Neptune `1.05`, Khepri Prime `1.20`, and Rift Belt `0.25`.
+
+The suit carries no ore. Its hand-drilled ore and enemy rewards become loose chunks, while a tethered artifact remains the sole cargo exception. The suit is slower and vulnerable but accelerates quickly, fits through narrow passages, and can change depth while the parked rig remains behind. A destroyed rig emergency-ejects the operator; a destroyed suit ends the run.
+
+Support Drones belong to the player rather than the Mining Rig. They follow, orbit, and defend the controlled actor through a transferable logical anchor while retaining independent positions, velocities, haul, shield state, cooldowns, stable formation slots, and orbit phases. Same-layer transfers do not snap them; cross-depth transfers rebuild deterministic formations. Artifact tether ownership stays independent.
 
 Research rewards should primarily widen the roguelite possibility space: module families, research facilities, special components, artifact threads, and story leads. Material-funded projects can directly unlock new module or facility families. Artifact-tagged projects identify one recovered artifact when possible; the identified record is tracked now, while its specific story payload remains a later content pass. Raw permanent stat inflation should remain secondary.
 
@@ -64,7 +75,7 @@ Each prepared launch also seeds a few deterministic telemetry incidents. An inci
 Emergency flight actions are also core flight-model transforms:
 
 - `Relief valve` vents physical pressure, reducing the `PRESS` channel while adding navigation drift. It can fail, and rare rapid decompression destroys the vehicle.
-- `Jettison cargo` stabilizes fuel mix but adds debris/mass-shift penalties to `NAV` and `VIB`, plus a return-home risk penalty because the ship has fewer reserves.
+- `Jettison cargo` stabilizes fuel mix but adds debris/mass-shift penalties to `NAV` and `VIB`, plus a recovery-risk penalty because the ship has fewer reserves.
 - These actions are single-use during outbound flight and should be presented as tactical risk swaps, not universal upgrades.
 
 Mission pressure is a separate modifier on the `PRESS` telemetry channel:
@@ -115,7 +126,7 @@ Hangar operations should keep pressure visible next to readiness and transfer pl
 Refit economy should reward recovered risk in discrete shelves:
 
 - Launch and outcome copy should frame the yellow marker as the mission brief: meeting it secures the requested profile, while safely pushing beyond it returns richer findings and stronger funding.
-- Returning home at the current data goal guarantees enough net credits for a common refit.
+- Recovering at the current data goal guarantees enough net credits for a common refit.
 - Pushing beyond the data goal far enough guarantees enough net credits for an uncommon refit if recovered.
 - Returning from the full target guarantees enough net credits for a rare refit if recovered.
 - Ejection remains rescue-first and should not be the primary upgrade economy.
@@ -125,11 +136,12 @@ Refit economy should reward recovered risk in discrete shelves:
 - `rocket_core` owns deterministic rules: content, RNG, progression, save data, flight tuning, launch resolution, and balance tests.
 - `rocket_app` and `src/game` own platform-neutral application orchestration. `GameRunner` samples input and advances fixed simulation steps; `RocketGameApp` handles screen transitions and live controls; `GamePanel` produces semantic mission-control markup from a read-only context; and `GameRmlUi` presents that markup on both targets.
 - `src/render` owns backend-neutral `SceneComposer`/`ScenePacket` generation plus the direct Vulkan 1.3 native backend and WebGL2 browser backend. Render code must not decide gameplay outcomes or create platform windows; native Vulkan and RmlUi share the SDL-created surface, device, frame command buffer, and synchronization.
+- The static `JetpackCapybara` sprite is a required shared texture registered through the scene manifest and generated atlas. Its addition raises the runtime texture count from 34 to 35; a missing asset or registration is a validation failure, not permission to substitute another sprite.
 - `src/input` owns portable controller snapshots, preferences, source arbitration, deadzones, button edges, real-time holds/repeats, and semantic input routing. Controller difficulty never scales from the player's loadout or device.
 - `src/platform/AppServices.h` defines the injected save, preference, host, controller, texture, renderer, UI, and UI-bridge contracts used by the shared app.
 - `src/platform/sdl` owns native SDL window and Vulkan surface creation, filesystem storage, PNG decoding, keyboard/mouse events, gamepads, haptics, fullscreen, and shutdown.
-- `src/platform/web` is the only C++ boundary allowed to own Emscripten APIs, browser storage, DOM mirroring, asynchronous browser textures, and web gamepads.
-- `web/shell.html` remains the web-only DOM fallback and forwards browser actions into the Emscripten entry point. Native builds use RmlUi directly and do not ship the browser shell.
+- `src/platform/web` is the only C++ boundary allowed to own Emscripten APIs, browser storage, DOM hosting, asynchronous browser textures, and web gamepads.
+- `web/shell.html` hosts the web target and forwards platform events into the shared application. It must not define a visually or behaviorally divergent gameplay-UI path; native and web use the same semantic presentation and action contracts.
 
 See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contract, device-local preference schema, pause safety rules, and verification matrix. `GameRunner` requests one `ControllerFrame` per host frame before scaled fixed simulation steps; UI repeats and safety holds always use the platform host's unscaled monotonic time.
 
@@ -141,7 +153,7 @@ Hangar operation cards should be driven by `HangarOperationPreview` from `src/co
 
 Research and surface-expedition rules should flow through `src/core/ResearchSystem.*`: post-arrival gating, research project generation/completion, material accounting, surface action kits, shared fuel, cargo, extraction risk, surface upgrades, Drone Bay state, and progression-backed surface-contact pressure. Panels and app transitions should consume those helpers instead of duplicating tier checks or resource math.
 
-`src/core/MiningProgression.*` is the authoritative Act/level resolver shared by campaign mapping, Surface Ops forecasts, debug requests, terrain/reward gates, and enemy generation. `src/core/MiningSystem.*` consumes those rules for terrain generation, oxygen/fuel/drill timers, scanner pulses, unified ore/artifact rewards, hostile tunnel networks, passive drone effects, finish/abort/failure outcomes, and conversion back into `SurfaceActionOutcome`. Platform input adapters should call `RocketGameApp` mining methods or dispatch shared UI actions; rendering should consume snapshots rather than deciding mining outcomes.
+`src/core/MiningProgression.*` is the authoritative Act/level resolver shared by campaign mapping, Surface Ops forecasts, debug requests, terrain/reward gates, and enemy generation. `src/core/MiningSystem.*` consumes those rules for terrain generation, vector gravity, independent rig/operator physics, loose chunks, oxygen/fuel/drill timers, scanner pulses, sidearm raycasts, artifact tether forces, unified ore/artifact rewards, hostile tunnel networks, finish/abort/failure outcomes, and conversion back into `SurfaceActionOutcome`. `src/core/MiniDroneCoordination.*` consumes a resolved `MiniDroneAnchorFrame`; these `MiniDrone*` names are legacy internal C++ identifiers, while Support Drone behavior and presentation must not reach directly for rig coordinates. Platform input adapters should call `RocketGameApp` mining methods or dispatch shared actions for aim, fire, drill, scan, tether, operator switching, and bank/leave. Rendering should consume snapshots rather than deciding mining outcomes.
 
 Shared game constants and player-facing copy should have one owner:
 
@@ -160,7 +172,7 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
 - `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, track/rank classes, glyphs, practical copy, primary impact, correctly signed stat chips, prices, affordability, permanent-install actions, conditional reroll action, and keep-credits action. Panels should render this returned data instead of rebuilding offer rules inline.
 - `src/core/ResearchPresentation.h` owns research and surface-expedition presentation: blueprint/material metrics, research project cards, surface supply/cargo/risk metrics, and field action availability. Panels should render this returned data instead of rebuilding research/resource rules inline.
-- `src/core/MiningPresentation.h` owns mining HUD and detail presentation: oxygen, shared fuel, drill integrity, scanner/fuel cadence, drone support, hostile tunnel summaries, action buttons, and controls copy.
+- `src/core/MiningPresentation.h` owns mining HUD and detail presentation: mode, gravity, oxygen, shared fuel, rig health, suit integrity, drill heat, tether burden, loose-chunk count, `Suit carry: 0`, Support Drone anchor status, scanner/fuel cadence, hostile tunnel summaries, action buttons, and controls copy.
 - `src/core/CrewPresentation.h` owns Crew Details rows and facility-effect value wording. Panels should render detail rows and headers from this helper instead of recomputing training, stress, facility, and trait modifier strings.
 - `src/core/ShipPresentation.h` owns Ship Details rows, installed/offline module summaries, and inventory fallback wording. Panels should render those rows instead of recomputing ship stats and module inventory display.
 - `src/core/ProgramPresentation.h` owns Frontier and Legacy detail rows: readiness, mission difficulty, next transfer target, blueprint progress, losses, and furthest tier. Panels should render these rows instead of rebuilding program-progress detail modals inline.
@@ -169,11 +181,11 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/ContentIds.h` owns persistent content IDs and unlock keys for modules, crew facilities, frames, astronauts, and destinations. Content definitions, save migrations, tests, and scripted rewards should use these shared IDs instead of raw strings.
 - `src/core/SaveSchema.h` owns the current save header, field keys, and line-format delimiters. Serializer, parser, and migration tests should use these shared constants instead of duplicating save strings.
 - `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
-- `src/core/GameUi.h` owns stable cross-platform panel action IDs and modal IDs. `GamePanel` emits these data-like IDs, RmlUi dispatches them through the shared app, and the web fallback maps them to exported C++ functions. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated markup.
+- `src/core/GameUi.h` owns stable cross-platform panel action IDs and modal IDs. `GamePanel` emits these data-like IDs, and both native and web dispatch them through the shared app. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated markup.
 
 Telemetry equation constants live under `tuning::telemetry`: pulse profiles, early/late channel buildup, readable minimums, abort certainty, and telemetry-driven stress. Balance the feel of warning dials there before changing formula structure.
 
-Outcome math should also stay tuned from one place. Survival odds, return-home risk, rescue costs, ship damage curves, useful-data thresholds, blueprint share thresholds, and post-flight crew stress all live under `tuning::outcomes` or `tuning::stress` so balance changes do not require spelunking through launch resolution branches.
+Outcome math should also stay tuned from one place. Survival odds, recovery risk, rescue costs, ship damage curves, useful-data thresholds, blueprint share thresholds, and post-flight crew stress all live under `tuning::outcomes` or `tuning::stress` so balance changes do not require spelunking through launch resolution branches.
 
 Post-launch crew stress should flow through `postLaunchCrewStress` / `postLaunchCrewStressGain` in `src/core/GameState.*`. That helper exposes base stress, warning contribution, abort contribution, facility relief, and total stress so future events, facilities, and UI can share one model.
 
@@ -181,6 +193,6 @@ When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visi
 
 ## Persistence
 
-The campaign save format is versioned and line-based. Version 3 introduced the saved refit entitlement and generated offer IDs so an earned shipyard choice survives reload and delayed Arrival Ops. Version 4 adds the acknowledged activity briefs and Prospector Common Ore objective while preserving persistent Drone Bay ownership. Version-2 migration installs every previously owned or stored module once, while its legacy equipped list remains the operational/offline state for the current expedition. `SaveSchema.h` defines the header, field keys, and delimiters so serialization, missing-field defaults, and migration tests stay synchronized as fields are added. `ISaveStore` keeps the shared app independent of the storage medium: the web adapter uses browser `localStorage`, while native builds use atomic replacement of `save_v1.txt` beneath the SDL per-user preference path. Native builds intentionally start with fresh native data and do not import browser saves.
+The campaign save format is versioned and line-based. Version 3 introduced the saved refit entitlement and generated offer IDs. Version 4 added acknowledged activity briefs and Prospector progress. Version 5 added active mining and Support Drone simulation. Version 6 persists independent operator/rig state, vector gravity, loose chunks, disabled-rig state, artifact tether state, and each Support Drone's anchor/formation simulation. Version 7 adds explicit Moon/Mars contract claims, Io/Hazard/artifact progression, layered lava-seal state, Drone Upgrade Credits, and the permanent Saturn slingshot gate. Migration preserves existing Support Drones and upgrades, removes free duplicate loadout references, backfills unreachable earlier gates, and never rolls Saturn-or-later saves backward. `SaveSchema.h` remains authoritative for field names, defaults, and migrations.
 
 Display, accessibility, debug, fullscreen, and controller settings are separate from campaign data behind `IPreferenceStore`. The web adapter persists browser-local preferences; native builds use `preferences_v1.txt` beside the native save.
