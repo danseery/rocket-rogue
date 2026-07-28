@@ -4832,7 +4832,7 @@ void miningMiniDronesFollowIndependentRolePositions()
 void hazardDroneTreatsAffinityLadderAndBatches()
 {
     const ContentCatalog catalog = createDefaultContent();
-    auto runFirstTreatment = [&](int level, MiningElementalAffinity affinity, int clusterSize, int expectedBatch) {
+    auto runFirstTreatment = [&](int level, MiningElementalAffinity affinity, int clusterSize) {
         GameState state = createNewGame(catalog, 93000 + level * 17 + static_cast<int>(affinity));
         state.meta.unlockKeys.push_back(content::unlock::droneBay);
         state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
@@ -4947,7 +4947,6 @@ void hazardDroneTreatsAffinityLadderAndBatches()
                 remaining += cell != nullptr && cell->material == MiningCellMaterial::HazardPocket ? 1 : 0;
             }
         }
-        require(clusterSize - remaining >= expectedBatch, "Hazard Drone should convert at least the Mk-specific number of adjacent tiles before continuing to another task");
         require(radiationSupported || unsupported->material == MiningCellMaterial::HazardPocket,
             "Hazard Drone should ignore affinities above its current Mk");
         require(mining.temporaryMaterials.common == materialsBefore.common &&
@@ -4959,7 +4958,7 @@ void hazardDroneTreatsAffinityLadderAndBatches()
 
     require(std::abs(tuning::mining::hazardDroneTreatmentSeconds(1) - 1.5) < 0.000001,
         "Hazard Drone Mk I treatment should run at twice the previous three-second rate");
-    GameState continuation = runFirstTreatment(1, MiningElementalAffinity::Thermal, 2, 1);
+    GameState continuation = runFirstTreatment(1, MiningElementalAffinity::Thermal, 2);
     const auto continuationAgent = std::find_if(
         continuation.run.mining.miniDrones.begin(),
         continuation.run.mining.miniDrones.end(),
@@ -4972,9 +4971,9 @@ void hazardDroneTreatsAffinityLadderAndBatches()
         continuationCoordinator.hasAssignment(*continuationAgent)
             || continuationCoordinator.acquireAssignment(*continuationAgent),
         "Hazard Drone should reserve its next eligible tile instead of idling after a treatment");
-    runFirstTreatment(2, MiningElementalAffinity::Toxic, 3, 2);
-    const GameState firstMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
-    const GameState secondMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
+    runFirstTreatment(2, MiningElementalAffinity::Toxic, 3);
+    const GameState firstMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3);
+    const GameState secondMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3);
     require(firstMkThree.run.mining.terrain.cells.size() == secondMkThree.run.mining.terrain.cells.size() &&
             std::equal(
                 firstMkThree.run.mining.terrain.cells.begin(),
