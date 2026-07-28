@@ -4914,6 +4914,8 @@ void hazardDroneTreatsAffinityLadderAndBatches()
             *ordinaryLava = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
             *nearbyHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
             *distantHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            hazardAgent->x = mining.droneX;
+            hazardAgent->y = mining.droneY;
         }
         const int startX = std::clamp(static_cast<int>(std::floor(mining.droneX)) + 1, 1, mining.terrain.width - clusterSize - 1);
         const int y = std::clamp(static_cast<int>(std::floor(mining.droneY)) + 2, 1, mining.terrain.height - 2);
