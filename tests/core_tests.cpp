@@ -2874,6 +2874,8 @@ void firstMiningContractBuildsAndCelebratesProspector()
         "only safely extracted mining ore should advance the Prospector contract");
     require(state.meta.materials.common == 0,
         "Prospector contract ore should be committed to fabrication instead of ordinary research spend");
+    require(firstRecovery.message.find("Lunar delivery +10 // 10/30") != std::string::npos,
+        "a safe lunar extraction should report the delivered amount and updated contract total");
     require(!hasUnlock(state.meta, content::unlock::droneBay),
         "the Prospector should remain locked before all contract ore is home");
 
@@ -10647,6 +10649,31 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         marsSurfaceHtml.find("data-rr-action=\"extract_surface\"") != std::string::npos
             && marsSurfaceHtml.find("Extract Mars Payload") != std::string::npos,
         "Surface Ops should expose an explicit Extract Mars Payload action for the aboard contract ore");
+
+    GameState lunarContractState = createNewGame(catalog, 0x4C554E41);
+    lunarContractState.run.destinationIndex = 1;
+    lunarContractState.meta.furthestTier = 1;
+    lunarContractState.meta.lunarMiningBriefingAcknowledged = true;
+    startSurfaceExpedition(lunarContractState, catalog);
+    lunarContractState.run.surfaceExpedition.miningRunUsed = true;
+    lunarContractState.run.surfaceExpedition.temporaryMaterials.common = 60;
+    lunarContractState.run.surfaceExpedition.bankedMiningMaterials.common = 60;
+    lunarContractState.run.surfaceExpedition.bankedMiningArenaValid = true;
+    lunarContractState.run.surfaceExpedition.bankedMiningProgressionEligible = true;
+    lunarContractState.screen = Screen::SurfaceExpedition;
+    Random lunarContractRng(0x4C554E41);
+    const PreparedLaunch lunarContractLaunch =
+        prepareLaunch(lunarContractState, catalog, lunarContractRng);
+    const std::string lunarSurfaceHtml =
+        buildGamePanelHtml({lunarContractState, catalog, lunarContractLaunch, lunarContractLaunch});
+    require(
+        lunarSurfaceHtml.find(">0/30</b>") != std::string::npos
+            && lunarSurfaceHtml.find("60 COMMON ABOARD") != std::string::npos,
+        "Moon Surface Ops should distinguish zero delivered contract ore from Common still aboard");
+    require(
+        lunarSurfaceHtml.find("Deliver 60 Lunar Common") != std::string::npos
+            && lunarSurfaceHtml.find("Lunar delivery +30") != std::string::npos,
+        "Moon Surface Ops should promote a named delivery action with its capped contract reward");
 
     GameState upgradeState = surfaceState;
     upgradeState.screen = Screen::SurfaceUpgrade;

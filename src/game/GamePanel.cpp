@@ -891,11 +891,11 @@ struct CampaignObjectivePresentation {
     PanelButtonPresentation action;
 };
 
-int marsCampaignCommonAboard(const GameState& state)
+int campaignCommonAboard(const GameState& state, std::string_view destinationId)
 {
     const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     if (!expedition.active
-        || expedition.destinationId != content::destination::mars
+        || expedition.destinationId != destinationId
         || !expedition.bankedMiningArenaValid
         || !expedition.bankedMiningProgressionEligible) {
         return 0;
@@ -905,6 +905,20 @@ int marsCampaignCommonAboard(const GameState& state)
         std::min(
             expedition.bankedMiningMaterials.common,
             expedition.temporaryMaterials.common));
+}
+
+int moonCampaignCommonAboard(const GameState& state)
+{
+    return state.meta.lunarProspectorClaimed
+        ? 0
+        : campaignCommonAboard(state, content::destination::moon);
+}
+
+int marsCampaignCommonAboard(const GameState& state)
+{
+    return state.meta.marsBayExpansionClaimed
+        ? 0
+        : campaignCommonAboard(state, content::destination::mars);
 }
 
 std::string campaignObjectiveStateLabel(CampaignObjectiveState state)
@@ -952,7 +966,21 @@ CampaignObjectivePresentation campaignObjectivePresentation(
     case CampaignObjectiveId::LunarProspector:
         presentation.location = "MOON";
         presentation.title = "Lunar Prospector Contract";
-        presentation.detail = "Deliver gray Common Ore safely. Plain regolith yields nothing.";
+        if (status.state == CampaignObjectiveState::Complete) {
+            presentation.detail = "PROSPECTOR MK I INSTALLED // SLOT 1 ONLINE.";
+        } else if (status.state == CampaignObjectiveState::ReadyToClaim) {
+            presentation.detail = std::to_string(status.required) + "/"
+                + std::to_string(status.required)
+                + " DELIVERED // INSTALL PROSPECTOR MK I.";
+        } else {
+            const int commonAboard = moonCampaignCommonAboard(state);
+            presentation.detail = commonAboard > 0
+                ? std::to_string(commonAboard)
+                    + " COMMON ABOARD // RETURN TO EARTH, THEN EXTRACT SAFELY."
+                : "MINE " + std::to_string(status.required)
+                    + " GRAY COMMON, RETURN TO THE SHUTTLE, THEN EXTRACT SAFELY. "
+                      "PLAIN REGOLITH YIELDS NOTHING.";
+        }
         presentation.reward = "REWARD // PROSPECTOR MK I + SLOT 1";
         if (status.state == CampaignObjectiveState::ReadyToClaim) {
             presentation.action = panelActionButton(
@@ -1273,7 +1301,8 @@ std::string surfaceActionCard(
     std::ostringstream out;
     const bool isMining = isSurfaceMiningAction(action);
     const bool featured = (isMining && action.action.enabled)
-        || (isSurfaceExtractionAction(action) && action.title == "Extract Mars Payload");
+        || (isSurfaceExtractionAction(action)
+            && (action.title == "Extract Mars Payload" || action.title.rfind("Deliver ", 0) == 0));
     out << "<article class=\"resource-bank rr-fixed-lane-card surface-choice-row" << (featured ? " featured-action" : "") << "\">";
     out << "<div class=\"surface-choice-summary\"><h3 class=\"card-title\">" << htmlEscape(action.title) << "</h3>";
     out << "<div class=\"card-topline surface-choice-cues\"><span class=\"surface-choice-cost\">" << htmlEscape(action.cost)

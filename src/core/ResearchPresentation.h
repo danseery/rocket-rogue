@@ -1672,6 +1672,17 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(pushPreview));
 
+    const int lunarContractCommonAboard =
+        expedition.destinationId == content::destination::moon
+            && !state.meta.lunarProspectorClaimed
+            && expedition.bankedMiningArenaValid
+            && expedition.bankedMiningProgressionEligible
+        ? std::max(
+              0,
+              std::min(
+                  expedition.bankedMiningMaterials.common,
+                  expedition.temporaryMaterials.common))
+        : 0;
     const int marsContractCommonAboard =
         expedition.destinationId == content::destination::mars
             && !state.meta.marsBayExpansionClaimed
@@ -1683,10 +1694,19 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
                   expedition.bankedMiningMaterials.common,
                   expedition.temporaryMaterials.common))
         : 0;
-    const std::string extractionTitle = marsContractCommonAboard > 0
+    const bool lunarDelivery = lunarContractCommonAboard > 0;
+    const bool marsDelivery = marsContractCommonAboard > 0;
+    const int contractCommonAboard = lunarDelivery
+        ? lunarContractCommonAboard
+        : marsContractCommonAboard;
+    const std::string extractionTitle = lunarDelivery
+        ? "Deliver " + std::to_string(lunarContractCommonAboard) + " Lunar Common"
+        : marsDelivery
         ? "Extract Mars Payload"
         : text::buttons::returnHomeLabel(arkKnown, outerExpedition);
-    const std::string extractionDetail = marsContractCommonAboard > 0
+    const std::string extractionDetail = lunarDelivery
+        ? "Safely extract the aboard Lunar Common to advance Prospector Mk I. Excess Common banks normally."
+        : marsDelivery
         ? "Safely extract the aboard Mars Common to advance Bay Expansion. No second Support Drone is required."
         : text::panel::messages::surfaceExtractDetailForHome(
               arkKnown,
@@ -1703,17 +1723,19 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
             extractionTitle,
             ui::actions::extractSurface,
             "ok"));
-    if (marsContractCommonAboard > 0) {
+    if (contractCommonAboard > 0) {
+        const bool moonDelivery = lunarDelivery;
         const int remaining = std::max(
             0,
-            tuning::research::marsBayCommonOreGoal
-                - state.meta.marsCommonOreRecovered);
+            (moonDelivery
+                ? tuning::research::prospectorCommonOreGoal - state.meta.prospectorCommonOreRecovered
+                : tuning::research::marsBayCommonOreGoal - state.meta.marsCommonOreRecovered));
         extractionPreview.payoffChips.insert(
             extractionPreview.payoffChips.begin(),
             panelMetric(
-                "Mars delivery",
+                moonDelivery ? "Lunar delivery" : "Mars delivery",
                 "+" + std::to_string(
-                    std::min(remaining, marsContractCommonAboard))));
+                    std::min(remaining, contractCommonAboard))));
     }
     presentation.actions.push_back(std::move(extractionPreview));
     return presentation;

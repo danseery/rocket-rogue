@@ -3524,15 +3524,21 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
             state,
             expedition.destinationId,
             recoveredMiningCommon);
-        if (delivered > 0 && expedition.destinationId == content::destination::mars) {
-            const CampaignObjectiveStatus status =
-                campaignObjectiveStatus(state, CampaignObjectiveId::MarsBayExpansion);
-            outcome.message = "Mars Common delivered "
+        if (delivered > 0 && (expedition.destinationId == content::destination::moon
+                || expedition.destinationId == content::destination::mars)) {
+            const bool lunarDelivery = expedition.destinationId == content::destination::moon;
+            const CampaignObjectiveStatus status = campaignObjectiveStatus(
+                state,
+                lunarDelivery
+                    ? CampaignObjectiveId::LunarProspector
+                    : CampaignObjectiveId::MarsBayExpansion);
+            outcome.message = std::string(lunarDelivery ? "Lunar delivery +" : "Mars delivery +")
+                + std::to_string(delivered) + " // "
                 + std::to_string(status.current) + "/"
                 + std::to_string(status.required)
                 + (status.state == CampaignObjectiveState::ReadyToClaim
-                      ? " - READY TO CLAIM."
-                      : " - continue the local contract.");
+                      ? " // READY TO CLAIM."
+                      : " // continue the local contract.");
         }
     }
 
