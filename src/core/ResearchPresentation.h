@@ -469,16 +469,20 @@ inline std::string miniDroneBuildHook(MiniDroneRole role)
 inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& drone, const GameState& state, int index)
 {
     const bool unlocked = isMiniDroneUnlocked(state.meta, drone);
-    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
-    const int equippedCount = static_cast<int>(std::count(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), drone.id));
+    const int ownedCount = ownedMiniDroneCount(state, drone.id);
+    const bool owned = ownedCount > 0;
+    const int equippedCount = equippedMiniDroneCount(state, drone.id);
     const bool hasFreeSlot = state.meta.equippedDroneIds.size() < static_cast<std::size_t>(std::max(0, state.meta.droneBaySlots));
+    const MaterialInventory additionalUnitCost = miniDroneAdditionalUnitCost(drone);
     const int upgradeLevel = owned ? miniDroneUpgradeLevel(state, drone.id) : 1;
     const MaterialInventory nextUpgradeCost = miniDroneUpgradeCost(upgradeLevel + 1);
     const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
     const bool coordinationRequired = combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination);
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
     std::string status = unlocked
-        ? (equippedCount > 0 ? "Assigned" : (owned ? "Ready" : "Not owned"))
+        ? (equippedCount > 0
+            ? "Assigned " + std::to_string(equippedCount) + "/" + std::to_string(ownedCount)
+            : (owned ? "Ready " + std::to_string(ownedCount) : "Not owned"))
         : "Locked";
     PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
     std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
@@ -486,9 +490,17 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         upgradeSummary = "Mk " + std::to_string(upgradeLevel) + " tuning locked: complete Perimeter Drone Network research";
     }
     if (owned && unlocked) {
-        action = equippedCount > 0
-            ? disabledPanelButton("Assigned")
-            : (hasFreeSlot ? panelActionButton("Assign", ui::actions::equipDrone(index), "ok") : disabledPanelButton("Slot full"));
+        if (!hasFreeSlot) {
+            action = disabledPanelButton("Slot full");
+        } else if (equippedCount < ownedCount) {
+            action = panelActionButton("Assign", ui::actions::equipDrone(index), "ok");
+        } else if (canAffordMaterials(state.meta.materials, additionalUnitCost)) {
+            action = panelActionButton("Build + assign", ui::actions::equipDrone(index), "ok");
+            status += " / Next " + materialSummary(additionalUnitCost);
+        } else {
+            action = disabledPanelButton("Need " + materialSummary(additionalUnitCost));
+            status += " / Next " + materialSummary(additionalUnitCost);
+        }
         upgradeAction = upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
             : (coordinationRequired
@@ -1039,8 +1051,8 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
         detailPresentationRow("Build guidance", guidance.detail),
         detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
-        detailPresentationRow("Unique units", std::string("Each owned Support Drone can occupy only one loadout slot. Free that slot before assigning it elsewhere.")),
-        detailPresentationRow("Support Drone upgrades", std::to_string(tunedDroneCount(state)) + " Support Drones above Mk I. Tuning applies to that unique unit."),
+        detailPresentationRow("Support Drone copies", std::string("Each unlocked type starts with one frame. Build extra copies into open slots; duplicate frames share that type's Mk tuning.")),
+        detailPresentationRow("Support Drone upgrades", std::to_string(tunedDroneCount(state)) + " Support Drone types above Mk I. Tuning applies to every owned copy of that type."),
         detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),

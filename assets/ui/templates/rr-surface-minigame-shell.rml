@@ -1,0 +1,11 @@
+<template name="rr-surface-minigame-shell" content="rr-surface-minigame-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-surface-minigame-shell" data-rr-template-kind="surface-minigame">
+		<div class="rr-shell-lane rr-surface-minigame-lane">
+			<div id="rr-surface-minigame-content" class="rr-shell-content"></div>
+		</div>
+	</section>
+</body>
+</template>

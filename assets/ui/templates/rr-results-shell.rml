@@ -1,0 +1,11 @@
+<template name="rr-results-shell" content="rr-results-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-results-shell" data-rr-template-kind="results">
+		<div class="rr-shell-lane rr-results-lane">
+			<div id="rr-results-content" class="rr-shell-content"></div>
+		</div>
+	</section>
+</body>
+</template>

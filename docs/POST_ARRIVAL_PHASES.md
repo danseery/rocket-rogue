@@ -6,7 +6,7 @@ This note extends the current launch/refit prototype with the next two layers: r
 
 ## Phase Structure
 
-Earth Orbit stays focused on proving the agency can travel and return safely. The Moon preserves that story framing while adding the first explicit surface objective: safely deliver 3 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
+Earth Orbit stays focused on proving the agency can travel and return safely. The Moon preserves that story framing while adding the first explicit surface objective: safely deliver 30 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
 
 Mars is the first research frontier. After a successful Mars arrival, the game opens a post-arrival sequence:
 
@@ -18,7 +18,7 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first unique Support Drone. Mars repeats the lesson with 4 local Common Ore and `Fabricate Drone Bay Slot 2`, leaving the slot empty until a specialist is deliberately commissioned or equipped.
+Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first Support Drone. Mars repeats the lesson with 40 local Common Ore and `Fabricate Drone Bay Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
 
 The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The story site presents outer and inner four-segment lava seals, then requires artifact towing and safe Surface extraction. The minor artifact grants one persistent, player-selected free Support Drone upgrade. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward.
 
@@ -38,7 +38,7 @@ Research outputs:
 - Module families: thermal control, pressure control, recovery systems, guidance AI, deep-range power.
 - Crew facilities: better simulators, medical bays, psychology/coaching rooms, mission analysis labs.
 - Surface tools: better drills, cargo harnesses, suit supplies, probes, hazard scanners.
-- Support Drone systems: Drone Bay, unique role units, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
+- Support Drone systems: Drone Bay, role frames and paid duplicate capacity, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
 - Artifact threads: story and late-game build options, intentionally undefined until the narrative direction is clearer. For now, each identified artifact adds a small capped blueprint insight bonus to future research.
 
 Design rule: research should mostly unlock variety and new decisions, not permanent raw stat inflation. Better parts can be stronger, but the reward should feel like a wider tool belt rather than a passive +10% forever.
@@ -49,7 +49,7 @@ The current POC treats research facilities and surface tools as small unlock lay
 - Field probes add action-kit margin and improve survey yield.
 - Surface drills improve mining yield and rare-material odds.
 - Cargo return rigs reduce extraction risk, especially when cargo gets heavy.
-- The Moon Prospector contract unlocks the unique Prospector Support Drone and Slot 1; the Mars contract unlocks empty Slot 2; Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the unique Hazard Support Drone.
+- The Moon Prospector contract unlocks the first Prospector Support Drone and Slot 1; the Mars contract unlocks empty Slot 2; Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the first Hazard Support Drone.
 - Arkfall grants Mk I Attack/Defense Support Drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
 
 These are research unlocks, not refit cards, so the player has a reason to care about Mars research even before enemy encounters exist.
@@ -124,7 +124,7 @@ Current POC implementation: post-solar-system expeditions can trigger hostile co
 Bring forward:
 
 - Tool-forward exploration: jetpack, grappling, Support Drones, mining tools, and special equipment all fit the fantasy of a small expedition crew improvising under pressure.
-- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; Support Drone loadouts use explicit equipment slots with at most one unit of each type.
+- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; Support Drone loadouts use explicit equipment slots, owned frames, and paid duplicates when a repeated specialist role is worth the capacity.
 - Procedural chambers: generated corridors, rooms, vaults, and deposits are a strong fit for repeatable surface expeditions.
 - Passive defense upgrades: Support Drones, shields, and area control can make combat strategic without requiring twitch-shooter controls.
 - Artifact goals: the prototype's artifact collection idea fits the research/story loop cleanly.

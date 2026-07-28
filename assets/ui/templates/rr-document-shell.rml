@@ -1,0 +1,11 @@
+<template name="rr-document-shell" content="rr-panel">
+<head>
+</head>
+<body id="rr-document" class="rr-document">
+	<div id="rr-scene-overlay-host" class="rr-scene-overlay-host"></div>
+	<main id="rr-panel" class="rr-panel"></main>
+	<div id="rr-modal-host" class="rr-modal-host"></div>
+	<div id="rr-controller-prompt-host" class="rr-controller-prompt-host"></div>
+	<div id="rr-performance-host" class="rr-performance-host"></div>
+</body>
+</template>

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/GameTypes.h"
+#include "core/UiViewportLayout.h"
 #include "input/ControllerInput.h"
 #include "platform/FrameLimitPolicy.h"
 
@@ -15,6 +17,7 @@
 namespace rocket {
 
 struct RenderSnapshot;
+struct PanelDocumentPresentation;
 
 enum class PlatformLogLevel {
     Info,
@@ -91,9 +94,18 @@ struct RealtimeHudPatch {
 
 // Compact, presentation-only state for values that change while a realtime
 // screen is active. Element ids refer to stable nodes emitted by GamePanel;
-// changing screen structure continues to use setPanelHtml().
+// changing screen structure uses setPanelPresentation().
 struct RealtimeHudState {
     std::vector<RealtimeHudPatch> patches;
+};
+
+// The platform shell only needs enough state to size and title its native
+// host. It never receives RML markup or mirrors the authoritative RmlUi HUD.
+struct UiHostContext {
+    Screen screen = Screen::Hangar;
+    UiSurfaceKind surfaceKind = UiSurfaceKind::Fullscreen;
+    bool titleScreenActive = false;
+    bool realtimeActivityActive = false;
 };
 
 struct PerformanceStats {
@@ -246,7 +258,7 @@ public:
 
     virtual ~IGameUi() = default;
     virtual bool initialize(ActionHandler actionHandler) = 0;
-    virtual void setPanelHtml(const std::string& html) = 0;
+    virtual void setPanelPresentation(const PanelDocumentPresentation& presentation) = 0;
     virtual void setRealtimeHudState(const RealtimeHudState&) {}
     virtual void render() = 0;
     virtual bool mouseMove(int x, int y) = 0;
@@ -283,15 +295,13 @@ public:
 class IUiBridge {
 public:
     virtual ~IUiBridge() = default;
-    virtual void setPanelHtml(std::string_view html) = 0;
-    virtual void setRealtimeHudState(const RealtimeHudState&) {}
+    virtual void setUiHostContext(const UiHostContext& context) = 0;
     virtual void setRmlUiEnabled(bool enabled) = 0;
     virtual void setModalOpen(bool open) = 0;
     virtual void setControllerPresentation(bool active, ControllerFamily family) = 0;
     virtual void setControllerFocusVisible(bool visible) = 0;
     virtual void setControllerResumeBlocked(bool blocked, bool connected) = 0;
     virtual void preferencesChanged(const AppPreferences& preferences) = 0;
-    virtual void setPerformanceStats(std::string_view, bool) {}
 };
 
 struct AppServices {

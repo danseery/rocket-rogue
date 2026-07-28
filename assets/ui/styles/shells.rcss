@@ -1,0 +1,135 @@
+/* Persistent document hosts and the small set of screen geometries. */
+.rr-document {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	width: 100%;
+	height: 100%;
+	color: var(--rr-color-text);
+	background-color: transparent;
+}
+
+.rr-panel,
+.rr-screen-host,
+.rr-shell,
+.rr-shell-content {
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+}
+
+.rr-scene-overlay-host,
+.rr-modal-host,
+.rr-controller-prompt-host,
+.rr-performance-host {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+.rr-scene-overlay-host {
+	z-index: 10;
+}
+
+#rr-scene-launch-control,
+#rr-scene-launch-control * {
+	pointer-events: auto;
+}
+
+.rr-modal-host {
+	z-index: 30;
+}
+
+.rr-controller-prompt-host {
+	z-index: 40;
+}
+
+.rr-performance-host {
+	z-index: 50;
+}
+
+.rr-shell {
+	display: flex;
+	flex-direction: column;
+}
+
+.rr-shell-lane {
+	box-sizing: border-box;
+	width: var(--rr-phase-board-width);
+	max-width: 100%;
+	height: 100%;
+	margin-left: auto;
+	margin-right: auto;
+	padding-left: var(--rr-phase-lane-inset);
+	padding-right: var(--rr-phase-lane-inset);
+}
+
+.rr-shell-lane > .rr-shell-content {
+	width: var(--rr-phase-content-width);
+	max-width: 100%;
+}
+
+.rr-workspace-lane {
+	width: var(--rr-workspace-max-width);
+	padding-left: var(--rr-workspace-inset);
+	padding-right: var(--rr-workspace-inset);
+}
+
+.rr-workspace-lane > .rr-shell-content {
+	width: 100%;
+}
+
+/* Some first-wave migrated payloads still own their authored viewport padding
+   and lane width. Only their explicit compatibility class may neutralize the
+   template lane, avoiding a second inset without changing future shells. */
+#rr-panel > .rr-shell.rr-legacy-content-owns-lane > .rr-shell-lane {
+	width: 100%;
+	max-width: none;
+	margin-left: 0px;
+	margin-right: 0px;
+	padding-left: 0px;
+	padding-right: 0px;
+}
+
+#rr-panel > .rr-shell.rr-legacy-content-owns-lane > .rr-shell-lane > .rr-shell-content {
+	width: 100%;
+	max-width: none;
+}
+
+.rr-control-shell,
+.rr-surface-minigame-shell,
+.rr-mining-shell {
+	background-color: transparent;
+}
+
+.rr-mining-content {
+	flex: 1;
+}
+
+.rr-modal-layer {
+	position: absolute;
+	left: 0px;
+	top: 0px;
+	width: 100%;
+	height: 100%;
+	display: block;
+	padding: 0px;
+	box-sizing: border-box;
+	pointer-events: auto;
+	background-color: transparent;
+}
+
+.rr-modal-surface {
+	box-sizing: border-box;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+	padding: 0px;
+	overflow: visible;
+	border-width: 0px;
+	background-color: transparent;
+}

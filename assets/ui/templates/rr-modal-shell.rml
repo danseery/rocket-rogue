@@ -1,0 +1,10 @@
+<template name="rr-modal-shell" content="rr-modal">
+<head>
+</head>
+<body>
+	<section id="rr-modal-scrim" class="rr-modal-layer" data-rr-template-kind="modal">
+		<div id="rr-modal" class="rr-modal-surface" role="dialog"
+			aria-modal="true" aria-labelledby="rr-modal-title"></div>
+	</section>
+</body>
+</template>

@@ -1,0 +1,17 @@
+<rml>
+<head>
+	<title>OREBIT UI</title>
+	<link type="text/rcss" href="styles/all.rcss"/>
+	<link type="text/template" href="templates/rr-document-shell.rml"/>
+	<link type="text/template" href="templates/rr-workspace-shell.rml"/>
+	<link type="text/template" href="templates/rr-control-shell.rml"/>
+	<link type="text/template" href="templates/rr-surface-minigame-shell.rml"/>
+	<link type="text/template" href="templates/rr-mining-shell.rml"/>
+	<link type="text/template" href="templates/rr-takeover-shell.rml"/>
+	<link type="text/template" href="templates/rr-results-shell.rml"/>
+	<link type="text/template" href="templates/rr-modal-shell.rml"/>
+</head>
+<body template="rr-document-shell">
+	<div id="rr-screen-host" class="rr-screen-host"></div>
+</body>
+</rml>

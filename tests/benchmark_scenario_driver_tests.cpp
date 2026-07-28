@@ -131,7 +131,7 @@ public:
 class FakeUi final : public rocket::IGameUi {
 public:
     bool initialize(ActionHandler handler) override { actionHandler = std::move(handler); return true; }
-    void setPanelHtml(const std::string&) override {}
+    void setPanelPresentation(const rocket::PanelDocumentPresentation&) override {}
     void render() override {}
     bool mouseMove(int, int) override { return false; }
     bool mouseDown(int, int, int) override { return false; }
@@ -159,7 +159,7 @@ public:
 
 class FakeUiBridge final : public rocket::IUiBridge {
 public:
-    void setPanelHtml(std::string_view) override {}
+    void setUiHostContext(const rocket::UiHostContext&) override {}
     void setRmlUiEnabled(bool) override {}
     void setModalOpen(bool) override {}
     void setControllerPresentation(bool, rocket::ControllerFamily) override {}

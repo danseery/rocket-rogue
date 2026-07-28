@@ -1801,8 +1801,12 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                 if (agent.taskProgressSeconds >= treatmentSeconds) {
                     completeHazardTreatment(state, agent, hazardCoordinator);
                     hazardCoordinator.releaseAssignment(agent);
-                    agent.actionCooldownSeconds = 0.20;
-                    agent.behavior = MiningMiniDroneBehavior::Returning;
+                    // Hazard coverage is an active job: immediately reserve the next
+                    // useful tile instead of idling after a single conversion.
+                    agent.actionCooldownSeconds = 0.0;
+                    agent.behavior = hazardCoordinator.acquireAssignment(agent)
+                        ? MiningMiniDroneBehavior::Traveling
+                        : MiningMiniDroneBehavior::Returning;
                 }
                 break;
             }

@@ -2,6 +2,8 @@
 
 Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit and mission-management surface, not a spreadsheet or a marketing page. Every screen should make the current state, available action, and consequence obvious at game speed.
 
+For implementation ownership, template selection, shared assets, and the extension workflow, see [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md).
+
 ## Core Rules
 
 - Preserve the space-game feel: dark cockpit panels, restrained borders, readable warning color, and the Neuropol-style futuristic tone.
@@ -19,7 +21,8 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 - Use shared lane primitives before adding local layout math: `.phase-lane`, `.phase-row`, `.phase-title-row`, `.phase-action-grid`, `.phase-card-slot`, `.phase-footer-lane`, and stable chip/button slots.
 - Parent regions own alignment. Child cards fill fixed slots, and the last card or final action must not carry trailing margin.
 - Fixed-format regions reserve lanes for chips, status, and footer actions. Prefer taller cards over squeezed content, clipped chips, or buttons pushed into dividers.
-- Do not solve alignment with arbitrary one-off width, height, padding, or margin tweaks. If a screen needs a new lane width or slot size, update the shared RmlUi contract used by native and web, then mirror the behavior in the web-only fallback in `web/shell.html`.
+- Do not solve alignment with arbitrary one-off width, height, padding, or margin tweaks. If a screen needs a new lane width or slot size, update the shared RmlUi token or primitive used by both native and web.
+- Do not copy a shared header, objective, KPI, card, or footer lane into screen-local RML or RCSS. Extend the shared primitive when the same geometry is useful elsewhere.
 
 ## Readability
 
@@ -48,18 +51,25 @@ Use this checklist when changing Rocket Rogue UI. The game is a playable cockpit
 
 ## RmlUi Implementation Checks
 
+- Select an existing `PanelTemplateKind` and `PanelVisualFamily` before writing layout markup. Add a template only when the screen requires genuinely new geometry.
+- Use `rr-`-prefixed RmlUi templates for stable shell structure. Keep repeated cards, lists, labels, action state, and other variable content in typed C++ presentation renderers.
 - Prefer explicit widths for `phase-board` cards, rows, and action groups.
 - Keep fixed-format UI stable with fixed heights or minimum heights where content changes during play.
 - Use `display: flex` with `flex-wrap: nowrap` for rows that must stay together.
 - Avoid nested cards unless the inner element is a genuine repeated item or modal surface.
 - Use one visual hierarchy: panel title, mission status, KPI chips, section title, cards, actions.
 - Do not introduce decorative UI that competes with the game scene.
+- Preserve semantic action IDs, focus IDs, controller geometry classes, realtime patch IDs, modal IDs, and settings attributes. Template expansion must not create a second source of behavior.
+- Keep one content target per template. A template supplies stable chrome around one flattened content payload; it is not a React-style parameterized component.
+- Put shared RML and RCSS under `assets/ui`. Do not embed a private stylesheet or an alternate browser implementation for one screen.
 
 ## Verification Path
 
-- Build both native and web targets after shared RmlUi or panel-markup changes.
+- Run the UI resource validator after changing RML, RCSS, links, or templates. Missing files, duplicate template names, missing content targets, dependency cycles, malformed resources, and obsolete modal pseudo-templates must fail.
+- Build both native and web targets after shared RmlUi, presentation, or component changes. Both targets must load the same packaged `assets/ui` tree.
 - Verify at least the changed screen and one adjacent flow into or out of it in a native window and the web build. Reload the browser with a cache-busting query string.
 - Take screenshots at 1280x800, 1080p, 1440p, and 4K where the changed layout can vary. Inspect for clipped right/bottom borders, wrapped button labels, overlap, hidden click targets, and high-DPI drift.
-- Verify shared RmlUi behavior on native and web. Verify the forced DOM fallback separately on web; native packages do not contain it.
+- Verify shared RmlUi behavior on native and web. The web shell is an input and host boundary, not a hidden panel, modal, prompt, toast, or focus renderer.
+- Exercise pointer actions, controller navigation, modal stacking, non-dismissible gates, and focus restoration. A steady-state realtime patch must preserve active modal, focus, and scroll state.
 - Run `git diff --check`.
-- Run native tests when gameplay, input, or presentation plumbing changed, and web tests whenever panel markup, browser mirroring, or fallback behavior changed.
+- Run native tests when gameplay, input, or presentation plumbing changed, and web tests whenever panel presentation or browser host behavior changed.

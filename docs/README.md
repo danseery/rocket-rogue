@@ -12,7 +12,7 @@ Use this page to choose the right source before changing gameplay, presentation,
 ## Playable systems
 
 - [Post-Arrival Phases](POST_ARRIVAL_PHASES.md) - research, Surface Ops, extraction, and the boundary between the launch and surface loops.
-- [Support Drone System](MINI_DRONE_SYSTEM.md) - Drone Bay roles, unique units, upgrades, capacity, and passive support/combat contract.
+- [Support Drone System](MINI_DRONE_SYSTEM.md) - Drone Bay roles, owned frames, paid duplicates, upgrades, capacity, and passive support/combat contract.
 - [Mining Mini-Game](MINING_MINIGAME_PLAN.md) - current entry flow, shared-fuel tradeoff, controls, rewards, failure states, and implementation ownership.
 - [Mining and Combat Progression](MINING_COMBAT_PROGRESSION.md) - deterministic Act/level rules, encounter budgets, campaign mapping, and persistence invariants.
 - [Mining Lock-and-Key Sites](MINING_LOCK_AND_KEY_SITES.md) - artifact gate progression, capability forecasting, runtime state, and soft-lock prevention.

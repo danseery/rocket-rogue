@@ -586,8 +586,8 @@ inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 
 namespace research {
 inline constexpr int firstResearchTier = 2;
-inline constexpr int prospectorCommonOreGoal = 3;
-inline constexpr int marsBayCommonOreGoal = 4;
+inline constexpr int prospectorCommonOreGoal = 30;
+inline constexpr int marsBayCommonOreGoal = 40;
 inline constexpr int enemyEncounterTier = 4;
 inline constexpr int offerCount = 3;
 inline constexpr int baseSupply = 7;
@@ -928,7 +928,7 @@ inline constexpr double surveyDroneFormationHalfWidthCells(int roleCount)
         surveyDroneMaximumFormationHalfWidthCells,
         std::max(surveyDroneAnchorHalfWidthCells, outerOffset + surveyDroneSearchLaneHalfWidthCells));
 }
-inline constexpr double hazardDroneAcquireRadiusCells = 8.0;
+inline constexpr double hazardDroneAcquireRadiusCells = 8.35;
 inline constexpr double hazardDroneWorkRangeCells = 0.75;
 inline constexpr double hazardDroneHomeOffsetCells = 1.80;
 inline constexpr int hazardDroneRequiredMark(MiningElementalAffinity affinity)
@@ -949,11 +949,11 @@ inline constexpr double hazardDroneTreatmentSeconds(int upgradeLevel)
 {
     switch (std::clamp(upgradeLevel, 1, 3)) {
     case 1:
-        return 3.0;
-    case 2:
-        return 2.25;
-    case 3:
         return 1.5;
+    case 2:
+        return 1.125;
+    case 3:
+        return 0.75;
     }
     return 3.0;
 }

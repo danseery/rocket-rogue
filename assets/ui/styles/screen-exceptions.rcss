@@ -1,0 +1,24 @@
+/* Screen-specific exceptions belong here only when a shared shell or primitive
+   cannot express the geometry. Keep this layer intentionally small. */
+.rr-takeover-shell .rr-shell-lane,
+.rr-results-shell .rr-shell-lane {
+	padding-top: 24px;
+	padding-bottom: 24px;
+}
+
+.rr-control-shell .rr-control-lane,
+.rr-surface-minigame-shell .rr-surface-minigame-lane {
+	padding-top: 8px;
+	padding-bottom: 8px;
+}
+
+/* First-wave screens still bring their proven viewport-height geometry with
+   them. Until their dynamic renderers are converted component by component,
+   the template wrapper must not shift or clip that content vertically. */
+#rr-panel > .rr-takeover-shell .rr-shell-lane,
+#rr-panel > .rr-results-shell .rr-shell-lane,
+#rr-panel > .rr-control-shell .rr-control-lane,
+#rr-panel > .rr-surface-minigame-shell .rr-surface-minigame-lane {
+	padding-top: 0px;
+	padding-bottom: 0px;
+}

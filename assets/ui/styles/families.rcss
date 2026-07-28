@@ -1,0 +1,53 @@
+/* Visual-family hooks. Screens select a family explicitly in presentation
+   metadata instead of inferring it from generated markup. */
+.rr-family-management {
+	--rr-family-accent: var(--rr-color-signal);
+}
+
+.rr-family-decision {
+	--rr-family-accent: var(--rr-color-objective);
+}
+
+.rr-family-live-hud {
+	--rr-family-accent: var(--rr-color-signal);
+}
+
+.rr-family-surface-minigame {
+	--rr-family-accent: var(--rr-color-ready);
+}
+
+.rr-family-hangar {
+	--rr-family-accent: var(--rr-color-signal);
+}
+
+.rr-family-navigation {
+	--rr-family-accent: #53a7d8;
+}
+
+.rr-family-research {
+	--rr-family-accent: #9d7fd3;
+}
+
+.rr-family-arrival {
+	--rr-family-accent: var(--rr-color-ready);
+}
+
+.rr-family-selection {
+	--rr-family-accent: var(--rr-color-objective);
+}
+
+.rr-family-drone-ops {
+	--rr-family-accent: #47a995;
+}
+
+.rr-family-mining {
+	--rr-family-accent: #aab6bd;
+}
+
+.rr-family-results {
+	--rr-family-accent: var(--rr-color-objective);
+}
+
+.rr-shell[class*="rr-family-"] .rr-screen-header {
+	border-color: var(--rr-family-accent);
+}

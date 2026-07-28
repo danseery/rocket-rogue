@@ -46,6 +46,36 @@ foreach(ROCKET_FONT_ASSET IN LISTS ROCKET_REQUIRED_FONT_ASSETS)
     endif()
 endforeach()
 
+set(ROCKET_UI_ASSET_DIRECTORY "${CMAKE_SOURCE_DIR}/assets/ui")
+set(ROCKET_REQUIRED_UI_ASSETS
+    panel.rml
+    styles/all.rcss
+    styles/tokens.rcss
+    styles/primitives.rcss
+    styles/shells.rcss
+    styles/families.rcss
+    styles/screen-exceptions.rcss
+    styles/legacy.rcss
+    templates/rr-document-shell.rml
+    templates/rr-workspace-shell.rml
+    templates/rr-control-shell.rml
+    templates/rr-surface-minigame-shell.rml
+    templates/rr-mining-shell.rml
+    templates/rr-takeover-shell.rml
+    templates/rr-results-shell.rml
+    templates/rr-modal-shell.rml)
+foreach(ROCKET_UI_ASSET IN LISTS ROCKET_REQUIRED_UI_ASSETS)
+    if(NOT EXISTS "${ROCKET_UI_ASSET_DIRECTORY}/${ROCKET_UI_ASSET}")
+        message(FATAL_ERROR
+            "Required RmlUi runtime asset is missing: "
+            "${ROCKET_UI_ASSET_DIRECTORY}/${ROCKET_UI_ASSET}")
+    endif()
+endforeach()
+file(GLOB_RECURSE ROCKET_UI_ASSET_FILES CONFIGURE_DEPENDS
+    "${ROCKET_UI_ASSET_DIRECTORY}/*.rml"
+    "${ROCKET_UI_ASSET_DIRECTORY}/*.rcss")
+list(SORT ROCKET_UI_ASSET_FILES)
+
 include(FetchContent)
 
 add_library(rocket_core
@@ -217,11 +247,17 @@ else()
     add_test(NAME rocket_scene_atlas_tests COMMAND rocket_scene_atlas_tests)
 endif()
 
-find_program(ROCKET_NODE_EXECUTABLE NAMES node node.exe)
-if(ROCKET_NODE_EXECUTABLE)
-    add_test(NAME rocket_platform_boundary_tests
-        COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-platform-boundaries.mjs")
-endif()
+find_program(ROCKET_NODE_EXECUTABLE NAMES node node.exe REQUIRED)
+add_test(NAME rocket_platform_boundary_tests
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-platform-boundaries.mjs")
+add_test(NAME rocket_rmlui_resource_graph_tests
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.test.mjs")
+add_test(NAME rocket_web_shell_input_contract_tests
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/web-shell-input-contract.test.mjs")
+add_custom_target(validate_rocket_ui_resources
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.mjs"
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Validating packaged RmlUi templates and styles")
 
 if(EMSCRIPTEN)
     add_library(rocket_platform_web
@@ -245,7 +281,11 @@ if(EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_FONT_ASSET_DIRECTORY}"
             "${CMAKE_CURRENT_BINARY_DIR}/assets/fonts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ROCKET_UI_ASSET_DIRECTORY}"
+            "${CMAKE_CURRENT_BINARY_DIR}/assets/ui"
         COMMENT "Copying Rocket Rogue web assets")
+    add_dependencies(copy_rocket_assets validate_rocket_ui_resources)
     add_dependencies(rocket_rogue copy_rocket_assets)
 
     set(ROCKET_EXPORTED_FUNCTIONS
@@ -253,8 +293,18 @@ if(EMSCRIPTEN)
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"
         SUFFIX ".html"
-        LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html"
-        LINK_FLAGS "--shell-file ${CMAKE_SOURCE_DIR}/web/shell.html --preload-file ${CMAKE_CURRENT_BINARY_DIR}/assets/fonts@/assets/fonts -sUSE_WEBGL2=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sUSE_FREETYPE=1 -sALLOW_MEMORY_GROWTH=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
+        LINK_DEPENDS "${CMAKE_SOURCE_DIR}/web/shell.html;${ROCKET_UI_ASSET_FILES}")
+    target_link_options(rocket_rogue PRIVATE
+        "SHELL:--shell-file \"${CMAKE_SOURCE_DIR}/web/shell.html\""
+        "SHELL:--preload-file \"${CMAKE_CURRENT_BINARY_DIR}/assets/fonts@/assets/fonts\""
+        "SHELL:--preload-file \"${CMAKE_CURRENT_BINARY_DIR}/assets/ui@/assets/ui\""
+        -sUSE_WEBGL2=1
+        -sMIN_WEBGL_VERSION=2
+        -sMAX_WEBGL_VERSION=2
+        -sUSE_FREETYPE=1
+        -sALLOW_MEMORY_GROWTH=1
+        "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap']"
+        "-sEXPORTED_FUNCTIONS=${ROCKET_EXPORTED_FUNCTIONS}")
 else()
     if(NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "Native Rocket Rogue builds currently support only Windows and Linux.")
@@ -402,7 +452,11 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_FONT_ASSET_DIRECTORY}"
             "$<TARGET_FILE_DIR:RocketRogue>/assets/fonts"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ROCKET_UI_ASSET_DIRECTORY}"
+            "$<TARGET_FILE_DIR:RocketRogue>/assets/ui"
         COMMENT "Copying native Rocket Rogue assets")
+    add_dependencies(copy_native_assets validate_rocket_ui_resources)
     add_dependencies(RocketRogue copy_native_assets)
 
     add_executable(rocket_native_platform_tests tests/native_platform_tests.cpp)
@@ -455,12 +509,10 @@ else()
     add_test(NAME rocket_vulkan_policy_tests COMMAND rocket_vulkan_policy_tests)
     add_test(NAME rocket_benchmark_scenario_driver_tests COMMAND rocket_benchmark_scenario_driver_tests)
 
-    if(ROCKET_NODE_EXECUTABLE)
-        add_test(NAME rocket_vulkan_shader_tool_tests
-            COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build-vulkan-shaders.test.mjs")
-        add_test(NAME rocket_native_benchmark_summary_tool_tests
-            COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/summarize-native-benchmarks.test.mjs")
-    endif()
+    add_test(NAME rocket_vulkan_shader_tool_tests
+        COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/build-vulkan-shaders.test.mjs")
+    add_test(NAME rocket_native_benchmark_summary_tool_tests
+        COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/summarize-native-benchmarks.test.mjs")
 
     if(WIN32)
         set(ROCKET_PACKAGE_NAME "RocketRogue-windows-x64.zip")
@@ -469,6 +521,7 @@ else()
         set(ROCKET_PACKAGE_NAME "RocketRogue-linux-x64.tar.gz")
         set(ROCKET_PACKAGE_MODE "tgz")
     endif()
+    set(ROCKET_PACKAGE_DEPENDENCIES RocketRogue validate_rocket_ui_resources)
     add_custom_target(package-native
         COMMAND ${CMAKE_COMMAND}
             -DROCKET_EXECUTABLE=$<TARGET_FILE:RocketRogue>
@@ -485,7 +538,9 @@ else()
             -DROCKET_VOLK_LICENSE=${ROCKET_VOLK_LICENSE}
             -DROCKET_VMA_LICENSE=${ROCKET_VMA_LICENSE}
             -DROCKET_STEAM_RUNTIME=${ROCKET_STEAM_RUNTIME}
+            -DROCKET_NODE=${ROCKET_NODE_EXECUTABLE}
+            -DROCKET_UI_VALIDATOR=${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.mjs
             -P ${CMAKE_SOURCE_DIR}/cmake/PackageNative.cmake
-        DEPENDS RocketRogue
+        DEPENDS ${ROCKET_PACKAGE_DEPENDENCIES}
         COMMENT "Creating ${ROCKET_PACKAGE_NAME}")
 endif()

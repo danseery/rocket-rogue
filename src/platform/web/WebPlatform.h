@@ -72,15 +72,13 @@ class WebUiBridge final : public IUiBridge {
 public:
     void setUiViewportLayout(const UiViewportLayout& layout);
     UiSurfaceKind viewportSurfaceKind() const noexcept;
-    void setPanelHtml(std::string_view html) override;
-    void setRealtimeHudState(const RealtimeHudState& state) override;
+    void setUiHostContext(const UiHostContext& context) override;
     void setRmlUiEnabled(bool enabled) override;
     void setModalOpen(bool open) override;
     void setControllerPresentation(bool active, ControllerFamily family) override;
     void setControllerFocusVisible(bool visible) override;
     void setControllerResumeBlocked(bool blocked, bool connected) override;
     void preferencesChanged(const AppPreferences& preferences) override;
-    void setPerformanceStats(std::string_view html, bool visible) override;
 
 private:
     UiSurfaceKind viewportSurfaceKind_ = UiSurfaceKind::Fullscreen;

@@ -933,14 +933,18 @@ bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId 
         if (state.meta.lunarMiningBriefingAcknowledged
             || (state.meta.furthestTier < 1 && state.run.destinationIndex < 1)) return false;
         state.meta.lunarMiningBriefingAcknowledged = true;
-        state.statusLine = "Lunar Prospector contract acknowledged. Recover 3 gray-seamed Common Ore.";
+        state.statusLine = "Lunar Prospector contract acknowledged. Recover "
+            + std::to_string(tuning::research::prospectorCommonOreGoal)
+            + " gray-seamed Common Ore.";
         return true;
     case CampaignObjectiveId::MarsBayExpansion:
         if (state.meta.marsMiningBriefingAcknowledged
             || !state.meta.lunarProspectorClaimed
             || (state.meta.furthestTier < 2 && state.run.destinationIndex < 2)) return false;
         state.meta.marsMiningBriefingAcknowledged = true;
-        state.statusLine = "Mars Bay Expansion acknowledged. Recover 4 local Common Ore.";
+        state.statusLine = "Mars Bay Expansion acknowledged. Recover "
+            + std::to_string(tuning::research::marsBayCommonOreGoal)
+            + " local Common Ore.";
         return true;
     case CampaignObjectiveId::IoVolcanicDescent:
         if (state.meta.ioVolcanicBriefingAcknowledged || !state.meta.marsBayExpansionClaimed) return false;
@@ -997,7 +1001,9 @@ bool canClaimLunarProspector(const GameState& state)
 bool claimLunarProspector(GameState& state, const ContentCatalog& catalog)
 {
     if (!canClaimLunarProspector(state)) {
-        state.statusLine = "Recover and deliver 3 lunar Common Ore before installing Prospector Mk I.";
+        state.statusLine = "Recover and deliver "
+            + std::to_string(tuning::research::prospectorCommonOreGoal)
+            + " lunar Common Ore before installing Prospector Mk I.";
         return false;
     }
     state.meta.lunarProspectorClaimed = true;
@@ -1024,7 +1030,9 @@ bool canClaimMarsBayExpansion(const GameState& state)
 bool claimMarsBayExpansion(GameState& state, const ContentCatalog& catalog)
 {
     if (!canClaimMarsBayExpansion(state)) {
-        state.statusLine = "Recover and deliver 4 Mars Common Ore before fabricating Drone Bay Slot 2.";
+        state.statusLine = "Recover and deliver "
+            + std::to_string(tuning::research::marsBayCommonOreGoal)
+            + " Mars Common Ore before fabricating Drone Bay Slot 2.";
         return false;
     }
     state.meta.marsBayExpansionClaimed = true;
@@ -2030,6 +2038,37 @@ MaterialInventory miniDroneUpgradeCost(int nextLevel)
     }
 }
 
+MaterialInventory miniDroneAdditionalUnitCost(const MiniDrone& drone)
+{
+    switch (drone.rarity) {
+    case Rarity::Common:
+        return {.common = 20};
+    case Rarity::Uncommon:
+        return {.common = 30};
+    case Rarity::Rare:
+        return {.common = 40, .rare = 1};
+    case Rarity::Prototype:
+        return {.common = 60, .rare = 2};
+    }
+    return {.common = 30};
+}
+
+int ownedMiniDroneCount(const GameState& state, std::string_view droneId)
+{
+    return static_cast<int>(std::count(
+        state.meta.ownedDroneIds.begin(),
+        state.meta.ownedDroneIds.end(),
+        droneId));
+}
+
+int equippedMiniDroneCount(const GameState& state, std::string_view droneId)
+{
+    return static_cast<int>(std::count(
+        state.meta.equippedDroneIds.begin(),
+        state.meta.equippedDroneIds.end(),
+        droneId));
+}
+
 double miniDroneUpgradeMultiplier(int level)
 {
     return 1.0 + 0.30 * static_cast<double>(std::clamp(level, 1, 3) - 1);
@@ -2073,24 +2112,15 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
             }),
         state.meta.ownedDroneIds.end());
 
-    state.meta.equippedDroneIds.erase(
-        std::remove_if(
-            state.meta.equippedDroneIds.begin(),
-            state.meta.equippedDroneIds.end(),
-            [&](const std::string& id) {
-                return std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), id) == state.meta.ownedDroneIds.end();
-            }),
-        state.meta.equippedDroneIds.end());
-    {
-        std::vector<std::string> uniqueEquipped;
-        uniqueEquipped.reserve(state.meta.equippedDroneIds.size());
-        for (const std::string& id : state.meta.equippedDroneIds) {
-            if (!containsId(uniqueEquipped, id)) {
-                uniqueEquipped.push_back(id);
-            }
+    std::vector<std::string> validEquipped;
+    validEquipped.reserve(state.meta.equippedDroneIds.size());
+    for (const std::string& id : state.meta.equippedDroneIds) {
+        if (static_cast<int>(std::count(validEquipped.begin(), validEquipped.end(), id)) <
+            ownedMiniDroneCount(state, id)) {
+            validEquipped.push_back(id);
         }
-        state.meta.equippedDroneIds = std::move(uniqueEquipped);
     }
+    state.meta.equippedDroneIds = std::move(validEquipped);
     if (state.meta.equippedDroneIds.size() > static_cast<std::size_t>(state.meta.droneBaySlots)) {
         state.meta.equippedDroneIds.resize(static_cast<std::size_t>(state.meta.droneBaySlots));
     }
@@ -2225,18 +2255,25 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
         return false;
     }
 
-    if (containsId(state.meta.equippedDroneIds, drone.id)) {
-        state.statusLine = drone.name + " is already assigned to a Drone Bay slot.";
-        return false;
-    }
-
     if (state.meta.equippedDroneIds.size() >= static_cast<std::size_t>(state.meta.droneBaySlots)) {
         state.statusLine = "Drone Loadout full. Unequip a slot or expand the bay.";
         return false;
     }
 
+    const int ownedCount = ownedMiniDroneCount(state, drone.id);
+    const int equippedCount = equippedMiniDroneCount(state, drone.id);
+    if (equippedCount >= ownedCount) {
+        const MaterialInventory cost = miniDroneAdditionalUnitCost(drone);
+        if (!spendMaterials(state.meta.materials, cost)) {
+            state.statusLine = "Need additional materials to build another " + drone.name + ".";
+            return false;
+        }
+        state.meta.ownedDroneIds.push_back(drone.id);
+    }
     state.meta.equippedDroneIds.push_back(drone.id);
-    state.statusLine = drone.name + " added to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + ".";
+    state.statusLine = equippedCount >= ownedCount
+        ? "Built and assigned another " + drone.name + " to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "."
+        : drone.name + " added to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + ".";
     return true;
 }
 

@@ -13,23 +13,6 @@
 namespace rocket {
 namespace {
 
-UiSurfaceKind uiSurfaceKindForPanelHtml(std::string_view html) noexcept
-{
-    if (html.find("data-panel-mode=\"mining-fullscreen\"") != std::string_view::npos) {
-        return UiSurfaceKind::Mining;
-    }
-    if (html.find("data-panel-mode=\"title\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"story-briefing\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"results\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"workspace\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"drone-workspace\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"arrival-fanfare\"") != std::string_view::npos
-        || html.find("data-panel-mode=\"mission-stamp\"") != std::string_view::npos) {
-        return UiSurfaceKind::Fullscreen;
-    }
-    return UiSurfaceKind::PersistentPanel;
-}
-
 EM_JS(char*, rr_web_string_preference, (int field), {
     let value = "";
     try {
@@ -257,24 +240,26 @@ EM_JS(int, rr_web_decode_image_rgba, (const char* keyPtr, unsigned char* destina
     }
 });
 
-EM_JS(void, rr_web_set_panel, (const char* valuePtr), {
-    if (window.RocketBridge && RocketBridge.setPanel) RocketBridge.setPanel(UTF8ToString(valuePtr));
+EM_JS(void, rr_web_set_ui_host_context,
+    (int screen, int surfaceKind, int titleScreenActive, int realtimeActivityActive), {
+    if (window.RocketBridge && RocketBridge.setUiHostContext) {
+        RocketBridge.setUiHostContext({
+            screen,
+            surfaceKind,
+            titleScreenActive: titleScreenActive !== 0,
+            realtimeActivityActive: realtimeActivityActive !== 0
+        });
+    }
     Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
-});
-EM_JS(void, rr_web_set_realtime_hud, (const char* valuePtr), {
-    if (!window.RocketBridge || !RocketBridge.setRealtimeHudState) return;
-    try { RocketBridge.setRealtimeHudState(JSON.parse(UTF8ToString(valuePtr || 0) || "[]")); }
-    catch (error) { console.warn("Rocket Rogue realtime HUD update failed", error); }
 });
 EM_JS(void, rr_web_set_rml_enabled, (int value), {
     const rmlEnabled = value !== 0;
-    document.body.classList.toggle("rmlui-enabled", rmlEnabled);
-    document.body.dataset.uiRenderer = rmlEnabled ? "rmlui" : "unavailable";
-    const startupStatus = document.getElementById("ui-startup-status");
-    if (startupStatus && !rmlEnabled) {
-        startupStatus.textContent = "RmlUi initialization failed. Check the browser console for details.";
+    if (window.RocketBridge && RocketBridge.setRmlUiEnabled) {
+        RocketBridge.setRmlUiEnabled(rmlEnabled);
+    } else {
+        document.body.classList.toggle("rmlui-enabled", rmlEnabled);
+        document.body.dataset.uiRenderer = rmlEnabled ? "rmlui" : "unavailable";
     }
-    if (window.RocketBridge && RocketBridge.syncSceneOverlays) RocketBridge.syncSceneOverlays();
     Module.RocketViewportRevision = (Module.RocketViewportRevision || 0) + 1;
 });
 EM_JS(void, rr_web_set_ui_viewport_layout,
@@ -311,16 +296,8 @@ EM_JS(void, rr_web_preferences_changed, (const char* resolutionPtr, int debugToo
     document.body.classList.toggle("performance-stats-enabled", performanceStats !== 0);
     if (window.RocketBridge && RocketBridge.setResolutionPreset) RocketBridge.setResolutionPreset(resolution);
     if (Module.RocketSyncCanvas) Module.RocketSyncCanvas();
-    if (window.RocketBridge && RocketBridge.syncSettingsControls) RocketBridge.syncSettingsControls();
     if (window.RocketBridge && RocketBridge.syncDebugToolsControls) RocketBridge.syncDebugToolsControls();
-    if (window.RocketBridge && RocketBridge.syncPerformanceStatsControls) RocketBridge.syncPerformanceStatsControls();
 });
-EM_JS(void, rr_web_set_performance_stats, (const char* htmlPtr, int visible), {
-    if (window.RocketBridge && RocketBridge.setPerformanceStats) {
-        RocketBridge.setPerformanceStats(UTF8ToString(htmlPtr || 0), visible !== 0);
-    }
-});
-
 std::string takeJsString(char* value)
 {
     const std::string result = value ? value : "";
@@ -373,56 +350,6 @@ std::string encodeSimpleJsonStrings(const std::vector<std::string>& values)
         stream << '"';
     }
     stream << ']'; return stream.str();
-}
-
-void appendJsonString(std::ostringstream& stream, std::string_view value)
-{
-    stream << '"';
-    for (const unsigned char c : value) {
-        switch (c) {
-        case '"': stream << "\\\""; break;
-        case '\\': stream << "\\\\"; break;
-        case '\b': stream << "\\b"; break;
-        case '\f': stream << "\\f"; break;
-        case '\n': stream << "\\n"; break;
-        case '\r': stream << "\\r"; break;
-        case '\t': stream << "\\t"; break;
-        default:
-            if (c < 0x20) {
-                constexpr char hex[] = "0123456789abcdef";
-                stream << "\\u00" << hex[(c >> 4) & 0xf] << hex[c & 0xf];
-            } else {
-                stream << static_cast<char>(c);
-            }
-            break;
-        }
-    }
-    stream << '"';
-}
-
-std::string encodeRealtimeHudState(const RealtimeHudState& state)
-{
-    std::ostringstream stream;
-    stream << '[';
-    for (std::size_t index = 0; index < state.patches.size(); ++index) {
-        const RealtimeHudPatch& patch = state.patches[index];
-        if (index > 0) {
-            stream << ',';
-        }
-        stream << "{\"id\":";
-        appendJsonString(stream, patch.elementId);
-        if (patch.updateText) {
-            stream << ",\"text\":";
-            appendJsonString(stream, patch.text);
-        }
-        if (patch.updateClass) {
-            stream << ",\"className\":";
-            appendJsonString(stream, patch.cssClass);
-        }
-        stream << '}';
-    }
-    stream << ']';
-    return stream.str();
 }
 
 } // namespace
@@ -601,16 +528,14 @@ UiSurfaceKind WebUiBridge::viewportSurfaceKind() const noexcept
     return viewportSurfaceKind_;
 }
 
-void WebUiBridge::setPanelHtml(std::string_view html)
+void WebUiBridge::setUiHostContext(const UiHostContext& context)
 {
-    viewportSurfaceKind_ = uiSurfaceKindForPanelHtml(html);
-    const std::string copy(html);
-    rr_web_set_panel(copy.c_str());
-}
-void WebUiBridge::setRealtimeHudState(const RealtimeHudState& state)
-{
-    const std::string json = encodeRealtimeHudState(state);
-    rr_web_set_realtime_hud(json.c_str());
+    viewportSurfaceKind_ = context.surfaceKind;
+    rr_web_set_ui_host_context(
+        static_cast<int>(context.screen),
+        static_cast<int>(context.surfaceKind),
+        context.titleScreenActive ? 1 : 0,
+        context.realtimeActivityActive ? 1 : 0);
 }
 void WebUiBridge::setRmlUiEnabled(bool enabled) { rr_web_set_rml_enabled(enabled); }
 void WebUiBridge::setModalOpen(bool open) { rr_web_set_modal_open(open); }
@@ -624,10 +549,4 @@ void WebUiBridge::preferencesChanged(const AppPreferences& preferences)
         preferences.debugToolsEnabled,
         preferences.performanceStatsEnabled);
 }
-void WebUiBridge::setPerformanceStats(std::string_view html, bool visible)
-{
-    const std::string copy(html);
-    rr_web_set_performance_stats(copy.c_str(), visible ? 1 : 0);
-}
-
 } // namespace rocket

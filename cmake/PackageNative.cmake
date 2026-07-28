@@ -3,6 +3,7 @@ file(MAKE_DIRECTORY
     "${ROCKET_STAGING}/assets"
     "${ROCKET_STAGING}/assets/fonts"
     "${ROCKET_STAGING}/assets/shaders"
+    "${ROCKET_STAGING}/assets/ui"
     "${ROCKET_STAGING}/licenses")
 file(COPY "${ROCKET_EXECUTABLE}" DESTINATION "${ROCKET_STAGING}")
 if(NOT IS_DIRECTORY "${ROCKET_ASSETS}/scene-atlas")
@@ -32,6 +33,48 @@ foreach(ROCKET_FONT_ASSET
         message(FATAL_ERROR "Required packaged Source Code Pro asset is missing: ${ROCKET_FONT_ASSET}")
     endif()
 endforeach()
+
+if(NOT IS_DIRECTORY "${ROCKET_ASSETS}/ui")
+    message(FATAL_ERROR "Required runtime asset directory is missing: ui")
+endif()
+file(COPY
+    "${ROCKET_ASSETS}/ui"
+    DESTINATION "${ROCKET_STAGING}/assets")
+foreach(ROCKET_UI_ASSET
+    panel.rml
+    styles/all.rcss
+    styles/tokens.rcss
+    styles/primitives.rcss
+    styles/shells.rcss
+    styles/families.rcss
+    styles/screen-exceptions.rcss
+    styles/legacy.rcss
+    templates/rr-document-shell.rml
+    templates/rr-workspace-shell.rml
+    templates/rr-control-shell.rml
+    templates/rr-surface-minigame-shell.rml
+    templates/rr-mining-shell.rml
+    templates/rr-takeover-shell.rml
+    templates/rr-results-shell.rml
+    templates/rr-modal-shell.rml)
+    if(NOT EXISTS "${ROCKET_STAGING}/assets/ui/${ROCKET_UI_ASSET}")
+        message(FATAL_ERROR "Required packaged RmlUi asset is missing: ${ROCKET_UI_ASSET}")
+    endif()
+endforeach()
+if(NOT DEFINED ROCKET_NODE OR ROCKET_NODE STREQUAL "" OR NOT EXISTS "${ROCKET_NODE}")
+    message(FATAL_ERROR "Node.js is required to validate the staged RmlUi package.")
+endif()
+if(NOT DEFINED ROCKET_UI_VALIDATOR OR NOT EXISTS "${ROCKET_UI_VALIDATOR}")
+    message(FATAL_ERROR "RmlUi package validator is missing: ${ROCKET_UI_VALIDATOR}")
+endif()
+execute_process(
+    COMMAND "${ROCKET_NODE}" "${ROCKET_UI_VALIDATOR}" "${ROCKET_STAGING}/assets/ui"
+    RESULT_VARIABLE ROCKET_UI_VALIDATION_RESULT)
+if(NOT ROCKET_UI_VALIDATION_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Staged native RmlUi resource graph validation failed: "
+        "${ROCKET_STAGING}/assets/ui")
+endif()
 
 # Copy third-party notices directly to stable names. Several dependencies call
 # their source notice LICENSE.txt, so copying and then renaming would silently

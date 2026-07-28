@@ -10,6 +10,10 @@
   },
   "scripts": {
     "sanity": "node tools/sanity-check.mjs",
+    "ui:bundle": "node tools/bundle-rmlui-styles.mjs",
+    "ui:validate": "node tools/validate-rmlui-resources.mjs",
+    "test:ui-resources": "node --test tools/validate-rmlui-resources.test.mjs",
+    "test:web-shell-context": "node --test tools/web-shell-input-contract.test.mjs",
     "check:steam-readiness": "node tools/verify-steam-readiness.mjs --policy",
     "test:steam-readiness": "node tools/verify-steam-readiness.test.mjs",
     "verify:steam-release": "node tools/verify-steam-readiness.mjs --release-candidate",

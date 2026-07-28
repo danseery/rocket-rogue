@@ -1736,7 +1736,9 @@ void RocketGameApp::acknowledgeLunarMiningBriefing()
     ui::briefings::acknowledge(
         state_.meta.acknowledgedActivityBriefingIds,
         ui::briefings::mining);
-    state_.statusLine = "Lunar Prospector contract accepted. Recover 3 gray-seamed Common Ore.";
+    state_.statusLine = "Lunar Prospector contract accepted. Recover "
+        + std::to_string(tuning::research::prospectorCommonOreGoal)
+        + " gray-seamed Common Ore.";
     save();
     panelDirty_ = true;
 }
@@ -1767,7 +1769,9 @@ void RocketGameApp::acknowledgeMarsMiningBriefing()
         return;
     }
 
-    state_.statusLine = "Mars bay-expansion contract accepted. Recover 4 local Common Ore.";
+    state_.statusLine = "Mars bay-expansion contract accepted. Recover "
+        + std::to_string(tuning::research::marsBayCommonOreGoal)
+        + " local Common Ore.";
     save();
     panelDirty_ = true;
 }
@@ -3545,9 +3549,14 @@ void RocketGameApp::refreshPanel()
 {
     const PreparedLaunch flightModel = currentFlightModel();
     const PanelRenderContext context = panelRenderContext(flightModel);
-    const std::string panelHtml = buildGamePanelHtml(context);
-    services_.uiBridge.setPanelHtml(panelHtml);
-    services_.ui.setPanelHtml(panelHtml);
+    const PanelDocumentPresentation presentation = buildGamePanelPresentation(context);
+    services_.uiBridge.setUiHostContext({
+        presentation.metadata.screen,
+        uiSurfaceKindForScreen(presentation.metadata.screen),
+        presentation.runtime.titleScreen,
+        presentation.metadata.interaction == PanelInteractionMode::Realtime,
+    });
+    services_.ui.setPanelPresentation(presentation);
     panelStructureKey_ = realtimePanelStructureKey(context);
     panelDirty_ = false;
     realtimeHudDirty_ = false;
@@ -3564,7 +3573,6 @@ void RocketGameApp::refreshRealtimeHud()
     }
 
     buildRealtimeHudState(context, realtimeHudState_);
-    services_.uiBridge.setRealtimeHudState(realtimeHudState_);
     services_.ui.setRealtimeHudState(realtimeHudState_);
     realtimeHudDirty_ = false;
 }

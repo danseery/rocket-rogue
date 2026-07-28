@@ -1,0 +1,25 @@
+/* Shared visual and geometry tokens. Runtime code may override inherited
+   variables on #rr-document for viewport-specific metrics. */
+body {
+	--rr-phase-board-width: 736px;
+	--rr-phase-content-width: 704px;
+	--rr-phase-lane-inset: 16px;
+	--rr-workspace-max-width: 1200px;
+	--rr-workspace-inset: 24px;
+	--rr-workspace-action-stack-height: 504px;
+	--rr-card-gap: 10px;
+	--rr-control-height: 38px;
+	--rr-modal-gutter: 24px;
+
+	--rr-color-void: #02090d;
+	--rr-color-panel: #07151c;
+	--rr-color-panel-raised: #0b202a;
+	--rr-color-line: #244b5c;
+	--rr-color-line-strong: #3f7286;
+	--rr-color-text: #c7d2d9;
+	--rr-color-muted: #78909c;
+	--rr-color-signal: #1bc9dc;
+	--rr-color-objective: #d2ad45;
+	--rr-color-ready: #46c587;
+	--rr-color-danger: #e36868;
+}

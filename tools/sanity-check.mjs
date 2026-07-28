@@ -93,11 +93,6 @@ if (webShell.includes("RocketDesktop")) {
   console.error("web/shell.html still references the retired Electron fullscreen bridge");
   failed = true;
 }
-const rmlUiOwnershipFence = /#panel,\s*#modal-root,\s*#controller-prompt-bar,\s*#toast-root,\s*#scene-launch-control,\s*#scene-ship-service,\s*#telemetry-chart-legend,\s*#surface-scan-scene-readout\s*\{\s*display:\s*none\s*!important;\s*pointer-events:\s*none\s*!important;\s*\}/s;
-if (!rmlUiOwnershipFence.test(webShell)) {
-  console.error("web/shell.html missing the RmlUi renderer ownership fence");
-  failed = true;
-}
 for (const token of [
   '<div id="ui-startup-status" role="status">Starting RmlUi...</div>',
   'body[data-ui-renderer="rmlui"] #ui-startup-status'
@@ -107,44 +102,37 @@ for (const token of [
     failed = true;
   }
 }
-for (const token of ["requestFullscreen", "exitFullscreen", "fullscreenchange"]) {
-  if (!webShell.includes(token)) {
-    console.error(`web/shell.html missing browser fullscreen support: ${token}`);
+for (const token of [
+  'id="panel"',
+  'id="modal-root"',
+  'id="controller-prompt-bar"',
+  'id="toast-root"',
+  "RocketBridge.setPanel",
+  "setRealtimeHudState",
+  "template[data-modal]"
+]) {
+  if (webShell.includes(token)) {
+    console.error(`web shell still contains an obsolete UI renderer token: ${token}`);
     failed = true;
   }
 }
-for (const token of [
-  "rocket_rogue_frame_limit_mode",
-  "data-frame-limit-select",
-  "setFrameLimitMode",
-  "syncFrameLimitControls"
-]) {
+for (const token of ["function setUiHostContext(context)", "setUiHostContext,"]) {
   if (!webShell.includes(token)) {
-    console.error(`web frame-limit preference missing token: ${token}`);
-    failed = true;
-  }
-}
-for (const token of [
-  "function rmlUiOwnsModalRendering()",
-  "function modalInputFenceActive()",
-  "function nonDomModalOwnsControllerInput()",
-  "body.rmlui-modal-open .telemetry-chart-legend",
-  "autoModal && !rmlUiOwnsModalRendering()",
-  "if (rmlUiOwnsModalRendering()) return false;"
-]) {
-  if (!webShell.includes(token)) {
-    console.error(`web modal authority contract missing token: ${token}`);
+    console.error(`web shell missing typed UI host context token: ${token}`);
     failed = true;
   }
 }
 
 const gameRmlUi = existsSync("src/game/GameRmlUi.cpp") ? readFileSync("src/game/GameRmlUi.cpp", "utf8") : "";
+const nativeRcss = existsSync("assets/ui/styles/all.rcss")
+  ? readFileSync("assets/ui/styles/all.rcss", "utf8")
+  : "";
 const nativeCssRuleBody = (selector) => {
-  const selectorStart = gameRmlUi.indexOf(selector);
+  const selectorStart = nativeRcss.indexOf(selector);
   if (selectorStart < 0) return "";
-  const bodyStart = gameRmlUi.indexOf("{", selectorStart);
-  const bodyEnd = bodyStart < 0 ? -1 : gameRmlUi.indexOf("}", bodyStart);
-  return bodyStart < 0 || bodyEnd < 0 ? "" : gameRmlUi.slice(bodyStart + 1, bodyEnd);
+  const bodyStart = nativeRcss.indexOf("{", selectorStart);
+  const bodyEnd = bodyStart < 0 ? -1 : nativeRcss.indexOf("}", bodyStart);
+  return bodyStart < 0 || bodyEnd < 0 ? "" : nativeRcss.slice(bodyStart + 1, bodyEnd);
 };
 const requireNativeCssRule = (selector, tokens, contract) => {
   const body = nativeCssRuleBody(selector);
@@ -159,7 +147,10 @@ const requireNativeCssRule = (selector, tokens, contract) => {
 for (const [pattern, contract] of [
   [/const int modalOutcomeHeight\s*=\s*std::max\(1,\s*std::min\(\d+,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped launch outcome height"],
   [/const int modalOutcomeTop\s*=\s*std::max\(modalGutter,\s*\(viewportHeight - modalOutcomeHeight\) \/ 2\);/, "centered launch outcome position"],
-  [/const bool modalOutcomeNeedsScroll\s*=\s*modalOutcomeHeight < \d+;/, "short-height launch outcome scrolling"]
+  [/const bool modalOutcomeNeedsScroll\s*=\s*modalOutcomeHeight < \d+;/, "short-height launch outcome scrolling"],
+  [/SetProperty\("--rr-legacy-layout-115",\s*std::to_string\(modalOutcomeTop\) \+ "px"\)/, "launch outcome top custom property"],
+  [/SetProperty\("--rr-legacy-layout-116",\s*std::to_string\(modalOutcomeHeight\) \+ "px"\)/, "launch outcome height custom property"],
+  [/SetProperty\("--rr-legacy-layout-117",\s*std::string\(modalOutcomeNeedsScroll \? "auto" : "hidden"\)\)/, "launch outcome scroll custom property"]
 ]) {
   if (!pattern.test(gameRmlUi)) {
     console.error(`native RmlUi modal layout contract missing: ${contract}`);
@@ -167,14 +158,18 @@ for (const [pattern, contract] of [
   }
 }
 requireNativeCssRule("#rr-modal-scrim", ["z-index: 100;"], "modal stacking");
+requireNativeCssRule(
+  "#rr-scene-launch-control,",
+  ["pointer-events: auto;"],
+  "actionable scene launch overlay");
 requireNativeCssRule("#rr-modal {", ["box-sizing: border-box;", "z-index: 101;", "display: flex;", "overflow: hidden;"], "modal containment");
 requireNativeCssRule(
   "#rr-modal.modal-launch_outcome {",
-  ["modalOutcomeTop", "modalOutcomeHeight"],
+  ["top: var(--rr-legacy-layout-115, 0px);", "height: var(--rr-legacy-layout-116, 0px);"],
   "launch outcome geometry");
 requireNativeCssRule(
   "#rr-modal.modal-launch_outcome .modal-scroll-body {",
-  ["display: flex;", "flex-direction: column;", "modalOutcomeNeedsScroll"],
+  ["display: flex;", "flex-direction: column;", "overflow-y: var(--rr-legacy-layout-117, hidden);"],
   "launch outcome short-height body");
 requireNativeCssRule(
   ".launch-outcome-summary {",
@@ -192,19 +187,30 @@ requireNativeCssRule(
   "#rr-modal.modal-launch_outcome .ui-outcome-rows > div {",
   ["min-height: 40px;", "height: 40px;"],
   "launch outcome compact consequence rows");
+for (const token of [
+  "#rr-panel.workspace-panel > .rr-shell .rr-shell-content > .panel-head",
+  "#rr-document.rr-side-rail #rr-panel.control-panel > .rr-shell .rr-shell-content > .panel-head",
+  "#rr-panel.results-panel-mode > .rr-shell .rr-shell-content > .panel-head"
+]) {
+  if (!nativeRcss.includes(token)) {
+    console.error(`native RmlUi template compatibility selector missing: ${token}`);
+    failed = true;
+  }
+}
 
 for (const token of [
   "data-frame-limit-select",
   "rr_rml_set_frame_limit_preference",
   "selectCurrentFrameLimit",
-  "if (activeModal == nullptr) {",
-  "document += nativeSceneOverlayMarkup(panelHtml);"
+  "const ModalPresentation* activeModal",
+  "overlayHost->SetInnerRML(activeModal ? std::string {} : nativeSceneOverlayMarkup(presentation_));"
 ]) {
   if (!gameRmlUi.includes(token)) {
     console.error(`native RmlUi frame-limit preference missing token: ${token}`);
     failed = true;
   }
 }
+const nativePresentationSource = `${gameRmlUi}\n${nativeRcss}`;
 for (const token of [
   "RmlPanelMode::Title",
   ".title-screen",
@@ -212,33 +218,20 @@ for (const token of [
   "@keyframes orebit-letter-float",
   "infinite alternate orebit-letter-float"
 ]) {
-  if (!gameRmlUi.includes(token)) {
+  if (!nativePresentationSource.includes(token)) {
     console.error(`native RmlUi title presentation missing token: ${token}`);
-    failed = true;
-  }
-}
-
-for (const token of [
-  ".title-screen-panel",
-  ".title-screen-panel-mode",
-  ".orebit-letter",
-  "@keyframes orebit-letter-float",
-  "animation: orebit-letter-float",
-  "rr_new_game",
-  "rr_continue_game",
-  "new_game",
-  "continue_game",
-  "function isTitleScreenActive()",
-  "if (isTitleScreenActive())"
-]) {
-  if (!webShell.includes(token)) {
-    console.error(`web title presentation or action bridge missing token: ${token}`);
     failed = true;
   }
 }
 
 const webMain = existsSync("src/platform/web/WebMain.cpp") ? readFileSync("src/platform/web/WebMain.cpp", "utf8") : "";
 const webPlatform = existsSync("src/platform/web/WebPlatform.cpp") ? readFileSync("src/platform/web/WebPlatform.cpp", "utf8") : "";
+for (const token of ["requestFullscreen", "exitFullscreen", "fullscreenchange", "data-frame-limit-select"]) {
+  if (!webPlatform.includes(token)) {
+    console.error(`WebPlatform missing browser display preference support: ${token}`);
+    failed = true;
+  }
+}
 const singleRendererSources = `${webMain}\n${webPlatform}\n${gameRmlUi}\n${webShell}`;
 for (const token of [
   "WebDomFallbackUi",

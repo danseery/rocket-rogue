@@ -6,7 +6,7 @@ namespace rocket {
 
 class NativeUiBridge final : public IUiBridge {
 public:
-    void setPanelHtml(std::string_view) override {}
+    void setUiHostContext(const UiHostContext&) override {}
     void setRmlUiEnabled(bool) override {}
     void setModalOpen(bool) override {}
     void setControllerPresentation(bool, ControllerFamily) override {}

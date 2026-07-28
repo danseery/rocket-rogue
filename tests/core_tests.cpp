@@ -67,6 +67,50 @@ std::size_t countOccurrences(std::string_view text, std::string_view needle)
     return count;
 }
 
+std::string panelTestEscape(std::string_view value)
+{
+    std::string escaped;
+    escaped.reserve(value.size());
+    for (const char ch : value) {
+        switch (ch) {
+        case '&': escaped += "&amp;"; break;
+        case '<': escaped += "&lt;"; break;
+        case '>': escaped += "&gt;"; break;
+        case '"': escaped += "&quot;"; break;
+        default: escaped.push_back(ch); break;
+        }
+    }
+    return escaped;
+}
+
+// Existing content assertions intentionally inspect one flat test string.
+// Production consumes the structured presentation and never serializes typed
+// modals back into the retired template[data-modal] transport.
+std::string buildGamePanelHtml(const PanelRenderContext& context)
+{
+    const PanelDocumentPresentation presentation = buildGamePanelPresentation(context);
+    std::string markup = presentation.contentMarkup;
+    for (const ModalPresentation& modal : presentation.modals) {
+        markup += "<template data-modal=\"" + panelTestEscape(modal.id) + "\"";
+        if (modal.autoOpen) {
+            markup += " data-auto-modal=\"1\" data-modal-dismissible=\"";
+            markup += modal.dismissible ? "1" : "0";
+            markup += "\" data-modal-close-action=\"" + panelTestEscape(modal.closeAction)
+                + "\" data-title=\"" + panelTestEscape(modal.title) + "\"";
+        } else {
+            markup += " data-title=\"" + panelTestEscape(modal.title) + "\"";
+            if (!modal.dismissible) {
+                markup += " data-modal-dismissible=\"0\"";
+            }
+        }
+        if (!modal.showClose) {
+            markup += " data-modal-hide-close=\"1\"";
+        }
+        markup += ">" + modal.bodyMarkup + "</template>";
+    }
+    return markup;
+}
+
 void activateOnlyCrew(GameState& state, std::string_view id)
 {
     for (Astronaut& astronaut : state.run.crew) {
@@ -1642,7 +1686,7 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     require(html.find("data-modal=\"lunar_mining_briefing\" data-auto-modal=\"1\"") != std::string::npos
             && html.find("data-rr-action=\"acknowledge_lunar_mining_briefing\"") != std::string::npos
             && html.find("Most lunar regolith is inert") != std::string::npos
-            && html.find("3 Common Ore") != std::string::npos
+            && html.find("30 Common Ore") != std::string::npos
             && html.find("REWARD // PROSPECTOR MK I + SLOT 1") != std::string::npos
             && html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos
             && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
@@ -1670,9 +1714,9 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     ensureDroneBayState(surface, catalog);
     html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
     require(html.find("data-ui-modal=\"mini_drone_introduction\"") != std::string::npos
-            && html.find("Support Drones are unique persistent craft") != std::string::npos
+            && html.find("Support Drones are persistent craft") != std::string::npos
             && html.find("data-rr-action=\"drone_ops\"") != std::string::npos,
-        "the unlocked Drone Bay should introduce unique Support Drones on first selection");
+        "the unlocked Drone Bay should introduce persistent Support Drones on first selection");
     PanelRenderContext surfaceHelpDisabled {surface, catalog, surfaceLaunch, surfaceLaunch};
     surfaceHelpDisabled.firstTimeIntroductionsEnabled = false;
     html = buildGamePanelHtml(surfaceHelpDisabled);
@@ -2723,11 +2767,18 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(claimMarsBayExpansion(state, catalog), "the completed Mars objective should explicitly fabricate Slot 2");
     require(state.meta.droneBaySlots == 2 && state.meta.equippedDroneIds.size() == 1,
         "Mars should add an empty second slot without assigning another drone");
-    require(!equipMiniDrone(state, catalog, 0), "a unique support drone should not occupy two slots");
+    state.meta.materials.common = 20;
+    require(equipMiniDrone(state, catalog, 0), "an open slot should build and assign a paid duplicate Support Drone");
+    require(ownedMiniDroneCount(state, content::drone::miningDrone) == 2
+            && equippedMiniDroneCount(state, content::drone::miningDrone) == 2
+            && state.meta.materials.common == 0,
+        "a duplicate Support Drone should consume its material cost and occupy the open slot");
+    require(unequipMiniDroneSlot(state, catalog, 1), "the duplicate slot should be independently removable");
     require(equipMiniDrone(state, catalog, 1), "a different support drone should fit in Slot 2");
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
     const MiniDroneLoadoutEffects beforeTune = miniDroneLoadoutEffects(state, catalog);
+    state.meta.materials.common = 3;
     require(canUpgradeMiniDrone(state, catalog, 0), "funded owned drone should expose tuning");
     require(upgradeMiniDrone(state, catalog, 0), "material-funded drone tuning should succeed");
     require(miniDroneUpgradeLevel(state, content::drone::miningDrone) == 2, "tuned drone should advance to Mk II");
@@ -2814,19 +2865,21 @@ void firstMiningContractBuildsAndCelebratesProspector()
         throw std::runtime_error("test should find a clean Prospector extraction seed");
     };
 
-    const SurfaceActionOutcome firstRecovery = recoverMiningOre(state, 2);
+    require(tuning::research::prospectorCommonOreGoal == 30,
+        "the lunar Prospector contract should require thirty safely delivered Common Ore");
+    const SurfaceActionOutcome firstRecovery = recoverMiningOre(state, 10);
     require(firstRecovery.applied && !firstRecovery.prospectorUnlocked,
         "a partial Prospector contract should bank progress without unlocking the drone");
-    require(state.meta.prospectorCommonOreRecovered == 2,
+    require(state.meta.prospectorCommonOreRecovered == 10,
         "only safely extracted mining ore should advance the Prospector contract");
     require(state.meta.materials.common == 0,
         "Prospector contract ore should be committed to fabrication instead of ordinary research spend");
     require(!hasUnlock(state.meta, content::unlock::droneBay),
-        "the Prospector should remain locked before all three ore loads are home");
+        "the Prospector should remain locked before all contract ore is home");
 
-    const SurfaceActionOutcome completion = recoverMiningOre(state, 1);
+    const SurfaceActionOutcome completion = recoverMiningOre(state, 20);
     require(!completion.prospectorUnlocked && canClaimLunarProspector(state),
-        "the third safely extracted Common Ore should create a claim-ready contract without applying its reward");
+        "the thirtieth safely extracted Common Ore should create a claim-ready contract without applying its reward");
     require(state.meta.prospectorCommonOreRecovered == tuning::research::prospectorCommonOreGoal,
         "Prospector progress should stop at its stated goal");
     require(!hasUnlock(state.meta, content::unlock::droneBay),
@@ -2891,10 +2944,21 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         "Mars should be gated by the explicit Lunar Prospector claim");
     require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
         "the lunar objective briefing should require an explicit acknowledgment");
-    state.meta.materials.common = 3;
-    require(creditCampaignCommonOre(state, content::destination::mars, 3) == 0,
+    require(tuning::research::prospectorCommonOreGoal == 30
+            && tuning::research::marsBayCommonOreGoal == 40,
+        "early campaign contracts should use the tuned thirty and forty ore requirements");
+    SaveData partialContractSave = captureSaveData(state);
+    partialContractSave.version = 7;
+    partialContractSave.prospectorCommonOreRecovered = 3;
+    GameState restoredPartialContract = createNewGame(catalog, 0x10A8);
+    restoreSaveData(restoredPartialContract, catalog, partialContractSave);
+    require(restoredPartialContract.meta.prospectorCommonOreRecovered == 3
+            && !restoredPartialContract.meta.lunarProspectorClaimed,
+        "an unfinished current save should retain its delivered contract ore and continue toward the new goal");
+    state.meta.materials.common = 30;
+    require(creditCampaignCommonOre(state, content::destination::mars, 30) == 0,
         "Mars ore must not satisfy the destination-attributed lunar contract");
-    require(creditCampaignCommonOre(state, content::destination::moon, 3) == 3
+    require(creditCampaignCommonOre(state, content::destination::moon, 30) == 30
             && state.meta.materials.common == 0,
         "safely extracted lunar ore should be reserved instead of entering the spendable pool");
     require(canClaimLunarProspector(state) && claimLunarProspector(state, catalog),
@@ -2904,6 +2968,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
 
     state.run.destinationIndex = 2;
     state.meta.furthestTier = 2;
+    startSurfaceExpedition(state, catalog);
     const CampaignObjectiveStatus freshMarsObjective =
         campaignObjectiveStatus(state, CampaignObjectiveId::MarsBayExpansion);
     require(state.meta.droneBaySlots == 1
@@ -2911,18 +2976,27 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
             && freshMarsObjective.current == 0
             && freshMarsObjective.required == tuning::research::marsBayCommonOreGoal
             && !state.meta.marsBayExpansionClaimed,
-        "a fresh Mars arrival should keep one bay slot and start the explicit 0/4 expansion objective");
+        "a fresh Mars arrival should keep one bay slot and start the explicit 0/40 expansion objective");
+    state.screen = Screen::SurfaceExpedition;
+    Random marsBriefingRng(0x10A7);
+    const PreparedLaunch marsBriefingLaunch = prepareLaunch(state, catalog, marsBriefingRng);
+    const std::string marsBriefingHtml = buildGamePanelHtml({state, catalog, marsBriefingLaunch, marsBriefingLaunch});
+    require(marsBriefingHtml.find("Recover 40 Martian Common Ore") != std::string::npos
+            && marsBriefingHtml.find("Oxygen, drill heat, integrity, repairs, and the return decision are now live.") != std::string::npos,
+        "the Mars briefing should show the shared forty-ore goal and its active mining-pressure lesson");
     require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::MarsBayExpansion),
         "the Mars bay objective should have its own briefing");
-    state.meta.materials.common = 4;
-    require(creditCampaignCommonOre(state, content::destination::mars, 4) == 4,
+    state.run.surfaceExpedition = {};
+    state.screen = Screen::Hangar;
+    state.meta.materials.common = 40;
+    require(creditCampaignCommonOre(state, content::destination::mars, 40) == 40,
         "only safely extracted Mars ore should fill the Mars contract");
     require(claimMarsBayExpansion(state, catalog)
             && state.meta.droneBaySlots == 2
             && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
         "the Mars claim should fabricate an empty Slot 2 without duplicating the Prospector");
-    require(!equipMiniDrone(state, catalog, 0),
-        "one unique support drone must not be equipped in multiple slots");
+    require(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
+        "the Mars reward should leave the new slot empty until the player assigns or builds a Support Drone");
 
     state.run.destinationIndex = 3;
     state.meta.furthestTier = 3;
@@ -3019,12 +3093,12 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
     state.meta.droneBaySlots = 2;
     ensureDroneBayState(state, catalog);
 
-    require(startSaturnSlingshotRun(state, catalog), "the v7 fixture should begin an active departure Flyby");
+    require(startSaturnSlingshotRun(state, catalog), "the current campaign fixture should begin an active departure Flyby");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 7 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == 8 && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
-    require(parsed.has_value(), "version-seven campaign state should deserialize");
+    require(parsed.has_value(), "current campaign state should deserialize");
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *parsed);
     require(restored.meta.lunarProspectorClaimed
@@ -3054,7 +3128,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && migratedMars.meta.marsMiningBriefingAcknowledged
             && migratedMars.meta.marsBayExpansionClaimed
             && migratedMars.meta.marsCommonOreRecovered == tuning::research::marsBayCommonOreGoal,
-        "a v6 Mars save that already owns Slot 2 should migrate past the redundant 4-Common bay contract");
+        "a v6 Mars save that already owns Slot 2 should migrate past the redundant Mars bay contract");
     require(migratedMars.meta.droneBaySlots == 2
             && migratedMars.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
             && migratedMars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
@@ -3354,7 +3428,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(hazardDrone->detail.find("Treats revealed") != std::string::npos, "Hazard Drone card should describe its active remediation task");
     require(hazardDrone->upgradeSummary.find("adds Toxic") != std::string::npos, "Hazard Drone Mk II preview should name its expanded hazard ladder");
     require(std::any_of(hazardDrone->effectChips.begin(), hazardDrone->effectChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == "Treatment" && chip.value.find("3.00s") != std::string::npos;
+        return chip.label == "Treatment" && chip.value.find("1.50s") != std::string::npos;
     }), "Hazard Drone card should expose current treatment speed");
     require(std::any_of(hazardDrone->effectChips.begin(), hazardDrone->effectChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == "Batch" && chip.value == "1 tile";
@@ -3415,16 +3489,16 @@ void droneOpsPresentationExposesPersistentLoadout()
     const auto uniqueAttackDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
         return drone.title == "Attack Drone";
     });
-    require(uniqueAttackDrone != drones.drones.end() && uniqueAttackDrone->status == "Assigned",
-        "Drone controls should present each equipped Support Drone as one unique unit");
+    require(uniqueAttackDrone != drones.drones.end() && uniqueAttackDrone->status.find("Assigned 1/1") != std::string::npos,
+        "Drone controls should normalize pre-v8 invalid repeated loadout IDs");
     require(miniDroneNameSummary(state, catalog) == "Attack Drone",
         "Drone Ops should de-duplicate legacy repeated loadout IDs");
     require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
-        return row.label == "Unique units" && row.value.find("only one loadout slot") != std::string::npos;
-    }), "Drone Ops details should explain unique Support Drone assignment");
+        return row.label == "Support Drone copies" && row.value.find("Build extra copies") != std::string::npos;
+    }), "Drone Ops details should explain paid duplicate Support Drone assignment");
     require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
-        return row.label == "Support Drone upgrades" && row.value.find("unique unit") != std::string::npos;
-    }), "Drone Ops details should explain that tuning applies to the selected unique unit");
+        return row.label == "Support Drone upgrades" && row.value.find("every owned copy") != std::string::npos;
+    }), "Drone Ops details should explain that tuning applies to every owned copy of a type");
     require(std::count_if(drones.loadoutSlots.begin(), drones.loadoutSlots.end(), [](const DroneLoadoutSlotPresentation& slot) {
         return slot.title == "Attack Drone";
     }) == 1, "Drone Loadout should retain only one instance of a legacy duplicate");
@@ -4792,25 +4866,54 @@ void hazardDroneTreatsAffinityLadderAndBatches()
                 static_cast<int>(std::floor(mining.droneX)) + 1,
                 1,
                 mining.terrain.width - 3);
-            const int sealX = ordinaryX + 1;
+            const int farSealX = ordinaryX + 1;
+            const int nearSealX = ordinaryX + 2;
             MiningCell* ordinaryLava = miningCellAt(mining.terrain, ordinaryX, priorityY);
-            MiningCell* storySeal = miningCellAt(mining.terrain, sealX, priorityY);
-            require(ordinaryLava != nullptr && storySeal != nullptr, "the Io priority cells should exist");
+            MiningCell* farStorySeal = miningCellAt(mining.terrain, farSealX, priorityY);
+            MiningCell* nearStorySeal = miningCellAt(mining.terrain, nearSealX, priorityY);
+            require(ordinaryLava != nullptr && farStorySeal != nullptr && nearStorySeal != nullptr, "the Io priority cells should exist");
             const double priorityToughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
             *ordinaryLava = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
             ordinaryLava->hazardAffinity = MiningElementalAffinity::Thermal;
-            *storySeal = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
-            storySeal->hazardAffinity = MiningElementalAffinity::Thermal;
-            storySeal->gateAssociated = true;
+            *farStorySeal = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
+            farStorySeal->hazardAffinity = MiningElementalAffinity::Thermal;
+            farStorySeal->gateAssociated = true;
+            *nearStorySeal = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
+            nearStorySeal->hazardAffinity = MiningElementalAffinity::Thermal;
+            nearStorySeal->gateAssociated = true;
+            mining.artifact.present = true;
+            mining.artifact.x = static_cast<double>(nearSealX) + 0.5;
+            mining.artifact.y = static_cast<double>(priorityY) + 0.5;
             HazardDroneCoordinator coordinator(mining);
             coordinator.synchronizeAssignments();
             require(coordinator.acquireAssignment(*hazardAgent)
-                    && hazardAgent->targetCellX == sealX
+                    && hazardAgent->targetCellX == nearSealX
                     && hazardAgent->targetCellY == priorityY,
-                "Hazard Drone should prioritize the fixed Io artifact seal over ordinary nearby lava");
+                "Hazard Drone should prioritize the closest Io artifact-seal segment over ordinary lava and distant seal segments");
+            coordinator.releaseAssignment(*hazardAgent);
+            const int nearbyHazardX = ordinaryX;
+            const int distantHazardX = std::min(mining.terrain.width - 2, ordinaryX + 5);
+            MiningCell* nearbyHazard = miningCellAt(mining.terrain, nearbyHazardX, priorityY + 2);
+            MiningCell* distantHazard = miningCellAt(mining.terrain, distantHazardX, priorityY + 2);
+            require(nearbyHazard != nullptr && distantHazard != nullptr, "the player-priority hazard cells should exist");
+            *nearbyHazard = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
+            nearbyHazard->hazardAffinity = MiningElementalAffinity::Thermal;
+            *distantHazard = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
+            distantHazard->hazardAffinity = MiningElementalAffinity::Thermal;
+            *ordinaryLava = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            *farStorySeal = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            *nearStorySeal = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            hazardAgent->x = static_cast<double>(distantHazardX) + 0.5;
+            hazardAgent->y = static_cast<double>(priorityY) + 2.5;
+            coordinator.synchronizeAssignments();
+            require(coordinator.acquireAssignment(*hazardAgent)
+                    && hazardAgent->targetCellX == nearbyHazardX
+                    && hazardAgent->targetCellY == priorityY + 2,
+                "Hazard Drone should prioritize the nearest unresolved hazard to the Mining Rig over a leftover tile beside itself");
             coordinator.releaseAssignment(*hazardAgent);
             *ordinaryLava = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
-            *storySeal = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            *nearbyHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+            *distantHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
         }
         const int startX = std::clamp(static_cast<int>(std::floor(mining.droneX)) + 1, 1, mining.terrain.width - clusterSize - 1);
         const int y = std::clamp(static_cast<int>(std::floor(mining.droneY)) + 2, 1, mining.terrain.height - 2);
@@ -4842,7 +4945,7 @@ void hazardDroneTreatsAffinityLadderAndBatches()
                 remaining += cell != nullptr && cell->material == MiningCellMaterial::HazardPocket ? 1 : 0;
             }
         }
-        require(clusterSize - remaining == expectedBatch, "Hazard Drone should convert the Mk-specific number of adjacent tiles in its first treatment");
+        require(clusterSize - remaining >= expectedBatch, "Hazard Drone should convert at least the Mk-specific number of adjacent tiles before continuing to another task");
         require(radiationSupported || unsupported->material == MiningCellMaterial::HazardPocket,
             "Hazard Drone should ignore affinities above its current Mk");
         require(mining.temporaryMaterials.common == materialsBefore.common &&
@@ -4852,7 +4955,15 @@ void hazardDroneTreatsAffinityLadderAndBatches()
         return state;
     };
 
-    runFirstTreatment(1, MiningElementalAffinity::Thermal, 2, 1);
+    require(std::abs(tuning::mining::hazardDroneTreatmentSeconds(1) - 1.5) < 0.000001,
+        "Hazard Drone Mk I treatment should run at twice the previous three-second rate");
+    GameState continuation = runFirstTreatment(1, MiningElementalAffinity::Thermal, 2, 1);
+    for (int tick = 0; tick < 240; ++tick) {
+        updateMiningRun(continuation, catalog, 0.05);
+    }
+    require(std::none_of(continuation.run.mining.terrain.cells.begin(), continuation.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
+        return cell.material == MiningCellMaterial::HazardPocket && cell.hazardAffinity == MiningElementalAffinity::Thermal;
+    }), "Hazard Drone should continue to the next eligible tile after completing a treatment");
     runFirstTreatment(2, MiningElementalAffinity::Toxic, 3, 2);
     const GameState firstMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
     const GameState secondMkThree = runFirstTreatment(3, MiningElementalAffinity::Radiation, 3, 3);
@@ -4933,6 +5044,7 @@ void legacyStabilizerSavesMigrateToHazardDrone()
     source.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     ensureDroneBayState(source, catalog);
     SaveData save = captureSaveData(source);
+    save.version = 7;
     save.droneBaySlots = 3;
     save.ownedDroneIds = {content::drone::legacyStabilizerDrone};
     save.equippedDroneIds = {content::drone::legacyStabilizerDrone, content::drone::legacyStabilizerDrone};
@@ -4943,7 +5055,7 @@ void legacyStabilizerSavesMigrateToHazardDrone()
     require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::hazardDrone) != restored.meta.ownedDroneIds.end(),
         "legacy Stabilizer ownership should migrate to the Hazard Drone");
     require(std::count(restored.meta.equippedDroneIds.begin(), restored.meta.equippedDroneIds.end(), content::drone::hazardDrone) == 1,
-        "legacy duplicate Stabilizer loadout slots should migrate to one unique Hazard Support Drone");
+        "legacy duplicate Stabilizer loadout slots should migrate to one Hazard Support Drone frame");
     require(miniDroneUpgradeLevel(restored, content::drone::hazardDrone) == 3,
         "legacy Stabilizer upgrades should migrate to the Hazard Drone");
     require(std::none_of(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), [](const std::string& id) {
@@ -4996,7 +5108,7 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
         }
     }
     require(miningTargets.size() == 1 && miningTargets.front().first >= 0,
-        "the unique Prospector Support Drone should acquire real terrain work");
+        "the Prospector Support Drone should acquire real terrain work");
 
     const int targetX = miningAgent->targetCellX;
     const int targetY = miningAgent->targetCellY;
@@ -7173,7 +7285,7 @@ void activeMiningRoundTripsThroughSave()
     legacySerialized.replace(legacyCycleStart, legacyCycleEnd - legacyCycleStart, "miningFuelBurn=4.5");
     const std::string currentVersionField =
         std::string(save_schema::field::version) +
-        save_schema::keyValueDelimiter + "7";
+        save_schema::keyValueDelimiter + std::to_string(SaveData {}.version);
     const std::size_t versionFieldStart = legacySerialized.find(currentVersionField);
     require(versionFieldStart != std::string::npos, "current save field should be replaceable for migration coverage");
     legacySerialized.replace(
@@ -7352,14 +7464,14 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 7, "new saves should use version seven");
+    require(captured.version == 8, "new saves should use version eight");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
     require(serialized.find("miningGravity=") != std::string::npos, "version-six saves should write vector gravity");
     require(serialized.find("miningLooseChunks=") != std::string::npos, "version-six saves should write loose chunks");
     const std::optional<SaveData> parsed = deserializeSaveData(serialized);
-    require(parsed.has_value(), "version-seven EVA save should deserialize");
+    require(parsed.has_value(), "version-eight EVA save should deserialize");
 
     GameState restored = createNewGame(catalog, 0xE6B);
     restoreSaveData(restored, catalog, *parsed);
@@ -9991,7 +10103,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     const std::string launchHtml = buildGamePanelHtml(launchContext);
     require(launchHtml.find("<h1>Flight</h1>") != std::string::npos, "launch panel should title the current phase instead of repeating the game title");
     require(launchHtml.find("class=\"cockpit-hud flight-hud\"") != std::string::npos, "launch controls should render in a cockpit HUD");
-    require(launchHtml.find("metric-grid panel-kpis") == std::string::npos,
+    require(launchHtml.find("metric-grid rr-metric-strip panel-kpis") == std::string::npos,
         "launch should rely on its four contextual readouts instead of repeating global KPIs");
     require(launchHtml.find("tutorial-card") == std::string::npos
             && launchHtml.find("data-help-topic") == std::string::npos,
@@ -10108,7 +10220,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(miningHtml.find("data-panel-mode=\"mining-fullscreen\"") != std::string::npos, "mining should opt into the full-screen HUD mode");
     require(miningHtml.find("class=\"mining-fullscreen\"") != std::string::npos, "mining controls should render in the full-screen HUD");
     require(miningHtml.find("class=\"cockpit-hud mining-hud\"") == std::string::npos, "mining should not render the old compact cockpit HUD");
-    require(miningHtml.find("class=\"mining-top-rail ui-screen-header\"") != std::string::npos,
+    require(miningHtml.find("class=\"mining-top-rail ui-screen-header rr-screen-header\"") != std::string::npos,
         "mining should reserve its compact top status rail outside the terrain");
     require(miningHtml.find("class=\"mining-depth-route-overlay\"") != std::string::npos &&
             miningHtml.find("SHUTTLE") != std::string::npos && miningHtml.find("ENTRY DEPTH") != std::string::npos &&
@@ -10123,7 +10235,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
         "mining drill tile should preserve integrity and heat together");
     require(miningHtml.find(">LOAD<") != std::string::npos && miningHtml.find("rr-hud-mining-load-value") != std::string::npos,
         "mining top rail should expose current load in the approved fourth tile");
-    require(miningHtml.find("MOON COMMON // DELIVERED 1/3 // ABOARD 1 // CARRIED 2") != std::string::npos,
+    require(miningHtml.find("MOON COMMON // DELIVERED 1/30 // ABOARD 1 // CARRIED 2") != std::string::npos,
         "the first mining contract should keep delivered, aboard, and carried ore visible beside the depth route");
     require(miningHtml.find("class=\"mining-ore-manifest\"") != std::string::npos
             && miningHtml.find(">ORE MANIFEST<") != std::string::npos
@@ -10264,7 +10376,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(droneHtml.find("drone-build-guidance") == std::string::npos, "Drone Ops HTML should not render build guidance inline");
     require(droneHtml.find("drone-loadout-bench") != std::string::npos, "Drone Ops HTML should include the loadout bench");
     require(droneHtml.find("Active loadout") != std::string::npos, "Drone Ops workspace should clearly name the next deployment loadout");
-    require(droneHtml.find("Assign or tune each unique owned frame.") != std::string::npos, "Drone Ops workspace should explain its unique-frame controls");
+    require(droneHtml.find("Assign owned frames, build paid copies, or tune a type.") != std::string::npos, "Drone Ops workspace should explain owned-frame and paid-copy controls");
     require(droneHtml.find("These Support Drones deploy with the Mining Rig.") != std::string::npos, "Drone Ops workspace should explain the active loadout");
     require(
         droneHtml.find("drone-workspace-main") != std::string::npos
@@ -10334,7 +10446,7 @@ void surfaceHtmlPromotesMiningAction()
     const std::size_t choiceListEnd = html.find("</div></section>", choiceList);
     require(choiceList != std::string::npos && choiceListEnd != std::string::npos, "surface choices should render inside one bounded list");
     const std::string choiceHtml = html.substr(choiceList, choiceListEnd - choiceList);
-    require(countOccurrences(choiceHtml, "resource-bank surface-choice-row") == 4
+    require(countOccurrences(choiceHtml, "resource-bank rr-fixed-lane-card surface-choice-row") == 4
             && countOccurrences(choiceHtml, "surface-choice-cost") == 4
             && countOccurrences(choiceHtml, "surface-choice-outcome") == 4,
         "each Surface Ops action should expose one compact title, cost, risk/reward cue, and action row");
@@ -10390,7 +10502,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
             && arrivalHtml.find(">Unavailable</span>") != std::string::npos,
         "arrival cards should render the complete unavailable status in its reserved footer lane");
     require(arrivalHtml.find("phase-status") == std::string::npos, "approach should not duplicate the yellow mission status inside the board");
-    const std::size_t arrivalKpis = arrivalHtml.find("metric-grid panel-kpis");
+    const std::size_t arrivalKpis = arrivalHtml.find("metric-grid rr-metric-strip panel-kpis");
     const std::size_t arrivalKpisEnd = arrivalHtml.find("</div></div>", arrivalKpis);
     require(arrivalKpis != std::string::npos && arrivalKpisEnd != std::string::npos
             && countOccurrences(arrivalHtml.substr(arrivalKpis, arrivalKpisEnd - arrivalKpis), "class=\"metric\"") == 4,
@@ -10408,7 +10520,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const std::string researchHtml = buildGamePanelHtml({researchState, catalog, researchLaunch, researchLaunch});
     require(researchHtml.find("phase-board phase-board-research") != std::string::npos, "research should render inside the dedicated research board");
     require(researchHtml.find("Research options") != std::string::npos, "research should expose the project board");
-    require(researchHtml.find("class=\"ops-card ui-choice-row management-choice-row\"") != std::string::npos,
+    require(researchHtml.find("class=\"ops-card rr-fixed-lane-card ui-choice-row management-choice-row") != std::string::npos,
         "research projects should render as compact management choice rows");
     require(researchHtml.find("class=\"phase-advisory") != std::string::npos, "research should include advisory styling");
     require(researchHtml.find("phase_briefing") == std::string::npos
@@ -10440,7 +10552,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(surfaceHtml.find("surface-arena-forecast") == std::string::npos,
         "surface ops should move the arena forecast into Details");
     require(surfaceHtml.find("surface-choice-row featured-action") != std::string::npos, "surface ops should promote mining inside the compact choice list");
-    require(surfaceHtml.find("resource-bank surface-choice-row") != std::string::npos
+    require(surfaceHtml.find("resource-bank rr-fixed-lane-card surface-choice-row") != std::string::npos
             && surfaceHtml.find("surface-action-card") == std::string::npos,
         "surface ops should render compact rows instead of legacy action cards");
     require(surfaceHtml.find("drone-ops-callout surface-controller-callout phase-lane phase-row") != std::string::npos, "surface ops drone callout should align to the shared phase lane");
@@ -10644,7 +10756,7 @@ void hangarHtmlShowsPilotIntakeModal()
     Random rng(715);
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
     const std::string html = buildGamePanelHtml({state, catalog, launch, launch});
-    require(html.find("ops-grid controller-choice-row") != std::string::npos,
+    require(html.find("ops-grid rr-card-grid controller-choice-row") != std::string::npos,
         "hangar operations should keep left/right navigation inside the operation-card row");
     require(html.find("hangar-actions controller-action-row") != std::string::npos,
         "hangar launch controls should form the separate up/down controller action row");
@@ -10658,7 +10770,7 @@ void hangarHtmlShowsPilotIntakeModal()
     require(hangarDetails != std::string::npos && hangarDetailsEnd != std::string::npos
             && html.substr(hangarDetails, hangarDetailsEnd - hangarDetails).find(">Legacy</button>") != std::string::npos,
         "Hangar should move Legacy out of persistent chrome and into its Details row");
-    const std::size_t hangarKpis = html.find("metric-grid panel-kpis");
+    const std::size_t hangarKpis = html.find("metric-grid rr-metric-strip panel-kpis");
     const std::size_t hangarKpisEnd = html.find("</div></div>", hangarKpis);
     require(hangarKpis != std::string::npos && hangarKpisEnd != std::string::npos
             && countOccurrences(html.substr(hangarKpis, hangarKpisEnd - hangarKpis), "class=\"metric\"") == 3
@@ -11170,6 +11282,225 @@ void panelLayoutModeIsPortablePresentationData()
     require(usesPhaseBoard(Screen::SurfaceScan), "active surface minigames should retain the protected phase-board geometry");
 }
 
+void structuredPanelPresentationSelectsFirstWaveTemplates()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const auto presentationFor = [&catalog](GameState& state, std::uint64_t seed) {
+        Random rng(seed);
+        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+        PanelRenderContext context {state, catalog, launch, launch};
+        context.firstTimeIntroductionsEnabled = false;
+        return buildGamePanelPresentation(context);
+    };
+
+    GameState hangar = createNewGame(catalog, 0xA110);
+    hangar.screen = Screen::Hangar;
+    const PanelDocumentPresentation hangarPresentation = presentationFor(hangar, 0xA110);
+    require(
+        hangarPresentation.templateKind == PanelTemplateKind::Workspace
+            && hangarPresentation.metadata.screen == Screen::Hangar,
+        "Hangar should select the shared Workspace template");
+    require(
+        hangarPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
+            && hangarPresentation.contentMarkup.find("rr-card-grid") != std::string::npos
+            && hangarPresentation.contentMarkup.find("rr-fixed-lane-card") != std::string::npos
+            && hangarPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
+        "Hangar should consume the shared typed header, card-grid, card, and action-footer primitives");
+
+    GameState flyby = createNewGame(catalog, 0xA111);
+    LaunchOutcome moonArrival;
+    moonArrival.type = LaunchResultType::MissionComplete;
+    moonArrival.frontierTransfer = true;
+    moonArrival.destinationId = content::destination::moon;
+    startArrivalOps(flyby, moonArrival);
+    startArrivalFlybyRun(flyby, catalog);
+    require(flyby.screen == Screen::Flyby && !flyby.run.flyby.completed,
+        "first-wave template test should create an active Flyby");
+    const PanelDocumentPresentation flybyPresentation = presentationFor(flyby, 0xA111);
+    require(
+        flybyPresentation.templateKind == PanelTemplateKind::ControlPanel
+            && flybyPresentation.metadata.interaction == PanelInteractionMode::Realtime,
+        "an active Flyby should select the shared Control Panel template");
+    require(
+        flybyPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
+            && flybyPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
+        "active Flyby should consume shared metric-strip and action-footer primitives");
+
+    GameState scan = createNewGame(catalog, 0xA112);
+    scan.run.destinationIndex = 2;
+    startSurfaceExpedition(scan, catalog);
+    Random scanRng(0xA112);
+    require(startSurfaceScanRun(scan, scanRng).applied,
+        "first-wave template test should create an active Surface Scan");
+    const PanelDocumentPresentation scanPresentation = presentationFor(scan, 0xA112);
+    require(
+        scanPresentation.templateKind == PanelTemplateKind::SurfaceMinigame
+            && scanPresentation.metadata.surface == PanelSurfaceKind::SurfaceScan
+            && scanPresentation.metadata.interaction == PanelInteractionMode::Realtime,
+        "Surface Scan should select the shared Surface Minigame template");
+    require(
+        scanPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
+            && scanPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
+            && scanPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
+        "Surface Scan should consume shared header, metric-strip, and action-footer primitives");
+    scan.run.surfaceScan.completed = true;
+    require(
+        presentationFor(scan, 0xA112).metadata.interaction == PanelInteractionMode::Standard,
+        "a completed Surface Scan should return Space and Enter to its explicit result actions");
+
+    GameState push = createNewGame(catalog, 0xA119);
+    push.run.destinationIndex = 2;
+    startSurfaceExpedition(push, catalog);
+    Random pushRng(0xA119);
+    require(startSurfacePushRun(push, pushRng).applied,
+        "first-wave template test should create an active Surface Push");
+    require(
+        presentationFor(push, 0xA119).metadata.interaction == PanelInteractionMode::Realtime,
+        "an active Surface Push should own its realtime step shortcut");
+    push.run.surfacePush.busted = true;
+    require(
+        presentationFor(push, 0xA119).metadata.interaction == PanelInteractionMode::Standard,
+        "a busted Surface Push should return Space and Enter to its explicit result actions");
+
+    GameState surface = createNewGame(catalog, 0xA118);
+    surface.run.destinationIndex = 2;
+    startSurfaceExpedition(surface, catalog);
+    surface.screen = Screen::SurfaceExpedition;
+    const PanelDocumentPresentation surfacePresentation = presentationFor(surface, 0xA118);
+    require(
+        surfacePresentation.contentMarkup.find("rr-fixed-action-stack") != std::string::npos
+            && surfacePresentation.contentMarkup.find("rr-fixed-action-context") != std::string::npos
+            && surfacePresentation.contentMarkup.find("rr-fixed-action-lane") != std::string::npos
+            && surfacePresentation.contentMarkup.find("rr-card-grid") != std::string::npos,
+        "Surface Ops should consume the reusable fixed-action stack instead of screen-local positioning");
+
+    GameState mining = createNewGame(catalog, 0xA113);
+    mining.run.destinationIndex = 2;
+    startSurfaceExpedition(mining, catalog);
+    mining.run.surfaceExpedition.miningSitePrepared = true;
+    require(startMiningRun(mining, catalog, {MiningAct::ActOne, 4, 0xA113}, false).applied,
+        "first-wave template test should create an active Mining run");
+    const PanelDocumentPresentation miningPresentation = presentationFor(mining, 0xA113);
+    require(
+        miningPresentation.templateKind == PanelTemplateKind::Mining
+            && miningPresentation.metadata.surface == PanelSurfaceKind::Mining,
+        "Mining should select the shared Mining template");
+    require(
+        miningPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
+            && miningPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos,
+        "Mining should consume shared header and metric-strip primitives");
+
+    GameState briefing = createNewGame(catalog, 0xA114);
+    briefing.screen = Screen::StoryBriefing;
+    briefing.storyBriefing.pending = StoryBriefingId::CampaignIntroduction;
+    const PanelDocumentPresentation briefingPresentation = presentationFor(briefing, 0xA114);
+    require(
+        briefingPresentation.templateKind == PanelTemplateKind::Takeover
+            && briefingPresentation.metadata.interaction == PanelInteractionMode::Takeover,
+        "Story Briefing should select the shared Takeover template");
+
+    GameState results = createNewGame(catalog, 0xA115);
+    results.screen = Screen::Results;
+    results.lastOutcome.type = LaunchResultType::SafeEject;
+    results.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    results.lastOutcome.ejectMultiplier = 1.1;
+    results.lastOutcome.crashMultiplier = 1.5;
+    const PanelDocumentPresentation resultsPresentation = presentationFor(results, 0xA115);
+    require(
+        resultsPresentation.templateKind == PanelTemplateKind::Results
+            && resultsPresentation.metadata.interaction == PanelInteractionMode::Takeover,
+        "Results should select the shared Results template");
+    require(
+        hangarPresentation.metadata.legacyContentOwnsLaneGeometry
+            && flybyPresentation.metadata.legacyContentOwnsLaneGeometry
+            && scanPresentation.metadata.legacyContentOwnsLaneGeometry
+            && miningPresentation.metadata.legacyContentOwnsLaneGeometry
+            && briefingPresentation.metadata.legacyContentOwnsLaneGeometry
+            && resultsPresentation.metadata.legacyContentOwnsLaneGeometry,
+        "first-wave templates should explicitly preserve their migrated content-owned lane geometry");
+    require(
+        !PanelDocumentPresentation {}.metadata.legacyContentOwnsLaneGeometry,
+        "future template presentations should inherit shell lane geometry unless they explicitly opt into migration compatibility");
+    const auto resultsOutcome = std::find_if(
+        resultsPresentation.modals.begin(),
+        resultsPresentation.modals.end(),
+        [](const ModalPresentation& modal) {
+            return modal.id == ui::modals::launchOutcome;
+        });
+    require(
+        resultsOutcome != resultsPresentation.modals.end()
+            && resultsOutcome->bodyMarkup.find("rr-action-footer") != std::string::npos,
+        "Results should consume the shared action-footer primitive inside its typed acknowledgement modal");
+}
+
+void structuredPanelPresentationCarriesTypedModalPolicy()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState lunar = createNewGame(catalog, 0xA116);
+    lunar.run.destinationIndex = 1;
+    startSurfaceExpedition(lunar, catalog);
+    lunar.screen = Screen::SurfaceExpedition;
+    Random lunarRng(0xA116);
+    const PreparedLaunch lunarLaunch = prepareLaunch(lunar, catalog, lunarRng);
+    PanelRenderContext lunarContext {lunar, catalog, lunarLaunch, lunarLaunch};
+    lunarContext.firstTimeIntroductionsEnabled = false;
+    const PanelDocumentPresentation lunarPresentation =
+        buildGamePanelPresentation(lunarContext);
+
+    const auto lunarModal = std::find_if(
+        lunarPresentation.modals.begin(),
+        lunarPresentation.modals.end(),
+        [](const ModalPresentation& modal) {
+            return modal.id == ui::modals::lunarMiningBriefing;
+        });
+    require(lunarModal != lunarPresentation.modals.end(),
+        "the mandatory Lunar briefing should be emitted as typed modal data");
+    require(
+        lunarModal->autoOpen && !lunarModal->dismissible
+            && lunarModal->closeAction.empty()
+            && lunarModal->bodyMarkup.find("acknowledge_lunar_mining_briefing") != std::string::npos,
+        "the Lunar briefing should auto-open, reject generic dismissal, and require its named action");
+    require(
+        lunarPresentation.contentMarkup.find("<template") == std::string::npos
+            && lunarPresentation.contentMarkup.find("data-modal=") == std::string::npos,
+        "panel content should not carry the retired template-based modal transport");
+
+    const auto settingsModal = std::find_if(
+        lunarPresentation.modals.begin(),
+        lunarPresentation.modals.end(),
+        [](const ModalPresentation& modal) {
+            return modal.id == ui::modals::settings;
+        });
+    require(
+        settingsModal != lunarPresentation.modals.end()
+            && !settingsModal->autoOpen
+            && settingsModal->dismissible
+            && settingsModal->showClose,
+        "ordinary utility modals should remain explicitly dismissible in typed metadata");
+
+    GameState results = createNewGame(catalog, 0xA117);
+    results.screen = Screen::Results;
+    results.lastOutcome.type = LaunchResultType::SafeEject;
+    results.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    results.lastOutcome.ejectMultiplier = 1.1;
+    results.lastOutcome.crashMultiplier = 1.5;
+    Random resultsRng(0xA117);
+    const PreparedLaunch resultsLaunch = prepareLaunch(results, catalog, resultsRng);
+    const PanelDocumentPresentation resultsPresentation =
+        buildGamePanelPresentation({results, catalog, resultsLaunch, resultsLaunch});
+    const auto outcomeModal = std::find_if(
+        resultsPresentation.modals.begin(),
+        resultsPresentation.modals.end(),
+        [](const ModalPresentation& modal) {
+            return modal.id == ui::modals::launchOutcome;
+        });
+    require(
+        outcomeModal != resultsPresentation.modals.end()
+            && outcomeModal->autoOpen
+            && !outcomeModal->dismissible,
+        "the Results acknowledgement should preserve its mandatory auto-open modal policy");
+}
+
 void contentIdsResolveAgainstDefaultCatalog()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -11424,6 +11755,26 @@ void miningThermalCutoffAndGuidanceAreExplicit()
         "equipped helper drones should unlock their automatic-role command line");
 }
 
+void marsMiningPressureFitsOxygenWindow()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const MiningArenaRules moonRules = resolveMiningArenaRules({MiningAct::ActOne, 3, 0x5545});
+    const MiningArenaRules marsRules = resolveMiningArenaRules({MiningAct::ActOne, 4, 0x5545});
+    require(moonRules.mechanics.oxygenAndFuel && !moonRules.mechanics.drillHeat && !moonRules.mechanics.drillIntegrity,
+        "the Moon tutorial should teach the oxygen return cycle before Mars adds heat and integrity pressure");
+    require(marsRules.mechanics.oxygenAndFuel && marsRules.mechanics.drillHeat
+            && marsRules.mechanics.drillIntegrity && marsRules.mechanics.fieldRepairs,
+        "Mars should introduce oxygen, heat, integrity, and field-repair pressure together");
+
+    const double secondsToIntegrityWear =
+        tuning::mining::heatDamageThreshold / tuning::mining::heatRisePerSecond;
+    const double secondsToThermalLock =
+        tuning::mining::drillHeatFlashThreshold / tuning::mining::heatRisePerSecond;
+    require(secondsToIntegrityWear < tuning::mining::oxygenSeconds
+            && secondsToThermalLock < tuning::mining::oxygenSeconds,
+        "continuous Mars drilling should enter integrity wear and thermal lock before the 30-second oxygen cycle expires");
+}
+
 void legacyOuterPlanetSavesMigrateByStableId()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -11645,12 +11996,15 @@ int main()
     arkCampaignStateRoundTripsThroughSave();
     uiActionsUseStableSchemaIds();
     panelLayoutModeIsPortablePresentationData();
+    structuredPanelPresentationSelectsFirstWaveTemplates();
+    structuredPanelPresentationCarriesTypedModalPolicy();
     contentIdsResolveAgainstDefaultCatalog();
     displayFormatAndMathHelpersAreShared();
     outerPlanetCampaignSequenceIsExplicitAndUnskippable();
     storyBriefingsTakeOverAndPersist();
     launchInstabilityMeetsLateFailureWarningFloor();
     miningThermalCutoffAndGuidanceAreExplicit();
+    marsMiningPressureFitsOxygenWindow();
     legacyOuterPlanetSavesMigrateByStableId();
 
     std::cout << "rocket_core_tests passed\n";

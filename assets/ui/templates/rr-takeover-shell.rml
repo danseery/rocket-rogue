@@ -1,0 +1,11 @@
+<template name="rr-takeover-shell" content="rr-takeover-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-takeover-shell" data-rr-template-kind="takeover">
+		<div class="rr-shell-lane rr-takeover-lane">
+			<div id="rr-takeover-content" class="rr-shell-content"></div>
+		</div>
+	</section>
+</body>
+</template>

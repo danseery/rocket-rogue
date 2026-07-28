@@ -1,10 +1,12 @@
 #pragma once
 
+#include "core/PanelDocumentPresentation.h"
 #include "input/ControllerInput.h"
 #include "platform/AppServices.h"
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Rml {
@@ -52,7 +54,7 @@ public:
         std::string assetRoot = {});
 
     bool initialize(ActionHandler actionHandler) override;
-    void setPanelHtml(const std::string& html) override;
+    void setPanelPresentation(const PanelDocumentPresentation& presentation) override;
     void setRealtimeHudState(const RealtimeHudState& state) override;
     void render() override;
 
@@ -82,6 +84,20 @@ public:
 
 private:
     void rebuildDocument();
+    void refreshPersistentHosts(
+        bool rebuildPanel,
+        bool rebuildPanelShell,
+        bool rebuildModal,
+        bool rebuildOverlay,
+        bool rebuildPrompt,
+        bool rebuildPerformance);
+    bool applyDocumentPresentationState();
+    bool rebuildPanelHost(bool rebuildShell);
+    bool rebuildModalHost();
+    bool rebuildOverlayHost();
+    bool rebuildPromptHost();
+    bool rebuildPerformanceHost();
+    void rebindAndRestoreFocus(bool restoreFocus);
     bool applyPendingFocusIfAvailable();
 
     IPreferenceStore& preferences_;
@@ -90,10 +106,13 @@ private:
     IRmlRenderHost& renderHost_;
     std::string assetRoot_;
     ActionHandler actionHandler_;
-    std::string panelHtml_;
+    PanelDocumentPresentation presentation_;
+    std::string externalRcss_;
     std::string openModalId_;
+    std::string renderedModalId_;
     std::vector<std::string> modalStack_;
     std::vector<std::string> modalFocusStack_;
+    std::unordered_map<std::string, float> modalScrollPositions_;
     std::vector<RmlButtonBinding> buttonBindings_;
     std::string focusedId_;
     std::string pendingFocusId_;
@@ -117,6 +136,8 @@ private:
     int pendingPanelRebuilds_ = 0;
     int pendingHudPatches_ = 0;
     UiDiagnostics uiDiagnostics_;
+    bool renderHostInitialized_ = false;
+    bool rmlInitialized_ = false;
     bool initialized_ = false;
 };
 

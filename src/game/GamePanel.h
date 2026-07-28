@@ -3,6 +3,7 @@
 #include "core/Content.h"
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
+#include "core/PanelDocumentPresentation.h"
 #include "platform/AppServices.h"
 
 #include <cstdint>
@@ -36,7 +37,7 @@ struct PanelRenderContext {
     int selectedRefitOfferIndex = 0;
 };
 
-std::string buildGamePanelHtml(const PanelRenderContext& context);
+PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);
 void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& result);
 std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context);
 

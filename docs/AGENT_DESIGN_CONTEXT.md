@@ -30,7 +30,7 @@ The desired aesthetic is:
 
 - Launch loop: risk a per-run hidden failure, use the composite Instability warning plus system telemetry, return/eject/mitigate, then compare burn depth with the revealed failure point in the debrief. The yellow marker is a performance target, not a safety boundary.
 - Arrival loop: reaching a destination should feel rewarding, then ask whether to flyby, orbit, or land.
-- Surface loop: landing opens Survey Site or Push Deeper to prepare one fuel-gated mining run, followed by payload extraction. Mandatory Moon/Mars delivery contracts and their explicit claim actions create the first two Drone Bay slots; Io commissions the unique Hazard Support Drone and gates its artifact behind layered lava. Expedition damage can end a dig without deleting claimed unlocks.
+- Surface loop: landing opens Survey Site or Push Deeper to prepare one fuel-gated mining run, followed by payload extraction. Mandatory Moon/Mars delivery contracts and their explicit claim actions create the first two Drone Bay slots; Io commissions the first Hazard Support Drone and gates its artifact behind layered lava. Open slots may fabricate paid duplicate frames. Expedition damage can end a dig without deleting claimed unlocks.
 - Mining mini-game: separate rig/operator actors, destination gravity and inertia, voluntary jetpack EVA, destructible chunked terrain, suit-only passages, fog of war, scanner pulses, drill friction, ore pockets, loose chunks, physical artifact tethering, transferable Support Drones, 30s baseline oxygen, shared fuel draw, cargo, and extraction risk. The rig carries ore; the suit carries none and may tow only an artifact. Keyboard rig drilling defaults to Toggle and can be set to Hold; mouse/controller EVA actions remain hold-based. Heat cuts drilling off at 100% and unlocks below 60%.
 - Long-term loop: recovered materials, blueprints, artifacts, and research unlock better tools, Drone Bay options, permanent ship systems, Ark/base systems, and future story threads.
 
@@ -95,7 +95,7 @@ Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering,
 Prefer incremental systems that hook into the shared C++ application and preserve parity between native Vulkan 1.3 and WebGL2 builds:
 
 - Add content types and presentation helpers before new architecture.
-- Save version 7 retains separate rig/operator state, vector gravity, loose chunks, disabled-rig state, artifact tether state, and Support Drone simulation while adding explicit Moon/Mars claims, Io progression, upgrade credits, and the permanent Saturn slingshot gate. Older saves restore seated, migrate Support Drones to `ControlledActor`, and de-duplicate repeated loadout IDs.
+- Save version 8 retains version 7's separate rig/operator state, vector gravity, loose chunks, disabled-rig state, artifact tether state, and Support Drone simulation while adding purchased duplicate Support Drone frames. Older saves restore seated, migrate Support Drones to `ControlledActor`, and de-duplicate repeated legacy loadout IDs once.
 - Make new systems visible through concise UI states.
 - Avoid enemies throughout the solar system and Aaru Vale; enemy combat begins only after Arkfall near Khepri Prime.
 - Treat shared fuel as an explicit tradeoff. The UI and docs should make clear that the shuttle and player-controlled Mining Rig spend the same reserve; autonomous bay units are Support Drones.

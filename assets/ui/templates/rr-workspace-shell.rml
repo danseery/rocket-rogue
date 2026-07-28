@@ -1,0 +1,11 @@
+<template name="rr-workspace-shell" content="rr-workspace-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-workspace-shell" data-rr-template-kind="workspace">
+		<div class="rr-shell-lane rr-workspace-lane">
+			<div id="rr-workspace-content" class="rr-shell-content"></div>
+		</div>
+	</section>
+</body>
+</template>

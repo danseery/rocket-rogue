@@ -6,7 +6,7 @@ OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications fo
 
 - Portable C++ core for content, deterministic RNG, launch resolution, run state, save serialization, and balance tests.
 - Native SDL 3 application with direct Vulkan 1.3 rendering, a Vulkan RmlUi host, controller support, atomic per-user saves, high-DPI metrics, and resizable Windows/Linux windows.
-- Emscripten app shell with WebGL2 rendering, browser localStorage persistence, RmlUi, and the existing DOM fallback.
+- Emscripten app shell with WebGL2 rendering, browser localStorage persistence, and the same packaged RmlUi document, templates, and RCSS used by native builds.
 - NASA-arcade presentation using procedural backdrops, telemetry lines, HTML mission-control controls, and swappable 90s-style sprite assets under `assets/art`.
 - Saved campaign and activity onboarding: New Game opens with the proving-flight brief, and mandatory saved objectives explicitly introduce the Moon Prospector contract, Mars bay expansion, Io lava recovery, and Jupiter-to-Saturn slingshot before their rewards can be claimed.
 - Frontier ladder: prove Earth Orbit, then reach Moon, Mars, the Jupiter system/Io, Saturn, Uranus, and Neptune in order before continuing to Khepri Prime and the Rift Belt. Moon and Mars mining contracts, the Io artifact, and a Perfect Jupiter Flyby are explicit route gates rather than implicit arrival rewards.
@@ -16,7 +16,7 @@ OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications fo
 - Shared surface fuel: the shuttle and player-controlled Mining Rig draw from the same reserve, so a mining run competes with the route home. The current baseline mining oxygen tank is 30 seconds; crew, Support Drones, and field upgrades can extend it up to the 120-second cap.
 - Deterministic mining progression: chapter and surface depth select an Act and level, teaching noncombat excavation in Act 1, passive Support Drone combat in Act 2, and counter-heavy mastery in Act 3 without scaling difficulty from the equipped loadout. Rich-material guarantees and caps share one reward ledger.
 - Lock-and-key artifact sites: forecasted Hazard, Survey, Mining, Resource, Attack, and Defense capabilities can open deterministic gates, while most sites preserve systemic alternatives such as manual triangulation, route preparation, terrain cover, or encounter clearance.
-- The Moon contract reserves 3 safely recovered lunar Common Ore for Prospector Mk I and Drone Bay Slot 1. Mars reserves 4 local Common Ore for an empty Slot 2; Io then commissions the unique Hazard Support Drone. Resource and Survey Support Drones remain research unlocks, while Attack and Defense Support Drones remain gated behind post-solar hostile-system progression.
+- The Moon contract reserves 30 safely recovered lunar Common Ore for Prospector Mk I and Drone Bay Slot 1. Mars reserves 40 local Common Ore for an empty Slot 2; Io then commissions the first Hazard Support Drone. Moon keeps the simple excavation-and-return lesson; Mars adds repeated 30-second oxygen runs, drill heat, integrity wear, repairs, cargo, and return decisions. Resource and Survey Support Drones remain research unlocks, while Attack and Defense Support Drones remain gated behind post-solar hostile-system progression. Open slots can also fabricate paid duplicate Support Drone frames.
 - Permanent refit tracks: useful Flight Data or a successful arrival grants one saved shipyard opportunity. The pre-Moon ladder offers the next unique Reach, Control, and Recovery system; later boards return to randomized, role-diverse offers. Installed systems survive replacement ships even when expedition damage takes one offline.
 - Ark campaign spine: the Straylight is completely absent before Neptune, then a saved full-screen discovery beat identifies it as the expedition's first viable home. The first Ark jump reaches friendly Aaru Vale; the second causes Arkfall near hostile Khepri Prime, where Navigation, Ark fuel, and passive combat take over.
 - Harsh legacy failure: ship losses, astronaut memorials, expedition system outages, blueprint progress, and unlock variety without deleting permanent system ownership.
@@ -289,9 +289,10 @@ Native and web builds use the same game state and backend-neutral scene composit
 Current boundaries:
 
 - `src/core`: deterministic content, progression, save data, flight tuning, launch resolution, and tests.
-- `src/game`: platform-neutral application orchestration, shared fixed-step runner, live launch/mining controls, RmlUi behavior, panel HTML generation, and render snapshots.
+- `src/game`: platform-neutral application orchestration, shared fixed-step runner, live launch/mining controls, typed RmlUi presentation generation, and render snapshots.
 - `src/render`: `SceneComposer` and immutable `ScenePacket` data shared by the direct Vulkan 1.3 native backend and the WebGL2 browser backend, plus backend-specific RmlUi render hosts.
-- `src/platform/AppServices.h`: injected save, preference, host, controller, texture, renderer, UI, and browser-mirror contracts.
+- `assets/ui`: the persistent RmlUi document shell, reusable screen-family/modal templates, design tokens, shared primitives, and screen exceptions packaged into every runtime.
+- `src/platform/AppServices.h`: injected save, preference, host, controller, texture, renderer, authoritative UI, and typed platform-host contracts.
 - `src/platform/sdl`: native SDL window/input/host, PNG texture loading, and atomic filesystem storage.
-- `src/platform/web`: Emscripten entry point, browser storage, DOM mirror, async browser textures, and web gamepads.
-- `web`: HTML/CSS/JS shell that forwards UI actions into exported C++ functions.
+- `src/platform/web`: Emscripten entry point, browser storage, typed RmlUi host context, async browser textures, and web gamepads.
+- `web`: a thin canvas/startup/input shell; it does not render or mirror game panels, modals, prompts, or realtime HUD state.

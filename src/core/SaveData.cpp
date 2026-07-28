@@ -2101,7 +2101,7 @@ void normalizeLegacyMiningHazards(MiningRunState& mining)
     }
 }
 
-void migrateLegacyHazardDroneRecords(MetaProgress& meta)
+void migrateLegacyHazardDroneRecords(MetaProgress& meta, bool deduplicateLegacyLoadouts)
 {
     auto replaceId = [](std::string& id) {
         if (id == content::drone::legacyStabilizerDrone) {
@@ -2111,16 +2111,28 @@ void migrateLegacyHazardDroneRecords(MetaProgress& meta)
     for (std::string& id : meta.ownedDroneIds) {
         replaceId(id);
     }
-    std::vector<std::string> uniqueOwned;
-    uniqueOwned.reserve(meta.ownedDroneIds.size());
-    for (const std::string& id : meta.ownedDroneIds) {
-        if (std::find(uniqueOwned.begin(), uniqueOwned.end(), id) == uniqueOwned.end()) {
-            uniqueOwned.push_back(id);
+    if (deduplicateLegacyLoadouts) {
+        std::vector<std::string> uniqueOwned;
+        uniqueOwned.reserve(meta.ownedDroneIds.size());
+        for (const std::string& id : meta.ownedDroneIds) {
+            if (std::find(uniqueOwned.begin(), uniqueOwned.end(), id) == uniqueOwned.end()) {
+                uniqueOwned.push_back(id);
+            }
         }
+        meta.ownedDroneIds = std::move(uniqueOwned);
     }
-    meta.ownedDroneIds = std::move(uniqueOwned);
     for (std::string& id : meta.equippedDroneIds) {
         replaceId(id);
+    }
+    if (deduplicateLegacyLoadouts) {
+        std::vector<std::string> uniqueEquipped;
+        uniqueEquipped.reserve(meta.equippedDroneIds.size());
+        for (const std::string& id : meta.equippedDroneIds) {
+            if (std::find(uniqueEquipped.begin(), uniqueEquipped.end(), id) == uniqueEquipped.end()) {
+                uniqueEquipped.push_back(id);
+            }
+        }
+        meta.equippedDroneIds = std::move(uniqueEquipped);
     }
     for (DroneUpgradeRecord& record : meta.droneUpgrades) {
         replaceId(record.droneId);
@@ -2543,7 +2555,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     if (save.version < 4 && legacyDroneBayUnlocked) {
         appendUnique(state.meta.unlockKeys, content::unlock::droneSupportSuite);
     }
-    migrateLegacyHazardDroneRecords(state.meta);
+    // Version 8 introduces purchased duplicate Support Drone frames. Earlier
+    // saves used repeated IDs only as an invalid legacy loadout, so normalize
+    // those once without touching intentional v8+ ownership.
+    migrateLegacyHazardDroneRecords(state.meta, save.version < 8);
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
         state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;

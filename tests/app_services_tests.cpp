@@ -14,11 +14,15 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #if defined(_MSC_VER)
 #include <crtdbg.h>
@@ -81,12 +85,18 @@ public:
     bool fullscreenAvailable() const override { return true; }
     bool fullscreen() const override { return fullscreenValue; }
     bool setFullscreen(bool enabled) override { fullscreenValue = enabled; return true; }
-    void log(rocket::PlatformLogLevel, std::string_view) override {}
+    void log(rocket::PlatformLogLevel level, std::string_view message) override
+    {
+        logLevels.push_back(level);
+        logMessages.emplace_back(message);
+    }
     bool haptic(double, double, double) override { ++hapticCount; return true; }
     mutable double now = 1.0;
     rocket::ViewportMetrics metrics {1280, 800, 2560, 1600, 2.0F};
     bool fullscreenValue = false;
     int hapticCount = 0;
+    std::vector<rocket::PlatformLogLevel> logLevels;
+    std::vector<std::string> logMessages;
 };
 
 class FakeController final : public rocket::IControllerSource {
@@ -193,7 +203,30 @@ public:
 class FakeUi final : public rocket::IGameUi {
 public:
     bool initialize(ActionHandler handler) override { actionHandler = std::move(handler); return true; }
-    void setPanelHtml(const std::string& value) override { html = value; ++panelSetCount; }
+    void setPanelPresentation(const rocket::PanelDocumentPresentation& value) override
+    {
+        presentation = value;
+        html = value.contentMarkup;
+        for (const rocket::ModalPresentation& modal : value.modals) {
+            html += "<template data-modal=\"" + modal.id + "\"";
+            if (modal.autoOpen) {
+                html += " data-auto-modal=\"1\" data-modal-dismissible=\"";
+                html += modal.dismissible ? "1" : "0";
+                html += "\" data-modal-close-action=\"" + modal.closeAction
+                    + "\" data-title=\"" + modal.title + "\"";
+            } else {
+                html += " data-title=\"" + modal.title + "\"";
+                if (!modal.dismissible) {
+                    html += " data-modal-dismissible=\"0\"";
+                }
+            }
+            if (!modal.showClose) {
+                html += " data-modal-hide-close=\"1\"";
+            }
+            html += ">" + modal.bodyMarkup + "</template>";
+        }
+        ++panelSetCount;
+    }
     void setRealtimeHudState(const rocket::RealtimeHudState& value) override
     {
         hud = value;
@@ -257,6 +290,7 @@ public:
     }
     void shutdown() override { shutdownCalled = true; }
     ActionHandler actionHandler;
+    rocket::PanelDocumentPresentation presentation;
     std::string html;
     bool shutdownCalled = false;
     int renderCount = 0;
@@ -285,28 +319,50 @@ public:
 
 class FakeUiBridge final : public rocket::IUiBridge {
 public:
-    void setPanelHtml(std::string_view value) override { html = value; ++panelSetCount; }
-    void setRealtimeHudState(const rocket::RealtimeHudState& value) override
+    void setUiHostContext(const rocket::UiHostContext& value) override
     {
-        hud = value;
-        ++hudSetCount;
+        hostContext = value;
+        ++panelSetCount;
     }
-    void setRmlUiEnabled(bool) override {}
-    void setModalOpen(bool) override {}
-    void setControllerPresentation(bool, rocket::ControllerFamily) override {}
-    void setControllerFocusVisible(bool) override {}
-    void setControllerResumeBlocked(bool, bool) override {}
+    void setRmlUiEnabled(bool enabled) override
+    {
+        rmlUiEnabled = enabled;
+        ++rmlUiEnabledSetCount;
+    }
+    void setModalOpen(bool open) override
+    {
+        modalOpen = open;
+        ++modalOpenSetCount;
+    }
+    void setControllerPresentation(bool active, rocket::ControllerFamily family) override
+    {
+        controllerPresentationActive = active;
+        controllerFamily = family;
+    }
+    void setControllerFocusVisible(bool visible) override { controllerFocusVisible = visible; }
+    void setControllerResumeBlocked(bool blocked, bool connected) override
+    {
+        controllerResumeBlocked = blocked;
+        controllerConnected = connected;
+    }
     void preferencesChanged(const rocket::AppPreferences& value) override
     {
         lastPreferences = value;
         ++preferenceUpdateCount;
     }
-    std::string html;
+    rocket::UiHostContext hostContext;
     int panelSetCount = 0;
-    int hudSetCount = 0;
     int preferenceUpdateCount = 0;
+    int rmlUiEnabledSetCount = 0;
+    int modalOpenSetCount = 0;
+    bool rmlUiEnabled = false;
+    bool modalOpen = false;
+    bool controllerPresentationActive = false;
+    bool controllerFocusVisible = false;
+    bool controllerResumeBlocked = false;
+    bool controllerConnected = false;
+    rocket::ControllerFamily controllerFamily = rocket::ControllerFamily::Generic;
     rocket::AppPreferences lastPreferences;
-    rocket::RealtimeHudState hud;
 };
 
 class NullRmlRenderInterface final : public Rml::RenderInterface {
@@ -360,6 +416,13 @@ private:
 
 std::string repositoryRootForRmlTests()
 {
+    const std::filesystem::path sourceCandidate =
+        std::filesystem::path(__FILE__).parent_path().parent_path();
+    if (std::filesystem::exists(
+            sourceCandidate / "assets" / "fonts" / "SourceCodePro-Regular.ttf")) {
+        return sourceCandidate.string();
+    }
+
     std::filesystem::path candidate = std::filesystem::current_path();
     for (int depth = 0; depth < 5; ++depth) {
         if (std::filesystem::exists(candidate / "assets" / "fonts" / "SourceCodePro-Regular.ttf")) {
@@ -437,6 +500,392 @@ int main()
 #endif
 
 #if !defined(__EMSCRIPTEN__)
+    // The packaged document shell is loaded once. Changing screen-family
+    // templates and patching live HUD values must only update stable hosts,
+    // while semantic focus and modal boundaries remain intact.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState hangar = rocket::createNewGame(catalog, 0x7E6D1A7EULL);
+        hangar.screen = rocket::Screen::Hangar;
+        rocket::Random hangarRng(0x7E6D1A7EULL);
+        const rocket::PreparedLaunch hangarLaunch =
+            rocket::prepareLaunch(hangar, catalog, hangarRng);
+        rocket::PanelRenderContext hangarContext {
+            hangar,
+            catalog,
+            hangarLaunch,
+            hangarLaunch};
+        hangarContext.firstTimeIntroductionsEnabled = false;
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        host.metrics = {1280, 800, 1280, 800, 1.0F};
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([](const std::string&) {}));
+        assert(bridge.rmlUiEnabled);
+
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(hangarContext));
+        ui.requestFocus("action:prepare_launch");
+        ui.refresh();
+        assert(ui.focusedId() == "action:prepare_launch");
+        ui.render();
+        const rocket::UiDiagnostics initialDiagnostics = ui.diagnostics();
+        assert(initialDiagnostics.documentRebuilds == 1);
+
+        // Nested modal expansion keeps each layer's semantic focus. Closing
+        // Settings returns to its launcher in the non-dismissible System
+        // Menu, and closing that layer restores the original panel control.
+        ui.requestFocus("modal:system_menu");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:system_menu");
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        assert(!ui.cancel());
+        ui.requestFocus("modal:settings");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:settings");
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        ui.closeModal();
+        assert(ui.modalOpen());
+        assert(ui.focusedId() == "modal:settings");
+        ui.closeModal();
+        assert(!ui.modalOpen());
+        assert(ui.focusedId() == "modal:system_menu");
+
+        rocket::GameState flyby = rocket::createNewGame(catalog, 0xF17B7ULL);
+        rocket::LaunchOutcome moonArrival;
+        moonArrival.type = rocket::LaunchResultType::MissionComplete;
+        moonArrival.frontierTransfer = true;
+        moonArrival.destinationId = rocket::content::destination::moon;
+        rocket::startArrivalOps(flyby, moonArrival);
+        rocket::startArrivalFlybyRun(flyby, catalog);
+        assert(flyby.screen == rocket::Screen::Flyby && !flyby.run.flyby.completed);
+        rocket::Random flybyRng(0xF17B7ULL);
+        const rocket::PreparedLaunch flybyLaunch =
+            rocket::prepareLaunch(flyby, catalog, flybyRng);
+        rocket::PanelRenderContext flybyContext {
+            flyby,
+            catalog,
+            flybyLaunch,
+            flybyLaunch};
+        flybyContext.firstTimeIntroductionsEnabled = false;
+        const rocket::PanelDocumentPresentation flybyPresentation =
+            rocket::buildGamePanelPresentation(flybyContext);
+        assert(flybyPresentation.templateKind == rocket::PanelTemplateKind::ControlPanel);
+
+        ui.setPanelPresentation(flybyPresentation);
+        ui.requestFocus("modal:flight_details");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:flight_details");
+        ui.render();
+        const rocket::UiDiagnostics transitionDiagnostics = ui.diagnostics();
+        assert(transitionDiagnostics.documentRebuilds == 0);
+        assert(transitionDiagnostics.panelRebuilds > 0);
+
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        const std::string activeModalFocus = ui.focusedId();
+        assert(!activeModalFocus.empty());
+        ui.render(); // Clear the modal host rebuild before measuring HUD-only work.
+
+        rocket::RealtimeHudState hud;
+        rocket::buildRealtimeHudState(flybyContext, hud);
+        assert(!hud.patches.empty());
+        ui.setRealtimeHudState(hud);
+        ui.render();
+        const rocket::UiDiagnostics hudDiagnostics = ui.diagnostics();
+        assert(hudDiagnostics.documentRebuilds == 0);
+        assert(hudDiagnostics.panelRebuilds == 0);
+        assert(hudDiagnostics.hudPatches > 0);
+        assert(ui.modalOpen());
+        assert(ui.focusedId() == activeModalFocus);
+        assert(std::none_of(
+            host.logMessages.begin(),
+            host.logMessages.end(),
+            [](const std::string& message) {
+                return message.find("Realtime RmlUi patch target is missing") != std::string::npos;
+            }));
+
+        assert(ui.cancel());
+        assert(!ui.modalOpen());
+        assert(ui.focusedId() == "modal:flight_details");
+
+        const auto applyRealtimePresentation = [&](const rocket::PanelRenderContext& context) {
+            const std::size_t logStart = host.logMessages.size();
+            ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+            rocket::RealtimeHudState realtime;
+            rocket::buildRealtimeHudState(context, realtime);
+            assert(!realtime.patches.empty());
+            ui.setRealtimeHudState(realtime);
+            ui.render();
+            assert(std::none_of(
+                host.logMessages.begin() + static_cast<std::ptrdiff_t>(logStart),
+                host.logMessages.end(),
+                [](const std::string& message) {
+                    return message.find("Realtime RmlUi patch target is missing") != std::string::npos;
+                }));
+        };
+
+        rocket::GameState launch = rocket::createNewGame(catalog, 0x1A0C4ULL);
+        launch.screen = rocket::Screen::Launch;
+        rocket::Random launchRng(0x1A0C4ULL);
+        const rocket::PreparedLaunch launchModel =
+            rocket::prepareLaunch(launch, catalog, launchRng);
+        rocket::PanelRenderContext launchContext {
+            launch,
+            catalog,
+            launchModel,
+            launchModel};
+        launchContext.firstTimeIntroductionsEnabled = false;
+        applyRealtimePresentation(launchContext);
+
+        rocket::GameState mining = rocket::createNewGame(catalog, 0xA11CEULL);
+        mining.run.destinationIndex = 2;
+        rocket::startSurfaceExpedition(mining, catalog);
+        mining.run.surfaceExpedition.miningSitePrepared = true;
+        assert(rocket::startMiningRun(mining, catalog).applied);
+        rocket::Random miningRng(0xA11CEULL);
+        const rocket::PreparedLaunch miningLaunch =
+            rocket::prepareLaunch(mining, catalog, miningRng);
+        rocket::PanelRenderContext miningContext {
+            mining,
+            catalog,
+            miningLaunch,
+            miningLaunch};
+        miningContext.firstTimeIntroductionsEnabled = false;
+        applyRealtimePresentation(miningContext);
+
+        rocket::GameState ioMining = rocket::createNewGame(catalog, 0x10A11ULL);
+        ioMining.run.destinationIndex = 3;
+        ioMining.meta.furthestTier = 3;
+        rocket::startSurfaceExpedition(ioMining, catalog);
+        ioMining.run.surfaceExpedition.miningSitePrepared = true;
+        assert(rocket::startMiningRun(ioMining, catalog).applied);
+        rocket::Random ioMiningRng(0x10A11ULL);
+        const rocket::PreparedLaunch ioMiningLaunch =
+            rocket::prepareLaunch(ioMining, catalog, ioMiningRng);
+        rocket::PanelRenderContext ioMiningContext {
+            ioMining,
+            catalog,
+            ioMiningLaunch,
+            ioMiningLaunch};
+        ioMiningContext.firstTimeIntroductionsEnabled = false;
+        applyRealtimePresentation(ioMiningContext);
+
+        rocket::GameState scan = rocket::createNewGame(catalog, 0x5CA11ULL);
+        scan.run.destinationIndex = 2;
+        rocket::startSurfaceExpedition(scan, catalog);
+        rocket::Random scanRng(0x5CA11ULL);
+        assert(rocket::startSurfaceScanRun(scan, scanRng).applied);
+        const rocket::PreparedLaunch scanLaunch =
+            rocket::prepareLaunch(scan, catalog, scanRng);
+        rocket::PanelRenderContext scanContext {
+            scan,
+            catalog,
+            scanLaunch,
+            scanLaunch};
+        scanContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(scanContext));
+        ui.openModal(std::string(rocket::ui::modals::inventory));
+        assert(ui.modalOpen());
+        applyRealtimePresentation(scanContext);
+        ui.closeModal();
+
+        rocket::GameState results = rocket::createNewGame(catalog, 0xDEB21EFULL);
+        results.screen = rocket::Screen::Results;
+        results.lastOutcome.type = rocket::LaunchResultType::SafeEject;
+        results.lastOutcome.recoveryMethod = rocket::RecoveryMethod::ReturnHome;
+        results.lastOutcome.ejectMultiplier = 1.1;
+        results.lastOutcome.crashMultiplier = 1.5;
+        rocket::Random resultsRng(0xDEB21EFULL);
+        const rocket::PreparedLaunch resultsLaunch =
+            rocket::prepareLaunch(results, catalog, resultsRng);
+        const rocket::PanelDocumentPresentation resultsPresentation =
+            rocket::buildGamePanelPresentation({
+                results,
+                catalog,
+                resultsLaunch,
+                resultsLaunch});
+        assert(resultsPresentation.templateKind == rocket::PanelTemplateKind::Results);
+        ui.setPanelPresentation(resultsPresentation);
+        assert(ui.modalOpen());
+        const std::string mandatoryModalFocus = ui.focusedId();
+        assert(!mandatoryModalFocus.empty());
+        ui.render();
+        assert(ui.diagnostics().documentRebuilds == 0);
+        assert(!ui.cancel());
+        assert(ui.modalOpen());
+        assert(ui.focusedId() == mandatoryModalFocus);
+        assert(bridge.modalOpen);
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+        ui.setControllerFocusVisible(true);
+        ui.setControllerResumeBlocked(true, true);
+        assert(bridge.controllerPresentationActive);
+        assert(bridge.controllerFocusVisible);
+        assert(bridge.controllerResumeBlocked);
+        assert(bridge.controllerConnected);
+        ui.shutdown();
+        assert(!bridge.modalOpen);
+        assert(!bridge.rmlUiEnabled);
+        assert(!bridge.controllerPresentationActive);
+        assert(!bridge.controllerFocusVisible);
+        assert(!bridge.controllerResumeBlocked);
+        assert(!bridge.controllerConnected);
+    }
+
+    // Typed modal records are an API boundary, not loosely parsed markup.
+    // Empty and duplicate IDs must fail loudly and leave the last valid
+    // presentation active instead of producing an ambiguous modal stack.
+    {
+        FakePreferenceStore preferences;
+        FakeHost host;
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            repositoryRootForRmlTests());
+        assert(ui.initialize([](const std::string&) {}));
+
+        rocket::PanelDocumentPresentation valid;
+        valid.contentMarkup = "<div>Valid panel</div>";
+        valid.modals.push_back({"valid_modal", "Valid modal", "<p>Valid body</p>"});
+        ui.setPanelPresentation(valid);
+
+        rocket::PanelDocumentPresentation emptyId = valid;
+        emptyId.modals.push_back({"", "Invalid modal", "<p>Invalid body</p>"});
+        const std::size_t emptyLogStart = host.logMessages.size();
+        ui.setPanelPresentation(emptyId);
+        assert(std::any_of(
+            host.logMessages.begin() + static_cast<std::ptrdiff_t>(emptyLogStart),
+            host.logMessages.end(),
+            [](const std::string& message) {
+                return message.find(
+                           "Invalid RmlUi panel presentation: modal at index 1 has an empty id.")
+                    != std::string::npos;
+            }));
+
+        rocket::PanelDocumentPresentation duplicateId = valid;
+        duplicateId.modals.push_back(
+            {"valid_modal", "Duplicate modal", "<p>Duplicate body</p>"});
+        const std::size_t duplicateLogStart = host.logMessages.size();
+        ui.setPanelPresentation(duplicateId);
+        assert(std::any_of(
+            host.logMessages.begin() + static_cast<std::ptrdiff_t>(duplicateLogStart),
+            host.logMessages.end(),
+            [](const std::string& message) {
+                return message.find(
+                           "Invalid RmlUi panel presentation: duplicate modal id 'valid_modal'.")
+                    != std::string::npos;
+            }));
+
+        ui.openModal("valid_modal");
+        assert(ui.modalOpen());
+        ui.closeModal();
+        ui.shutdown();
+    }
+
+    // The packaged document, templates, styles, and fonts must resolve when
+    // the runtime asset root itself contains spaces.
+    {
+        const std::filesystem::path repositoryRoot = repositoryRootForRmlTests();
+        const auto nonce = std::chrono::high_resolution_clock::now()
+                               .time_since_epoch()
+                               .count();
+        const std::filesystem::path temporaryRoot =
+            std::filesystem::temp_directory_path()
+            / ("orebit rmlui assets " + std::to_string(nonce));
+        const std::filesystem::path temporaryAssets = temporaryRoot / "assets";
+        std::filesystem::create_directories(temporaryAssets);
+        std::filesystem::copy(
+            repositoryRoot / "assets" / "fonts",
+            temporaryAssets / "fonts",
+            std::filesystem::copy_options::recursive);
+        std::filesystem::copy(
+            repositoryRoot / "assets" / "ui",
+            temporaryAssets / "ui",
+            std::filesystem::copy_options::recursive);
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        FakeUiBridge bridge;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            temporaryRoot.string());
+        assert(ui.initialize([](const std::string&) {}));
+        assert(bridge.rmlUiEnabled);
+        ui.shutdown();
+        assert(!bridge.rmlUiEnabled);
+
+        std::error_code cleanupError;
+        std::filesystem::remove_all(temporaryRoot, cleanupError);
+        assert(!cleanupError);
+    }
+
+    // Initialization should fail atomically, identify the exact missing
+    // packaged asset, and leave the browser/native host disabled.
+    {
+        const std::filesystem::path repositoryRoot = repositoryRootForRmlTests();
+        const auto nonce = std::chrono::high_resolution_clock::now()
+                               .time_since_epoch()
+                               .count();
+        const std::filesystem::path temporaryRoot =
+            std::filesystem::temp_directory_path()
+            / ("orebit-rmlui-missing-assets-" + std::to_string(nonce));
+        const std::filesystem::path temporaryFonts =
+            temporaryRoot / "assets" / "fonts";
+        std::filesystem::create_directories(temporaryFonts);
+        for (const std::string_view fontName : {
+                 std::string_view("SourceCodePro-Regular.ttf"),
+                 std::string_view("SourceCodePro-Semibold.ttf"),
+                 std::string_view("SourceCodePro-It.ttf")}) {
+            assert(std::filesystem::copy_file(
+                repositoryRoot / "assets" / "fonts" / std::string(fontName),
+                temporaryFonts / std::string(fontName)));
+        }
+
+        FakePreferenceStore preferences;
+        FakeHost host;
+        FakeUiBridge bridge;
+        bridge.rmlUiEnabled = true;
+        NullRmlRenderHost renderHost;
+        rocket::GameRmlUi ui(
+            preferences,
+            host,
+            bridge,
+            renderHost,
+            temporaryRoot.string());
+        assert(!ui.initialize([](const std::string&) {}));
+        assert(!bridge.rmlUiEnabled);
+        const std::filesystem::path expectedMissingAsset =
+            temporaryRoot / "assets" / "ui" / "panel.rml";
+        assert(std::any_of(
+            host.logMessages.begin(),
+            host.logMessages.end(),
+            [&expectedMissingAsset](const std::string& message) {
+                return message.find("Required RmlUi asset is missing:") != std::string::npos
+                    && message.find(expectedMissingAsset.string()) != std::string::npos;
+            }));
+
+        std::error_code cleanupError;
+        std::filesystem::remove_all(temporaryRoot, cleanupError);
+        assert(!cleanupError);
+    }
+
     // Surface Ops presents its immediate operations as one visible horizontal
     // action row. Left/right follows Mine -> Survey -> Push -> Extract, while
     // Up returns to the Drone Ops callout above the row.
@@ -474,9 +923,11 @@ int main()
         assert(ui.initialize([&pointerAction](const std::string& action) {
             pointerAction = action;
         }));
-        const std::string surfaceHtml = rocket::buildGamePanelHtml(panelContext);
+        const rocket::PanelDocumentPresentation surfacePresentation =
+            rocket::buildGamePanelPresentation(panelContext);
+        const std::string& surfaceHtml = surfacePresentation.contentMarkup;
         assert(surfaceHtml.find("data-ui-focus-id=\"action:drone_ops\"") != std::string::npos);
-        ui.setPanelHtml(surfaceHtml);
+        ui.setPanelPresentation(surfacePresentation);
         ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
         ui.requestFocus("action:mine_surface");
         ui.refresh();
@@ -600,7 +1051,7 @@ int main()
             renderHost,
             repositoryRootForRmlTests());
         assert(ui.initialize([](const std::string&) {}));
-        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(panelContext));
         ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
         ui.requestFocus("modal:map");
         ui.refresh();
@@ -634,7 +1085,7 @@ int main()
             renderHost,
             repositoryRootForRmlTests());
         assert(ui.initialize([](const std::string&) {}));
-        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(panelContext));
         ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
         ui.requestFocus("modal:map");
         ui.refresh();
@@ -668,7 +1119,7 @@ int main()
             unavailableOpsLaunch,
             unavailableOpsLaunch};
         unavailableOpsContext.firstTimeIntroductionsEnabled = false;
-        ui.setPanelHtml(rocket::buildGamePanelHtml(unavailableOpsContext));
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(unavailableOpsContext));
         ui.requestFocus("modal:crew");
         ui.refresh();
 
@@ -715,7 +1166,7 @@ int main()
         assert(ui.initialize([&pointerAction](const std::string& action) {
             pointerAction = action;
         }));
-        ui.setPanelHtml(rocket::buildGamePanelHtml(panelContext));
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(panelContext));
 
         // Details is part of every drone card's controller path, and must
         // promote its full profile into the matching modal rather than
@@ -751,7 +1202,7 @@ int main()
         const rocket::PreparedLaunch loadedLaunch = rocket::prepareLaunch(loadedState, catalog, loadedRng);
         rocket::PanelRenderContext loadedPanelContext {loadedState, catalog, loadedLaunch, loadedLaunch};
         loadedPanelContext.firstTimeIntroductionsEnabled = false;
-        ui.setPanelHtml(rocket::buildGamePanelHtml(loadedPanelContext));
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(loadedPanelContext));
         ui.requestFocus("action:equip_drone:1");
         ui.refresh();
         assert(ui.navigate(rocket::UiDirection::Right));
@@ -820,7 +1271,8 @@ int main()
         assert(fixture.ui.html.find("data-panel-mode=\"title\"") != std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"new_game\"") != std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
-        assert(fixture.ui.html == fixture.bridge.html);
+        assert(fixture.bridge.hostContext.screen == fixture.ui.presentation.metadata.screen);
+        assert(fixture.bridge.hostContext.titleScreenActive);
         fixture.runner.shutdown();
     }
     {
@@ -1249,7 +1701,8 @@ int main()
     assert(runner.initialize());
     assert(renderer.initialized);
     assert(!ui.html.empty());
-    assert(ui.html == bridge.html);
+    assert(bridge.hostContext.screen == ui.presentation.metadata.screen);
+    assert(bridge.hostContext.titleScreenActive);
     assert(ui.html.find("data-panel-mode=\"title\"") != std::string::npos);
     assert(ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
     assert(preferences.loadCount == 1);
@@ -1314,15 +1767,12 @@ int main()
     const int uiPanelUpdatesBeforeRealtimeFrame = ui.panelSetCount;
     const int bridgePanelUpdatesBeforeRealtimeFrame = bridge.panelSetCount;
     const int uiHudUpdatesBeforeRealtimeFrame = ui.hudSetCount;
-    const int bridgeHudUpdatesBeforeRealtimeFrame = bridge.hudSetCount;
     host.now += 0.20;
     runner.frame();
     assert(ui.panelSetCount == uiPanelUpdatesBeforeRealtimeFrame);
     assert(bridge.panelSetCount == bridgePanelUpdatesBeforeRealtimeFrame);
     assert(ui.hudSetCount == uiHudUpdatesBeforeRealtimeFrame + 1);
-    assert(bridge.hudSetCount == bridgeHudUpdatesBeforeRealtimeFrame + 1);
     assert(!ui.hud.patches.empty());
-    assert(!bridge.hud.patches.empty());
 
     const double animationTimeBeforeSuspend = renderer.animationTime;
     host.now += 10.0;

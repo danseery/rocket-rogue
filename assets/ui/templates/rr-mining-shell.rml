@@ -1,0 +1,11 @@
+<template name="rr-mining-shell" content="rr-mining-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-mining-shell" data-rr-template-kind="mining">
+		<div class="rr-mining-top-host"></div>
+		<div id="rr-mining-content" class="rr-shell-content rr-mining-content"></div>
+		<div class="rr-mining-bottom-host"></div>
+	</section>
+</body>
+</template>

@@ -180,9 +180,9 @@ Research improves mining through specific tools:
 - Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra blueprint progress from recovered field notes.
-- Moon mining contract: 3 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the unique Prospector Support Drone, and opens Slot 1.
-- Mars bay contract: 4 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Drone Bay Slot 2` consumes the reserve and opens an empty specialist slot.
-- Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the unique Hazard Support Drone Mk I into the open Mars slot.
+- Moon mining contract: 30 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
+- Mars bay contract: 40 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Drone Bay Slot 2` consumes the reserve and opens an empty specialist slot.
+- Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.
 - Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second story arena stages outer `0/4` and inner `0/4` lava seals around the minor artifact.
 - Arkfall emergency kit: Mk I Attack and Defense Support Drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
 - Perimeter Drone Network: Perimeter Coordination for Mk II/Mk III combat tuning and advanced combat synergies.
@@ -214,6 +214,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and bank/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 7 retains rig/operator state, loose chunks, disabled-rig state, Support Drone anchor/formation state, positions, velocities, haul, shields, and cooldowns while adding the explicit Moon/Mars/Io/Saturn campaign fields. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, and de-duplicate repeated loadout IDs.
+- Save version 8 retains version 7's rig/operator state, loose chunks, disabled-rig state, Support Drone anchor/formation state, positions, velocities, haul, shields, and cooldowns while adding purchased duplicate Support Drone frames. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, and de-duplicate repeated legacy loadout IDs once.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

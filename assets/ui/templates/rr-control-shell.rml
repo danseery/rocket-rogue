@@ -1,0 +1,11 @@
+<template name="rr-control-shell" content="rr-control-content">
+<head>
+</head>
+<body>
+	<section class="rr-shell rr-control-shell" data-rr-template-kind="control-panel">
+		<div class="rr-shell-lane rr-control-lane">
+			<div id="rr-control-content" class="rr-shell-content"></div>
+		</div>
+	</section>
+</body>
+</template>

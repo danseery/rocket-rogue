@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const shell = readFileSync(resolve(repositoryRoot, "web", "shell.html"), "utf8");
+const webPlatform = readFileSync(
+  resolve(repositoryRoot, "src", "platform", "web", "WebPlatform.cpp"),
+  "utf8",
+);
+
+function functionBody(name) {
+  const match = shell.match(new RegExp(
+    `function ${name}\\([^)]*\\) \\{([\\s\\S]*?)\\n    \\}`,
+  ));
+  assert.ok(match, `web shell should define ${name}()`);
+  return match[1];
+}
+
+test("completed realtime screens return input ownership to RmlUi", () => {
+  assert.match(
+    functionBody("setUiHostContext"),
+    /realtimeActivityActive:\s*Boolean\(context\?\.realtimeActivityActive\)/,
+  );
+  assert.match(
+    functionBody("setUiHostContext"),
+    /previousRealtimeActivity\s*!==\s*currentUiHostContext\.realtimeActivityActive[\s\S]*releaseRealtimeInputs\(\)/,
+    "active-to-results transitions on the same Screen enum must release held realtime input",
+  );
+
+  for (const helper of ["isFlybyActive", "isOrbitActive", "isMiningActive"]) {
+    assert.match(
+      functionBody(helper),
+      /rmlUiAvailable[\s\S]*currentUiHostContext\.realtimeActivityActive/,
+      `${helper} must reject completed/takeover presentations`,
+    );
+  }
+
+  assert.match(
+    webPlatform,
+    /rr_web_set_ui_host_context[\s\S]*context\.realtimeActivityActive\s*\?\s*1\s*:\s*0/,
+    "the C++ web bridge must publish authoritative realtime activity state",
+  );
+});
+
+test("realtime input cannot bypass explicit RmlUi actions", () => {
+  const pointerDown = shell.match(
+    /canvas\.addEventListener\("pointerdown",[\s\S]*?\n    \}\);/,
+  );
+  assert.ok(pointerDown, "web shell should define canvas pointer-down routing");
+  assert.doesNotMatch(pointerDown[0], /flybyContinue|orbitContinue/);
+  assert.match(pointerDown[0], /if \(!isMiningActive\(\)\) return/);
+
+  const keyDown = functionBody("handleRealtimeKeyDown");
+  assert.match(keyDown, /if \(isFlybyActive\(\)\)/);
+  assert.match(keyDown, /if \(isOrbitActive\(\)\)/);
+  assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);
+  assert.doesNotMatch(keyDown, /flybyContinue|orbitContinue/);
+});
+
+test("surface shortcuts yield to result actions and shutdown clears input ownership", () => {
+  const globalKeyDown = shell.match(
+    /window\.addEventListener\("keydown",[\s\S]*?\n    \}\);/,
+  );
+  assert.ok(globalKeyDown, "web shell should define global keyboard routing");
+  for (const screen of ["surfaceScan", "surfacePush"]) {
+    assert.match(
+      globalKeyDown[0],
+      new RegExp(
+        `currentUiHostContext\\.realtimeActivityActive[\\s\\S]*screen === rrScreen\\.${screen}`,
+      ),
+      `${screen} Space shortcut must only own input during active play`,
+    );
+  }
+
+  const availability = functionBody("setRmlUiEnabled");
+  assert.match(availability, /realtimeActivityActive:\s*false/);
+  assert.match(availability, /releaseRealtimeInputs\(\)/);
+  assert.match(
+    webPlatform,
+    /RocketBridge\.setRmlUiEnabled\(rmlEnabled\)/,
+    "the native web bridge must publish RmlUi availability changes",
+  );
+});

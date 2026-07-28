@@ -430,7 +430,13 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     }
     const double radius = tuning::mining::hazardDroneAcquireRadiusCells;
     const double radiusSq = radius * radius;
-    double bestScore = 1.0e12;
+    bool foundCandidate = false;
+    bool bestIsStorySeal = false;
+    double bestArtifactDistance = 1.0e12;
+    double bestAnchorDistance = 1.0e12;
+    double bestIntensity = -1.0;
+    int bestUsefulNeighbors = -1;
+    double bestAgentDistance = 1.0e12;
     int bestX = -1;
     int bestY = -1;
     const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - radius)));
@@ -450,9 +456,13 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
                 continue;
             }
             const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
+            const double anchorDistance = std::hypot(rigDx, rigDy);
             const double agentDistance = std::hypot(centerX - agent.x, centerY - agent.y);
             const double intensityPriority = static_cast<double>(tuning::mining::hazardDroneRequiredMark(cell->hazardAffinity));
-            const double storySealPriority = cell->gateAssociated ? 100000.0 : 0.0;
+            const bool isStorySeal = cell->gateAssociated;
+            const double artifactDistance = isStorySeal && mining_.artifact.present
+                ? std::hypot(centerX - mining_.artifact.x, centerY - mining_.artifact.y)
+                : 0.0;
             int eligibleNeighbors = 0;
             for (int neighborY = y - 1; neighborY <= y + 1; ++neighborY) {
                 for (int neighborX = x - 1; neighborX <= x + 1; ++neighborX) {
@@ -466,11 +476,34 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             const int usefulNeighbors = std::min(
                 eligibleNeighbors,
                 tuning::mining::hazardDroneBatchSize(agent.upgradeLevel) - 1);
-            const double score = -storySealPriority - intensityPriority * 1000.0 -
-                static_cast<double>(usefulNeighbors) * 25.0 +
-                agentDistance + static_cast<double>(y * mining_.terrain.width + x) * 0.00001;
-            if (score < bestScore) {
-                bestScore = score;
+            // The rig is the operational anchor. Artifact seal segments always win;
+            // within that mission-critical group we work from the artifact outward.
+            // Ordinary hazards then favor the closest threat to the player, not the
+            // closest leftover tile to a drone that has just returned from elsewhere.
+            const bool better = !foundCandidate
+                || (isStorySeal != bestIsStorySeal && isStorySeal)
+                || (isStorySeal == bestIsStorySeal && isStorySeal && artifactDistance < bestArtifactDistance - 0.0001)
+                || (isStorySeal == bestIsStorySeal && (!isStorySeal || std::abs(artifactDistance - bestArtifactDistance) <= 0.0001)
+                    && anchorDistance < bestAnchorDistance - 0.0001)
+                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
+                    && intensityPriority > bestIntensity)
+                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
+                    && intensityPriority == bestIntensity && usefulNeighbors > bestUsefulNeighbors)
+                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
+                    && intensityPriority == bestIntensity && usefulNeighbors == bestUsefulNeighbors
+                    && agentDistance < bestAgentDistance - 0.0001)
+                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
+                    && intensityPriority == bestIntensity && usefulNeighbors == bestUsefulNeighbors
+                    && std::abs(agentDistance - bestAgentDistance) <= 0.0001
+                    && (bestY < 0 || y * mining_.terrain.width + x < bestY * mining_.terrain.width + bestX));
+            if (better) {
+                foundCandidate = true;
+                bestIsStorySeal = isStorySeal;
+                bestArtifactDistance = artifactDistance;
+                bestAnchorDistance = anchorDistance;
+                bestIntensity = intensityPriority;
+                bestUsefulNeighbors = usefulNeighbors;
+                bestAgentDistance = agentDistance;
                 bestX = x;
                 bestY = y;
             }

@@ -1,0 +1,113 @@
+/* Reusable, parameterized component lanes. Dynamic content stays in the
+   typed C++ renderers; these classes own their shared geometry. */
+.rr-screen-header,
+.rr-objective-strip,
+.rr-metric-strip,
+.rr-fixed-lane-card,
+.rr-detail-stack,
+.rr-action-footer,
+.rr-fixed-action-stack,
+.rr-fixed-action-context,
+.rr-fixed-action-lane {
+	box-sizing: border-box;
+	width: 100%;
+}
+
+.rr-objective-strip,
+.rr-fixed-lane-card {
+	border-width: 1px;
+	border-color: var(--rr-color-line);
+	background-color: var(--rr-color-panel);
+}
+
+.rr-objective-strip,
+.rr-fixed-lane-card {
+	padding: 12px;
+}
+
+.rr-screen-header {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	border-bottom-width: 1px;
+	border-color: var(--rr-color-line);
+}
+
+.rr-objective-strip {
+	color: var(--rr-color-text);
+}
+
+.rr-objective-strip.active {
+	border-color: var(--rr-color-objective);
+}
+
+.rr-objective-strip.locked {
+	border-color: var(--rr-color-line);
+}
+
+.rr-objective-strip.ready-to-claim,
+.rr-objective-strip.complete {
+	border-color: var(--rr-color-ready);
+}
+
+.rr-metric-strip,
+.rr-card-grid,
+.rr-action-footer {
+	display: flex;
+	flex-direction: row;
+	gap: var(--rr-card-gap);
+}
+
+.rr-metric-strip,
+.rr-card-grid {
+	flex-wrap: wrap;
+}
+
+.rr-action-footer {
+	min-height: 54px;
+	padding: 8px;
+	align-items: center;
+	justify-content: flex-end;
+	border-top-width: 1px;
+	border-color: var(--rr-color-line);
+}
+
+.rr-detail-stack {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-card-gap);
+}
+
+.rr-fixed-lane-card {
+	min-height: 96px;
+}
+
+/* A reusable decision workspace keeps its variable context scrollable while
+   preserving the final choice lane inside the viewport. This is the shared
+   geometry for Surface Ops today and future card-based workspaces that need a
+   persistent final action row. */
+.rr-fixed-action-stack {
+	display: flex;
+	flex-direction: column;
+	height: var(--rr-workspace-action-stack-height);
+	min-height: 280px;
+	overflow: hidden;
+	padding-bottom: 0px;
+}
+
+.rr-fixed-action-context {
+	display: block;
+	flex: 1 1 auto;
+	min-height: 0px;
+	overflow-x: hidden;
+	overflow-y: auto;
+}
+
+.rr-fixed-action-lane {
+	display: flex;
+	flex: 0 0 auto;
+	min-height: 0px;
+	margin-top: 8px;
+	overflow: hidden;
+}
