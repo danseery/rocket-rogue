@@ -38,6 +38,7 @@
     { "textureId": "MiniDroneAttack", "key": "mini_drone_attack", "source": "assets/art/mini-drone-attack.png", "columns": 1, "rows": 1 },
     { "textureId": "MiniDroneDefense", "key": "mini_drone_defense", "source": "assets/art/mini-drone-defense.png", "columns": 1, "rows": 1 },
     { "textureId": "HeroicCapybara", "key": "heroic_capybara", "source": "assets/art/heroic-capybara.png", "columns": 1, "rows": 1 },
-    { "textureId": "JetpackCapybara", "key": "jetpack_capybara", "source": "assets/art/jetpack-capybara.png", "columns": 1, "rows": 1 }
+    { "textureId": "JetpackCapybara", "key": "jetpack_capybara", "source": "assets/art/jetpack-capybara.png", "columns": 1, "rows": 1 },
+    { "textureId": "PoiGuidanceArrow", "key": "poi_guidance_arrow", "source": "assets/art/poi-guidance-arrow.png", "columns": 1, "rows": 1 }
   ]
 }

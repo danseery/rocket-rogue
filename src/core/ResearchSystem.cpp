@@ -3,6 +3,7 @@
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/MiningProgression.h"
+#include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -16,6 +17,8 @@
 #include <vector>
 
 namespace rocket {
+
+void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
 
 namespace {
 
@@ -90,6 +93,168 @@ void appendUniqueId(std::vector<std::string>& ids, std::string_view id)
     }
 }
 
+// These bindings are deliberately confined to the legacy public API used by
+// existing UI and input bindings. Scenario definitions remain the authority;
+// the old CampaignObjectiveId names are only a compatibility facade while the
+// UI migrates to typed scenario presentation records.
+struct LegacyCampaignScenarioBinding {
+    CampaignObjectiveId objective = CampaignObjectiveId::LunarProspector;
+    std::string_view scenarioId;
+    std::string_view briefingStepId;
+    std::string_view progressStepId;
+};
+
+constexpr std::array<LegacyCampaignScenarioBinding, 4> legacyCampaignScenarioBindings {{
+    {CampaignObjectiveId::LunarProspector, content::scenario::lunarProspector, "briefing", "delivery"},
+    {CampaignObjectiveId::MarsBayExpansion, content::scenario::marsBayExpansion, "briefing", "delivery"},
+    {CampaignObjectiveId::IoVolcanicDescent, content::scenario::volcanicDescent, "commission", "recovery"},
+    {CampaignObjectiveId::SaturnSlingshot, content::scenario::outerTransfer, "briefing", "flyby"},
+}};
+
+const LegacyCampaignScenarioBinding* legacyCampaignScenarioBinding(CampaignObjectiveId objective)
+{
+    const auto found = std::find_if(
+        legacyCampaignScenarioBindings.begin(),
+        legacyCampaignScenarioBindings.end(),
+        [&](const LegacyCampaignScenarioBinding& binding) { return binding.objective == objective; });
+    return found == legacyCampaignScenarioBindings.end() ? nullptr : &*found;
+}
+
+const ContentCatalog& legacyCampaignCatalog()
+{
+    static const ContentCatalog catalog = createDefaultContent();
+    return catalog;
+}
+
+CampaignObjectiveState legacyCampaignObjectiveState(ScenarioStepState state)
+{
+    switch (state) {
+    case ScenarioStepState::Active:
+        return CampaignObjectiveState::Active;
+    case ScenarioStepState::ReadyToClaim:
+        return CampaignObjectiveState::ReadyToClaim;
+    case ScenarioStepState::Complete:
+        return CampaignObjectiveState::Complete;
+    case ScenarioStepState::Locked:
+        return CampaignObjectiveState::Locked;
+    }
+    return CampaignObjectiveState::Locked;
+}
+
+const ScenarioStepProgress* scenarioProgress(
+    const GameState& state,
+    std::string_view scenarioId,
+    std::string_view stepId)
+{
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, scenarioId);
+    return instance == nullptr ? nullptr : findScenarioStepProgress(*instance, stepId);
+}
+
+// Compatibility cache only. ScenarioInstance remains the authoritative state;
+// this writes retired named fields so old saves and callers can be migrated
+// without allowing those fields to drive any route, reward, or activity.
+void writeLegacyCampaignSaveProjection(GameState& state, const ContentCatalog& catalog)
+{
+    const auto progressFor = [&](CampaignObjectiveId objective) -> const ScenarioStepProgress* {
+        const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(objective);
+        return binding == nullptr ? nullptr : scenarioProgress(state, binding->scenarioId, binding->progressStepId);
+    };
+    const auto briefingFor = [&](CampaignObjectiveId objective) -> const ScenarioStepProgress* {
+        const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(objective);
+        return binding == nullptr ? nullptr : scenarioProgress(state, binding->scenarioId, binding->briefingStepId);
+    };
+
+    const ScenarioStepProgress* lunarDelivery = progressFor(CampaignObjectiveId::LunarProspector);
+    const ScenarioStepProgress* lunarBriefing = briefingFor(CampaignObjectiveId::LunarProspector);
+    state.meta.prospectorCommonOreRecovered = lunarDelivery == nullptr ? 0 : std::max(0, lunarDelivery->progress);
+    state.meta.lunarMiningBriefingAcknowledged = lunarBriefing != nullptr && lunarBriefing->briefingAcknowledged;
+    state.meta.lunarProspectorClaimed = lunarDelivery != nullptr && lunarDelivery->claimed;
+
+    const ScenarioStepProgress* marsDelivery = progressFor(CampaignObjectiveId::MarsBayExpansion);
+    const ScenarioStepProgress* marsBriefing = briefingFor(CampaignObjectiveId::MarsBayExpansion);
+    state.meta.marsCommonOreRecovered = marsDelivery == nullptr ? 0 : std::max(0, marsDelivery->progress);
+    state.meta.marsMiningBriefingAcknowledged = marsBriefing != nullptr && marsBriefing->briefingAcknowledged;
+    state.meta.marsBayExpansionClaimed = marsDelivery != nullptr && marsDelivery->claimed;
+
+    const ScenarioStepProgress* volcanicCommission = briefingFor(CampaignObjectiveId::IoVolcanicDescent);
+    const ScenarioStepProgress* volcanicRecovery = progressFor(CampaignObjectiveId::IoVolcanicDescent);
+    state.meta.ioVolcanicBriefingAcknowledged = volcanicCommission != nullptr && volcanicCommission->briefingAcknowledged;
+    state.meta.ioHazardDroneCommissioned = volcanicCommission != nullptr && volcanicCommission->claimed;
+    state.meta.ioArtifactRecovered = volcanicRecovery != nullptr && volcanicRecovery->claimed;
+
+    const ScenarioStepProgress* transferBriefing = briefingFor(CampaignObjectiveId::SaturnSlingshot);
+    const ScenarioStepProgress* transferFlyby = progressFor(CampaignObjectiveId::SaturnSlingshot);
+    state.meta.saturnSlingshotBriefingAcknowledged = transferBriefing != nullptr && transferBriefing->briefingAcknowledged;
+    state.meta.saturnSlingshotPerfect = transferFlyby != nullptr && transferFlyby->completed;
+    state.meta.saturnRouteUnlocked = transferFlyby != nullptr && transferFlyby->claimed;
+    state.meta.saturnSlingshotFailed = transferFlyby != nullptr && transferFlyby->failureSeen;
+    state.meta.saturnSlingshotFailureAcknowledged = transferFlyby != nullptr && transferFlyby->failureAcknowledged;
+
+    // The projection may be called after a migrated save. Let generic reward
+    // state repair bay bookkeeping without re-awarding anything.
+    ensureDroneBayState(state, catalog);
+}
+
+bool scenarioStepMatchesEvent(
+    const ScenarioStepDefinition& step,
+    const ScenarioEvent& event)
+{
+    return step.completionEvent == event.kind &&
+        (step.eventOriginId.empty() || step.eventOriginId == event.originId) &&
+        (step.eventTargetId.empty() || step.eventTargetId == event.targetId);
+}
+
+const MiningSiteDefinition* miningSiteForSurface(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active) {
+        return nullptr;
+    }
+    if (!expedition.pendingMiningSiteDefinitionId.empty()) {
+        return findMiningSiteDefinition(catalog, expedition.pendingMiningSiteDefinitionId);
+    }
+
+    const MiningSiteDefinition* fallback = nullptr;
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const std::string_view definitionId = instance.definitionId.empty()
+            ? std::string_view(instance.id)
+            : std::string_view(instance.definitionId);
+        const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        if (!resolved.destinationId.empty() && resolved.destinationId != expedition.destinationId) {
+            continue;
+        }
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.miningSiteDefinitionId.empty()) {
+                continue;
+            }
+            const MiningSiteDefinition* site = findMiningSiteDefinition(catalog, step.miningSiteDefinitionId);
+            if (site == nullptr) {
+                continue;
+            }
+            if (fallback == nullptr) {
+                fallback = site;
+            }
+            const ScenarioStepState stepState = scenarioStepState(state, catalog, instance.id, step.id);
+            if (stepState == ScenarioStepState::Active || stepState == ScenarioStepState::ReadyToClaim) {
+                return site;
+            }
+        }
+    }
+    return fallback;
+}
+
+bool surfaceUsesThermalOnlyRegolith(const GameState& state)
+{
+    const MiningSiteDefinition* site = miningSiteForSurface(state, legacyCampaignCatalog());
+    return site != nullptr && site->biome == MiningSiteBiome::ThermalLava;
+}
+
 ArtifactRecord* firstUnidentifiedArtifact(GameState& state)
 {
     auto artifact = std::find_if(state.meta.artifacts.begin(), state.meta.artifacts.end(), [](const ArtifactRecord& record) {
@@ -108,10 +273,25 @@ std::string artifactId(const SurfaceExpeditionState& expedition)
     return out.str();
 }
 
-void applyRecoveredArtifactRewards(GameState& state, std::vector<ArtifactRecord>& artifacts)
+void applyRecoveredArtifactRewards(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::vector<ArtifactRecord>& artifacts,
+    std::string_view miningSiteDefinitionId)
 {
     for (ArtifactRecord& artifact : artifacts) {
         if (artifact.rewardApplied) {
+            continue;
+        }
+        // A protected objective's reward belongs to its owning scenario, not
+        // to the artifact adapter. This must run before the ordinary artifact
+        // reward switch because a configured cocoon intentionally uses
+        // ArtifactRewardType::None to avoid a duplicate local payout.
+        if (creditRecoveredProtectedObjective(
+                state,
+                catalog,
+                artifact,
+                miningSiteDefinitionId)) {
             continue;
         }
         const double condition = std::clamp(artifact.condition, 0.0, 1.0);
@@ -138,7 +318,11 @@ void applyRecoveredArtifactRewards(GameState& state, std::vector<ArtifactRecord>
             artifact.rewardApplied = true;
             break;
         case ArtifactRewardType::DroneUpgradeCredit:
-            creditRecoveredIoArtifact(state, artifact);
+            // The generic protected-objective dispatcher above already
+            // handles scenario-owned credit rewards. A standalone credit
+            // artifact keeps its local, non-scenario payout.
+            state.meta.droneUpgradeCredits += 1;
+            artifact.rewardApplied = true;
             break;
         case ArtifactRewardType::None:
             artifact.rewardApplied = true;
@@ -203,9 +387,9 @@ void addDestinationHistoryValue(std::vector<int>& values, const ContentCatalog& 
     values[static_cast<std::size_t>(index)] += 1;
 }
 
-bool isMoonTutorialLanding(const Destination& destination)
+bool requiresArrivalSurveySequence(const Destination& destination)
 {
-    return destination.id == content::destination::moon;
+    return destination.requiresArrivalSurveySequence;
 }
 
 double landingReconHazardPenalty(const GameState& state, const ContentCatalog& catalog, const Destination& destination)
@@ -867,220 +1051,311 @@ CampaignObjectiveStatus campaignObjectiveStatus(const GameState& state, Campaign
 {
     CampaignObjectiveStatus status;
     status.id = objective;
-    switch (objective) {
-    case CampaignObjectiveId::LunarProspector:
-        status.current = std::clamp(
-            state.meta.prospectorCommonOreRecovered,
-            0,
-            tuning::research::prospectorCommonOreGoal);
-        status.required = tuning::research::prospectorCommonOreGoal;
-        status.briefingAcknowledged = state.meta.lunarMiningBriefingAcknowledged;
-        if (state.meta.lunarProspectorClaimed) {
-            status.state = CampaignObjectiveState::Complete;
-        } else if (status.current >= status.required) {
-            status.state = CampaignObjectiveState::ReadyToClaim;
-        } else if (state.meta.furthestTier >= 1 || state.run.destinationIndex >= 1) {
-            status.state = CampaignObjectiveState::Active;
-        }
-        break;
-    case CampaignObjectiveId::MarsBayExpansion:
-        status.current = std::clamp(
-            state.meta.marsCommonOreRecovered,
-            0,
-            tuning::research::marsBayCommonOreGoal);
-        status.required = tuning::research::marsBayCommonOreGoal;
-        status.briefingAcknowledged = state.meta.marsMiningBriefingAcknowledged;
-        if (state.meta.marsBayExpansionClaimed) {
-            status.state = CampaignObjectiveState::Complete;
-        } else if (status.current >= status.required) {
-            status.state = CampaignObjectiveState::ReadyToClaim;
-        } else if (state.meta.lunarProspectorClaimed
-            && (state.meta.furthestTier >= 2 || state.run.destinationIndex >= 2)) {
-            status.state = CampaignObjectiveState::Active;
-        }
-        break;
-    case CampaignObjectiveId::IoVolcanicDescent:
-        status.current = state.meta.ioArtifactRecovered ? 1 : 0;
-        status.required = 1;
-        status.briefingAcknowledged = state.meta.ioVolcanicBriefingAcknowledged;
-        if (state.meta.ioArtifactRecovered) {
-            status.state = CampaignObjectiveState::Complete;
-        } else if (state.meta.marsBayExpansionClaimed
-            && (state.meta.furthestTier >= 3 || state.run.destinationIndex >= 3)) {
-            status.state = CampaignObjectiveState::Active;
-        }
-        break;
-    case CampaignObjectiveId::SaturnSlingshot:
-        status.current = state.meta.saturnSlingshotPerfect ? 1 : 0;
-        status.required = 1;
-        status.briefingAcknowledged = state.meta.saturnSlingshotBriefingAcknowledged;
-        if (state.meta.saturnRouteUnlocked) {
-            status.state = CampaignObjectiveState::Complete;
-        } else if (state.meta.saturnSlingshotPerfect) {
-            status.state = CampaignObjectiveState::ReadyToClaim;
-        } else if (state.meta.ioArtifactRecovered) {
-            status.state = CampaignObjectiveState::Active;
-        }
-        break;
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(objective);
+    if (binding == nullptr) {
+        return status;
     }
+    const ContentCatalog& catalog = legacyCampaignCatalog();
+    const ScenarioDefinition* definition = findScenarioDefinition(catalog, binding->scenarioId);
+    const ScenarioStepDefinition* step = definition == nullptr
+        ? nullptr
+        : findScenarioStepDefinition(*definition, binding->progressStepId);
+    const ScenarioStepProgress* progress = scenarioProgress(state, binding->scenarioId, binding->progressStepId);
+    status.current = progress == nullptr ? 0 : std::max(0, progress->progress);
+    status.required = step == nullptr ? 0 : std::max(0, step->requiredProgress);
+    status.briefingAcknowledged = scenarioStepBriefingAcknowledged(
+        state,
+        binding->scenarioId,
+        binding->briefingStepId);
+
+    ScenarioStepState stateForPresentation = scenarioStepState(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId);
+    if (stateForPresentation == ScenarioStepState::Locked &&
+        binding->briefingStepId != binding->progressStepId) {
+        stateForPresentation = scenarioStepState(
+            state,
+            catalog,
+            binding->scenarioId,
+            binding->briefingStepId);
+    }
+    status.state = legacyCampaignObjectiveState(stateForPresentation);
     return status;
 }
 
 bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId objective)
 {
-    switch (objective) {
-    case CampaignObjectiveId::LunarProspector:
-        if (state.meta.lunarMiningBriefingAcknowledged
-            || (state.meta.furthestTier < 1 && state.run.destinationIndex < 1)) return false;
-        state.meta.lunarMiningBriefingAcknowledged = true;
-        state.statusLine = "Lunar Prospector contract acknowledged. Recover "
-            + std::to_string(tuning::research::prospectorCommonOreGoal)
-            + " gray-seamed Common Ore.";
-        return true;
-    case CampaignObjectiveId::MarsBayExpansion:
-        if (state.meta.marsMiningBriefingAcknowledged
-            || !state.meta.lunarProspectorClaimed
-            || (state.meta.furthestTier < 2 && state.run.destinationIndex < 2)) return false;
-        state.meta.marsMiningBriefingAcknowledged = true;
-        state.statusLine = "Mars Bay Expansion acknowledged. Recover "
-            + std::to_string(tuning::research::marsBayCommonOreGoal)
-            + " local Common Ore.";
-        return true;
-    case CampaignObjectiveId::IoVolcanicDescent:
-        if (state.meta.ioVolcanicBriefingAcknowledged || !state.meta.marsBayExpansionClaimed) return false;
-        state.meta.ioVolcanicBriefingAcknowledged = true;
-        state.statusLine = "Io volcanic descent acknowledged. Commission the Hazard Drone.";
-        return true;
-    case CampaignObjectiveId::SaturnSlingshot:
-        if (state.meta.saturnSlingshotBriefingAcknowledged || !state.meta.ioArtifactRecovered) return false;
-        state.meta.saturnSlingshotBriefingAcknowledged = true;
-        state.statusLine = "Saturn slingshot briefing acknowledged. A Perfect corridor is required.";
-        return true;
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(objective);
+    if (binding == nullptr) {
+        return false;
     }
-    return false;
+    const ContentCatalog& catalog = legacyCampaignCatalog();
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->briefingStepId,
+        ScenarioActionKind::AcknowledgeBriefing);
+    if (!outcome.applied) {
+        return false;
+    }
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
+    return true;
 }
 
 int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int safelyExtractedCommonOre)
+{
+    return creditCampaignCommonOre(
+        state,
+        legacyCampaignCatalog(),
+        destinationId,
+        safelyExtractedCommonOre);
+}
+
+int creditCampaignCommonOre(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId,
+    int safelyExtractedCommonOre)
 {
     const int recovered = std::max(0, safelyExtractedCommonOre);
     if (recovered <= 0) {
         return 0;
     }
-
-    int* delivered = nullptr;
-    int goal = 0;
-    if (destinationId == content::destination::moon && !state.meta.lunarProspectorClaimed) {
-        delivered = &state.meta.prospectorCommonOreRecovered;
-        goal = tuning::research::prospectorCommonOreGoal;
-    } else if (destinationId == content::destination::mars
-        && state.meta.lunarProspectorClaimed
-        && !state.meta.marsBayExpansionClaimed) {
-        delivered = &state.meta.marsCommonOreRecovered;
-        goal = tuning::research::marsBayCommonOreGoal;
-    }
-    if (delivered == nullptr) {
-        return 0;
-    }
-
-    *delivered = std::clamp(*delivered, 0, goal);
-    const int allocated = std::min(goal - *delivered, recovered);
-    *delivered += allocated;
+    ensureScenarioInstances(state, catalog);
+    const ScenarioEvent event {
+        ScenarioEventKind::SafeMaterialDelivered,
+        {},
+        {},
+        std::string(destinationId),
+        "common",
+        recovered,
+        0
+    };
+    const auto matchingProgress = [&]() {
+        int total = 0;
+        for (const ScenarioInstance& instance : state.meta.scenarios) {
+            const std::string_view definitionId = instance.definitionId.empty()
+                ? std::string_view(instance.id)
+                : std::string_view(instance.definitionId);
+            const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+            if (definition == nullptr) {
+                continue;
+            }
+            const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+            for (const ScenarioStepDefinition& step : resolved.steps) {
+                if (!scenarioStepMatchesEvent(step, event)) {
+                    continue;
+                }
+                const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+                total += progress == nullptr ? 0 : std::max(0, progress->progress);
+            }
+        }
+        return total;
+    };
+    const int before = matchingProgress();
+    (void)recordScenarioEvent(state, catalog, event);
+    const int allocated = std::max(0, matchingProgress() - before);
     // Contract samples are reserved when they reach home, keeping them out of
     // the general material pool until the player explicitly claims the reward.
     state.meta.materials.common = std::max(0, state.meta.materials.common - allocated);
+    writeLegacyCampaignSaveProjection(state, catalog);
     return allocated;
 }
 
 bool canClaimLunarProspector(const GameState& state)
 {
-    return state.meta.lunarMiningBriefingAcknowledged
-        && !state.meta.lunarProspectorClaimed
-        && state.meta.prospectorCommonOreRecovered >= tuning::research::prospectorCommonOreGoal;
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::LunarProspector);
+    return binding != nullptr && scenarioStepState(
+        state,
+        legacyCampaignCatalog(),
+        binding->scenarioId,
+        binding->progressStepId) == ScenarioStepState::ReadyToClaim;
 }
 
 bool claimLunarProspector(GameState& state, const ContentCatalog& catalog)
 {
-    if (!canClaimLunarProspector(state)) {
-        state.statusLine = "Recover and deliver "
-            + std::to_string(tuning::research::prospectorCommonOreGoal)
-            + " lunar Common Ore before installing Prospector Mk I.";
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::LunarProspector);
+    if (binding == nullptr) {
         return false;
     }
-    state.meta.lunarProspectorClaimed = true;
-    appendUniqueId(state.meta.unlockKeys, content::unlock::droneBay);
-    state.meta.droneBaySlots = std::max(1, state.meta.droneBaySlots);
-    ensureDroneBayState(state, catalog);
-    if (!containsId(state.meta.equippedDroneIds, content::drone::miningDrone)
-        && state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
-        state.meta.equippedDroneIds.emplace_back(content::drone::miningDrone);
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId,
+        ScenarioActionKind::ClaimReward);
+    if (!outcome.applied) {
+        state.statusLine = "Complete the active route objective before claiming its reward.";
+        return false;
     }
-    state.run.frontierReadiness = frontierReadinessCap(state, catalog);
-    state.statusLine = "Prospector Mk I installed. Drone Bay Slot 1 and the Prospector Support Drone are online.";
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
     return true;
 }
 
 bool canClaimMarsBayExpansion(const GameState& state)
 {
-    return state.meta.marsMiningBriefingAcknowledged
-        && state.meta.lunarProspectorClaimed
-        && !state.meta.marsBayExpansionClaimed
-        && state.meta.marsCommonOreRecovered >= tuning::research::marsBayCommonOreGoal;
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::MarsBayExpansion);
+    return binding != nullptr && scenarioStepState(
+        state,
+        legacyCampaignCatalog(),
+        binding->scenarioId,
+        binding->progressStepId) == ScenarioStepState::ReadyToClaim;
 }
 
 bool claimMarsBayExpansion(GameState& state, const ContentCatalog& catalog)
 {
-    if (!canClaimMarsBayExpansion(state)) {
-        state.statusLine = "Recover and deliver "
-            + std::to_string(tuning::research::marsBayCommonOreGoal)
-            + " Mars Common Ore before fabricating Drone Bay Slot 2.";
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::MarsBayExpansion);
+    if (binding == nullptr) {
         return false;
     }
-    state.meta.marsBayExpansionClaimed = true;
-    state.meta.droneBaySlots = std::max(2, state.meta.droneBaySlots);
-    ensureDroneBayState(state, catalog);
-    state.run.frontierReadiness = frontierReadinessCap(state, catalog);
-    state.statusLine = "Drone Bay Slot 2 fabricated. The new support slot is empty.";
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId,
+        ScenarioActionKind::ClaimReward);
+    if (!outcome.applied) {
+        state.statusLine = "Complete the active route objective before claiming its reward.";
+        return false;
+    }
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
     return true;
 }
 
 bool canCommissionIoHazardDrone(const GameState& state, const ContentCatalog& catalog)
 {
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::IoVolcanicDescent);
+    const ScenarioDefinition* definition = binding == nullptr
+        ? nullptr
+        : scenarioDefinitionForRuntimeId(state, catalog, binding->scenarioId);
+    const ScenarioInstance* instance = binding == nullptr
+        ? nullptr
+        : findScenarioInstance(state.meta, binding->scenarioId);
+    if (binding == nullptr || definition == nullptr || instance == nullptr || state.run.flyby.active ||
+        state.run.surfaceExpedition.active || state.run.mining.active) {
+        return false;
+    }
+    const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, binding->briefingStepId);
+    if (step == nullptr) {
+        return false;
+    }
     const Destination& destination = currentDestination(state, catalog);
-    return destination.id == content::destination::jupiter
-        && state.meta.marsBayExpansionClaimed
-        && !state.meta.ioHazardDroneCommissioned;
+    const bool directManualBriefingAction =
+        step->mandatoryBriefing && step->completionEvent == ScenarioEventKind::ManualAction &&
+        step->action == ScenarioActionKind::BeginActivity;
+    return (resolved.destinationId.empty() || resolved.destinationId == destination.id) &&
+        scenarioStepState(state, catalog, binding->scenarioId, binding->briefingStepId) == ScenarioStepState::Active &&
+        (scenarioStepBriefingAcknowledged(state, binding->scenarioId, binding->briefingStepId) ||
+         directManualBriefingAction);
 }
 
 bool commissionIoHazardDrone(GameState& state, const ContentCatalog& catalog)
 {
-    if (!canCommissionIoHazardDrone(state, catalog)) {
-        state.statusLine = "The Io Hazard Drone cannot be commissioned here.";
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::IoVolcanicDescent);
+    if (binding == nullptr || !canCommissionIoHazardDrone(state, catalog)) {
+        state.statusLine = "The required support drone cannot be commissioned here.";
         return false;
     }
-    state.meta.ioVolcanicBriefingAcknowledged = true;
-    state.meta.ioHazardDroneCommissioned = true;
-    appendUniqueId(state.meta.unlockKeys, content::unlock::ioHazardDrone);
-    appendUniqueId(state.meta.ownedDroneIds, content::drone::hazardDrone);
-    ensureDroneBayState(state, catalog);
-    if (!containsId(state.meta.equippedDroneIds, content::drone::hazardDrone)
-        && state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
-        state.meta.equippedDroneIds.emplace_back(content::drone::hazardDrone);
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->briefingStepId,
+        ScenarioActionKind::BeginActivity);
+    if (!outcome.applied) {
+        return false;
     }
-    state.statusLine = "Hazard Drone Mk I commissioned for Io lava treatment.";
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
     return true;
 }
 
 bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact)
 {
-    if (artifact.rewardApplied
-        || artifact.rewardType != ArtifactRewardType::DroneUpgradeCredit) {
+    return creditRecoveredProtectedObjective(state, legacyCampaignCatalog(), artifact);
+}
+
+bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, ArtifactRecord& artifact)
+{
+    return creditRecoveredProtectedObjective(state, catalog, artifact);
+}
+
+bool creditRecoveredProtectedObjective(
+    GameState& state,
+    const ContentCatalog& catalog,
+    ArtifactRecord& artifact,
+    std::string_view miningSiteDefinitionId)
+{
+    if (artifact.rewardApplied) {
+        return false;
+    }
+    ensureScenarioInstances(state, catalog);
+
+    // A protected objective is identified by its mining-site configuration,
+    // not by a destination or a narrative artifact name.
+    bool matchedScenarioObjective = false;
+    bool scenarioEventRecorded = false;
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const std::string_view definitionId = instance.definitionId.empty()
+            ? std::string_view(instance.id)
+            : std::string_view(instance.definitionId);
+        const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted ||
+                step.miningSiteDefinitionId.empty()) {
+                continue;
+            }
+            if (!miningSiteDefinitionId.empty() && step.miningSiteDefinitionId != miningSiteDefinitionId) {
+                continue;
+            }
+            const MiningSiteDefinition* site = findMiningSiteDefinition(catalog, step.miningSiteDefinitionId);
+            if (site == nullptr || site->cocoon.protectedObjective.id != artifact.id) {
+                continue;
+            }
+            matchedScenarioObjective = true;
+            ScenarioEvent event;
+            event.kind = ScenarioEventKind::ProtectedObjectiveExtracted;
+            event.scenarioId = instance.id;
+            event.stepId = step.id;
+            event.originId = artifact.originDestinationId;
+            event.targetId = step.eventTargetId;
+            event.amount = 1;
+            scenarioEventRecorded = recordScenarioEvent(state, catalog, event) || scenarioEventRecorded;
+        }
+    }
+
+    // Scenario rewards are granted by the scenario dispatcher and must not
+    // be duplicated by the protected-objective adapter. Mark only a recorded
+    // event as consumed so an invalid/out-of-order extraction cannot silently
+    // discard its payload.
+    if (scenarioEventRecorded) {
+        artifact.rewardApplied = true;
+        writeLegacyCampaignSaveProjection(state, catalog);
+        return true;
+    }
+    if (matchedScenarioObjective) {
+        return false;
+    }
+
+    // Standalone artifacts retain the old local upgrade-credit reward. Their
+    // identity never participates in a scenario reward ledger.
+    if (artifact.rewardType != ArtifactRewardType::DroneUpgradeCredit) {
         return false;
     }
     state.meta.droneUpgradeCredits += 1;
-    if (artifact.originDestinationId == content::destination::jupiter) {
-        state.meta.ioArtifactRecovered = true;
-    }
     artifact.rewardApplied = true;
+    writeLegacyCampaignSaveProjection(state, catalog);
     return true;
 }
 
@@ -1102,7 +1377,7 @@ bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, i
 {
     ensureDroneBayState(state, catalog);
     if (!canRedeemDroneUpgradeCredit(state, catalog, index)) {
-        state.statusLine = "No eligible support drone can use the artifact upgrade credit.";
+        state.statusLine = "No eligible Support Drone can use a free upgrade credit.";
         return false;
     }
     const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
@@ -1117,7 +1392,7 @@ bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, i
         record->level = nextLevel;
     }
     state.meta.droneUpgradeCredits -= 1;
-    state.statusLine = drone.name + " upgraded to Mk " + std::to_string(nextLevel) + " with the Io artifact credit.";
+    state.statusLine = drone.name + " upgraded to Mk " + std::to_string(nextLevel) + " with a free Support Drone upgrade credit.";
     return true;
 }
 
@@ -1180,7 +1455,7 @@ bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
     if (destination == nullptr) {
         return false;
     }
-    if (!isMoonTutorialLanding(*destination)) {
+    if (!requiresArrivalSurveySequence(*destination)) {
         return true;
     }
     return destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) > 0;
@@ -1192,7 +1467,7 @@ bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& cata
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
         return false;
     }
-    if (!isMoonTutorialLanding(*destination)) {
+    if (!requiresArrivalSurveySequence(*destination)) {
         return true;
     }
     return destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) > 0
@@ -1210,7 +1485,7 @@ bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalo
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation)
 {
     const Destination* destination = currentResearchDestination(state, catalog);
-    if (destination == nullptr || !isMoonTutorialLanding(*destination)) {
+    if (destination == nullptr || !requiresArrivalSurveySequence(*destination)) {
         return {};
     }
     if (operation == "orbit" && !canEnterArrivalOrbit(state, catalog)) {
@@ -1274,31 +1549,207 @@ void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
     state.screen = Screen::Flyby;
 }
 
-bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog)
+namespace {
+
+bool briefingPrerequisitesCanTransition(
+    const ScenarioDefinition& definition,
+    const ScenarioInstance& instance,
+    const ScenarioStepDefinition& target,
+    std::vector<std::string>& visiting)
 {
+    for (const std::string& prerequisiteId : target.prerequisites) {
+        const ScenarioStepDefinition* prerequisite =
+            findScenarioStepDefinition(definition, prerequisiteId);
+        const ScenarioStepProgress* progress =
+            findScenarioStepProgress(instance, prerequisiteId);
+        if (prerequisite == nullptr || progress == nullptr) {
+            return false;
+        }
+        if (progress->completed) {
+            continue;
+        }
+        if (std::find(visiting.begin(), visiting.end(), prerequisiteId) != visiting.end() ||
+            prerequisite->completionEvent != ScenarioEventKind::None ||
+            !prerequisite->mandatoryBriefing ||
+            prerequisite->action != ScenarioActionKind::AcknowledgeBriefing) {
+            return false;
+        }
+        visiting.push_back(prerequisiteId);
+        const bool canTransition = briefingPrerequisitesCanTransition(
+            definition,
+            instance,
+            *prerequisite,
+            visiting);
+        visiting.pop_back();
+        if (!canTransition) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool acknowledgeScenarioBriefingPrerequisites(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId)
+{
+    ensureScenarioInstances(state, catalog);
+    ScenarioInstance* instance = findScenarioInstance(state.meta, scenarioId);
+    const ScenarioDefinition* definition = instance == nullptr
+        ? nullptr
+        : scenarioDefinitionForRuntimeId(state, catalog, scenarioId);
+    if (instance == nullptr || definition == nullptr) {
+        return false;
+    }
+    const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* target = findScenarioStepDefinition(resolved, stepId);
+    if (target == nullptr) {
+        return false;
+    }
+
+    const auto acknowledge = [&](auto&& self, const ScenarioStepDefinition& step) -> bool {
+        for (const std::string& prerequisiteId : step.prerequisites) {
+            const ScenarioStepDefinition* prerequisite =
+                findScenarioStepDefinition(resolved, prerequisiteId);
+            ScenarioStepProgress* progress =
+                findScenarioStepProgress(*instance, prerequisiteId);
+            if (prerequisite == nullptr || progress == nullptr) {
+                return false;
+            }
+            if (progress->completed) {
+                continue;
+            }
+            if (!self(self, *prerequisite)) {
+                return false;
+            }
+        }
+        ScenarioStepProgress* progress = findScenarioStepProgress(*instance, step.id);
+        if (progress == nullptr || progress->completed) {
+            return progress != nullptr;
+        }
+        if (step.completionEvent != ScenarioEventKind::None ||
+            !step.mandatoryBriefing ||
+            step.action != ScenarioActionKind::AcknowledgeBriefing) {
+            return false;
+        }
+        return performScenarioAction(
+            state,
+            catalog,
+            scenarioId,
+            step.id,
+            ScenarioActionKind::AcknowledgeBriefing).applied;
+    };
+
+    for (const std::string& prerequisiteId : target->prerequisites) {
+        const ScenarioStepDefinition* prerequisite =
+            findScenarioStepDefinition(resolved, prerequisiteId);
+        if (prerequisite == nullptr || !acknowledge(acknowledge, *prerequisite)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool canStartScenarioFlyby(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId)
+{
+    const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, scenarioId);
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, scenarioId);
+    if (definition == nullptr || instance == nullptr) {
+        return false;
+    }
+    const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, stepId);
+    if (step == nullptr ||
+        !hasUnlock(state.meta, resolved.availabilityUnlockKey) ||
+        step->completionEvent != ScenarioEventKind::FlybyFinished) {
+        return false;
+    }
     const Destination& destination = currentDestination(state, catalog);
-    return destination.id == content::destination::jupiter
-        && state.meta.ioArtifactRecovered
-        && !state.meta.saturnRouteUnlocked
-        && !state.run.flyby.active
+    std::vector<std::string> visiting {step->id};
+    const bool stepIsActive =
+        scenarioStepState(state, catalog, scenarioId, stepId) == ScenarioStepState::Active;
+    const bool prerequisitesCanTransition =
+        !stepIsActive && briefingPrerequisitesCanTransition(
+            resolved,
+            *instance,
+            *step,
+            visiting);
+    const bool matchingActivityAcknowledgesBriefing =
+        step->mandatoryBriefing &&
+        (step->action == ScenarioActionKind::BeginActivity ||
+         step->action == ScenarioActionKind::RetryActivity);
+    return (resolved.destinationId.empty() || resolved.destinationId == destination.id) &&
+        (stepIsActive || prerequisitesCanTransition) &&
+        (!step->mandatoryBriefing ||
+         scenarioStepBriefingAcknowledged(state, scenarioId, stepId) ||
+         matchingActivityAcknowledgesBriefing) &&
+        !state.run.flyby.active
         && !state.run.surfaceExpedition.active
         && !state.run.mining.active;
 }
 
-bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog)
+} // namespace
+
+bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog)
 {
-    if (!canStartSaturnSlingshot(state, catalog)) {
-        state.statusLine = "Recover the Io artifact before beginning the Saturn slingshot.";
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
+    return binding != nullptr && canStartScenarioFlyby(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId);
+}
+
+bool startScenarioFlybyRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId,
+    ScenarioActionKind action)
+{
+    if (!acknowledgeScenarioBriefingPrerequisites(state, catalog, scenarioId, stepId)) {
         return false;
     }
-    state.meta.saturnSlingshotBriefingAcknowledged = true;
+    if (!canStartScenarioFlyby(state, catalog, scenarioId, stepId)) {
+        return false;
+    }
+    const ScenarioActionOutcome actionOutcome = performScenarioAction(
+        state,
+        catalog,
+        scenarioId,
+        stepId,
+        action);
+    if (!actionOutcome.applied || !actionOutcome.beginsActivity) {
+        return false;
+    }
     startArrivalFlybyRun(state, catalog);
     if (!state.run.flyby.active) {
         return false;
     }
-    state.run.flyby.purpose = FlybyPurpose::SaturnSlingshot;
+    state.run.flyby.purpose = FlybyPurpose::ScenarioChallenge;
+    state.run.flyby.scenarioId = std::string(scenarioId);
+    state.run.flyby.scenarioStepId = std::string(stepId);
     state.run.arrivalOps = {};
-    state.statusLine = "Saturn slingshot underway. Hold the gold corridor for a Perfect pass.";
+    state.statusLine = actionOutcome.message;
+    return true;
+}
+
+bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog)
+{
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
+    if (binding == nullptr || !canStartSaturnSlingshot(state, catalog)) {
+        state.statusLine = "Complete the active transfer objective before beginning its challenge.";
+        return false;
+    }
+    if (!startScenarioFlybyRun(state, catalog, binding->scenarioId, binding->progressStepId)) {
+        return false;
+    }
+    writeLegacyCampaignSaveProjection(state, catalog);
     return true;
 }
 
@@ -1535,21 +1986,47 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
         break;
     }
     applyFlybyReward(state, catalog, grade);
-    if (flyby.purpose == FlybyPurpose::SaturnSlingshot) {
-        if (grade == FlybyGrade::Perfect) {
-            state.meta.saturnSlingshotPerfect = true;
-        } else {
-            state.meta.saturnSlingshotFailed = true;
+    const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
+    ScenarioStepDefinition challengeStep;
+    bool hasChallengeStep = false;
+    if (scenarioChallenge) {
+        const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, flyby.scenarioId);
+        const ScenarioInstance* instance = findScenarioInstance(state.meta, flyby.scenarioId);
+        if (definition != nullptr && instance != nullptr) {
+            const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+            if (const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, flyby.scenarioStepId)) {
+                challengeStep = *step;
+                hasChallengeStep = true;
+            }
         }
+        ScenarioEvent event;
+        event.kind = ScenarioEventKind::FlybyFinished;
+        event.scenarioId = flyby.scenarioId;
+        event.stepId = flyby.scenarioStepId;
+        event.originId = flyby.scenarioId;
+        event.amount = 1;
+        event.grade = static_cast<int>(grade);
+        (void)recordScenarioEvent(state, catalog, event);
+        writeLegacyCampaignSaveProjection(state, catalog);
     }
     const Destination* destination = catalog.findDestination(flyby.destinationId);
     state.run.flyby = {};
-    if (flyby.purpose == FlybyPurpose::SaturnSlingshot) {
+    if (scenarioChallenge) {
         state.run.arrivalOps = {};
         state.screen = Screen::Hangar;
-        state.statusLine = grade == FlybyGrade::Perfect
-            ? "Perfect slingshot solution captured. Lock the Saturn course."
-            : "Insufficient slingshot. Saturn remains locked.";
+        const ScenarioStepState challengeState = scenarioStepState(
+            state,
+            catalog,
+            flyby.scenarioId,
+            flyby.scenarioStepId);
+        if (challengeState == ScenarioStepState::ReadyToClaim && hasChallengeStep) {
+            state.statusLine = challengeStep.rewardPreview;
+        } else if (hasChallengeStep && !challengeStep.failureExplanation.empty()) {
+            state.statusLine = challengeStep.failureExplanation;
+        } else {
+            state.statusLine = "Scenario challenge complete.";
+        }
     } else {
         state.run.arrivalOps = {true, destination == nullptr ? flyby.destinationId : destination->id};
         state.screen = Screen::ArrivalOps;
@@ -1558,17 +2035,40 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
 
 void abortFlybyRun(GameState& state)
 {
+    abortFlybyRun(state, legacyCampaignCatalog());
+}
+
+void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
+{
     if (!state.run.flyby.active || state.run.flyby.completed) {
         return;
     }
 
     const FlybyRunState flyby = state.run.flyby;
     state.run.flyby = {};
-    if (flyby.purpose == FlybyPurpose::SaturnSlingshot) {
-        state.meta.saturnSlingshotFailed = true;
+    const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
+    if (scenarioChallenge) {
+        ScenarioEvent event;
+        event.kind = ScenarioEventKind::ActivityAborted;
+        event.scenarioId = flyby.scenarioId;
+        event.stepId = flyby.scenarioStepId;
+        event.originId = flyby.scenarioId;
+        (void)recordScenarioEvent(state, catalog, event);
+        writeLegacyCampaignSaveProjection(state, catalog);
         state.run.arrivalOps = {};
         state.screen = Screen::Hangar;
-        state.statusLine = "Slingshot aborted. Saturn remains locked.";
+        const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, flyby.scenarioId);
+        const ScenarioInstance* instance = findScenarioInstance(state.meta, flyby.scenarioId);
+        const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
+            ? resolveScenarioDefinition(*definition, *instance)
+            : ScenarioDefinition {};
+        const ScenarioStepDefinition* step = definition == nullptr || instance == nullptr
+            ? nullptr
+            : findScenarioStepDefinition(resolved, flyby.scenarioStepId);
+        state.statusLine = step != nullptr && !step->failureExplanation.empty()
+            ? step->failureExplanation
+            : "Scenario challenge aborted.";
     } else {
         state.run.arrivalOps = {true, flyby.destinationId};
         state.screen = Screen::ArrivalOps;
@@ -1585,30 +2085,53 @@ void acknowledgeFlybyResult(GameState& state)
 
 bool canClaimSaturnCourse(const GameState& state)
 {
-    return state.meta.saturnSlingshotPerfect && !state.meta.saturnRouteUnlocked;
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
+    return binding != nullptr && scenarioStepState(
+        state,
+        legacyCampaignCatalog(),
+        binding->scenarioId,
+        binding->progressStepId) == ScenarioStepState::ReadyToClaim;
 }
 
 bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog)
 {
-    if (!canClaimSaturnCourse(state)) {
-        state.statusLine = "A Perfect Io flyby is required before locking the Saturn course.";
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
+    if (binding == nullptr) {
         return false;
     }
-    state.meta.saturnRouteUnlocked = true;
-    state.run.frontierReadiness = frontierReadinessCap(state, catalog);
-    state.statusLine = "Saturn course locked. This begins the one-way outer expedition.";
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId,
+        ScenarioActionKind::ClaimReward);
+    if (!outcome.applied) {
+        state.statusLine = "Complete the active transfer objective before claiming its route.";
+        return false;
+    }
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
     return true;
 }
 
 bool acknowledgeSaturnSlingshotFailure(GameState& state)
 {
-    if (!state.meta.saturnSlingshotFailed
-        || state.meta.saturnSlingshotPerfect
-        || state.meta.saturnSlingshotFailureAcknowledged) {
+    const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
+    if (binding == nullptr) {
         return false;
     }
-    state.meta.saturnSlingshotFailureAcknowledged = true;
-    state.statusLine = "Saturn remains locked. Retry and hold the gold corridor for a Perfect pass.";
+    const ContentCatalog& catalog = legacyCampaignCatalog();
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        binding->scenarioId,
+        binding->progressStepId,
+        ScenarioActionKind::AcknowledgeFailure);
+    if (!outcome.applied) {
+        return false;
+    }
+    writeLegacyCampaignSaveProjection(state, catalog);
+    state.statusLine = outcome.message;
     return true;
 }
 
@@ -2152,7 +2675,9 @@ bool canUpgradeDroneSlot(const GameState& state)
     if (!droneBayUnlocked(state) || state.meta.droneBaySlots >= 6) {
         return false;
     }
-    if (!state.meta.marsBayExpansionClaimed) {
+    // Paid expansion begins once the authored campaign has awarded a second
+    // bay slot. This is a capacity rule, not a campaign-name dependency.
+    if (state.meta.droneBaySlots < 2) {
         return false;
     }
     return canAffordMaterials(state.meta.materials, droneSlotUpgradeCost(state.meta.droneBaySlots + 1));
@@ -2165,8 +2690,8 @@ bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog)
         state.statusLine = "Drone Bay is already at maximum capacity.";
         return false;
     }
-    if (!state.meta.marsBayExpansionClaimed) {
-        state.statusLine = "Complete Mars Bay Expansion before adding paid Drone Bay slots.";
+    if (state.meta.droneBaySlots < 2) {
+        state.statusLine = "Unlock a second bay slot before adding paid capacity.";
         return false;
     }
 
@@ -2271,6 +2796,14 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
         state.meta.ownedDroneIds.push_back(drone.id);
     }
     state.meta.equippedDroneIds.push_back(drone.id);
+    // Equipment assignment is a first-class scenario event. It deliberately
+    // routes by the equipped unit ID instead of by a campaign objective so
+    // authored and procedural scenarios can require any configured support
+    // frame without a new dispatcher branch.
+    (void)recordScenarioEvent(
+        state,
+        catalog,
+        {ScenarioEventKind::EquipmentAssigned, {}, {}, drone.id, {}, 1, 0});
     state.statusLine = equippedCount >= ownedCount
         ? "Built and assigned another " + drone.name + " to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "."
         : drone.name + " added to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + ".";
@@ -2774,9 +3307,9 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    const bool ioSurface = expedition.destinationId == content::destination::jupiter;
+    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
     const MaterialInventory gain {
-        .common = ioSurface
+        .common = thermalSurface
             ? 0
             : tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus
     };
@@ -2795,8 +3328,8 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
         tuning::research::dustHazardSupplyLoss,
         0,
         tuning::research::dustHazardIncrease);
-    outcome.message = ioSurface
-        ? "Io survey complete. The regolith is inert; ore signatures remain sealed inside lava."
+    outcome.message = thermalSurface
+        ? "Survey complete. The regolith is inert; ore signatures remain sealed inside thermal seams."
         : std::string(text::status::surfaceSurveyed);
     finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
     return outcome;
@@ -2815,13 +3348,13 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    const bool ioSurface = expedition.destinationId == content::destination::jupiter;
+    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
     MaterialInventory gain {
-        .common = ioSurface
+        .common = thermalSurface
             ? 0
             : tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus
     };
-    if (!ioSurface
+    if (!thermalSurface
         && (expedition.depth >= tuning::research::mineRareDepthThreshold
             || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus + upgrades.oreYieldChance)))) {
         gain.rare += 1;
@@ -2841,8 +3374,8 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
         0,
         tuning::research::drillHazardCargoLoss,
         tuning::research::drillHazardIncrease);
-    outcome.message = ioSurface
-        ? "Io regolith broken. No resource recovered; treat a lava seam with the Hazard Drone."
+    outcome.message = thermalSurface
+        ? "Regolith broken. No resource recovered; treat a thermal seam with Hazard support."
         : std::string(text::status::surfaceMined);
     finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
     return outcome;
@@ -2868,7 +3401,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    if (expedition.destinationId != content::destination::jupiter
+    if (!surfaceUsesThermalOnlyRegolith(state)
         && expedition.depth >= tuning::research::artifactDepthThreshold
         && expedition.temporaryArtifacts.empty()
         && rng.chance(std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus))) {
@@ -3042,9 +3575,7 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     SurfaceDepthProspect prospect;
     prospect.depthOffset = std::max(0, depthOffset);
     prospect.absoluteDepth = std::max(0, expedition.depth + prospect.depthOffset);
-    if (expedition.destinationId == content::destination::jupiter) {
-        return prospect;
-    }
+    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
 
     prospect.possibleMaterials.common = prospect.depthOffset == 0 || rng.chance(0.62 + signal * 0.18) ? 1 : 0;
     if (prospect.depthOffset > 0 || rng.chance(0.12 + signal * 0.30 + site.mineRareChanceBonus + support.rareChanceBonus)) {
@@ -3056,7 +3587,9 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     if (prospect.depthOffset >= 3 && rng.chance(0.08 + signal * 0.10 + support.exoticChanceBonus)) {
         prospect.possibleMaterials.exotic += 1;
     }
-    if (prospect.depthOffset >= 2 && rng.chance(std::min(0.70, 0.05 + signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
+    if (!thermalSurface
+        && prospect.depthOffset >= 2
+        && rng.chance(std::min(0.70, 0.05 + signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
         prospect.possibleArtifacts = 1;
     }
     if (materialCargo(prospect.possibleMaterials) == 0 && prospect.possibleArtifacts == 0) {
@@ -3073,9 +3606,6 @@ MaterialInventory actualizePushMaterials(
     Random& rng)
 {
     MaterialInventory gain;
-    if (expedition.destinationId == content::destination::jupiter) {
-        return gain;
-    }
     gain.common = step == 1 ? 1 : 0;
     gain.rare = 1;
     if (forecast != nullptr) {
@@ -3324,10 +3854,10 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
         tuning::research::pushBaseCollapseRisk + expedition.hazard * tuning::research::pushRiskHazardScale - support.collapseRelief,
         0.04,
         0.42);
-    push.message = "Descent lane armed. Each step commits a deeper layer and reveals actual finds.";
+    push.message = "Descent lane armed. Layer +1 is guaranteed and bankable; collapse risk begins on the next push.";
     state.run.surfacePush = push;
     state.screen = Screen::SurfacePush;
-    outcome.message = "Deep route armed. Push to turn layer forecasts into actual mining marks.";
+    outcome.message = "Deep route armed. The first layer is safe; later pushes risk the unbanked route.";
     return outcome;
 }
 
@@ -3342,7 +3872,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     }
 
     outcome.applied = true;
-    if (rng.chance(push.collapseRisk)) {
+    if (push.steps > 0 && rng.chance(push.collapseRisk)) {
         push.completed = true;
         push.busted = true;
         push.active = false;
@@ -3377,16 +3907,16 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     bool artifactFound = false;
-    const bool ioSurface = expedition.destinationId == content::destination::jupiter;
-    const double artifactChance = ioSurface
+    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
+    const bool forecastArtifact = forecast != nullptr && forecast->possibleArtifacts > 0;
+    const double blindArtifactChance = thermalSurface
         ? 0.0
-        : forecast != nullptr && forecast->possibleArtifacts > 0
-        ? 0.55 + support.artifactChanceBonus + crew.artifactChanceBonus * 0.50
-        : tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus;
-    if (!ioSurface
-        && push.steps >= 2
+        : tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 +
+            crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus;
+    if (!thermalSurface
+        && (forecastArtifact || push.steps >= 2)
         && push.temporaryArtifacts.empty()
-        && rng.chance(std::min(0.82, artifactChance))) {
+        && (forecastArtifact || rng.chance(std::min(0.82, blindArtifactChance)))) {
         push.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
         outcome.artifactFound = true;
         artifactFound = true;
@@ -3401,13 +3931,13 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     outcome.materialDelta = gain;
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = pushHazardDelta;
-    outcome.message = ioSurface
-        ? "Lava channel mapped. Ore remains sealed until Hazard Drone treatment."
+    outcome.message = thermalSurface
+        ? "Thermal seam confirmed. Its mapped resources will require Hazard treatment in the mining layer."
         : push.steps >= push.maxSteps
-            ? "Maximum safe depth reached. Bank the route before the floor gives out."
+            ? "Maximum depth reached. Bank the confirmed route."
             : (forecast != nullptr
-                ? "Layer +" + std::to_string(push.steps) + " confirmed. Actual finds are now marked for mining."
-                : "Blind push found a deeper lane. Scan first next time for a better read.");
+                ? "Layer +" + std::to_string(push.steps) + " confirmed. Bank now or risk it on the next push."
+                : "Blind layer +" + std::to_string(push.steps) + " confirmed. Bank now or risk it on the next push.");
     push.message = surfaceActionSummary(outcome);
     if (push.steps >= push.maxSteps) {
         push.completed = true;
@@ -3464,6 +3994,11 @@ SurfaceActionOutcome abortSurfacePush(GameState& state)
 
 SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
 {
+    return extractSurfacePayload(state, legacyCampaignCatalog(), rng);
+}
+
+SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng)
+{
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
     if (!expedition.active) {
@@ -3475,8 +4010,14 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
     outcome.cargoRecovered = !rng.chance(outcome.extractionRisk);
     if (outcome.cargoRecovered) {
         addMaterials(state.meta.materials, expedition.temporaryMaterials);
-        applyRecoveredArtifactRewards(state, expedition.temporaryArtifacts);
-        creditExtractedMiningStoryArtifacts(state.meta, expedition.temporaryArtifacts);
+        applyRecoveredArtifactRewards(
+            state,
+            catalog,
+            expedition.temporaryArtifacts,
+            expedition.pendingMiningSiteDefinitionId);
+        creditExtractedCompatibilityMiningSiteArtifacts(
+            state.meta,
+            expedition.temporaryArtifacts);
         state.meta.artifacts.insert(state.meta.artifacts.end(), expedition.temporaryArtifacts.begin(), expedition.temporaryArtifacts.end());
         outcome.materialDelta = expedition.temporaryMaterials;
         outcome.artifactFound = !expedition.temporaryArtifacts.empty();
@@ -3522,24 +4063,69 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
     if (recoveredMiningCommon > 0) {
         const int delivered = creditCampaignCommonOre(
             state,
+            catalog,
             expedition.destinationId,
             recoveredMiningCommon);
-        if (delivered > 0 && (expedition.destinationId == content::destination::moon
-                || expedition.destinationId == content::destination::mars)) {
-            const bool lunarDelivery = expedition.destinationId == content::destination::moon;
-            const CampaignObjectiveStatus status = campaignObjectiveStatus(
-                state,
-                lunarDelivery
-                    ? CampaignObjectiveId::LunarProspector
-                    : CampaignObjectiveId::MarsBayExpansion);
-            outcome.message = std::string(lunarDelivery ? "Lunar delivery +" : "Mars delivery +")
-                + std::to_string(delivered) + " // "
-                + std::to_string(status.current) + "/"
-                + std::to_string(status.required)
-                + (status.state == CampaignObjectiveState::ReadyToClaim
-                      ? " // READY TO CLAIM."
-                      : " // continue the local contract.");
+        if (delivered > 0) {
+            const ScenarioEvent deliveryEvent {
+                ScenarioEventKind::SafeMaterialDelivered,
+                {},
+                {},
+                expedition.destinationId,
+                "common",
+                delivered,
+                0
+            };
+            bool deliveryPresented = false;
+            for (const ScenarioInstance& instance : state.meta.scenarios) {
+                const std::string_view definitionId = instance.definitionId.empty()
+                    ? std::string_view(instance.id)
+                    : std::string_view(instance.definitionId);
+                const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+                if (definition == nullptr) {
+                    continue;
+                }
+                const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+                for (const ScenarioStepDefinition& step : resolved.steps) {
+                    if (!scenarioStepMatchesEvent(step, deliveryEvent)) {
+                        continue;
+                    }
+                    const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+                    if (progress == nullptr) {
+                        continue;
+                    }
+                    outcome.message = step.location + " delivery +" + std::to_string(delivered)
+                        + " // " + std::to_string(progress->progress) + "/"
+                        + std::to_string(std::max(0, step.requiredProgress))
+                        + (progress->completed && !progress->claimed
+                              ? " // READY TO CLAIM."
+                              : " // continue the local contract.");
+                    deliveryPresented = true;
+                    break;
+                }
+                if (deliveryPresented) {
+                    break;
+                }
+            }
         }
+    }
+
+    // A mining-site completion is distinct from a protected-objective
+    // extraction: generic scenarios may complete a site with no payload at
+    // all. It is recorded only after the expedition has extracted safely, and
+    // the active scenario address prevents a shared site definition from
+    // advancing another runtime instance.
+    if (outcome.cargoRecovered && !expedition.pendingMiningSiteDefinitionId.empty()) {
+        (void)recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::MiningSiteCompleted,
+             expedition.pendingScenarioId,
+             expedition.pendingScenarioStepId,
+             expedition.pendingMiningSiteDefinitionId,
+             {},
+             1,
+             0});
     }
 
     expedition = {};

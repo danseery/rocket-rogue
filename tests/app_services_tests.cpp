@@ -8,6 +8,8 @@
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
+#include "core/ScenarioSystem.h"
+#include "core/Tuning.h"
 #include "platform/AppServices.h"
 
 #include <RmlUi/Core/RenderInterface.h>
@@ -139,6 +141,12 @@ public:
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
         flybyInputY = snapshot.flybyInputY;
+        surfacePushSteps = snapshot.surfacePushSteps;
+        surfacePushMaterials = snapshot.surfacePushMaterials;
+        surfacePushRewardMarkers = snapshot.surfacePushRewardMarkers;
+        surfacePushRewardDepthOffsets = snapshot.surfacePushRewardDepthOffsets;
+        surfacePushForecastMarkers = snapshot.surfacePushForecastMarkers;
+        surfacePushForecastDepthOffsets = snapshot.surfacePushForecastDepthOffsets;
         if (snapshot.screen == rocket::Screen::Mining) {
             miningViewsObserved = true;
             const std::size_t expectedCells = static_cast<std::size_t>(
@@ -194,6 +202,12 @@ public:
     double miningHeat = 0.0;
     double flybyInputY = 0.0;
     double miningViewChecksum = 0.0;
+    int surfacePushSteps = 0;
+    rocket::MaterialInventory surfacePushMaterials;
+    std::vector<rocket::MiningCellMaterial> surfacePushRewardMarkers;
+    std::vector<int> surfacePushRewardDepthOffsets;
+    std::vector<rocket::MiningCellMaterial> surfacePushForecastMarkers;
+    std::vector<int> surfacePushForecastDepthOffsets;
     rocket::Screen screen = rocket::Screen::Hangar;
     bool titleScreen = false;
     bool miningViewsObserved = false;
@@ -464,10 +478,32 @@ std::string freshSurfaceExpeditionSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
     rocket::GameState state = rocket::createNewGame(catalog, 0x51A7EULL);
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::lunarProspector,
+               "briefing",
+               rocket::ScenarioActionKind::AcknowledgeBriefing)
+               .applied);
+    assert(rocket::recordScenarioEvent(
+        state,
+        catalog,
+        {rocket::ScenarioEventKind::SafeMaterialDelivered,
+         {},
+         {},
+         rocket::content::destination::moon,
+         "common",
+         rocket::tuning::research::prospectorCommonOreGoal,
+         0}));
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::lunarProspector,
+               "delivery",
+               rocket::ScenarioActionKind::ClaimReward)
+               .applied);
     state.run.destinationIndex = 2;
     state.meta.furthestTier = 2;
-    state.meta.lunarMiningBriefingAcknowledged = true;
-    state.meta.lunarProspectorClaimed = true;
     rocket::startSurfaceExpedition(state, catalog);
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -893,10 +929,32 @@ int main()
         const rocket::ContentCatalog catalog = rocket::createDefaultContent();
         rocket::GameState state = rocket::createNewGame(catalog, 0x5A7FACEULL);
         state.run.destinationIndex = 2;
+        state.meta.furthestTier = 2;
+        assert(rocket::performScenarioAction(
+                   state,
+                   catalog,
+                   rocket::content::scenario::lunarProspector,
+                   "briefing",
+                   rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
+        assert(rocket::recordScenarioEvent(
+            state,
+            catalog,
+            {rocket::ScenarioEventKind::SafeMaterialDelivered,
+             {}, {}, rocket::content::destination::moon, "common",
+             rocket::tuning::research::prospectorCommonOreGoal, 0}));
+        assert(rocket::performScenarioAction(
+                   state,
+                   catalog,
+                   rocket::content::scenario::lunarProspector,
+                   "delivery",
+                   rocket::ScenarioActionKind::ClaimReward).applied);
+        assert(rocket::performScenarioAction(
+                   state,
+                   catalog,
+                   rocket::content::scenario::marsBayExpansion,
+                   "briefing",
+                   rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
         rocket::startSurfaceExpedition(state, catalog);
-        state.meta.marsMiningBriefingAcknowledged = true;
-        state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
-        state.meta.droneBaySlots = 2;
         rocket::ensureDroneBayState(state, catalog);
         rocket::ui::briefings::acknowledge(
             state.meta.acknowledgedActivityBriefingIds,
@@ -1414,6 +1472,38 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Push Deeper's player-facing renderer must receive both the banked scan
+    // forecast and the confirmed markers produced by the real application
+    // state. Scene-only fixtures cannot catch snapshot handoff regressions.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugStartSurfacePush();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.screen == rocket::Screen::SurfacePush);
+        assert(std::find(
+            fixture.renderer.surfacePushForecastMarkers.begin(),
+            fixture.renderer.surfacePushForecastMarkers.end(),
+            rocket::MiningCellMaterial::ArtifactCache) !=
+            fixture.renderer.surfacePushForecastMarkers.end());
+
+        fixture.ui.dispatchAction("surface_push_step");
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.surfacePushSteps == 1);
+        assert(fixture.renderer.surfacePushMaterials.common >= 1);
+        assert(fixture.renderer.surfacePushMaterials.rare >= 1);
+        assert(fixture.renderer.surfacePushRewardMarkers.size() >= 3);
+        assert(fixture.renderer.surfacePushRewardDepthOffsets.size() ==
+            fixture.renderer.surfacePushRewardMarkers.size());
+        assert(std::all_of(
+            fixture.renderer.surfacePushRewardDepthOffsets.begin(),
+            fixture.renderer.surfacePushRewardDepthOffsets.end(),
+            [](int depth) { return depth == 1; }));
+        fixture.runner.shutdown();
+    }
+
     // New Game must atomically replace any previous valid save with a fresh,
     // immediately resumable initial state.
     {
@@ -1478,25 +1568,48 @@ int main()
     // Mandatory campaign mining cannot start until its explicit story
     // briefing is accepted. The optional Help preference is not involved.
     {
+        const auto savedScenario = [](const rocket::SaveData& save, std::string_view id) {
+            const auto found = std::find_if(
+                save.scenarios.begin(),
+                save.scenarios.end(),
+                [id](const rocket::ScenarioInstance& instance) { return instance.id == id; });
+            return found == save.scenarios.end() ? nullptr : &*found;
+        };
         AppFixture fixture;
         fixture.saves.value = freshSurfaceExpeditionSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        assert(fixture.ui.html.find("data-modal=\"mars_mining_briefing\" data-auto-modal=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-modal=\"scenario_mars_bay_expansion_briefing\" data-auto-modal=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-scenario-id=\"mars_bay_expansion\" data-scenario-step-id=\"briefing\"") != std::string::npos);
         assert(fixture.ui.html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos);
 
         const std::optional<rocket::SaveData> beforeMining = rocket::deserializeSaveData(fixture.saves.value);
         assert(beforeMining.has_value());
-        assert(!beforeMining->marsMiningBriefingAcknowledged);
+        const rocket::ScenarioInstance* beforeMars = savedScenario(
+            *beforeMining,
+            rocket::content::scenario::marsBayExpansion);
+        const rocket::ScenarioStepProgress* beforeBriefing = beforeMars == nullptr
+            ? nullptr
+            : rocket::findScenarioStepProgress(*beforeMars, "briefing");
+        assert(beforeBriefing != nullptr && !beforeBriefing->briefingAcknowledged);
 
         fixture.ui.dispatchAction("mine_surface");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
 
-        fixture.ui.dispatchAction("acknowledge_mars_mining_briefing");
+        fixture.ui.dispatchAction(
+            std::string(rocket::ui::actions::scenarioActionPrefix) +
+            rocket::content::scenario::marsBayExpansion + "|briefing|" +
+            std::to_string(static_cast<int>(rocket::ScenarioActionKind::AcknowledgeBriefing)));
         const std::optional<rocket::SaveData> acceptedMining = rocket::deserializeSaveData(fixture.saves.value);
         assert(acceptedMining.has_value());
-        assert(acceptedMining->marsMiningBriefingAcknowledged);
+        const rocket::ScenarioInstance* acceptedMars = savedScenario(
+            *acceptedMining,
+            rocket::content::scenario::marsBayExpansion);
+        const rocket::ScenarioStepProgress* acceptedBriefing = acceptedMars == nullptr
+            ? nullptr
+            : rocket::findScenarioStepProgress(*acceptedMars, "briefing");
+        assert(acceptedBriefing != nullptr && acceptedBriefing->briefingAcknowledged);
 
         fixture.ui.dispatchAction("mine_surface");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));

@@ -8,7 +8,7 @@
 
 namespace rocket {
 
-inline constexpr int miningArenaRulesVersion = 2;
+inline constexpr int miningArenaRulesVersion = 3;
 
 struct MiningCampaignProgression {
     bool miningAvailable = false;
@@ -22,26 +22,29 @@ MiningProgressionBand miningProgressionBandForDifficulty(int difficulty);
 std::string_view miningActName(MiningAct act);
 std::string_view miningProgressionBandName(MiningProgressionBand band);
 MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& request);
-bool isIoMiningDestination(std::string_view destinationId);
-MiningArenaRules resolveDestinationMiningArenaRules(
+// Authored and procedural sites use this resolver instead of destination
+// identity. A site is allowed to opt into a focused biome without making
+// terrain, hazards, or gate logic depend on where the site happens to live.
+MiningArenaRules resolveMiningSiteArenaRules(
     const MiningArenaRequest& request,
-    std::string_view destinationId);
+    const MiningSiteDefinition& site);
 MiningGateType selectMiningGateType(const MiningArenaRules& rules);
 MiningGateDefinition resolveMiningGateDefinition(
     const MiningArenaRules& rules,
     MiningGateType type,
-    bool storyCritical = false);
+    bool compatibilityCritical = false);
 std::string_view miningGateName(MiningGateType type);
 std::string_view miningGateStateName(MiningGateState state);
 bool miningGateAllowed(const MiningArenaRules& rules, MiningGateType type);
-MiningStorySiteProgress* ensureMiningStorySite(
+// Compatibility-only accessors for imported pre-scenario saves. New authored
+// and procedural sites advance through ScenarioInstance state instead.
+MiningSiteProgress* pendingCompatibilityMiningSite(
     MetaProgress& meta,
-    std::string_view destinationId,
-    const MiningArenaRules& rules);
-const MiningStorySiteProgress* pendingMiningStorySite(
+    std::string_view destinationId);
+const MiningSiteProgress* pendingCompatibilityMiningSite(
     const MetaProgress& meta,
     std::string_view destinationId);
-void creditExtractedMiningStoryArtifacts(
+void creditExtractedCompatibilityMiningSiteArtifacts(
     MetaProgress& meta,
     const std::vector<ArtifactRecord>& artifacts);
 

@@ -5,6 +5,7 @@
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
+#include "core/ScenarioSystem.h"
 #include "core/SaveSchema.h"
 #include "core/Tuning.h"
 
@@ -98,6 +99,15 @@ std::string decodeSaveBlob(std::string_view encoded)
     return decoded;
 }
 
+std::string decodeSaveBlobOrOriginal(std::string_view encoded)
+{
+    if (encoded == "x") {
+        return {};
+    }
+    const std::string decoded = decodeSaveBlob(encoded);
+    return decoded.empty() ? std::string(encoded) : decoded;
+}
+
 int statusToInt(CrewStatus status)
 {
     switch (status) {
@@ -169,6 +179,10 @@ int miningMaterialToInt(MiningCellMaterial material)
         return 7;
     case MiningCellMaterial::Bedrock:
         return 8;
+    case MiningCellMaterial::FuelPocket:
+        return 9;
+    case MiningCellMaterial::OxygenPocket:
+        return 10;
     }
     return 0;
 }
@@ -192,6 +206,10 @@ MiningCellMaterial miningMaterialFromInt(int value)
         return MiningCellMaterial::HazardPocket;
     case 8:
         return MiningCellMaterial::Bedrock;
+    case 9:
+        return MiningCellMaterial::FuelPocket;
+    case 10:
+        return MiningCellMaterial::OxygenPocket;
     default:
         return MiningCellMaterial::Empty;
     }
@@ -630,7 +648,7 @@ MiningArenaMetadata parseMiningArenaMetadata(std::string_view text)
         metadata.rulesVersion = std::max(0, parseInt(fields[3], 0));
     }
     if (fields.size() > 4) {
-        metadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[4], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+        metadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[4], 0), 0, static_cast<int>(MiningGateType::CompoundVault)));
     }
     if (fields.size() > 5) {
         metadata.gateOverrideEnabled = parseInt(fields[5], 0) != 0;
@@ -680,7 +698,7 @@ void parseSurfaceBankedMiningArena(std::string_view text, SurfaceExpeditionState
     }
     const bool hasGateMetadata = fields.size() >= 11;
     if (hasGateMetadata) {
-        expedition.bankedMiningArenaMetadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[6], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+        expedition.bankedMiningArenaMetadata.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[6], 0), 0, static_cast<int>(MiningGateType::CompoundVault)));
         expedition.bankedMiningArenaMetadata.gateOverrideEnabled = parseInt(fields[7], 0) != 0;
     }
     const std::size_t materialOffset = hasGateMetadata ? 8 : 6;
@@ -738,6 +756,58 @@ void parseMiningRewardLedger(std::string_view text, MiningRunState& mining)
     }
 }
 
+std::string serializeMiningCocoonLayers(const std::vector<MiningCocoonLayerProgress>& layers)
+{
+    std::ostringstream out;
+    for (std::size_t index = 0; index < layers.size(); ++index) {
+        if (index > 0) out << save_schema::crewRecordDelimiter;
+        const MiningCocoonLayerProgress& layer = layers[index];
+        out << encodeSaveBlob(layer.id) << '^'
+            << encodeSaveBlob(layer.label) << '^'
+            << layer.total << '^'
+            << layer.remaining << '^'
+            << layer.requiredHazardMark << '^'
+            << (layer.revealed ? 1 : 0) << '^'
+            << (layer.completed ? 1 : 0) << '^'
+            << static_cast<int>(layer.completionRule) << '^'
+            << static_cast<int>(layer.revealPolicy);
+    }
+    return out.str();
+}
+
+std::vector<MiningCocoonLayerProgress> parseMiningCocoonLayers(std::string_view text)
+{
+    std::vector<MiningCocoonLayerProgress> layers;
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, '^');
+        if (fields.size() < 4) continue;
+        MiningCocoonLayerProgress layer;
+        layer.id = decodeSaveBlob(fields[0]);
+        layer.label = decodeSaveBlob(fields[1]);
+        layer.total = std::max(0, parseInt(fields[2], 0));
+        layer.remaining = std::max(0, parseInt(fields[3], 0));
+        if (fields.size() > 4) layer.requiredHazardMark = std::max(0, parseInt(fields[4], 0));
+        if (fields.size() > 5) layer.revealed = parseInt(fields[5], 0) != 0;
+        if (fields.size() > 6) layer.completed = parseInt(fields[6], 0) != 0;
+        if (fields.size() > 7) {
+            layer.completionRule = parseInt(fields[7], 0) == static_cast<int>(MiningCocoonCompletionRule::TreatOnly)
+                ? MiningCocoonCompletionRule::TreatOnly
+                : MiningCocoonCompletionRule::TreatAndExcavate;
+        }
+        layer.revealPolicy = fields.size() > 8
+            ? static_cast<MiningCocoonRevealPolicy>(
+                  std::clamp(
+                      parseInt(fields[8], 0),
+                      static_cast<int>(MiningCocoonRevealPolicy::OnAnyCellDiscovered),
+                      static_cast<int>(MiningCocoonRevealPolicy::Immediately)))
+            : (layers.empty()
+                   ? MiningCocoonRevealPolicy::OnAnyCellDiscovered
+                   : MiningCocoonRevealPolicy::AfterPreviousLayerCompleted);
+        layers.push_back(std::move(layer));
+    }
+    return layers;
+}
+
 std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
 {
     std::ostringstream markers;
@@ -753,10 +823,10 @@ std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
     out << (gate.active ? 1 : 0)
         << save_schema::crewFieldDelimiter << static_cast<int>(gate.type)
         << save_schema::crewFieldDelimiter << static_cast<int>(gate.state)
-        << save_schema::crewFieldDelimiter << (gate.storyCritical ? 1 : 0)
+        << save_schema::crewFieldDelimiter << (gate.compatibilityCritical ? 1 : 0)
         << save_schema::crewFieldDelimiter << (gate.discovered ? 1 : 0)
-        << save_schema::crewFieldDelimiter << gate.siteId
-        << save_schema::crewFieldDelimiter << gate.artifactId
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.siteId)
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.artifactId)
         << save_schema::crewFieldDelimiter << static_cast<int>(gate.hazardAffinity)
         << save_schema::crewFieldDelimiter << gate.requiredHazardMark
         << save_schema::crewFieldDelimiter << gate.shellTilesTotal
@@ -774,11 +844,17 @@ std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
         << save_schema::crewFieldDelimiter << (gate.burrowBreach ? 1 : 0)
         << save_schema::crewFieldDelimiter << gate.anchorX
         << save_schema::crewFieldDelimiter << gate.anchorY
-        << save_schema::crewFieldDelimiter << markers.str()
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(markers.str())
         << save_schema::crewFieldDelimiter << gate.outerShellTilesTotal
         << save_schema::crewFieldDelimiter << gate.outerShellTilesRemaining
         << save_schema::crewFieldDelimiter << gate.innerShellTilesTotal
-        << save_schema::crewFieldDelimiter << gate.innerShellTilesRemaining;
+        << save_schema::crewFieldDelimiter << gate.innerShellTilesRemaining
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.cocoonDefinitionId)
+        << save_schema::crewFieldDelimiter << gate.cocoonDefinitionVersion
+        << save_schema::crewFieldDelimiter << static_cast<int>(gate.protectedObjective.kind)
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.protectedObjective.id)
+        << save_schema::crewFieldDelimiter << gate.activeCocoonLayer
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(serializeMiningCocoonLayers(gate.cocoonLayers));
     return out.str();
 }
 
@@ -791,12 +867,12 @@ void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
     gate.active = parseInt(fields[0], 0) != 0;
     auto intAt = [&](std::size_t index, int fallback = 0) { return fields.size() > index ? parseInt(fields[index], fallback) : fallback; };
     auto boolAt = [&](std::size_t index, bool fallback = false) { return fields.size() > index ? parseInt(fields[index], fallback ? 1 : 0) != 0 : fallback; };
-    gate.type = static_cast<MiningGateType>(std::clamp(intAt(1), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
+    gate.type = static_cast<MiningGateType>(std::clamp(intAt(1), 0, static_cast<int>(MiningGateType::CompoundVault)));
     gate.state = static_cast<MiningGateState>(std::clamp(intAt(2), 0, static_cast<int>(MiningGateState::Completed)));
-    gate.storyCritical = boolAt(3);
+    gate.compatibilityCritical = boolAt(3);
     gate.discovered = boolAt(4);
-    if (fields.size() > 5) gate.siteId = fields[5];
-    if (fields.size() > 6) gate.artifactId = fields[6];
+    if (fields.size() > 5) gate.siteId = decodeSaveBlobOrOriginal(fields[5]);
+    if (fields.size() > 6) gate.artifactId = decodeSaveBlobOrOriginal(fields[6]);
     gate.hazardAffinity = static_cast<MiningElementalAffinity>(std::clamp(intAt(7), 0, static_cast<int>(MiningElementalAffinity::Toxic)));
     gate.requiredHazardMark = std::max(0, intAt(8));
     gate.shellTilesTotal = std::max(0, intAt(9));
@@ -816,7 +892,9 @@ void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
     if (fields.size() > 23) gate.anchorY = parseDouble(fields[23], 0.0);
     gate.markers.clear();
     if (fields.size() > 24) {
-        for (const std::string& markerText : split(fields[24], save_schema::crewRecordDelimiter)) {
+        const std::string markerRecords =
+            decodeSaveBlobOrOriginal(fields[24]);
+        for (const std::string& markerText : split(markerRecords, save_schema::crewRecordDelimiter)) {
             const std::vector<std::string> markerFields = split(markerText, save_schema::listDelimiter);
             if (markerFields.size() < 2) continue;
             gate.markers.push_back({
@@ -830,43 +908,57 @@ void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
     gate.outerShellTilesRemaining = std::max(0, intAt(26));
     gate.innerShellTilesTotal = std::max(0, intAt(27));
     gate.innerShellTilesRemaining = std::max(0, intAt(28));
+    if (fields.size() > 29) gate.cocoonDefinitionId = decodeSaveBlob(fields[29]);
+    if (fields.size() > 30) gate.cocoonDefinitionVersion = std::max(0, intAt(30));
+    if (fields.size() > 31) {
+        gate.protectedObjective.kind = static_cast<ProtectedObjectiveKind>(
+            std::clamp(intAt(31), 0, static_cast<int>(ProtectedObjectiveKind::Artifact)));
+    }
+    if (fields.size() > 32) gate.protectedObjective.id = decodeSaveBlob(fields[32]);
+    if (fields.size() > 33) gate.activeCocoonLayer = std::max(-1, intAt(33, -1));
+    if (fields.size() > 34) gate.cocoonLayers = parseMiningCocoonLayers(decodeSaveBlob(fields[34]));
 }
 
-std::string serializeMiningStorySites(const std::vector<MiningStorySiteProgress>& sites)
+std::string serializeMiningSites(const std::vector<MiningSiteProgress>& sites)
 {
     std::ostringstream out;
     for (std::size_t index = 0; index < sites.size(); ++index) {
         if (index > 0) out << save_schema::crewRecordDelimiter;
-        const MiningStorySiteProgress& site = sites[index];
-        out << site.siteId << save_schema::crewFieldDelimiter
-            << site.destinationId << save_schema::crewFieldDelimiter
+        const MiningSiteProgress& site = sites[index];
+        out << encodeSaveBlob(site.siteId) << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(site.destinationId) << save_schema::crewFieldDelimiter
             << miningActToInt(site.act) << save_schema::crewFieldDelimiter
             << site.difficulty << save_schema::crewFieldDelimiter
             << site.seed << save_schema::crewFieldDelimiter
             << static_cast<int>(site.gateType) << save_schema::crewFieldDelimiter
-            << site.artifactId << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(site.artifactId) << save_schema::crewFieldDelimiter
             << (site.discovered ? 1 : 0) << save_schema::crewFieldDelimiter
-            << (site.completed ? 1 : 0);
+            << (site.completed ? 1 : 0) << save_schema::crewFieldDelimiter
+            << (site.legacyMigrated ? 1 : 0);
     }
     return out.str();
 }
 
-std::vector<MiningStorySiteProgress> parseMiningStorySites(std::string_view text)
+std::vector<MiningSiteProgress> parseMiningSites(std::string_view text)
 {
-    std::vector<MiningStorySiteProgress> sites;
+    std::vector<MiningSiteProgress> sites;
     for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
         const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
         if (fields.size() < 7 || fields[0].empty()) continue;
-        MiningStorySiteProgress site;
-        site.siteId = fields[0];
-        site.destinationId = fields[1];
+        MiningSiteProgress site;
+        site.siteId = decodeSaveBlobOrOriginal(fields[0]);
+        site.destinationId = decodeSaveBlobOrOriginal(fields[1]);
         site.act = miningActFromInt(parseInt(fields[2], 1));
         site.difficulty = std::clamp(parseInt(fields[3], 1), 1, 10);
         site.seed = parseU64(fields[4], 0);
-        site.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[5], 0), 0, static_cast<int>(MiningGateType::CompoundStoryVault)));
-        site.artifactId = fields[6];
+        site.gateType = static_cast<MiningGateType>(std::clamp(parseInt(fields[5], 0), 0, static_cast<int>(MiningGateType::CompoundVault)));
+        site.artifactId = decodeSaveBlobOrOriginal(fields[6]);
         if (fields.size() > 7) site.discovered = parseInt(fields[7], 0) != 0;
         if (fields.size() > 8) site.completed = parseInt(fields[8], 0) != 0;
+        site.legacyMigrated =
+            fields.size() > 9
+            ? parseInt(fields[9], 0) != 0
+            : true;
         sites.push_back(std::move(site));
     }
     return sites;
@@ -928,7 +1020,7 @@ bool parseMiningProgressionField(SaveData& save, std::string_view key, std::stri
         return true;
     }
     if (key == save_schema::field::miningStorySites) {
-        save.miningStorySites = parseMiningStorySites(value);
+        save.miningSites = parseMiningSites(value);
         return true;
     }
     return false;
@@ -937,6 +1029,7 @@ bool parseMiningProgressionField(SaveData& save, std::string_view key, std::stri
 std::vector<Astronaut> parseCrew(std::string_view text);
 MaterialInventory parseMaterials(std::string_view text);
 std::vector<DroneUpgradeRecord> parseDroneUpgrades(std::string_view text);
+std::vector<ScenarioInstance> parseScenarioInstances(std::string_view text);
 std::vector<ArtifactRecord> parseArtifacts(std::string_view text);
 std::vector<int> parseInts(std::string_view text);
 
@@ -956,6 +1049,8 @@ bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::st
         save.equippedDroneIds = split(value, save_schema::listDelimiter);
     } else if (key == save_schema::field::droneUpgrades) {
         save.droneUpgrades = parseDroneUpgrades(value);
+    } else if (key == save_schema::field::scenarios) {
+        save.scenarios = parseScenarioInstances(value);
     } else if (key == save_schema::field::prospectorCommonOreRecovered) {
         save.prospectorCommonOreRecovered = parseInt(value, save.prospectorCommonOreRecovered);
     } else if (key == save_schema::field::lunarMiningBriefingAcknowledged) {
@@ -1230,7 +1325,8 @@ std::string serializeMiningCells(const MiningTerrain& terrain)
             << save_schema::crewFieldDelimiter << miningEnemyTypeToInt(cell.enemy)
             << save_schema::crewFieldDelimiter << miningElementalAffinityToInt(cell.hazardAffinity)
             << save_schema::crewFieldDelimiter << (cell.gateAssociated ? 1 : 0)
-            << save_schema::crewFieldDelimiter << (cell.suitOnlyPassage ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (cell.suitOnlyPassage ? 1 : 0)
+            << save_schema::crewFieldDelimiter << cell.cocoonLayer;
     }
     return out.str();
 }
@@ -1272,6 +1368,9 @@ void parseMiningCells(std::string_view text, MiningTerrain& terrain)
         }
         if (fields.size() > 9) {
             cell.suitOnlyPassage = parseInt(fields[9], 0) != 0;
+        }
+        if (fields.size() > 10) {
+            cell.cocoonLayer = std::max(-1, parseInt(fields[10], -1));
         }
         terrain.cells.push_back(cell);
     }
@@ -1316,6 +1415,119 @@ std::vector<DroneUpgradeRecord> parseDroneUpgrades(std::string_view text)
         upgrades.push_back(std::move(upgrade));
     }
     return upgrades;
+}
+
+std::string serializeScenarioInstances(const std::vector<ScenarioInstance>& instances)
+{
+    std::ostringstream out;
+    bool firstInstance = true;
+    for (const ScenarioInstance& instance : instances) {
+        if (instance.id.empty()) {
+            continue;
+        }
+        if (!firstInstance) {
+            out << save_schema::crewRecordDelimiter;
+        }
+        firstInstance = false;
+        std::ostringstream steps;
+        for (std::size_t index = 0; index < instance.steps.size(); ++index) {
+            if (index > 0) {
+                steps << '|';
+            }
+            const ScenarioStepProgress& step = instance.steps[index];
+            steps << encodeSaveBlob(step.id) << '^'
+                << step.progress << '^'
+                << (step.briefingAcknowledged ? 1 : 0) << '^'
+                << (step.completed ? 1 : 0) << '^'
+                << (step.claimed ? 1 : 0) << '^'
+                << (step.failureAcknowledged ? 1 : 0) << '^'
+                << (step.failureSeen ? 1 : 0) << '^'
+                << (step.activityStarted ? 1 : 0);
+        }
+        std::ostringstream parameters;
+        for (std::size_t index = 0; index < instance.resolvedParameters.size(); ++index) {
+            if (index > 0) parameters << '|';
+            parameters << encodeSaveBlob(instance.resolvedParameters[index]);
+        }
+        std::ostringstream rewards;
+        for (std::size_t index = 0; index < instance.awardedRewardIds.size(); ++index) {
+            if (index > 0) rewards << '|';
+            rewards << encodeSaveBlob(instance.awardedRewardIds[index]);
+        }
+        out << encodeSaveBlob(instance.id) << '^'
+            << instance.definitionVersion << '^'
+            << static_cast<int>(instance.source) << '^'
+            << encodeSaveBlob(instance.factoryId) << '^'
+            << instance.factoryVersion << '^'
+            << instance.seed << '^'
+            << encodeSaveBlob(parameters.str()) << '^'
+            << encodeSaveBlob(steps.str()) << '^'
+            << encodeSaveBlob(rewards.str()) << '^'
+            << (instance.completed ? 1 : 0) << '^'
+            << encodeSaveBlob(instance.definitionId.empty() ? instance.id : instance.definitionId);
+    }
+    return out.str();
+}
+
+std::vector<ScenarioInstance> parseScenarioInstances(std::string_view text)
+{
+    std::vector<ScenarioInstance> instances;
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, '^');
+        if (fields.size() < 2) {
+            continue;
+        }
+        ScenarioInstance instance;
+        instance.id = decodeSaveBlob(fields[0]);
+        if (instance.id.empty()) {
+            continue;
+        }
+        instance.definitionVersion = std::max(1, parseInt(fields[1], 1));
+        if (fields.size() > 2) {
+            instance.source = parseInt(fields[2], 0) == static_cast<int>(ScenarioSource::Procedural)
+                ? ScenarioSource::Procedural
+                : ScenarioSource::Authored;
+        }
+        if (fields.size() > 3) instance.factoryId = decodeSaveBlob(fields[3]);
+        if (fields.size() > 4) instance.factoryVersion = std::max(0, parseInt(fields[4], 0));
+        if (fields.size() > 5) instance.seed = parseU64(fields[5], 0);
+        if (fields.size() > 6) {
+            for (const std::string& parameter : split(decodeSaveBlob(fields[6]), '|')) {
+                if (!parameter.empty()) instance.resolvedParameters.push_back(decodeSaveBlob(parameter));
+            }
+        }
+        if (fields.size() > 7) {
+            for (const std::string& stepRecord : split(decodeSaveBlob(fields[7]), '|')) {
+                const std::vector<std::string> stepFields = split(stepRecord, '^');
+                if (stepFields.empty()) continue;
+                ScenarioStepProgress step;
+                step.id = decodeSaveBlob(stepFields[0]);
+                if (step.id.empty()) continue;
+                if (stepFields.size() > 1) step.progress = std::max(0, parseInt(stepFields[1], 0));
+                if (stepFields.size() > 2) step.briefingAcknowledged = parseInt(stepFields[2], 0) != 0;
+                if (stepFields.size() > 3) step.completed = parseInt(stepFields[3], 0) != 0;
+                if (stepFields.size() > 4) step.claimed = parseInt(stepFields[4], 0) != 0;
+                if (stepFields.size() > 5) step.failureAcknowledged = parseInt(stepFields[5], 0) != 0;
+                if (stepFields.size() > 6) step.failureSeen = parseInt(stepFields[6], 0) != 0;
+                if (stepFields.size() > 7) step.activityStarted = parseInt(stepFields[7], 0) != 0;
+                instance.steps.push_back(std::move(step));
+            }
+        }
+        if (fields.size() > 8) {
+            for (const std::string& reward : split(decodeSaveBlob(fields[8]), '|')) {
+                if (!reward.empty()) instance.awardedRewardIds.push_back(decodeSaveBlob(reward));
+            }
+        }
+        if (fields.size() > 9) instance.completed = parseInt(fields[9], 0) != 0;
+        instance.definitionId = fields.size() > 10
+            ? decodeSaveBlob(fields[10])
+            : instance.id;
+        if (instance.definitionId.empty()) {
+            instance.definitionId = instance.id;
+        }
+        instances.push_back(std::move(instance));
+    }
+    return instances;
 }
 
 std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
@@ -1873,7 +2085,13 @@ void normalizeLegacyMiningArtifact(MiningRunState& mining)
     if (!mining.active) {
         return;
     }
-    bool foundArtifactTile = mining.artifact.present;
+    bool foundArtifactTile = false;
+    const int persistedArtifactX = mining.artifact.present
+        ? static_cast<int>(std::floor(mining.artifact.x))
+        : -1;
+    const int persistedArtifactY = mining.artifact.present
+        ? static_cast<int>(std::floor(mining.artifact.y))
+        : -1;
     for (int y = 0; y < mining.terrain.height; ++y) {
         for (int x = 0; x < mining.terrain.width; ++x) {
             const std::size_t index = static_cast<std::size_t>(y * mining.terrain.width + x);
@@ -1884,7 +2102,18 @@ void normalizeLegacyMiningArtifact(MiningRunState& mining)
             if (cell.material != MiningCellMaterial::ArtifactCache) {
                 continue;
             }
-            if (!foundArtifactTile) {
+            const bool matchesPersistedArtifact =
+                mining.artifact.present &&
+                mining.artifact.state == MiningArtifactState::Embedded &&
+                x == persistedArtifactX &&
+                y == persistedArtifactY;
+            if (matchesPersistedArtifact) {
+                foundArtifactTile = true;
+                mining.artifact.revealed =
+                    mining.artifact.revealed || cell.revealed;
+                continue;
+            }
+            if (!mining.artifact.present && !foundArtifactTile) {
                 mining.artifact = {};
                 mining.artifact.present = true;
                 mining.artifact.id = mining.destinationId + "_mining_artifact_" + std::to_string(mining.depthZone) + "_legacy";
@@ -1929,38 +2158,38 @@ void normalizeLegacyIoArtifactForVersionSeven(
     GameState& state,
     bool artifactAlreadyRecovered)
 {
-    auto isIoStorySite = [](const MiningStorySiteProgress& site) {
+    auto isIoStorySite = [](const MiningSiteProgress& site) {
         return site.destinationId == content::destination::jupiter
             && site.gateType == MiningGateType::HazardCocoon;
     };
-    auto siteForArtifact = [&](std::string_view artifactId) -> MiningStorySiteProgress* {
+    auto siteForArtifact = [&](std::string_view artifactId) -> MiningSiteProgress* {
         const auto site = std::find_if(
-            state.meta.miningStorySites.begin(),
-            state.meta.miningStorySites.end(),
-            [&](const MiningStorySiteProgress& candidate) {
+            state.meta.miningSites.begin(),
+            state.meta.miningSites.end(),
+            [&](const MiningSiteProgress& candidate) {
                 return isIoStorySite(candidate)
                     && (artifactId.empty() || candidate.artifactId == artifactId);
             });
-        return site == state.meta.miningStorySites.end() ? nullptr : &*site;
+        return site == state.meta.miningSites.end() ? nullptr : &*site;
     };
     auto ensureSite = [&](
                           std::string_view artifactId,
                           std::string_view siteId,
-                          const MiningArenaMetadata& metadata) -> MiningStorySiteProgress& {
-        MiningStorySiteProgress* site = siteForArtifact(artifactId);
+                          const MiningArenaMetadata& metadata) -> MiningSiteProgress& {
+        MiningSiteProgress* site = siteForArtifact(artifactId);
         if (site == nullptr) {
             const auto pending = std::find_if(
-                state.meta.miningStorySites.begin(),
-                state.meta.miningStorySites.end(),
-                [&](const MiningStorySiteProgress& candidate) {
+                state.meta.miningSites.begin(),
+                state.meta.miningSites.end(),
+                [&](const MiningSiteProgress& candidate) {
                     return isIoStorySite(candidate) && !candidate.completed;
                 });
-            if (pending != state.meta.miningStorySites.end()) {
+            if (pending != state.meta.miningSites.end()) {
                 site = &*pending;
             }
         }
         if (site == nullptr) {
-            MiningStorySiteProgress migrated;
+            MiningSiteProgress migrated;
             migrated.siteId = siteId.empty()
                 ? std::string(content::destination::jupiter)
                     + "_story_gate_"
@@ -1973,8 +2202,9 @@ void normalizeLegacyIoArtifactForVersionSeven(
             migrated.gateType = MiningGateType::HazardCocoon;
             migrated.artifactId = std::string(artifactId);
             migrated.discovered = true;
-            state.meta.miningStorySites.push_back(std::move(migrated));
-            site = &state.meta.miningStorySites.back();
+            migrated.legacyMigrated = true;
+            state.meta.miningSites.push_back(std::move(migrated));
+            site = &state.meta.miningSites.back();
         }
         if (site->siteId.empty()) {
             site->siteId = std::string(content::destination::jupiter)
@@ -1997,7 +2227,13 @@ void normalizeLegacyIoArtifactForVersionSeven(
         if (artifact.kind != ArtifactKind::Story && !matchesStorySite) {
             return;
         }
-        (void)ensureSite(artifact.id, {}, metadata);
+        MiningSiteProgress& site = ensureSite(artifact.id, {}, metadata);
+        // The content-owned protected-objective ID is the scenario adapter's
+        // stable identity. Legacy site IDs and seeds remain on the site
+        // record; old artifact labels are normalized so safe extraction can
+        // enter the generic scenario event path exactly once.
+        site.artifactId = content::protectedObjective::ioMinorArtifact;
+        artifact.id = site.artifactId;
         artifact.kind = ArtifactKind::Boost;
         artifact.rewardType = ArtifactRewardType::DroneUpgradeCredit;
         if (artifactAlreadyRecovered) {
@@ -2019,11 +2255,12 @@ void normalizeLegacyIoArtifactForVersionSeven(
                 + std::to_string(static_cast<int>(MiningGateType::HazardCocoon))
                 + "_artifact";
         }
-        MiningStorySiteProgress& site = ensureSite(
+        MiningSiteProgress& site = ensureSite(
             artifactId,
             mining.gate.siteId,
             mining.arenaMetadata);
-        mining.gate.storyCritical = true;
+        site.artifactId = content::protectedObjective::ioMinorArtifact;
+        mining.gate.compatibilityCritical = true;
         mining.gate.discovered = true;
         mining.gate.siteId = site.siteId;
         mining.gate.artifactId = site.artifactId;
@@ -2097,6 +2334,47 @@ void normalizeLegacyMiningHazards(MiningRunState& mining)
             if (cell->hazardAffinity == MiningElementalAffinity::None) {
                 cell->hazardAffinity = legacyHazardAffinity(mining, x);
             }
+        }
+    }
+}
+
+void normalizeRestoredHazardDroneAssignments(MiningRunState& mining)
+{
+    if (!mining.active) {
+        return;
+    }
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        if (agent.role != MiniDroneRole::Hazard) {
+            continue;
+        }
+        agent.x = std::clamp(
+            agent.x,
+            0.5,
+            std::max(0.5, static_cast<double>(mining.terrain.width) - 0.5));
+        agent.y = std::clamp(
+            agent.y,
+            0.5,
+            std::max(0.5, static_cast<double>(mining.terrain.height) - 0.5));
+        const MiningCell* target = miningCellAt(
+            mining.terrain,
+            agent.targetCellX,
+            agent.targetCellY);
+        const bool validTarget =
+            target != nullptr &&
+            target->revealed &&
+            target->hazard &&
+            target->material == MiningCellMaterial::HazardPocket &&
+            tuning::mining::hazardDroneRequiredMark(target->hazardAffinity) <=
+                agent.upgradeLevel;
+        if (validTarget) {
+            continue;
+        }
+        agent.targetCellX = -1;
+        agent.targetCellY = -1;
+        agent.taskProgressSeconds = 0.0;
+        if (agent.behavior == MiningMiniDroneBehavior::Traveling ||
+            agent.behavior == MiningMiniDroneBehavior::Working) {
+            agent.behavior = MiningMiniDroneBehavior::Returning;
         }
     }
 }
@@ -2182,6 +2460,455 @@ void appendUnique(std::vector<std::string>& values, const std::string& value)
     }
 }
 
+std::string scenarioRewardId(
+    std::string_view scenarioId,
+    std::string_view stepId,
+    int rewardIndex)
+{
+    return std::string(scenarioId) + "/" + std::string(stepId) + "/" +
+        std::to_string(std::max(0, rewardIndex));
+}
+
+void markScenarioRewardsAwarded(
+    ScenarioInstance& instance,
+    std::string_view scenarioId,
+    std::string_view stepId,
+    int rewardCount)
+{
+    for (int rewardIndex = 0; rewardIndex < rewardCount; ++rewardIndex) {
+        appendUnique(
+            instance.awardedRewardIds,
+            scenarioRewardId(scenarioId, stepId, rewardIndex));
+    }
+}
+
+void migrateLegacyCampaignScenarios(
+    GameState& state,
+    const ContentCatalog& catalog)
+{
+    constexpr std::string_view outerTransferReady = "outer_transfer_ready";
+    ensureScenarioInstances(state, catalog);
+
+    const auto contains = [](const std::vector<std::string>& values, std::string_view value) {
+        return std::find(values.begin(), values.end(), value) != values.end();
+    };
+    const auto setBriefingComplete = [](
+        ScenarioStepProgress* progress,
+        bool acknowledged) {
+        if (progress == nullptr || !acknowledged) {
+            return;
+        }
+        progress->progress = std::max(1, progress->progress);
+        progress->briefingAcknowledged = true;
+        progress->completed = true;
+        progress->claimed = true;
+    };
+    const auto setDeliveryProgress = [](
+        ScenarioStepProgress* progress,
+        int delivered,
+        int required,
+        bool claimed) {
+        if (progress == nullptr) {
+            return;
+        }
+        progress->progress = std::max(
+            progress->progress,
+            std::clamp(delivered, 0, required));
+        if (claimed) {
+            progress->progress = required;
+            progress->completed = true;
+            progress->claimed = true;
+        } else if (progress->progress >= required) {
+            progress->completed = true;
+        }
+    };
+    const auto applyMigratedFrontierReadiness = [&](
+        const ScenarioInstance& instance,
+        std::string_view stepId) {
+        const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(
+            state,
+            catalog,
+            instance.id);
+        if (definition == nullptr) {
+            return;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, stepId);
+        if (step == nullptr || !std::any_of(
+                step->rewards.begin(),
+                step->rewards.end(),
+                [](const ScenarioReward& reward) {
+                    return reward.kind == ScenarioRewardKind::FrontierReadiness;
+                })) {
+            return;
+        }
+        state.run.frontierReadiness = frontierReadinessCap(state, catalog);
+    };
+
+    const bool lunarClaimed =
+        state.meta.lunarProspectorClaimed ||
+        contains(state.meta.unlockKeys, content::unlock::routeMars);
+    const bool lunarStarted =
+        state.meta.lunarMiningBriefingAcknowledged ||
+        state.meta.prospectorCommonOreRecovered > 0 ||
+        lunarClaimed;
+    if (ScenarioInstance* lunar =
+            findScenarioInstance(state.meta, content::scenario::lunarProspector)) {
+        ScenarioStepProgress* briefing = findScenarioStepProgress(*lunar, "briefing");
+        ScenarioStepProgress* delivery = findScenarioStepProgress(*lunar, "delivery");
+        setBriefingComplete(briefing, lunarStarted);
+        setDeliveryProgress(
+            delivery,
+            state.meta.prospectorCommonOreRecovered,
+            tuning::research::prospectorCommonOreGoal,
+            lunarClaimed);
+        if (lunarClaimed) {
+            markScenarioRewardsAwarded(
+                *lunar,
+                content::scenario::lunarProspector,
+                "delivery",
+                5);
+            appendUnique(state.meta.unlockKeys, content::unlock::droneBay);
+            appendUnique(state.meta.unlockKeys, content::unlock::routeMars);
+            state.meta.lunarProspectorClaimed = true;
+            state.meta.lunarMiningBriefingAcknowledged = true;
+            state.meta.prospectorCommonOreRecovered =
+                tuning::research::prospectorCommonOreGoal;
+            applyMigratedFrontierReadiness(*lunar, "delivery");
+        }
+        lunar->completed =
+            briefing != nullptr && briefing->completed &&
+            delivery != nullptr && delivery->completed && delivery->claimed;
+    }
+
+    const bool marsClaimed =
+        state.meta.marsBayExpansionClaimed ||
+        contains(state.meta.unlockKeys, content::unlock::routeJupiter);
+    const bool marsStarted =
+        state.meta.marsMiningBriefingAcknowledged ||
+        state.meta.marsCommonOreRecovered > 0 ||
+        marsClaimed;
+    if (ScenarioInstance* mars =
+            findScenarioInstance(state.meta, content::scenario::marsBayExpansion)) {
+        ScenarioStepProgress* briefing = findScenarioStepProgress(*mars, "briefing");
+        ScenarioStepProgress* delivery = findScenarioStepProgress(*mars, "delivery");
+        setBriefingComplete(briefing, marsStarted);
+        setDeliveryProgress(
+            delivery,
+            state.meta.marsCommonOreRecovered,
+            tuning::research::marsBayCommonOreGoal,
+            marsClaimed);
+        if (marsClaimed) {
+            markScenarioRewardsAwarded(
+                *mars,
+                content::scenario::marsBayExpansion,
+                "delivery",
+                3);
+            appendUnique(state.meta.unlockKeys, content::unlock::routeJupiter);
+            state.meta.marsBayExpansionClaimed = true;
+            state.meta.marsMiningBriefingAcknowledged = true;
+            state.meta.marsCommonOreRecovered =
+                tuning::research::marsBayCommonOreGoal;
+            applyMigratedFrontierReadiness(*mars, "delivery");
+        }
+        mars->completed =
+            briefing != nullptr && briefing->completed &&
+            delivery != nullptr && delivery->completed && delivery->claimed;
+    }
+
+    const bool ioRecovered =
+        state.meta.ioArtifactRecovered ||
+        contains(state.meta.unlockKeys, outerTransferReady) ||
+        state.meta.saturnSlingshotPerfect ||
+        state.meta.saturnRouteUnlocked ||
+        contains(state.meta.unlockKeys, content::unlock::routeSaturn);
+    const bool ioCommissioned =
+        state.meta.ioHazardDroneCommissioned ||
+        ioRecovered ||
+        contains(state.meta.unlockKeys, content::unlock::ioHazardDrone) ||
+        contains(state.meta.ownedDroneIds, content::drone::hazardDrone);
+    if (ScenarioInstance* io =
+            findScenarioInstance(state.meta, content::scenario::volcanicDescent)) {
+        ScenarioStepProgress* commission = findScenarioStepProgress(*io, "commission");
+        ScenarioStepProgress* recovery = findScenarioStepProgress(*io, "recovery");
+        if (commission != nullptr) {
+            commission->briefingAcknowledged =
+                commission->briefingAcknowledged ||
+                state.meta.ioVolcanicBriefingAcknowledged ||
+                ioCommissioned;
+            if (ioCommissioned) {
+                commission->progress = std::max(1, commission->progress);
+                commission->completed = true;
+                commission->claimed = true;
+                markScenarioRewardsAwarded(
+                    *io,
+                    content::scenario::volcanicDescent,
+                    "commission",
+                    2);
+                appendUnique(state.meta.unlockKeys, content::unlock::ioHazardDrone);
+                appendUnique(state.meta.ownedDroneIds, content::drone::hazardDrone);
+                state.meta.ioVolcanicBriefingAcknowledged = true;
+                state.meta.ioHazardDroneCommissioned = true;
+            }
+        }
+        if (recovery != nullptr && ioRecovered) {
+            recovery->progress = std::max(1, recovery->progress);
+            recovery->completed = true;
+            recovery->claimed = true;
+            markScenarioRewardsAwarded(
+                *io,
+                content::scenario::volcanicDescent,
+                "recovery",
+                2);
+            appendUnique(state.meta.unlockKeys, std::string(outerTransferReady));
+            state.meta.ioArtifactRecovered = true;
+        }
+        io->completed =
+            commission != nullptr && commission->completed &&
+            recovery != nullptr && recovery->completed;
+    }
+
+    const bool slingshotClaimed =
+        state.meta.saturnRouteUnlocked ||
+        contains(state.meta.unlockKeys, content::unlock::routeSaturn);
+    const bool slingshotPerfect =
+        state.meta.saturnSlingshotPerfect ||
+        slingshotClaimed;
+    const bool slingshotStarted =
+        state.meta.saturnSlingshotBriefingAcknowledged ||
+        state.meta.saturnSlingshotFailed ||
+        state.meta.saturnSlingshotFailureAcknowledged ||
+        slingshotPerfect;
+    if (ScenarioInstance* transfer =
+            findScenarioInstance(state.meta, content::scenario::outerTransfer)) {
+        ScenarioStepProgress* briefing = findScenarioStepProgress(*transfer, "briefing");
+        ScenarioStepProgress* flyby = findScenarioStepProgress(*transfer, "flyby");
+        setBriefingComplete(briefing, slingshotStarted);
+        if (flyby != nullptr) {
+            flyby->failureSeen =
+                flyby->failureSeen ||
+                state.meta.saturnSlingshotFailed ||
+                state.meta.saturnSlingshotFailureAcknowledged;
+            flyby->failureAcknowledged =
+                flyby->failureAcknowledged ||
+                state.meta.saturnSlingshotFailureAcknowledged;
+            if (slingshotPerfect) {
+                flyby->progress = std::max(1, flyby->progress);
+                flyby->completed = true;
+            }
+            if (slingshotClaimed) {
+                flyby->claimed = true;
+                markScenarioRewardsAwarded(
+                    *transfer,
+                    content::scenario::outerTransfer,
+                    "flyby",
+                    2);
+                appendUnique(state.meta.unlockKeys, content::unlock::routeSaturn);
+                state.meta.saturnRouteUnlocked = true;
+                applyMigratedFrontierReadiness(*transfer, "flyby");
+            }
+        }
+        state.meta.saturnSlingshotBriefingAcknowledged =
+            state.meta.saturnSlingshotBriefingAcknowledged || slingshotStarted;
+        state.meta.saturnSlingshotPerfect =
+            state.meta.saturnSlingshotPerfect || slingshotPerfect;
+        transfer->completed =
+            briefing != nullptr && briefing->completed &&
+            flyby != nullptr && flyby->completed && flyby->claimed;
+    }
+
+    ensureDroneBayState(state, catalog);
+}
+
+bool migrateLegacyCocoonLayer(
+    MiningTerrain& terrain,
+    MiningGateRuntime& gate,
+    MiningArtifactObject& artifact,
+    const MiningCocoonDefinition& definition)
+{
+    if (!gate.active ||
+        gate.type != MiningGateType::HazardCocoon ||
+        definition.id.empty() ||
+        definition.layers.empty()) {
+        return false;
+    }
+
+    const int anchorX = static_cast<int>(std::floor(gate.anchorX));
+    const int anchorY = static_cast<int>(std::floor(gate.anchorY));
+    gate.cocoonDefinitionId = definition.id;
+    gate.cocoonDefinitionVersion = std::max(1, definition.version);
+    gate.protectedObjective = definition.protectedObjective;
+    gate.cocoonLayers.clear();
+
+    bool previousLayersCompleted = true;
+    int earliestIncomplete = -1;
+    for (std::size_t layerIndex = 0;
+         layerIndex < definition.layers.size();
+         ++layerIndex) {
+        const MiningCocoonLayerDefinition& layerDefinition =
+            definition.layers[layerIndex];
+        std::vector<MiningCell*> cells;
+        cells.reserve(layerDefinition.offsets.size());
+        bool anyLegacyCellRevealed = false;
+        int remaining = 0;
+        for (const MiningCocoonOffset& offset : layerDefinition.offsets) {
+            MiningCell* cell = miningCellAt(
+                terrain,
+                anchorX + offset.x,
+                anchorY + offset.y);
+            if (cell == nullptr) {
+                continue;
+            }
+            anyLegacyCellRevealed =
+                anyLegacyCellRevealed || cell->revealed;
+            cell->cocoonLayer = static_cast<int>(layerIndex);
+            cell->gateAssociated = true;
+            cells.push_back(cell);
+            const bool incomplete =
+                layerDefinition.completionRule ==
+                    MiningCocoonCompletionRule::TreatOnly
+                ? cell->material == MiningCellMaterial::HazardPocket
+                : cell->material != MiningCellMaterial::Empty;
+            remaining += incomplete ? 1 : 0;
+        }
+
+        const bool completed = remaining == 0;
+        bool revealed = false;
+        switch (layerDefinition.revealPolicy) {
+        case MiningCocoonRevealPolicy::OnAnyCellDiscovered:
+            revealed = anyLegacyCellRevealed || completed;
+            break;
+        case MiningCocoonRevealPolicy::AfterPreviousLayerCompleted:
+            revealed = previousLayersCompleted;
+            break;
+        case MiningCocoonRevealPolicy::Immediately:
+            revealed = true;
+            break;
+        }
+        if (!previousLayersCompleted &&
+            layerDefinition.revealPolicy ==
+                MiningCocoonRevealPolicy::AfterPreviousLayerCompleted) {
+            revealed = false;
+        }
+        for (MiningCell* cell : cells) {
+            cell->revealed = revealed;
+        }
+
+        MiningCocoonLayerProgress progress;
+        progress.id = layerDefinition.id;
+        progress.label = layerDefinition.label;
+        progress.total = static_cast<int>(cells.size());
+        progress.remaining = remaining;
+        progress.requiredHazardMark =
+            std::max(0, layerDefinition.requiredHazardMark);
+        progress.revealed = revealed;
+        progress.completed = completed;
+        progress.completionRule = layerDefinition.completionRule;
+        progress.revealPolicy = layerDefinition.revealPolicy;
+        gate.cocoonLayers.push_back(std::move(progress));
+        if (!completed && earliestIncomplete < 0) {
+            earliestIncomplete = static_cast<int>(layerIndex);
+        }
+        previousLayersCompleted =
+            previousLayersCompleted && completed;
+    }
+
+    gate.activeCocoonLayer = earliestIncomplete;
+    gate.shellTilesTotal = 0;
+    gate.shellTilesRemaining = 0;
+    for (const MiningCocoonLayerProgress& layer : gate.cocoonLayers) {
+        gate.shellTilesTotal += layer.total;
+        gate.shellTilesRemaining += layer.remaining;
+    }
+    gate.outerShellTilesTotal =
+        gate.cocoonLayers.empty() ? 0 : gate.cocoonLayers[0].total;
+    gate.outerShellTilesRemaining =
+        gate.cocoonLayers.empty() ? 0 : gate.cocoonLayers[0].remaining;
+    gate.innerShellTilesTotal =
+        gate.cocoonLayers.size() < 2 ? 0 : gate.cocoonLayers[1].total;
+    gate.innerShellTilesRemaining =
+        gate.cocoonLayers.size() < 2 ? 0 : gate.cocoonLayers[1].remaining;
+    gate.hazardTreatmentComplete = gate.shellTilesRemaining == 0;
+    gate.derivedStateDirty = true;
+
+    const bool artifactAlreadyExposed =
+        artifact.present &&
+        (artifact.state == MiningArtifactState::Loose ||
+         artifact.state == MiningArtifactState::Delivered ||
+         artifact.state == MiningArtifactState::Destroyed ||
+         artifact.tethered);
+    if (artifact.present) {
+        if (artifactAlreadyExposed) {
+            artifact.revealed = true;
+        } else if (artifact.state == MiningArtifactState::Embedded) {
+            artifact.revealed = gate.activeCocoonLayer < 0;
+            const int artifactX =
+                static_cast<int>(std::floor(artifact.x));
+            const int artifactY =
+                static_cast<int>(std::floor(artifact.y));
+            if (MiningCell* artifactCell =
+                    miningCellAt(terrain, artifactX, artifactY);
+                artifactCell != nullptr) {
+                artifactCell->material =
+                    MiningCellMaterial::ArtifactCache;
+                artifactCell->hazard = false;
+                artifactCell->gateAssociated = true;
+                artifactCell->cocoonLayer = -1;
+                artifactCell->revealed = artifact.revealed;
+            }
+        }
+    }
+    return true;
+}
+
+void migrateLegacyIoCocoon(
+    MiningRunState& mining,
+    const ContentCatalog& catalog)
+{
+    if (!mining.active ||
+        mining.destinationId != content::destination::jupiter) {
+        return;
+    }
+    const MiningSiteDefinition* site = nullptr;
+    if (!mining.miningSiteDefinitionId.empty()) {
+        site = findMiningSiteDefinition(
+            catalog,
+            mining.miningSiteDefinitionId);
+    }
+    if (site == nullptr) {
+        site = findMiningSiteDefinition(
+            catalog,
+            content::miningSite::thermalLayeredRecovery);
+    }
+    if (site == nullptr || site->cocoon.layers.empty()) {
+        return;
+    }
+
+    bool migrated = migrateLegacyCocoonLayer(
+        mining.terrain,
+        mining.gate,
+        mining.artifact,
+        site->cocoon);
+    for (MiningDepthLayerState& layer : mining.depthLayers) {
+        migrated =
+            migrateLegacyCocoonLayer(
+                layer.terrain,
+                layer.gate,
+                layer.artifact,
+                site->cocoon) ||
+            migrated;
+    }
+    if (!migrated) {
+        return;
+    }
+    mining.scenarioId = content::scenario::volcanicDescent;
+    mining.scenarioStepId = "recovery";
+    mining.miningSiteDefinitionId = site->id;
+    mining.miningSiteBiome = site->biome;
+    mining.siteBaselineOxygenSeconds =
+        std::max(0.0, site->baselineOxygenSeconds);
+}
+
 } // namespace
 
 SaveData captureSaveData(const GameState& state)
@@ -2236,6 +2963,7 @@ SaveData captureSaveData(const GameState& state)
     save.ownedDroneIds = state.meta.ownedDroneIds;
     save.equippedDroneIds = state.meta.equippedDroneIds;
     save.droneUpgrades = state.meta.droneUpgrades;
+    save.scenarios = state.meta.scenarios;
     save.prospectorCommonOreRecovered = state.meta.prospectorCommonOreRecovered;
     save.lunarMiningBriefingAcknowledged = state.meta.lunarMiningBriefingAcknowledged;
     save.lunarProspectorClaimed = state.meta.lunarProspectorClaimed;
@@ -2253,7 +2981,7 @@ SaveData captureSaveData(const GameState& state)
     save.saturnSlingshotFailureAcknowledged = state.meta.saturnSlingshotFailureAcknowledged;
     save.artifacts = state.meta.artifacts;
     save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
-    save.miningStorySites = state.meta.miningStorySites;
+    save.miningSites = state.meta.miningSites;
     save.furthestTier = state.meta.furthestTier;
     save.shipsLost = state.meta.shipsLost;
     save.astronautsLost = state.meta.astronautsLost;
@@ -2407,22 +3135,22 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     if (state.run.mining.active) {
         MiningRunState& mining = state.run.mining;
         if (save.version < 5) {
-            // Older runs moved the shuttle with every one-way depth change, so
-            // their current layer is the only safe entry layer to restore.
-            mining.entryDepthZone = mining.depthZone;
-            mining.deepestDepthZone = mining.depthZone;
+            // Legacy saves did not cache traversable depth layers. Preserve the
+            // active terrain and actor positions, but restore the ship to surface.
+            mining.entryDepthZone = 0;
+            mining.deepestDepthZone = std::max(0, mining.depthZone);
             mining.depthLayers.clear();
             mining.hasDownwardTransition = false;
             mining.downwardTransitionX = 0.0;
         } else {
-            mining.entryDepthZone = std::clamp(mining.entryDepthZone, 0, mining.depthZone);
-            mining.deepestDepthZone = std::max({mining.entryDepthZone, mining.depthZone, mining.deepestDepthZone});
+            mining.entryDepthZone = 0;
+            mining.deepestDepthZone = std::max({0, mining.depthZone, mining.deepestDepthZone});
             mining.depthLayers.erase(
                 std::remove_if(
                     mining.depthLayers.begin(),
                     mining.depthLayers.end(),
                     [&](const MiningDepthLayerState& layer) {
-                        return layer.depthZone < mining.entryDepthZone ||
+                        return layer.depthZone < 0 ||
                             layer.depthZone == mining.depthZone ||
                             layer.terrain.depthZone != layer.depthZone ||
                             static_cast<int>(layer.terrain.cells.size()) != layer.terrain.width * layer.terrain.height;
@@ -2499,8 +3227,12 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     normalizeLegacyMiningArtifact(state.run.mining);
+    if (save.version < 9) {
+        migrateLegacyIoCocoon(state.run.mining, catalog);
+    }
     normalizeLegacyMiningReturnZone(state.run.mining);
     normalizeLegacyMiningHazards(state.run.mining);
+    normalizeRestoredHazardDroneAssignments(state.run.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;
@@ -2517,6 +3249,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
     state.meta.droneUpgrades = save.droneUpgrades;
+    state.meta.scenarios = save.scenarios;
     state.meta.prospectorCommonOreRecovered = std::clamp(
         save.prospectorCommonOreRecovered,
         0,
@@ -2575,7 +3308,12 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     state.meta.artifacts = save.artifacts;
     state.meta.miningFirstClearProgress = save.miningFirstClearProgress;
-    state.meta.miningStorySites = save.miningStorySites;
+    state.meta.miningSites = save.miningSites;
+    if (save.version < 9) {
+        for (MiningSiteProgress& site : state.meta.miningSites) {
+            site.legacyMigrated = true;
+        }
+    }
     state.meta.furthestTier = save.furthestTier;
     {
         const int marsIndex = [&]() {
@@ -2603,10 +3341,21 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         const bool reachedSaturn = (saturnIndex >= 0 && state.run.destinationIndex >= saturnIndex)
             || state.meta.furthestTier >= 4;
         const bool completedLegacyIoSite = std::any_of(
-            state.meta.miningStorySites.begin(),
-            state.meta.miningStorySites.end(),
-            [](const MiningStorySiteProgress& site) {
+            state.meta.miningSites.begin(),
+            state.meta.miningSites.end(),
+            [](const MiningSiteProgress& site) {
                 return site.destinationId == content::destination::jupiter && site.completed;
+            });
+        const bool activeLegacyIoCocoon =
+            state.run.mining.active &&
+            state.run.mining.destinationId == content::destination::jupiter &&
+            state.run.mining.gate.type == MiningGateType::HazardCocoon;
+        const bool pendingLegacyIoCocoon = std::any_of(
+            state.meta.miningSites.begin(),
+            state.meta.miningSites.end(),
+            [](const MiningSiteProgress& site) {
+                return site.destinationId == content::destination::jupiter &&
+                    site.gateType == MiningGateType::HazardCocoon && !site.completed;
             });
 
         if (save.version < 7) {
@@ -2631,7 +3380,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
                 || std::find(
                     state.meta.ownedDroneIds.begin(),
                     state.meta.ownedDroneIds.end(),
-                    content::drone::hazardDrone) != state.meta.ownedDroneIds.end()) {
+                    content::drone::hazardDrone) != state.meta.ownedDroneIds.end()
+                || activeLegacyIoCocoon
+                || pendingLegacyIoCocoon) {
                 state.meta.ioVolcanicBriefingAcknowledged = true;
                 state.meta.ioHazardDroneCommissioned = true;
             }
@@ -2686,6 +3437,11 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             state.meta.saturnSlingshotPerfect = true;
         }
         ensureDroneBayState(state, catalog);
+    }
+    if (save.version < 9) {
+        migrateLegacyCampaignScenarios(state, catalog);
+    } else {
+        ensureScenarioInstances(state, catalog);
     }
     state.meta.shipsLost = save.shipsLost;
     state.meta.astronautsLost = save.astronautsLost;
@@ -2904,6 +3660,9 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
     writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
+    writeField(out, save_schema::field::surfacePendingScenario, save.surfaceExpedition.pendingScenarioId);
+    writeField(out, save_schema::field::surfacePendingScenarioStep, save.surfaceExpedition.pendingScenarioStepId);
+    writeField(out, save_schema::field::surfacePendingMiningSite, save.surfaceExpedition.pendingMiningSiteDefinitionId);
     writeField(out, save_schema::field::surfaceBankedMiningArena, serializeSurfaceBankedMiningArena(save.surfaceExpedition));
     writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
     writeField(out, save_schema::field::surfaceUpgrades, join(save.surfaceUpgradeIds, save_schema::listDelimiter));
@@ -2916,6 +3675,14 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningGateRuntime, serializeMiningGateRuntime(save.mining.gate));
     writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
+    writeField(
+        out,
+        save_schema::field::miningScenarioContext,
+        encodeSaveBlob(save.mining.scenarioId) + "^" +
+            encodeSaveBlob(save.mining.scenarioStepId) + "^" +
+            encodeSaveBlob(save.mining.miningSiteDefinitionId) + "^" +
+            std::to_string(static_cast<int>(save.mining.miningSiteBiome)) + "^" +
+            std::to_string(std::max(0.0, save.mining.siteBaselineOxygenSeconds)));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
     writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
     writeField(out, save_schema::field::miningDroneHealth, save.mining.droneHealth);
@@ -2967,6 +3734,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::ownedDrones, join(save.ownedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equippedDrones, join(save.equippedDroneIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneUpgrades, serializeDroneUpgrades(save.droneUpgrades));
+    writeField(out, save_schema::field::scenarios, serializeScenarioInstances(save.scenarios));
     writeField(out, save_schema::field::prospectorCommonOreRecovered, save.prospectorCommonOreRecovered);
     writeField(out, save_schema::field::lunarMiningBriefingAcknowledged, save.lunarMiningBriefingAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::lunarProspectorClaimed, save.lunarProspectorClaimed ? 1 : 0);
@@ -2984,7 +3752,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::saturnSlingshotFailureAcknowledged, save.saturnSlingshotFailureAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
-    writeField(out, save_schema::field::miningStorySites, serializeMiningStorySites(save.miningStorySites));
+    writeField(out, save_schema::field::miningStorySites, serializeMiningSites(save.miningSites));
     writeField(out, save_schema::field::furthestTier, save.furthestTier);
     writeField(out, save_schema::field::shipsLost, save.shipsLost);
     writeField(out, save_schema::field::astronautsLost, save.astronautsLost);
@@ -3157,6 +3925,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.miningSitePrepared = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceMiningUsed) {
             save.surfaceExpedition.miningRunUsed = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::surfacePendingScenario) {
+            save.surfaceExpedition.pendingScenarioId = std::string(value);
+        } else if (key == save_schema::field::surfacePendingScenarioStep) {
+            save.surfaceExpedition.pendingScenarioStepId = std::string(value);
+        } else if (key == save_schema::field::surfacePendingMiningSite) {
+            save.surfaceExpedition.pendingMiningSiteDefinitionId = std::string(value);
         } else if (key == save_schema::field::surfaceLog) {
             save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
         } else if (key == save_schema::field::surfaceUpgrades) {
@@ -3173,6 +3947,22 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.destinationId = std::string(value);
         } else if (key == save_schema::field::miningSite) {
             save.mining.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.mining.siteProfile)));
+        } else if (key == save_schema::field::miningScenarioContext) {
+            const std::vector<std::string> fields = split(value, '^');
+            if (!fields.empty()) save.mining.scenarioId = decodeSaveBlob(fields[0]);
+            if (fields.size() > 1) save.mining.scenarioStepId = decodeSaveBlob(fields[1]);
+            if (fields.size() > 2) save.mining.miningSiteDefinitionId = decodeSaveBlob(fields[2]);
+            if (fields.size() > 3) {
+                save.mining.miningSiteBiome = static_cast<MiningSiteBiome>(
+                    std::clamp(
+                        parseInt(fields[3], 0),
+                        static_cast<int>(MiningSiteBiome::Default),
+                        static_cast<int>(MiningSiteBiome::ThermalLava)));
+            }
+            if (fields.size() > 4) {
+                save.mining.siteBaselineOxygenSeconds =
+                    std::max(0.0, parseDouble(fields[4], 0.0));
+            }
         } else if (key == save_schema::field::miningElapsed) {
             save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);
         } else if (key == save_schema::field::miningOxygen) {

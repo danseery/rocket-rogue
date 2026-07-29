@@ -2,20 +2,20 @@
 
 The filename and `MiniDrone*` C++ symbols are retained as legacy internal identifiers. Player-facing copy and current design terminology use Support Drone.
 
-Support Drone roles also act as forecastable keys for artifact sites; see [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). Capability checks communicate readiness but never rubber-band arena difficulty.
+Support Drone roles also act as forecastable keys for protected-objective sites; see [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md) and [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md). Capability checks communicate readiness but never rubber-band arena difficulty.
 
 This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Treat USG Notes as the primary direction: Support Drones should enable exploration, excavation, logistics, endurance, engineering, and post-solar autonomous combat rather than feeling like generic stat pets. *Solar Jetman* is the mechanical touchstone for gravity, inertia, towing burden, and the difference between vehicle and pilot roles; OREBIT's transferable support swarm is a deliberate modernization beyond that reference.
 
 ## Role In The Loop
 
-Drone Bay begins as the payoff for the lunar mining contract. Safely delivering 30 Moon Common Ore creates a ready-to-claim Prospector milestone; `Install Prospector Mk I` permanently owns and equips the first Prospector Support Drone (Mining role) in Slot 1. Mars then reserves 40 local Common Ore for an explicit `Fabricate Drone Bay Slot 2` action, leaving that slot empty. The extended Mars contract makes repeated oxygen, heat, integrity, repair, cargo, and return decisions part of the early loop. Io later commissions the first Hazard Support Drone.
+Drone Bay begins as the payoff for the lunar mining contract. Safely delivering 30 Moon Common Ore creates a ready-to-claim Prospector milestone; `Install Prospector Mk I` permanently owns and equips the first Prospector Support Drone (Mining role) in Slot 1. Mars then reserves 40 local Common Ore for an explicit `Fabricate Slot 2` action, leaving that slot empty. The extended Mars contract makes repeated oxygen, heat, integrity, repair, cargo, and return decisions part of the early loop. Io later commissions the first Hazard Support Drone.
 
 Support Drone choices should be readable and chunky:
 
 - Mining Support Drone: acquires a nearby revealed tile around the controlled actor, flies to it, physically drills it, and returns immediately when its hard leash or an anchor transfer fires.
 - Resource Support Drone: collects loose chunks around the controlled actor and carries them until a valid shuttle-delivery window or rig collection is available.
 - Survey Support Drone: scouts deeper than the controlled actor. Scanner pulses reveal from both the actor and the Survey Support Drone's position.
-- Hazard Support Drone: acquires revealed environmental pockets around the controlled actor and converts them into safe mineable terrain before the actor remains in their contact envelope.
+- Hazard Support Drone: flies directly through terrain to revealed environmental pockets and converts them into safe mineable terrain before the actor remains in their contact envelope. It never reveals or targets hidden cells.
 - Attack Support Drone: acquires threats relative to the controlled actor, fires from its own position, and returns to the actor's orbit before engaging again.
 - Defense Support Drone: orbits on the threat-facing side and intercepts incoming damage for the controlled actor before remaining damage reaches rig health or suit integrity.
 
@@ -37,11 +37,11 @@ Every fixed update resolves that binding through `resolveMiniDroneAnchor` into a
 - Cross-depth transfers recreate deterministic formation positions around the new anchor while preserving haul, shield state, cooldowns, and orbit phase.
 - A parked or destroyed rig is never selected as the return target for a `ControlledActor` Support Drone.
 
-Following and defense outrank finishing remote work. Mining, Resource, Survey, and Hazard Support Drones may make bounded sorties, but a hard-leash or anchor-transfer event recalls them immediately. Shuttle unloading is a temporary task destination, never a parent transfer: a hauling Mining or Resource Support Drone detaches to unload only when the active actor is on the entry layer and near the shuttle. Otherwise it retains its haul and follows.
+Following and defense outrank finishing remote work. Mining, Resource, and Survey Support Drones make collision-aware bounded sorties, and a hard-leash or anchor-transfer event recalls them immediately. Hazard Support Drones instead cross terrain directly to valid revealed work and return directly to formation when no work remains. Shuttle unloading is a temporary task destination, never a parent transfer: a hauling Mining or Resource Support Drone detaches to unload only when the active actor is on the entry layer and near the shuttle. Otherwise it retains its haul and follows.
 
 Idle and returning Support Drones continuously orbit at `0.45` radians per second. Role rings are Mining `1.6` cells, Resource `2.05`, Hazard `1.9`, Defense `2.7`, Attack `3.35`, and Survey `3.4`. Each equipped frame retains a stable formation slot; alternating rings counter-rotate. Defense rings reorient toward the closest threat.
 
-Orbit centers lead the anchor by `0.18` seconds of its velocity. Support Drones return at `5.6` cells per second and use `8.5` cells per second catch-up speed when more than `4.5` cells behind, which lets them keep pace with the faster Mining Rig. A blocked orbit goal projects radially toward the anchor until a valid point is found. Small Support Drone colliders admit suit-only passages, avoid terrain and one another, and never stack.
+Orbit centers lead the anchor by `0.18` seconds of its velocity. Support Drones return at `5.6` cells per second and use `8.5` cells per second catch-up speed when more than `4.5` cells behind, which lets them keep pace with the faster Mining Rig. A blocked orbit goal projects radially toward the anchor until a valid point is found. Mining, Resource, Survey, Attack, and Defense Support Drone colliders admit suit-only passages and avoid terrain. Hazard Support Drones deliberately ignore terrain collision, use distinct target-approach points, and show a cyan transit shimmer while crossing solid cells.
 
 Artifact tether ownership is separate from swarm anchoring. Anchor transfer never attaches, releases, or modifies an artifact, and Support Drones do not collide with the tether line.
 
@@ -83,7 +83,7 @@ The current implementation supports persistent Support Drone loadouts, transfera
 - During mining, the Swarm command strip keeps the chosen build visible with active build name, current anchor, threat count, allied/enemy shot counts, crit chance, volley size, shield relief, defeated enemies, Support Drone damage, counter-hit damage, shield absorption, and damage routed to the rig or suit.
 - Hostile mining renders compact enemy silhouettes, allied blue/cyan projectiles, enemy red/orange or elemental projectiles, directional shield barriers during incoming fire, rig health bars, and floating damage/crit text without persistent aura disks.
 - Every equipped Support Drone is an independent saved simulation agent with its own world position, velocity, behavior, target, cooldown, anchor target, stable formation slot, and orbit phase. Logical parenting resolves a home frame but never directly transforms a Support Drone sprite.
-- Mining, Hazard, and Attack Support Drones travel to world targets and brake smoothly as they settle into a task. Defense units guard the active actor's threat-facing side, Survey units scout deeper, and Resource units collect spatial loose chunks nearby. Mining units show compact chip-and-spark effects while drilling; Hazard units project affinity-colored treatment beams and completion bursts. Their sprites stay upright when the controlled actor turns.
+- Mining, Hazard, and Attack Support Drones travel to world targets and brake smoothly as they settle into a task. Defense units guard the active actor's threat-facing side, Survey units scout deeper, and Resource units collect spatial loose chunks nearby. Mining units show compact chip-and-spark effects while drilling; Hazard units cross terrain with a cyan transit shimmer and project one affinity-colored treatment beam per working unit. Their sprites stay upright when the controlled actor turns.
 - Mk II and Mk III Support Drones carry one or two attached gold rank lights on the unit body. Upgrade state should never appear as a detached rail or unexplained line.
 - Pair synergies and signature builds deploy from the active actor into role behavior. After deployment, the build reads through each Support Drone's movement and contextual activity plus the named Swarm command strip instead of glows, brackets, or rails around the actor.
 - Scanner pulses use a brief grid and compact prospect pips without persistent concentric rings; partial terrain-edge rails should not sit around the actor during normal mining. Thruster trails appear only while moving, and the actor-health gauge appears only during combat or after damage.
@@ -94,7 +94,9 @@ Dedicated Mining, Resource, Survey, Hazard, Attack, and Defense Support Drone sp
 
 ## Hazard Support Drone Ladder
 
-Hazard treatment is a spatial world task rather than an always-on rig buff. Hazard Support Drones target revealed pockets within their operating radius. They prioritize artifact-seal segments closest to the artifact, then the nearest eligible ordinary hazard to the Mining Rig, and immediately reserve another target after each treatment.
+Hazard treatment is a spatial world task rather than an always-on rig buff. `MiningCell::revealed` is the hard targeting gate: line-of-sight discovery, the Mining Rig scanner, and Survey Support Drone pulses can make work eligible, while Hazard Support Drones never reveal terrain themselves. Revealed active cocoon-layer segments are valid across the active arena and outrank ordinary hazards; ordinary hazards remain limited to the `8.35`-cell operating radius and are ordered closest to the controlled actor, then by intensity and stable terrain index. Hidden later cocoon layers remain ineligible until their authored prerequisites are met.
+
+The Hazard squad assigns all equipped frames together. Drones split across distinct eligible targets when possible; surplus frames assist the highest-priority target from separate approach positions. Shared treatment advances once per target at an exact linear rate—two active workers provide `2x`, three provide `3x`—and all workers reacquire on the first update after conversion. Stable role indices retain identity and partial treatment ownership across saves.
 
 | Mk | Eligible conditions | Treatment | Batch | Refinement |
 | --- | --- | --- | --- | --- |
@@ -104,10 +106,10 @@ Hazard treatment is a spatial world task rather than an always-on rig buff. Haza
 
 Standard Hazard Support Drone treatment converts a hazard pocket to revealed regolith. A deterministic refinement roll instead converts Thermal or Cryo to common ore, Toxic to rare ore, or Radiation to an exotic vein. The resulting tile still has to be mined and collected.
 
-Io is the deliberate exception and tutorial: its soil never pays, it generates no direct ore deposits or Cryo pockets, and every mineable Thermal lava seam deterministically cools into gray Common Ore. The fixed artifact site uses two staged four-segment lava seals and a 60-second story-run oxygen budget before the artifact can be towed and safely extracted.
+Io is the current deliberate exception and tutorial: its soil never pays, it generates no direct ore deposits or Cryo pockets, and every mineable Thermal lava seam deterministically cools into gray Common Ore. Its authored layered-recovery site uses two staged four-segment lava layers and a 60-second oxygen budget before its protected Artifact can be towed and safely extracted. The Hazard squad's generic cocoon priority works for any revealed active layer; it is not specific to this site.
 
 ## Future Hooks
 
-Save version 8 retains version 7's Support Drone anchor, formation, position, haul, shield, recharge, and cooldown state while adding paid duplicate Support Drone frames. Older units migrate to `ControlledActor`, derive stable slots from equipped order and deterministic phases, and repeated legacy loadout IDs are de-duplicated once.
+Save version 9 retains version 8's paid-frame, anchor, formation, position, haul, shield, recharge, and cooldown state while adding the scenario and generic cocoon context that owns protected-site deployments. Older units migrate to `ControlledActor`, derive stable slots from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

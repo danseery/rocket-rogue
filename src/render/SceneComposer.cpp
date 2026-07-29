@@ -28,10 +28,8 @@ constexpr float kOrbitSceneScale = 1.66F;
 constexpr float kBottomDockSceneViewportPadding = 0.56F;
 constexpr float kMiningLightRadiusCells = 2.15F;
 constexpr float kMiningScannerPulseSeconds = 0.9F;
-constexpr float kMiningPickupTextLifetimeSeconds = 1.45F;
-constexpr int kMiningPickupCargoMaterial = -1;
-constexpr int kMiningBankedBurstMaterial = -2;
-constexpr int kMiningHazardTreatmentBurstMaterial = -3;
+constexpr float kMiningPickupTextLifetimeSeconds = 2.0F;
+constexpr float kMiningPickupTextScale = 2.25F;
 
 enum ArtAsset {
     EarthAsset = 0,
@@ -68,7 +66,8 @@ enum ArtAsset {
     MiniDroneAttackAsset = 31,
     MiniDroneDefenseAsset = 32,
     HeroicCapybaraAsset = 33,
-    JetpackCapybaraAsset = 34
+    JetpackCapybaraAsset = 34,
+    PoiGuidanceArrowAsset = 35
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -337,6 +336,12 @@ Color miningMaterialColor(int material, float integrity, bool revealed, bool haz
     case 8:
         color = {0.10F, 0.11F, 0.13F, 1.0F};
         break;
+    case 9:
+        color = {0.92F, 0.24F, 0.035F, 1.0F};
+        break;
+    case 10:
+        color = {0.34F, 0.76F, 0.94F, 1.0F};
+        break;
     default:
         color = mars ? Color {0.030F, 0.020F, 0.018F, 1.0F} : (moon ? Color {0.026F, 0.028F, 0.032F, 1.0F} : Color {0.020F, 0.030F, 0.035F, 1.0F});
         break;
@@ -437,6 +442,8 @@ bool miningRewardMaterial(int material)
     case MiningCellMaterial::RareOre:
     case MiningCellMaterial::ExoticVein:
     case MiningCellMaterial::ArtifactCache:
+    case MiningCellMaterial::FuelPocket:
+    case MiningCellMaterial::OxygenPocket:
         return true;
     case MiningCellMaterial::Empty:
     case MiningCellMaterial::Regolith:
@@ -457,6 +464,8 @@ bool miningScannerPingMaterial(int material)
     case MiningCellMaterial::ExoticVein:
     case MiningCellMaterial::ArtifactCache:
     case MiningCellMaterial::HazardPocket:
+    case MiningCellMaterial::FuelPocket:
+    case MiningCellMaterial::OxygenPocket:
         return true;
     case MiningCellMaterial::Empty:
     case MiningCellMaterial::Regolith:
@@ -477,6 +486,10 @@ Color miningRewardGlowColor(int material)
         return {0.78F, 0.42F, 1.0F, 1.0F};
     case MiningCellMaterial::ArtifactCache:
         return {0.38F, 0.92F, 1.0F, 1.0F};
+    case MiningCellMaterial::FuelPocket:
+        return {1.0F, 0.34F, 0.04F, 1.0F};
+    case MiningCellMaterial::OxygenPocket:
+        return {0.48F, 0.88F, 1.0F, 1.0F};
     case MiningCellMaterial::Empty:
     case MiningCellMaterial::Regolith:
     case MiningCellMaterial::HardRock:
@@ -487,18 +500,21 @@ Color miningRewardGlowColor(int material)
     return {1.0F, 0.82F, 0.28F, 1.0F};
 }
 
-Color miningPickupGlowColor(int material)
+Color miningPickupGlowColor(MiningPickupKind kind)
 {
-    if (material == kMiningBankedBurstMaterial) {
-        return {1.0F, 0.84F, 0.28F, 1.0F};
+    switch (kind) {
+    case MiningPickupKind::CommonOre:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::CommonOre));
+    case MiningPickupKind::RareOre:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::RareOre));
+    case MiningPickupKind::ExoticOre:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::ExoticVein));
+    case MiningPickupKind::Fuel:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::FuelPocket));
+    case MiningPickupKind::Oxygen:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::OxygenPocket));
     }
-    if (material == kMiningHazardTreatmentBurstMaterial) {
-        return {0.32F, 1.0F, 0.72F, 1.0F};
-    }
-    if (material == kMiningPickupCargoMaterial) {
-        return {0.60F, 0.94F, 0.76F, 1.0F};
-    }
-    return miningRewardGlowColor(material);
+    return {1.0F, 1.0F, 1.0F, 1.0F};
 }
 
 Color miningScannerPingColor(int material, int hazardAffinity = 0)
@@ -509,6 +525,10 @@ Color miningScannerPingColor(int material, int hazardAffinity = 0)
     switch (static_cast<MiningCellMaterial>(material)) {
     case MiningCellMaterial::HazardPocket:
         return miningHazardColor(hazardAffinity);
+    case MiningCellMaterial::FuelPocket:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::FuelPocket));
+    case MiningCellMaterial::OxygenPocket:
+        return miningRewardGlowColor(static_cast<int>(MiningCellMaterial::OxygenPocket));
     case MiningCellMaterial::HardRock:
         return {0.48F, 0.72F, 0.86F, 1.0F};
     case MiningCellMaterial::Regolith:
@@ -557,40 +577,6 @@ Color miningArtifactColor(int kind, int state)
         return {1.0F, 0.82F, 0.28F, 0.96F};
     }
     return {0.58F, 0.88F, 1.0F, 0.94F};
-}
-
-int miningMaterialBucket(int material)
-{
-    switch (static_cast<MiningCellMaterial>(material)) {
-    case MiningCellMaterial::CommonOre:
-        return 0;
-    case MiningCellMaterial::RareOre:
-        return 1;
-    case MiningCellMaterial::ExoticVein:
-        return 2;
-    case MiningCellMaterial::Empty:
-    case MiningCellMaterial::Regolith:
-    case MiningCellMaterial::HardRock:
-    case MiningCellMaterial::HazardPocket:
-    case MiningCellMaterial::ArtifactCache:
-    case MiningCellMaterial::Bedrock:
-        break;
-    }
-    return -1;
-}
-
-int miningDisplayMaterialForBucket(int bucket)
-{
-    if (bucket == 0) {
-        return static_cast<int>(MiningCellMaterial::CommonOre);
-    }
-    if (bucket == 1) {
-        return static_cast<int>(MiningCellMaterial::RareOre);
-    }
-    if (bucket == 2) {
-        return static_cast<int>(MiningCellMaterial::ExoticVein);
-    }
-    return static_cast<int>(MiningCellMaterial::CommonOre);
 }
 
 float miningCellNoise(int x, int y, int salt)
@@ -714,10 +700,9 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         previousMiningHeight_ = 0;
         currentMiningMaterials_.clear();
         previousMiningMaterials_.clear();
-        previousMiningInventory_ = {};
         previousMiningStowedInventory_ = {};
-        previousMiningCargo_ = 0;
         previousMiningStowedCargo_ = 0;
+        lastMiningPickupEventSequence_ = 0;
         miningSurveyDrones_.clear();
         miningPickupBursts_.clear();
         miningPickupBurstScratch_.clear();
@@ -931,6 +916,13 @@ void SceneComposer::drawMiningMaterialMarker(
     case MiningCellMaterial::ArtifactCache:
         drawCircle(cx, cy, safeRadius, color, 8, worldSpace);
         return;
+    case MiningCellMaterial::FuelPocket:
+        drawCircle(cx, cy, safeRadius, color, 4, worldSpace);
+        return;
+    case MiningCellMaterial::OxygenPocket:
+        drawCircle(cx, cy, safeRadius, color, 12, worldSpace);
+        drawCircle(cx, cy, safeRadius * 0.34F, {0.92F, 1.0F, 1.0F, color.a * 0.88F}, 10, worldSpace);
+        return;
     case MiningCellMaterial::Empty:
     case MiningCellMaterial::Regolith:
     case MiningCellMaterial::HardRock:
@@ -961,7 +953,7 @@ void SceneComposer::drawMiningOreSparkleColor(float cx, float cy, float unitSize
     drawLine(cx, cy - length, cx, cy + length, {glow.r, glow.g, glow.b, alpha}, 1.4F);
 }
 
-void SceneComposer::drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age)
+void SceneComposer::drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age)
 {
     if (amount <= 0 || age < 0.0F || age > kMiningPickupTextLifetimeSeconds) {
         return;
@@ -969,8 +961,8 @@ void SceneComposer::drawMiningPickupText(float cx, float cy, float unitSize, int
 
     const float t = std::clamp(age / kMiningPickupTextLifetimeSeconds, 0.0F, 1.0F);
     const float fade = (1.0F - t) * (1.0F - t);
-    const float lift = unitSize * (0.90F + t * 2.65F);
-    const float scale = unitSize * (0.84F + 0.20F * (1.0F - std::abs(t - 0.18F) / 0.18F));
+    const float lift = unitSize * kMiningPickupTextScale * (0.90F + t * 2.65F);
+    const float scale = unitSize * kMiningPickupTextScale * (0.84F + 0.20F * (1.0F - std::abs(t - 0.18F) / 0.18F));
     const std::string text = "+" + std::to_string(amount);
     const float glyphW = scale * 0.48F;
     const float glyphH = scale * 0.78F;
@@ -1012,20 +1004,20 @@ void SceneComposer::drawMiningPickupText(float cx, float cy, float unitSize, int
         }
     };
 
-    const Color glow = miningPickupGlowColor(material);
+    const Color glow = miningPickupGlowColor(kind);
     std::vector<SceneVertex>& shadowVertices = scratchVertices(text.size() * 14U);
     const Color shadow {0.005F, 0.010F, 0.012F, 0.78F * fade};
     for (std::size_t i = 0; i < text.size(); ++i) {
         appendGlyph(shadowVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap) + unitSize * 0.045F, baseY - glyphH * 0.5F - unitSize * 0.045F, shadow);
     }
-    submitLines(shadowVertices, 4.4F);
+    submitLines(shadowVertices, 4.4F * kMiningPickupTextScale);
 
     std::vector<SceneVertex>& textVertices = scratchVertices(text.size() * 14U);
     const Color color {glow.r, glow.g, glow.b, 0.98F * fade};
     for (std::size_t i = 0; i < text.size(); ++i) {
         appendGlyph(textVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap), baseY - glyphH * 0.5F, color);
     }
-    submitLines(textVertices, 2.6F);
+    submitLines(textVertices, 2.6F * kMiningPickupTextScale);
 }
 
 void SceneComposer::drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind)
@@ -1259,6 +1251,143 @@ void SceneComposer::drawMiningBankedText(float cx, float cy, float unitSize, flo
         appendGlyph(textVertices, text[i], startX + static_cast<float>(i) * (glyphW + gap), baseY - glyphH * 0.5F, color);
     }
     submitLines(textVertices, 2.3F);
+}
+
+void SceneComposer::drawPoiLabel(
+    float cx,
+    float cy,
+    float pixelSize,
+    std::string_view label,
+    PoiGuidanceKind kind)
+{
+    if (label.empty() || pixelSize <= 0.0F) {
+        return;
+    }
+
+    const auto glyphRows = [](char ch) -> std::array<std::uint8_t, 7> {
+        switch (ch) {
+        case 'A': return {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
+        case 'B': return {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E};
+        case 'C': return {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E};
+        case 'D': return {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E};
+        case 'E': return {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F};
+        case 'F': return {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10};
+        case 'G': return {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F};
+        case 'H': return {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11};
+        case 'I': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1F};
+        case 'J': return {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0C};
+        case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
+        case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F};
+        case 'M': return {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11};
+        case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
+        case 'O': return {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E};
+        case 'P': return {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10};
+        case 'Q': return {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D};
+        case 'R': return {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11};
+        case 'S': return {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E};
+        case 'T': return {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+        case 'U': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E};
+        case 'V': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04};
+        case 'W': return {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11};
+        case 'X': return {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11};
+        case 'Y': return {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04};
+        case 'Z': return {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F};
+        case '0': return {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E};
+        case '1': return {0x04, 0x0C, 0x14, 0x04, 0x04, 0x04, 0x1F};
+        case '2': return {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F};
+        case '3': return {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E};
+        case '4': return {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02};
+        case '5': return {0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E};
+        case '6': return {0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E};
+        case '7': return {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08};
+        case '8': return {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E};
+        case '9': return {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E};
+        case '-': return {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00};
+        default: return {};
+        }
+    };
+
+    const Color accent = kind == PoiGuidanceKind::Ship
+        ? Color{1.0F, 0.58F, 0.18F, 0.98F}
+        : kind == PoiGuidanceKind::Artifact
+            ? Color{0.78F, 0.52F, 1.0F, 0.98F}
+            : kind == PoiGuidanceKind::Boss
+                ? Color{1.0F, 0.22F, 0.16F, 0.98F}
+                : Color{0.32F, 0.92F, 1.0F, 0.98F};
+    const float glyphAdvance = pixelSize * 6.0F;
+    const float totalWidth = static_cast<float>(label.size()) * glyphAdvance - pixelSize;
+    drawRect(
+        cx,
+        cy,
+        totalWidth + pixelSize * 2.8F,
+        pixelSize * 9.8F,
+        {0.008F, 0.014F, 0.026F, 0.88F});
+    drawRect(
+        cx,
+        cy - pixelSize * 4.55F,
+        totalWidth + pixelSize * 2.8F,
+        pixelSize * 0.9F,
+        {accent.r, accent.g, accent.b, 0.92F});
+
+    std::vector<SceneVertex>& textVertices = scratchVertices(label.size() * 7U * 5U * 6U);
+    const float startX = cx - totalWidth * 0.5F;
+    const float topY = cy + pixelSize * 3.0F;
+    for (std::size_t glyph = 0; glyph < label.size(); ++glyph) {
+        char ch = label[glyph];
+        if (ch >= 'a' && ch <= 'z') {
+            ch = static_cast<char>(ch - 'a' + 'A');
+        }
+        const std::array<std::uint8_t, 7> rows = glyphRows(ch);
+        for (int row = 0; row < 7; ++row) {
+            for (int column = 0; column < 5; ++column) {
+                if ((rows[static_cast<std::size_t>(row)] & (1U << (4 - column))) == 0) {
+                    continue;
+                }
+                appendRect(
+                    textVertices,
+                    startX + static_cast<float>(glyph) * glyphAdvance +
+                        static_cast<float>(column) * pixelSize,
+                    topY - static_cast<float>(row) * pixelSize,
+                    pixelSize * 0.78F,
+                    pixelSize * 0.78F,
+                    accent);
+            }
+        }
+    }
+    submit(textVertices);
+}
+
+void SceneComposer::drawPoiGuidance(
+    float cx,
+    float cy,
+    float directionX,
+    float directionY,
+    float size,
+    std::string_view label,
+    PoiGuidanceKind kind,
+    double animationTime)
+{
+    if (!textureReady(PoiGuidanceArrowAsset) || size <= 0.0F) {
+        return;
+    }
+    const Vec2 direction = normalize({directionX, directionY});
+    const float bounce = std::sin(static_cast<float>(animationTime) * kPi * 2.0F) * size * 0.085F;
+    const float arrowY = cy + bounce;
+    const Color glow = kind == PoiGuidanceKind::Ship
+        ? Color{1.0F, 0.26F, 0.10F, 0.10F}
+        : Color{0.60F, 0.32F, 1.0F, 0.10F};
+    drawRadialGlow(cx, arrowY, size * 0.66F, glow, 28);
+    // The authored sprite points down, opposite the local "forward" axis.
+    drawSpriteRotated(
+        cx,
+        arrowY,
+        size * 0.72F,
+        size,
+        -direction.x,
+        -direction.y,
+        {1.0F, 1.0F, 1.0F, 1.0F},
+        PoiGuidanceArrowAsset);
+    drawPoiLabel(cx, arrowY + size * 0.80F, size * 0.035F, label, kind);
 }
 
 std::vector<SceneVertex>& SceneComposer::scratchVertices(std::size_t reserveCount)
@@ -1746,100 +1875,58 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         snapshot.miningCells.size(),
         static_cast<std::size_t>(std::max(0, cellCount)));
     for (std::size_t index = 0; index < renderedCellCount; ++index) {
-        currentMiningMaterials_[index] = static_cast<int>(snapshot.miningCells[index].material);
+        // This cache feeds scanner-edge markers on later frames. Never retain
+        // a hidden cell's material here: doing so would leak an unrevealed
+        // cocoon layer or protected objective through an adjacent empty tile.
+        const MiningCell& cell = snapshot.miningCells[index];
+        currentMiningMaterials_[index] = cell.revealed
+            ? static_cast<int>(cell.material)
+            : static_cast<int>(MiningCellMaterial::Empty);
     }
+    auto trimPickupBursts = [&]() {
+        if (miningPickupBursts_.size() > 44U) {
+            miningPickupBursts_.erase(miningPickupBursts_.begin(), miningPickupBursts_.begin() + static_cast<std::ptrdiff_t>(miningPickupBursts_.size() - 44U));
+        }
+    };
+    if (snapshot.miningPickupEventSequence < lastMiningPickupEventSequence_) {
+        lastMiningPickupEventSequence_ = 0;
+    }
+    for (const MiningPickupEvent& event : snapshot.miningPickupEvents) {
+        if (event.sequence <= lastMiningPickupEventSequence_ || event.amount <= 0) {
+            continue;
+        }
+        const Vec2 center = cellCenter(event.x - 0.5, event.y - 0.5);
+        miningPickupBursts_.push_back({
+            center.x,
+            center.y,
+            MiningPickupBurstKind::Pickup,
+            event.kind,
+            event.amount,
+            snapshot.animationTime,
+            0.0F
+        });
+        trimPickupBursts();
+    }
+    lastMiningPickupEventSequence_ = std::max(lastMiningPickupEventSequence_, snapshot.miningPickupEventSequence);
+
     if (previousMiningActive_ && previousMiningWidth_ == snapshot.miningWidth && previousMiningHeight_ == snapshot.miningHeight) {
-        struct PickupCandidate {
-            Vec2 center;
-            int bucket = -1;
-        };
-        std::vector<PickupCandidate> candidates;
-        candidates.reserve(6);
-        std::vector<Vec2> treatmentCenters;
-        for (std::size_t index = 0; index < renderedCellCount; ++index) {
-            if (index >= previousMiningMaterials_.size()) {
-                continue;
-            }
-            const MiningCell& cell = snapshot.miningCells[index];
+        for (std::size_t index = 0; index < renderedCellCount && index < previousMiningMaterials_.size(); ++index) {
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
-            const int material = static_cast<int>(cell.material);
-            const int previousMaterial = previousMiningMaterials_[index];
-            const int bucket = miningMaterialBucket(previousMaterial);
-            if (bucket >= 0 && cell.material == MiningCellMaterial::Empty) {
-                const Vec2 burstCenter = cellCenter(static_cast<double>(x), static_cast<double>(y));
-                candidates.push_back({burstCenter, bucket});
+            if (previousMiningMaterials_[index] == static_cast<int>(MiningCellMaterial::HazardPocket) &&
+                snapshot.miningCells[index].material != MiningCellMaterial::HazardPocket) {
+                const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+                miningPickupBursts_.push_back({
+                    center.x,
+                    center.y,
+                    MiningPickupBurstKind::HazardTreatment,
+                    MiningPickupKind::CommonOre,
+                    1,
+                    snapshot.animationTime,
+                    0.0F
+                });
+                trimPickupBursts();
             }
-            if (previousMaterial == static_cast<int>(MiningCellMaterial::HazardPocket) &&
-                material != static_cast<int>(MiningCellMaterial::HazardPocket)) {
-                treatmentCenters.push_back(cellCenter(static_cast<double>(x), static_cast<double>(y)));
-            }
-        }
-
-        int remaining[3] = {
-            std::max(0, snapshot.miningMaterials.common - previousMiningInventory_.common),
-            std::max(0, snapshot.miningMaterials.rare - previousMiningInventory_.rare),
-            std::max(0, snapshot.miningMaterials.exotic - previousMiningInventory_.exotic)
-        };
-        int remainingCandidates[3] = {};
-        for (const PickupCandidate& candidate : candidates) {
-            if (candidate.bucket >= 0 && candidate.bucket < 3) {
-                ++remainingCandidates[candidate.bucket];
-            }
-        }
-        int remainingCargo = std::max(0, snapshot.miningCargo - previousMiningCargo_);
-        int remainingCargoCandidates = static_cast<int>(candidates.size());
-        auto trimPickupBursts = [&]() {
-            if (miningPickupBursts_.size() > 44U) {
-                miningPickupBursts_.erase(miningPickupBursts_.begin(), miningPickupBursts_.begin() + static_cast<std::ptrdiff_t>(miningPickupBursts_.size() - 44U));
-            }
-        };
-        for (const Vec2& center : treatmentCenters) {
-            miningPickupBursts_.push_back({
-                center.x,
-                center.y,
-                kMiningHazardTreatmentBurstMaterial,
-                1,
-                snapshot.animationTime,
-                0.0F
-            });
-            trimPickupBursts();
-        }
-        for (const PickupCandidate& candidate : candidates) {
-            if (remainingCargo <= 0 || remainingCargoCandidates <= 0) {
-                continue;
-            }
-            const int amount = std::max(1, (remainingCargo + remainingCargoCandidates - 1) / remainingCargoCandidates);
-            const int clampedAmount = std::min(amount, remainingCargo);
-            remainingCargo -= clampedAmount;
-            --remainingCargoCandidates;
-            miningPickupBursts_.push_back({
-                candidate.center.x,
-                candidate.center.y,
-                kMiningPickupCargoMaterial,
-                clampedAmount,
-                snapshot.animationTime,
-                -cellW * 0.34F
-            });
-            trimPickupBursts();
-        }
-        for (const PickupCandidate& candidate : candidates) {
-            if (candidate.bucket < 0 || candidate.bucket >= 3 || remaining[candidate.bucket] <= 0 || remainingCandidates[candidate.bucket] <= 0) {
-                continue;
-            }
-            const int amount = std::max(1, (remaining[candidate.bucket] + remainingCandidates[candidate.bucket] - 1) / remainingCandidates[candidate.bucket]);
-            const int clampedAmount = std::min(amount, remaining[candidate.bucket]);
-            remaining[candidate.bucket] -= clampedAmount;
-            --remainingCandidates[candidate.bucket];
-            miningPickupBursts_.push_back({
-                candidate.center.x,
-                candidate.center.y,
-                miningDisplayMaterialForBucket(candidate.bucket),
-                clampedAmount,
-                snapshot.animationTime,
-                cellW * 0.34F
-            });
-            trimPickupBursts();
         }
         const int bankedGain =
             std::max(0, snapshot.miningStowedCargo - previousMiningStowedCargo_) +
@@ -1850,7 +1937,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             miningPickupBursts_.push_back({
                 returnZone.x,
                 returnZone.y,
-                kMiningBankedBurstMaterial,
+                MiningPickupBurstKind::Banked,
+                MiningPickupKind::CommonOre,
                 1,
                 snapshot.animationTime,
                 0.0F
@@ -1862,8 +1950,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     previousMiningWidth_ = snapshot.miningWidth;
     previousMiningHeight_ = snapshot.miningHeight;
     previousMiningMaterials_.swap(currentMiningMaterials_);
-    previousMiningInventory_ = snapshot.miningMaterials;
-    previousMiningCargo_ = snapshot.miningCargo;
     previousMiningStowedInventory_ = snapshot.miningStowedMaterials;
     previousMiningStowedCargo_ = snapshot.miningStowedCargo;
 
@@ -2251,7 +2337,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     miningPickupBurstScratch_.reserve(miningPickupBursts_.size());
     for (const MiningPickupBurst& burst : miningPickupBursts_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
-        const float lifetime = burst.material == kMiningBankedBurstMaterial || burst.material == kMiningHazardTreatmentBurstMaterial
+        const float lifetime = burst.burstKind == MiningPickupBurstKind::Banked || burst.burstKind == MiningPickupBurstKind::HazardTreatment
             ? 1.05F
             : kMiningPickupTextLifetimeSeconds;
         if (age < 0.0F || age > lifetime) {
@@ -2260,9 +2346,16 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         miningPickupBurstScratch_.push_back(burst);
         const float t = std::clamp(age / 0.82F, 0.0F, 1.0F);
         const float fade = (1.0F - t) * (1.0F - t);
-        const Color glow = miningPickupGlowColor(burst.material);
+        const Color glow = burst.burstKind == MiningPickupBurstKind::HazardTreatment
+            ? Color{0.32F, 1.0F, 0.72F, 1.0F}
+            : (burst.burstKind == MiningPickupBurstKind::Banked
+                  ? Color{1.0F, 0.84F, 0.28F, 1.0F}
+                  : miningPickupGlowColor(burst.kind));
         for (int i = 0; i < 9; ++i) {
-            const float seed = miningCellNoise(static_cast<int>(burst.x * 1000.0F), static_cast<int>(burst.y * 1000.0F), i + burst.material * 7);
+            const float seed = miningCellNoise(
+                static_cast<int>(burst.x * 1000.0F),
+                static_cast<int>(burst.y * 1000.0F),
+                i + static_cast<int>(burst.kind) * 7 + static_cast<int>(burst.burstKind) * 13);
             const float angle = seed * kPi * 2.0F + static_cast<float>(i) * 0.63F;
             const float spray = cellSize * (0.28F + t * (1.15F + seed * 0.82F));
             const float arcX = std::cos(angle) * spray;
@@ -2280,10 +2373,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     submit(pickupVertices);
     for (const MiningPickupBurst& burst : miningPickupBurstScratch_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
-        if (burst.material == kMiningBankedBurstMaterial) {
+        if (burst.burstKind == MiningPickupBurstKind::Banked) {
             drawMiningBankedText(burst.x, burst.y, cellSize, age);
-        } else if (burst.material != kMiningHazardTreatmentBurstMaterial) {
-            drawMiningPickupText(burst.x + burst.textOffsetX, burst.y, cellSize, burst.material, burst.amount, age);
+        } else if (burst.burstKind == MiningPickupBurstKind::Pickup) {
+            drawMiningPickupText(burst.x + burst.textOffsetX, burst.y, cellSize, burst.kind, burst.amount, age);
         }
     }
     miningPickupBursts_.swap(miningPickupBurstScratch_);
@@ -2739,8 +2832,46 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const Vec2 agentPosition = cellCenter(agent.x, agent.y);
         const float sx = agentPosition.x;
         const float sy = agentPosition.y;
+        bool hazardTraversingSolid = false;
+        if (role == static_cast<int>(MiniDroneRole::Hazard) &&
+            behavior == MiningMiniDroneBehavior::Traveling) {
+            const int cellX = static_cast<int>(std::floor(agent.x));
+            const int cellY = static_cast<int>(std::floor(agent.y));
+            if (cellX >= 0 && cellY >= 0 &&
+                cellX < snapshot.miningWidth &&
+                cellY < snapshot.miningHeight) {
+                const std::size_t cellIndex = static_cast<std::size_t>(
+                    cellY * snapshot.miningWidth + cellX);
+                hazardTraversingSolid =
+                    cellIndex < renderedCellCount &&
+                    miningMaterialSolid(snapshot.miningCells[cellIndex].material);
+            }
+        }
         const float activityPulse = 0.5F + 0.5F * std::sin(animationTime * 8.0F + static_cast<float>(i));
         const int droneAsset = miningMiniDroneAsset(role);
+        if (hazardTraversingSolid) {
+            Vec2 transitDirection = normalize({
+                static_cast<float>(agent.velocityX),
+                static_cast<float>(agent.velocityY)
+            });
+            if (std::abs(transitDirection.x) + std::abs(transitDirection.y) < 0.001F) {
+                transitDirection = {0.0F, 1.0F};
+            }
+            const float trailLength = cellSize * (0.72F + activityPulse * 0.22F);
+            drawLine(
+                sx - transitDirection.x * trailLength,
+                sy - transitDirection.y * trailLength,
+                sx,
+                sy,
+                {0.28F, 0.94F, 1.0F, 0.18F + activityPulse * 0.16F},
+                cellSize * 0.16F);
+            drawRadialGlow(
+                sx,
+                sy,
+                cellSize * (0.72F + activityPulse * 0.18F),
+                {0.24F, 0.92F, 1.0F, 0.18F + activityPulse * 0.08F},
+                16);
+        }
         if (textureReady(droneAsset)) {
             const float spriteSize = cellSize * 1.50F;
             const bool miningTask = role == static_cast<int>(MiniDroneRole::Mining) && agent.targetCellX >= 0 && agent.targetCellY >= 0 &&
@@ -2787,9 +2918,23 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                     sy,
                     spriteSize,
                     spriteSize,
-                    {1.0F, 1.0F, 1.0F, 0.90F + static_cast<float>(upgradeLevel - 1) * 0.05F},
+                    {
+                        hazardTraversingSolid ? 0.76F : 1.0F,
+                        1.0F,
+                        1.0F,
+                        (hazardTraversingSolid ? 0.74F : 0.90F) +
+                            static_cast<float>(upgradeLevel - 1) * 0.05F
+                    },
                     droneAsset);
             }
+        }
+        if (hazardTraversingSolid) {
+            drawCircle(
+                sx,
+                sy,
+                cellSize * (0.34F + activityPulse * 0.08F),
+                {0.62F, 1.0F, 1.0F, 0.34F + activityPulse * 0.18F},
+                14);
         }
         if (role == static_cast<int>(MiniDroneRole::Resource) || role == static_cast<int>(MiniDroneRole::Mining)) {
             const int commonChunks = std::max(0, agent.haulMaterials.common);
@@ -3485,6 +3630,55 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             static_cast<int>(number.kind));
     }
 
+    if (snapshot.miningPoiGuidance.active) {
+        const float pointerSize = std::clamp(cellSize * 4.2F, 0.13F, 0.20F);
+        Vec2 pointer;
+        Vec2 direction;
+        if (snapshot.miningPoiGuidance.direction == PoiGuidanceDirection::Ascend) {
+            const Vec2 activeActor = cellCenter(activeActorX, activeActorY);
+            pointer = {
+                std::clamp(activeActor.x, left + pointerSize, right - pointerSize),
+                top - pointerSize * 1.28F
+            };
+            direction = {0.0F, 1.0F};
+        } else if (snapshot.miningPoiGuidance.direction == PoiGuidanceDirection::Descend) {
+            const Vec2 activeActor = cellCenter(activeActorX, activeActorY);
+            pointer = {
+                std::clamp(activeActor.x, left + pointerSize, right - pointerSize),
+                bottom + pointerSize * 1.12F
+            };
+            direction = {0.0F, -1.0F};
+        } else {
+            const Vec2 target = cellCenter(
+                snapshot.miningPoiGuidance.x,
+                snapshot.miningPoiGuidance.y);
+            pointer = {
+                std::clamp(target.x, left + pointerSize, right - pointerSize),
+                std::clamp(
+                    target.y + pointerSize * 1.18F,
+                    bottom + pointerSize,
+                    top - pointerSize * 1.42F)
+            };
+            direction = {target.x - pointer.x, target.y - pointer.y};
+            if (std::abs(direction.x) + std::abs(direction.y) < 0.001F) {
+                pointer.x = std::clamp(
+                    target.x + pointerSize * 1.18F,
+                    left + pointerSize,
+                    right - pointerSize);
+                direction = {target.x - pointer.x, target.y - pointer.y};
+            }
+        }
+        drawPoiGuidance(
+            pointer.x,
+            pointer.y,
+            direction.x,
+            direction.y,
+            pointerSize,
+            snapshot.miningPoiGuidance.label,
+            snapshot.miningPoiGuidance.kind,
+            snapshot.animationTime);
+    }
+
     if (damagePressure > 0.01F) {
         const float heartbeat = miningDamageHeartbeat(damagePressure, snapshot.animationTime);
         const float severityAlpha = 0.08F + damagePressure * 0.28F;
@@ -3742,22 +3936,65 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         return Vec2{x, y};
     };
 
+    const auto markerLabel = [](MiningCellMaterial material) {
+        switch (material) {
+        case MiningCellMaterial::CommonOre:
+            return std::pair<std::string_view, PoiGuidanceKind>{"COMMON", PoiGuidanceKind::None};
+        case MiningCellMaterial::RareOre:
+            return std::pair<std::string_view, PoiGuidanceKind>{"RARE", PoiGuidanceKind::Ship};
+        case MiningCellMaterial::ExoticVein:
+            return std::pair<std::string_view, PoiGuidanceKind>{"EXOTIC", PoiGuidanceKind::Artifact};
+        case MiningCellMaterial::ArtifactCache:
+            return std::pair<std::string_view, PoiGuidanceKind>{"ARTIFACT", PoiGuidanceKind::Artifact};
+        default:
+            return std::pair<std::string_view, PoiGuidanceKind>{"ORE", PoiGuidanceKind::None};
+        }
+    };
+
+    const auto drawRouteMarker = [&](const Vec2& position, MiningCellMaterial material, bool confirmed, float phaseSeed) {
+        const Color base = pocketColor(material);
+        const float alpha = confirmed ? 0.96F : 0.78F;
+        const Color color {base.r, base.g, base.b, alpha};
+        const float markerRadius = confirmed ? 0.020F : 0.015F;
+        const float glowRadius = confirmed ? 0.082F : 0.060F;
+        const float side = position.x < shaftX ? -1.0F : 1.0F;
+        // Make the layer/resource relationship legible even during the
+        // sub-second sparkle gap: a colored tether, halo, icon, and runtime
+        // label are all visible before the animated flare arrives.
+        drawLine(
+            shaftX + side * 0.012F,
+            position.y,
+            position.x - side * markerRadius * 1.35F,
+            position.y,
+            {color.r, color.g, color.b, confirmed ? 0.72F : 0.54F},
+            confirmed ? 1.7F : 1.25F);
+        drawRadialGlow(position.x, position.y, glowRadius, {color.r, color.g, color.b, confirmed ? 0.20F : 0.13F}, 28);
+        drawCircle(position.x, position.y, markerRadius * 1.58F, {color.r, color.g, color.b, confirmed ? 0.34F : 0.24F}, 16);
+        drawMiningMaterialMarker(position.x, position.y, markerRadius, static_cast<int>(material), color);
+        drawMiningOreSparkleColor(
+            position.x,
+            position.y,
+            confirmed ? 0.092F : 0.072F,
+            color,
+            static_cast<float>(snapshot.animationTime),
+            phaseSeed,
+            confirmed ? 1.55F : 1.18F);
+        const auto [label, kind] = markerLabel(material);
+        drawPoiLabel(position.x, position.y - markerRadius * 3.6F, 0.0062F, label, kind);
+    };
+
     const int forecastCount = std::min(static_cast<int>(snapshot.surfacePushForecastMarkers.size()), 14);
     for (int i = 0; i < forecastCount; ++i) {
         const int depthOffset = i < static_cast<int>(snapshot.surfacePushForecastDepthOffsets.size())
             ? snapshot.surfacePushForecastDepthOffsets[static_cast<std::size_t>(i)]
             : i % safeSteps;
         const MiningCellMaterial material = snapshot.surfacePushForecastMarkers[static_cast<std::size_t>(i)];
-        const Color forecast = pocketColor(material);
         const Vec2 position = markerPosition(i, depthOffset, 0.145F);
-        drawMiningMaterialMarker(
-            position.x,
-            position.y,
-            0.010F,
-            static_cast<int>(material),
-            {forecast.r, forecast.g, forecast.b, 0.24F + pressure * 0.08F});
+        drawRouteMarker(position, material, false, static_cast<float>(i) * 0.271F + pressure * 0.19F);
     }
 
+    bool artifactGuidanceVisible = false;
+    Vec2 artifactGuidanceTarget;
     const int pocketCount = std::min(static_cast<int>(pockets.size()), 10);
     for (int i = 0; i < pocketCount; ++i) {
         const float seed = miningCellNoise(i, snapshot.surfacePushSteps + snapshot.destinationTier * 5, 131);
@@ -3768,22 +4005,16 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         const float x = position.x;
         const float y = position.y;
         const MiningCellMaterial material = pockets[static_cast<std::size_t>(i)];
+        if (!artifactGuidanceVisible && material == MiningCellMaterial::ArtifactCache) {
+            artifactGuidanceVisible = true;
+            artifactGuidanceTarget = position;
+        }
         const Color pocket = pocketColor(material);
-        const float pulse = 0.80F + 0.20F * std::sin(static_cast<float>(snapshot.animationTime) * (1.4F + seed * 0.8F) + static_cast<float>(i) * 0.73F);
-        drawMiningMaterialMarker(
-            x,
-            y,
-            0.012F + pulse * 0.004F,
-            static_cast<int>(material),
-            {pocket.r, pocket.g, pocket.b, pocket.a * (0.82F + pulse * 0.18F)});
-        drawMiningOreSparkleColor(
-            x,
-            y,
-            0.038F + seed * 0.014F,
-            {pocket.r, pocket.g, pocket.b, 1.0F},
-            static_cast<float>(snapshot.animationTime) * (1.18F + pressure * 0.22F),
-            seed + static_cast<float>(i) * 0.117F + pressure * 0.19F,
-            1.15F + pressure * 0.42F);
+        drawRouteMarker(
+            position,
+            material,
+            true,
+            seed + static_cast<float>(i) * 0.117F + pressure * 0.19F);
         const float twinkle = std::fmod(static_cast<float>(snapshot.animationTime) * (1.55F + seed * 0.75F) + seed + static_cast<float>(i) * 0.071F, 1.0F);
         if (twinkle < 0.62F) {
             const Color sparkle{pocket.r, pocket.g, pocket.b, 1.0F};
@@ -3793,6 +4024,19 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
             drawLine(x - length, y, x + length, y, {sparkle.r, sparkle.g, sparkle.b, alpha}, 1.25F);
             drawLine(x, y - length, x, y + length, {sparkle.r, sparkle.g, sparkle.b, alpha}, 1.25F);
         }
+    }
+
+    if (artifactGuidanceVisible) {
+        const float pointerY = std::min(0.72F, artifactGuidanceTarget.y + 0.16F);
+        drawPoiGuidance(
+            artifactGuidanceTarget.x,
+            pointerY,
+            artifactGuidanceTarget.x - artifactGuidanceTarget.x,
+            artifactGuidanceTarget.y - pointerY,
+            0.13F,
+            "ARTIFACT",
+            PoiGuidanceKind::Artifact,
+            snapshot.animationTime);
     }
 
     if (pressure > 0.0F) {
@@ -4769,10 +5013,9 @@ void SceneComposer::reset()
     miningTerrainStreamUsed_ = false;
     currentMiningMaterials_.clear();
     previousMiningMaterials_.clear();
-    previousMiningInventory_ = {};
     previousMiningStowedInventory_ = {};
-    previousMiningCargo_ = 0;
     previousMiningStowedCargo_ = 0;
+    lastMiningPickupEventSequence_ = 0;
     miningSurveyDrones_.clear();
     miningPickupBursts_.clear();
     miningPickupBurstScratch_.clear();

@@ -84,3 +84,21 @@ test("surface shortcuts yield to result actions and shutdown clears input owners
     "the native web bridge must publish RmlUi availability changes",
   );
 });
+
+test("web shell leaves semantic scenario controls inside the shared RmlUi document", () => {
+  assert.doesNotMatch(
+    shell,
+    /RocketBridge\.setPanel|setPanelHtml|data-rr-action/,
+    "the web shell must not recreate a DOM panel or intercept semantic RmlUi actions",
+  );
+  assert.match(
+    shell,
+    /rr\.rmlMouseDown\(event\.clientX, event\.clientY, event\.button \|\| 0\)/,
+    "web pointer input must reach the same RmlUi semantic-element dispatcher as native",
+  );
+  assert.match(
+    shell,
+    /rr\.uiActivateFocused\(\)/,
+    "web keyboard and controller confirmation must activate the focused RmlUi element",
+  );
+});

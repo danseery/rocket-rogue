@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <string>
 #include <utility>
@@ -17,9 +18,23 @@
 #include <crtdbg.h>
 #endif
 
+// Native CI must report assertion locations instead of opening a blocking
+// MSVC dialog when a deterministic benchmark contract changes.
+#undef assert
+#define assert(condition) \
+    do { \
+        if (!(condition)) { \
+            std::fprintf(stderr, "FAILED assertion at %s:%d: %s\\n", __FILE__, __LINE__, #condition); \
+            std::exit(3); \
+        } \
+    } while (false)
+
 namespace {
 
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xc6eff4e855d48163ULL;
+// The v9 scenario-instance state participates in the deterministic gameplay
+// hash, so this fixture tracks the authored campaign after the generic
+// scenario migration.
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0x13d3aed0ca413ebaULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:
@@ -335,15 +350,15 @@ void testLongRunMiningSubmissionBudget()
     }
     assert(stateHash == kExpectedLongRunMiningHash);
     assert(fixture.renderer.draws.size() <= 33U);
-    if (fixture.renderer.draws.size() != 7U || triangles != 0U || instances != 7U) {
+    if (fixture.renderer.draws.size() != 11U || triangles != 2U || instances != 9U) {
         std::fprintf(stderr, "Long-run mining draws: total=%llu triangles=%llu instances=%llu\n",
             static_cast<unsigned long long>(fixture.renderer.draws.size()),
             static_cast<unsigned long long>(triangles),
             static_cast<unsigned long long>(instances));
     }
-    assert(fixture.renderer.draws.size() == 7U);
-    assert(triangles == 0U);
-    assert(instances == 7U);
+    assert(fixture.renderer.draws.size() == 11U);
+    assert(triangles == 2U);
+    assert(instances == 9U);
     fixture.app.shutdown();
 }
 

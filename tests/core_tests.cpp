@@ -21,6 +21,7 @@
 #include "core/RefitPresentation.h"
 #include "core/ResearchPresentation.h"
 #include "core/ResearchSystem.h"
+#include "core/ScenarioSystem.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
@@ -28,6 +29,7 @@
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 #include "game/GamePanel.h"
+#include "render/RenderSnapshot.h"
 
 #include <cassert>
 #include <algorithm>
@@ -47,7 +49,10 @@ void require(bool condition, const char* message)
 {
     if (!condition) {
         std::cerr << "FAILED: " << message << "\n";
-        std::abort();
+        // Exit normally through the test harness instead of opening the
+        // platform crash dialog. This keeps failures observable in automated
+        // native and WebAssembly runs.
+        std::exit(3);
     }
 }
 
@@ -1641,12 +1646,12 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     const PreparedLaunch lunarApproachLaunch = prepareLaunch(lunarApproach, catalog, lunarApproachRng);
     html = buildGamePanelHtml({lunarApproach, catalog, lunarApproachLaunch, lunarApproachLaunch});
     require(html.find("data-modal=\"approach_introduction\" data-auto-modal=\"1\"") != std::string::npos
-            && html.find("LUNAR APPROACH") != std::string::npos,
-        "the first successful lunar arrival should automatically introduce the Approach phase");
-    require(html.find("Mars route will remain locked until the Lunar Prospector contract is claimed") != std::string::npos
+            && html.find("MOON APPROACH") != std::string::npos,
+        "the first successful configured arrival should automatically introduce the Approach phase");
+    require(html.find("Complete this site's active objective before the next route can open") != std::string::npos
             && html.find("Begin with a flyby") != std::string::npos
             && html.find("data-rr-action=\"acknowledge_approach_introduction\"") != std::string::npos,
-        "the lunar Approach introduction should explain the phase and return to its options");
+        "the configured Approach introduction should explain the phase and return to its options");
     ui::briefings::acknowledge(lunarApproach.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
     html = buildGamePanelHtml({lunarApproach, catalog, lunarApproachLaunch, lunarApproachLaunch});
     require(html.find("approach_introduction") == std::string::npos,
@@ -1679,14 +1684,20 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     surface.screen = Screen::SurfaceExpedition;
     Random surfaceRng(610);
     const PreparedLaunch surfaceLaunch = prepareLaunch(surface, catalog, surfaceRng);
+    const std::string lunarBriefingModalId =
+        "scenario_" + std::string(content::scenario::lunarProspector) + "_briefing";
+    const std::string lunarBriefingAction = ui::actions::scenarioAction(
+        content::scenario::lunarProspector,
+        "briefing",
+        static_cast<int>(ScenarioActionKind::AcknowledgeBriefing));
     html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
     require(html.find("mini_drone_introduction") == std::string::npos
             && html.find("Mini-drones are persistent") == std::string::npos,
         "locked Drone Bay screens should not emit mini-drone introduction copy or markup");
-    require(html.find("data-modal=\"lunar_mining_briefing\" data-auto-modal=\"1\"") != std::string::npos
-            && html.find("data-rr-action=\"acknowledge_lunar_mining_briefing\"") != std::string::npos
-            && html.find("Most lunar regolith is inert") != std::string::npos
-            && html.find("30 Common Ore") != std::string::npos
+    require(html.find("data-modal=\"" + lunarBriefingModalId + "\" data-auto-modal=\"1\"") != std::string::npos
+            && html.find("data-rr-action=\"" + lunarBriefingAction + "\"") != std::string::npos
+            && html.find("Most regolith is inert") != std::string::npos
+            && html.find("30 gray-seamed Common Ore") != std::string::npos
             && html.find("REWARD // PROSPECTOR MK I + SLOT 1") != std::string::npos
             && html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos
             && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
@@ -1696,14 +1707,14 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     miningHelpDisabled.firstTimeIntroductionsEnabled = false;
     html = buildGamePanelHtml(miningHelpDisabled);
     require(html.find("mining_introduction") == std::string::npos
-            && html.find("data-modal=\"lunar_mining_briefing\" data-auto-modal=\"1\"") != std::string::npos
+            && html.find("data-modal=\"" + lunarBriefingModalId + "\" data-auto-modal=\"1\"") != std::string::npos
             && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
         "the mandatory Lunar contract should ignore the optional introduction setting");
 
     ui::briefings::acknowledge(surface.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
     acknowledgeCampaignObjectiveBriefing(surface, CampaignObjectiveId::LunarProspector);
     html = buildGamePanelHtml({surface, catalog, surfaceLaunch, surfaceLaunch});
-    require(html.find("lunar_mining_briefing") == std::string::npos
+    require(html.find(lunarBriefingModalId) == std::string::npos
             && html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos
             && html.find("data-rr-action=\"mine_surface\"") != std::string::npos,
         "acknowledged Lunar mining should start directly without repeating either briefing");
@@ -2755,15 +2766,33 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     state.meta.materials.rare = 10;
     state.meta.materials.exotic = 10;
     require(!upgradeDroneSlot(state, catalog), "paid expansion should not bypass the Mars Slot 2 objective");
-    GameState prematureSlotThree = state;
-    prematureSlotThree.meta.droneBaySlots = 2;
-    require(!canUpgradeDroneSlot(prematureSlotThree)
-            && !upgradeDroneSlot(prematureSlotThree, catalog)
-            && prematureSlotThree.meta.droneBaySlots == 2,
-        "an inherited Slot 2 must not permit a paid Slot 3 upgrade before the Mars objective is claimed");
-    state.meta.lunarProspectorClaimed = true;
-    state.meta.marsMiningBriefingAcknowledged = true;
-    state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
+    GameState earnedSlotTwo = state;
+    earnedSlotTwo.meta.droneBaySlots = 2;
+    require(canUpgradeDroneSlot(earnedSlotTwo)
+            && upgradeDroneSlot(earnedSlotTwo, catalog)
+            && earnedSlotTwo.meta.droneBaySlots == 3,
+        "any valid two-slot state should permit the generic paid Slot 3 expansion when materials are available");
+    state.meta.unlockKeys.push_back(content::unlock::routeMars);
+    require(
+        performScenarioAction(
+            state,
+            catalog,
+            content::scenario::marsBayExpansion,
+            "briefing",
+            ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Mars slot fixture should acknowledge the authored scenario briefing");
+    require(
+        recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::SafeMaterialDelivered,
+             {},
+             {},
+             content::destination::mars,
+             "common",
+             tuning::research::marsBayCommonOreGoal,
+             0}),
+        "the Mars slot fixture should complete its delivery through a generic scenario event");
     require(claimMarsBayExpansion(state, catalog), "the completed Mars objective should explicitly fabricate Slot 2");
     require(state.meta.droneBaySlots == 2 && state.meta.equippedDroneIds.size() == 1,
         "Mars should add an empty second slot without assigning another drone");
@@ -2874,8 +2903,9 @@ void firstMiningContractBuildsAndCelebratesProspector()
         "only safely extracted mining ore should advance the Prospector contract");
     require(state.meta.materials.common == 0,
         "Prospector contract ore should be committed to fabrication instead of ordinary research spend");
-    require(firstRecovery.message.find("Lunar delivery +10 // 10/30") != std::string::npos,
-        "a safe lunar extraction should report the delivered amount and updated contract total");
+    require(firstRecovery.message.find("delivery +10") != std::string::npos
+            && firstRecovery.message.find("10/30") != std::string::npos,
+        "a safe extraction should report the delivered amount and updated configured contract total");
     require(!hasUnlock(state.meta, content::unlock::droneBay),
         "the Prospector should remain locked before all contract ore is home");
 
@@ -2890,10 +2920,16 @@ void firstMiningContractBuildsAndCelebratesProspector()
     Random launchRng(0xC0A11);
     const PreparedLaunch launch = prepareLaunch(state, catalog, launchRng);
     std::string html = buildGamePanelHtml({state, catalog, launch, launch});
-    require(html.find("data-modal=\"prospector_completion\" data-auto-modal=\"1\"") != std::string::npos
+    const std::string lunarClaimModalId =
+        "scenario_" + std::string(content::scenario::lunarProspector) + "_delivery";
+    const std::string lunarClaimAction = ui::actions::scenarioAction(
+        content::scenario::lunarProspector,
+        "delivery",
+        static_cast<int>(ScenarioActionKind::ClaimReward));
+    require(html.find("data-modal=\"" + lunarClaimModalId + "\" data-auto-modal=\"1\"") != std::string::npos
             && html.find("data-modal-dismissible=\"0\"") != std::string::npos
-            && html.find("READY TO CLAIM // MOON") != std::string::npos
-            && html.find("data-rr-action=\"claim_lunar_prospector\"") != std::string::npos,
+            && html.find("READY TO CLAIM") != std::string::npos
+            && html.find("data-rr-action=\"" + lunarClaimAction + "\"") != std::string::npos,
         "the ready lunar contract should receive a mandatory explicit-claim modal");
     require(claimLunarProspector(state, catalog), "Install Prospector Mk I should explicitly claim the ready contract");
     require(hasUnlock(state.meta, content::unlock::droneBay)
@@ -2919,7 +2955,7 @@ void firstMiningContractBuildsAndCelebratesProspector()
     Random restoredLaunchRng(1);
     const PreparedLaunch restoredLaunch = prepareLaunch(restored, catalog, restoredLaunchRng);
     html = buildGamePanelHtml({restored, catalog, restoredLaunch, restoredLaunch});
-    require(html.find("prospector_completion") == std::string::npos,
+    require(html.find(lunarClaimModalId) == std::string::npos,
         "the Prospector celebration should not repeat after acknowledgment");
 
     SaveData legacy = captureSaveData(createNewGame(catalog, 77));
@@ -2942,8 +2978,9 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     state.meta.furthestTier = 1;
 
     FrontierGateStatus gate = frontierGateStatus(state, catalog);
-    require(gate.kind == FrontierGateKind::LunarProspector && !gate.satisfied,
-        "Mars should be gated by the explicit Lunar Prospector claim");
+    require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
+            gate.scenarioId == content::scenario::lunarProspector && gate.scenarioStepId == "delivery",
+        "Mars should be gated by the explicit Lunar Prospector scenario requirement");
     require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
         "the lunar objective briefing should require an explicit acknowledgment");
     require(tuning::research::prospectorCommonOreGoal == 30
@@ -3004,6 +3041,15 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     state.meta.furthestTier = 3;
     require(commissionIoHazardDrone(state, catalog),
         "the Io briefing action should explicitly commission Hazard Drone Mk I");
+    const ScenarioInstance* ioScenario =
+        findScenarioInstance(state.meta, content::scenario::volcanicDescent);
+    const ScenarioStepProgress* ioCommission = ioScenario == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*ioScenario, "commission");
+    require(
+        ioCommission != nullptr && ioCommission->briefingAcknowledged &&
+            ioCommission->completed && ioCommission->claimed,
+        "a mandatory manual scenario action should acknowledge and complete its named directive in one click");
     require(hasUnlock(state.meta, content::unlock::ioHazardDrone)
             && !hasUnlock(state.meta, content::unlock::droneSupportSuite)
             && state.meta.equippedDroneIds == std::vector<std::string>{
@@ -3016,7 +3062,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         content::destination::jupiter,
         false,
         ArtifactKind::Boost,
-        ArtifactRewardType::DroneUpgradeCredit,
+        ArtifactRewardType::None,
         1.0,
         false,
     };
@@ -3024,7 +3070,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
             && !creditRecoveredIoArtifact(state, ioArtifact)
             && state.meta.ioArtifactRecovered
             && state.meta.droneUpgradeCredits == 1,
-        "the safely recovered Io artifact should grant exactly one persistent upgrade credit");
+        "a protected objective with no local artifact payout should grant exactly one persistent scenario upgrade credit");
     const auto lockedCombatDrone = std::find_if(
         catalog.miniDrones.begin(),
         catalog.miniDrones.end(),
@@ -3067,37 +3113,60 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
             && claimSaturnCourse(state, catalog),
         "Perfect should create a separate explicit Lock Saturn Course claim");
     gate = frontierGateStatus(state, catalog);
-    require(gate.kind == FrontierGateKind::SaturnSlingshot && gate.satisfied,
-        "claiming the saved Perfect solution should permanently satisfy Saturn's route gate");
+    require(gate.kind == FrontierGateKind::ScenarioRequirement && gate.satisfied,
+        "claiming the saved Perfect solution should permanently satisfy Saturn's authored route requirement");
 }
 
 void versionSevenCampaignStateRoundTripsAndMigrates()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0x7007);
+    state.run.destinationIndex = 1;
+    state.meta.furthestTier = 1;
+    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
+        "the normalized campaign fixture should acknowledge the Lunar briefing");
+    state.meta.materials.common = tuning::research::prospectorCommonOreGoal;
+    require(creditCampaignCommonOre(
+                state,
+                content::destination::moon,
+                tuning::research::prospectorCommonOreGoal) == tuning::research::prospectorCommonOreGoal &&
+            claimLunarProspector(state, catalog),
+        "the normalized campaign fixture should claim the Lunar contract through scenario actions");
+    state.run.destinationIndex = 2;
+    state.meta.furthestTier = 2;
+    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::MarsBayExpansion),
+        "the normalized campaign fixture should acknowledge the Mars briefing");
+    state.meta.materials.common = tuning::research::marsBayCommonOreGoal;
+    require(creditCampaignCommonOre(
+                state,
+                content::destination::mars,
+                tuning::research::marsBayCommonOreGoal) == tuning::research::marsBayCommonOreGoal &&
+            claimMarsBayExpansion(state, catalog),
+        "the normalized campaign fixture should claim the Mars contract through scenario actions");
     state.run.destinationIndex = 3;
     state.meta.furthestTier = 3;
-    state.meta.lunarMiningBriefingAcknowledged = true;
-    state.meta.lunarProspectorClaimed = true;
-    state.meta.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
-    state.meta.marsMiningBriefingAcknowledged = true;
-    state.meta.marsBayExpansionClaimed = true;
-    state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
-    state.meta.ioVolcanicBriefingAcknowledged = true;
-    state.meta.ioHazardDroneCommissioned = true;
-    state.meta.ioArtifactRecovered = true;
-    state.meta.droneUpgradeCredits = 1;
-    state.meta.saturnSlingshotBriefingAcknowledged = true;
-    state.meta.saturnSlingshotFailed = true;
-    state.meta.saturnSlingshotFailureAcknowledged = true;
-    state.meta.unlockKeys.push_back(content::unlock::droneBay);
-    state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
-    state.meta.droneBaySlots = 2;
-    ensureDroneBayState(state, catalog);
-
-    require(startSaturnSlingshotRun(state, catalog), "the current campaign fixture should begin an active departure Flyby");
+    require(commissionIoHazardDrone(state, catalog),
+        "the normalized campaign fixture should commission its configured Hazard support");
+    ArtifactRecord recoveredObjective {
+        "io_minor_artifact",
+        content::destination::jupiter,
+        false,
+        ArtifactKind::Boost,
+        ArtifactRewardType::None,
+        1.0,
+        false,
+    };
+    require(creditRecoveredIoArtifact(state, recoveredObjective),
+        "the normalized campaign fixture should resolve its protected objective through the scenario dispatcher");
+    require(startSaturnSlingshotRun(state, catalog),
+        "the normalized campaign fixture should begin an active departure Flyby");
+    state.run.flyby.completed = true;
+    state.run.flyby.result = FlybyGrade::Good;
+    completeFlybyRun(state, catalog);
+    require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
+        "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 8 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == 9 && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
     require(parsed.has_value(), "current campaign state should deserialize");
@@ -3135,7 +3204,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && migratedMars.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
             && migratedMars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
         "the v6 Mars repair should preserve one Prospector and leave the inherited second slot empty");
-    require(migratedMarsGate.kind == FrontierGateKind::MarsBayExpansion
+    require(migratedMarsGate.kind == FrontierGateKind::ScenarioRequirement
             && migratedMarsGate.satisfied,
         "the repaired v6 Mars save should satisfy the Jupiter frontier gate");
 
@@ -3155,7 +3224,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && repairedV7Mars.meta.marsCommonOreRecovered == tuning::research::marsBayCommonOreGoal
             && repairedV7Mars.meta.droneBaySlots == 2
             && repairedV7Mars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone}
-            && repairedV7MarsGate.kind == FrontierGateKind::MarsBayExpansion
+            && repairedV7MarsGate.kind == FrontierGateKind::ScenarioRequirement
             && repairedV7MarsGate.satisfied,
         "an already-v7 Mars save with inherited Slot 2 should self-heal instead of remaining route-locked");
 
@@ -3177,7 +3246,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
         content::drone::miningDrone,
         content::drone::miningDrone,
     };
-    legacy.miningStorySites.push_back({
+    legacy.miningSites.push_back({
         "legacy_io_cocoon",
         content::destination::jupiter,
         MiningAct::ActOne,
@@ -3222,6 +3291,11 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
     activeSource.run.destinationIndex = jupiterIndex;
     activeSource.meta.furthestTier = jupiter->tier;
     startSurfaceExpedition(activeSource, catalog);
+    activeSource.run.surfaceExpedition.pendingScenarioId =
+        std::string(content::scenario::volcanicDescent);
+    activeSource.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    activeSource.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+        std::string(content::miningSite::thermalLayeredRecovery);
     prepareMiningSiteForTest(activeSource);
     require(
         startMiningRun(
@@ -3234,8 +3308,12 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
     require(
         activeSource.run.mining.artifact.present
             && activeSource.run.mining.gate.type == MiningGateType::HazardCocoon
-            && activeSource.run.mining.gate.storyCritical,
-        "legacy active-Io fixture should contain the story cocoon artifact");
+            && !activeSource.run.mining.gate.compatibilityCritical,
+        "the generic active-site fixture should contain a configured cocoon without a legacy compatibility flag");
+    // Serialize a representative v6 active gate after the generic run has
+    // supplied its deterministic terrain. The migration must restore this as
+    // a compatibility record without making new scenarios depend on it.
+    activeSource.run.mining.gate.compatibilityCritical = true;
     activeSource.run.mining.artifact.kind = ArtifactKind::Story;
     activeSource.run.mining.artifact.rewardType = ArtifactRewardType::None;
     activeSource.run.mining.gate.outerShellTilesTotal = 0;
@@ -3255,9 +3333,9 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
     restoreSaveData(activeMigrated, catalog, *parsedActiveLegacy);
     const MiningRunState& restoredMining = activeMigrated.run.mining;
     const auto restoredSite = std::find_if(
-        activeMigrated.meta.miningStorySites.begin(),
-        activeMigrated.meta.miningStorySites.end(),
-        [&](const MiningStorySiteProgress& site) {
+        activeMigrated.meta.miningSites.begin(),
+        activeMigrated.meta.miningSites.end(),
+        [&](const MiningSiteProgress& site) {
             return site.destinationId == content::destination::jupiter
                 && site.gateType == MiningGateType::HazardCocoon
                 && site.artifactId == restoredMining.artifact.id;
@@ -3265,10 +3343,11 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
     require(
         restoredMining.artifact.kind == ArtifactKind::Boost
             && restoredMining.artifact.rewardType == ArtifactRewardType::DroneUpgradeCredit
-            && restoredMining.gate.storyCritical
+            && restoredMining.gate.compatibilityCritical
             && restoredMining.gate.hazardAffinity == MiningElementalAffinity::Thermal
             && restoredMining.gate.artifactId == restoredMining.artifact.id
-            && restoredSite != activeMigrated.meta.miningStorySites.end(),
+            && restoredSite != activeMigrated.meta.miningSites.end()
+            && restoredSite->legacyMigrated,
         "a v6 active Jupiter cocoon should migrate to the persistent Io site and minor-artifact reward");
 
     MiningRunState& deliverableMining = activeMigrated.run.mining;
@@ -3338,7 +3417,7 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
         1.0,
         false,
     }};
-    bankedLegacy.miningStorySites = {{
+    bankedLegacy.miningSites = {{
         "legacy_banked_io_cocoon",
         content::destination::jupiter,
         MiningAct::ActOne,
@@ -3372,7 +3451,8 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
             && bankedMigrated.meta.ioArtifactRecovered
             && bankedMigrated.meta.droneUpgradeCredits == 1
             && bankedMigrated.meta.ark.repairProgress == 0
-            && bankedMigrated.meta.miningStorySites.front().completed,
+            && bankedMigrated.meta.miningSites.front().completed
+            && bankedMigrated.meta.miningSites.front().legacyMigrated,
         "safe extraction of a banked v6 cocoon should complete Io and award exactly one credit");
 
     const SaveData recoveredRoundTrip = captureSaveData(bankedMigrated);
@@ -3382,6 +3462,874 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
         recoveredRestored.meta.ioArtifactRecovered
             && recoveredRestored.meta.droneUpgradeCredits == 1,
         "the migrated Io credit should remain exactly-once after a v7 roundtrip");
+}
+
+void versionNineScenarioAndCocoonStateRoundTrips()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x9009);
+
+    ScenarioInstance generated;
+    generated.id = "generated_fixture_42";
+    generated.definitionId = content::scenario::generatedTemplate;
+    generated.definitionVersion = 3;
+    generated.source = ScenarioSource::Procedural;
+    generated.factoryId = "fixture_factory";
+    generated.factoryVersion = 2;
+    generated.seed = 0x900942;
+    generated.resolvedParameters = {
+        "alpha|beta",
+        "gamma^delta",
+        "epsilon:semicolon",
+    };
+    ScenarioStepProgress generatedStep;
+    generatedStep.id = "recover^payload";
+    generatedStep.progress = 7;
+    generatedStep.briefingAcknowledged = true;
+    generatedStep.completed = true;
+    generatedStep.claimed = true;
+    generatedStep.failureSeen = true;
+    generatedStep.failureAcknowledged = true;
+    generated.steps = {generatedStep};
+    generated.awardedRewardIds = {
+        "generated_fixture_42/recover^payload/0",
+        "generated_fixture_42/recover^payload/1",
+    };
+    generated.completed = true;
+    state.meta.scenarios.push_back(generated);
+    state.meta.miningSites = {
+        {
+            "roundtrip_site",
+            content::destination::jupiter,
+            MiningAct::ActOne,
+            8,
+            0x900943,
+            MiningGateType::HazardCocoon,
+            {},
+            true,
+            false,
+            false,
+        },
+        {
+            "roundtrip_legacy_site",
+            content::destination::jupiter,
+            MiningAct::ActOne,
+            8,
+            0x900944,
+            MiningGateType::HazardCocoon,
+            "legacy_payload",
+            true,
+            true,
+            true,
+        },
+    };
+
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId =
+        content::destination::jupiter;
+    state.run.surfaceExpedition.pendingScenarioId =
+        content::scenario::volcanicDescent;
+    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    state.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+        content::miningSite::thermalLayeredRecovery;
+
+    const auto makeTerrain = [](int depthZone) {
+        MiningTerrain terrain;
+        terrain.width = 11;
+        terrain.height = 11;
+        terrain.depthZone = depthZone;
+        terrain.cells.assign(
+            static_cast<std::size_t>(terrain.width * terrain.height),
+            MiningCell {});
+        return terrain;
+    };
+    MiningRunState& mining = state.run.mining;
+    mining.active = true;
+    mining.destinationId = content::destination::jupiter;
+    mining.scenarioId = content::scenario::volcanicDescent;
+    mining.scenarioStepId = "recovery";
+    mining.miningSiteDefinitionId =
+        content::miningSite::thermalLayeredRecovery;
+    mining.miningSiteBiome = MiningSiteBiome::ThermalLava;
+    mining.siteBaselineOxygenSeconds = 60.0;
+    mining.depthZone = 1;
+    mining.entryDepthZone = 0;
+    mining.deepestDepthZone = 1;
+    mining.terrain = makeTerrain(1);
+    mining.gate.active = true;
+    mining.gate.type = MiningGateType::HazardCocoon;
+    mining.gate.cocoonDefinitionId = "roundtrip_cocoon";
+    mining.gate.cocoonDefinitionVersion = 4;
+    mining.gate.protectedObjective = {
+        ProtectedObjectiveKind::Artifact,
+        "roundtrip_payload",
+    };
+    mining.gate.activeCocoonLayer = 0;
+    mining.gate.cocoonLayers = {
+        {
+            "outer",
+            "OUTER",
+            4,
+            2,
+            1,
+            true,
+            false,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningCocoonRevealPolicy::OnAnyCellDiscovered,
+        },
+        {
+            "inner",
+            "INNER",
+            4,
+            4,
+            2,
+            false,
+            false,
+            MiningCocoonCompletionRule::TreatOnly,
+            MiningCocoonRevealPolicy::AfterPreviousLayerCompleted,
+        },
+    };
+    MiningCell* activeTagged = miningCellAt(mining.terrain, 2, 2);
+    require(activeTagged != nullptr, "v9 active cocoon cell should exist");
+    activeTagged->material = MiningCellMaterial::HazardPocket;
+    activeTagged->hazard = true;
+    activeTagged->gateAssociated = true;
+    activeTagged->cocoonLayer = 0;
+    activeTagged->revealed = true;
+
+    MiningDepthLayerState cached;
+    cached.depthZone = 0;
+    cached.terrain = makeTerrain(0);
+    cached.gate = mining.gate;
+    cached.gate.activeCocoonLayer = 1;
+    cached.gate.cocoonLayers[0].remaining = 0;
+    cached.gate.cocoonLayers[0].completed = true;
+    cached.gate.cocoonLayers[1].remaining = 3;
+    cached.gate.cocoonLayers[1].revealed = true;
+    MiningCell* cachedTagged = miningCellAt(cached.terrain, 3, 3);
+    require(cachedTagged != nullptr, "v9 cached cocoon cell should exist");
+    cachedTagged->material = MiningCellMaterial::CommonOre;
+    cachedTagged->gateAssociated = true;
+    cachedTagged->cocoonLayer = 1;
+    cachedTagged->revealed = true;
+    mining.depthLayers = {cached};
+    state.screen = Screen::Mining;
+
+    const SaveData captured = captureSaveData(state);
+    require(captured.version == 9, "new saves should use schema version nine");
+    const std::optional<SaveData> parsed =
+        deserializeSaveData(serializeSaveData(captured));
+    require(parsed.has_value(), "v9 scenario and cocoon state should deserialize");
+
+    GameState restored = createNewGame(catalog, 0x900A);
+    restoreSaveData(restored, catalog, *parsed);
+    const ScenarioInstance* restoredGenerated =
+        findScenarioInstance(restored.meta, generated.id);
+    require(
+        restoredGenerated != nullptr &&
+            restoredGenerated->definitionId == generated.definitionId &&
+            restoredGenerated->definitionVersion == generated.definitionVersion &&
+            restoredGenerated->source == ScenarioSource::Procedural &&
+            restoredGenerated->factoryId == generated.factoryId &&
+            restoredGenerated->factoryVersion == generated.factoryVersion &&
+            restoredGenerated->seed == generated.seed &&
+            restoredGenerated->resolvedParameters == generated.resolvedParameters &&
+            restoredGenerated->awardedRewardIds == generated.awardedRewardIds &&
+            restoredGenerated->completed,
+        "a procedural scenario instance should round trip without collapsing its runtime ID into its definition ID");
+    const ScenarioStepProgress* restoredGeneratedStep =
+        restoredGenerated == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*restoredGenerated, generatedStep.id);
+    require(
+        restoredGeneratedStep != nullptr &&
+            restoredGeneratedStep->progress == generatedStep.progress &&
+            restoredGeneratedStep->briefingAcknowledged &&
+            restoredGeneratedStep->completed &&
+            restoredGeneratedStep->claimed &&
+            restoredGeneratedStep->failureSeen &&
+            restoredGeneratedStep->failureAcknowledged,
+        "scenario step progress and first-failure acknowledgement should round trip");
+    require(
+        restored.meta.miningSites.size() == 2 &&
+            restored.meta.miningSites[0].siteId == "roundtrip_site" &&
+            restored.meta.miningSites[0].artifactId.empty() &&
+            !restored.meta.miningSites[0].legacyMigrated &&
+            restored.meta.miningSites[1].siteId ==
+                "roundtrip_legacy_site" &&
+            restored.meta.miningSites[1].legacyMigrated,
+        "generic and legacy-migrated mining-site progress should retain identity and provenance through v9");
+    require(
+        restored.run.surfaceExpedition.pendingScenarioId ==
+                content::scenario::volcanicDescent &&
+            restored.run.surfaceExpedition.pendingScenarioStepId == "recovery" &&
+            restored.run.surfaceExpedition.pendingMiningSiteDefinitionId ==
+                content::miningSite::thermalLayeredRecovery,
+        "a staged scenario mining launch should survive reload");
+    require(
+        restored.run.mining.scenarioId ==
+                content::scenario::volcanicDescent &&
+            restored.run.mining.scenarioStepId == "recovery" &&
+            restored.run.mining.miningSiteDefinitionId ==
+                content::miningSite::thermalLayeredRecovery &&
+            restored.run.mining.miningSiteBiome ==
+                MiningSiteBiome::ThermalLava &&
+            std::abs(
+                restored.run.mining.siteBaselineOxygenSeconds -
+                60.0) < 0.0001,
+        "active mining should retain its generic scenario, site, biome, and oxygen context");
+    const MiningCell* restoredActiveTagged =
+        miningCellAt(restored.run.mining.terrain, 2, 2);
+    require(
+        restored.run.mining.gate.cocoonDefinitionId ==
+                "roundtrip_cocoon" &&
+            restored.run.mining.gate.cocoonDefinitionVersion == 4 &&
+            restored.run.mining.gate.protectedObjective.id ==
+                "roundtrip_payload",
+        "active cocoon definition and protected-objective identity should round trip");
+    require(
+        restored.run.mining.gate.cocoonLayers.size() == 2 &&
+            restored.run.mining.gate.cocoonLayers[1].completionRule ==
+                MiningCocoonCompletionRule::TreatOnly &&
+            restored.run.mining.gate.cocoonLayers[1].revealPolicy ==
+                MiningCocoonRevealPolicy::AfterPreviousLayerCompleted,
+        "active cocoon layer progress, completion rules, and reveal policies should round trip");
+    require(
+        restoredActiveTagged != nullptr &&
+            restoredActiveTagged->cocoonLayer == 0,
+        "active cocoon cell tags should round trip");
+    require(
+        restored.run.mining.depthLayers.size() == 1 &&
+            restored.run.mining.depthLayers[0].gate.activeCocoonLayer == 1 &&
+            restored.run.mining.depthLayers[0].gate.cocoonLayers.size() == 2,
+        "cached depth layers should retain independent cocoon progress");
+    const MiningCell* restoredCachedTagged =
+        restored.run.mining.depthLayers.empty()
+        ? nullptr
+        : miningCellAt(
+              restored.run.mining.depthLayers[0].terrain,
+              3,
+              3);
+    require(
+        restoredCachedTagged != nullptr &&
+            restoredCachedTagged->cocoonLayer == 1 &&
+            restoredCachedTagged->revealed,
+        "cached-depth cocoon tags and visibility should round trip");
+
+    SaveData compatibility;
+    ScenarioInstance preDefinitionId;
+    preDefinitionId.id = "pre_definition_id";
+    preDefinitionId.definitionId = preDefinitionId.id;
+    compatibility.scenarios = {preDefinitionId};
+    compatibility.miningSites = {{
+        "pre_site_provenance",
+        content::destination::jupiter,
+        MiningAct::ActOne,
+        8,
+        0x900945,
+        MiningGateType::HazardCocoon,
+        "pre_site_payload",
+        true,
+        false,
+        false,
+    }};
+    std::string compatibilityText = serializeSaveData(compatibility);
+    const auto eraseLastField = [&](std::string_view key, char delimiter) {
+        const std::string prefix = std::string(key) + '=';
+        const std::size_t valueStart = compatibilityText.find(prefix);
+        require(
+            valueStart != std::string::npos,
+            "compatibility fixture should contain the requested save field");
+        const std::size_t lineEnd =
+            compatibilityText.find('\n', valueStart);
+        const std::size_t fieldStart =
+            compatibilityText.rfind(
+                delimiter,
+                lineEnd == std::string::npos
+                    ? compatibilityText.size()
+                    : lineEnd);
+        require(
+            fieldStart != std::string::npos && fieldStart > valueStart,
+            "compatibility fixture should contain an optional final field");
+        compatibilityText.erase(
+            fieldStart,
+            (lineEnd == std::string::npos
+                 ? compatibilityText.size()
+                 : lineEnd) -
+                fieldStart);
+    };
+    eraseLastField(save_schema::field::scenarios, '^');
+    eraseLastField(save_schema::field::miningStorySites, ':');
+    const std::optional<SaveData> parsedCompatibility =
+        deserializeSaveData(compatibilityText);
+    require(
+        parsedCompatibility.has_value() &&
+            parsedCompatibility->scenarios.size() == 1 &&
+            parsedCompatibility->scenarios[0].definitionId ==
+                parsedCompatibility->scenarios[0].id,
+        "a scenario record without the optional definition ID should default it to the runtime ID");
+    require(
+        parsedCompatibility->miningSites.size() == 1 &&
+            parsedCompatibility->miningSites[0].legacyMigrated,
+        "a mining-site record without provenance should default to legacy-migrated");
+}
+
+void proceduralScenarioTemplatesStayDormantUntilInstanced()
+{
+    ContentCatalog catalog = createDefaultContent();
+    Destination routeFixture;
+    routeFixture.id = "procedural_route_destination";
+    routeFixture.name = "Procedural Route Fixture";
+    routeFixture.tier = 2;
+    routeFixture.routeRequirementKeys = {"procedural_route_key"};
+    catalog.destinations.push_back(std::move(routeFixture));
+    std::string validationError;
+    require(
+        validateScenarioCatalog(catalog, &validationError),
+        "the default catalog should validate its non-default procedural template");
+    require(
+        makeProceduralScenarioInstance(
+            catalog,
+            "generated_mining",
+            0xBAD,
+            {"step.delivery.unsupported=1"}).id.empty(),
+        "a factory should reject malformed resolved parameters before they can enter a save");
+    require(
+        makeProceduralScenarioInstance(
+            catalog,
+            "generated_mining",
+            0xBAD + 1,
+            {"step.delivery.reward_count=1",
+             "step.delivery.reward.0.kind=inventory_resources"}).id.empty(),
+        "a factory should reject an inventory reward with no positive material grant");
+    require(
+        makeProceduralScenarioInstance(
+            catalog,
+            "generated_mining",
+            0xBAD + 2,
+            {"step.delivery.reward_count=1",
+             "step.delivery.reward.0.kind=route_access",
+             "step.delivery.reward.0.id=unknown_route"}).id.empty(),
+        "a factory should reject route access that does not resolve to catalog destination requirements");
+
+    GameState state = createNewGame(catalog, 0x515C);
+    require(
+        findScenarioInstance(state.meta, content::scenario::generatedTemplate) == nullptr,
+        "a factory template should not appear as a live starter scenario");
+
+    ScenarioDefinition* templateDefinition = nullptr;
+    for (ScenarioDefinition& definition : catalog.scenarios) {
+        if (definition.id == content::scenario::generatedTemplate) {
+            templateDefinition = &definition;
+            break;
+        }
+    }
+    require(templateDefinition != nullptr, "the procedural factory template should be authored in the catalog");
+
+    ScenarioInstance instance = makeProceduralScenarioInstance(
+        catalog,
+        "generated_mining",
+        0xDECAFBAD,
+        {
+            "destination=procedural_fixture_destination",
+            "step.delivery.required_progress=7",
+            "step.delivery.reward_count=3",
+            "step.delivery.reward.0.kind=drone_upgrade_credit",
+            "step.delivery.reward.0.amount=2",
+            "step.delivery.reward.1.kind=inventory_resources",
+            "step.delivery.reward.1.materials.common=3",
+            "step.delivery.reward.1.materials.rare=1",
+            "step.delivery.reward.2.kind=route_access",
+            "step.delivery.reward.2.id=procedural_route_destination"
+        });
+    require(
+        !instance.id.empty() && instance.definitionId == content::scenario::generatedTemplate &&
+            instance.source == ScenarioSource::Procedural,
+        "a factory should create a concrete procedural scenario instance");
+    const std::string instanceId = instance.id;
+    state.meta.scenarios.push_back(std::move(instance));
+    ensureScenarioInstances(state, catalog);
+    require(
+        findScenarioInstance(state.meta, instanceId) != nullptr,
+        "scenario initialization must preserve a concrete procedural instance");
+    const ScenarioInstance* persisted = findScenarioInstance(state.meta, instanceId);
+    require(persisted != nullptr, "the procedural fixture should retain its resolved values");
+    const ScenarioDefinition resolvedDelivery = resolveScenarioDefinition(*templateDefinition, *persisted);
+    const ScenarioStepDefinition* resolvedDeliveryStep =
+        findScenarioStepDefinition(resolvedDelivery, "delivery");
+    require(
+            resolvedDelivery.destinationId == "procedural_fixture_destination" &&
+            resolvedDeliveryStep != nullptr && resolvedDeliveryStep->requiredProgress == 7 &&
+            resolvedDeliveryStep->rewards.size() == 3 &&
+            resolvedDeliveryStep->rewards[0].kind == ScenarioRewardKind::DroneUpgradeCredit &&
+            resolvedDeliveryStep->rewards[0].amount == 2 &&
+            resolvedDeliveryStep->rewards[1].kind == ScenarioRewardKind::InventoryResources &&
+            resolvedDeliveryStep->rewards[1].materials.common == 3 &&
+            resolvedDeliveryStep->rewards[1].materials.rare == 1 &&
+            resolvedDeliveryStep->rewards[2].kind == ScenarioRewardKind::RouteAccess &&
+            resolvedDeliveryStep->rewards[2].id == "procedural_route_destination",
+        "a factory should persist and materialize typed procedural destination, material, and route reward parameters");
+    const ScenarioObjectivePresentation presentation = scenarioObjectiveForDestination(
+        state,
+        catalog,
+        "procedural_fixture_destination");
+    require(
+        presentation.available && presentation.scenarioId == instanceId && presentation.stepId == "delivery" &&
+            presentation.action == ScenarioActionKind::None,
+        "a procedural passive delivery objective should route by instance without exposing its claim action early");
+    require(
+        !performScenarioAction(
+             state,
+             catalog,
+             instanceId,
+             "delivery",
+             ScenarioActionKind::BeginActivity).applied,
+        "the generic dispatcher should reject starting a passive delivery objective as an activity");
+    const Destination* routeDestination = catalog.findDestination("procedural_route_destination");
+    require(routeDestination != nullptr, "the procedural route reward fixture should exist in the catalog");
+    const ScenarioRouteRequirementStatus routeBeforeClaim =
+        scenarioRouteRequirementStatus(state, catalog, *routeDestination);
+    require(
+        !routeBeforeClaim.satisfied && routeBeforeClaim.scenarioId == instanceId &&
+            routeBeforeClaim.stepId == "delivery",
+        "route evaluation should identify a generic RouteAccess reward before it is claimed");
+    ScenarioInstance unrelatedInstance = makeProceduralScenarioInstance(
+        catalog,
+        "generated_mining",
+        0xDECAFBAD + 1,
+        {"destination=procedural_fixture_destination"});
+    require(!unrelatedInstance.id.empty(), "a second factory result should be independently addressable");
+    const std::string unrelatedId = unrelatedInstance.id;
+    state.meta.scenarios.push_back(std::move(unrelatedInstance));
+    require(
+        recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::SafeMaterialDelivered, instanceId, "delivery",
+             "procedural_fixture_destination", "common", 7, 0}) &&
+            scenarioStepState(state, catalog, instanceId, "delivery") == ScenarioStepState::ReadyToClaim,
+        "an arbitrary authored destination should use the same procedural safe-delivery event path");
+    require(
+        scenarioStepState(state, catalog, unrelatedId, "delivery") == ScenarioStepState::Active,
+        "an event addressed to one procedural runtime instance must not advance another instance of its template");
+    require(
+        performScenarioAction(
+            state,
+            catalog,
+            instanceId,
+            "delivery",
+            ScenarioActionKind::ClaimReward).applied && state.meta.droneUpgradeCredits == 2 &&
+            state.meta.materials.common == 3 && state.meta.materials.rare == 1 &&
+            hasUnlock(state.meta, "procedural_route_key") &&
+            scenarioRouteRequirementStatus(state, catalog, *routeDestination).satisfied,
+        "a procedurally resolved material and route reward should be claimed exactly through the shared scenario dispatcher");
+    const auto proceduralSave = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(proceduralSave.has_value(), "a procedural scenario instance should serialize");
+    GameState restoredProcedural = createNewGame(catalog, 0x515D);
+    restoreSaveData(restoredProcedural, catalog, *proceduralSave);
+    const ScenarioInstance* restoredInstance =
+        findScenarioInstance(restoredProcedural.meta, instanceId);
+    require(
+        restoredInstance != nullptr && restoredInstance->source == ScenarioSource::Procedural &&
+            restoredInstance->factoryId == "generated_mining" &&
+            restoredInstance->resolvedParameters == persisted->resolvedParameters &&
+            resolveScenarioDefinition(*templateDefinition, *restoredInstance).destinationId ==
+                "procedural_fixture_destination",
+        "a procedural factory instance should reload its resolved values without rerolling");
+    state = std::move(restoredProcedural);
+
+    templateDefinition->steps.push_back({
+        "flyby",
+        {},
+        "PROCEDURAL FIXTURE",
+        "Perfect Pass",
+        "Complete a configured Flyby challenge.",
+        "REWARD // CONFIGURED BY FACTORY",
+        "Begin Challenge",
+        {},
+        ScenarioEventKind::FlybyFinished,
+        {},
+        {},
+        1,
+        static_cast<int>(FlybyGrade::Perfect),
+        false,
+        false,
+        true,
+        ScenarioActionKind::BeginActivity,
+        {},
+        {}
+    });
+    ScenarioInstance* procedural = findScenarioInstance(state.meta, instanceId);
+    require(procedural != nullptr, "the procedural Flyby fixture should retain its runtime instance");
+    procedural->steps.push_back({"flyby"});
+    procedural->resolvedParameters.push_back("destination=moon");
+    state.run.destinationIndex = 1;
+    state.meta.furthestTier = 1;
+    require(
+        startScenarioFlybyRun(state, catalog, instanceId, "flyby") &&
+            state.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+            state.run.flyby.scenarioId == instanceId && state.run.flyby.scenarioStepId == "flyby",
+        "a generic Flyby challenge should start from a procedural runtime scenario ID");
+    state.run.flyby.completed = true;
+    state.run.flyby.result = FlybyGrade::Perfect;
+    completeFlybyRun(state, catalog);
+    require(
+        scenarioStepState(state, catalog, instanceId, "flyby") == ScenarioStepState::Complete,
+        "a completed procedural Flyby should record its result against the runtime scenario instance");
+
+    ScenarioInstance obsoleteTemplate;
+    obsoleteTemplate.id = content::scenario::generatedTemplate;
+    obsoleteTemplate.definitionId = content::scenario::generatedTemplate;
+    obsoleteTemplate.source = ScenarioSource::Authored;
+    state.meta.scenarios.push_back(std::move(obsoleteTemplate));
+    ensureScenarioInstances(state, catalog);
+    require(
+        findScenarioInstance(state.meta, content::scenario::generatedTemplate) == nullptr,
+        "initialization should remove the obsolete auto-instantiated template from development saves");
+
+    templateDefinition->instantiateByDefault = true;
+    validationError.clear();
+    require(
+        !validateScenarioCatalog(catalog, &validationError) && !validationError.empty(),
+        "a scenario factory must reject a template that would auto-instantiate as a live contract");
+}
+
+void versionEightCampaignAndIoCocoonMigrateToVersionNine()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    SaveData legacy = captureSaveData(createNewGame(catalog, 0x8009));
+    legacy.version = 8;
+    legacy.scenarios.clear();
+    legacy.screen = Screen::Mining;
+    legacy.destinationIndex = 3;
+    legacy.furthestTier = 3;
+    legacy.unlockKeys = {
+        content::unlock::starter,
+        content::unlock::droneBay,
+        content::unlock::ioHazardDrone,
+    };
+    legacy.droneBaySlots = 2;
+    legacy.ownedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::hazardDrone,
+    };
+    legacy.equippedDroneIds = legacy.ownedDroneIds;
+    legacy.prospectorCommonOreRecovered =
+        tuning::research::prospectorCommonOreGoal;
+    legacy.lunarMiningBriefingAcknowledged = true;
+    legacy.lunarProspectorClaimed = true;
+    legacy.marsCommonOreRecovered =
+        tuning::research::marsBayCommonOreGoal;
+    legacy.marsMiningBriefingAcknowledged = true;
+    legacy.marsBayExpansionClaimed = true;
+    legacy.ioVolcanicBriefingAcknowledged = true;
+    legacy.ioHazardDroneCommissioned = true;
+    legacy.ioArtifactRecovered = true;
+    legacy.droneUpgradeCredits = 1;
+    legacy.saturnSlingshotBriefingAcknowledged = true;
+    legacy.saturnSlingshotPerfect = true;
+    legacy.saturnRouteUnlocked = false;
+    legacy.saturnSlingshotFailed = true;
+    legacy.saturnSlingshotFailureAcknowledged = true;
+
+    const auto makeTerrain = [](int depthZone) {
+        MiningTerrain terrain;
+        terrain.width = 11;
+        terrain.height = 11;
+        terrain.depthZone = depthZone;
+        terrain.cells.assign(
+            static_cast<std::size_t>(terrain.width * terrain.height),
+            MiningCell {});
+        return terrain;
+    };
+    legacy.surfaceExpedition.active = true;
+    legacy.surfaceExpedition.destinationId =
+        content::destination::jupiter;
+    MiningRunState& mining = legacy.mining;
+    mining.active = true;
+    mining.destinationId = content::destination::jupiter;
+    mining.scenarioId.clear();
+    mining.scenarioStepId.clear();
+    mining.miningSiteDefinitionId.clear();
+    mining.depthZone = 1;
+    mining.entryDepthZone = 0;
+    mining.deepestDepthZone = 1;
+    mining.terrain = makeTerrain(1);
+    mining.gate.active = true;
+    mining.gate.type = MiningGateType::HazardCocoon;
+    mining.gate.compatibilityCritical = true;
+    mining.gate.anchorX = 5.0;
+    mining.gate.anchorY = 5.0;
+    mining.gate.shellTilesTotal = 8;
+    mining.gate.shellTilesRemaining = 5;
+    mining.gate.outerShellTilesTotal = 4;
+    mining.gate.outerShellTilesRemaining = 1;
+    mining.gate.innerShellTilesTotal = 4;
+    mining.gate.innerShellTilesRemaining = 4;
+    mining.gate.cocoonLayers.clear();
+    mining.gate.activeCocoonLayer = -1;
+
+    constexpr std::array<std::pair<int, int>, 4> outerOffsets {{
+        {0, -2},
+        {2, 0},
+        {0, 2},
+        {-2, 0},
+    }};
+    constexpr std::array<std::pair<int, int>, 4> innerOffsets {{
+        {-1, -1},
+        {1, -1},
+        {1, 1},
+        {-1, 1},
+    }};
+    for (std::size_t index = 0; index < outerOffsets.size(); ++index) {
+        const auto [dx, dy] = outerOffsets[index];
+        MiningCell* cell = miningCellAt(
+            mining.terrain,
+            5 + dx,
+            5 + dy);
+        require(cell != nullptr, "legacy active outer seal cell should exist");
+        cell->material = index == 0
+            ? MiningCellMaterial::CommonOre
+            : MiningCellMaterial::Empty;
+        cell->gateAssociated = index == 0;
+        cell->revealed = index == 0;
+        cell->cocoonLayer = -1;
+    }
+    for (const auto& [dx, dy] : innerOffsets) {
+        MiningCell* cell = miningCellAt(
+            mining.terrain,
+            5 + dx,
+            5 + dy);
+        require(cell != nullptr, "legacy active inner seal cell should exist");
+        cell->material = MiningCellMaterial::HazardPocket;
+        cell->hazard = true;
+        cell->gateAssociated = true;
+        cell->revealed = true;
+        cell->cocoonLayer = -1;
+    }
+    MiningCell* embeddedCell = miningCellAt(mining.terrain, 5, 5);
+    require(embeddedCell != nullptr, "legacy embedded payload cell should exist");
+    embeddedCell->material = MiningCellMaterial::ArtifactCache;
+    embeddedCell->gateAssociated = true;
+    embeddedCell->revealed = true;
+    mining.artifact.present = true;
+    mining.artifact.id = "legacy_embedded_payload";
+    mining.artifact.kind = ArtifactKind::Boost;
+    mining.artifact.rewardType =
+        ArtifactRewardType::DroneUpgradeCredit;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    mining.artifact.x = 5.5;
+    mining.artifact.y = 5.5;
+    mining.artifact.revealed = true;
+
+    MiningDepthLayerState cached;
+    cached.depthZone = 0;
+    cached.terrain = makeTerrain(0);
+    cached.gate = mining.gate;
+    cached.gate.shellTilesRemaining = 2;
+    cached.gate.outerShellTilesRemaining = 0;
+    cached.gate.innerShellTilesRemaining = 2;
+    for (const auto& [dx, dy] : outerOffsets) {
+        MiningCell* cell = miningCellAt(cached.terrain, 5 + dx, 5 + dy);
+        require(cell != nullptr, "legacy cached outer seal cell should exist");
+        cell->material = MiningCellMaterial::Empty;
+        cell->revealed = true;
+    }
+    for (std::size_t index = 0; index < innerOffsets.size(); ++index) {
+        const auto [dx, dy] = innerOffsets[index];
+        MiningCell* cell = miningCellAt(cached.terrain, 5 + dx, 5 + dy);
+        require(cell != nullptr, "legacy cached inner seal cell should exist");
+        cell->material = index < 2
+            ? MiningCellMaterial::Empty
+            : MiningCellMaterial::HazardPocket;
+        cell->hazard = index >= 2;
+        cell->gateAssociated = index >= 2;
+        cell->revealed = false;
+    }
+    cached.artifact.present = true;
+    cached.artifact.id = "legacy_loose_payload";
+    cached.artifact.state = MiningArtifactState::Loose;
+    cached.artifact.x = 6.5;
+    cached.artifact.y = 5.5;
+    cached.artifact.tethered = true;
+    cached.artifact.revealed = false;
+    mining.depthLayers = {cached};
+
+    const std::optional<SaveData> parsedLegacy =
+        deserializeSaveData(serializeSaveData(legacy));
+    require(
+        parsedLegacy.has_value() && parsedLegacy->version == 8,
+        "the v8 campaign and active Io fixture should survive its legacy text-save boundary");
+    GameState migrated = createNewGame(catalog, 0x9010);
+    restoreSaveData(migrated, catalog, *parsedLegacy);
+    const auto hasReward = [](const ScenarioInstance* instance, std::string_view id) {
+        return instance != nullptr &&
+            std::find(
+                instance->awardedRewardIds.begin(),
+                instance->awardedRewardIds.end(),
+                id) != instance->awardedRewardIds.end();
+    };
+    const ScenarioInstance* lunar =
+        findScenarioInstance(
+            migrated.meta,
+            content::scenario::lunarProspector);
+    const ScenarioInstance* mars =
+        findScenarioInstance(
+            migrated.meta,
+            content::scenario::marsBayExpansion);
+    const ScenarioInstance* io =
+        findScenarioInstance(
+            migrated.meta,
+            content::scenario::volcanicDescent);
+    const ScenarioInstance* transfer =
+        findScenarioInstance(
+            migrated.meta,
+            content::scenario::outerTransfer);
+    require(
+        lunar != nullptr && lunar->completed &&
+            mars != nullptr && mars->completed &&
+            io != nullptr && io->completed &&
+            transfer != nullptr && !transfer->completed,
+        "v8 campaign flags should become authored scenario instances without auto-claiming a saved Perfect slingshot");
+    require(
+        hasReward(
+            lunar,
+            "lunar_prospector_contract/delivery/4") &&
+            hasReward(
+                mars,
+                "mars_bay_expansion/delivery/2") &&
+            hasReward(
+                io,
+                "volcanic_descent/commission/1") &&
+            hasReward(
+                io,
+                "volcanic_descent/recovery/1") &&
+            !hasReward(
+                transfer,
+                "outer_transfer/flyby/0"),
+        "v8 claimed rewards should receive canonical idempotency IDs while an unclaimed Perfect remains reward-free");
+    const ScenarioStepProgress* flyby =
+        transfer == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*transfer, "flyby");
+    require(
+        flyby != nullptr &&
+            flyby->completed &&
+            !flyby->claimed &&
+            flyby->failureSeen &&
+            flyby->failureAcknowledged,
+        "v8 slingshot completion and first-failure acknowledgement should migrate independently from route claim");
+    require(
+        hasUnlock(migrated.meta, content::unlock::routeMars) &&
+            hasUnlock(migrated.meta, content::unlock::routeJupiter) &&
+            hasUnlock(migrated.meta, "outer_transfer_ready") &&
+            !hasUnlock(migrated.meta, content::unlock::routeSaturn) &&
+            migrated.meta.droneUpgradeCredits == 1,
+        "v8 route unlocks should be repaired without re-awarding the Io upgrade credit or auto-opening Saturn");
+
+    const MiningRunState& migratedMining = migrated.run.mining;
+    require(
+        migratedMining.scenarioId ==
+                content::scenario::volcanicDescent &&
+            migratedMining.scenarioStepId == "recovery" &&
+            migratedMining.miningSiteDefinitionId ==
+                content::miningSite::thermalLayeredRecovery &&
+            migratedMining.miningSiteBiome ==
+                MiningSiteBiome::ThermalLava &&
+            std::abs(
+                migratedMining.siteBaselineOxygenSeconds -
+                60.0) < 0.0001,
+        "a live v8 Io recovery should gain generic scenario and site context");
+    require(
+        migratedMining.gate.cocoonLayers.size() == 2 &&
+            migratedMining.gate.activeCocoonLayer == 0 &&
+            migratedMining.gate.cocoonLayers[0].remaining == 1 &&
+            migratedMining.gate.cocoonLayers[0].revealed &&
+            migratedMining.gate.cocoonLayers[1].remaining == 4 &&
+            !migratedMining.gate.cocoonLayers[1].revealed,
+        "a partial v8 outer seal should reveal atomically while keeping every inner segment hidden");
+    for (const auto& [dx, dy] : outerOffsets) {
+        const MiningCell* cell =
+            miningCellAt(migratedMining.terrain, 5 + dx, 5 + dy);
+        require(
+            cell != nullptr &&
+                cell->cocoonLayer == 0 &&
+                cell->revealed,
+            "all migrated outer cells should share tag zero and one atomic visibility state");
+    }
+    for (const auto& [dx, dy] : innerOffsets) {
+        const MiningCell* cell =
+            miningCellAt(migratedMining.terrain, 5 + dx, 5 + dy);
+        require(
+            cell != nullptr &&
+                cell->cocoonLayer == 1 &&
+                !cell->revealed,
+            "all migrated inner cells should share tag one and remain hidden behind the outer layer");
+    }
+    const MiningCell* migratedEmbeddedCell =
+        miningCellAt(migratedMining.terrain, 5, 5);
+    require(
+        migratedMining.artifact.state ==
+                MiningArtifactState::Embedded &&
+            !migratedMining.artifact.revealed &&
+            migratedEmbeddedCell != nullptr &&
+            migratedEmbeddedCell->material ==
+                MiningCellMaterial::ArtifactCache &&
+            !migratedEmbeddedCell->revealed,
+        "an embedded v8 payload should remain present but hidden until every cocoon layer clears");
+    require(
+        migratedMining.depthLayers.size() == 1 &&
+            migratedMining.depthLayers[0].gate.cocoonLayers.size() == 2 &&
+            migratedMining.depthLayers[0].gate.activeCocoonLayer == 1 &&
+            migratedMining.depthLayers[0].gate.cocoonLayers[0].completed &&
+            migratedMining.depthLayers[0].gate.cocoonLayers[1].remaining == 2 &&
+            migratedMining.depthLayers[0].gate.cocoonLayers[1].revealed &&
+            migratedMining.depthLayers[0].artifact.state ==
+                MiningArtifactState::Loose &&
+            migratedMining.depthLayers[0].artifact.tethered &&
+            migratedMining.depthLayers[0].artifact.revealed,
+        "cached v8 layers should expose the inner ring only after the outer clears and should never re-lock a loose tethered payload");
+
+    SaveData partial = captureSaveData(createNewGame(catalog, 0x8010));
+    partial.version = 8;
+    partial.scenarios.clear();
+    partial.destinationIndex = 1;
+    partial.furthestTier = 1;
+    partial.unlockKeys = {content::unlock::starter};
+    partial.prospectorCommonOreRecovered = 29;
+    partial.lunarMiningBriefingAcknowledged = true;
+    partial.marsCommonOreRecovered =
+        tuning::research::marsBayCommonOreGoal;
+    partial.marsMiningBriefingAcknowledged = true;
+    GameState partialMigrated = createNewGame(catalog, 0x9011);
+    restoreSaveData(partialMigrated, catalog, partial);
+    const ScenarioInstance* partialLunar =
+        findScenarioInstance(
+            partialMigrated.meta,
+            content::scenario::lunarProspector);
+    const ScenarioInstance* partialMars =
+        findScenarioInstance(
+            partialMigrated.meta,
+            content::scenario::marsBayExpansion);
+    const ScenarioStepProgress* partialLunarDelivery =
+        partialLunar == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*partialLunar, "delivery");
+    const ScenarioStepProgress* partialMarsDelivery =
+        partialMars == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*partialMars, "delivery");
+    require(
+        partialLunarDelivery != nullptr &&
+            partialLunarDelivery->progress == 29 &&
+            !partialLunarDelivery->completed &&
+            partialMarsDelivery != nullptr &&
+            partialMarsDelivery->progress ==
+                tuning::research::marsBayCommonOreGoal &&
+            partialMarsDelivery->completed &&
+            !partialMarsDelivery->claimed &&
+            partialMars->awardedRewardIds.empty(),
+        "unfinished v8 delivery counts should remain partial or READY TO CLAIM without silently applying rewards");
 }
 
 void droneOpsPresentationExposesPersistentLoadout()
@@ -3402,9 +4350,9 @@ void droneOpsPresentationExposesPersistentLoadout()
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
     state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
-    state.meta.marsMiningBriefingAcknowledged = true;
-    state.meta.marsBayExpansionClaimed = true;
-    state.meta.marsCommonOreRecovered = tuning::research::marsBayCommonOreGoal;
+    // The presentation gate is the installed capacity reward, not the old
+    // Mars projection fields. This also covers a future authored or
+    // procedural scenario that grants the same reusable capability.
     state.meta.droneBaySlots = 2;
     state.meta.materials.common = 6;
     state.meta.materials.rare = 2;
@@ -3452,7 +4400,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(std::any_of(drones.buildGuidanceChips.begin(), drones.buildGuidanceChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == "Upgrade" && !chip.value.empty();
     }), "Drone Ops should expose an upgrade priority for the active build");
-    require(drones.upgradeSlotAction.enabled, "the funded post-Mars slot upgrade should be offered when materials allow");
+    require(drones.upgradeSlotAction.enabled, "the funded post-capacity-reward slot upgrade should be offered when materials allow");
     require(std::any_of(drones.details.begin(), drones.details.end(), [](const DetailPresentationRow& row) {
         return row.label == "Passive combat plan" && row.value.find("auto-fire") != std::string::npos;
     }), "Drone Ops details should frame combat as passive mini-drone abilities");
@@ -4158,9 +5106,11 @@ void surfacePushMiniGameBanksDepthRoute()
     require(state.screen == Screen::SurfacePush, "starting Push Deeper should move to its phase board");
     require(state.run.surfaceExpedition.supply == supplyBefore - tuning::research::pushSupplyCost, "starting push should spend push action kits");
 
-    state.run.surfacePush.collapseRisk = 0.0;
+    state.run.surfacePush.collapseRisk = 1.0;
     const SurfaceActionOutcome step = pushSurfaceDepthStep(state, rng);
     require(step.applied, "Push Deeper step should resolve while active");
+    require(!step.hazardTriggered && state.run.surfacePush.steps == 1,
+        "the first pushed layer should resolve before collapse risk begins");
     require(state.run.surfacePush.depthGain > 0, "Push Deeper should stage a depth gain");
     require(state.run.surfacePush.temporaryMaterials.rare > 0, "Push Deeper should stage richer materials");
     require(!state.run.surfacePush.rewardMarkers.empty(), "Push Deeper should record stable visual reward markers");
@@ -4182,6 +5132,9 @@ void surfacePushMiniGameBanksDepthRoute()
     require(state.run.surfaceExpedition.prospectMaterials.rare > 0, "banked Push Deeper should tag richer material prospects");
 
     require(startMiningRun(state, catalog).applied, "Push Deeper prospects should open the mining run");
+    require(state.run.mining.entryDepthZone == 0, "the mining ship should remain fixed at surface depth zero");
+    require(state.run.mining.rigDepthZone == state.run.mining.depthZone,
+        "the Mining Rig should deploy directly at the banked pushed depth");
     const bool foundDeepProspect = std::any_of(
         state.run.mining.terrain.cells.begin(),
         state.run.mining.terrain.cells.end(),
@@ -4189,6 +5142,177 @@ void surfacePushMiniGameBanksDepthRoute()
             return (cell.material == MiningCellMaterial::RareOre || cell.material == MiningCellMaterial::ArtifactCache) && cell.revealed;
         });
     require(foundDeepProspect, "Push Deeper prospects should appear as revealed rich targets in mining terrain");
+}
+
+void surfacePushLaterCollapseCanLoseTheUnbankedRoute()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94211);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    Random rng(94212);
+
+    require(startSurfacePushRun(state, rng).applied, "collapse test should start Push Deeper");
+    state.run.surfacePush.collapseRisk = 1.0;
+    require(pushSurfaceDepthStep(state, rng).applied, "safe first layer should resolve");
+    require(state.run.surfacePush.steps == 1 && !state.run.surfacePush.busted,
+        "a forced collapse roll must not affect layer one");
+    state.run.surfacePush.collapseRisk = 1.0;
+    const SurfaceActionOutcome collapse = pushSurfaceDepthStep(state, rng);
+    require(collapse.applied && collapse.hazardTriggered,
+        "collapse risk should apply when attempting layer two");
+    require(state.run.surfacePush.busted && state.run.surfacePush.completed,
+        "a later collapse should close and bust the unbanked route");
+}
+
+void scannedArtifactBecomesARecoverableMiningTarget()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94221);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.supply = 10;
+    const int baseDepth = state.run.surfaceExpedition.depth;
+    state.run.surfaceExpedition.depthProspects.push_back(
+        {2, baseDepth + 2, {}, 1});
+    Random rng(94222);
+
+    require(startSurfacePushRun(state, rng).applied, "artifact route should start Push Deeper");
+    state.run.surfacePush.collapseRisk = 1.0;
+    require(pushSurfaceDepthStep(state, rng).applied, "artifact route should resolve its safe first layer");
+    state.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(state, rng).applied, "artifact forecast layer should push successfully");
+    require(state.run.surfacePush.temporaryArtifacts.size() == 1,
+        "a scanned artifact should be confirmed without another random roll");
+    require(std::find(
+            state.run.surfacePush.rewardMarkers.begin(),
+            state.run.surfacePush.rewardMarkers.end(),
+            MiningCellMaterial::ArtifactCache) != state.run.surfacePush.rewardMarkers.end(),
+        "a confirmed artifact should keep a stable Push Deeper marker");
+
+    require(bankSurfacePush(state).applied, "confirmed artifact route should bank");
+    require(state.run.surfaceExpedition.depth == baseDepth + 2 &&
+            state.run.surfaceExpedition.prospectArtifacts == 1,
+        "banking should bind the confirmed artifact to the selected start depth");
+    require(startMiningRun(state, catalog).applied, "confirmed artifact route should start mining");
+    const MiningRunState& mining = state.run.mining;
+    require(mining.depthZone == baseDepth + 2 && mining.entryDepthZone == 0,
+        "the rig should start at the selected depth while the ship stays on the surface");
+    require(mining.artifact.present && mining.artifact.revealed &&
+            mining.artifact.state == MiningArtifactState::Embedded,
+        "the banked artifact should become a revealed recoverable mining object");
+    const MiningCell* artifactCell = miningCellAt(
+        mining.terrain,
+        static_cast<int>(std::floor(mining.artifact.x)),
+        static_cast<int>(std::floor(mining.artifact.y)));
+    require(artifactCell != nullptr &&
+            artifactCell->material == MiningCellMaterial::ArtifactCache &&
+            artifactCell->revealed,
+        "terrain normalization must not overwrite the guaranteed artifact cell");
+}
+
+void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
+{
+    MiningRunState mining;
+    mining.active = true;
+    mining.depthZone = 2;
+    mining.entryDepthZone = 0;
+    mining.returnZoneX = 8.0;
+    mining.returnZoneY = 3.0;
+    mining.oxygenSeconds = 100.0;
+    mining.droneHealth = 1.0;
+    mining.drillIntegrity = 1.0;
+    mining.artifact.present = true;
+    mining.artifact.revealed = true;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    mining.artifact.x = 12.5;
+    mining.artifact.y = 18.5;
+
+    PoiGuidanceTarget guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.kind == PoiGuidanceKind::Artifact &&
+            guidance.label == "ARTIFACT" &&
+            guidance.direction == PoiGuidanceDirection::WorldTarget,
+        "a revealed recoverable artifact on the active layer should receive dynamic guidance");
+
+    mining.oxygenSeconds = 37.0;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.kind == PoiGuidanceKind::Ship &&
+            guidance.label == "SHIP" &&
+            guidance.direction == PoiGuidanceDirection::Ascend,
+        "oxygen caution should override artifact guidance and point upward below surface");
+
+    mining.oxygenSeconds = 100.0;
+    mining.droneHealth = 0.37;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
+        "mining rig integrity caution should override artifact guidance");
+
+    mining.droneHealth = 1.0;
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorIntegrity = 0.37;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
+        "active operator suit integrity caution should override artifact guidance");
+
+    mining.operatorMode = MiningOperatorMode::Rig;
+    mining.operatorPresent = false;
+    mining.operatorIntegrity = 1.0;
+    mining.drillIntegrity = 0.37;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
+        "drill integrity caution should override artifact guidance");
+
+    mining.drillIntegrity = 1.0;
+    mining.oxygenSeconds = 37.0;
+    mining.depthZone = 0;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.direction == PoiGuidanceDirection::WorldTarget &&
+            guidance.x == mining.returnZoneX && guidance.y == mining.returnZoneY,
+        "surface safety guidance should point directly to the ship");
+    require(!miningPoiGuidanceTarget(
+                 mining, 100.0, tuning::launch::warningCautionThreshold, true).active,
+        "surface ship guidance should disappear inside the return zone");
+
+    mining.oxygenSeconds = 100.0;
+    mining.depthZone = 2;
+    mining.artifact.state = MiningArtifactState::Delivered;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(!guidance.active, "delivered artifacts should not retain POI guidance");
+    mining.artifact.state = MiningArtifactState::Destroyed;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(!guidance.active, "destroyed artifacts should not retain POI guidance");
+
+    MiningDepthLayerState upperLayer;
+    upperLayer.depthZone = 1;
+    upperLayer.artifact.present = true;
+    upperLayer.artifact.revealed = true;
+    upperLayer.artifact.state = MiningArtifactState::Loose;
+    mining.depthLayers = {upperLayer};
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.direction == PoiGuidanceDirection::Ascend,
+        "an artifact on an upper cached layer should lead to the ascent boundary");
+    mining.depthLayers.front().depthZone = 3;
+    guidance = miningPoiGuidanceTarget(
+        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+    require(guidance.active && guidance.direction == PoiGuidanceDirection::Descend,
+        "an artifact on a lower cached layer should lead to the descent boundary");
+
+    PoiGuidanceTarget futureTarget;
+    futureTarget.active = true;
+    futureTarget.kind = PoiGuidanceKind::Boss;
+    futureTarget.label = "BOSS";
+    require(futureTarget.label == "BOSS",
+        "future story and boss guidance should use the same dynamic-label interface");
 }
 
 void surfaceScanForecastsPushDepthLayers()
@@ -4233,6 +5357,49 @@ void surfaceScanForecastsPushDepthLayers()
     require(startMiningRun(state, catalog).applied, "forecasted pushed layer should open mining");
     require(state.run.mining.depthZone == startingDepth + 1, "mining should start at the pushed layer depth");
     require(state.run.surfaceExpedition.depthProspects.empty(), "starting mining should consume banked layer forecasts");
+}
+
+void thermalSurfacePushStillMapsResourceLayers()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 94305);
+    state.run.destinationIndex = 3;
+    state.meta.furthestTier = 3;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.pendingScenarioId =
+        std::string(content::scenario::volcanicDescent);
+    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    state.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+        std::string(content::miningSite::thermalLayeredRecovery);
+    state.run.surfaceExpedition.supply = 10;
+    Random rng(94306);
+
+    require(startSurfaceScanRun(state, rng).applied,
+        "thermal route should still allow its resource layers to be scanned");
+    state.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(state, rng).applied,
+        "thermal scan should map its current layer");
+    const MaterialInventory mapped =
+        state.run.surfaceScan.depthProspects.empty()
+        ? MaterialInventory{}
+        : state.run.surfaceScan.depthProspects.front().possibleMaterials;
+    require(mapped.common > 0 || mapped.rare > 0 || mapped.exotic > 0,
+        "thermal scan should display the resources sealed behind Hazard treatment");
+    require(bankSurfaceScan(state).applied,
+        "thermal resource forecast should remain available to Push Deeper");
+
+    require(startSurfacePushRun(state, rng).applied,
+        "thermal Push Deeper route should start");
+    state.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(state, rng).applied,
+        "thermal route should resolve its guaranteed first layer");
+    require(state.run.surfacePush.temporaryMaterials.common >= 1
+            && state.run.surfacePush.temporaryMaterials.rare >= 1,
+        "thermal first layer should retain the same guaranteed resource value");
+    require(!state.run.surfacePush.rewardMarkers.empty()
+            && state.run.surfacePush.rewardMarkers.size()
+                == state.run.surfacePush.rewardMarkerDepthOffsets.size(),
+        "thermal Push Deeper should send colored resource markers to presentation");
 }
 
 void surfaceScanBustAndAbortDiscardForecasts()
@@ -4332,6 +5499,21 @@ void miningTerrainIsDeterministicAndDepthScales()
                 "Act 1 Pressure hazards should stay in the Thermal/Cryo teaching set");
         }
     }
+    const auto hasReturnShaft = [](const MiningTerrain& terrain) {
+        const int leftX = terrain.width / 2 - 1;
+        for (int y = 0; y < terrain.height - 1; ++y) {
+            for (int x = leftX; x <= leftX + 1; ++x) {
+                const MiningCell* cell = miningCellAt(terrain, x, y);
+                if (cell == nullptr || cell->material != MiningCellMaterial::Empty ||
+                    cell->feature != MiningCellFeature::MainTunnel || cell->suitOnlyPassage) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    require(!hasReturnShaft(a),
+        "a fresh mining layer should stay normal until the player leaves it for a deeper depth");
     require(elementalHazards > 0, "Act 1 Pressure terrain should include environmental hazard pockets");
     const MiningArenaRules actOneEarly = resolveMiningArenaRules({MiningAct::ActOne, 1, 1});
     const MiningArenaRules actOneLate = resolveMiningArenaRules({MiningAct::ActOne, 10, 1});
@@ -4875,14 +6057,23 @@ void hazardDroneTreatsAffinityLadderAndBatches()
             MiningCell* nearStorySeal = miningCellAt(mining.terrain, nearSealX, priorityY);
             require(ordinaryLava != nullptr && farStorySeal != nullptr && nearStorySeal != nullptr, "the Io priority cells should exist");
             const double priorityToughness = miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+            MiningCocoonLayerProgress priorityLayer;
+            priorityLayer.id = "priority_layer";
+            priorityLayer.label = "PROTECTED LAYER";
+            priorityLayer.total = 2;
+            priorityLayer.remaining = 2;
+            priorityLayer.requiredHazardMark = 1;
+            priorityLayer.revealed = true;
+            mining.gate.cocoonLayers = {priorityLayer};
+            mining.gate.activeCocoonLayer = 0;
             *ordinaryLava = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
             ordinaryLava->hazardAffinity = MiningElementalAffinity::Thermal;
             *farStorySeal = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
             farStorySeal->hazardAffinity = MiningElementalAffinity::Thermal;
-            farStorySeal->gateAssociated = true;
+            farStorySeal->cocoonLayer = 0;
             *nearStorySeal = {MiningCellMaterial::HazardPocket, priorityToughness, priorityToughness, true, true};
             nearStorySeal->hazardAffinity = MiningElementalAffinity::Thermal;
-            nearStorySeal->gateAssociated = true;
+            nearStorySeal->cocoonLayer = 0;
             mining.artifact.present = true;
             mining.artifact.x = static_cast<double>(nearSealX) + 0.5;
             mining.artifact.y = static_cast<double>(priorityY) + 0.5;
@@ -4985,6 +6176,300 @@ void hazardDroneTreatsAffinityLadderAndBatches()
                     return lhs.material == rhs.material && lhs.hazard == rhs.hazard && lhs.hazardAffinity == rhs.hazardAffinity;
                 }),
         "hazard refinement results should be deterministic for the same run seed and tile coordinates");
+}
+
+void hazardDronesCrossSolidTerrainButNeverTargetHiddenCells()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 93401);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::hazardDrone};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied,
+        "collisionless Hazard fixture should start an Io mining run");
+
+    MiningRunState& mining = state.run.mining;
+    clearMiningTerrainForEvaTest(mining);
+    mining.droneX = 3.5;
+    mining.droneY = 6.5;
+    MiningMiniDroneAgent& hazardAgent = mining.miniDrones.front();
+    hazardAgent.x = mining.droneX;
+    hazardAgent.y = mining.droneY;
+    const double hardness =
+        miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        MiningCell* wall = miningCellAt(mining.terrain, 8, y);
+        require(wall != nullptr, "collisionless Hazard wall should exist");
+        *wall = {MiningCellMaterial::HardRock, hardness, hardness, true, false};
+    }
+
+    constexpr int targetX = 14;
+    constexpr int targetY = 6;
+    MiningCell* target = miningCellAt(mining.terrain, targetX, targetY);
+    require(target != nullptr, "collisionless Hazard target should exist");
+    MiningCocoonLayerProgress hiddenLayer;
+    hiddenLayer.id = "hidden_layer";
+    hiddenLayer.label = "HIDDEN LAYER";
+    hiddenLayer.total = 1;
+    hiddenLayer.remaining = 1;
+    hiddenLayer.requiredHazardMark = 1;
+    mining.gate.cocoonLayers = {hiddenLayer};
+    mining.gate.activeCocoonLayer = 0;
+    *target = {MiningCellMaterial::HazardPocket, hardness, hardness, false, true};
+    target->hazardAffinity = MiningElementalAffinity::Thermal;
+    target->cocoonLayer = 0;
+    mining.artifact.present = true;
+    mining.artifact.x = 15.5;
+    mining.artifact.y = 6.5;
+
+    updateMiningRun(state, catalog, 0.10);
+    require(
+        hazardAgent.targetCellX < 0 && target->material == MiningCellMaterial::HazardPocket,
+        "a Hazard Drone must not detect or treat an unrevealed story seal");
+
+    target->revealed = true;
+    mining.gate.cocoonLayers.front().revealed = true;
+    bool crossedSolidTerrain = false;
+    for (int tick = 0; tick < 500; ++tick) {
+        updateMiningRun(state, catalog, 0.05);
+        const MiningCell* occupied = miningCellAt(
+            mining.terrain,
+            static_cast<int>(std::floor(hazardAgent.x)),
+            static_cast<int>(std::floor(hazardAgent.y)));
+        crossedSolidTerrain =
+            crossedSolidTerrain ||
+            (occupied != nullptr && miningMaterialSolid(occupied->material));
+        if (target->material != MiningCellMaterial::HazardPocket) {
+            break;
+        }
+    }
+    require(crossedSolidTerrain,
+        "a revealed story seal should send the Hazard Drone directly through blocking terrain");
+    require(
+        target->material != MiningCellMaterial::HazardPocket,
+        "the collisionless Hazard Drone should reach and treat the revealed story seal");
+
+    bool returnedAcrossWall = false;
+    for (int tick = 0; tick < 300; ++tick) {
+        updateMiningRun(state, catalog, 0.05);
+        if (hazardAgent.x < 8.0) {
+            returnedAcrossWall = true;
+            break;
+        }
+    }
+    require(returnedAcrossWall,
+        "a Hazard Drone should return directly to the controlled actor after treatment");
+}
+
+void duplicateHazardDronesCoordinatePriorityAndExactAssistance()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 93402);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 2;
+    state.meta.equippedDroneIds = {
+        content::drone::hazardDrone,
+        content::drone::hazardDrone
+    };
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied,
+        "duplicate Hazard Drone fixture should start an Io mining run");
+
+    MiningRunState& mining = state.run.mining;
+    clearMiningTerrainForEvaTest(mining);
+    mining.droneX = 12.5;
+    mining.droneY = 6.5;
+    require(mining.miniDrones.size() == 2,
+        "both equipped Hazard Drone copies should deploy");
+    MiningMiniDroneAgent& first = mining.miniDrones[0];
+    MiningMiniDroneAgent& second = mining.miniDrones[1];
+    require(
+        first.role == MiniDroneRole::Hazard &&
+            second.role == MiniDroneRole::Hazard &&
+            first.roleIndex != second.roleIndex,
+        "duplicate Hazard Drones should retain independent stable identities");
+    first.x = second.x = mining.droneX;
+    first.y = second.y = mining.droneY;
+    first.velocityX = first.velocityY = 0.0;
+    second.velocityX = second.velocityY = 0.0;
+
+    const double hardness =
+        miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+    const auto placeHazard = [&](int x, int y, bool gateAssociated) {
+        MiningCell* cell = miningCellAt(mining.terrain, x, y);
+        require(cell != nullptr, "Hazard priority fixture cell should exist");
+        *cell = {MiningCellMaterial::HazardPocket, hardness, hardness, true, true};
+        cell->hazardAffinity = MiningElementalAffinity::Thermal;
+        cell->gateAssociated = gateAssociated;
+        return cell;
+    };
+    MiningCell* oldEntranceHazard = placeHazard(2, 6, false);
+    MiningCell* nearbyHazard = placeHazard(11, 6, false);
+    MiningCell* storySeal = placeHazard(20, 6, true);
+    mining.artifact.present = true;
+    mining.artifact.x = 21.5;
+    mining.artifact.y = 6.5;
+
+    updateMiningRun(state, catalog, 0.01);
+    const auto targetsStorySeal = [&](const MiningMiniDroneAgent& agent) {
+        return agent.targetCellX == 20 && agent.targetCellY == 6;
+    };
+    const auto targetsNearbyHazard = [&](const MiningMiniDroneAgent& agent) {
+        return agent.targetCellX == 11 && agent.targetCellY == 6;
+    };
+    require(
+        (targetsStorySeal(first) && targetsNearbyHazard(second)) ||
+            (targetsStorySeal(second) && targetsNearbyHazard(first)),
+        "the revealed story seal should win globally while the second drone takes the nearby ordinary hazard");
+    require(
+        first.targetCellX != 2 && second.targetCellX != 2,
+        "an ordinary hazard near the entrance but outside command radius should remain unassigned");
+
+    *oldEntranceHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    *nearbyHazard = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    *storySeal = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    updateMiningRun(state, catalog, 0.01);
+
+    MiningCell* sharedTarget = placeHazard(13, 6, false);
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        agent.x = 13.5;
+        agent.y = 6.5;
+        agent.velocityX = agent.velocityY = 0.0;
+        agent.targetCellX = agent.targetCellY = -1;
+        agent.taskProgressSeconds = 0.0;
+        agent.actionCooldownSeconds = 0.0;
+        agent.behavior = MiningMiniDroneBehavior::Following;
+    }
+    updateMiningRun(state, catalog, 0.01);
+    require(
+        first.targetCellX == 13 && first.targetCellY == 6 &&
+            second.targetCellX == 13 && second.targetCellY == 6,
+        "duplicate Hazard Drones should assist on one eligible tile when no distinct work remains");
+
+    HazardDroneCoordinator coordinator(mining);
+    coordinator.synchronizeAssignments();
+    const MiniDroneCoordinationPoint firstApproach =
+        coordinator.treatmentApproachPoint(first);
+    const MiniDroneCoordinationPoint secondApproach =
+        coordinator.treatmentApproachPoint(second);
+    require(
+        std::hypot(
+            firstApproach.x - secondApproach.x,
+            firstApproach.y - secondApproach.y) > 0.5,
+        "assistants should receive distinct approach positions around their shared target");
+    first.x = firstApproach.x;
+    first.y = firstApproach.y;
+    second.x = secondApproach.x;
+    second.y = secondApproach.y;
+    first.velocityX = first.velocityY = 0.0;
+    second.velocityX = second.velocityY = 0.0;
+    first.taskProgressSeconds = second.taskProgressSeconds = 0.0;
+
+    for (int tick = 0; tick < 14; ++tick) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    require(
+        sharedTarget->material == MiningCellMaterial::HazardPocket,
+        "two assistants should not finish before their exact two-times treatment duration");
+    for (int tick = 0; tick < 2; ++tick) {
+        updateMiningRun(state, catalog, 0.05);
+    }
+    require(
+        sharedTarget->material != MiningCellMaterial::HazardPocket,
+        "two working Hazard Drones should finish at exactly twice one-drone throughput");
+}
+
+void hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 93403);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 2;
+    state.meta.equippedDroneIds = {
+        content::drone::hazardDrone,
+        content::drone::hazardDrone
+    };
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied,
+        "Hazard save-normalization fixture should start an Io mining run");
+
+    MiningRunState& mining = state.run.mining;
+    clearMiningTerrainForEvaTest(mining);
+    constexpr int targetX = 10;
+    constexpr int targetY = 8;
+    MiningCell* target = miningCellAt(mining.terrain, targetX, targetY);
+    require(target != nullptr, "Hazard save-normalization target should exist");
+    const double hardness =
+        miningMaterialToughness(MiningCellMaterial::HazardPocket, mining.depthZone);
+    *target = {
+        MiningCellMaterial::HazardPocket,
+        hardness,
+        hardness,
+        true,
+        true
+    };
+    target->hazardAffinity = MiningElementalAffinity::Thermal;
+    require(mining.miniDrones.size() == 2,
+        "Hazard save-normalization fixture should deploy both copies");
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        agent.targetCellX = targetX;
+        agent.targetCellY = targetY;
+        agent.taskProgressSeconds = 0.45;
+        agent.behavior = MiningMiniDroneBehavior::Working;
+    }
+
+    const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(saved.has_value(), "valid Hazard assignments should serialize");
+    GameState restored = createNewGame(catalog, 93404);
+    restoreSaveData(restored, catalog, *saved);
+    require(restored.run.mining.miniDrones.size() == 2,
+        "restoring a duplicate Hazard squad should keep both independent agents");
+    for (const MiningMiniDroneAgent& agent : restored.run.mining.miniDrones) {
+        require(
+            agent.role == MiniDroneRole::Hazard &&
+                agent.targetCellX == targetX &&
+                agent.targetCellY == targetY &&
+                std::abs(agent.taskProgressSeconds - 0.45) < 0.0001,
+            "a valid revealed Hazard target should preserve shared partial treatment progress");
+    }
+    require(
+        restored.run.mining.miniDrones[0].roleIndex !=
+            restored.run.mining.miniDrones[1].roleIndex,
+        "restored duplicate Hazard Drones should retain distinct stable identities");
+
+    MiningCell* restoredTarget =
+        miningCellAt(restored.run.mining.terrain, targetX, targetY);
+    require(restoredTarget != nullptr, "restored Hazard target should exist");
+    restoredTarget->revealed = false;
+    const auto hiddenSaved =
+        deserializeSaveData(serializeSaveData(captureSaveData(restored)));
+    require(hiddenSaved.has_value(), "hidden Hazard assignment fixture should serialize");
+    GameState hiddenRestored = createNewGame(catalog, 93405);
+    restoreSaveData(hiddenRestored, catalog, *hiddenSaved);
+    for (const MiningMiniDroneAgent& agent : hiddenRestored.run.mining.miniDrones) {
+        require(
+            agent.targetCellX < 0 &&
+                agent.targetCellY < 0 &&
+                agent.taskProgressSeconds == 0.0 &&
+                agent.behavior == MiningMiniDroneBehavior::Returning,
+            "restoring a hidden Hazard target should clear obsolete work without losing the drone");
+    }
 }
 
 void miningHazardAffinitiesApplyOnlyOnDrillContact()
@@ -7331,10 +8816,19 @@ void activeMiningRoundTripsThroughSave()
             recordEnd == std::string::npos
                 ? std::string::npos
                 : recordEnd - recordStart);
-        const std::size_t suitOnlyField = record.rfind(save_schema::crewFieldDelimiter);
+        const std::size_t cocoonLayerField = record.rfind(save_schema::crewFieldDelimiter);
+        require(
+            cocoonLayerField != std::string::npos,
+            "current mining cell records should contain an appended cocoon-layer field");
+        const std::size_t suitOnlyField = record.rfind(
+            save_schema::crewFieldDelimiter,
+            cocoonLayerField == 0 ? 0 : cocoonLayerField - 1);
         require(
             suitOnlyField != std::string::npos,
-            "version-six mining cell records should contain an appended suit-only field");
+            "current mining cell records should contain an appended suit-only field");
+        // A v5 record predates both fields. Strip the pair so this fixture
+        // exercises the default values rather than treating cocoonLayer as
+        // suitOnlyPassage.
         record.erase(suitOnlyField);
         if (!legacyCellPayload.empty()) {
             legacyCellPayload.push_back(save_schema::listDelimiter);
@@ -7358,7 +8852,7 @@ void activeMiningRoundTripsThroughSave()
     const MiningCell* legacyCell = miningCellAt(legacySave->mining.terrain, 20, 10);
     require(
         legacyCell != nullptr && !legacyCell->suitOnlyPassage,
-        "legacy mining cell records without a suit-only field should default to a normal passage");
+        "legacy mining cell records without suit-only or cocoon-layer fields should default to a normal passage");
     require(restored.run.mining.enemies.front().affinity == MiningElementalAffinity::Radiation, "active mining enemy affinity should round trip");
     require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
@@ -7473,14 +8967,14 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 8, "new saves should use version eight");
+    require(captured.version == 9, "new saves should use version nine");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
     require(serialized.find("miningGravity=") != std::string::npos, "version-six saves should write vector gravity");
     require(serialized.find("miningLooseChunks=") != std::string::npos, "version-six saves should write loose chunks");
     const std::optional<SaveData> parsed = deserializeSaveData(serialized);
-    require(parsed.has_value(), "version-eight EVA save should deserialize");
+    require(parsed.has_value(), "version-nine EVA save should deserialize");
 
     GameState restored = createNewGame(catalog, 0xE6B);
     restoreSaveData(restored, catalog, *parsed);
@@ -7621,6 +9115,19 @@ void miningDepthLayersAreBidirectionalAndPersistent()
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
+    const auto hasReturnShaft = [](const MiningTerrain& terrain) {
+        const int leftX = terrain.width / 2 - 1;
+        for (int y = 0; y < terrain.height - 1; ++y) {
+            for (int x = leftX; x <= leftX + 1; ++x) {
+                const MiningCell* cell = miningCellAt(terrain, x, y);
+                if (cell == nullptr || cell->material != MiningCellMaterial::Empty ||
+                    cell->feature != MiningCellFeature::MainTunnel || cell->suitOnlyPassage) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
     require(
         startMiningRun(state, catalog, {MiningAct::ActOne, 2, 0xD37A}, false).applied,
         "depth-route test should start an oxygen-enabled mining run");
@@ -7650,6 +9157,8 @@ void miningDepthLayersAreBidirectionalAndPersistent()
         "the entry depth should remain fixed while deepest depth advances");
     require(deep.depthLayers.size() == 1 && deep.depthLayers.front().depthZone == entryDepth,
         "descending should cache the complete entry layer");
+    require(hasReturnShaft(deep.depthLayers.front().terrain) && !hasReturnShaft(deep.terrain),
+        "descending should open the layer left behind without pre-carving the newly reached depth");
     require(std::abs(deep.returnZoneX - shipX) < 0.000001 && std::abs(deep.returnZoneY - shipY) < 0.000001,
         "the shuttle anchor must not move when descending");
     require(!miningAtReturnZone(deep), "the ship zone must be unavailable below the entry layer");
@@ -7680,6 +9189,8 @@ void miningDepthLayersAreBidirectionalAndPersistent()
         "ascending should restore the previously carved entry terrain exactly");
     require(returned.depthLayers.size() == 1 && returned.depthLayers.front().depthZone == entryDepth + 1,
         "ascending should cache the deeper layer for a later revisit");
+    require(hasReturnShaft(returned.terrain) && !hasReturnShaft(returned.depthLayers.front().terrain),
+        "the return route should remain on the prior layer while the revisited deeper layer stays normal");
     returned.droneX = returned.returnZoneX;
     returned.droneY = returned.returnZoneY;
     require(miningAtReturnZone(returned), "the fixed shuttle should become available again on the entry layer");
@@ -7702,22 +9213,97 @@ void miningDepthLayersAreBidirectionalAndPersistent()
     require(parsed.has_value(), "a mining run with cached depth layers should serialize");
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *parsed);
-    require(restored.run.mining.depthZone == entryDepth + 1 && restored.run.mining.entryDepthZone == entryDepth,
-        "active and entry depth should survive save restore");
+    require(restored.run.mining.depthZone == entryDepth + 1 && restored.run.mining.entryDepthZone == 0,
+        "active depth should survive save restore while the ship normalizes to surface");
     require(restored.run.mining.depthLayers.size() == 1 && restored.run.mining.depthLayers.front().depthZone == entryDepth,
         "the cached return route should survive save restore");
     const MiningCell* savedEntryMarker = miningCellAt(restored.run.mining.depthLayers.front().terrain, 5, 5);
     require(savedEntryMarker != nullptr && savedEntryMarker->material == MiningCellMaterial::RareOre,
         "saved depth layers should preserve their modified terrain");
+    require(!hasReturnShaft(restored.run.mining.terrain) &&
+            hasReturnShaft(restored.run.mining.depthLayers.front().terrain),
+        "active mining saves should preserve shafts only on the prior layers that earned them");
 
     SaveData legacy = *parsed;
     legacy.version = 4;
     GameState migrated = createNewGame(catalog, 2);
     restoreSaveData(migrated, catalog, legacy);
-    require(migrated.run.mining.entryDepthZone == migrated.run.mining.depthZone,
-        "legacy one-way mining saves should treat their current layer as the safe shuttle entry layer");
+    require(migrated.run.mining.entryDepthZone == 0 &&
+            migrated.run.mining.depthZone == entryDepth + 1,
+        "legacy active mining saves should preserve the layer while moving the ship to surface");
     require(migrated.run.mining.depthLayers.empty(),
         "legacy one-way mining saves should not restore depth snapshots they could never have authored");
+}
+
+void miningDeploysDeepAndGeneratesTheRouteBackToSurface()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xD37B);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    const auto hasReturnShaft = [](const MiningTerrain& terrain) {
+        const int leftX = terrain.width / 2 - 1;
+        for (int y = 0; y < terrain.height - 1; ++y) {
+            for (int x = leftX; x <= leftX + 1; ++x) {
+                const MiningCell* cell = miningCellAt(terrain, x, y);
+                if (cell == nullptr || cell->material != MiningCellMaterial::Empty ||
+                    cell->feature != MiningCellFeature::MainTunnel || cell->suitOnlyPassage) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+    state.run.surfaceExpedition.depth = 2;
+    require(
+        startMiningRun(state, catalog, {MiningAct::ActOne, 2, 0xD37B}, false).applied,
+        "deep deployment test should start mining");
+    require(state.run.mining.depthZone == 2 &&
+            state.run.mining.entryDepthZone == 0 &&
+            state.run.mining.rigDepthZone == 2,
+        "the rig should begin at start depth +2 while the ship remains at surface zero");
+    require(!hasReturnShaft(state.run.mining.terrain),
+        "pushed-depth deployment should begin in normal mining terrain without a pre-carved shaft");
+
+    const auto ascendOneLayer = [&]() {
+        MiningRunState& mining = state.run.mining;
+        mining.enemies.clear();
+        for (int y = 0; y < 5; ++y) {
+            for (int x = 0; x < mining.terrain.width; ++x) {
+                if (MiningCell* cell = miningCellAt(mining.terrain, x, y)) {
+                    *cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+                }
+            }
+        }
+        mining.depthTransitionCooldownSeconds = 0.0;
+        mining.droneX = static_cast<double>(mining.terrain.width) * 0.5;
+        mining.droneY = 2.1;
+        updateMiningRun(state, catalog, 0.01);
+    };
+
+    ascendOneLayer();
+    require(state.run.mining.depthZone == 1 &&
+            state.run.mining.depthLayers.size() == 1 &&
+            state.run.mining.depthLayers.front().depthZone == 2,
+        "ascending from a deep deployment should generate depth +1 and cache depth +2");
+    require(hasReturnShaft(state.run.mining.terrain) &&
+            !hasReturnShaft(state.run.mining.depthLayers.front().terrain),
+        "ascending should carve the previous depth while leaving the starting depth normal");
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
+    require(!miningAtReturnZone(state.run.mining),
+        "the ship service zone must remain unavailable on an intermediate layer");
+
+    ascendOneLayer();
+    require(state.run.mining.depthZone == 0,
+        "the generated ascent route should reach the fixed surface layer");
+    require(hasReturnShaft(state.run.mining.terrain),
+        "each newly reached prior layer should provide an uninterrupted route toward the surface ship");
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
+    require(miningAtReturnZone(state.run.mining),
+        "extraction and service should become available only at the surface ship");
 }
 
 void miningDestinationGravityAndEvaMotionUsePhysicalProfiles()
@@ -8782,6 +10368,71 @@ void surfacePresentationComesFromSharedHelper()
     }) != deepSurface.metrics.end(), "post-solar surface presentation should label contact risk");
     require(deepSurface.metrics[1].value.find("Perimeter drones") != std::string::npos, "surface presentation should name passive defense unlocks");
     require(findDetailPresentationRow(deepSurface.details, text::panel::details::hostileContact) != nullptr, "post-solar surface details should explain hostile contact");
+}
+
+void scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract()
+{
+    ContentCatalog catalog = createDefaultContent();
+    ScenarioDefinition fixture;
+    fixture.id = "presentation_delivery_fixture";
+    fixture.version = 1;
+    fixture.availabilityUnlockKey = content::unlock::starter;
+    fixture.destinationId = content::destination::mars;
+    fixture.steps.push_back({
+        "delivery",
+        {},
+        "TEST ZONE",
+        "Configured Recovery",
+        "Safely deliver the configured material.",
+        "REWARD // TEST CAPACITY",
+        "Claim configured reward",
+        {},
+        ScenarioEventKind::SafeMaterialDelivered,
+        content::destination::mars,
+        "rare",
+        7,
+        0,
+        false,
+        true,
+        false,
+        ScenarioActionKind::ClaimReward,
+        {},
+        {}});
+    catalog.scenarios.push_back(std::move(fixture));
+
+    GameState state = createNewGame(catalog, 0xD311D3A1ULL);
+    const Destination* destination = catalog.findDestination(content::destination::mars);
+    require(destination != nullptr, "generic delivery presentation fixture requires a destination");
+    state.run.destinationIndex = static_cast<int>(destination - catalog.destinations.data());
+    startSurfaceExpedition(state, catalog);
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    expedition.miningRunUsed = true;
+    expedition.temporaryMaterials.rare = 9;
+    expedition.bankedMiningMaterials.rare = 9;
+    expedition.bankedMiningArenaValid = true;
+    expedition.bankedMiningProgressionEligible = true;
+
+    const SurfaceExpeditionPresentation presentation =
+        surfaceExpeditionPresentation(state, catalog);
+    const SurfaceActionPreviewPresentation& extraction = presentation.actions.back();
+    require(
+        extraction.title == "Deliver 9 Rare Ore" &&
+            extraction.detail.find("Configured Recovery") != std::string::npos,
+        "Surface Ops extraction should use the active scenario's configured title and material target");
+    require(
+        std::any_of(
+            extraction.payoffChips.begin(),
+            extraction.payoffChips.end(),
+            [](const PanelMetricPresentation& chip) {
+                return chip.label == "TEST ZONE delivery" && chip.value == "+7";
+            }),
+        "Surface Ops should cap a generic delivery chip by the configured scenario requirement");
+    const DetailPresentationRow* supportLoadout =
+        findDetailPresentationRow(presentation.details, "Support Drone loadout");
+    require(
+        supportLoadout != nullptr &&
+            supportLoadout->value.find("Configured Recovery: 0/7 Rare Ore safely delivered.") != std::string::npos,
+        "Surface details should use the generic delivery progress instead of a named campaign projection");
 }
 
 void overburnRewardsBeatLinearScalingAfterGoal()
@@ -10218,7 +11869,26 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(
         startMiningRun(miningState, catalog, {MiningAct::ActOne, 9, 713}, false).applied,
         "test mining run should start with the full Act 1 HUD mechanic set");
-    miningState.meta.prospectorCommonOreRecovered = 1;
+    require(
+        performScenarioAction(
+            miningState,
+            catalog,
+            content::scenario::lunarProspector,
+            "briefing",
+            ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the mining HUD fixture should acknowledge its generic Moon briefing");
+    require(
+        recordScenarioEvent(
+            miningState,
+            catalog,
+            {ScenarioEventKind::SafeMaterialDelivered,
+             {},
+             {},
+             content::destination::moon,
+             "common",
+             1,
+             0}),
+        "the mining HUD fixture should record generic safely-delivered Common Ore");
     miningState.run.mining.temporaryMaterials = {.common = 2, .rare = 1};
     miningState.run.mining.stowedMaterials = {.common = 1, .exotic = 1};
     miningState.run.mining.stowedCargo = 7;
@@ -10232,9 +11902,55 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(miningHtml.find("class=\"mining-top-rail ui-screen-header rr-screen-header\"") != std::string::npos,
         "mining should reserve its compact top status rail outside the terrain");
     require(miningHtml.find("class=\"mining-depth-route-overlay\"") != std::string::npos &&
-            miningHtml.find("SHUTTLE") != std::string::npos && miningHtml.find("ENTRY DEPTH") != std::string::npos &&
+            miningHtml.find("SURFACE") != std::string::npos && miningHtml.find("SHIP HERE") != std::string::npos &&
             miningHtml.find("DESCEND") != std::string::npos,
-        "mining should mark the fixed shuttle layer and the lower depth transition inside the scene boundary");
+        "mining should mark the fixed surface ship and the lower depth transition inside the scene boundary");
+    const auto jupiterDestination = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [](const Destination& destination) {
+            return destination.id == content::destination::jupiter;
+        });
+    require(jupiterDestination != catalog.destinations.end(), "Jupiter should exist for the Io HUD fixture");
+    GameState ioMiningState = createNewGame(catalog, 714);
+    ioMiningState.run.destinationIndex =
+        static_cast<int>(std::distance(catalog.destinations.begin(), jupiterDestination));
+    startSurfaceExpedition(ioMiningState, catalog);
+    // The HUD is driven by the generic mining-site context, not by the
+    // destination. Author the same scenario/site handoff that a real
+    // Scenario BeginActivity action produces.
+    ioMiningState.run.surfaceExpedition.pendingScenarioId =
+        std::string(content::scenario::volcanicDescent);
+    ioMiningState.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    ioMiningState.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+        std::string(content::miningSite::thermalLayeredRecovery);
+    prepareMiningSiteForTest(ioMiningState);
+    require(
+        startMiningRun(ioMiningState, catalog, {MiningAct::ActOne, 8, 714}, true).applied,
+        "Io HUD fixture should start its story mining run");
+    MiningMiniDroneAgent ioHazardLeader;
+    ioHazardLeader.role = MiniDroneRole::Hazard;
+    ioHazardLeader.roleIndex = 0;
+    ioHazardLeader.behavior = MiningMiniDroneBehavior::Working;
+    ioHazardLeader.targetCellX = 8;
+    ioHazardLeader.targetCellY = 8;
+    MiningMiniDroneAgent ioHazardAssistant = ioHazardLeader;
+    ioHazardAssistant.roleIndex = 1;
+    ioMiningState.run.mining.miniDrones = {
+        ioHazardLeader,
+        ioHazardAssistant
+    };
+    Random ioMiningRng(714);
+    const PreparedLaunch ioMiningLaunch = prepareLaunch(ioMiningState, catalog, ioMiningRng);
+    const std::string ioMiningHtml =
+        buildGamePanelHtml({ioMiningState, catalog, ioMiningLaunch, ioMiningLaunch});
+    require(
+        ioMiningHtml.find("class=\"mining-cocoon-progress\"") != std::string::npos
+            && ioMiningHtml.find("data-cocoon-layer-count=\"2\"") != std::string::npos
+            && ioMiningHtml.find("class=\"mining-depth-route-overlay is-cocoon\"") != std::string::npos
+            && ioMiningHtml.find(">HAZARD SQUAD<") != std::string::npos
+            && ioMiningHtml.find(">1 TREATING \xE2\x80\xA2 1 ASSISTING<") != std::string::npos,
+        "a layered recovery HUD should separate its route row and expose active Hazard Drone assistance");
     require(miningHtml.find("Rig health") != std::string::npos,
         "mining Details should preserve rig health without adding a fifth persistent vital");
     require(miningHtml.find(">OXYGEN<") != std::string::npos, "mining top rail should expose oxygen");
@@ -10478,6 +12194,55 @@ void surfaceHtmlPromotesMiningAction()
     require(usedMine < surveyAction, "disabled mining action should stay first in the compact action grid");
     require(usedHtml.find("class=\"disabled\" disabled>Unavailable</button>") != std::string::npos,
         "disabled unavailable buttons should carry the muted disabled style hook");
+
+    GameState scenarioSiteState = createNewGame(catalog, 715);
+    scenarioSiteState.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    scenarioSiteState.run.destinationIndex = 3;
+    scenarioSiteState.meta.furthestTier = 3;
+    require(
+        performScenarioAction(
+            scenarioSiteState,
+            catalog,
+            content::scenario::volcanicDescent,
+            "commission",
+            ScenarioActionKind::BeginActivity).applied,
+        "the authored mining-site fixture should commission its prerequisite Support Drone");
+    startSurfaceExpedition(scenarioSiteState, catalog);
+    scenarioSiteState.screen = Screen::SurfaceExpedition;
+    Random scenarioSiteRng(715);
+    const PreparedLaunch scenarioSiteLaunch = prepareLaunch(scenarioSiteState, catalog, scenarioSiteRng);
+    const std::string scenarioSiteHtml =
+        buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
+    require(
+        scenarioSiteHtml.find("Begin Volcanic Recovery") != std::string::npos &&
+            scenarioSiteHtml.find("Mine deposit") == std::string::npos,
+        "an active authored mining site should replace the generic deposit action with its scenario launch");
+
+    require(
+        performScenarioAction(
+            scenarioSiteState,
+            catalog,
+            content::scenario::volcanicDescent,
+            "recovery",
+            ScenarioActionKind::BeginActivity).beginsActivity,
+        "starting an authored site should record a generic activity attempt for a later retry affordance");
+
+    scenarioSiteState.run.surfaceExpedition.miningRunUsed = true;
+    const std::string spentScenarioSiteHtml =
+        buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
+    require(
+        spentScenarioSiteHtml.find("Begin Volcanic Recovery") == std::string::npos &&
+            spentScenarioSiteHtml.find("Mining Rig deployment is spent") != std::string::npos &&
+            spentScenarioSiteHtml.find("Mine deposit") == std::string::npos,
+        "a spent scenario deployment should show a return-and-retry instruction without a dead launch button");
+
+    scenarioSiteState.run.surfaceExpedition.miningRunUsed = false;
+    const std::string retryScenarioSiteHtml =
+        buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
+    require(
+        retryScenarioSiteHtml.find("Retry Volcanic Recovery") != std::string::npos &&
+            retryScenarioSiteHtml.find("Mine deposit") == std::string::npos,
+        "a fresh Surface Ops loop should label an incomplete authored site as a retry without restoring the generic deposit action");
 }
 
 void postArrivalPhaseHtmlUsesPolishedBoardStructure()
@@ -10608,12 +12373,42 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     GameState marsContractState = createNewGame(catalog, 0x4D415253);
     marsContractState.run.destinationIndex = 2;
     marsContractState.meta.furthestTier = 2;
-    marsContractState.meta.lunarMiningBriefingAcknowledged = true;
-    marsContractState.meta.lunarProspectorClaimed = true;
-    marsContractState.meta.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
-    marsContractState.meta.marsMiningBriefingAcknowledged = true;
-    marsContractState.meta.unlockKeys.push_back(content::unlock::droneBay);
-    marsContractState.meta.droneBaySlots = 1;
+    require(
+        performScenarioAction(
+            marsContractState,
+            catalog,
+            content::scenario::lunarProspector,
+            "briefing",
+            ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Mars Drone Ops fixture should acknowledge the generic Moon briefing");
+    require(
+        recordScenarioEvent(
+            marsContractState,
+            catalog,
+            {ScenarioEventKind::SafeMaterialDelivered,
+             {},
+             {},
+             content::destination::moon,
+             "common",
+             tuning::research::prospectorCommonOreGoal,
+             0}),
+        "the Mars Drone Ops fixture should complete the Moon delivery through a scenario event");
+    require(
+        performScenarioAction(
+            marsContractState,
+            catalog,
+            content::scenario::lunarProspector,
+            "delivery",
+            ScenarioActionKind::ClaimReward).applied,
+        "the Mars Drone Ops fixture should explicitly claim the Moon reward");
+    require(
+        performScenarioAction(
+            marsContractState,
+            catalog,
+            content::scenario::marsBayExpansion,
+            "briefing",
+            ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Mars Drone Ops fixture should acknowledge the generic Mars briefing");
     ensureDroneBayState(marsContractState, catalog);
     marsContractState.meta.equippedDroneIds = {content::drone::miningDrone};
     startSurfaceExpedition(marsContractState, catalog);
@@ -10647,13 +12442,20 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         buildGamePanelHtml({marsContractState, catalog, marsContractLaunch, marsContractLaunch});
     require(
         marsSurfaceHtml.find("data-rr-action=\"extract_surface\"") != std::string::npos
-            && marsSurfaceHtml.find("Extract Mars Payload") != std::string::npos,
-        "Surface Ops should expose an explicit Extract Mars Payload action for the aboard contract ore");
+            && marsSurfaceHtml.find("Deliver 14 Common Ore") != std::string::npos,
+        "Surface Ops should expose the configured safe-delivery action for the aboard contract material");
 
     GameState lunarContractState = createNewGame(catalog, 0x4C554E41);
     lunarContractState.run.destinationIndex = 1;
     lunarContractState.meta.furthestTier = 1;
-    lunarContractState.meta.lunarMiningBriefingAcknowledged = true;
+    require(
+        performScenarioAction(
+            lunarContractState,
+            catalog,
+            content::scenario::lunarProspector,
+            "briefing",
+            ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Moon Surface Ops fixture should acknowledge its scenario briefing through the runtime API");
     startSurfaceExpedition(lunarContractState, catalog);
     lunarContractState.run.surfaceExpedition.miningRunUsed = true;
     lunarContractState.run.surfaceExpedition.temporaryMaterials.common = 60;
@@ -10668,12 +12470,13 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         buildGamePanelHtml({lunarContractState, catalog, lunarContractLaunch, lunarContractLaunch});
     require(
         lunarSurfaceHtml.find(">0/30</b>") != std::string::npos
-            && lunarSurfaceHtml.find("60 COMMON ABOARD") != std::string::npos,
+            && lunarSurfaceHtml.find("60 Common Ore aboard") != std::string::npos,
         "Moon Surface Ops should distinguish zero delivered contract ore from Common still aboard");
     require(
-        lunarSurfaceHtml.find("Deliver 60 Lunar Common") != std::string::npos
-            && lunarSurfaceHtml.find("Lunar delivery +30") != std::string::npos,
-        "Moon Surface Ops should promote a named delivery action with its capped contract reward");
+        lunarSurfaceHtml.find("Deliver 60 Common Ore") != std::string::npos
+            && lunarSurfaceHtml.find("MOON delivery") != std::string::npos
+            && lunarSurfaceHtml.find("+30") != std::string::npos,
+        "Moon Surface Ops should promote the configured delivery action with its capped scenario reward");
 
     GameState upgradeState = surfaceState;
     upgradeState.screen = Screen::SurfaceUpgrade;
@@ -10971,7 +12774,11 @@ void frontierReadinessGatesProgression()
     require(commitToNextFrontier(state, catalog), "commit should advance exactly one frontier");
     require(state.run.destinationIndex == 1, "commit should move from Earth Orbit to Moon");
     require(state.run.frontierReadiness == 0, "commit should reset readiness for the new frontier");
-    require(frontierReadinessRequired(state, catalog) == 3, "Moon frontier should require three data flights before Mars");
+    const FrontierGateStatus moonToMars = frontierGateStatus(state, catalog);
+    require(
+        moonToMars.kind == FrontierGateKind::ScenarioRequirement && !moonToMars.satisfied &&
+            moonToMars.current == 0 && moonToMars.required == tuning::research::prospectorCommonOreGoal,
+        "Moon-to-Mars transfer should be gated by the authored Mars scenario rather than another Flight Data grind");
 }
 
 void transferAttemptAdvancesOnlyOnSuccess()
@@ -11485,14 +13292,17 @@ void structuredPanelPresentationCarriesTypedModalPolicy()
         lunarPresentation.modals.begin(),
         lunarPresentation.modals.end(),
         [](const ModalPresentation& modal) {
-            return modal.id == ui::modals::lunarMiningBriefing;
+            return modal.id == "scenario_" + std::string(content::scenario::lunarProspector) + "_briefing";
         });
     require(lunarModal != lunarPresentation.modals.end(),
         "the mandatory Lunar briefing should be emitted as typed modal data");
     require(
         lunarModal->autoOpen && !lunarModal->dismissible
             && lunarModal->closeAction.empty()
-            && lunarModal->bodyMarkup.find("acknowledge_lunar_mining_briefing") != std::string::npos,
+            && lunarModal->bodyMarkup.find(ui::actions::scenarioAction(
+                content::scenario::lunarProspector,
+                "briefing",
+                static_cast<int>(ScenarioActionKind::AcknowledgeBriefing))) != std::string::npos,
         "the Lunar briefing should auto-open, reject generic dismissal, and require its named action");
     require(
         lunarPresentation.contentMarkup.find("<template") == std::string::npos
@@ -11858,6 +13668,7 @@ void legacyOuterPlanetSavesMigrateByStableId()
 
 int main()
 {
+    proceduralScenarioTemplatesStayDormantUntilInstanced();
     deterministicLaunchesMatch();
     safeAndDestroyedOutcomesResolve();
     shallowRecoveryHasBoundedCostAndNoProgress();
@@ -11924,6 +13735,8 @@ int main()
     explicitSolarCampaignObjectivesGateRewardsAndRoutes();
     versionSevenCampaignStateRoundTripsAndMigrates();
     versionSixPendingIoArtifactsMigrateToUpgradeCredit();
+    versionNineScenarioAndCocoonStateRoundTrips();
+    versionEightCampaignAndIoCocoonMigrateToVersionNine();
     droneOpsPresentationExposesPersistentLoadout();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();
@@ -11938,7 +13751,11 @@ int main()
     miningArtifactSaveRoundTrips();
     surfaceScanMiniGameBanksSurveyPayload();
     surfacePushMiniGameBanksDepthRoute();
+    surfacePushLaterCollapseCanLoseTheUnbankedRoute();
+    scannedArtifactBecomesARecoverableMiningTarget();
+    poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts();
     surfaceScanForecastsPushDepthLayers();
+    thermalSurfacePushStillMapsResourceLayers();
     surfaceScanBustAndAbortDiscardForecasts();
     surfaceMissionLogIsBounded();
     miningTerrainIsDeterministicAndDepthScales();
@@ -11950,6 +13767,9 @@ int main()
     attackDroneCombatCanCritAndEnemyCooldownPersists();
     miningMiniDronesFollowIndependentRolePositions();
     hazardDroneTreatsAffinityLadderAndBatches();
+    hazardDronesCrossSolidTerrainButNeverTargetHiddenCells();
+    duplicateHazardDronesCoordinatePriorityAndExactAssistance();
+    hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
     legacyStabilizerSavesMigrateToHazardDrone();
     miningAndSurveyDroneAgentsPerformWorldActions();
@@ -11982,6 +13802,7 @@ int main()
     miningEvaAndSwarmStateRoundTripsThroughVersionSixSave();
     versionFiveMiningSavesMigrateToSeatedRigAndDeterministicSwarm();
     miningDepthLayersAreBidirectionalAndPersistent();
+    miningDeploysDeepAndGeneratesTheRouteBackToSurface();
     miningDestinationGravityAndEvaMotionUsePhysicalProfiles();
     miningEvaTogglePassagesAndExtractionRulesAreSafe();
     miningEvaLooseChunksResourceRecoveryAndSidearmAreDeterministic();
@@ -11992,6 +13813,7 @@ int main()
     roughSurfaceExtractionReportsLostPayload();
     researchPresentationComesFromSharedHelper();
     surfacePresentationComesFromSharedHelper();
+    scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract();
     overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
     progressedSavesSkipTheFirstLaunchIntroduction();

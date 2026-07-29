@@ -4,6 +4,7 @@
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 namespace rocket {
@@ -200,6 +201,30 @@ const Destination* ContentCatalog::findDestination(std::string_view id) const
     return found == destinations.end() ? nullptr : &*found;
 }
 
+const ScenarioDefinition* ContentCatalog::findScenario(std::string_view id) const
+{
+    const auto found = std::find_if(scenarios.begin(), scenarios.end(), [id](const ScenarioDefinition& scenario) {
+        return scenario.id == id;
+    });
+    return found == scenarios.end() ? nullptr : &*found;
+}
+
+const ScenarioFactoryDefinition* ContentCatalog::findScenarioFactory(std::string_view id) const
+{
+    const auto found = std::find_if(scenarioFactories.begin(), scenarioFactories.end(), [id](const ScenarioFactoryDefinition& factory) {
+        return factory.id == id;
+    });
+    return found == scenarioFactories.end() ? nullptr : &*found;
+}
+
+const MiningSiteDefinition* ContentCatalog::findMiningSite(std::string_view id) const
+{
+    const auto found = std::find_if(miningSites.begin(), miningSites.end(), [id](const MiningSiteDefinition& site) {
+        return site.id == id;
+    });
+    return found == miningSites.end() ? nullptr : &*found;
+}
+
 ContentCatalog createDefaultContent()
 {
     ContentCatalog catalog;
@@ -325,6 +350,171 @@ ContentCatalog createDefaultContent()
         {content::destination::nearbyGalaxy, "Rift Belt", 8, 7.00, 1.30, 10.50, 144.0, 3.15, content::unlock::exotic, 0.0, 1.0, 0.25}
     };
 
+    for (Destination& destination : catalog.destinations) {
+        // The outer-system navigation mode is authored as destination data;
+        // route traversal never needs to recognize a specific destination.
+        destination.requiresHostileSystem = destination.tier >= 7;
+        // The Moon is the authored first-arrival teaching destination. The
+        // arrival loop consumes this capability rather than this ID.
+        destination.requiresArrivalSurveySequence =
+            destination.id == content::destination::moon;
+        if (destination.requiresArrivalSurveySequence) {
+            destination.provingRouteReadyTitle = "LUNAR ROUTE CHARTED";
+            destination.provingRouteReadyConsequence =
+                "The route is complete. Mission Control has cleared the next launch for the Moon.";
+        }
+        // The current catalog begins its outward-only expedition at Saturn.
+        // This is content policy: recovery and transfer mechanics consume the
+        // capability, so future destinations can opt in without a code branch.
+        destination.oneWayExpedition = destination.tier >= 4;
+        if (destination.id == content::destination::mars) {
+            destination.routeRequirementKeys = {content::unlock::routeMars};
+        } else if (destination.id == content::destination::jupiter) {
+            destination.routeRequirementKeys = {content::unlock::routeJupiter};
+        } else if (destination.id == content::destination::saturn) {
+            destination.routeRequirementKeys = {content::unlock::routeSaturn};
+        }
+    }
+
+    MiningSiteDefinition thermalLayeredRecovery;
+    thermalLayeredRecovery.id = content::miningSite::thermalLayeredRecovery;
+    thermalLayeredRecovery.version = 1;
+    thermalLayeredRecovery.arena = {MiningAct::ActOne, 8, 0, true, MiningGateType::HazardCocoon};
+    thermalLayeredRecovery.biome = MiningSiteBiome::ThermalLava;
+    thermalLayeredRecovery.gateType = MiningGateType::HazardCocoon;
+    thermalLayeredRecovery.baselineOxygenSeconds = tuning::mining::ioArtifactOxygenSeconds;
+    thermalLayeredRecovery.cocoon.id = "thermal_two_layer";
+    thermalLayeredRecovery.cocoon.version = 1;
+    // This is a content-owned payload identity. The cocoon and scenario
+    // systems consume it generically; compatibility migration can preserve
+    // the established artifact ID without either mechanic recognizing Io.
+    thermalLayeredRecovery.cocoon.protectedObjective = {
+        ProtectedObjectiveKind::Artifact,
+        content::protectedObjective::ioMinorArtifact};
+    thermalLayeredRecovery.cocoon.layers = {
+        {"outer", "OUTER SEAL", {{0, -2}, {2, 0}, {0, 2}, {-2, 0}},
+            MiningCocoonRevealPolicy::OnAnyCellDiscovered,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningElementalAffinity::Thermal, 1},
+        {"inner", "INNER SEAL", {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}},
+            MiningCocoonRevealPolicy::AfterPreviousLayerCompleted,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningElementalAffinity::Thermal, 1}
+    };
+    catalog.miningSites.push_back(std::move(thermalLayeredRecovery));
+
+    catalog.scenarios = {
+        {
+            content::scenario::lunarProspector,
+            1,
+            content::unlock::starter,
+            content::destination::moon,
+            {
+                {"briefing", {}, "MOON", "Lunar Prospector Contract",
+                    std::string("Most regolith is inert. Recover ") +
+                        std::to_string(tuning::research::prospectorCommonOreGoal) +
+                        " gray-seamed Common Ore deposits and return them safely.",
+                    "REWARD // PROSPECTOR MK I + SLOT 1", "Accept Lunar Contract", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
+                    "Safely deliver gray Common Ore. Carried, aboard, and delivered cargo are tracked separately.",
+                    "REWARD // PROSPECTOR MK I + SLOT 1", "Install Prospector Mk I", {},
+                    ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
+                    tuning::research::prospectorCommonOreGoal, 0, false, true, false,
+                    ScenarioActionKind::ClaimReward, {},
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
+                     {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
+                     {ScenarioRewardKind::SupportDrone, content::drone::miningDrone, 1, true},
+                     {ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false},
+                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+            }
+        },
+        {
+            content::scenario::marsBayExpansion,
+            1,
+            content::unlock::routeMars,
+            content::destination::mars,
+            {
+                {"briefing", {}, "MARS", "Bay Expansion",
+                    std::string("Recover ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
+                        " Martian Common Ore. Oxygen, drill heat, integrity, repairs, and the return decision are now live.",
+                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Accept Mars Contract", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"delivery", {"briefing"}, "MARS", "Bay Expansion",
+                    std::string("Safely deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
+                        " Mars Common Ore. The reward opens an empty slot. No second Support Drone is required.",
+                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Fabricate Slot 2", {},
+                    ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
+                    tuning::research::marsBayCommonOreGoal, 0, false, true, false,
+                    ScenarioActionKind::ClaimReward, {},
+                    {{ScenarioRewardKind::DroneBaySlots, {}, 2, false},
+                     {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
+                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+            }
+        },
+        {
+            content::scenario::volcanicDescent,
+            1,
+            content::unlock::routeJupiter,
+            content::destination::jupiter,
+            {
+                {"commission", {}, "JUPITER SYSTEM", "Volcanic Descent",
+                    "Io regolith is inert. Commission Hazard support to cool lava into mineable gray Common Ore.",
+                    "REWARD // HAZARD DRONE MK I", "Commission Hazard Drone", {},
+                    ScenarioEventKind::ManualAction, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::BeginActivity, {},
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::ioHazardDrone, 0, false},
+                     {ScenarioRewardKind::SupportDrone, content::drone::hazardDrone, 1, true}}},
+                {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Layered Recovery",
+                    "Discover the outer seal, cool and excavate every segment, then reveal, tether, and extract the protected objective.",
+                    "REWARD // FREE SUPPORT DRONE UPGRADE", "Begin Volcanic Recovery", {},
+                    ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::thermalLayeredRecovery, 1, 0, false, false, false,
+                    ScenarioActionKind::BeginActivity, content::miningSite::thermalLayeredRecovery,
+                    {{ScenarioRewardKind::DroneUpgradeCredit, {}, 1, false},
+                     {ScenarioRewardKind::UnlockKey, "outer_transfer_ready", 0, false}}}
+            }
+        },
+        {
+            content::scenario::outerTransfer,
+            1,
+            "outer_transfer_ready",
+            content::destination::jupiter,
+            {
+                {"briefing", {}, "JUPITER DEPARTURE", "Perfect Slingshot",
+                    "Saturn is beyond normal transfer range. Hold the gold corridor for a Perfect pass; departure commits the expedition outward.",
+                    "REWARD // SATURN ROUTE", "Begin Slingshot Run", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"flyby", {"briefing"}, "JUPITER DEPARTURE", "Perfect Slingshot",
+                    "Good is not enough. Hold the gold corridor through the finish.",
+                    "REWARD // SATURN ROUTE", "Begin Slingshot Run",
+                    "INSUFFICIENT SLINGSHOT — Saturn remains locked. Hold the gold corridor for a Perfect pass.",
+                    ScenarioEventKind::FlybyFinished, content::scenario::outerTransfer, {}, 1, static_cast<int>(FlybyGrade::Perfect), false, true, true,
+                    ScenarioActionKind::BeginActivity, {},
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::routeSaturn, 0, false},
+                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+            }
+        },
+        {
+            content::scenario::generatedTemplate,
+            1,
+            content::unlock::starter,
+            {},
+            {
+                {"delivery", {}, "GENERATED SITE", "Material Recovery",
+                    "Safely deliver the requested material.", "REWARD // CONFIGURED BY FACTORY", "Claim Reward", {},
+                    ScenarioEventKind::SafeMaterialDelivered, {}, "common", 1, 0, false, true, false,
+                    ScenarioActionKind::ClaimReward, {}, {}}
+            },
+            false
+        }
+    };
+    catalog.scenarioFactories = {
+        {"generated_mining", 1, content::scenario::generatedTemplate, 0x5343454E4152494FULL}
+    };
+
     return catalog;
 }
 
@@ -380,6 +570,15 @@ std::string unlockDisplayName(std::string_view key)
     }
     if (key == content::unlock::ioHazardDrone) {
         return "Io hazard drone";
+    }
+    if (key == content::unlock::routeMars) {
+        return "Mars route";
+    }
+    if (key == content::unlock::routeJupiter) {
+        return "Jupiter route";
+    }
+    if (key == content::unlock::routeSaturn) {
+        return "Saturn route";
     }
     return {};
 }

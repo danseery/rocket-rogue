@@ -5,8 +5,8 @@
   "packingPageSize": 3776,
   "padding": 2,
   "pageCount": 3,
-  "textureCount": 35,
-  "frameCount": 55,
+  "textureCount": 36,
+  "frameCount": 56,
   "pages": [
     {
       "index": 0,
@@ -29,8 +29,8 @@
       "key": "scene_atlas_2",
       "path": "assets/scene-atlas/scene-atlas-2.png",
       "width": 3612,
-      "height": 2064,
-      "pixelSha256": "ff9082ff6c96c64a614060777361fdc295c83842cbc3a767379a8ea7d2e51be4"
+      "height": 2580,
+      "pixelSha256": "5be957658a5d21468e785c10d1fb1eadc46354227897724db751b6dbc2853a15"
     }
   ],
   "textures": [
@@ -857,13 +857,13 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 1550,
+            "y": 2066,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 0,
-            "y": 1548,
+            "y": 2064,
             "width": 516,
             "height": 516
           }
@@ -929,13 +929,13 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 518,
+            "y": 1034,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 0,
-            "y": 516,
+            "y": 1032,
             "width": 516,
             "height": 516
           }
@@ -965,13 +965,13 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 1034,
+            "y": 1550,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 0,
-            "y": 1032,
+            "y": 1548,
             "width": 516,
             "height": 516
           }
@@ -1730,6 +1730,42 @@
             "y": 0,
             "width": 1258,
             "height": 1258
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "PoiGuidanceArrow",
+      "key": "poi_guidance_arrow",
+      "source": "assets/art/poi-guidance-arrow.png",
+      "sourceSha256": "f9c63ad9830c83881af4ee8e658ab2e49ce2206d6b16a89e81991cfc75844e49",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 2,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 518,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 516,
+            "width": 516,
+            "height": 516
           }
         }
       ]

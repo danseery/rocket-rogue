@@ -1,6 +1,7 @@
 #include "core/GameState.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -277,6 +278,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
     state.run.credits = tuning::hangar::startingCredits;
     state.run.crew = catalog.astronauts;
     ensureDestinationHistory(state, catalog);
+    ensureScenarioInstances(state, catalog);
     startNewExpedition(state, catalog);
 
     state.statusLine = std::string(text::status::programInitialized);
@@ -286,6 +288,7 @@ GameState createNewGame(const ContentCatalog& catalog, std::uint64_t seed)
 void startNewExpedition(GameState& state, const ContentCatalog& catalog)
 {
     ensureDestinationHistory(state, catalog);
+    ensureScenarioInstances(state, catalog);
     ensurePermanentModuleState(state, catalog);
     state.screen = hostileSystemActive(state) ? Screen::Navigation : Screen::Hangar;
     state.run.active = true;
@@ -1013,7 +1016,7 @@ std::vector<const Destination*> navigationDestinations(const GameState& state, c
     }
 
     for (const Destination& destination : catalog.destinations) {
-        if (destination.tier >= 7) {
+        if (destination.requiresHostileSystem) {
             destinations.push_back(&destination);
         }
     }
@@ -1134,10 +1137,14 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
 int frontierReadinessRequired(const GameState& state, const ContentCatalog& catalog)
 {
     const Destination& destination = currentDestination(state, catalog);
-    if (nextDestination(state, catalog) == nullptr) {
+    const Destination* next = nextDestination(state, catalog);
+    if (next == nullptr) {
         return 0;
     }
-    if (destination.id == content::destination::moon) {
+    // The starter transfer retains its lighter readiness target by tier, not
+    // by a narrative destination ID. Authored route requirements take
+    // precedence in frontierGateStatusForDestination below.
+    if (next->tier <= 1) {
         return tuning::mission::moonReadinessRequired;
     }
     return tuning::mission::readinessBaseRequired + destination.tier;
@@ -1154,18 +1161,12 @@ int frontierReadinessCap(const GameState& state, const ContentCatalog& catalog)
 
 const Destination* nextDestination(const GameState& state, const ContentCatalog& catalog)
 {
-    if (!hostileSystemActive(state)) {
-        const int neptuneIndex = destinationIndexForId(catalog, content::destination::neptune);
-        if (neptuneIndex >= 0 && state.run.destinationIndex >= neptuneIndex) {
-            return nullptr;
-        }
-    }
-
     const int nextIndex = state.run.destinationIndex + 1;
     if (nextIndex < 0 || nextIndex >= static_cast<int>(catalog.destinations.size())) {
         return nullptr;
     }
-    return &catalog.destinations[static_cast<std::size_t>(nextIndex)];
+    const Destination& next = catalog.destinations[static_cast<std::size_t>(nextIndex)];
+    return next.requiresHostileSystem && !hostileSystemActive(state) ? nullptr : &next;
 }
 
 FrontierGateStatus frontierGateStatusForDestination(
@@ -1175,35 +1176,51 @@ FrontierGateStatus frontierGateStatusForDestination(
 {
     FrontierGateStatus status;
     status.destinationId = std::string(destinationId);
-    if (catalog.findDestination(destinationId) == nullptr) {
+    const Destination* destination = catalog.findDestination(destinationId);
+    if (destination == nullptr) {
         return status;
     }
 
-    if (destinationId == content::destination::mars) {
-        status.kind = FrontierGateKind::LunarProspector;
-        status.current = std::clamp(
-            state.meta.prospectorCommonOreRecovered,
-            0,
-            tuning::research::prospectorCommonOreGoal);
-        status.required = tuning::research::prospectorCommonOreGoal;
-        status.satisfied = state.meta.lunarProspectorClaimed;
+    const ScenarioRouteRequirementStatus scenarioRequirement = scenarioRouteRequirementStatus(
+        state,
+        catalog,
+        *destination);
+    if (!scenarioRequirement.satisfied) {
+        status.kind = FrontierGateKind::ScenarioRequirement;
+        status.scenarioId = scenarioRequirement.scenarioId;
+        status.scenarioStepId = scenarioRequirement.stepId;
+        status.current = scenarioRequirement.current;
+        status.required = scenarioRequirement.required;
+        status.satisfied = false;
+        const ScenarioInstance* instance = findScenarioInstance(state.meta, status.scenarioId);
+        const std::string_view definitionId = instance == nullptr || instance->definitionId.empty()
+            ? std::string_view(status.scenarioId)
+            : std::string_view(instance->definitionId);
+        const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+        const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
+            ? resolveScenarioDefinition(*definition, *instance)
+            : ScenarioDefinition {};
+        const ScenarioStepDefinition* step = definition == nullptr
+            ? nullptr
+            : (instance == nullptr
+                   ? findScenarioStepDefinition(*definition, status.scenarioStepId)
+                   : findScenarioStepDefinition(resolved, status.scenarioStepId));
+        status.blockerText = step == nullptr
+            ? "Complete the required route objective."
+            : (step->actionLabel.empty() ? step->detail : step->actionLabel);
         return status;
     }
-    if (destinationId == content::destination::jupiter) {
-        status.kind = FrontierGateKind::MarsBayExpansion;
-        status.current = std::clamp(
-            state.meta.marsCommonOreRecovered,
-            0,
-            tuning::research::marsBayCommonOreGoal);
-        status.required = tuning::research::marsBayCommonOreGoal;
-        status.satisfied = state.meta.marsBayExpansionClaimed;
-        return status;
-    }
-    if (destinationId == content::destination::saturn) {
-        status.kind = FrontierGateKind::SaturnSlingshot;
-        status.current = state.meta.saturnSlingshotPerfect ? 1 : 0;
-        status.required = 1;
-        status.satisfied = state.meta.saturnRouteUnlocked;
+
+    // A destination with authored route keys is governed entirely by those
+    // keys. Once every key is present, do not silently add a second Flight
+    // Data grind after the scenario reward has already opened the route.
+    // Destinations without route keys continue to use the generic Flight Data
+    // requirement below.
+    if (!destination->routeRequirementKeys.empty()) {
+        status.kind = FrontierGateKind::ScenarioRequirement;
+        status.current = static_cast<int>(destination->routeRequirementKeys.size());
+        status.required = status.current;
+        status.satisfied = true;
         return status;
     }
 
@@ -1270,22 +1287,12 @@ bool commitToNextFrontier(GameState& state, const ContentCatalog& catalog)
 
     const FrontierGateStatus gate = frontierGateStatusForDestination(state, catalog, next->id);
     if (!gate.satisfied) {
-        switch (gate.kind) {
-        case FrontierGateKind::LunarProspector:
-            state.statusLine = "Install Prospector Mk I before plotting the Mars route.";
-            break;
-        case FrontierGateKind::MarsBayExpansion:
-            state.statusLine = "Fabricate Drone Bay Slot 2 before plotting the Jupiter route.";
-            break;
-        case FrontierGateKind::SaturnSlingshot:
-            state.statusLine = "Saturn is locked. Complete and claim a Perfect Io flyby.";
-            break;
-        case FrontierGateKind::FlightData:
+        if (gate.kind == FrontierGateKind::FlightData) {
             state.statusLine = text::moreFlightDataNeeded(next->name);
-            break;
-        case FrontierGateKind::None:
+        } else if (!gate.blockerText.empty()) {
+            state.statusLine = gate.blockerText;
+        } else {
             state.statusLine = std::string(text::status::noFartherFrontier);
-            break;
         }
         return false;
     }
@@ -1437,11 +1444,6 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                     state.launchConfig.destinationId = destination->id;
                     state.launchConfig.burnGoalMultiplier = defaultProvingTarget(*destination);
                     state.statusLine = text::transferAchievedNewRoute(destination->name);
-                    if (destination->id == content::destination::jupiter ||
-                        destination->id == content::destination::saturn ||
-                        destination->id == content::destination::uranus) {
-                        state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-                    }
                 } else if (destination != nullptr && selectedHostileSortie) {
                     state.statusLine = text::transferAchievedNewRoute(destination->name);
                 } else {

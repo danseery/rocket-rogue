@@ -155,7 +155,21 @@ enum class MiningCellMaterial {
     ExoticVein,
     ArtifactCache,
     HazardPocket,
-    Bedrock
+    Bedrock,
+    // Appended to preserve the serialized values of all existing materials.
+    FuelPocket,
+    OxygenPocket
+};
+
+inline constexpr std::size_t miningCellMaterialCount =
+    static_cast<std::size_t>(MiningCellMaterial::OxygenPocket) + 1U;
+
+enum class MiningPickupKind {
+    CommonOre,
+    RareOre,
+    ExoticOre,
+    Fuel,
+    Oxygen
 };
 
 enum class MiningCellFeature {
@@ -211,7 +225,8 @@ enum class MiningGateType {
     EnduranceVault,
     ShieldCorridor,
     BurrowBreach,
-    CompoundStoryVault
+    // Keep this final ordinal stable: active saves persist gate types by value.
+    CompoundVault
 };
 
 enum class MiningGateState {
@@ -272,12 +287,11 @@ struct MiningArenaRules {
     MiningArenaRequest request;
     MiningProgressionBand band = MiningProgressionBand::Learn;
     MiningMechanicGates mechanics;
-    std::array<bool, 9> allowedMaterials {};
+    std::array<bool, miningCellMaterialCount> allowedMaterials {};
     std::array<bool, 7> allowedEnemyTypes {};
     std::array<bool, 5> allowedAffinities {};
     std::array<bool, 9> allowedRoomFeatures {};
     std::array<bool, miningGateTypeCount> allowedGateTypes {};
-    MiningGateType fixedStoryGate = MiningGateType::None;
     int maximumGateLocks = 0;
     int maxActiveEnemies = 0;
     int maxSpawners = 0;
@@ -304,7 +318,9 @@ struct MiningArenaMetadata {
 
 struct MiningGateDefinition {
     MiningGateType type = MiningGateType::None;
-    bool storyCritical = false;
+    // True only for an active gate restored through the pre-scenario
+    // compatibility migration. New authored/procedural sites stay false.
+    bool compatibilityCritical = false;
     bool requiresHazardTreatment = false;
     bool requiresEnemyClearance = false;
     bool requiresSurveyTriangulation = false;
@@ -319,6 +335,83 @@ struct MiningGateDefinition {
     std::string_view name;
     std::string_view requiredCapability;
     std::string_view alternatives;
+};
+
+// A protected objective is intentionally independent of the mechanism that
+// protects it. Cocoon layers, encounter rooms, and future scenario mechanics
+// can all expose the same objective through this small adapter boundary.
+enum class ProtectedObjectiveKind {
+    None,
+    Artifact
+};
+
+struct ProtectedObjectiveRef {
+    ProtectedObjectiveKind kind = ProtectedObjectiveKind::None;
+    std::string id;
+};
+
+struct MiningCocoonOffset {
+    int x = 0;
+    int y = 0;
+};
+
+enum class MiningCocoonRevealPolicy {
+    OnAnyCellDiscovered,
+    AfterPreviousLayerCompleted,
+    Immediately
+};
+
+enum class MiningCocoonCompletionRule {
+    TreatAndExcavate,
+    TreatOnly
+};
+
+struct MiningCocoonLayerDefinition {
+    std::string id;
+    std::string label;
+    std::vector<MiningCocoonOffset> offsets;
+    MiningCocoonRevealPolicy revealPolicy = MiningCocoonRevealPolicy::OnAnyCellDiscovered;
+    MiningCocoonCompletionRule completionRule = MiningCocoonCompletionRule::TreatAndExcavate;
+    MiningElementalAffinity hazardAffinity = MiningElementalAffinity::Thermal;
+    int requiredHazardMark = 1;
+};
+
+struct MiningCocoonDefinition {
+    std::string id;
+    int version = 1;
+    std::vector<MiningCocoonLayerDefinition> layers;
+    ProtectedObjectiveRef protectedObjective;
+};
+
+struct MiningCocoonLayerProgress {
+    std::string id;
+    std::string label;
+    int total = 0;
+    int remaining = 0;
+    int requiredHazardMark = 0;
+    bool revealed = false;
+    bool completed = false;
+    MiningCocoonCompletionRule completionRule = MiningCocoonCompletionRule::TreatAndExcavate;
+    // Persist the authored reveal trigger with the active instance so a
+    // reload never has to infer a custom layer's discovery behavior.
+    MiningCocoonRevealPolicy revealPolicy = MiningCocoonRevealPolicy::OnAnyCellDiscovered;
+};
+
+enum class MiningSiteBiome {
+    Default,
+    ThermalLava
+};
+
+// An authored site configures reusable mining mechanics. It deliberately has
+// no campaign or destination semantics; scenarios decide where it is offered.
+struct MiningSiteDefinition {
+    std::string id;
+    int version = 1;
+    MiningArenaRequest arena;
+    MiningSiteBiome biome = MiningSiteBiome::Default;
+    MiningGateType gateType = MiningGateType::None;
+    double baselineOxygenSeconds = 0.0;
+    MiningCocoonDefinition cocoon;
 };
 
 struct MiningCapabilityProfile {
@@ -341,11 +434,18 @@ struct MiningGateRuntime {
     bool active = false;
     MiningGateType type = MiningGateType::None;
     MiningGateState state = MiningGateState::None;
-    bool storyCritical = false;
+    // True only for a gate restored through the pre-scenario compatibility
+    // migration. It is not a narrative or destination identity.
+    bool compatibilityCritical = false;
     bool discovered = false;
     bool completionNotified = false;
     std::string siteId;
     std::string artifactId;
+    std::string cocoonDefinitionId;
+    int cocoonDefinitionVersion = 0;
+    ProtectedObjectiveRef protectedObjective;
+    int activeCocoonLayer = -1;
+    std::vector<MiningCocoonLayerProgress> cocoonLayers;
     MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
     int requiredHazardMark = 0;
     int shellTilesTotal = 0;
@@ -374,7 +474,10 @@ struct MiningGateRuntime {
     bool derivedStateDirty = true;
 };
 
-struct MiningStorySiteProgress {
+// Runtime progress for a reusable authored or procedurally resolved mining
+// site. It carries mechanics/identity only; scenario presentation and rewards
+// stay in the scenario system.
+struct MiningSiteProgress {
     std::string siteId;
     std::string destinationId;
     MiningAct act = MiningAct::ActOne;
@@ -384,7 +487,15 @@ struct MiningStorySiteProgress {
     std::string artifactId;
     bool discovered = false;
     bool completed = false;
+    // Set only while importing pre-scenario save records. New sites are
+    // created by ScenarioInstance + MiningSiteDefinition, never by this
+    // compatibility record.
+    bool legacyMigrated = false;
 };
+
+// Kept solely for old save and migration code. Runtime systems should use
+// MiningSiteProgress and MetaProgress::miningSites.
+using MiningStorySiteProgress = MiningSiteProgress;
 
 struct MiningFirstClearProgress {
     int rareBanked = 0;
@@ -421,7 +532,9 @@ enum class FlybyGrade {
 
 enum class FlybyPurpose {
     Recon,
-    SaturnSlingshot
+    ScenarioChallenge,
+    // Serialized compatibility name. New mechanics use ScenarioChallenge.
+    SaturnSlingshot = ScenarioChallenge
 };
 
 enum class CampaignObjectiveId {
@@ -451,12 +564,18 @@ enum class FrontierGateKind {
     FlightData,
     LunarProspector,
     MarsBayExpansion,
-    SaturnSlingshot
+    SaturnSlingshot,
+    // Legacy values remain above for compatibility; new route evaluation uses
+    // a requirement supplied by an authored scenario.
+    ScenarioRequirement
 };
 
 struct FrontierGateStatus {
     FrontierGateKind kind = FrontierGateKind::None;
     std::string destinationId;
+    std::string scenarioId;
+    std::string scenarioStepId;
+    std::string blockerText;
     int current = 0;
     int required = 0;
     bool satisfied = false;
@@ -621,6 +740,150 @@ struct ArtifactRecord {
     bool rewardApplied = false;
 };
 
+enum class ScenarioSource {
+    Authored,
+    Procedural
+};
+
+enum class ScenarioEventKind {
+    None,
+    SafeMaterialDelivered,
+    ProtectedObjectiveExtracted,
+    FlybyFinished,
+    ManualAction,
+    ActivityAborted,
+    // Appended to preserve any persisted/content enum meanings above.
+    // A site event is emitted only after its staged run extracts safely;
+    // assignment is emitted when a player actually equips a Support Drone.
+    MiningSiteCompleted,
+    EquipmentAssigned
+};
+
+enum class ScenarioActionKind {
+    None,
+    AcknowledgeBriefing,
+    ClaimReward,
+    BeginActivity,
+    RetryActivity,
+    AcknowledgeFailure
+};
+
+enum class ScenarioRewardKind {
+    UnlockKey,
+    DroneBaySlots,
+    SupportDrone,
+    DroneUpgradeCredit,
+    FrontierReadiness,
+    // Appended so any future serialized representation retains the existing
+    // reward-kind ordinals.
+    InventoryResources,
+    RouteAccess
+};
+
+enum class ScenarioStepState {
+    Locked,
+    Active,
+    ReadyToClaim,
+    Complete
+};
+
+struct ScenarioReward {
+    ScenarioRewardKind kind = ScenarioRewardKind::UnlockKey;
+    std::string id;
+    int amount = 0;
+    bool equipIfSlotAvailable = false;
+    // Used by InventoryResources. Other reward kinds deliberately ignore it
+    // so a single typed reward record remains sufficient for authored and
+    // procedural scenario content.
+    MaterialInventory materials;
+};
+
+struct ScenarioStepDefinition {
+    std::string id;
+    std::vector<std::string> prerequisites;
+    std::string location;
+    std::string title;
+    std::string detail;
+    std::string rewardPreview;
+    std::string actionLabel;
+    std::string failureExplanation;
+    ScenarioEventKind completionEvent = ScenarioEventKind::None;
+    std::string eventOriginId;
+    std::string eventTargetId;
+    int requiredProgress = 1;
+    int requiredGrade = 0;
+    bool mandatoryBriefing = false;
+    bool claimRequired = false;
+    bool firstFailureExplanation = false;
+    ScenarioActionKind action = ScenarioActionKind::None;
+    std::string miningSiteDefinitionId;
+    std::vector<ScenarioReward> rewards;
+};
+
+struct ScenarioDefinition {
+    std::string id;
+    int version = 1;
+    std::string availabilityUnlockKey = content::unlock::starter;
+    std::string destinationId;
+    std::vector<ScenarioStepDefinition> steps;
+    // Authored campaign scenarios are created for every eligible save. A
+    // procedural factory template remains catalog data until a factory makes
+    // a concrete instance, so it cannot silently become a live contract.
+    bool instantiateByDefault = true;
+};
+
+struct ScenarioFactoryDefinition {
+    std::string id;
+    int version = 1;
+    std::string templateScenarioId;
+    std::uint64_t seedSalt = 0;
+};
+
+struct ScenarioStepProgress {
+    std::string id;
+    int progress = 0;
+    bool briefingAcknowledged = false;
+    bool completed = false;
+    bool claimed = false;
+    bool failureAcknowledged = false;
+    bool failureSeen = false;
+    // Activity attempts are distinct from failure explanations. Any authored
+    // mining site or challenge can use this to present a retry affordance
+    // after an incomplete run without inventing destination-specific state.
+    bool activityStarted = false;
+};
+
+struct ScenarioInstance {
+    // `id` identifies this saved runtime instance. `definitionId` identifies
+    // immutable authored content. They are equal for authored campaign
+    // scenarios and intentionally differ for procedurally generated runs.
+    std::string id;
+    std::string definitionId;
+    int definitionVersion = 1;
+    ScenarioSource source = ScenarioSource::Authored;
+    std::string factoryId;
+    int factoryVersion = 0;
+    std::uint64_t seed = 0;
+    std::vector<std::string> resolvedParameters;
+    std::vector<ScenarioStepProgress> steps;
+    std::vector<std::string> awardedRewardIds;
+    bool completed = false;
+};
+
+struct ScenarioEvent {
+    ScenarioEventKind kind = ScenarioEventKind::None;
+    // Optional explicit routing keeps reusable events from relying on
+    // destination names or presentation copy. Empty values intentionally
+    // allow a single event (for example, safe delivery) to satisfy every
+    // eligible matching authored or procedural step.
+    std::string scenarioId;
+    std::string stepId;
+    std::string originId;
+    std::string targetId;
+    int amount = 0;
+    int grade = 0;
+};
+
 struct ResearchProject {
     std::string id;
     std::string name;
@@ -665,6 +928,25 @@ struct Destination {
     double gravityDirectionX = 0.0;
     double gravityDirectionY = 1.0;
     double gravityScale = 1.0;
+    // Content-defined route keys are evaluated generically by navigation.
+    std::vector<std::string> routeRequirementKeys;
+    // A destination can require the late-game hostile-system navigation mode
+    // without route evaluation knowing a destination ID or position.
+    bool requiresHostileSystem = false;
+    // Some destinations teach the arrival loop as an authored sequence before
+    // surface landing becomes available. Arrival mechanics read this capability
+    // instead of recognizing a destination ID.
+    bool requiresArrivalSurveySequence = false;
+    // A destination can begin an outward-only expedition. Recovery and
+    // post-transfer presentation read this capability instead of inferring a
+    // point of no return from a named destination or a tier threshold.
+    bool oneWayExpedition = false;
+    // Optional content-owned presentation for the route that this
+    // destination unlocks from the starter proving loop. This preserves a
+    // campaign's authored voice without a launch presenter recognizing a
+    // destination ID.
+    std::string provingRouteReadyTitle;
+    std::string provingRouteReadyConsequence;
 };
 
 struct LaunchConfig {
@@ -741,6 +1023,7 @@ struct MetaProgress {
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
     std::vector<DroneUpgradeRecord> droneUpgrades;
+    std::vector<ScenarioInstance> scenarios;
     int prospectorCommonOreRecovered = 0;
     bool lunarMiningBriefingAcknowledged = false;
     bool lunarProspectorClaimed = false;
@@ -758,7 +1041,7 @@ struct MetaProgress {
     bool saturnSlingshotFailureAcknowledged = false;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
-    std::vector<MiningStorySiteProgress> miningStorySites;
+    std::vector<MiningSiteProgress> miningSites;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;
@@ -805,6 +1088,10 @@ struct FlybyRunState {
     bool active = false;
     std::string destinationId;
     FlybyPurpose purpose = FlybyPurpose::Recon;
+    // Scenario challenges share reconnaissance flight behavior, while their
+    // authored completion contract remains attached to this active run.
+    std::string scenarioId;
+    std::string scenarioStepId;
     double elapsedSeconds = 0.0;
     double durationSeconds = 18.0;
     double shipX = -0.68;
@@ -892,6 +1179,11 @@ struct SurfaceExpeditionState {
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
     bool miningRunUsed = false;
+    // A generic scenario can stage a reusable mining site without teaching
+    // the surface loop any narrative destination or artifact terminology.
+    std::string pendingScenarioId;
+    std::string pendingScenarioStepId;
+    std::string pendingMiningSiteDefinitionId;
     bool bankedMiningArenaValid = false;
     bool bankedMiningProgressionEligible = false;
     MiningArenaMetadata bankedMiningArenaMetadata;
@@ -949,6 +1241,8 @@ struct MiningCell {
     MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
     bool gateAssociated = false;
     bool suitOnlyPassage = false;
+    // -1 means the cell is not part of a layered cocoon.
+    int cocoonLayer = -1;
 };
 
 struct MiningTerrain {
@@ -1036,6 +1330,14 @@ struct MiningLooseChunk {
     bool active = true;
 };
 
+struct MiningPickupEvent {
+    std::uint64_t sequence = 0;
+    MiningPickupKind kind = MiningPickupKind::CommonOre;
+    int amount = 0;
+    double x = 0.0;
+    double y = 0.0;
+};
+
 struct MiniDroneAnchorFrame {
     MiningActorIdentity actor = MiningActorIdentity::Rig;
     double x = 0.0;
@@ -1115,6 +1417,13 @@ struct MiningRunState {
     MaterialInventory richRewardsAwarded;
     bool progressionCreditEligible = true;
     std::string destinationId;
+    std::string scenarioId;
+    std::string scenarioStepId;
+    std::string miningSiteDefinitionId;
+    // Persist the resolved site profile so active procedural/authored sites
+    // never fall back to destination-specific generation after a reload.
+    MiningSiteBiome miningSiteBiome = MiningSiteBiome::Default;
+    double siteBaselineOxygenSeconds = 0.0;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
     double oxygenSeconds = 30.0;
@@ -1208,6 +1517,8 @@ struct MiningRunState {
     std::vector<MiningEnemy> enemies;
     std::vector<MiningMiniDroneAgent> miniDrones;
     std::vector<MiningLooseChunk> looseChunks;
+    std::uint64_t pickupEventSequence = 0;
+    std::vector<MiningPickupEvent> pickupEvents;
     std::vector<MiningProjectileVisual> combatProjectiles;
     std::vector<MiningDamageNumber> damageNumbers;
     MiningArtifactObject artifact;

@@ -1,33 +1,43 @@
 # Mining Lock-and-Key Sites
 
-This is the implementation contract for deterministic artifact-site gates. `MiningProgression.cpp` is authoritative; campaign forecasts, Arena Lab, generation, runtime checks, saves, and tests consume the same typed rules.
+This is the implementation contract for deterministic protected-objective site gates. `MiningProgression.cpp` is authoritative; campaign forecasts, Arena Lab, generation, runtime checks, saves, and tests consume the same typed rules. Scenario/site/cocoon authoring is specified in [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md).
 
 ## Progression Contract
 
 | Gate | First legal arena | Direct key | Systemic alternatives |
 |---|---:|---|---|
-| Hazard Cocoon | Act 1 L8 | Hazard Mk I; Toxic uses Mk II; Radiation uses Mk III | None for story cocoons. Every marked shell tile must be treated. |
+| Hazard Cocoon | Act 1 L8 | Hazard Mk I; Toxic uses Mk II; Radiation uses Mk III | None for fully protected cocoons. Every marked shell tile must be treated. |
 | Enemy-Sealed Chamber | Act 2 L2 | Passive combat strength | Any Attack, Defense, terrain, and utility combination that clears the assigned group and spawner descendants. |
 | Survey Triangulation | Act 1 L8 | Survey Support Drone | Move the rig between all marked origins and spend scanner pulses. |
-| Fragile Excavation | Act 1 L8 | Mining support and drill control | Excavate around the cache, scan first, and minimize rebound. Story progress survives damage; condition changes secondary value. |
+| Fragile Excavation | Act 1 L8 | Mining support and drill control | Excavate around the cache, scan first, and minimize rebound. Protected-objective progress survives damage; condition changes secondary value. |
 | Heavy Tow | Act 1 L9 | Resource support or tow upgrades | Empty cargo and a wide, direct return tunnel. |
 | Endurance Vault | Act 1 L9 | Resource support or oxygen upgrades | Shortcuts, disciplined fuel use, and route pre-clearance. |
 | Shield Corridor | Act 2 L4 | Defense or Attack support | Terrain cover and an alternate extraction tunnel. |
 | Burrow Breach | Act 3 L1 | Lure a Mammal through marked bedrock | Survey the longer natural route. The site replenishes its burrower until opened. |
-| Compound Story Vault | Act 2 L7 | Hazard treatment plus assigned encounter clearance | Act 3 capstones add endurance and heavy towing as a third lock. |
+| Compound Vault | Act 2 L7 | Hazard treatment plus assigned encounter clearance | Act 3 capstones add endurance and heavy towing as a third lock. |
 
 Act 1 uses at most one lock, Act 2 uses at most two, and Act 3 uses at most three. A gate is legal only after its component mechanics and enemy families are available. Act 2 never selects Burrow Breach or Radiation.
 
 ## Architecture
 
 - `MiningArenaRequest` carries Act, level, seed, and an optional gate override. Arena Lab offers Default rules, None, and every specific gate.
-- `MiningArenaRules` declares legal gates, the fixed story gate, and maximum lock count alongside mechanics, roster, scaling, and reward budgets.
+- `MiningArenaRules` declares legal generic gates and maximum lock count alongside mechanics, roster, scaling, and reward budgets. It does not select a campaign site.
 - `MiningGateDefinition` is the immutable contract: components, Hazard mark/affinity, player-facing key, and alternatives.
-- `MiningGateRuntime` owns discovery, shell cells, assigned enemies, scan markers, open/completed state, artifact identity, and soft-lock modifiers.
+- `MiningGateRuntime` owns discovery, shell cells, assigned enemies, scan markers, open/completed state, protected-objective identity, and soft-lock modifiers. Its compatibility-critical marker is set only while restoring a pre-scenario active gate.
 - `MiningCapabilityProfile` derives role marks and rig capability from equipped Support Drones, upgrades, crew, and ship. It is forecast-only and never changes arena difficulty.
-- Gate-associated cells and enemies serialize with the active arena. `MiningStorySiteProgress` stores destination, Act/level, seed, gate, artifact identity, discovery, and completion in `MetaProgress`.
+- Gate-associated cells and enemies serialize with the active arena. New authored and procedural sites are held by `ScenarioInstance` plus `MiningSiteDefinition`; `MiningSiteProgress` exists only to resume migrated pre-scenario sites and records legacy provenance.
 
-Fixed story sites reuse their saved request and artifact identity until the artifact is delivered, banked, and survives Surface extraction. Abort, rig loss, artifact destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by artifact identity, not merely by Story kind.
+Scenario sites reuse their resolved request and protected-objective identity until the payload is delivered, banked, and survives Surface extraction. Abort, rig loss, payload destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by protected-objective identity, not by a destination or narrative tag. Imported pre-scenario sites retain their historical identity only through the compatibility migration.
+
+### Generic cocoon authoring
+
+1. Add a versioned `MiningSiteDefinition` with a stable ID, arena request, biome, `HazardCocoon` gate, and any site-specific oxygen baseline.
+2. Give its `MiningCocoonDefinition` a stable ID/version and a `ProtectedObjectiveRef`. The protected objective is deliberately separate from the protection mechanism; the current implementation supports Artifact payloads without making the scenario depend on artifact copy.
+3. Define ordered layers with unique IDs, labels, non-duplicated offsets, reveal policies, completion rules, affinities, and required Hazard marks. The first layer cannot wait for a previous layer.
+4. Reference the site ID from a scenario step whose completion event is `ProtectedObjectiveExtracted`; launch and completion then retain scenario instance, step, site, and protected-objective identity.
+5. Run `validateScenarioCatalog()`. Invalid gates/objectives, empty layers, duplicate IDs or offsets, and unknown site references are fatal catalog errors.
+
+Runtime progress stores the authored cocoon ID/version, protected objective, active layer, per-layer reveal/completion state, and each cell's layer tag for the active and cached depth layers. `MiningSiteProgress` stores reusable site identity and whether a record came from legacy migration. Reload never reconstructs a custom cocoon from player-facing labels or assumes a fixed two-layer shape.
 
 ## Runtime Rules
 
@@ -37,7 +47,7 @@ Fixed story sites reuse their saved request and artifact identity until the arti
 - Triangulation origins are visible world markers. Survey Support Drones expand efficient coverage; manual repositioning remains valid.
 - Heavy Tow increases tether cargo burden and reduces tether response. Endurance Vault uses a deep/far anchor. Shield Corridor stamps a ranged extraction lane.
 - Burrow bedrock is immune to the rig but accepts Mammal burrow damage. A replacement Mammal spawns while the breach is closed.
-- Story artifacts do not spend rare/exotic mineral budget. Mineral cells, enemy drops, and Hazard refinement still share the arena ledger.
+- Protected artifacts do not spend rare/exotic mineral budget. Mineral cells, enemy drops, and Hazard refinement still share the arena ledger.
 
 ## Player and Debug Communication
 
@@ -47,4 +57,4 @@ Arena Lab includes a gate override and prints the gate, requirement, and alterna
 
 ## Verification
 
-`mining_progression_tests` table-tests introductions and Act restrictions, Hazard mark escalation, illegal overrides, capability forecasts, story identity persistence, extraction credit, hard-lock behavior, assigned enemy clearance, and save/load. Existing core and economy suites cover artifact physics, rich caps, Support Drone behavior, deterministic terrain, and campaign regression.
+`mining_progression_tests` table-tests introductions and Act restrictions, Hazard mark escalation, illegal overrides, capability forecasts, imported-site compatibility identity, extraction credit, hard-lock behavior, authored cocoon layers, assigned enemy clearance, and save/load. Existing core and economy suites cover artifact physics, rich caps, Support Drone behavior, deterministic terrain, and campaign regression.

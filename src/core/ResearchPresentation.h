@@ -8,11 +8,13 @@
 #include "core/MiningSystem.h"
 #include "core/PanelPresentation.h"
 #include "core/ResearchSystem.h"
+#include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -142,6 +144,15 @@ struct DroneOpsPresentation {
     std::string arenaDetail;
 };
 
+// A delivery contract is a scenario event, not a campaign destination. Keep
+// the Surface Ops presentation bound to the configured material target and
+// the safely banked Mining Rig payload so authored and generated scenarios
+// use the same extraction UI.
+struct ScenarioDeliveryPresentation {
+    ScenarioObjectivePresentation objective;
+    int safelyAboard = 0;
+};
+
 inline MiningArenaRules upcomingMiningArenaRules(
     const GameState& state,
     const ContentCatalog& catalog,
@@ -174,6 +185,157 @@ inline std::string compactMaterialSummary(const MaterialInventory& materials)
     add(materials.rare, "R");
     add(materials.exotic, "E");
     return summary.empty() ? "Free" : summary;
+}
+
+inline int scenarioObjectiveRank(ScenarioStepState state)
+{
+    switch (state) {
+    case ScenarioStepState::ReadyToClaim:
+        return 0;
+    case ScenarioStepState::Active:
+        return 1;
+    case ScenarioStepState::Locked:
+        return 2;
+    case ScenarioStepState::Complete:
+        return 3;
+    }
+    return 4;
+}
+
+inline int scenarioTargetMaterialAmount(
+    const MaterialInventory& materials,
+    std::string_view targetId)
+{
+    if (targetId == "common") {
+        return materials.common;
+    }
+    if (targetId == "rare") {
+        return materials.rare;
+    }
+    if (targetId == "exotic") {
+        return materials.exotic;
+    }
+    return 0;
+}
+
+inline std::string scenarioTargetMaterialLabel(std::string_view targetId)
+{
+    if (targetId == "common") {
+        return "Common Ore";
+    }
+    if (targetId == "rare") {
+        return "Rare Ore";
+    }
+    if (targetId == "exotic") {
+        return "Exotic Ore";
+    }
+    return targetId.empty() ? "materials" : std::string(targetId);
+}
+
+inline ScenarioObjectivePresentation scenarioSafeDeliveryObjectiveForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    ScenarioObjectivePresentation best;
+    int bestRank = 100;
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition =
+            scenarioDefinitionForRuntimeId(state, catalog, instance.id);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        if (resolved.destinationId != destinationId) {
+            continue;
+        }
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.completionEvent != ScenarioEventKind::SafeMaterialDelivered) {
+                continue;
+            }
+            ScenarioObjectivePresentation candidate =
+                scenarioObjectivePresentation(state, catalog, instance.id, step.id);
+            if (!candidate.available) {
+                continue;
+            }
+            const int rank = scenarioObjectiveRank(candidate.state);
+            if (rank < bestRank) {
+                best = std::move(candidate);
+                bestRank = rank;
+            }
+        }
+    }
+    return best;
+}
+
+inline ScenarioDeliveryPresentation scenarioSafeDeliveryPresentation(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const SurfaceExpeditionState& expedition)
+{
+    ScenarioDeliveryPresentation presentation;
+    if (!expedition.active) {
+        return presentation;
+    }
+    presentation.objective = scenarioSafeDeliveryObjectiveForDestination(
+        state,
+        catalog,
+        expedition.destinationId);
+    if (!presentation.objective.available ||
+        !expedition.bankedMiningArenaValid ||
+        !expedition.bankedMiningProgressionEligible) {
+        return presentation;
+    }
+    presentation.safelyAboard = std::max(
+        0,
+        std::min(
+            scenarioTargetMaterialAmount(
+                expedition.bankedMiningMaterials,
+                presentation.objective.eventTargetId),
+            scenarioTargetMaterialAmount(
+                expedition.temporaryMaterials,
+                presentation.objective.eventTargetId)));
+    return presentation;
+}
+
+inline ScenarioObjectivePresentation scenarioCapacityRewardObjective(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int requiredSlots)
+{
+    ScenarioObjectivePresentation best;
+    int bestRank = 100;
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition =
+            scenarioDefinitionForRuntimeId(state, catalog, instance.id);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            const bool grantsRequiredCapacity = std::any_of(
+                step.rewards.begin(),
+                step.rewards.end(),
+                [&](const ScenarioReward& reward) {
+                    return reward.kind == ScenarioRewardKind::DroneBaySlots &&
+                        reward.amount >= requiredSlots;
+                });
+            if (!grantsRequiredCapacity) {
+                continue;
+            }
+            ScenarioObjectivePresentation candidate =
+                scenarioObjectivePresentation(state, catalog, instance.id, step.id);
+            if (!candidate.available) {
+                continue;
+            }
+            const int rank = scenarioObjectiveRank(candidate.state);
+            if (rank < bestRank) {
+                best = std::move(candidate);
+                bestRank = rank;
+            }
+        }
+    }
+    return best;
 }
 
 inline std::string researchMaterialSummary(const MaterialInventory& cost)
@@ -1014,7 +1176,12 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     const int nextSlot = state.meta.droneBaySlots + 1;
     const MaterialInventory nextCost = droneSlotUpgradeCost(nextSlot);
     const bool maxed = state.meta.droneBaySlots >= 6;
-    const bool marsGateComplete = state.meta.marsBayExpansionClaimed;
+    // Paid capacity begins after any explicitly claimed scenario reward has
+    // granted a second bay slot. The slot count is the reusable capability;
+    // do not consult a named campaign projection here.
+    const bool paidCapacityUnlocked = state.meta.droneBaySlots >= 2;
+    const ScenarioObjectivePresentation capacityObjective =
+        scenarioCapacityRewardObjective(state, catalog, 2);
     const bool canAddSlot = canUpgradeDroneSlot(state);
 
     DroneOpsPresentation presentation;
@@ -1053,6 +1220,13 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
         detailPresentationRow("Support Drone copies", std::string("Each unlocked type starts with one frame. Build extra copies into open slots; duplicate frames share that type's Mk tuning.")),
         detailPresentationRow("Support Drone upgrades", std::to_string(tunedDroneCount(state)) + " Support Drone types above Mk I. Tuning applies to every owned copy of that type."),
+        detailPresentationRow(
+            "Capacity objective",
+            paidCapacityUnlocked
+                ? "Second bay slot installed. Material-paid expansion is available."
+                : (capacityObjective.available
+                    ? capacityObjective.title + " // " + capacityObjective.rewardPreview
+                    : "Claim a scenario reward that installs a second bay slot.")),
         detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
@@ -1071,7 +1245,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         const MiningGateDefinition gate = resolveMiningGateDefinition(
             arenaRules,
             gateType,
-            arenaRules.fixedStoryGate == gateType || arenaRules.request.gateOverrideEnabled);
+            false);
         const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
         presentation.arenaTitle = miningArenaForecastTitle(arenaRules);
         if (gateType != MiningGateType::None) {
@@ -1095,12 +1269,12 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     }
     presentation.nextSlotCost = maxed
         ? "MAX"
-        : (marsGateComplete ? compactMaterialSummary(nextCost) : "MARS CLAIM");
+        : (paidCapacityUnlocked ? compactMaterialSummary(nextCost) : "OBJECTIVE");
     const std::string blockedSlotLabel = "Need mats";
     presentation.upgradeSlotAction = maxed
         ? disabledPanelButton("Bay maxed")
-        : (!marsGateComplete
-              ? disabledPanelButton("Complete Mars")
+        : (!paidCapacityUnlocked
+              ? disabledPanelButton("Unlock slot 2")
               : (canAddSlot
                     ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok")
                     : disabledPanelButton(blockedSlotLabel)));
@@ -1365,10 +1539,7 @@ inline bool surfaceUsesOuterExpeditionRecovery(
     const ContentCatalog& catalog)
 {
     const Destination* destination = catalog.findDestination(expedition.destinationId);
-    const Destination* saturn = catalog.findDestination(content::destination::saturn);
-    return destination != nullptr &&
-        saturn != nullptr &&
-        destination->tier >= saturn->tier;
+    return destination != nullptr && destination->oneWayExpedition;
 }
 
 inline SurfaceExpeditionPresentation surfacePosturePresentation(
@@ -1482,7 +1653,19 @@ inline MiningArenaRules upcomingMiningArenaRules(
         completedHostileSorties,
         state.seed,
         landingOrdinal);
-    if (const MiningStorySiteProgress* site = pendingMiningStorySite(state.meta, expedition.destinationId)) {
+    if (!expedition.pendingMiningSiteDefinitionId.empty()) {
+        if (const MiningSiteDefinition* site = catalog.findMiningSite(
+                expedition.pendingMiningSiteDefinitionId)) {
+            MiningArenaRequest siteRequest = site->arena;
+            if (siteRequest.seed == 0) {
+                siteRequest.seed = request.seed;
+            }
+            return resolveMiningSiteArenaRules(siteRequest, *site);
+        }
+    }
+    if (const MiningSiteProgress* site = pendingCompatibilityMiningSite(
+            state.meta,
+            expedition.destinationId)) {
         request.act = site->act;
         request.difficulty = site->difficulty;
         request.seed = site->seed;
@@ -1511,23 +1694,43 @@ inline std::string miningArenaForecastDetail(const MiningArenaRules& rules)
 }
 
 inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
+    const GameState& state,
+    const ContentCatalog& catalog,
     const SurfaceExpeditionState& expedition,
-    const MetaProgress& meta,
     const SurfaceCrewEffects& crew,
     const SurfaceUpgradeEffects& upgrades,
     double extractionRisk,
     bool arkKnown)
 {
+    const MetaProgress& meta = state.meta;
     const SurfaceToolEffects tools = surfaceToolEffects(meta);
+    const ScenarioDeliveryPresentation delivery =
+        scenarioSafeDeliveryPresentation(state, catalog, expedition);
+    const auto supportDroneLoadoutDetail = [&]() {
+        if (droneBayUnlocked(state)) {
+            return std::string("Configure persistent Support Drones from Drone Ops before mining.");
+        }
+        if (!delivery.objective.available) {
+            return std::string("Claim a scenario reward that installs the Drone Bay.");
+        }
+        if (delivery.objective.state == ScenarioStepState::ReadyToClaim) {
+            return delivery.objective.title + ": READY TO CLAIM.";
+        }
+        if (delivery.objective.state == ScenarioStepState::Complete) {
+            return delivery.objective.title + ": reward claimed.";
+        }
+        if (delivery.objective.state == ScenarioStepState::Locked) {
+            return delivery.objective.title + ": acknowledge the active directive to begin safe delivery.";
+        }
+        return delivery.objective.title + ": " +
+            std::to_string(std::clamp(delivery.objective.current, 0, delivery.objective.required)) + "/" +
+            std::to_string(delivery.objective.required) + " " +
+            scenarioTargetMaterialLabel(delivery.objective.eventTargetId) + " safely delivered.";
+    };
     std::vector<DetailPresentationRow> rows {
         detailPresentationRow(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
         detailPresentationRow(text::labels::fieldKit, surfaceFieldKitSummary(meta)),
-        detailPresentationRow("Support Drone loadout", hasUnlock(meta, content::unlock::droneBay)
-            ? std::string("Configure persistent Support Drones from Drone Ops before mining.")
-            : std::string("Prospector contract: ") +
-                std::to_string(std::clamp(meta.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal)) +
-                "/" + std::to_string(tuning::research::prospectorCommonOreGoal) +
-                " Common Ore safely recovered."),
+        detailPresentationRow("Support Drone loadout", supportDroneLoadoutDetail()),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and Mining Rig operations"),
@@ -1535,8 +1738,8 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
         detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then layers available through Push Deeper. Dust can still burn extra action kits.")),
-        detailPresentationRow(text::panel::details::miningRisk, std::string("Mining is one fuel-only Mining Rig run for this surface loop; pushing deeper closes once the run is used.")),
-        detailPresentationRow(text::panel::details::depthRisk, std::string("Pushing deeper commits the actual layer depth and marks what the Mining Rig should find there.")),
+        detailPresentationRow(text::panel::details::miningRisk, std::string("The Mining Rig deploys at the selected start depth while the ship remains at SURFACE; pushing deeper closes once the run is used.")),
+        detailPresentationRow(text::panel::details::depthRisk, std::string("Layer +1 is guaranteed and bankable. Collapse risk begins when gambling on layer +2; confirmed finds remain marked for mining.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,
@@ -1566,7 +1769,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const MiningGateDefinition gate = resolveMiningGateDefinition(
         arenaRules,
         gateType,
-        arenaRules.fixedStoryGate == gateType || arenaRules.request.gateOverrideEnabled);
+        false);
     const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(
         expedition,
@@ -1580,7 +1783,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         presentation.arenaTitle += " | Site: " + std::string(gate.name);
     }
     presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
-    presentation.details = surfaceDetailsPresentation(expedition, state.meta, crew, upgrades, extractionRisk, arkKnown);
+    presentation.details = surfaceDetailsPresentation(state, catalog, expedition, crew, upgrades, extractionRisk, arkKnown);
     presentation.details.insert(presentation.details.begin(), {
         detailPresentationRow("Upcoming arena", presentation.arenaTitle),
         detailPresentationRow("Artifact site", std::string(gate.name)),
@@ -1607,7 +1810,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::supply, std::to_string(expedition.supply)),
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
-        panelMetric(text::labels::depth, std::to_string(expedition.depth)),
+        panelMetric("Start depth", "+" + std::to_string(expedition.depth)),
         panelMetric(text::labels::extractionRisk, display::percent(extractionRisk)),
         panelMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common)),
         panelMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare)),
@@ -1652,6 +1855,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     miningPreview.availability = miningSurfaceActionAvailability(state);
     miningPreview.payoffChips.push_back(panelMetric(text::labels::oxygen, std::to_string(static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s"));
     miningPreview.payoffChips.push_back(panelMetric(text::fuel::reserveLabel(arkKnown), "-1 deploy"));
+    miningPreview.payoffChips.push_back(panelMetric("Start depth", "+" + std::to_string(expedition.depth)));
+    miningPreview.payoffChips.push_back(panelMetric("Ship", "SURFACE"));
     addPositiveChip(miningPreview.payoffChips, "Tagged CM", expedition.prospectMaterials.common);
     addPositiveChip(miningPreview.payoffChips, "Tagged RM", expedition.prospectMaterials.rare);
     addPositiveChip(miningPreview.payoffChips, "Tagged EX", expedition.prospectMaterials.exotic);
@@ -1668,46 +1873,25 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         pushPayoffChips(state, crew, site),
         pushSurfaceActionButton(state));
     pushPreview.availability = pushSurfaceActionAvailability(state);
+    pushPreview.payoffChips.push_back(panelMetric("Layer +1", "GUARANTEED"));
     const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
     pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(pushPreview));
 
-    const int lunarContractCommonAboard =
-        expedition.destinationId == content::destination::moon
-            && !state.meta.lunarProspectorClaimed
-            && expedition.bankedMiningArenaValid
-            && expedition.bankedMiningProgressionEligible
-        ? std::max(
-              0,
-              std::min(
-                  expedition.bankedMiningMaterials.common,
-                  expedition.temporaryMaterials.common))
-        : 0;
-    const int marsContractCommonAboard =
-        expedition.destinationId == content::destination::mars
-            && !state.meta.marsBayExpansionClaimed
-            && expedition.bankedMiningArenaValid
-            && expedition.bankedMiningProgressionEligible
-        ? std::max(
-              0,
-              std::min(
-                  expedition.bankedMiningMaterials.common,
-                  expedition.temporaryMaterials.common))
-        : 0;
-    const bool lunarDelivery = lunarContractCommonAboard > 0;
-    const bool marsDelivery = marsContractCommonAboard > 0;
-    const int contractCommonAboard = lunarDelivery
-        ? lunarContractCommonAboard
-        : marsContractCommonAboard;
-    const std::string extractionTitle = lunarDelivery
-        ? "Deliver " + std::to_string(lunarContractCommonAboard) + " Lunar Common"
-        : marsDelivery
-        ? "Extract Mars Payload"
+    const ScenarioDeliveryPresentation delivery =
+        scenarioSafeDeliveryPresentation(state, catalog, expedition);
+    const bool safeDeliveryActive =
+        delivery.objective.available &&
+        delivery.objective.state == ScenarioStepState::Active &&
+        delivery.safelyAboard > 0;
+    const std::string deliveryMaterial =
+        scenarioTargetMaterialLabel(delivery.objective.eventTargetId);
+    const std::string extractionTitle = safeDeliveryActive
+        ? "Deliver " + std::to_string(delivery.safelyAboard) + " " + deliveryMaterial
         : text::buttons::returnHomeLabel(arkKnown, outerExpedition);
-    const std::string extractionDetail = lunarDelivery
-        ? "Safely extract the aboard Lunar Common to advance Prospector Mk I. Excess Common banks normally."
-        : marsDelivery
-        ? "Safely extract the aboard Mars Common to advance Bay Expansion. No second Support Drone is required."
+    const std::string extractionDetail = safeDeliveryActive
+        ? "Safely extract the aboard " + deliveryMaterial + " to advance " +
+            delivery.objective.title + ". Excess material banks normally."
         : text::panel::messages::surfaceExtractDetailForHome(
               arkKnown,
               outerExpedition);
@@ -1723,19 +1907,18 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
             extractionTitle,
             ui::actions::extractSurface,
             "ok"));
-    if (contractCommonAboard > 0) {
-        const bool moonDelivery = lunarDelivery;
+    if (safeDeliveryActive) {
         const int remaining = std::max(
             0,
-            (moonDelivery
-                ? tuning::research::prospectorCommonOreGoal - state.meta.prospectorCommonOreRecovered
-                : tuning::research::marsBayCommonOreGoal - state.meta.marsCommonOreRecovered));
+            delivery.objective.required - delivery.objective.current);
         extractionPreview.payoffChips.insert(
             extractionPreview.payoffChips.begin(),
             panelMetric(
-                moonDelivery ? "Lunar delivery" : "Mars delivery",
+                delivery.objective.location.empty()
+                    ? (delivery.objective.title + " delivery")
+                    : (delivery.objective.location + " delivery"),
                 "+" + std::to_string(
-                    std::min(remaining, contractCommonAboard))));
+                    std::min(remaining, delivery.safelyAboard))));
     }
     presentation.actions.push_back(std::move(extractionPreview));
     return presentation;

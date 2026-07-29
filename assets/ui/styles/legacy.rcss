@@ -702,7 +702,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     box-sizing: border-box;
     display: block;
 }
-.io-seal-progress {
+.mining-cocoon-progress {
     position: absolute;
     left: var(--rr-legacy-layout-057, 0px);
     top: var(--rr-legacy-layout-058, 0px);
@@ -712,42 +712,51 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     box-sizing: border-box;
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
+    align-content: center;
+    justify-content: flex-start;
     border-width: 1px;
     border-color: rgba(255, 129, 54, 0.66);
     border-radius: 6px;
     background-color: rgba(28, 10, 4, 0.90);
     z-index: 6;
 }
-.io-seal-progress > div {
+.mining-cocoon-progress > div {
     width: 104px;
+    margin-right: 8px;
 }
-.io-seal-progress > div > span,
-.io-seal-progress > div > b {
+.mining-cocoon-progress > div > span,
+.mining-cocoon-progress > div > b {
     color: #ffc18b;
     font-size: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.io-seal-progress > div > section {
+.mining-cocoon-progress > div > section {
+    width: 104px;
     display: flex;
     flex-direction: row;
     margin-top: 3px;
     margin-bottom: 2px;
 }
-.io-seal-progress i {
-    width: 17px;
+.mining-cocoon-progress i {
+    flex: 1 1 1px;
+    max-width: 17px;
     height: 6px;
     margin-right: 3px;
     background-color: #8f2818;
 }
-.io-seal-progress i.is-cleared {
+.mining-cocoon-progress i.is-cleared {
     background-color: #aebcc2;
 }
-.io-seal-progress > div.is-locked {
+.mining-cocoon-progress > div.is-locked {
     opacity: 0.46;
 }
-.io-seal-progress > strong {
+.mining-cocoon-progress > strong {
     width: 132px;
+    margin-left: auto;
     color: #fff0d8;
     font-size: 9px;
     line-height: 1.18;
@@ -958,6 +967,7 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     border-radius: 3px;
 }
 .mining-depth-route-overlay .mining-route-up { top: 8px; }
+.mining-depth-route-overlay.is-cocoon .mining-route-up { top: var(--rr-cocoon-route-top, 60px); }
 .mining-depth-route-overlay .mining-route-down { top: var(--rr-legacy-layout-083, 0px); }
 .mining-bottom-rail {
     left: var(--rr-legacy-layout-054, 0px);

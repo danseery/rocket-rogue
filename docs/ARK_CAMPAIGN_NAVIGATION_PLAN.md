@@ -52,3 +52,11 @@ Post-disaster loop:
 Enemies and Attack/Defense Support Drones belong after the gravity-well disaster. Solar-system tutorial destinations should stay enemy-free.
 
 Mining/combat progression follows `docs/MINING_COMBAT_PROGRESSION.md`: Chapters 1-5 are enemy-free Act 1, Chapters 6-7 are Act 2, and Chapters 8-10 are Act 3. Campaign and debug arenas resolve the same Act/level contract.
+
+## Reusable Route And Flyby Gates
+
+Route blocking is authored, not inferred from tier or destination copy. Add the required unlock key to `Destination::routeRequirementKeys`, then grant that exact key from a claim-required scenario step. `scenarioRouteRequirementStatus()` resolves the blocking key back to its scenario instance and step, so Navigation, buttons, objectives, and modal wording share one result. Use `Destination::oneWayExpedition` for outward-only recovery framing instead of branching on Saturn by name.
+
+A required Flyby is a normal scenario activity: set the step action to `BeginActivity`, completion event to `FlybyFinished`, and `requiredGrade` to the gate threshold. The launched run retains its scenario-instance and step IDs; completion records a typed event against that instance. Failure may expose one saved explanation, while success becomes `READY TO CLAIM`; only the explicit claim grants the route key. Generic reconnaissance Flybys remain independent because they carry no scenario context.
+
+See [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md) for the complete definition, factory, reward, migration, and no-story-branch authoring contract.

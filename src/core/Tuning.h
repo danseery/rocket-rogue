@@ -684,6 +684,7 @@ inline constexpr int chunkSize = 8;
 inline constexpr double oxygenSeconds = 30.0;
 inline constexpr double ioArtifactOxygenSeconds = 60.0;
 inline constexpr double maximumOxygenSeconds = 120.0;
+inline constexpr double oxygenPocketRestoreSeconds = 10.0;
 inline constexpr double fuelCycleProgressPerSecond = 1.0 / 15.0;
 inline constexpr double targetRunSeconds = 120.0;
 inline constexpr double droneSpeedCellsPerSecond = 7.2;

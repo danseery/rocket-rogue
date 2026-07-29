@@ -221,6 +221,10 @@ private:
     void refreshPanel();
     void refreshRealtimeHud();
     void runUiAction(const std::string& action);
+    bool runScenarioUiAction(std::string_view action);
+    // Temporary adapters for external bindings that still send pre-scenario
+    // action IDs. All state changes still flow through runScenarioUiAction.
+    bool runLegacyScenarioUiAction(std::string_view action);
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
     void recordTelemetryPeak(const TelemetryEvent& event);

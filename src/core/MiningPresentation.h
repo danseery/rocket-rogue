@@ -6,6 +6,7 @@
 #include "core/GameUi.h"
 #include "core/MiningSystem.h"
 #include "core/PanelPresentation.h"
+#include "core/ScenarioSystem.h"
 
 #include <algorithm>
 #include <array>
@@ -545,19 +546,24 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     MiningHudPresentation presentation;
     presentation.runLabel = std::string(miningActName(mining.arenaMetadata.act))
         + " \xE2\x80\xA2 LEVEL " + std::to_string(mining.arenaMetadata.difficulty);
-    const int levelsFromShip = std::max(0, mining.depthZone - mining.entryDepthZone);
-    const int prospectorGoal = tuning::research::prospectorCommonOreGoal;
-    const int prospectorDelivered = std::clamp(state.meta.prospectorCommonOreRecovered, 0, prospectorGoal);
-    if (!hasUnlock(state.meta, content::unlock::droneBay)) {
-        presentation.objective = "PROSPECTOR \xE2\x80\xA2 DELIVERED " + std::to_string(prospectorDelivered) + "/" +
-            std::to_string(prospectorGoal) + " \xE2\x80\xA2 SHIP ";
+    const int currentDepth = std::max(0, mining.depthZone);
+    const ScenarioObjectivePresentation scenarioObjective = scenarioObjectiveForMining(state, catalog);
+    if (scenarioObjective.available &&
+        scenarioObjective.state != ScenarioStepState::Complete &&
+        scenarioObjective.required > 0) {
+        const int required = std::max(1, scenarioObjective.required);
+        const int current = std::clamp(scenarioObjective.current, 0, required);
+        presentation.objective = scenarioObjective.title + " \xE2\x80\xA2 " + std::to_string(current) + "/" +
+            std::to_string(required) + " \xE2\x80\xA2 ";
     } else {
-        presentation.objective = "DEPTH +" + std::to_string(levelsFromShip) + " \xE2\x80\xA2 SHIP ";
+        presentation.objective = currentDepth == 0
+            ? "SURFACE \xE2\x80\xA2 "
+            : "DEPTH +" + std::to_string(currentDepth) + " \xE2\x80\xA2 ";
     }
-    if (levelsFromShip == 0) {
-        presentation.objective += "HERE";
+    if (currentDepth == 0) {
+        presentation.objective += "SHIP HERE";
     } else {
-        presentation.objective += "\xE2\x86\x91 " + std::to_string(levelsFromShip);
+        presentation.objective += "SHIP \xE2\x86\x91 " + std::to_string(currentDepth);
     }
     presentation.atShip = mining.active && miningAtReturnZone(mining);
     presentation.failurePending = run.failurePending;

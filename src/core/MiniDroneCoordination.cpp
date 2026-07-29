@@ -4,8 +4,11 @@
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
+#include <queue>
+#include <vector>
 
 namespace rocket {
 
@@ -20,6 +23,9 @@ double targetPriority(MiningCellMaterial material)
         return -3.2;
     case MiningCellMaterial::CommonOre:
         return -2.4;
+    case MiningCellMaterial::FuelPocket:
+    case MiningCellMaterial::OxygenPocket:
+        return -1.4;
     case MiningCellMaterial::Regolith:
         return 0.0;
     case MiningCellMaterial::HardRock:
@@ -40,6 +46,9 @@ double surveyTargetPriority(MiningCellMaterial material)
         return 2.0;
     case MiningCellMaterial::CommonOre:
         return 3.0;
+    case MiningCellMaterial::FuelPocket:
+    case MiningCellMaterial::OxygenPocket:
+        return 3.5;
     case MiningCellMaterial::HazardPocket:
         return 4.0;
     case MiningCellMaterial::HardRock:
@@ -76,6 +85,186 @@ MiniDroneAnchorFrame agentAnchor(
     const MiningMiniDroneAgent& agent)
 {
     return resolveMiniDroneAnchor(mining, agent.anchorTarget);
+}
+
+int earliestIncompleteCocoonLayer(const MiningRunState& mining)
+{
+    for (int layer = 0;
+         layer < static_cast<int>(mining.gate.cocoonLayers.size());
+         ++layer) {
+        if (!mining.gate.cocoonLayers[static_cast<std::size_t>(layer)].completed) {
+            return layer;
+        }
+    }
+    return -1;
+}
+
+bool isActiveRevealedCocoonCell(const MiningRunState& mining, const MiningCell& cell)
+{
+    if (cell.cocoonLayer < 0 ||
+        cell.cocoonLayer != earliestIncompleteCocoonLayer(mining) ||
+        cell.cocoonLayer >= static_cast<int>(mining.gate.cocoonLayers.size())) {
+        return false;
+    }
+    const MiningCocoonLayerProgress& layer =
+        mining.gate.cocoonLayers[static_cast<std::size_t>(cell.cocoonLayer)];
+    return layer.revealed && !layer.completed;
+}
+
+int hazardRequiredMarkForCell(const MiningRunState& mining, const MiningCell& cell)
+{
+    int required = tuning::mining::hazardDroneRequiredMark(cell.hazardAffinity);
+    if (cell.cocoonLayer >= 0 &&
+        cell.cocoonLayer < static_cast<int>(mining.gate.cocoonLayers.size())) {
+        required = std::max(
+            required,
+            mining.gate.cocoonLayers[static_cast<std::size_t>(cell.cocoonLayer)].requiredHazardMark);
+    }
+    return required;
+}
+
+bool miniDroneCanOccupyCell(const MiningTerrain& terrain, int x, int y)
+{
+    const MiningCell* cell = miningCellAt(terrain, x, y);
+    // Support Drones may use suit-only apertures, but cannot phase through
+    // terrain. This is intentionally the same passability they use in flight.
+    return cell != nullptr && !miningMaterialSolid(cell->material);
+}
+
+struct MiniDroneTaskPath {
+    int length = -1;
+    std::optional<MiniDroneCoordinationPoint> nextWaypoint;
+};
+
+MiniDroneTaskPath findMiniDroneTaskPath(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent,
+    int targetCellX,
+    int targetCellY,
+    double workRangeCells)
+{
+    const MiningTerrain& terrain = mining.terrain;
+    if (terrain.width <= 0 || terrain.height <= 0 ||
+        targetCellX < 0 || targetCellY < 0 ||
+        targetCellX >= terrain.width || targetCellY >= terrain.height) {
+        return {};
+    }
+
+    int startX = std::clamp(static_cast<int>(std::floor(agent.x)), 0, terrain.width - 1);
+    int startY = std::clamp(static_cast<int>(std::floor(agent.y)), 0, terrain.height - 1);
+    std::optional<MiniDroneCoordinationPoint> recoveryWaypoint;
+    if (!miniDroneCanOccupyCell(terrain, startX, startY)) {
+        // Recover from an obsolete target position or a boundary collision by
+        // stepping toward an adjacent open cell before planning normally.
+        bool foundRecoveryCell = false;
+        double bestRecoveryDistance = 1.0e12;
+        for (int y = std::max(0, startY - 1); y <= std::min(terrain.height - 1, startY + 1); ++y) {
+            for (int x = std::max(0, startX - 1); x <= std::min(terrain.width - 1, startX + 1); ++x) {
+                if (!miniDroneCanOccupyCell(terrain, x, y)) {
+                    continue;
+                }
+                const double distance = std::hypot(
+                    static_cast<double>(x) + 0.5 - agent.x,
+                    static_cast<double>(y) + 0.5 - agent.y);
+                if (distance < bestRecoveryDistance) {
+                    foundRecoveryCell = true;
+                    bestRecoveryDistance = distance;
+                    startX = x;
+                    startY = y;
+                }
+            }
+        }
+        if (!foundRecoveryCell) {
+            return {};
+        }
+        recoveryWaypoint = MiniDroneCoordinationPoint {
+            static_cast<double>(startX) + 0.5,
+            static_cast<double>(startY) + 0.5
+        };
+    }
+
+    const int cellCount = terrain.width * terrain.height;
+    const int start = startY * terrain.width + startX;
+    std::vector<int> previous(static_cast<std::size_t>(cellCount), -2);
+    std::queue<int> frontier;
+    previous[static_cast<std::size_t>(start)] = -1;
+    frontier.push(start);
+    const double targetX = static_cast<double>(targetCellX) + 0.5;
+    const double targetY = static_cast<double>(targetCellY) + 0.5;
+    // A drone works from the nearest open portion of an adjacent cell. Its
+    // center need not occupy the solid task cell itself.
+    const double usablePositionRadius = std::max(0.0, workRangeCells) + 0.51;
+    constexpr std::array<std::pair<int, int>, 4> steps {{
+        {0, -1}, {1, 0}, {0, 1}, {-1, 0}
+    }};
+
+    while (!frontier.empty()) {
+        const int current = frontier.front();
+        frontier.pop();
+        const int currentX = current % terrain.width;
+        const int currentY = current / terrain.width;
+        const double centerX = static_cast<double>(currentX) + 0.5;
+        const double centerY = static_cast<double>(currentY) + 0.5;
+        if (std::hypot(centerX - targetX, centerY - targetY) <= usablePositionRadius) {
+            int next = current;
+            while (previous[static_cast<std::size_t>(next)] != -1 &&
+                   previous[static_cast<std::size_t>(next)] != start) {
+                next = previous[static_cast<std::size_t>(next)];
+            }
+            int length = 0;
+            for (int cursor = current; previous[static_cast<std::size_t>(cursor)] != -1;
+                 cursor = previous[static_cast<std::size_t>(cursor)]) {
+                ++length;
+            }
+            if (recoveryWaypoint.has_value()) {
+                return {length + 1, recoveryWaypoint};
+            }
+            if (current == start) {
+                if (workRangeCells <= 0.0) {
+                    return {length, MiniDroneCoordinationPoint {targetX, targetY}};
+                }
+                const double approachX = centerX - targetX;
+                const double approachY = centerY - targetY;
+                const double approachLength = std::max(0.0001, std::hypot(approachX, approachY));
+                // Stop inside treatment range while keeping the collider fully
+                // outside the solid target cell. Aiming at the cell center can
+                // otherwise pin the drone against the terrain boundary.
+                const double safeWorkDistance = std::min(
+                    workRangeCells * 0.92,
+                    0.5 + tuning::mining::miniDroneColliderRadiusCells + 0.02);
+                return {
+                    length,
+                    MiniDroneCoordinationPoint {
+                        targetX + approachX / approachLength * safeWorkDistance,
+                        targetY + approachY / approachLength * safeWorkDistance
+                    }
+                };
+            }
+            return {
+                length,
+                MiniDroneCoordinationPoint {
+                    static_cast<double>(next % terrain.width) + 0.5,
+                    static_cast<double>(next / terrain.width) + 0.5
+                }
+            };
+        }
+
+        for (const auto& [offsetX, offsetY] : steps) {
+            const int nextX = currentX + offsetX;
+            const int nextY = currentY + offsetY;
+            if (nextX < 0 || nextY < 0 || nextX >= terrain.width || nextY >= terrain.height ||
+                !miniDroneCanOccupyCell(terrain, nextX, nextY)) {
+                continue;
+            }
+            const int next = nextY * terrain.width + nextX;
+            if (previous[static_cast<std::size_t>(next)] != -2) {
+                continue;
+            }
+            previous[static_cast<std::size_t>(next)] = current;
+            frontier.push(next);
+        }
+    }
+    return {};
 }
 
 } // namespace
@@ -257,6 +446,36 @@ MiniDroneCoordinationPoint miniDroneOrbitPoint(
     };
 }
 
+int miniDroneTaskPathLength(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent,
+    int targetCellX,
+    int targetCellY,
+    double workRangeCells)
+{
+    return findMiniDroneTaskPath(
+        mining,
+        agent,
+        targetCellX,
+        targetCellY,
+        workRangeCells).length;
+}
+
+std::optional<MiniDroneCoordinationPoint> miniDroneTaskNavigationWaypoint(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent,
+    int targetCellX,
+    int targetCellY,
+    double workRangeCells)
+{
+    return findMiniDroneTaskPath(
+        mining,
+        agent,
+        targetCellX,
+        targetCellY,
+        workRangeCells).nextWaypoint;
+}
+
 MiningDroneCoordinator::MiningDroneCoordinator(MiningRunState& mining)
     : mining_(mining)
 {
@@ -270,7 +489,10 @@ void MiningDroneCoordinator::synchronizeAssignments()
             continue;
         }
         if (!agentAnchor(mining_, agent).valid ||
-            !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
+            !isCandidateCell(agent.targetCellX, agent.targetCellY) ||
+            miniDroneTaskPathLength(
+                mining_, agent, agent.targetCellX, agent.targetCellY,
+                tuning::mining::miningDroneWorkRangeCells) < 0) {
             clearAssignment(agent);
             continue;
         }
@@ -286,7 +508,10 @@ bool MiningDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 {
     if (agent.role != MiniDroneRole::Mining ||
         !agentAnchor(mining_, agent).valid ||
-        !isCandidateCell(agent.targetCellX, agent.targetCellY)) {
+        !isCandidateCell(agent.targetCellX, agent.targetCellY) ||
+        miniDroneTaskPathLength(
+            mining_, agent, agent.targetCellX, agent.targetCellY,
+            tuning::mining::miningDroneWorkRangeCells) < 0) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
@@ -324,6 +549,11 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             }
 
             const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
+            if (miniDroneTaskPathLength(
+                    mining_, agent, x, y,
+                    tuning::mining::miningDroneWorkRangeCells) < 0) {
+                continue;
+            }
             const double agentDx = centerX - agent.x;
             const double agentDy = centerY - agent.y;
             const double score = std::sqrt(agentDx * agentDx + agentDy * agentDy) + targetPriority(cell->material);
@@ -399,14 +629,12 @@ void HazardDroneCoordinator::synchronizeAssignments()
     });
     for (MiningMiniDroneAgent* agent : hazardDrones_) {
         if (!agentAnchor(mining_, *agent).valid ||
-            !isCandidateCell(*agent, agent->targetCellX, agent->targetCellY)) {
+            !isEligibleTarget(*agent, agent->targetCellX, agent->targetCellY)) {
             clearAssignment(*agent);
             continue;
         }
         const int key = cellKey(agent->targetCellX, agent->targetCellY);
-        if (!reservations_.emplace(key, agent).second) {
-            clearAssignment(*agent);
-        }
+        reservations_[key].push_back(agent);
     }
 }
 
@@ -414,11 +642,12 @@ bool HazardDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 {
     if (agent.role != MiniDroneRole::Hazard ||
         !agentAnchor(mining_, agent).valid ||
-        !isCandidateCell(agent, agent.targetCellX, agent.targetCellY)) {
+        !isEligibleTarget(agent, agent.targetCellX, agent.targetCellY)) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
-    return reservation != reservations_.end() && reservation->second == &agent;
+    return reservation != reservations_.end() &&
+        std::find(reservation->second.begin(), reservation->second.end(), &agent) != reservation->second.end();
 }
 
 bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
@@ -428,82 +657,62 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     if (!anchor.valid) {
         return false;
     }
-    const double radius = tuning::mining::hazardDroneAcquireRadiusCells;
-    const double radiusSq = radius * radius;
     bool foundCandidate = false;
-    bool bestIsStorySeal = false;
+    bool bestIsProtectedLayer = false;
     double bestArtifactDistance = 1.0e12;
     double bestAnchorDistance = 1.0e12;
     double bestIntensity = -1.0;
-    int bestUsefulNeighbors = -1;
-    double bestAgentDistance = 1.0e12;
     int bestX = -1;
     int bestY = -1;
-    const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - radius)));
-    const int maxX = std::min(mining_.terrain.width - 1, static_cast<int>(std::ceil(anchor.x + radius)));
-    const int minY = std::max(0, static_cast<int>(std::floor(anchor.y - radius)));
-    const int maxY = std::min(mining_.terrain.height - 1, static_cast<int>(std::ceil(anchor.y + radius)));
+    // Revealed cells in the earliest incomplete protected layer are eligible
+    // anywhere in the arena. Ordinary hazards remain constrained to the
+    // controlled actor's operating radius.
+    const int minX = 0;
+    const int maxX = mining_.terrain.width - 1;
+    const int minY = 0;
+    const int maxY = mining_.terrain.height - 1;
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
-            if (!isCandidateCell(agent, x, y) || reservations_.contains(cellKey(x, y))) {
+            if (!isEligibleTarget(agent, x, y) || reservations_.contains(cellKey(x, y))) {
                 continue;
             }
             const double centerX = static_cast<double>(x) + 0.5;
             const double centerY = static_cast<double>(y) + 0.5;
             const double rigDx = centerX - anchor.x;
             const double rigDy = centerY - anchor.y;
-            if (rigDx * rigDx + rigDy * rigDy > radiusSq) {
-                continue;
-            }
             const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
             const double anchorDistance = std::hypot(rigDx, rigDy);
-            const double agentDistance = std::hypot(centerX - agent.x, centerY - agent.y);
-            const double intensityPriority = static_cast<double>(tuning::mining::hazardDroneRequiredMark(cell->hazardAffinity));
-            const bool isStorySeal = cell->gateAssociated;
-            const double artifactDistance = isStorySeal && mining_.artifact.present
+            const double intensityPriority = static_cast<double>(hazardRequiredMarkForCell(mining_, *cell));
+            const bool isProtectedLayer = isActiveRevealedCocoonCell(mining_, *cell);
+            const double artifactDistance = isProtectedLayer && mining_.artifact.present
                 ? std::hypot(centerX - mining_.artifact.x, centerY - mining_.artifact.y)
                 : 0.0;
-            int eligibleNeighbors = 0;
-            for (int neighborY = y - 1; neighborY <= y + 1; ++neighborY) {
-                for (int neighborX = x - 1; neighborX <= x + 1; ++neighborX) {
-                    if ((neighborX != x || neighborY != y) &&
-                        isCandidateCell(agent, neighborX, neighborY) &&
-                        !reservations_.contains(cellKey(neighborX, neighborY))) {
-                        ++eligibleNeighbors;
-                    }
-                }
-            }
-            const int usefulNeighbors = std::min(
-                eligibleNeighbors,
-                tuning::mining::hazardDroneBatchSize(agent.upgradeLevel) - 1);
-            // The rig is the operational anchor. Artifact seal segments always win;
-            // within that mission-critical group we work from the artifact outward.
+            // The rig is the operational anchor. Active protected-layer segments
+            // always win; within that group we work from the objective outward.
             // Ordinary hazards then favor the closest threat to the player, not the
             // closest leftover tile to a drone that has just returned from elsewhere.
             const bool better = !foundCandidate
-                || (isStorySeal != bestIsStorySeal && isStorySeal)
-                || (isStorySeal == bestIsStorySeal && isStorySeal && artifactDistance < bestArtifactDistance - 0.0001)
-                || (isStorySeal == bestIsStorySeal && (!isStorySeal || std::abs(artifactDistance - bestArtifactDistance) <= 0.0001)
+                || (isProtectedLayer != bestIsProtectedLayer && isProtectedLayer)
+                || (isProtectedLayer == bestIsProtectedLayer && isProtectedLayer && artifactDistance < bestArtifactDistance - 0.0001)
+                || (!isProtectedLayer && !bestIsProtectedLayer
                     && anchorDistance < bestAnchorDistance - 0.0001)
-                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
+                || (isProtectedLayer == bestIsProtectedLayer
+                    && (isProtectedLayer
+                        ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
+                        : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001)
                     && intensityPriority > bestIntensity)
-                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
-                    && intensityPriority == bestIntensity && usefulNeighbors > bestUsefulNeighbors)
-                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
-                    && intensityPriority == bestIntensity && usefulNeighbors == bestUsefulNeighbors
-                    && agentDistance < bestAgentDistance - 0.0001)
-                || (isStorySeal == bestIsStorySeal && std::abs(anchorDistance - bestAnchorDistance) <= 0.0001
-                    && intensityPriority == bestIntensity && usefulNeighbors == bestUsefulNeighbors
-                    && std::abs(agentDistance - bestAgentDistance) <= 0.0001
+                || (isProtectedLayer == bestIsProtectedLayer
+                    && (isProtectedLayer
+                        ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
+                        : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001)
+                    && intensityPriority == bestIntensity
                     && (bestY < 0 || y * mining_.terrain.width + x < bestY * mining_.terrain.width + bestX));
             if (better) {
                 foundCandidate = true;
-                bestIsStorySeal = isStorySeal;
+                bestIsProtectedLayer = isProtectedLayer;
                 bestArtifactDistance = artifactDistance;
                 bestAnchorDistance = anchorDistance;
                 bestIntensity = intensityPriority;
-                bestUsefulNeighbors = usefulNeighbors;
-                bestAgentDistance = agentDistance;
                 bestX = x;
                 bestY = y;
             }
@@ -516,16 +725,175 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     agent.targetCellY = bestY;
     agent.taskProgressSeconds = 0.0;
     agent.behavior = MiningMiniDroneBehavior::Traveling;
-    reservations_.emplace(cellKey(bestX, bestY), &agent);
+    reservations_[cellKey(bestX, bestY)].push_back(&agent);
     return true;
+}
+
+void HazardDroneCoordinator::assignAvailableDrones()
+{
+    // Assign the whole squad before any one drone advances. This prevents the
+    // first duplicate in loadout order from completing a tile and repeatedly
+    // taking the next reservation before its wingmate gets a job.
+    for (MiningMiniDroneAgent* agent : hazardDrones_) {
+        if (agent->actionCooldownSeconds <= 0.0 && !hasAssignment(*agent)) {
+            if (!acquireAssignment(*agent)) {
+                acquireAssistAssignment(*agent);
+            }
+        }
+    }
+}
+
+bool HazardDroneCoordinator::acquireAssistAssignment(MiningMiniDroneAgent& agent)
+{
+    releaseAssignment(agent);
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
+    bool foundCandidate = false;
+    bool bestIsProtectedLayer = false;
+    double bestArtifactDistance = 1.0e12;
+    double bestAnchorDistance = 1.0e12;
+    double bestIntensity = -1.0;
+    int bestX = -1;
+    int bestY = -1;
+    for (const auto& [key, workers] : reservations_) {
+        if (workers.empty()) {
+            continue;
+        }
+        const int x = key % mining_.terrain.width;
+        const int y = key / mining_.terrain.width;
+        if (!isEligibleTarget(agent, x, y)) {
+            continue;
+        }
+        const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
+        const double centerX = static_cast<double>(x) + 0.5;
+        const double centerY = static_cast<double>(y) + 0.5;
+        const bool isProtectedLayer = isActiveRevealedCocoonCell(mining_, *cell);
+        const double artifactDistance = isProtectedLayer && mining_.artifact.present
+            ? std::hypot(centerX - mining_.artifact.x, centerY - mining_.artifact.y)
+            : 0.0;
+        const double anchorDistance = std::hypot(centerX - anchor.x, centerY - anchor.y);
+        const double intensityPriority = static_cast<double>(
+            hazardRequiredMarkForCell(mining_, *cell));
+        const bool better = !foundCandidate
+            || (isProtectedLayer != bestIsProtectedLayer && isProtectedLayer)
+            || (isProtectedLayer == bestIsProtectedLayer && isProtectedLayer &&
+                artifactDistance < bestArtifactDistance - 0.0001)
+            || (!isProtectedLayer && !bestIsProtectedLayer &&
+                anchorDistance < bestAnchorDistance - 0.0001)
+            || (isProtectedLayer == bestIsProtectedLayer &&
+                (isProtectedLayer
+                    ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
+                    : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001) &&
+                intensityPriority > bestIntensity)
+            || (isProtectedLayer == bestIsProtectedLayer &&
+                (isProtectedLayer
+                    ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
+                    : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001) &&
+                intensityPriority == bestIntensity &&
+                (bestY < 0 || key < cellKey(bestX, bestY)));
+        if (better) {
+            foundCandidate = true;
+            bestIsProtectedLayer = isProtectedLayer;
+            bestArtifactDistance = artifactDistance;
+            bestAnchorDistance = anchorDistance;
+            bestIntensity = intensityPriority;
+            bestX = x;
+            bestY = y;
+        }
+    }
+    if (bestX < 0 || bestY < 0) {
+        return false;
+    }
+    agent.targetCellX = bestX;
+    agent.targetCellY = bestY;
+    agent.taskProgressSeconds = 0.0;
+    agent.behavior = MiningMiniDroneBehavior::Traveling;
+    reservations_[cellKey(bestX, bestY)].push_back(&agent);
+    return true;
+}
+
+std::vector<std::pair<int, int>> HazardDroneCoordinator::assignedTargets() const
+{
+    std::vector<std::pair<int, int>> result;
+    result.reserve(reservations_.size());
+    for (const auto& [key, workers] : reservations_) {
+        if (!workers.empty()) {
+            result.emplace_back(key % mining_.terrain.width, key / mining_.terrain.width);
+        }
+    }
+    std::sort(result.begin(), result.end(), [&](const auto& lhs, const auto& rhs) {
+        return cellKey(lhs.first, lhs.second) < cellKey(rhs.first, rhs.second);
+    });
+    return result;
+}
+
+std::vector<MiningMiniDroneAgent*> HazardDroneCoordinator::assignedWorkers(int x, int y) const
+{
+    const auto reservation = reservations_.find(cellKey(x, y));
+    if (reservation == reservations_.end()) {
+        return {};
+    }
+    std::vector<MiningMiniDroneAgent*> result = reservation->second;
+    std::sort(result.begin(), result.end(), [](const MiningMiniDroneAgent* lhs, const MiningMiniDroneAgent* rhs) {
+        return lhs->roleIndex < rhs->roleIndex;
+    });
+    return result;
+}
+
+MiniDroneCoordinationPoint HazardDroneCoordinator::treatmentApproachPoint(
+    const MiningMiniDroneAgent& agent) const
+{
+    const std::vector<MiningMiniDroneAgent*> workers =
+        assignedWorkers(agent.targetCellX, agent.targetCellY);
+    const auto found = std::find(workers.begin(), workers.end(), &agent);
+    const int workerCount = std::max(1, static_cast<int>(workers.size()));
+    const int workerSlot = found == workers.end()
+        ? std::max(0, agent.roleIndex)
+        : static_cast<int>(std::distance(workers.begin(), found));
+    const double angle = -kPi * 0.5 +
+        kTau * static_cast<double>(workerSlot) / static_cast<double>(workerCount);
+    const double radius = tuning::mining::hazardDroneWorkRangeCells * 0.72;
+    return {
+        std::clamp(
+            static_cast<double>(agent.targetCellX) + 0.5 + std::cos(angle) * radius,
+            0.5,
+            static_cast<double>(mining_.terrain.width) - 0.5),
+        std::clamp(
+            static_cast<double>(agent.targetCellY) + 0.5 + std::sin(angle) * radius,
+            0.5,
+            static_cast<double>(mining_.terrain.height) - 0.5)
+    };
+}
+
+void HazardDroneCoordinator::releaseTargetAssignments(int x, int y)
+{
+    const auto reservation = reservations_.find(cellKey(x, y));
+    if (reservation == reservations_.end()) {
+        return;
+    }
+    const std::vector<MiningMiniDroneAgent*> workers = reservation->second;
+    reservations_.erase(reservation);
+    for (MiningMiniDroneAgent* worker : workers) {
+        if (worker == nullptr) {
+            continue;
+        }
+        clearAssignment(*worker);
+        worker->actionCooldownSeconds = 0.0;
+        worker->behavior = MiningMiniDroneBehavior::Returning;
+    }
 }
 
 void HazardDroneCoordinator::releaseAssignment(MiningMiniDroneAgent& agent)
 {
     if (agent.targetCellX >= 0 && agent.targetCellY >= 0) {
         const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
-        if (reservation != reservations_.end() && reservation->second == &agent) {
-            reservations_.erase(reservation);
+        if (reservation != reservations_.end()) {
+            std::erase(reservation->second, &agent);
+            if (reservation->second.empty()) {
+                reservations_.erase(reservation);
+            }
         }
     }
     clearAssignment(agent);
@@ -534,7 +902,8 @@ void HazardDroneCoordinator::releaseAssignment(MiningMiniDroneAgent& agent)
 bool HazardDroneCoordinator::reservedByOther(int x, int y, const MiningMiniDroneAgent& agent) const
 {
     const auto reservation = reservations_.find(cellKey(x, y));
-    return reservation != reservations_.end() && reservation->second != &agent;
+    return reservation != reservations_.end() &&
+        std::find(reservation->second.begin(), reservation->second.end(), &agent) == reservation->second.end();
 }
 
 bool HazardDroneCoordinator::isCandidateCell(const MiningMiniDroneAgent& agent, int x, int y) const
@@ -542,7 +911,27 @@ bool HazardDroneCoordinator::isCandidateCell(const MiningMiniDroneAgent& agent, 
     const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
     return cell != nullptr && cell->revealed && cell->hazard &&
         cell->material == MiningCellMaterial::HazardPocket &&
-        tuning::mining::hazardDroneRequiredMark(cell->hazardAffinity) <= agent.upgradeLevel;
+        (cell->cocoonLayer < 0 || isActiveRevealedCocoonCell(mining_, *cell)) &&
+        hazardRequiredMarkForCell(mining_, *cell) <= agent.upgradeLevel;
+}
+
+bool HazardDroneCoordinator::isEligibleTarget(const MiningMiniDroneAgent& agent, int x, int y) const
+{
+    if (!isCandidateCell(agent, x, y)) {
+        return false;
+    }
+    const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
+    if (cell != nullptr && isActiveRevealedCocoonCell(mining_, *cell)) {
+        return true;
+    }
+    const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+    if (!anchor.valid) {
+        return false;
+    }
+    const double dx = static_cast<double>(x) + 0.5 - anchor.x;
+    const double dy = static_cast<double>(y) + 0.5 - anchor.y;
+    const double radius = tuning::mining::hazardDroneAcquireRadiusCells;
+    return dx * dx + dy * dy <= radius * radius;
 }
 
 int HazardDroneCoordinator::cellKey(int x, int y) const

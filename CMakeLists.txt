@@ -87,6 +87,7 @@ add_library(rocket_core
     src/core/MiningSystem.cpp
     src/core/Random.cpp
     src/core/ResearchSystem.cpp
+    src/core/ScenarioSystem.cpp
     src/core/SaveData.cpp
     src/input/ControllerInput.cpp)
 target_include_directories(rocket_core PUBLIC src)
@@ -250,6 +251,8 @@ endif()
 find_program(ROCKET_NODE_EXECUTABLE NAMES node node.exe REQUIRED)
 add_test(NAME rocket_platform_boundary_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-platform-boundaries.mjs")
+add_test(NAME rocket_scenario_architecture_boundary_tests
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check-scenario-boundaries.mjs")
 add_test(NAME rocket_rmlui_resource_graph_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.test.mjs")
 add_test(NAME rocket_web_shell_input_contract_tests

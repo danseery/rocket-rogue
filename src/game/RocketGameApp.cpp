@@ -9,6 +9,7 @@
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
+#include "core/ScenarioSystem.h"
 #include "core/RefitPresentation.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
@@ -178,6 +179,122 @@ bool consumeIndexedAction(std::string_view action, std::string_view prefix, int&
 
     index = value;
     return true;
+}
+
+struct ScenarioActionAddress {
+    std::string scenarioId;
+    std::string stepId;
+    ScenarioActionKind action = ScenarioActionKind::None;
+};
+
+bool parseScenarioAction(std::string_view encoded, ScenarioActionAddress& result)
+{
+    if (!encoded.starts_with(ui::actions::scenarioActionPrefix)) {
+        return false;
+    }
+    const std::string_view payload = encoded.substr(ui::actions::scenarioActionPrefix.size());
+    const std::size_t first = payload.find('|');
+    const std::size_t second = first == std::string_view::npos ? std::string_view::npos : payload.find('|', first + 1);
+    if (first == std::string_view::npos || second == std::string_view::npos ||
+        first == 0 || second == first + 1 || second + 1 >= payload.size()) {
+        return false;
+    }
+    const std::string_view rawAction = payload.substr(second + 1);
+    int actionValue = 0;
+    for (const char c : rawAction) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        actionValue = actionValue * 10 + (c - '0');
+    }
+    if (actionValue <= static_cast<int>(ScenarioActionKind::None) ||
+        actionValue > static_cast<int>(ScenarioActionKind::AcknowledgeFailure)) {
+        return false;
+    }
+    result.scenarioId = std::string(payload.substr(0, first));
+    result.stepId = std::string(payload.substr(first + 1, second - first - 1));
+    result.action = static_cast<ScenarioActionKind>(actionValue);
+    return true;
+}
+
+std::string encodeScenarioAction(
+    std::string_view scenarioId,
+    std::string_view stepId,
+    ScenarioActionKind action)
+{
+    return std::string(ui::actions::scenarioActionPrefix) + std::string(scenarioId) + "|" +
+        std::string(stepId) + "|" + std::to_string(static_cast<int>(action));
+}
+
+// These mappings are deliberately an input-bridge compatibility boundary.
+// They preserve the old exported web/native actions while the live UI emits
+// semantic scenario actions. No campaign reward, route, or activity logic is
+// implemented here.
+struct LegacyScenarioActionTranslation {
+    std::string_view legacyAction;
+    std::string_view scenarioId;
+    std::string_view stepId;
+    ScenarioActionKind action = ScenarioActionKind::None;
+};
+
+constexpr std::array<LegacyScenarioActionTranslation, 7> kLegacyScenarioActionTranslations {{
+    {ui::actions::acknowledgeProspectorCompletion,
+     content::scenario::lunarProspector,
+     "delivery",
+     ScenarioActionKind::ClaimReward},
+    {ui::actions::acknowledgeLunarMiningBriefing,
+     content::scenario::lunarProspector,
+     "briefing",
+     ScenarioActionKind::AcknowledgeBriefing},
+    {ui::actions::claimLunarProspector,
+     content::scenario::lunarProspector,
+     "delivery",
+     ScenarioActionKind::ClaimReward},
+    {ui::actions::acknowledgeMarsMiningBriefing,
+     content::scenario::marsBayExpansion,
+     "briefing",
+     ScenarioActionKind::AcknowledgeBriefing},
+    {ui::actions::claimMarsBayExpansion,
+     content::scenario::marsBayExpansion,
+     "delivery",
+     ScenarioActionKind::ClaimReward},
+    {ui::actions::commissionIoHazardDrone,
+     content::scenario::volcanicDescent,
+     "commission",
+     ScenarioActionKind::BeginActivity},
+    {ui::actions::beginSaturnSlingshot,
+     content::scenario::outerTransfer,
+     "flyby",
+     ScenarioActionKind::BeginActivity}
+}};
+
+const LegacyScenarioActionTranslation* legacyScenarioActionTranslation(std::string_view action)
+{
+    const auto found = std::find_if(
+        kLegacyScenarioActionTranslations.begin(),
+        kLegacyScenarioActionTranslations.end(),
+        [&](const LegacyScenarioActionTranslation& translation) {
+            return translation.legacyAction == action;
+        });
+    return found == kLegacyScenarioActionTranslations.end() ? nullptr : &*found;
+}
+
+void recordActiveMiningScenarioAbort(GameState& state, const ContentCatalog& catalog)
+{
+    const MiningRunState& mining = state.run.mining;
+    if (mining.scenarioId.empty() || mining.scenarioStepId.empty()) {
+        return;
+    }
+    (void)recordScenarioEvent(
+        state,
+        catalog,
+        {ScenarioEventKind::ActivityAborted,
+         mining.scenarioId,
+         mining.scenarioStepId,
+         mining.miningSiteDefinitionId,
+         {},
+         0,
+         0});
 }
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId)
@@ -1336,29 +1453,33 @@ void RocketGameApp::tick(double deltaSeconds)
         const bool wasCompleted = state_.run.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
         if (!wasCompleted && state_.run.flyby.completed) {
-            const bool saturnSlingshot = state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot;
-            if (saturnSlingshot) {
-                if (state_.run.flyby.result == FlybyGrade::Perfect) {
-                    state_.meta.saturnSlingshotPerfect = true;
-                } else {
-                    state_.meta.saturnSlingshotFailed = true;
-                }
-            }
+            const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+                !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+            const ScenarioDefinition* scenario = scenarioChallenge
+                ? findScenarioDefinition(catalog_, state_.run.flyby.scenarioId)
+                : nullptr;
+            const ScenarioStepDefinition* challenge = scenario == nullptr
+                ? nullptr
+                : findScenarioStepDefinition(*scenario, state_.run.flyby.scenarioStepId);
             switch (state_.run.flyby.result) {
             case FlybyGrade::Perfect:
-                state_.statusLine = saturnSlingshot
-                    ? "Perfect corridor held. Lock the Saturn course."
+                state_.statusLine = scenarioChallenge
+                    ? "Perfect corridor held. Claim the scenario reward."
                     : "Perfect slingshot. Next launch gets fuel margin and speed.";
                 break;
             case FlybyGrade::Good:
-                state_.statusLine = saturnSlingshot
-                    ? "Clean flyby, but insufficient slingshot. Saturn remains locked."
+                state_.statusLine = scenarioChallenge
+                    ? (challenge != nullptr && !challenge->failureExplanation.empty()
+                        ? challenge->failureExplanation
+                        : "Clean flyby, but the scenario requirement was not met.")
                     : "Clean flyby. Recon data secured.";
                 break;
             case FlybyGrade::Miss:
             default:
-                state_.statusLine = saturnSlingshot
-                    ? "Slingshot corridor lost. Saturn remains locked."
+                state_.statusLine = scenarioChallenge
+                    ? (challenge != nullptr && !challenge->failureExplanation.empty()
+                        ? challenge->failureExplanation
+                        : "Scenario corridor lost.")
                     : "Missed flyby window. Approach options remain open.";
                 break;
             }
@@ -1729,172 +1850,47 @@ void RocketGameApp::acknowledgeProspectorCompletion()
 
 void RocketGameApp::acknowledgeLunarMiningBriefing()
 {
-    if (!acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::LunarProspector)) {
-        return;
-    }
-
-    ui::briefings::acknowledge(
-        state_.meta.acknowledgedActivityBriefingIds,
-        ui::briefings::mining);
-    state_.statusLine = "Lunar Prospector contract accepted. Recover "
-        + std::to_string(tuning::research::prospectorCommonOreGoal)
-        + " gray-seamed Common Ore.";
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeLunarMiningBriefing);
 }
 
 void RocketGameApp::claimLunarProspector()
 {
-    if (!rocket::claimLunarProspector(state_, catalog_)) {
-        return;
-    }
-
-    // The named claim teaches the first support craft, so suppress the older
-    // optional helper-drone introduction.
-    ui::briefings::acknowledge(
-        state_.meta.acknowledgedActivityBriefingIds,
-        ui::briefings::prospectorComplete);
-    ui::briefings::acknowledge(
-        state_.meta.acknowledgedActivityBriefingIds,
-        ui::briefings::miniDrones);
-    state_.statusLine = "Prospector Mk I installed. Support Drone Slot 1 is online.";
-    syncLaunchConfig(state_, catalog_);
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::claimLunarProspector);
 }
 
 void RocketGameApp::acknowledgeMarsMiningBriefing()
 {
-    if (!acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::MarsBayExpansion)) {
-        return;
-    }
-
-    state_.statusLine = "Mars bay-expansion contract accepted. Recover "
-        + std::to_string(tuning::research::marsBayCommonOreGoal)
-        + " local Common Ore.";
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeMarsMiningBriefing);
 }
 
 void RocketGameApp::claimMarsBayExpansion()
 {
-    if (!rocket::claimMarsBayExpansion(state_, catalog_)) {
-        return;
-    }
-
-    state_.statusLine = "Support Drone Slot 2 fabricated. The new bay is empty and ready.";
-    syncLaunchConfig(state_, catalog_);
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::claimMarsBayExpansion);
 }
 
 void RocketGameApp::commissionIoHazardDrone()
 {
-    acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::IoVolcanicDescent);
-    if (!rocket::commissionIoHazardDrone(state_, catalog_)) {
-        return;
-    }
-
-    const bool hazardEquipped = std::find(
-        state_.meta.equippedDroneIds.begin(),
-        state_.meta.equippedDroneIds.end(),
-        content::drone::hazardDrone) != state_.meta.equippedDroneIds.end();
-    if (!hazardEquipped) {
-        ensureDroneBayState(state_, catalog_);
-        state_.screen = Screen::DroneOps;
-        state_.statusLine = "Hazard Drone commissioned. Free a slot, then assign it for the Io descent.";
-    } else {
-        state_.statusLine = "Hazard Drone commissioned. Cool every lava seal before drilling.";
-    }
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::commissionIoHazardDrone);
 }
 
 void RocketGameApp::beginSaturnSlingshot()
 {
-    if (state_.screen != Screen::Hangar) {
-        return;
-    }
-
-    acknowledgeCampaignObjectiveBriefing(state_, CampaignObjectiveId::SaturnSlingshot);
-    if (!startSaturnSlingshotRun(state_, catalog_)) {
-        state_.statusLine = "Saturn remains locked. Recover the Io artifact before attempting the slingshot.";
-        panelDirty_ = true;
-        return;
-    }
-
-    state_.statusLine = "Saturn slingshot active. Hold the gold corridor for a Perfect pass.";
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::beginSaturnSlingshot);
 }
 
 void RocketGameApp::retrySaturnSlingshot()
 {
-    const bool completedFailure = state_.screen == Screen::Flyby
-        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
-        && state_.run.flyby.completed
-        && state_.run.flyby.result != FlybyGrade::Perfect;
-    const bool savedFailure = state_.screen == Screen::Hangar
-        && state_.meta.saturnSlingshotFailed
-        && !state_.meta.saturnSlingshotPerfect;
-    if (!completedFailure && !savedFailure) {
-        return;
-    }
-
-    if (completedFailure) {
-        completeFlybyRun(state_, catalog_);
-    }
-    rocket::acknowledgeSaturnSlingshotFailure(state_);
-    if (!startSaturnSlingshotRun(state_, catalog_)) {
-        state_.statusLine = "Slingshot retry unavailable. Review the Jupiter departure objective.";
-    } else {
-        state_.statusLine = "Slingshot retry active. Perfect corridor required.";
-    }
-    syncLaunchConfig(state_, catalog_);
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::retrySaturnSlingshot);
 }
 
 void RocketGameApp::acknowledgeSaturnSlingshotFailure()
 {
-    const bool completedFailure = state_.screen == Screen::Flyby
-        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
-        && state_.run.flyby.completed
-        && state_.run.flyby.result != FlybyGrade::Perfect;
-    const bool savedFailure = state_.screen == Screen::Hangar
-        && state_.meta.saturnSlingshotFailed
-        && !state_.meta.saturnSlingshotPerfect;
-    if (!completedFailure && !savedFailure) {
-        return;
-    }
-
-    if (completedFailure) {
-        completeFlybyRun(state_, catalog_);
-    }
-    rocket::acknowledgeSaturnSlingshotFailure(state_);
-    state_.statusLine = "Saturn remains locked. Retry the Perfect Jupiter slingshot from the Hangar.";
-    syncLaunchConfig(state_, catalog_);
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeSaturnSlingshotFailure);
 }
 
 void RocketGameApp::claimSaturnCourse()
 {
-    const bool completedPerfect = state_.screen == Screen::Flyby
-        && state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot
-        && state_.run.flyby.completed
-        && state_.run.flyby.result == FlybyGrade::Perfect;
-    if (completedPerfect) {
-        completeFlybyRun(state_, catalog_);
-    }
-    if (!rocket::claimSaturnCourse(state_, catalog_)) {
-        return;
-    }
-
-    state_.statusLine = "Saturn course locked. The one-way outer expedition is ready.";
-    syncLaunchConfig(state_, catalog_);
-    save();
-    panelDirty_ = true;
+    (void)runLegacyScenarioUiAction(ui::actions::claimSaturnCourse);
 }
 
 void RocketGameApp::flybyMove(double xAxis, double yAxis)
@@ -1912,11 +1908,12 @@ void RocketGameApp::flybyAbort()
     if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
         return;
     }
-    const bool saturnSlingshot = state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot;
-    abortFlybyRun(state_);
-    state_.statusLine = saturnSlingshot
-        ? "Slingshot aborted. Saturn remains locked until a Perfect corridor pass."
-        : "Flyby aborted. No recon reward earned.";
+    const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+    abortFlybyRun(state_, catalog_);
+    if (!scenarioChallenge) {
+        state_.statusLine = "Flyby aborted. No recon reward earned.";
+    }
     save();
     panelDirty_ = true;
 }
@@ -1928,12 +1925,16 @@ void RocketGameApp::flybyContinue()
     }
 
     const FlybyGrade grade = state_.run.flyby.result;
-    if (state_.run.flyby.purpose == FlybyPurpose::SaturnSlingshot) {
-        if (grade == FlybyGrade::Perfect) {
-            claimSaturnCourse();
-        } else {
-            acknowledgeSaturnSlingshotFailure();
-        }
+    const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+    if (scenarioChallenge) {
+        // Completion records a typed scenario event. A Perfect leaves an
+        // explicit claim instead of advancing a route implicitly; failures
+        // retain their one-time explanation through scenario progress.
+        completeFlybyRun(state_, catalog_);
+        syncLaunchConfig(state_, catalog_);
+        save();
+        panelDirty_ = true;
         return;
     }
     completeFlybyRun(state_, catalog_);
@@ -2081,32 +2082,61 @@ void RocketGameApp::mineSurface()
     if (state_.screen != Screen::SurfaceExpedition) {
         return;
     }
-    const std::string& destinationId = state_.run.surfaceExpedition.destinationId;
-    if (destinationId == content::destination::moon
-        && !state_.meta.lunarMiningBriefingAcknowledged) {
-        state_.statusLine = "Accept the Lunar Prospector Contract before deploying the Mining Rig.";
+    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
+        state_,
+        catalog_,
+        expedition.destinationId);
+    if (objective.available && objective.mandatoryBriefing && !objective.briefingAcknowledged) {
+        state_.statusLine = "Acknowledge " + objective.title + " before deploying the Mining Rig.";
         panelDirty_ = true;
         return;
     }
-    if (destinationId == content::destination::mars
-        && !state_.meta.marsMiningBriefingAcknowledged) {
-        state_.statusLine = "Accept the Mars Bay Expansion contract before deploying the Mining Rig.";
+
+    const ScenarioDefinition* definition = objective.available
+        ? scenarioDefinitionForRuntimeId(state_, catalog_, objective.scenarioId)
+        : nullptr;
+    const ScenarioInstance* instance = objective.available
+        ? findScenarioInstance(state_.meta, objective.scenarioId)
+        : nullptr;
+    const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
+        ? resolveScenarioDefinition(*definition, *instance)
+        : ScenarioDefinition {};
+    const ScenarioStepDefinition* step = definition == nullptr
+        ? nullptr
+        : (instance == nullptr
+               ? findScenarioStepDefinition(*definition, objective.stepId)
+               : findScenarioStepDefinition(resolved, objective.stepId));
+    const bool pendingSite = !expedition.pendingMiningSiteDefinitionId.empty();
+    if (!pendingSite && step != nullptr &&
+        step->completionEvent == ScenarioEventKind::ProtectedObjectiveExtracted &&
+        !step->miningSiteDefinitionId.empty()) {
+        state_.statusLine = "Begin " + objective.title + " from the active objective before deploying the Mining Rig.";
         panelDirty_ = true;
         return;
     }
-    if (destinationId == content::destination::jupiter) {
-        if (!state_.meta.ioHazardDroneCommissioned) {
-            state_.statusLine = "Commission Hazard Drone Mk I before beginning the Io descent.";
-            panelDirty_ = true;
-            return;
-        }
-        const bool hazardEquipped = std::find(
+
+    const MiningSiteDefinition* site = pendingSite
+        ? findMiningSiteDefinition(catalog_, expedition.pendingMiningSiteDefinitionId)
+        : nullptr;
+    const bool siteRequiresHazard = site != nullptr && std::any_of(
+        site->cocoon.layers.begin(),
+        site->cocoon.layers.end(),
+        [](const MiningCocoonLayerDefinition& layer) { return layer.requiredHazardMark > 0; });
+    if (siteRequiresHazard) {
+        const bool hazardEquipped = std::any_of(
             state_.meta.equippedDroneIds.begin(),
             state_.meta.equippedDroneIds.end(),
-            content::drone::hazardDrone) != state_.meta.equippedDroneIds.end();
+            [&](const std::string& equippedId) {
+                const auto found = std::find_if(
+                    catalog_.miniDrones.begin(),
+                    catalog_.miniDrones.end(),
+                    [&](const MiniDrone& drone) { return drone.id == equippedId; });
+                return found != catalog_.miniDrones.end() && found->role == MiniDroneRole::Hazard;
+            });
         if (!hazardEquipped) {
             state_.screen = Screen::DroneOps;
-            state_.statusLine = "Equip Hazard Drone Mk I before beginning the Io descent.";
+            state_.statusLine = "Equip a Hazard Drone before beginning this recovery site.";
             panelDirty_ = true;
             return;
         }
@@ -2139,7 +2169,7 @@ void RocketGameApp::extractSurface()
         return;
     }
 
-    const SurfaceActionOutcome outcome = extractSurfacePayload(state_, rng_);
+    const SurfaceActionOutcome outcome = extractSurfacePayload(state_, catalog_, rng_);
     if (!outcome.applied) {
         panelDirty_ = true;
         return;
@@ -2613,6 +2643,7 @@ void RocketGameApp::miningAbort()
         return;
     }
 
+    recordActiveMiningScenarioAbort(state_, catalog_);
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
     if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
@@ -2641,6 +2672,7 @@ void RocketGameApp::miningFailureAck()
         clearControllerPause();
     }
 
+    recordActiveMiningScenarioAbort(state_, catalog_);
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
     if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
         generateSurfaceUpgradeOffers(state_, catalog_, rng_);
@@ -2704,7 +2736,7 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
         std::clamp(difficulty, 1, 10),
         std::max<std::uint64_t>(1, seed),
         gateOverride >= 0,
-        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundStoryVault)))
+        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundVault)))
     };
     const MiningArenaRules rules = resolveMiningArenaRules(request);
 
@@ -2808,7 +2840,7 @@ std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty, int 
         std::clamp(difficulty, 1, 10),
         1,
         gateOverride >= 0,
-        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundStoryVault)))
+        static_cast<MiningGateType>(std::clamp(gateOverride, 0, static_cast<int>(MiningGateType::CompoundVault)))
     });
     const auto joinNames = [](const std::vector<std::string>& names) {
         if (names.empty()) {
@@ -2862,7 +2894,7 @@ std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty, int 
 
     std::ostringstream preview;
     const MiningGateType gateType = selectMiningGateType(rules);
-    const MiningGateDefinition gate = resolveMiningGateDefinition(rules, gateType, rules.fixedStoryGate == gateType);
+    const MiningGateDefinition gate = resolveMiningGateDefinition(rules, gateType, false);
     preview << miningActName(rules.request.act)
             << " • Level " << rules.request.difficulty
             << " • " << miningProgressionBandName(rules.band)
@@ -2914,6 +2946,11 @@ void RocketGameApp::debugStartSurfacePush()
     state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
     state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.08;
+    SurfaceDepthProspect artifactForecast;
+    artifactForecast.depthOffset = 1;
+    artifactForecast.absoluteDepth = state_.run.surfaceExpedition.depth + 1;
+    artifactForecast.possibleArtifacts = 1;
+    state_.run.surfaceExpedition.depthProspects.push_back(artifactForecast);
     const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
     state_.statusLine = outcome.applied
         ? "Debug Push Deeper sandbox. Descend, bank, or collapse without touching your save."
@@ -3577,10 +3614,193 @@ void RocketGameApp::refreshRealtimeHud()
     realtimeHudDirty_ = false;
 }
 
+bool RocketGameApp::runScenarioUiAction(std::string_view action)
+{
+    ScenarioActionAddress address;
+    if (!parseScenarioAction(action, address)) {
+        return false;
+    }
+
+    const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(
+        state_,
+        catalog_,
+        address.scenarioId);
+    const ScenarioInstance* instance = findScenarioInstance(state_.meta, address.scenarioId);
+    const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
+        ? resolveScenarioDefinition(*definition, *instance)
+        : ScenarioDefinition {};
+    const ScenarioStepDefinition* step = definition == nullptr
+        ? nullptr
+        : (instance == nullptr
+               ? findScenarioStepDefinition(*definition, address.stepId)
+               : findScenarioStepDefinition(resolved, address.stepId));
+    if (step == nullptr) {
+        return true;
+    }
+
+    const bool miningSiteAction =
+        (address.action == ScenarioActionKind::BeginActivity ||
+         address.action == ScenarioActionKind::RetryActivity) &&
+        !step->miningSiteDefinitionId.empty();
+    if (miningSiteAction && state_.run.surfaceExpedition.active &&
+        state_.run.surfaceExpedition.miningRunUsed) {
+        state_.statusLine =
+            "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
+        panelDirty_ = true;
+        return true;
+    }
+
+    const std::size_t equippedDroneCountBefore = state_.meta.equippedDroneIds.size();
+    const bool grantsAutoAssignedSupportDrone = std::any_of(
+        step->rewards.begin(),
+        step->rewards.end(),
+        [](const ScenarioReward& reward) {
+            return reward.kind == ScenarioRewardKind::SupportDrone &&
+                reward.equipIfSlotAvailable;
+        });
+
+    // A flyby challenge owns its run initialization. It dispatches the
+    // scenario action exactly once, then records the grade/abort through the
+    // same generic event stream used by any future challenge.
+    if ((address.action == ScenarioActionKind::BeginActivity ||
+         address.action == ScenarioActionKind::RetryActivity) &&
+        step->completionEvent == ScenarioEventKind::FlybyFinished) {
+        if (!startScenarioFlybyRun(
+                state_,
+                catalog_,
+                address.scenarioId,
+                address.stepId,
+                address.action)) {
+            state_.statusLine = "The scenario challenge is not ready to launch.";
+            panelDirty_ = true;
+            return true;
+        }
+        save();
+        panelDirty_ = true;
+        return true;
+    }
+
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state_, catalog_, address.scenarioId, address.stepId, address.action);
+    if (!outcome.applied) {
+        return true;
+    }
+
+    const bool supportDroneNeedsAssignment = grantsAutoAssignedSupportDrone &&
+        state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore;
+    if (outcome.beginsActivity && !outcome.miningSiteDefinitionId.empty()) {
+        SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+        if (!expedition.active) {
+            state_.statusLine = "Open Surface Ops before beginning this recovery site.";
+        } else if (expedition.miningRunUsed) {
+            // A scenario mining site shares the Surface Ops loop's single
+            // Mining Rig deployment. Keep its retry state explicit instead
+            // of sending the action through a generic no-op start attempt.
+            state_.statusLine =
+                "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
+        } else {
+            expedition.pendingScenarioId = address.scenarioId;
+            expedition.pendingScenarioStepId = address.stepId;
+            expedition.pendingMiningSiteDefinitionId = outcome.miningSiteDefinitionId;
+            mineSurface();
+        }
+    } else if (supportDroneNeedsAssignment) {
+        // The reward is owned, but no capacity was available for its
+        // content-authored automatic assignment. Drone Ops provides the
+        // explicit, reusable swap decision instead of silently replacing a
+        // loadout entry.
+        state_.screen = Screen::DroneOps;
+        state_.statusLine = "New Support Drone ready. Free a bay slot or swap an active Support Drone, then assign it.";
+    } else if (!outcome.message.empty()) {
+        state_.statusLine = outcome.message;
+    }
+
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+    return true;
+}
+
+bool RocketGameApp::runLegacyScenarioUiAction(std::string_view action)
+{
+    if (const LegacyScenarioActionTranslation* translation = legacyScenarioActionTranslation(action)) {
+        return runScenarioUiAction(encodeScenarioAction(
+            translation->scenarioId,
+            translation->stepId,
+            translation->action));
+    }
+
+    // The remaining pre-scenario actions operated directly from the old
+    // Flyby result panel. Translate their result-close/retry sequence into
+    // the exact same scenario event/action flow used by current UI controls.
+    constexpr std::string_view scenarioId = content::scenario::outerTransfer;
+    constexpr std::string_view stepId = "flyby";
+    const bool isLegacyResultAction = action == ui::actions::retrySaturnSlingshot ||
+        action == ui::actions::acknowledgeSaturnSlingshotFailure ||
+        action == ui::actions::claimSaturnCourse;
+    if (!isLegacyResultAction) {
+        return false;
+    }
+
+    const auto completedMatchingChallenge = [&]() {
+        const FlybyRunState& flyby = state_.run.flyby;
+        return state_.screen == Screen::Flyby && flyby.active && flyby.completed &&
+            flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+            flyby.scenarioId == scenarioId && flyby.scenarioStepId == stepId;
+    };
+    const auto completeMatchingChallenge = [&]() {
+        if (!completedMatchingChallenge()) {
+            return false;
+        }
+        completeFlybyRun(state_, catalog_);
+        return true;
+    };
+    const auto hasRecordedFailure = [&]() {
+        const ScenarioInstance* instance = findScenarioInstance(state_.meta, scenarioId);
+        const ScenarioStepProgress* progress = instance == nullptr
+            ? nullptr
+            : findScenarioStepProgress(*instance, stepId);
+        return progress != nullptr && progress->failureSeen && !progress->completed;
+    };
+
+    if (action == ui::actions::claimSaturnCourse) {
+        if (completedMatchingChallenge()) {
+            if (state_.run.flyby.result != FlybyGrade::Perfect) {
+                return true;
+            }
+            (void)completeMatchingChallenge();
+        }
+        return runScenarioUiAction(encodeScenarioAction(
+            scenarioId, stepId, ScenarioActionKind::ClaimReward));
+    }
+
+    if (completedMatchingChallenge()) {
+        if (state_.run.flyby.result == FlybyGrade::Perfect) {
+            return true;
+        }
+        (void)completeMatchingChallenge();
+    }
+    if (!hasRecordedFailure()) {
+        return true;
+    }
+
+    const std::string acknowledge = encodeScenarioAction(
+        scenarioId, stepId, ScenarioActionKind::AcknowledgeFailure);
+    if (action == ui::actions::acknowledgeSaturnSlingshotFailure) {
+        return runScenarioUiAction(acknowledge);
+    }
+
+    (void)runScenarioUiAction(acknowledge);
+    return runScenarioUiAction(encodeScenarioAction(
+        scenarioId, stepId, ScenarioActionKind::BeginActivity));
+}
+
 void RocketGameApp::runUiAction(const std::string& action)
 {
     int index = 0;
-    if (action == ui::actions::newGame) {
+    if (runScenarioUiAction(action) || runLegacyScenarioUiAction(action)) {
+        return;
+    } else if (action == ui::actions::newGame) {
         newGame();
     } else if (action == ui::actions::continueGame) {
         continueGame();
@@ -3638,26 +3858,6 @@ void RocketGameApp::runUiAction(const std::string& action)
         rerollOffers();
     } else if (action == ui::actions::acknowledgeApproachIntroduction) {
         acknowledgeApproachIntroduction();
-    } else if (action == ui::actions::acknowledgeProspectorCompletion) {
-        acknowledgeProspectorCompletion();
-    } else if (action == ui::actions::acknowledgeLunarMiningBriefing) {
-        acknowledgeLunarMiningBriefing();
-    } else if (action == ui::actions::claimLunarProspector) {
-        claimLunarProspector();
-    } else if (action == ui::actions::acknowledgeMarsMiningBriefing) {
-        acknowledgeMarsMiningBriefing();
-    } else if (action == ui::actions::claimMarsBayExpansion) {
-        claimMarsBayExpansion();
-    } else if (action == ui::actions::commissionIoHazardDrone) {
-        commissionIoHazardDrone();
-    } else if (action == ui::actions::beginSaturnSlingshot) {
-        beginSaturnSlingshot();
-    } else if (action == ui::actions::retrySaturnSlingshot) {
-        retrySaturnSlingshot();
-    } else if (action == ui::actions::acknowledgeSaturnSlingshotFailure) {
-        acknowledgeSaturnSlingshotFailure();
-    } else if (action == ui::actions::claimSaturnCourse) {
-        claimSaturnCourse();
     } else if (action == ui::actions::arrivalFlyby) {
         runArrivalFlyby();
     } else if (action == ui::actions::flybyAbort) {
@@ -3849,6 +4049,13 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
+        if (!miningExtraction_.active) {
+            result.miningPoiGuidance = miningPoiGuidanceTarget(
+                mining,
+                std::max(miningStats.oxygenSeconds, mining.siteBaselineOxygenSeconds),
+                tuning::launch::warningCautionThreshold,
+                result.miningAtReturnZone);
+        }
         result.miningScannerRadius =
             mining.operatorMode == MiningOperatorMode::Jetpack
             ? tuning::mining::scannerRevealRadius

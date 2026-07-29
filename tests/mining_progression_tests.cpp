@@ -22,7 +22,7 @@ void require(bool condition, const char* message)
 {
     if (!condition) {
         std::cerr << "FAILED: " << message << "\n";
-        std::abort();
+        std::exit(3);
     }
 }
 
@@ -279,16 +279,16 @@ void miningGateContractsAndRuntimeAreDeterministic()
             && miningGateAllowed(actOneEight, MiningGateType::SurveyTriangulation)
             && miningGateAllowed(actOneEight, MiningGateType::FragileExcavation),
         "Act 1 level 8 should introduce the three artifact recovery gates");
-    require(actOneEight.fixedStoryGate == MiningGateType::HazardCocoon && actOneEight.maximumGateLocks == 1,
-        "Act 1 level 8 should anchor the one-lock Hazard Cocoon story site");
-    require(actTwoTwo.fixedStoryGate == MiningGateType::EnemySealedChamber,
-        "Act 2 level 2 should anchor the enemy-sealed story site");
+    require(actOneEight.maximumGateLocks == 1,
+        "Act 1 gate composition should retain its one-lock limit");
+    require(actTwoTwo.maximumGateLocks == 1,
+        "Act 2 gate composition should retain its one-lock limit at its opening");
     require(miningGateAllowed(actTwoFour, MiningGateType::ShieldCorridor),
         "Act 2 level 4 should permit shield corridor sites after ranged enemies are taught");
-    require(actTwoSeven.fixedStoryGate == MiningGateType::CompoundStoryVault && actTwoSeven.maximumGateLocks == 2,
-        "Act 2 pressure should combine exactly two previously taught locks");
-    require(actThreeOne.fixedStoryGate == MiningGateType::BurrowBreach && actThreeOne.maximumGateLocks == 3,
-        "Act 3 should introduce the burrow gate and support three-lock capstones");
+    require(actTwoSeven.maximumGateLocks == 2,
+        "Act 2 pressure should retain its two-lock cap");
+    require(actThreeOne.maximumGateLocks == 3,
+        "Act 3 should retain its three-lock cap");
     require(!miningGateAllowed(actTwoSeven, MiningGateType::BurrowBreach),
         "Act 2 must never leak the Act 3 Mammal gate");
 
@@ -297,6 +297,10 @@ void miningGateContractsAndRuntimeAreDeterministic()
     });
     require(selectMiningGateType(illegalOverride) == MiningGateType::None,
         "Arena Lab must reject an override that violates the Act roster");
+    MiningArenaRules noGateCandidates = actOneEight;
+    noGateCandidates.allowedGateTypes.fill(false);
+    require(selectMiningGateType(noGateCandidates) == MiningGateType::None,
+        "an arena with no allowed gate must not synthesize a campaign site");
 
     const MiningGateDefinition cocoon = resolveMiningGateDefinition(actOneEight, MiningGateType::HazardCocoon, true);
     require(cocoon.requiresHazardTreatment && cocoon.requiredHazardMark == 1,
@@ -316,17 +320,30 @@ void miningGateContractsAndRuntimeAreDeterministic()
     require(miningCapabilityReadyForGate(profile, cocoon), "the matching Hazard mark should satisfy the direct key forecast");
 
     MetaProgress meta;
-    MiningStorySiteProgress* firstSite = ensureMiningStorySite(meta, content::destination::jupiter, actOneEight);
-    MiningStorySiteProgress* sameSite = ensureMiningStorySite(meta, content::destination::jupiter, actOneEight);
-    require(firstSite != nullptr && sameSite != nullptr && firstSite->seed == sameSite->seed && firstSite->artifactId == sameSite->artifactId,
-        "story sites should retain deterministic seed and artifact identity until completion");
-    creditExtractedMiningStoryArtifacts(meta, {{"wrong", content::destination::jupiter, false, ArtifactKind::Story}});
-    require(!meta.miningStorySites.front().completed, "unrelated recovered artifacts must not complete a story site");
+    require(pendingCompatibilityMiningSite(meta, content::destination::jupiter) == nullptr,
+        "new progress should not synthesize a compatibility mining site");
+    meta.miningSites.push_back({
+        "legacy_fixed_gate",
+        content::destination::jupiter,
+        actOneEight.request.act,
+        actOneEight.request.difficulty,
+        actOneEight.request.seed,
+        MiningGateType::HazardCocoon,
+        "legacy_fixed_gate_artifact",
+        false,
+        false,
+        true,
+    });
+    MiningSiteProgress* firstSite = pendingCompatibilityMiningSite(meta, content::destination::jupiter);
+    require(firstSite != nullptr && firstSite->legacyMigrated,
+        "only an imported legacy record should enter the compatibility mining-site path");
+    creditExtractedCompatibilityMiningSiteArtifacts(meta, {{"wrong", content::destination::jupiter, false, ArtifactKind::Story}});
+    require(!meta.miningSites.front().completed, "unrelated recovered artifacts must not complete a compatibility mining site");
     ArtifactRecord recovered;
-    recovered.id = meta.miningStorySites.front().artifactId;
+    recovered.id = meta.miningSites.front().artifactId;
     recovered.kind = ArtifactKind::Story;
-    creditExtractedMiningStoryArtifacts(meta, {recovered});
-    require(meta.miningStorySites.front().completed, "only the banked site artifact should complete persistent story progress");
+    creditExtractedCompatibilityMiningSiteArtifacts(meta, {recovered});
+    require(meta.miningSites.front().completed, "only the banked site artifact should complete compatibility site progress");
 
     const ContentCatalog catalog = createDefaultContent();
     auto prepareSurface = [](GameState& state, std::string_view destinationId) {
@@ -339,14 +356,15 @@ void miningGateContractsAndRuntimeAreDeterministic()
     };
 
     GameState hazardState = createNewGame(catalog, 501);
-    // Exercise the generic cocoon contract here. Jupiter now resolves to Io's
-    // staged seal, where cooled Common Ore must also be drilled away.
+    // Exercise the generic cocoon contract without relying on a destination.
     prepareSurface(hazardState, content::destination::mars);
     const MiningArenaRequest hazardRequest {MiningAct::ActOne, 8, 0xCAFE, true, MiningGateType::HazardCocoon};
     require(startMiningRun(hazardState, catalog, hazardRequest, false).applied, "Hazard Cocoon debug arena should start");
     require(hazardState.run.mining.gate.type == MiningGateType::HazardCocoon
             && hazardState.run.mining.gate.shellTilesRemaining == 8,
         "Hazard Cocoon should stamp eight marked, deterministic shell tiles");
+    require(hazardState.meta.miningSites.empty() && !hazardState.run.mining.gate.compatibilityCritical,
+        "new debug sites should not create legacy mining-site progress");
     require(hazardState.run.mining.gate.derivedStateDirty,
         "new gate runtime should require one derived-state reconciliation");
     hazardState.run.mining.droneX = hazardState.run.mining.artifact.x;
@@ -438,51 +456,151 @@ void miningGateContractsAndRuntimeAreDeterministic()
 
     SaveData save;
     save.mining = hazardState.run.mining;
-    save.miningStorySites = meta.miningStorySites;
+    save.miningSites = meta.miningSites;
     const std::optional<SaveData> gateRoundTrip = deserializeSaveData(serializeSaveData(save));
     require(gateRoundTrip.has_value()
             && gateRoundTrip->mining.gate.type == MiningGateType::HazardCocoon
             && gateRoundTrip->mining.gate.derivedStateDirty
-            && gateRoundTrip->miningStorySites.front().artifactId == meta.miningStorySites.front().artifactId,
-        "active gate state and persistent story identity should survive save/load while transient derived state reloads dirty");
+            && gateRoundTrip->miningSites.front().artifactId == meta.miningSites.front().artifactId,
+        "active gate state and compatibility site identity should survive save/load while transient derived state reloads dirty");
 }
 
-void ioDestinationRulesAreThermalAndStoryLocked()
+void thermalSiteRulesAreContentDriven()
 {
     const MiningArenaRequest request {MiningAct::ActOne, 7, 0x10A0ULL};
-    const MiningArenaRules generic = resolveDestinationMiningArenaRules(
-        request,
-        content::destination::mars);
-    const MiningArenaRules io = resolveDestinationMiningArenaRules(
-        request,
-        content::destination::jupiter);
+    MiningSiteDefinition thermalSite;
+    thermalSite.id = "test_thermal_cocoon";
+    thermalSite.arena = request;
+    thermalSite.biome = MiningSiteBiome::ThermalLava;
+    thermalSite.gateType = MiningGateType::HazardCocoon;
 
-    require(!isIoMiningDestination(content::destination::mars)
-            && isIoMiningDestination(content::destination::jupiter),
-        "Jupiter's stable destination id should select the Io mining profile");
-    require(generic.fixedStoryGate == MiningGateType::None,
-        "destination specialization should leave non-Io arena contracts unchanged");
-    require(io.fixedStoryGate == MiningGateType::HazardCocoon
-            && miningGateAllowed(io, MiningGateType::HazardCocoon),
-        "Io should always expose its fixed lava-cocoon story site");
-    require(io.mechanics.environmentalHazards
-            && io.mechanics.artifactRecovery
-            && io.mechanics.artifactTethering,
-        "Io should enable its lava treatment and artifact recovery mechanics");
-    require(miningAffinityAllowed(io, MiningElementalAffinity::Thermal)
-            && !miningAffinityAllowed(io, MiningElementalAffinity::Cryo)
-            && !miningAffinityAllowed(io, MiningElementalAffinity::Toxic)
-            && !miningAffinityAllowed(io, MiningElementalAffinity::Radiation),
-        "Io should permit Thermal lava and no other hazard affinity");
-    require(io.rewardBudget.rareGuarantee == 0
-            && io.rewardBudget.rareCap == 0
-            && io.rewardBudget.exoticGuarantee == 0
-            && io.rewardBudget.exoticCap == 0,
-        "Io should not inject normal rich-deposit rewards");
-    require(io.referenceDrones.roleCount == 1
-            && io.referenceDrones.roles[0] == MiniDroneRole::Hazard
-            && io.referenceDrones.maximumMark == 1,
-        "Io should teach the commissioned Hazard Drone Mk I");
+    const MiningArenaRules generic = resolveMiningArenaRules(request);
+    const MiningArenaRules thermal = resolveMiningSiteArenaRules(request, thermalSite);
+
+    require(selectMiningGateType(generic) == MiningGateType::None,
+        "a pre-gate ordinary arena should not acquire an authored cocoon gate");
+    require(selectMiningGateType(thermal) == MiningGateType::HazardCocoon
+            && miningGateAllowed(thermal, MiningGateType::HazardCocoon),
+        "a Thermal site should expose its authored cocoon gate");
+    require(thermal.mechanics.environmentalHazards
+            && thermal.mechanics.artifactRecovery
+            && thermal.mechanics.artifactTethering,
+        "a Thermal site should enable treatment and protected-objective mechanics");
+    require(miningAffinityAllowed(thermal, MiningElementalAffinity::Thermal)
+            && !miningAffinityAllowed(thermal, MiningElementalAffinity::Cryo)
+            && !miningAffinityAllowed(thermal, MiningElementalAffinity::Toxic)
+            && !miningAffinityAllowed(thermal, MiningElementalAffinity::Radiation),
+        "a Thermal site should permit only its authored hazard affinity");
+    require(thermal.rewardBudget.rareGuarantee == 0
+            && thermal.rewardBudget.rareCap == 0
+            && thermal.rewardBudget.exoticGuarantee == 0
+            && thermal.rewardBudget.exoticCap == 0,
+        "a Thermal site should not inject normal rich-deposit rewards");
+    require(thermal.referenceDrones.roleCount == 1
+            && thermal.referenceDrones.roles[0] == MiniDroneRole::Hazard
+            && thermal.referenceDrones.maximumMark == 1,
+        "a Thermal site should teach the required Hazard Drone Mk I");
+}
+
+void layeredCocoonsHonorAuthoredRevealPolicies()
+{
+    ContentCatalog catalog = createDefaultContent();
+    MiningSiteDefinition site;
+    site.id = "test_authored_three_layer_cocoon";
+    site.version = 1;
+    site.arena = {MiningAct::ActOne, 8, 0xC0C00AULL, true, MiningGateType::HazardCocoon};
+    site.biome = MiningSiteBiome::ThermalLava;
+    site.gateType = MiningGateType::HazardCocoon;
+    site.cocoon.id = "test_three_layer_cocoon";
+    site.cocoon.version = 1;
+    site.cocoon.protectedObjective = {ProtectedObjectiveKind::Artifact, "test_protected_payload"};
+    site.cocoon.layers = {
+        {"outer", "OUTER", {{0, -3}, {3, 0}, {0, 3}, {-3, 0}},
+            MiningCocoonRevealPolicy::OnAnyCellDiscovered,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningElementalAffinity::Thermal, 1},
+        {"middle", "MIDDLE", {{-2, -2}, {2, -2}, {2, 2}, {-2, 2}},
+            MiningCocoonRevealPolicy::AfterPreviousLayerCompleted,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningElementalAffinity::Thermal, 1},
+        {"inner", "INNER", {{0, -1}, {1, 0}, {0, 1}, {-1, 0}},
+            MiningCocoonRevealPolicy::OnAnyCellDiscovered,
+            MiningCocoonCompletionRule::TreatAndExcavate,
+            MiningElementalAffinity::Thermal, 1},
+    };
+    catalog.miningSites.push_back(site);
+
+    GameState state = createNewGame(catalog, 0xC0C00BULL);
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::mars;
+    state.run.surfaceExpedition.sharedFuel = 4;
+    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.surfaceExpedition.pendingMiningSiteDefinitionId = site.id;
+    require(startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 8, 0xC0C00CULL, true, MiningGateType::HazardCocoon},
+                false)
+                .applied,
+        "an authored mining site should start independently of its destination");
+
+    MiningRunState& mining = state.run.mining;
+    require(mining.gate.cocoonDefinitionId == site.cocoon.id &&
+            mining.gate.cocoonLayers.size() == 3 &&
+            !mining.gate.compatibilityCritical &&
+            !mining.gate.cocoonLayers[0].revealed &&
+            !mining.gate.cocoonLayers[1].revealed &&
+            !mining.gate.cocoonLayers[2].revealed &&
+            !mining.artifact.revealed,
+        "an authored site should avoid legacy story state and begin with its payload and non-immediate layers hidden");
+
+    mining.droneX = mining.gate.anchorX;
+    mining.droneY = mining.gate.anchorY;
+    pulseMiningScanner(state, catalog);
+    require(mining.gate.cocoonLayers[0].revealed &&
+            !mining.gate.cocoonLayers[1].revealed &&
+            !mining.gate.cocoonLayers[2].revealed,
+        "discovering one outer segment should reveal exactly its authored layer");
+
+    auto clearLayer = [&](int layer) {
+        for (MiningCell& cell : mining.terrain.cells) {
+            if (cell.cocoonLayer == layer) {
+                cell.material = MiningCellMaterial::Empty;
+                cell.hazard = false;
+                cell.revealed = true;
+            }
+        }
+        mining.gate.derivedStateDirty = true;
+        updateMiningRun(state, catalog, 0.01);
+    };
+
+    clearLayer(0);
+    require(mining.gate.cocoonLayers[0].completed &&
+            mining.gate.cocoonLayers[1].revealed &&
+            !mining.gate.cocoonLayers[2].revealed,
+        "an AfterPrevious layer should reveal only after its predecessor is treated and excavated");
+
+    clearLayer(1);
+    require(mining.gate.cocoonLayers[1].completed &&
+            !mining.gate.cocoonLayers[2].revealed &&
+            !mining.artifact.revealed,
+        "a later OnAny layer should remain hidden until the player discovers it");
+
+    pulseMiningScanner(state, catalog);
+    require(mining.gate.cocoonLayers[2].revealed,
+        "the active later OnAny layer should reveal atomically through the shared scanner path");
+
+    clearLayer(2);
+    require(mining.gate.hazardTreatmentComplete &&
+            mining.gate.state == MiningGateState::Open &&
+            mining.artifact.revealed,
+        "the protected payload should reveal only after every authored layer is complete");
+    mining.droneX = mining.artifact.x;
+    mining.droneY = mining.artifact.y;
+    toggleMiningTether(state);
+    require(mining.artifact.tethered,
+        "a revealed protected payload should become tetherable through the generic artifact adapter");
 }
 
 } // namespace
@@ -494,7 +612,8 @@ int main()
     deterministicSeedsAndRewardProgressAreStable();
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
-    ioDestinationRulesAreThermalAndStoryLocked();
+    thermalSiteRulesAreContentDriven();
+    layeredCocoonsHonorAuthoredRevealPolicies();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;
 }

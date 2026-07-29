@@ -7,7 +7,7 @@
 namespace rocket {
 
 struct SaveData {
-    int version = 8;
+    int version = 9;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 100.0;
     int destinationIndex = 0;
@@ -51,6 +51,7 @@ struct SaveData {
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
     std::vector<DroneUpgradeRecord> droneUpgrades;
+    std::vector<ScenarioInstance> scenarios;
     int prospectorCommonOreRecovered = 0;
     bool lunarMiningBriefingAcknowledged = false;
     bool lunarProspectorClaimed = false;
@@ -68,7 +69,7 @@ struct SaveData {
     bool saturnSlingshotFailureAcknowledged = false;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
-    std::vector<MiningStorySiteProgress> miningStorySites;
+    std::vector<MiningSiteProgress> miningSites;
     int furthestTier = 0;
     int shipsLost = 0;
     int astronautsLost = 0;

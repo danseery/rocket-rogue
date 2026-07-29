@@ -110,11 +110,10 @@ inline const Destination& launchDisplayDestination(const GameState& state, const
 }
 
 inline bool launchUsesOuterExpeditionRecovery(
-    const ContentCatalog& catalog,
+    const ContentCatalog&,
     const Destination& destination)
 {
-    const Destination* saturn = catalog.findDestination(content::destination::saturn);
-    return saturn != nullptr && destination.tier >= saturn->tier;
+    return destination.oneWayExpedition;
 }
 
 inline bool advancedFlightControlsUnlocked(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel)
@@ -126,7 +125,7 @@ inline bool advancedFlightControlsUnlocked(const GameState& state, const Content
 
     const Destination* next = nextDestination(state, catalog);
     return next != nullptr &&
-        next->id == content::destination::moon &&
+        next->requiresArrivalSurveySequence &&
         canCommitToNextFrontier(state, catalog);
 }
 

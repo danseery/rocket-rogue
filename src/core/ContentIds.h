@@ -19,7 +19,26 @@ inline constexpr const char* arkScaffold = "ark_scaffold";
 inline constexpr const char* droneBay = "drone_bay";
 inline constexpr const char* droneSupportSuite = "drone_support_suite";
 inline constexpr const char* ioHazardDrone = "io_hazard_drone";
+inline constexpr const char* routeMars = "route_mars";
+inline constexpr const char* routeJupiter = "route_jupiter";
+inline constexpr const char* routeSaturn = "route_saturn";
 } // namespace unlock
+
+namespace scenario {
+inline constexpr const char* lunarProspector = "lunar_prospector_contract";
+inline constexpr const char* marsBayExpansion = "mars_bay_expansion";
+inline constexpr const char* volcanicDescent = "volcanic_descent";
+inline constexpr const char* outerTransfer = "outer_transfer";
+inline constexpr const char* generatedTemplate = "generated_mining_template";
+} // namespace scenario
+
+namespace miningSite {
+inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
+} // namespace miningSite
+
+namespace protectedObjective {
+inline constexpr const char* ioMinorArtifact = "io_minor_artifact";
+} // namespace protectedObjective
 
 namespace module {
 inline constexpr const char* sparrowInjectorTune = "sparrow_injector_tune";

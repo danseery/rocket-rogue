@@ -13,12 +13,14 @@
 #include "core/RefitPresentation.h"
 #include "core/ResearchPresentation.h"
 #include "core/ResearchSystem.h"
+#include "core/ScenarioSystem.h"
 #include "core/ShipPresentation.h"
 #include "core/SurfaceScanPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -180,6 +182,30 @@ std::string button(std::string_view label, std::string_view action, std::string 
         htmlEscape(action) + "\"" + defaultAttr + ">" + htmlEscape(label) + "</button>";
 }
 
+std::string scenarioActionButton(
+    const ScenarioObjectivePresentation& objective,
+    std::string_view cssClass = "",
+    bool defaultFocus = false)
+{
+    if (!objective.available || objective.action == ScenarioActionKind::None || objective.actionLabel.empty()) {
+        return {};
+    }
+
+    const std::string action = ui::actions::scenarioAction(
+        objective.scenarioId,
+        objective.stepId,
+        static_cast<int>(objective.action));
+    const std::string classAttr = cssClass.empty() ? "" : " class=\"" + std::string(cssClass) + "\"";
+    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) +
+        "\" data-scenario-id=\"" + htmlEscape(objective.scenarioId) +
+        "\" data-scenario-step-id=\"" + htmlEscape(objective.stepId) +
+        "\" data-scenario-action=\"" + std::to_string(static_cast<int>(objective.action)) +
+        "\" data-ui-focus-id=\"scenario:" + htmlEscape(objective.scenarioId) + ":" +
+        htmlEscape(objective.stepId) + ":" + std::to_string(static_cast<int>(objective.action)) +
+        "\"" + defaultAttr + ">" + htmlEscape(objective.actionLabel) + "</button>";
+}
+
 std::string missionStamp(
     std::string_view kicker,
     std::string_view title,
@@ -188,7 +214,8 @@ std::string missionStamp(
     std::string_view tagTwo,
     std::string_view tagThree,
     std::string_view continueAction,
-    std::string_view continueLabel = "Select to continue")
+    std::string_view continueLabel = "Select to continue",
+    const ScenarioObjectivePresentation* scenarioObjective = nullptr)
 {
     std::ostringstream out;
     out << "<section class=\"arrival-fanfare-panel\">"
@@ -200,9 +227,15 @@ std::string missionStamp(
     if (!tagThree.empty()) {
         out << "<span class=\"gold\">" << htmlEscape(tagThree) << "</span>";
     }
-    out << "</div>"
-        << button(continueLabel, continueAction, "arrival-stamp-continue", true)
-        << "</section>";
+    out << "</div>";
+    if (scenarioObjective != nullptr) {
+        ScenarioObjectivePresentation actionObjective = *scenarioObjective;
+        actionObjective.actionLabel = std::string(continueLabel);
+        out << scenarioActionButton(actionObjective, "arrival-stamp-continue", true);
+    } else {
+        out << button(continueLabel, continueAction, "arrival-stamp-continue", true);
+    }
+    out << "</section>";
     return out.str();
 }
 
@@ -448,6 +481,70 @@ std::string miningDroneParentLabel(const MiningRunState& mining)
     default:
         return miningOperatorIsEva(mining) ? "SWARM -> OPERATOR" : "SWARM -> RIG";
     }
+}
+
+std::string miningSupportTileLabel(const MiningRunState& mining)
+{
+    const bool hasHazardDrone = std::any_of(
+        mining.miniDrones.begin(),
+        mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& drone) {
+            return drone.role == MiniDroneRole::Hazard;
+        });
+    return hasHazardDrone ? "HAZARD SQUAD" : "SUPPORT ANCHOR";
+}
+
+std::string miningSupportTileValue(const MiningRunState& mining)
+{
+    std::vector<std::pair<int, int>> activeTargets;
+    int total = 0;
+    int working = 0;
+    int traveling = 0;
+    int assisting = 0;
+    for (const MiningMiniDroneAgent& drone : mining.miniDrones) {
+        if (drone.role != MiniDroneRole::Hazard) {
+            continue;
+        }
+        ++total;
+        if (drone.behavior == MiningMiniDroneBehavior::Working) {
+            ++working;
+            const std::pair<int, int> target {
+                drone.targetCellX,
+                drone.targetCellY
+            };
+            if (std::find(activeTargets.begin(), activeTargets.end(), target) !=
+                activeTargets.end()) {
+                ++assisting;
+            } else {
+                activeTargets.push_back(target);
+            }
+        } else if (
+            drone.behavior == MiningMiniDroneBehavior::Traveling &&
+            drone.targetCellX >= 0 &&
+            drone.targetCellY >= 0) {
+            ++traveling;
+        }
+    }
+    if (total <= 0) {
+        return miningDroneParentLabel(mining);
+    }
+    if (working > 0 && assisting > 0) {
+        return std::to_string(working - assisting) + " TREATING \xE2\x80\xA2 " +
+            std::to_string(assisting) + " ASSISTING";
+    }
+    if (working > 0 && traveling > 0) {
+        return std::to_string(working) + " WORK \xE2\x80\xA2 " +
+            std::to_string(traveling) + " EN ROUTE";
+    }
+    if (working > 0) {
+        return std::to_string(working) + "/" + std::to_string(total) +
+            " TREATING";
+    }
+    if (traveling > 0) {
+        return std::to_string(traveling) + "/" + std::to_string(total) +
+            " EN ROUTE";
+    }
+    return "NO REVEALED HAZARD IN RANGE";
 }
 
 std::string statChip(const RefitStatChip& chip)
@@ -697,6 +794,10 @@ std::string activityIntroductionModal(
         : modalTemplate(modalId, title, body.str());
 }
 
+// Superseded campaign-only presentation. ScenarioObjectivePresentation below
+// is the sole live presentation path; retain this source block temporarily so
+// old save migration diagnostics can be compared while v9 lands.
+#if 0
 bool prospectorCompletionPending(const GameState& state)
 {
     return canClaimLunarProspector(state);
@@ -879,6 +980,170 @@ std::string saturnSlingshotFailureModal(const GameState& state)
         false);
 }
 
+#endif
+
+std::string scenarioObjectiveStateLabel(ScenarioStepState state)
+{
+    switch (state) {
+    case ScenarioStepState::Active:
+        return "ACTIVE";
+    case ScenarioStepState::ReadyToClaim:
+        return "READY TO CLAIM";
+    case ScenarioStepState::Complete:
+        return "COMPLETE";
+    case ScenarioStepState::Locked:
+    default:
+        return "LOCKED";
+    }
+}
+
+std::string scenarioObjectiveStateClass(ScenarioStepState state)
+{
+    switch (state) {
+    case ScenarioStepState::Active:
+        return "state-active active";
+    case ScenarioStepState::ReadyToClaim:
+        return "state-ready ready-to-claim";
+    case ScenarioStepState::Complete:
+        return "state-complete complete";
+    case ScenarioStepState::Locked:
+    default:
+        return "state-locked locked";
+    }
+}
+
+std::string scenarioObjectiveMarkup(
+    const ScenarioObjectivePresentation& objective,
+    bool showAction = true,
+    bool usePhaseLane = true)
+{
+    if (!objective.available) {
+        return {};
+    }
+
+    std::ostringstream out;
+    out << "<section class=\"objective-strip rr-objective-strip scenario-objective "
+        << (usePhaseLane ? "phase-lane " : "")
+        << scenarioObjectiveStateClass(objective.state)
+        << "\" data-scenario-id=\"" << htmlEscape(objective.scenarioId)
+        << "\" data-scenario-step-id=\"" << htmlEscape(objective.stepId)
+        << "\" data-objective-state=\"" << scenarioObjectiveStateLabel(objective.state) << "\">"
+        << "<div class=\"campaign-objective-head\"><span>" << htmlEscape(objective.location)
+        << "</span><em>" << htmlEscape(scenarioObjectiveStateLabel(objective.state)) << "</em></div>"
+        << "<strong>" << htmlEscape(objective.title) << "</strong>";
+    if (objective.required > 0) {
+        // A numeric readout remains authoritative for large contracts; a
+        // compact 8-cell strip keeps all shared layout lanes stable.
+        constexpr int visualSegments = 8;
+        const int filled = std::clamp(
+            static_cast<int>(std::ceil(
+                static_cast<double>(std::clamp(objective.current, 0, objective.required)) /
+                static_cast<double>(objective.required) * visualSegments)),
+            0,
+            visualSegments);
+        out << "<div class=\"campaign-progress\" aria-label=\""
+            << htmlEscape(std::to_string(objective.current) + " of " + std::to_string(objective.required))
+            << "\">";
+        for (int index = 0; index < visualSegments; ++index) {
+            out << "<i class=\"" << (index < filled ? "is-filled" : "") << "\"></i>";
+        }
+        out << "<b>" << std::clamp(objective.current, 0, objective.required) << "/"
+            << objective.required << "</b></div>";
+    }
+    out << "<p>" << htmlEscape(objective.detail) << "</p>"
+        << "<div class=\"campaign-objective-foot\"><small>" << htmlEscape(objective.rewardPreview) << "</small>";
+    if (showAction) {
+        out << scenarioActionButton(
+            objective,
+            objective.state == ScenarioStepState::ReadyToClaim ? "ok" : "warn");
+    }
+    out << "</div></section>";
+    return out.str();
+}
+
+std::string scenarioObjectiveModal(const ScenarioObjectivePresentation& objective)
+{
+    if (!objective.available || objective.state == ScenarioStepState::Complete) {
+        return {};
+    }
+
+    const bool mandatoryBriefing = objective.mandatoryBriefing && !objective.briefingAcknowledged;
+    const bool readyToClaim = objective.state == ScenarioStepState::ReadyToClaim;
+    const bool firstFailure = objective.firstFailurePending;
+    if (!mandatoryBriefing && !readyToClaim && !firstFailure) {
+        return {};
+    }
+
+    const std::string modalId = "scenario_" + objective.scenarioId + "_" + objective.stepId;
+    const std::string title = firstFailure
+        ? "OBJECTIVE RETRY REQUIRED"
+        : (readyToClaim ? objective.title + " READY" : objective.title);
+    const std::string setup = firstFailure
+        ? objective.failureExplanation
+        : objective.detail;
+    const std::string kicker = firstFailure
+        ? "OBJECTIVE // LOCKED"
+        : (readyToClaim ? "READY TO CLAIM" : "MANDATORY DIRECTIVE");
+    const std::string actionClass = readyToClaim ? "ok" : (firstFailure ? "warn" : "ok");
+    ScenarioObjectivePresentation actionObjective = objective;
+    if (firstFailure) {
+        // The action is AcknowledgeFailure, not a navigation action. Keep the
+        // label honest so semantic buttons never imply a different outcome.
+        actionObjective.actionLabel = "Acknowledge";
+    }
+    std::ostringstream body;
+    body << "<section class=\"activity-introduction modal-body campaign-briefing\" data-scenario-id=\""
+        << htmlEscape(objective.scenarioId) << "\" data-scenario-step-id=\""
+        << htmlEscape(objective.stepId) << "\">"
+        << "<span class=\"activity-introduction-kicker\">" << htmlEscape(kicker) << "</span>"
+        << "<p class=\"activity-introduction-setup\">" << htmlEscape(setup) << "</p>"
+        << "<div class=\"activity-introduction-payoff\"><span>Reward preview</span><strong>"
+        << htmlEscape(objective.rewardPreview) << "</strong></div>"
+        << "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
+        << scenarioActionButton(actionObjective, actionClass, true) << "</div></section>";
+    // Campaign gates always require an explicit semantic action. In
+    // particular, Escape/Back must not skip a mandatory briefing or claim.
+    return autoModalTemplate(modalId, title, body.str(), false);
+}
+
+ScenarioObjectivePresentation scenarioObjectiveForSurface(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    return expedition.active
+        ? scenarioObjectiveForDestination(state, catalog, expedition.destinationId)
+        : scenarioObjectiveForDestination(state, catalog, currentDestination(state, catalog).id);
+}
+
+std::string scenarioObjectiveModalForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    return scenarioObjectiveModal(scenarioObjectiveForDestination(state, catalog, destinationId));
+}
+
+int scenarioCommonAboard(const GameState& state, std::string_view destinationId)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active
+        || expedition.destinationId != destinationId
+        || !expedition.bankedMiningArenaValid
+        || !expedition.bankedMiningProgressionEligible) {
+        return 0;
+    }
+    return std::max(
+        0,
+        std::min(
+            expedition.bankedMiningMaterials.common,
+            expedition.temporaryMaterials.common));
+}
+
+// The live objective renderer is content-driven. Keep the former
+// CampaignObjectiveId implementation out of the build while migration tests
+// are being converted; it is not an alternate runtime path.
+#if 0
 struct CampaignObjectivePresentation {
     CampaignObjectiveId id = CampaignObjectiveId::LunarProspector;
     CampaignObjectiveState state = CampaignObjectiveState::Locked;
@@ -1107,38 +1372,104 @@ CampaignObjectiveId objectiveForFrontier(const GameState& state, const ContentCa
     }
     return CampaignObjectiveId::LunarProspector;
 }
+#endif
 
-std::string compactMiningCampaignObjective(const GameState& state)
+std::string scenarioProgressTargetLabel(const ScenarioObjectivePresentation& presentation)
 {
-    const CampaignObjectiveId objective = state.run.mining.destinationId == content::destination::mars
-        ? CampaignObjectiveId::MarsBayExpansion
-        : (state.run.mining.destinationId == content::destination::jupiter
-              ? CampaignObjectiveId::IoVolcanicDescent
-              : CampaignObjectiveId::LunarProspector);
-    const CampaignObjectivePresentation presentation = campaignObjectivePresentation(state, objective);
+    if (presentation.completionEvent != ScenarioEventKind::SafeMaterialDelivered ||
+        presentation.eventTargetId.empty()) {
+        return {};
+    }
+    std::string label;
+    label.reserve(presentation.eventTargetId.size());
+    bool previousWasSpace = false;
+    for (const unsigned char character : presentation.eventTargetId) {
+        if (character == '_' || character == '-') {
+            if (!label.empty() && !previousWasSpace) {
+                label.push_back(' ');
+                previousWasSpace = true;
+            }
+            continue;
+        }
+        label.push_back(static_cast<char>(std::toupper(character)));
+        previousWasSpace = false;
+    }
+    return label;
+}
+
+std::string compactMiningScenarioObjective(const GameState& state, const ContentCatalog& catalog)
+{
+    const ScenarioObjectivePresentation presentation = scenarioObjectiveForMining(state, catalog);
     const int aboard = std::max(0, state.run.mining.stowedMaterials.common);
     const int carried = std::max(0, state.run.mining.temporaryMaterials.common);
-    if (objective == CampaignObjectiveId::IoVolcanicDescent) {
-        const MiningGateRuntime& gate = state.run.mining.gate;
-        const int outerCleared = std::max(0, gate.outerShellTilesTotal - gate.outerShellTilesRemaining);
-        const int innerCleared = std::max(0, gate.innerShellTilesTotal - gate.innerShellTilesRemaining);
-        const std::string artifactState = state.run.mining.artifact.state == MiningArtifactState::Delivered
-            ? "EXTRACT SAFELY"
-            : (state.run.mining.artifact.tethered
-                  ? "TOW TO SHUTTLE"
-                  : (gate.state == MiningGateState::Open || gate.state == MiningGateState::Completed
-                        ? "ARTIFACT EXPOSED"
-                        : "SEALS LOCKED"));
-        return "IO LAVA // OUTER " + std::to_string(outerCleared) + "/" +
-            std::to_string(std::max(4, gate.outerShellTilesTotal)) +
-            " // INNER " + std::to_string(innerCleared) + "/" +
-            std::to_string(std::max(4, gate.innerShellTilesTotal)) +
-            " // " + artifactState;
+    const MiningGateRuntime& gate = state.run.mining.gate;
+    if (!gate.cocoonLayers.empty()) {
+        std::ostringstream out;
+        out << (presentation.location.empty() ? "RECOVERY SITE" : presentation.location);
+        for (const MiningCocoonLayerProgress& layer : gate.cocoonLayers) {
+            if (!layer.revealed) {
+                out << " // NEXT LAYER LOCKED";
+                break;
+            }
+            const int cleared = std::max(0, layer.total - layer.remaining);
+            out << " // " << layer.label << " " << cleared << "/" << std::max(0, layer.total);
+            if (!layer.completed) {
+                break;
+            }
+        }
+        const MiningArtifactObject& artifact = state.run.mining.artifact;
+        const std::string objectiveState = artifact.revealed
+            ? (artifact.state == MiningArtifactState::Delivered
+                   ? "EXTRACT SAFELY"
+                   : (artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED"))
+            : "CLEAR ACTIVE LAYER";
+        out << " // " << objectiveState;
+        return out.str();
     }
-    return presentation.location + " COMMON // DELIVERED " +
+    if (!presentation.available) {
+        return "MINING // CARRIED " + std::to_string(carried) + " // ABOARD " + std::to_string(aboard);
+    }
+    const std::string targetLabel = scenarioProgressTargetLabel(presentation);
+    const std::string locationAndTarget = presentation.location +
+        (targetLabel.empty() ? std::string {} : " " + targetLabel);
+    return locationAndTarget + " // DELIVERED " +
         std::to_string(presentation.current) + "/" + std::to_string(presentation.required) +
         " // ABOARD " + std::to_string(aboard) +
         " // CARRIED " + std::to_string(carried);
+}
+
+std::string miningCocoonObjectiveState(const MiningRunState& mining)
+{
+    const MiningArtifactObject& artifact = mining.artifact;
+    if (artifact.revealed) {
+        if (artifact.state == MiningArtifactState::Delivered) {
+            return "EXTRACT SAFELY";
+        }
+        return artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED";
+    }
+    return "CLEAR ACTIVE LAYER";
+}
+
+struct MiningCocoonHudLayout {
+    int routeTop = 60;
+};
+
+// The cocoon renderer accepts an authored list of layers, not a fixed
+// outer/inner pair. Keep the route marker below however many rows the compact
+// layer display needs so additional scenario layers never overlap it.
+MiningCocoonHudLayout miningCocoonHudLayout(const MiningGateRuntime& gate)
+{
+    constexpr int layerFootprint = 112;
+    constexpr int objectiveFootprint = 132;
+    constexpr int availableWidth = 364;
+    constexpr int rowHeight = 34;
+    constexpr int verticalPadding = 12;
+
+    const int contentWidth = static_cast<int>(gate.cocoonLayers.size()) * layerFootprint
+        + objectiveFootprint;
+    const int rows = std::max(1, (contentWidth + availableWidth - 1) / availableWidth);
+    const int displayHeight = verticalPadding + rows * rowHeight;
+    return {.routeTop = std::max(60, displayHeight + 12)};
 }
 
 std::string flybyZoneLabel(int zone)
@@ -1691,16 +2022,21 @@ std::vector<PanelMetricPresentation> compactHeaderMetrics(
             panelMetric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage))
         };
     case Screen::ArrivalOps:
+    {
+        const ScenarioObjectivePresentation objective =
+            scenarioObjectiveForDestination(state, catalog, displayDestination.id);
+        const std::string location = objective.available && !objective.location.empty()
+            ? objective.location
+            : displayDestination.name;
         return {
             panelMetric(
                 text::labels::currentFrontier,
-                displayDestination.id == content::destination::jupiter
-                    ? "Jupiter System"
-                    : displayDestination.name),
+                location),
             panelMetric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage)),
             panelMetric(text::labels::crewStress, crewStressSummary(activeAstronaut(state))),
             panelMetric(text::labels::missionCredits, display::money(state.run.credits))
         };
+    }
     default:
         // Realtime, minigame, draft, and specialist screens own their context
         // locally. A second global strip only repeats values and consumes the
@@ -1716,22 +2052,20 @@ std::string compactHeaderObjective(
     switch (state.screen) {
     case Screen::Hangar: {
         const Destination& current = currentDestination(state, catalog);
-        const Destination* next = nextDestination(state, catalog);
-        if (current.id == content::destination::earthOrbit
-            && next != nullptr
-            && next->id == content::destination::moon) {
-            const int required = frontierReadinessRequired(state, catalog);
-            return state.run.frontierReadiness >= required
-                ? "Prepare the lunar transfer"
-                : "Chart the route to the Moon";
+        const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(state, catalog, current.id);
+        if (objective.available && objective.state != ScenarioStepState::Complete) {
+            return scenarioObjectiveStateLabel(objective.state) + " // " + objective.title;
         }
-        if (current.id == content::destination::moon
-            || current.id == content::destination::mars
-            || current.id == content::destination::jupiter) {
-            const CampaignObjectivePresentation objective = campaignObjectivePresentation(
+        const FrontierGateStatus gate = frontierGateStatus(state, catalog);
+        if (!gate.satisfied && gate.kind == FrontierGateKind::ScenarioRequirement) {
+            const ScenarioObjectivePresentation routeObjective = scenarioObjectivePresentation(
                 state,
-                objectiveForFrontier(state, catalog));
-            return campaignObjectiveStateLabel(objective.state) + " // " + objective.title;
+                catalog,
+                gate.scenarioId,
+                gate.scenarioStepId);
+            if (routeObjective.available) {
+                return scenarioObjectiveStateLabel(routeObjective.state) + " // " + routeObjective.title;
+            }
         }
         return "Prepare the next flight";
     }
@@ -1827,6 +2161,157 @@ std::string solarMapNode(
     return out.str();
 }
 
+ScenarioObjectivePresentation scenarioObjectiveForMap(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const ScenarioInstance& instance)
+{
+    const ScenarioDefinition* authored = scenarioDefinitionForRuntimeId(
+        state,
+        catalog,
+        instance.id);
+    if (authored == nullptr) {
+        return {};
+    }
+    const ScenarioDefinition definition = resolveScenarioDefinition(*authored, instance);
+
+    ScenarioObjectivePresentation best;
+    int bestRank = 100;
+    for (const ScenarioStepDefinition& step : definition.steps) {
+        ScenarioObjectivePresentation candidate =
+            scenarioObjectivePresentation(state, catalog, instance.id, step.id);
+        if (!candidate.available) {
+            continue;
+        }
+        const int rank = candidate.state == ScenarioStepState::ReadyToClaim ? 0
+            : candidate.state == ScenarioStepState::Active ? 1
+            : candidate.state == ScenarioStepState::Locked ? 2
+            : 3;
+        if (rank < bestRank) {
+            best = std::move(candidate);
+            bestRank = rank;
+        }
+    }
+    return best;
+}
+
+std::string scenarioMapCocoonDetail(
+    const GameState& state,
+    const ScenarioObjectivePresentation& objective)
+{
+    const MiningRunState& mining = state.run.mining;
+    if (!objective.miningSiteDefinitionId.empty() &&
+        mining.active && mining.miningSiteDefinitionId == objective.miningSiteDefinitionId) {
+        std::ostringstream out;
+        for (const MiningCocoonLayerProgress& layer : mining.gate.cocoonLayers) {
+            if (!out.str().empty()) {
+                out << " / ";
+            }
+            if (!layer.revealed) {
+                out << "[LOCKED] " << layer.label;
+                break;
+            }
+            out << layer.label << " "
+                << std::max(0, layer.total - layer.remaining) << "/" << std::max(0, layer.total);
+            if (!layer.completed) {
+                break;
+            }
+        }
+        if (mining.artifact.revealed) {
+            out << (mining.artifact.tethered ? " / TOW TO SHUTTLE" : " / OBJECTIVE EXPOSED");
+        }
+        return out.str();
+    }
+    return {};
+}
+
+std::string scenarioCampaignTrack(const GameState& state, const ContentCatalog& catalog)
+{
+    std::ostringstream out;
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* authored = scenarioDefinitionForRuntimeId(
+            state,
+            catalog,
+            instance.id);
+        if (authored == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition definition = resolveScenarioDefinition(*authored, instance);
+        if (definition.steps.empty()) {
+            continue;
+        }
+        ScenarioObjectivePresentation objective = scenarioObjectiveForMap(state, catalog, instance);
+        const ScenarioStepDefinition& firstStep = definition.steps.front();
+        const std::string stepId = objective.available && !objective.stepId.empty()
+            ? objective.stepId
+            : firstStep.id;
+        const std::string location = objective.available && !objective.location.empty()
+            ? objective.location
+            : firstStep.location;
+        const std::string title = objective.available && !objective.title.empty()
+            ? objective.title
+            : firstStep.title;
+        const ScenarioStepState stepState = objective.available
+            ? objective.state
+            : ScenarioStepState::Locked;
+        std::string detail = scenarioMapCocoonDetail(state, objective);
+        if (detail.empty()) {
+            if (objective.available && objective.required > 1) {
+                detail = std::to_string(objective.current) + "/" +
+                    std::to_string(objective.required) + " " + objective.title;
+            } else if (objective.available && stepState == ScenarioStepState::Complete) {
+                detail = "[DONE] " + title;
+            } else if (objective.available) {
+                detail = objective.detail;
+            } else {
+                detail = "[LOCKED] " + title;
+            }
+        }
+        out << "<div class=\"" << scenarioObjectiveStateClass(stepState)
+            << "\" data-scenario-id=\"" << htmlEscape(instance.id)
+            << "\" data-scenario-step-id=\"" << htmlEscape(stepId)
+            << "\" data-objective-state=\"" << scenarioObjectiveStateLabel(stepState)
+            << "\" aria-label=\"" << htmlEscape(
+                location + " " + scenarioObjectiveStateLabel(stepState) + " " + title)
+            << "\">"
+            << "<span>" << htmlEscape(location) << "</span><strong>"
+            << htmlEscape(detail) << "</strong></div>";
+    }
+    return out.str();
+}
+
+struct MapRouteSummary {
+    std::string label = "Route requirements";
+    std::string detail = "ROUTES OPEN";
+    std::string scenarioId;
+    std::string stepId;
+};
+
+MapRouteSummary mapRouteSummary(const GameState& state, const ContentCatalog& catalog)
+{
+    for (const Destination& destination : catalog.destinations) {
+        if (destination.routeRequirementKeys.empty()) {
+            continue;
+        }
+        const ScenarioRouteRequirementStatus requirement =
+            scenarioRouteRequirementStatus(state, catalog, destination);
+        if (requirement.satisfied) {
+            continue;
+        }
+        MapRouteSummary summary;
+        summary.label = destination.name + " connector";
+        summary.scenarioId = requirement.scenarioId;
+        summary.stepId = requirement.stepId;
+        const ScenarioObjectivePresentation objective =
+            scenarioObjectivePresentation(state, catalog, requirement.scenarioId, requirement.stepId);
+        summary.detail = objective.available && !objective.title.empty()
+            ? "LOCKED — " + objective.title
+            : "LOCKED — COMPLETE REQUIREMENT";
+        return summary;
+    }
+    return {};
+}
+
 std::string solarMapBody(const PanelRenderContext& context)
 {
     const GameState& state = context.state;
@@ -1849,6 +2334,13 @@ std::string solarMapBody(const PanelRenderContext& context)
     const bool uranusExplored = reached(5, 5) || destinationVisited(content::destination::uranus);
     const bool neptuneExplored = reached(6, 6) || destinationVisited(content::destination::neptune) || arkDiscovered(state);
     const bool straylightFound = arkDiscovered(state);
+    const MapRouteSummary nextRoute = mapRouteSummary(state, catalog);
+    const std::string routeScenarioAttributes = nextRoute.scenarioId.empty()
+        ? std::string {}
+        : " data-scenario-id=\"" + htmlEscape(nextRoute.scenarioId)
+            + "\" data-scenario-step-id=\"" + htmlEscape(nextRoute.stepId)
+            + "\" data-objective-state=\"LOCKED\"";
+#if 0 // Superseded fixed campaign checklist; scenarioCampaignTrack is content-driven.
     const std::string saturnConnector = state.meta.saturnRouteUnlocked
         ? "ROUTE OPEN"
         : (state.meta.saturnSlingshotPerfect
@@ -1875,6 +2367,7 @@ std::string solarMapBody(const PanelRenderContext& context)
     } else {
         ioChecklist = "[DONE] HAZARD / [ ] OUTER 0/4 / [LOCKED] INNER / [ ] EXTRACT";
     }
+#endif
     const int exploredWorlds = 1
         + (moonExplored ? 1 : 0)
         + (marsExplored ? 1 : 0)
@@ -1888,8 +2381,11 @@ std::string solarMapBody(const PanelRenderContext& context)
         << "<div class=\"solar-map-summary\">"
         << "<div><span>Current frontier</span><strong>" << htmlEscape(currentDestination(state, catalog).name) << "</strong></div>"
         << "<div><span>Explored worlds</span><strong>" << exploredWorlds << " / 7</strong></div>"
-        << "<div><span>Saturn connector</span><strong>" << htmlEscape(saturnConnector) << "</strong></div></div>"
+        << "<div" << routeScenarioAttributes << "><span>" << htmlEscape(nextRoute.label) << "</span><strong>"
+        << htmlEscape(nextRoute.detail) << "</strong></div></div>"
         << "<div class=\"solar-map-campaign-track\">"
+        << scenarioCampaignTrack(state, catalog)
+#if 0 // Superseded fixed campaign checklist; scenarioCampaignTrack is content-driven.
         << "<div class=\"" << (state.meta.lunarProspectorClaimed ? "is-complete" : "is-active")
         << "\"><span>MOON</span><strong>" << (state.meta.lunarProspectorClaimed ? "✓ SLOT 1" : "○ ORE → SLOT 1") << "</strong></div>"
         << "<div class=\"" << (state.meta.marsBayExpansionClaimed ? "is-complete" : (state.meta.lunarProspectorClaimed ? "is-active" : "is-locked"))
@@ -1898,6 +2394,7 @@ std::string solarMapBody(const PanelRenderContext& context)
         << "\"><span>IO // JUPITER SYSTEM</span><strong>" << htmlEscape(ioChecklist) << "</strong></div>"
         << "<div class=\"" << (state.meta.saturnRouteUnlocked ? "is-complete" : (state.meta.ioArtifactRecovered ? "is-active" : "is-locked"))
         << "\"><span>SATURN</span><strong>" << (state.meta.saturnRouteUnlocked ? "✓ ROUTE OPEN" : "○ PERFECT FLYBY") << "</strong></div>"
+#endif
         << "</div>"
         << "<div class=\"solar-map-section solar-map-system\"><div class=\"solar-map-section-head\"><h3>System bodies</h3><span>Inner system to heliopause</span></div>"
         << "<div class=\"solar-system-track\">"
@@ -2215,8 +2712,7 @@ std::string buildGamePanelMarkup(
             out << "</div></section>";
         }
         out << phaseBoardClose();
-        out << prospectorCompletionModal(state);
-        out << marsBayCompletionModal(state);
+        out << scenarioObjectiveModalForDestination(state, catalog, currentDestination(state, catalog).id);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -2247,66 +2743,76 @@ std::string buildGamePanelMarkup(
         const std::string destinationName = flybyDestination == nullptr ? currentFrontier.name : flybyDestination->name;
         const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
         const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
-        const bool saturnSlingshot = flyby.purpose == FlybyPurpose::SaturnSlingshot;
+        const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+            !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
+        const ScenarioObjectivePresentation challengeObjective = scenarioChallenge
+            ? scenarioObjectivePresentation(state, catalog, flyby.scenarioId, flyby.scenarioStepId)
+            : ScenarioObjectivePresentation {};
 
         if (flyby.completed) {
-            const std::string resultTitle = saturnSlingshot
+            const std::string resultTitle = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect
-                      ? "PERFECT SLINGSHOT"
+                      ? challengeObjective.title + " READY"
                       : (grade == FlybyGrade::Good
                             ? "CLEAN FLYBY — INSUFFICIENT"
-                            : "CORRIDOR LOST"))
+                            : "CHALLENGE INCOMPLETE"))
                 : (flyby.collidedWithBody ? "Impact recorded" : flybyGradeLabel(grade));
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
             const double flybyFuelBoost = flyby.slingshotAwarded ? flyby.slingshotFuelBoost : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
             const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
-            const std::string resultBody = saturnSlingshot
+            const std::string resultBody = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect
-                      ? "Gold corridor held through the finish. The Saturn trajectory solution is ready to lock."
-                      : "Saturn remains beyond transfer range. Only a Perfect gold-corridor pass opens the route.")
+                      ? "Required flight grade reached. Claim the configured reward explicitly."
+                      : (!challengeObjective.failureExplanation.empty()
+                            ? challengeObjective.failureExplanation
+                            : challengeObjective.detail))
                 : (flyby.collidedWithBody
                 ? "The ship clipped the destination body. Hull damage added and no flyby data was recovered."
                 : (grade == FlybyGrade::Perfect
                     ? "Perfect corridor exit. Fast completion amplified the payout, and exit speed amplified the next-launch slingshot."
                     : flybyResultBody(grade)));
-            const std::string tagOne = saturnSlingshot
-                ? (grade == FlybyGrade::Perfect ? "SATURN SOLUTION READY" : "SATURN ROUTE LOCKED")
+            const std::string tagOne = scenarioChallenge
+                ? (grade == FlybyGrade::Perfect ? "READY TO CLAIM" : "ROUTE REMAINS LOCKED")
                 : (flyby.collidedWithBody
                 ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
                 : (grade == FlybyGrade::Miss ? "No flyby data" : "Flyby data secured"));
-            const std::string tagTwo = saturnSlingshot
+            const std::string tagTwo = scenarioChallenge
                 ? "PERFECT REQUIRED"
                 : (flyby.collidedWithBody
                 ? "No recon recovered"
                 : (grade == FlybyGrade::Perfect
                     ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1)
                     : (grade == FlybyGrade::Good ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1) : "No slingshot")));
-            const std::string tagThree = saturnSlingshot
-                ? (grade == FlybyGrade::Perfect ? "ONE-WAY OUTER COURSE" : "RETRY AVAILABLE")
+            const std::string tagThree = scenarioChallenge
+                ? (grade == FlybyGrade::Perfect ? challengeObjective.rewardPreview : "RETRY AVAILABLE")
                 : (flyby.collidedWithBody
                 ? "Hull damage logged"
                 : (grade == FlybyGrade::Perfect
                     ? "+" + display::fixed(flybyFuelBoost, 1) + " fuel, +" + display::fixed(flybySpeedBoost, 2) + " speed"
                     : (grade == FlybyGrade::Good ? "Clean exit gate" : "Retry from approach")));
             out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\""
-                << (saturnSlingshot ? "saturn-slingshot" : "recon") << "\" hidden></div>";
+                << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
             out << missionStamp(
-                saturnSlingshot ? "Saturn slingshot" : "Flyby stamp",
+                scenarioChallenge ? "Scenario flyby" : "Flyby stamp",
                 resultTitle,
                 resultBody,
                 tagOne,
                 tagTwo,
                 tagThree,
-                saturnSlingshot && grade == FlybyGrade::Perfect
-                    ? ui::actions::claimSaturnCourse
+                scenarioChallenge && grade == FlybyGrade::Perfect
+                    ? ui::actions::scenarioAction(
+                        challengeObjective.scenarioId,
+                        challengeObjective.stepId,
+                        static_cast<int>(ScenarioActionKind::ClaimReward))
                     : ui::actions::flybyContinue,
-                saturnSlingshot && grade == FlybyGrade::Perfect
-                    ? std::string_view("Lock Saturn Course")
-                    : (saturnSlingshot
+                scenarioChallenge && grade == FlybyGrade::Perfect
+                    ? std::string_view(challengeObjective.actionLabel)
+                    : (scenarioChallenge
                           ? std::string_view("Return to Hangar")
-                          : std::string_view("Select to continue")));
-            if (saturnSlingshot) {
-                out << saturnSlingshotFailureModal(state);
+                          : std::string_view("Select to continue")),
+                scenarioChallenge && grade == FlybyGrade::Perfect ? &challengeObjective : nullptr);
+            if (scenarioChallenge) {
+                out << scenarioObjectiveModal(challengeObjective);
             }
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             out << inventoryTemplate(state, catalog);
@@ -2314,18 +2820,15 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<div data-flyby-run=\"1\" data-flyby-completed=\"0\" data-flyby-purpose=\""
-            << (saturnSlingshot ? "saturn-slingshot" : "recon") << "\" hidden></div>";
+            << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
         out << "<section class=\"live-hud-header\"><div><h2>"
-            << htmlEscape(saturnSlingshot ? "Saturn Slingshot" : "Manual Flyby") << "</h2>"
-            << "<p class=\"phase-copy\">" << htmlEscape(saturnSlingshot
-                ? "PERFECT REQUIRED — Gold corridor opens Saturn."
+            << htmlEscape(scenarioChallenge ? challengeObjective.title : "Manual Flyby") << "</h2>"
+            << "<p class=\"phase-copy\">" << htmlEscape(scenarioChallenge
+                ? "PERFECT REQUIRED — " + challengeObjective.detail
                 : "Hold the approach corridor until the timer closes.")
             << "</p></div>" << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
-        if (saturnSlingshot) {
-            out << campaignObjectiveMarkup(
-                campaignObjectivePresentation(state, CampaignObjectiveId::SaturnSlingshot),
-                false,
-                false);
+        if (scenarioChallenge) {
+            out << scenarioObjectiveMarkup(challengeObjective, false, false);
         }
         const std::string zoneValue = flyby.collidedWithBody
             ? "Impact"
@@ -2341,12 +2844,12 @@ std::string buildGamePanelMarkup(
             << panelButton(panelActionButton("ABORT FLYBY", ui::actions::flybyAbort, "danger")) << "</div>";
 
         const std::vector<DetailPresentationRow> flybyDetails {
-            detailPresentationRow("Destination", saturnSlingshot ? std::string("Saturn transfer corridor") : destinationName),
+            detailPresentationRow("Destination", scenarioChallenge ? challengeObjective.location : destinationName),
             detailPresentationRow("Reward multiplier", "x" + display::fixed(flyby.rewardBonusScale, 1)),
             detailPresentationRow(
                 "Perfect window",
-                saturnSlingshot
-                    ? std::string_view("Permanently opens the Saturn route")
+                scenarioChallenge
+                    ? std::string_view(challengeObjective.rewardPreview)
                     : std::string_view("Creates next-launch fuel and speed margin")),
             detailPresentationRow("Controls", std::string_view("Turn and adjust speed; Abort records a Miss"))
         };
@@ -2577,25 +3080,22 @@ std::string buildGamePanelMarkup(
             ? std::string_view {}
             : ui::modals::landingIntroduction;
         const bool showApproachIntroduction = arrivalDestination != nullptr
-            && arrivalDestination->id == content::destination::moon
+            && arrivalDestination->requiresArrivalSurveySequence
             && context.firstTimeIntroductionsEnabled
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
+        const ScenarioObjectivePresentation arrivalScenario = arrivalDestination == nullptr
+            ? ScenarioObjectivePresentation {}
+            : scenarioObjectiveForDestination(state, catalog, arrivalDestination->id);
+        const std::string landingLabel = arrivalScenario.available && !arrivalScenario.location.empty()
+            ? "Land at " + arrivalScenario.location
+            : std::string(text::panel::details::landing);
 
         out << phaseBoardOpen("phase-board-arrival", "");
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
             << "</h2><p>" << htmlEscape("Optional operations are available before refit.") << "</p></div></div>";
-        if (arrivalDestination != nullptr
-            && (arrivalDestination->id == content::destination::moon
-                || arrivalDestination->id == content::destination::mars
-                || arrivalDestination->id == content::destination::jupiter)) {
-            out << campaignObjectiveMarkup(
-                campaignObjectivePresentation(
-                    state,
-                    arrivalDestination->id == content::destination::moon
-                        ? CampaignObjectiveId::LunarProspector
-                        : (arrivalDestination->id == content::destination::mars
-                              ? CampaignObjectiveId::MarsBayExpansion
-                              : CampaignObjectiveId::IoVolcanicDescent)),
+        if (arrivalDestination != nullptr) {
+            out << scenarioObjectiveMarkup(
+                scenarioObjectiveForDestination(state, catalog, arrivalDestination->id),
                 false);
         }
         out << "<h2>" << htmlEscape("Choose approach") << "</h2>";
@@ -2619,9 +3119,7 @@ std::string buildGamePanelMarkup(
                 : disabledPanelButton(text::buttons::unavailable),
             orbitIntroduction);
         out << arrivalOperationCard(
-            arrivalDestination != nullptr && arrivalDestination->id == content::destination::jupiter
-                ? std::string_view("Land on Io")
-                : text::panel::details::landing,
+            landingLabel,
             landingDetail,
             "High risk",
             "Materials + artifacts",
@@ -2632,10 +3130,13 @@ std::string buildGamePanelMarkup(
         out << "</div>";
         out << phaseBoardClose();
         if (showApproachIntroduction) {
+            const std::string approachLocation = arrivalScenario.available && !arrivalScenario.location.empty()
+                ? arrivalScenario.location
+                : arrivalDestination->name;
             out << activityIntroductionModal(
                 ui::modals::approachIntroduction,
-                "LUNAR APPROACH",
-                "You made it to the Moon. The Mars route will remain locked until the Lunar Prospector contract is claimed.",
+                approachLocation + " APPROACH",
+                "You made it to " + arrivalDestination->name + ". Complete this site's active objective before the next route can open.",
                 "Begin with a flyby. Successful operations unlock Orbit, then Landing and the first explicit mining objective.",
                 "Review approach options",
                 ui::actions::acknowledgeApproachIntroduction,
@@ -2716,10 +3217,9 @@ std::string buildGamePanelMarkup(
         const MiningRunState& mining = state.run.mining;
         const MiningLoadStats miningLoad = miningLoadStats(state, catalog);
         const bool evaActive = miningOperatorIsEva(mining);
-        const bool campaignMining = mining.destinationId == content::destination::moon
-            || mining.destinationId == content::destination::mars
-            || mining.destinationId == content::destination::jupiter;
-        const bool ioMining = mining.destinationId == content::destination::jupiter;
+        const ScenarioObjectivePresentation miningScenario = scenarioObjectiveForMining(state, catalog);
+        const bool scenarioMining = miningScenario.available;
+        const bool cocoonMining = !mining.gate.cocoonLayers.empty();
 
         out << "<section class=\"mining-fullscreen\" data-panel-mode=\"mining-fullscreen\" data-mining-drones=\""
             << (!mining.miniDrones.empty() ? 1 : 0) << "\" data-mining-operator-mode=\""
@@ -2743,7 +3243,7 @@ std::string buildGamePanelMarkup(
             : 1.0;
         out << "<header class=\"mining-top-rail ui-screen-header rr-screen-header\"><div class=\"mining-run-title\"><strong id=\"rr-hud-mining-title\">"
             << htmlEscape(miningHud.runLabel) << "</strong><span class=\"mining-run-objective\" id=\"rr-hud-mining-objective-title\">"
-            << htmlEscape(campaignMining ? compactMiningCampaignObjective(state) : miningHud.objective)
+            << htmlEscape(scenarioMining ? compactMiningScenarioObjective(state, catalog) : miningHud.objective)
             << "</span></div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
         for (std::size_t index = 0; index < miningHud.vitals.size(); ++index) {
             const MiningHudTilePresentation& tile = miningHud.vitals[index];
@@ -2784,28 +3284,29 @@ std::string buildGamePanelMarkup(
             << modalButton("DETAILS", ui::modals::surface, "ghost")
             << modalButton("INV", ui::modals::inventory, "ghost")
             << modalButton("MENU", ui::modals::settings, "ghost") << "</nav></header>";
-        if (ioMining) {
-            const int outerCleared = std::max(0, mining.gate.outerShellTilesTotal - mining.gate.outerShellTilesRemaining);
-            const int innerCleared = std::max(0, mining.gate.innerShellTilesTotal - mining.gate.innerShellTilesRemaining);
-            out << "<section class=\"io-seal-progress\" aria-label=\"Io lava seal progress\">"
-                << "<div><span>OUTER SEAL</span><section>";
-            for (int index = 0; index < 4; ++index) {
-                out << "<i id=\"rr-hud-io-outer-" << index << "\" class=\""
-                    << (index < outerCleared ? "is-cleared" : "") << "\"></i>";
+        const MiningCocoonHudLayout cocoonHudLayout = miningCocoonHudLayout(mining.gate);
+        if (cocoonMining) {
+            out << "<section class=\"mining-cocoon-progress\" aria-label=\"Protected objective layer progress\""
+                << " data-cocoon-layer-count=\"" << mining.gate.cocoonLayers.size() << "\""
+                << " data-protected-objective-state=\""
+                << htmlEscape(miningCocoonObjectiveState(mining)) << "\">";
+            for (std::size_t layerIndex = 0; layerIndex < mining.gate.cocoonLayers.size(); ++layerIndex) {
+                const MiningCocoonLayerProgress& layer = mining.gate.cocoonLayers[layerIndex];
+                const int cleared = std::clamp(layer.total - layer.remaining, 0, std::max(0, layer.total));
+                out << "<div id=\"rr-hud-cocoon-layer-" << layerIndex << "\" class=\""
+                    << (!layer.revealed ? "is-locked" : (layer.completed ? "is-complete" : "")) << "\">"
+                    << "<span id=\"rr-hud-cocoon-label-" << layerIndex << "\">"
+                    << htmlEscape(layer.revealed ? layer.label : "NEXT LAYER LOCKED") << "</span><section>";
+                for (int cellIndex = 0; cellIndex < std::max(0, layer.total); ++cellIndex) {
+                    out << "<i id=\"rr-hud-cocoon-" << layerIndex << "-" << cellIndex << "\" class=\""
+                        << (layer.revealed && cellIndex < cleared ? "is-cleared" : "") << "\"></i>";
+                }
+                out << "</section><b id=\"rr-hud-cocoon-value-" << layerIndex << "\">"
+                    << (layer.revealed ? std::to_string(cleared) + "/" + std::to_string(std::max(0, layer.total)) : "LOCKED")
+                    << "</b></div>";
             }
-            out << "</section><b id=\"rr-hud-io-outer-value\">" << std::min(4, outerCleared)
-                << "/4</b></div><div class=\"" << (mining.gate.outerShellTilesRemaining > 0 ? "is-locked" : "")
-                << "\"><span>INNER SEAL</span><section>";
-            for (int index = 0; index < 4; ++index) {
-                out << "<i id=\"rr-hud-io-inner-" << index << "\" class=\""
-                    << (index < innerCleared ? "is-cleared" : "") << "\"></i>";
-            }
-            out << "</section><b id=\"rr-hud-io-inner-value\">" << std::min(4, innerCleared)
-                << "/4</b></div><strong id=\"rr-hud-io-artifact-state\">"
-                << htmlEscape(mining.gate.state == MiningGateState::Open
-                        ? "ARTIFACT EXPOSED"
-                        : "COOL LAVA -> DRILL GRAY ORE")
-                << "</strong></section>";
+            out << "<strong id=\"rr-hud-cocoon-objective-state\">"
+                << htmlEscape(miningCocoonObjectiveState(mining)) << "</strong></section>";
         }
         out << "<div class=\"mining-playfield-space\"><aside class=\"mining-eva-readout "
             << (evaActive ? "is-eva" : "is-rig") << "\" aria-label=\"Active mining actor status\">"
@@ -2822,18 +3323,25 @@ std::string buildGamePanelMarkup(
             << htmlEscape(miningTetherBurdenLabel(mining, miningLoad)) << "</b></span>"
             << "<span><i>LOOSE CHUNKS</i><b id=\"rr-hud-mining-loose-chunks\">"
             << activeMiningLooseChunkCount(mining) << "</b></span>"
-            << "<span><i>SUPPORT ANCHOR</i><b id=\"rr-hud-mining-drone-parent\">"
-            << htmlEscape(miningDroneParentLabel(mining)) << "</b></span>"
+            << "<span><i id=\"rr-hud-mining-support-label\">"
+            << htmlEscape(miningSupportTileLabel(mining))
+            << "</i><b id=\"rr-hud-mining-drone-parent\">"
+            << htmlEscape(miningSupportTileValue(mining)) << "</b></span>"
             << "</div><footer><span id=\"rr-hud-mining-suit-carry\">Suit carry: 0</span></footer>"
             << "</aside></div>";
-        const int levelsFromShip = std::max(0, mining.depthZone - mining.entryDepthZone);
-        out << "<div class=\"mining-depth-route-overlay\">"
+        const int currentDepth = std::max(0, mining.depthZone);
+        out << "<div class=\"mining-depth-route-overlay" << (cocoonMining ? " is-cocoon" : "")
+            << "\"";
+        if (cocoonMining) {
+            out << " style=\"--rr-cocoon-route-top: " << cocoonHudLayout.routeTop << "px\"";
+        }
+        out << ">"
             << "<span id=\"rr-hud-mining-route-up\" class=\"mining-route-up\">"
-            << htmlEscape(levelsFromShip == 0
-                    ? std::string("SHUTTLE \xE2\x80\xA2 ENTRY DEPTH")
-                    : std::string("ASCEND \xE2\x80\xA2 SHIP \xE2\x86\x91 ") + std::to_string(levelsFromShip))
+            << htmlEscape(currentDepth == 0
+                    ? std::string("SURFACE \xE2\x80\xA2 SHIP HERE")
+                    : std::string("ASCEND \xE2\x80\xA2 SHIP \xE2\x86\x91 ") + std::to_string(currentDepth))
             << "</span><span id=\"rr-hud-mining-route-down\" class=\"mining-route-down\">"
-            << htmlEscape(std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(levelsFromShip + 1))
+            << htmlEscape(std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1))
             << "</span></div>";
         const std::array<std::string_view, 2> miningPayloadIds {
             "rr-hud-mining-payload-banked",
@@ -2907,12 +3415,35 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::DroneOps) {
         const DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
-        const bool ioHazardSwapRequired = currentDestination(state, catalog).id == content::destination::jupiter
-            && state.meta.ioHazardDroneCommissioned
-            && std::find(
-                   state.meta.equippedDroneIds.begin(),
-                   state.meta.equippedDroneIds.end(),
-                   content::drone::hazardDrone) == state.meta.equippedDroneIds.end();
+        const ScenarioObjectivePresentation droneScenario = scenarioObjectiveForDestination(
+            state,
+            catalog,
+            currentDestination(state, catalog).id);
+        const ScenarioDefinition* droneScenarioDefinition = droneScenario.available
+            ? findScenarioDefinition(catalog, droneScenario.scenarioId)
+            : nullptr;
+        const ScenarioStepDefinition* droneScenarioStep = droneScenarioDefinition == nullptr
+            ? nullptr
+            : findScenarioStepDefinition(*droneScenarioDefinition, droneScenario.stepId);
+        const MiningSiteDefinition* requiredSite = droneScenarioStep == nullptr ||
+                droneScenarioStep->miningSiteDefinitionId.empty()
+            ? nullptr
+            : findMiningSiteDefinition(catalog, droneScenarioStep->miningSiteDefinitionId);
+        const bool recoveryNeedsHazard = requiredSite != nullptr && std::any_of(
+            requiredSite->cocoon.layers.begin(),
+            requiredSite->cocoon.layers.end(),
+            [](const MiningCocoonLayerDefinition& layer) { return layer.requiredHazardMark > 0; });
+        const bool hazardEquipped = std::any_of(
+            state.meta.equippedDroneIds.begin(),
+            state.meta.equippedDroneIds.end(),
+            [&](const std::string& equippedId) {
+                const auto found = std::find_if(
+                    catalog.miniDrones.begin(),
+                    catalog.miniDrones.end(),
+                    [&](const MiniDrone& drone) { return drone.id == equippedId; });
+                return found != catalog.miniDrones.end() && found->role == MiniDroneRole::Hazard;
+            });
+        const bool hazardSwapRequired = recoveryNeedsHazard && !hazardEquipped;
         out << "<section class=\"phase-board phase-board-drone-ops drone-workspace\" data-panel-mode=\"drone-workspace\">";
         out << "<div class=\"drone-workspace-toolbar\"><div class=\"drone-workspace-heading\">"
             << "<span class=\"ui-kicker\">" << htmlEscape("MINING SUPPORT WORKSPACE") << "</span>"
@@ -2921,45 +3452,38 @@ std::string buildGamePanelMarkup(
             << "<div class=\"utility-row utility-actions drone-workspace-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << modalButton("Synergies", ui::modals::droneSynergies, "ghost")
             << panelButton(dronePanel.backAction) << "</div></div>";
-        const std::string& droneOpsDestinationId = currentDestination(state, catalog).id;
-        if (droneOpsDestinationId == content::destination::moon
-            || droneOpsDestinationId == content::destination::mars
-            || droneOpsDestinationId == content::destination::jupiter) {
-            out << campaignObjectiveMarkup(
-                campaignObjectivePresentation(state, objectiveForFrontier(state, catalog)),
-                false);
+        if (droneScenario.available) {
+            out << scenarioObjectiveMarkup(droneScenario, false);
         }
-        if (droneOpsDestinationId == content::destination::mars) {
-            const CampaignObjectiveStatus marsObjective =
-                campaignObjectiveStatus(state, CampaignObjectiveId::MarsBayExpansion);
-            const int commonAboard = marsCampaignCommonAboard(state);
+        if (droneScenarioStep != nullptr &&
+            droneScenarioStep->completionEvent == ScenarioEventKind::SafeMaterialDelivered) {
+            const int commonAboard = scenarioCommonAboard(state, currentDestination(state, catalog).id);
             out << "<section class=\"phase-advisory "
-                << (marsObjective.state == CampaignObjectiveState::Complete ? "ok" : "caution")
-                << " mars-extraction-objective\"><strong>"
+                << (droneScenario.state == ScenarioStepState::Complete ? "ok" : "caution")
+                << " scenario-extraction-objective\"><strong>"
                 << htmlEscape(
-                       marsObjective.state == CampaignObjectiveState::Complete
-                           ? "MARS COMPLETE // NO SECOND SUPPORT DRONE REQUIRED"
-                           : "NO SECOND SUPPORT DRONE REQUIRED")
+                       droneScenario.state == ScenarioStepState::Complete
+                           ? "OBJECTIVE COMPLETE"
+                           : "SAFE DELIVERY REQUIRED")
                 << "</strong><span>";
             if (commonAboard > 0) {
                 out << htmlEscape(
                     std::to_string(commonAboard)
                     + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY.");
-            } else if (marsObjective.state == CampaignObjectiveState::Complete) {
+            } else if (droneScenario.state == ScenarioStepState::Complete) {
                 out << htmlEscape(
-                    "Slot 2 may remain empty. The Jupiter route is open; Hazard Drone arrives on Io.");
+                    "The configured reward is claimed. Open slots remain your choice.");
             } else {
                 out << htmlEscape(
-                    "Slot 2 is the reward, not the task. Mine "
-                    + std::to_string(marsObjective.required)
-                    + " Mars Common, then extract it safely.");
+                    "Mine " + std::to_string(droneScenario.required) +
+                    " Common Ore, then extract it safely.");
             }
             out << "</span></section>";
         }
-        if (ioHazardSwapRequired) {
-            out << "<section class=\"phase-advisory warn io-hazard-swap-objective\">"
-                << "<strong>IO DESCENT BLOCKED // EQUIP HAZARD DRONE</strong>"
-                << "<span>All slots are occupied. Remove one Support Drone, then assign Hazard Drone Mk I before returning.</span>"
+        if (hazardSwapRequired) {
+            out << "<section class=\"phase-advisory warn scenario-hazard-swap-objective\">"
+                << "<strong>RECOVERY LOADOUT // EQUIP HAZARD SUPPORT</strong>"
+                << "<span>The active site needs a Hazard Drone. Free a slot, then assign a qualified frame before returning.</span>"
                 << "</section>";
         }
         const std::vector<PanelMetricPresentation> droneBayChips {
@@ -3064,8 +3588,12 @@ std::string buildGamePanelMarkup(
             });
         const std::vector<PanelMetricPresentation> pushMetrics {
             panelMetric("Steps", std::to_string(push.steps) + "/" + std::to_string(std::max(1, push.maxSteps))),
-            panelMetric("Depth gain", "+" + std::to_string(push.depthGain)),
-            panelMetric("Collapse risk", display::percent(push.collapseRisk) + (nextLayerScanned ? " / mapped" : " / unknown"))
+            panelMetric("Start depth", "+" + std::to_string(state.run.surfaceExpedition.depth + push.depthGain)),
+            panelMetric(
+                "Next push risk",
+                push.steps == 0
+                    ? "SAFE FIRST LAYER"
+                    : display::percent(push.collapseRisk) + (nextLayerScanned ? " / mapped" : " / blind"))
         };
         std::vector<PanelButtonPresentation> actions;
         if (push.busted) {
@@ -3080,11 +3608,11 @@ std::string buildGamePanelMarkup(
         out << surfaceMiniGamePanel(
             "push-minigame",
             text::buttons::pushDeeper,
-            "Push Deeper turns layer forecasts into marked finds for mining.",
+            "Layer +1 is guaranteed. Bank it, or risk the route by pushing farther.",
             pushMetrics,
             materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
             push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
-            push.message.empty() ? "Push Deeper for the next layer, then bank before the terrain turns." : push.message,
+            push.message.empty() ? "Push the safe first layer, then choose whether to bank or gamble deeper." : push.message,
             actions);
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
@@ -3096,29 +3624,42 @@ std::string buildGamePanelMarkup(
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-        const bool lunarSurface = expedition.destinationId == content::destination::moon;
-        const bool marsSurface = expedition.destinationId == content::destination::mars;
-        const bool ioSurface = expedition.destinationId == content::destination::jupiter;
+        const ScenarioObjectivePresentation surfaceScenario = scenarioObjectiveForSurface(state, catalog);
+        const ScenarioDeliveryPresentation surfaceDelivery =
+            scenarioSafeDeliveryPresentation(state, catalog, expedition);
+        const bool scenarioSurface = surfaceScenario.available;
+        // A fixed scenario mining site is the sole mining deployment for its
+        // Surface Ops loop. Showing the generic deposit action alongside it
+        // lets the player spend that deployment on the wrong activity.
+        const bool scenarioMiningSiteActive = scenarioSurface &&
+            surfaceScenario.state == ScenarioStepState::Active &&
+            !surfaceScenario.miningSiteDefinitionId.empty();
+        const bool scenarioMiningDeploymentSpent = scenarioMiningSiteActive &&
+            expedition.miningRunUsed;
+        ScenarioObjectivePresentation displayedSurfaceScenario = surfaceScenario;
+        if (scenarioMiningDeploymentSpent) {
+            displayedSurfaceScenario.detail =
+                "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
+            displayedSurfaceScenario.action = ScenarioActionKind::None;
+        }
         const double extractionRisk = surfaceExtractionRisk(state);
         const bool showMiniDroneIntroduction = context.firstTimeIntroductionsEnabled
             && surfacePanel.droneOpsAction.enabled
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
         const bool showMiningIntroduction = context.firstTimeIntroductionsEnabled
-            && !lunarSurface
-            && !marsSurface
-            && !ioSurface
+            && !scenarioSurface
             && expedition.active
             && !expedition.miningRunUsed
             && expedition.sharedFuel > 0
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
         out << phaseBoardOpen(
             std::string("phase-board-surface surface-ops-screen rr-fixed-action-stack") +
-                (lunarSurface || marsSurface || ioSurface ? " campaign-surface" : ""),
+                (scenarioSurface ? " scenario-surface" : ""),
             state.statusLine);
         out << "<div class=\"rr-fixed-action-context\">";
         out << "<div class=\"phase-titlebar phase-title-row\"><div><h2>" << htmlEscape(text::panel::sections::surfaceExpedition)
-            << "</h2><p>" << htmlEscape(ioSurface
-                ? std::string("IO — JUPITER SYSTEM / ") + surfacePanel.postureTitle
+            << "</h2><p>" << htmlEscape(scenarioSurface
+                ? surfaceScenario.location + " / " + surfacePanel.postureTitle
                 : (surfacePanel.metrics.empty() ? std::string("Active site") : surfacePanel.metrics.front().value)
                     + " / " + surfacePanel.postureTitle)
             << "</p></div>";
@@ -3128,14 +3669,24 @@ std::string buildGamePanelMarkup(
         }
         out << "</div></div>";
         out << surfaceQuickbar(expedition, extractionRisk);
-        if (lunarSurface || marsSurface || ioSurface) {
-            out << campaignObjectiveMarkup(campaignObjectivePresentation(
-                state,
-                lunarSurface
-                    ? CampaignObjectiveId::LunarProspector
-                    : (marsSurface
-                          ? CampaignObjectiveId::MarsBayExpansion
-                          : CampaignObjectiveId::IoVolcanicDescent)));
+        if (scenarioSurface) {
+            out << scenarioObjectiveMarkup(displayedSurfaceScenario);
+            if (surfaceDelivery.objective.available &&
+                surfaceDelivery.objective.state == ScenarioStepState::Active &&
+                surfaceDelivery.safelyAboard > 0) {
+                const std::string material =
+                    scenarioTargetMaterialLabel(surfaceDelivery.objective.eventTargetId);
+                const int remaining = std::max(
+                    0,
+                    surfaceDelivery.objective.required - surfaceDelivery.objective.current);
+                out << "<section class=\"phase-advisory caution scenario-extraction-objective\">"
+                    << "<strong>PAYLOAD ABOARD // EXTRACT SAFELY</strong><span>"
+                    << htmlEscape(
+                           std::to_string(surfaceDelivery.safelyAboard) + " " + material +
+                           " aboard. Safe extraction will deliver +" +
+                           std::to_string(std::min(remaining, surfaceDelivery.safelyAboard)) + ".")
+                    << "</span></section>";
+            }
         }
         if (surfacePanel.droneOpsAction.enabled) {
             out << "<section class=\"resource-bank drone-ops-callout surface-controller-callout phase-lane phase-row\"><div><h2>" << htmlEscape("Drone Ops")
@@ -3167,7 +3718,9 @@ std::string buildGamePanelMarkup(
             orderedActions.push_back(&*extractionAction);
         }
         if (mineAction != surfacePanel.actions.end()) {
-            orderedActions.push_back(&*mineAction);
+            if (!scenarioMiningSiteActive) {
+                orderedActions.push_back(&*mineAction);
+            }
         }
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             if (isSurfaceMiningAction(action)
@@ -3187,13 +3740,7 @@ std::string buildGamePanelMarkup(
         }
         out << "</div></section>";
         out << phaseBoardClose();
-        if (lunarSurface) {
-            out << lunarMiningBriefingModal(state);
-        } else if (marsSurface) {
-            out << marsMiningBriefingModal(state);
-        } else if (ioSurface) {
-            out << ioVolcanicBriefingModal(state);
-        }
+        out << scenarioObjectiveModal(surfaceScenario);
         if (showMiniDroneIntroduction) {
             out << activityIntroductionModal(
                 ui::modals::miniDroneIntroduction,
@@ -3277,8 +3824,7 @@ std::string buildGamePanelMarkup(
         }
         surfaceUpgradeComparison << "</div>";
         out << modalTemplate("surface_upgrade_compare", "Compare Field Upgrades", surfaceUpgradeComparison.str());
-        out << prospectorCompletionModal(state);
-        out << marsBayCompletionModal(state);
+        out << scenarioObjectiveModalForDestination(state, catalog, currentDestination(state, catalog).id);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -3334,8 +3880,7 @@ std::string buildGamePanelMarkup(
         }
         refitComparison << "</div>";
         out << modalTemplate("refit_compare", "Compare Permanent Refits", refitComparison.str());
-        out << prospectorCompletionModal(state);
-        out << marsBayCompletionModal(state);
+        out << scenarioObjectiveModalForDestination(state, catalog, currentDestination(state, catalog).id);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -3383,11 +3928,9 @@ std::string buildGamePanelMarkup(
                 ? "Prepare the transfer"
                 : "Flight Data " + std::to_string(state.run.frontierReadiness) + "/" + std::to_string(required))
             << "</p></section>";
-    } else if (currentFrontier.id == content::destination::moon
-        || currentFrontier.id == content::destination::mars
-        || currentFrontier.id == content::destination::jupiter) {
-        out << campaignObjectiveMarkup(
-            campaignObjectivePresentation(state, objectiveForFrontier(state, catalog)));
+    } else {
+        out << scenarioObjectiveMarkup(
+            scenarioObjectiveForDestination(state, catalog, currentFrontier.id));
     }
     out << "<div class=\"utility-row compact-tools utility-actions hangar-detail-actions\">"
         << modalButton("Ship details", ui::modals::ship, "ghost")
@@ -3424,11 +3967,11 @@ std::string buildGamePanelMarkup(
             : button(text::buttons::launchProvingFlight, ui::actions::prepareLaunch, "ok")));
     if (next != nullptr && !navigationAvailable(state)) {
         if (canCommitToNextFrontier(state, catalog)) {
-            const bool saturnCommit = next->id == content::destination::saturn;
+            const bool oneWayCommit = next->oneWayExpedition;
             out << (launchReadiness.blocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
-                : (saturnCommit
-                      ? modalButton("Commit to Saturn", "saturn_launch_confirm", "danger")
+                : (oneWayCommit
+                      ? modalButton("Commit to " + next->name, "one_way_launch_confirm", "danger")
                       : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
         } else {
             const FrontierGateStatus gate = frontierGateStatus(state, catalog);
@@ -3448,16 +3991,16 @@ std::string buildGamePanelMarkup(
     out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody);
     out << modalTemplate(ui::modals::launchBlocked, text::panel::modals::launchHold, launchBlockedBody.str());
     out << modalTemplate(ui::modals::pilotIntake, text::panel::modals::pilotIntake, pilotIntakeBody.str());
-    if (next != nullptr && next->id == content::destination::saturn && canCommitToNextFrontier(state, catalog)) {
-        const std::string saturnLaunchBody =
+    if (next != nullptr && next->oneWayExpedition && canCommitToNextFrontier(state, catalog)) {
+        const std::string oneWayLaunchBody =
             "<section class=\"activity-introduction modal-body campaign-briefing\">"
             "<span class=\"activity-introduction-kicker\">ONE-WAY OUTER EXPEDITION</span>"
-            "<p class=\"activity-introduction-setup\">The Perfect slingshot solved the Saturn transfer. Crossing this window commits the expedition outward.</p>"
+            "<p class=\"activity-introduction-setup\">The required transfer solution is complete. Crossing this window commits the expedition outward.</p>"
             "<div class=\"activity-introduction-payoff\"><span>Point of no return</span><strong>The inner planets will no longer be reachable after departure.</strong></div>"
             "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">" +
-            button("Lock course for Saturn", ui::actions::attemptFrontier, "danger", true) +
+            button("Lock course for " + next->name, ui::actions::attemptFrontier, "danger", true) +
             "</div></section>";
-        out << modalTemplate("saturn_launch_confirm", "CONFIRM SATURN COURSE", saturnLaunchBody);
+        out << modalTemplate("one_way_launch_confirm", "CONFIRM OUTER COURSE", oneWayLaunchBody);
     }
     if (showLaunchIntroduction && !launchReadiness.blocked) {
         out << activityIntroductionModal(
@@ -3469,13 +4012,7 @@ std::string buildGamePanelMarkup(
             ui::actions::prepareLaunch,
             "ok");
     }
-    out << prospectorCompletionModal(state);
-    out << marsBayCompletionModal(state);
-    if (currentFrontier.id == content::destination::jupiter) {
-        out << ioVolcanicBriefingModal(state);
-        out << saturnSlingshotBriefingModal(state);
-        out << saturnSlingshotFailureModal(state);
-    }
+    out << scenarioObjectiveModalForDestination(state, catalog, currentFrontier.id);
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
     out << inventoryTemplate(state, catalog);
@@ -3791,22 +4328,22 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     const MiningDrillStats miningStats = miningDrillStats(state, catalog);
     const MiningLoadStats miningLoad = miningLoadStats(state, catalog);
     const MiningHudPresentation miningHud = miningHudPresentation(state, catalog);
-    const int levelsFromShip = std::max(0, mining.depthZone - mining.entryDepthZone);
-    const std::string depthRoute = "DEPTH +" + std::to_string(levelsFromShip) + " \xE2\x80\xA2 SHIP " +
-        (levelsFromShip == 0 ? std::string("HERE") : std::string("\xE2\x86\x91 ") + std::to_string(levelsFromShip));
-    const bool campaignMining = mining.destinationId == content::destination::moon
-        || mining.destinationId == content::destination::mars
-        || mining.destinationId == content::destination::jupiter;
+    const int currentDepth = std::max(0, mining.depthZone);
+    const std::string depthRoute = currentDepth == 0
+        ? std::string("SURFACE \xE2\x80\xA2 SHIP HERE")
+        : "DEPTH +" + std::to_string(currentDepth) + " \xE2\x80\xA2 SHIP \xE2\x86\x91 " + std::to_string(currentDepth);
+    const ScenarioObjectivePresentation miningScenario = scenarioObjectiveForMining(state, catalog);
+    const bool scenarioMining = miningScenario.available;
     appendHudText(
         result,
         "rr-hud-mining-route-up",
-        levelsFromShip == 0
-            ? std::string("SHUTTLE \xE2\x80\xA2 ENTRY DEPTH")
-            : std::string("ASCEND \xE2\x80\xA2 SHIP \xE2\x86\x91 ") + std::to_string(levelsFromShip));
+        currentDepth == 0
+            ? std::string("SURFACE \xE2\x80\xA2 SHIP HERE")
+            : std::string("ASCEND \xE2\x80\xA2 SHIP \xE2\x86\x91 ") + std::to_string(currentDepth));
     appendHudText(
         result,
         "rr-hud-mining-route-down",
-        std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(levelsFromShip + 1));
+        std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1));
 
     const double oxygenPressure = miningStats.oxygenSeconds > 0.0
         ? std::clamp(1.0 - mining.oxygenSeconds / miningStats.oxygenSeconds, 0.0, 1.0)
@@ -3869,8 +4406,8 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     appendHudText(
         result,
         "rr-hud-mining-objective-title",
-        campaignMining
-            ? compactMiningCampaignObjective(state) + " \xE2\x80\xA2 " + depthRoute
+        scenarioMining
+            ? compactMiningScenarioObjective(state, catalog) + " \xE2\x80\xA2 " + depthRoute
             : miningHud.objective);
     const std::array<std::string_view, 4> vitalValueIds {
         "rr-hud-mining-oxygen-value",
@@ -3894,37 +4431,36 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     appendHudText(result, "rr-hud-mining-drill-heat", display::percent(mining.drillHeat));
     appendHudText(result, "rr-hud-mining-tether-burden", miningTetherBurdenLabel(mining, miningLoad));
     appendHudText(result, "rr-hud-mining-loose-chunks", std::to_string(activeMiningLooseChunkCount(mining)));
-    appendHudText(result, "rr-hud-mining-drone-parent", miningDroneParentLabel(mining));
+    appendHudText(result, "rr-hud-mining-support-label", miningSupportTileLabel(mining));
+    appendHudText(result, "rr-hud-mining-drone-parent", miningSupportTileValue(mining));
     appendHudText(result, "rr-hud-mining-suit-carry", "Suit carry: 0");
-    if (mining.destinationId == content::destination::jupiter) {
-        const int outerCleared = std::clamp(
-            mining.gate.outerShellTilesTotal - mining.gate.outerShellTilesRemaining,
-            0,
-            4);
-        const int innerCleared = std::clamp(
-            mining.gate.innerShellTilesTotal - mining.gate.innerShellTilesRemaining,
-            0,
-            4);
-        appendHudText(result, "rr-hud-io-outer-value", std::to_string(outerCleared) + "/4");
-        appendHudText(result, "rr-hud-io-inner-value", std::to_string(innerCleared) + "/4");
-        for (int index = 0; index < 4; ++index) {
+    if (!mining.gate.cocoonLayers.empty()) {
+        for (std::size_t layerIndex = 0; layerIndex < mining.gate.cocoonLayers.size(); ++layerIndex) {
+            const MiningCocoonLayerProgress& layer = mining.gate.cocoonLayers[layerIndex];
+            const int cleared = std::clamp(layer.total - layer.remaining, 0, std::max(0, layer.total));
+            const std::string prefix = "rr-hud-cocoon-" + std::to_string(layerIndex);
             appendHudClass(
                 result,
-                "rr-hud-io-outer-" + std::to_string(index),
-                index < outerCleared ? "is-cleared" : "");
-            appendHudClass(
+                "rr-hud-cocoon-layer-" + std::to_string(layerIndex),
+                !layer.revealed ? "is-locked" : (layer.completed ? "is-complete" : ""));
+            appendHudText(
                 result,
-                "rr-hud-io-inner-" + std::to_string(index),
-                index < innerCleared ? "is-cleared" : "");
+                prefix + "-label",
+                layer.revealed ? layer.label : "NEXT LAYER LOCKED");
+            appendHudText(
+                result,
+                prefix + "-value",
+                layer.revealed
+                    ? std::to_string(cleared) + "/" + std::to_string(std::max(0, layer.total))
+                    : "LOCKED");
+            for (int cellIndex = 0; cellIndex < std::max(0, layer.total); ++cellIndex) {
+                appendHudClass(
+                    result,
+                    prefix + "-" + std::to_string(cellIndex),
+                    layer.revealed && cellIndex < cleared ? "is-cleared" : "");
+            }
         }
-        const std::string artifactState = mining.artifact.state == MiningArtifactState::Delivered
-            ? "EXTRACT SAFELY"
-            : (mining.artifact.tethered
-                  ? "TOW TO SHUTTLE"
-                  : (mining.gate.state == MiningGateState::Open || mining.gate.state == MiningGateState::Completed
-                        ? "ARTIFACT EXPOSED"
-                        : "COOL LAVA -> DRILL GRAY ORE"));
-        appendHudText(result, "rr-hud-io-artifact-state", artifactState);
+        appendHudText(result, "rr-hud-cocoon-objective-state", miningCocoonObjectiveState(mining));
     }
 }
 
@@ -3971,6 +4507,9 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         }
         for (const PanelButtonPresentation& action : panel.actions) {
             key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';
+        }
+        for (const MiningCocoonLayerProgress& layer : state.run.mining.gate.cocoonLayers) {
+            key << layer.id << ':' << layer.total << ':' << layer.revealed << ':' << layer.completed << ';';
         }
     }
     return static_cast<std::uint64_t>(std::hash<std::string>{}(key.str()));

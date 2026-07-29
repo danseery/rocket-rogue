@@ -1,6 +1,6 @@
 # Mining Mini-Game
 
-Deterministic story and optional artifact gates are specified in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). They reuse the physical artifact, scanner, hazard, towing, terrain, EVA, and autonomous-combat systems described here.
+Deterministic scenario-authored and optional protected-objective gates are specified in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). Their reusable authoring contract is [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md). They reuse the physical artifact, scanner, hazard, towing, terrain, EVA, and autonomous-combat systems described here.
 
 See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current mining direction should follow `docs/reference/USG_NOTES.md` first: chunky/mobile, Straylight-inspired, fog-of-war, destructible terrain, excavation/logistics/endurance roles, and enemy combat only after Arkfall near Khepri Prime.
 
@@ -33,7 +33,8 @@ Current flow:
 2. Choose Flyby, Orbit, or Landing.
 3. Landing opens Research, then Surface Ops.
 4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked. Mine deposit remains unavailable until Survey Site or Push Deeper prepares the site.
-5. Pressing the prepared `Mine deposit` action spends 1 shared fuel and opens the direct-control Mining Rig screen.
+5. Push Deeper guarantees a bankable layer +1. Collapse risk begins on the attempt for layer +2; a scanned artifact becomes guaranteed when its mapped layer succeeds.
+6. Pressing the prepared `Mine deposit` action spends 1 shared fuel and opens the direct-control Mining Rig screen at the selected start depth. The ship remains fixed at surface depth `0`.
 
 Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining Rig offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push Deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
 
@@ -60,6 +61,8 @@ Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, th
 3. Allow autonomous Support Drones to follow, orbit, defend, mine, survey, treat hazards, and collect loose chunks around whichever actor is controlled.
 4. Manage oxygen, shared fuel, gravity, inertia, drill heat, integrity, cargo, loose chunks, tether burden, and extraction risk.
 5. Re-enter the rig within `1.25` cells on the same layer, or return to the shuttle under the failure rules below.
+
+The HUD distinguishes `SURFACE`, `START DEPTH +N`, and `SHIP ↑ N`. A single unlabeled arrow asset accepts a runtime POI kind, label, target depth, coordinate, and direction. Revealed recoverable artifacts use `ARTIFACT`; safety pressure at the existing caution threshold overrides them with `SHIP`. Below the surface it points to ascent, while on the surface it points directly to the ship and disappears inside the service zone. The arrow uses a one-second sine bounce and keeps its runtime label upright.
 
 ### Mobility and destination gravity
 
@@ -147,13 +150,14 @@ Normal extraction requires a functioning rig and operator in the return zone. Af
 
 Mining terrain is generated from the destination, surface site profile, and depth:
 
+- A fresh deployment depth is normal mining terrain. Once the player descends, the layer left behind receives a permanent two-cell-wide central return shaft from its ascent seam to its descent seam. Intermediate layers generated while climbing receive the same shaft, so every previously traversed route back to the surface stays open across cached layers and reloads without changing normal rig movement.
 - Regolith and hard rock define tunneling speed and bounce.
 - Baseline hard-rock contact produces a broad, floaty rebound. Shock Mounts and Recoil Braces reduce that impulse so upgraded rigs can hold the drill on target.
 - After a hard contact, thrust eases back to full speed instead of snapping forward immediately; bounce relief starts the recovery closer to full control.
 - Common ore, rare ore, exotic veins, and artifact caches produce payload.
 - Exposed artifacts can be tethered across a 6.8-cell recovery envelope, and the towline keeps a visible trailing length instead of collapsing the relic into an actor. Artifact tether ownership is independent of the Support Drone anchor.
 - Hazard pockets use the same Thermal, Cryo, Toxic, and Radiation language as elemental threats. Their effects apply while an actor is drilling or within the pocket's visible contact envelope: Thermal adds heat and actor damage, Cryo slows movement, Toxic damages drill/suit integrity, and Radiation raises extraction hazard.
-- Hazard Support Drones convert revealed pockets into safe regolith, with Mk II and Mk III treating larger adjacent clusters and unlocking Toxic and Radiation remediation. Treatment is active remediation, not immunity: route away from a pocket until the unit finishes.
+- Hazard Support Drones fly directly through terrain to convert revealed pockets into safe regolith, with Mk II and Mk III treating larger adjacent clusters and unlocking Toxic and Radiation remediation. They never reveal or target hidden cells. Treatment is active remediation, not immunity: route away from a pocket until the unit finishes.
 - Bedrock blocks excavation.
 - Deeper or post-solar terrain can add rooms, vaults, hives, miniboss lairs, and boss chambers.
 
@@ -181,9 +185,9 @@ Research improves mining through specific tools:
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra blueprint progress from recovered field notes.
 - Moon mining contract: 30 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
-- Mars bay contract: 40 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Drone Bay Slot 2` consumes the reserve and opens an empty specialist slot.
+- Mars bay contract: 40 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Slot 2` consumes the reserve and opens an empty specialist slot.
 - Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.
-- Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second story arena stages outer `0/4` and inner `0/4` lava seals around the minor artifact.
+- Current Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second authored arena stages outer `0/4` and inner `0/4` lava layers around a protected Artifact. The same `MiningCocoonDefinition` can protect a different objective with any number of authored layers.
 - Arkfall emergency kit: Mk I Attack and Defense Support Drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
 - Perimeter Drone Network: Perimeter Coordination for Mk II/Mk III combat tuning and advanced combat synergies.
 
@@ -204,7 +208,7 @@ The solar system and Aaru Vale remain enemy-free. Enemies begin only after Arkfa
 - Hostile tunnel networks, encounter rooms, hives, miniboss lairs, and boss chambers.
 - Autonomous base defense plus independent Attack Support Drone targeting and Defense Support Drone interception around the active actor.
 
-The player's operator sidearm is a vulnerable recovery tool rather than the primary combat build. Sustained survival still comes from build planning, movement, return timing, and the Support Drone loadout. Support Drones execute their own role behavior automatically around the active actor: Mining units work revealed cells, Survey units add remote scan origins, Resource units collect loose chunks, Hazard units remediate dangerous terrain, Attack units hold targets, and Defense units intercept fire before it reaches rig health or suit integrity.
+The player's operator sidearm is a vulnerable recovery tool rather than the primary combat build. Sustained survival still comes from build planning, movement, return timing, and the Support Drone loadout. Support Drones execute their own role behavior automatically around the active actor: Mining units work revealed cells, Survey units add remote scan origins, Resource units collect loose chunks, Hazard units cross terrain to coordinate on player-revealed dangerous terrain, Attack units hold targets, and Defense units intercept fire before it reaches rig health or suit integrity. Multiple Hazard units split across available targets and assist at exact linear treatment speed when fewer targets are available.
 
 ## Implementation Boundaries
 
@@ -212,8 +216,9 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/MiniDroneCoordination.*` consumes `MiniDroneAnchorFrame` for all home, orbit, task, targeting, shield, scanner, and clearance decisions. These `MiniDrone*` names are legacy internal identifiers; `resolveMiniDroneAnchor` and `transferMiniDroneSwarmAnchor` are the only authoritative binding helpers.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, mode, gravity, suit integrity, drill heat, tether burden, loose-chunk count, Support Drone anchor status, `Suit carry: 0`, metrics, and detail rows.
 - `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
+- `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and bank/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 8 retains version 7's rig/operator state, loose chunks, disabled-rig state, Support Drone anchor/formation state, positions, velocities, haul, shields, and cooldowns while adding purchased duplicate Support Drone frames. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, and de-duplicate repeated legacy loadout IDs once.
+- Save version 9 retains version 8's rig/operator, loose-chunk, disabled-rig, purchased-frame, and Support Drone anchor/formation state while adding scenario instance/site context plus generic cocoon definition, protected-objective, layer, reveal, and cell-tag state. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize v9 scenario/cocoon state without replaying rewards.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

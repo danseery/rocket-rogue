@@ -38,10 +38,10 @@ struct SceneAtlasTexture {
 inline constexpr std::array<SceneAtlasPage, 3U> kSceneAtlasPages {{
     {"scene_atlas_0", "assets/scene-atlas/scene-atlas-0.png", 3774U, 3774U},
     {"scene_atlas_1", "assets/scene-atlas/scene-atlas-1.png", 3774U, 3678U},
-    {"scene_atlas_2", "assets/scene-atlas/scene-atlas-2.png", 3612U, 2064U},
+    {"scene_atlas_2", "assets/scene-atlas/scene-atlas-2.png", 3612U, 2580U},
 }};
 
-inline constexpr std::array<SceneAtlasFrame, 55U>
+inline constexpr std::array<SceneAtlasFrame, 56U>
     kSceneAtlasFrames {{
     {1U, 3086U, 1260U, 512U, 512U}, // TextureId::Earth frame 0
     {2U, 2582U, 2U, 512U, 512U}, // TextureId::Moon frame 0
@@ -73,10 +73,10 @@ inline constexpr std::array<SceneAtlasFrame, 55U>
     {1U, 1030U, 2288U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 2
     {1U, 1030U, 2868U, 1024U, 576U}, // TextureId::LocalSolarBackground frame 3
     {1U, 2058U, 2808U, 512U, 512U}, // TextureId::Mercury frame 0
-    {2U, 2U, 1550U, 512U, 512U}, // TextureId::Venus frame 0
+    {2U, 2U, 2066U, 512U, 512U}, // TextureId::Venus frame 0
     {1U, 3086U, 1776U, 512U, 512U}, // TextureId::Jupiter frame 0
-    {2U, 2U, 518U, 512U, 512U}, // TextureId::Saturn frame 0
-    {2U, 2U, 1034U, 512U, 512U}, // TextureId::Uranus frame 0
+    {2U, 2U, 1034U, 512U, 512U}, // TextureId::Saturn frame 0
+    {2U, 2U, 1550U, 512U, 512U}, // TextureId::Uranus frame 0
     {2U, 3098U, 2U, 512U, 512U}, // TextureId::Neptune frame 0
     {1U, 2518U, 2U, 1254U, 1254U}, // TextureId::ArkOperational frame 0
     {1U, 1260U, 2U, 1254U, 1254U}, // TextureId::ArkDamaged frame 0
@@ -98,9 +98,10 @@ inline constexpr std::array<SceneAtlasFrame, 55U>
     {1U, 3090U, 2808U, 512U, 512U}, // TextureId::MiniDroneDefense frame 0
     {1U, 2U, 1260U, 1024U, 1024U}, // TextureId::HeroicCapybara frame 0
     {0U, 2U, 2U, 1254U, 1254U}, // TextureId::JetpackCapybara frame 0
+    {2U, 2U, 518U, 512U, 512U}, // TextureId::PoiGuidanceArrow frame 0
 }};
 
-inline constexpr std::array<SceneAtlasTexture, 36U>
+inline constexpr std::array<SceneAtlasTexture, 37U>
     kSceneAtlasTextures {{
     {}, // TextureId::None
     {512U, 512U, 512U, 512U, 0U, 1U, 1U, 1U}, // TextureId::Earth
@@ -138,6 +139,7 @@ inline constexpr std::array<SceneAtlasTexture, 36U>
     {512U, 512U, 512U, 512U, 52U, 1U, 1U, 1U}, // TextureId::MiniDroneDefense
     {1024U, 1024U, 1024U, 1024U, 53U, 1U, 1U, 1U}, // TextureId::HeroicCapybara
     {1254U, 1254U, 1254U, 1254U, 54U, 1U, 1U, 1U}, // TextureId::JetpackCapybara
+    {512U, 512U, 512U, 512U, 55U, 1U, 1U, 1U}, // TextureId::PoiGuidanceArrow
 }};
 
 static_assert(kSceneAtlasTextures.size() == textureIndex(TextureId::Count));

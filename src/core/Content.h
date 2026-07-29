@@ -16,6 +16,9 @@ struct ContentCatalog {
     std::vector<ShipFrame> frames;
     std::vector<Astronaut> astronauts;
     std::vector<Destination> destinations;
+    std::vector<ScenarioDefinition> scenarios;
+    std::vector<ScenarioFactoryDefinition> scenarioFactories;
+    std::vector<MiningSiteDefinition> miningSites;
 
     const ShipModule* findModule(std::string_view id) const;
     const CrewUpgrade* findCrewUpgrade(std::string_view id) const;
@@ -25,6 +28,9 @@ struct ContentCatalog {
     const ShipFrame* findFrame(std::string_view id) const;
     const Astronaut* findAstronaut(std::string_view id) const;
     const Destination* findDestination(std::string_view id) const;
+    const ScenarioDefinition* findScenario(std::string_view id) const;
+    const ScenarioFactoryDefinition* findScenarioFactory(std::string_view id) const;
+    const MiningSiteDefinition* findMiningSite(std::string_view id) const;
 };
 
 ContentCatalog createDefaultContent();

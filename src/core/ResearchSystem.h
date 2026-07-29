@@ -135,20 +135,41 @@ struct SurfaceActionOutcome {
     double extractionRiskDelta = 0.0;
 };
 
+// Compatibility-only campaign façade. New gameplay, routing, and UI actions
+// must use ScenarioSystem IDs, ScenarioEvent, and performScenarioAction
+// directly. These declarations preserve old save/UI/test callers while the
+// non-authoritative legacy fields remain readable during migration.
 CampaignObjectiveStatus campaignObjectiveStatus(const GameState& state, CampaignObjectiveId objective);
 bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId objective);
 int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int safelyExtractedCommonOre);
+int creditCampaignCommonOre(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId,
+    int safelyExtractedCommonOre);
 bool canClaimLunarProspector(const GameState& state);
 bool claimLunarProspector(GameState& state, const ContentCatalog& catalog);
 bool canClaimMarsBayExpansion(const GameState& state);
 bool claimMarsBayExpansion(GameState& state, const ContentCatalog& catalog);
 bool canCommissionIoHazardDrone(const GameState& state, const ContentCatalog& catalog);
 bool commissionIoHazardDrone(GameState& state, const ContentCatalog& catalog);
+bool creditRecoveredProtectedObjective(
+    GameState& state,
+    const ContentCatalog& catalog,
+    ArtifactRecord& artifact,
+    std::string_view miningSiteDefinitionId = {});
 bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact);
+bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, ArtifactRecord& artifact);
 bool canRedeemDroneUpgradeCredit(const GameState& state, const ContentCatalog& catalog, int index);
 bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, int index);
 bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
 bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
+bool startScenarioFlybyRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId,
+    ScenarioActionKind action = ScenarioActionKind::BeginActivity);
 bool canClaimSaturnCourse(const GameState& state);
 bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog);
 bool acknowledgeSaturnSlingshotFailure(GameState& state);
@@ -174,6 +195,7 @@ FlybyGrade flybyGrade(const FlybyRunState& flyby);
 void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrade grade);
 void completeFlybyRun(GameState& state, const ContentCatalog& catalog);
 void abortFlybyRun(GameState& state);
+void abortFlybyRun(GameState& state, const ContentCatalog& catalog);
 void acknowledgeFlybyResult(GameState& state);
 void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog);
 void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog);
@@ -232,5 +254,6 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng);
 SurfaceActionOutcome bankSurfacePush(GameState& state);
 SurfaceActionOutcome abortSurfacePush(GameState& state);
 SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng);
+SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng);
 
 } // namespace rocket

@@ -70,36 +70,44 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
 {
     const LaunchOutcome& outcome = state.lastOutcome;
     const Destination* destination = catalog.findDestination(outcome.destinationId);
-    const bool earthFlight = destination != nullptr && destination->id == content::destination::earthOrbit;
-    const bool moonTransfer = destination != nullptr
-        && destination->id == content::destination::moon
-        && outcome.frontierTransfer;
+    const Destination* next = nextDestination(state, catalog);
+    // The starter proving loop and first-arrival presentation are authored
+    // destination capabilities. A catalog can move either teaching beat
+    // without this reusable presenter recognizing a destination ID.
+    const bool provingRoute = destination != nullptr && !outcome.frontierTransfer &&
+        next != nullptr && next->requiresArrivalSurveySequence;
+    const bool teachingArrival = destination != nullptr &&
+        destination->requiresArrivalSurveySequence && outcome.frontierTransfer;
     const std::string funding = launchFundingSummary(outcome);
 
-    if (moonTransfer && outcome.type == LaunchResultType::MissionComplete) {
+    if (teachingArrival && outcome.type == LaunchResultType::MissionComplete) {
         return {
-            "LUNAR ARRIVAL",
-            "The Moon is ours. Fresh telemetry and renewed backing open the road to Mars.",
-            "Mars route open  •  " + funding
+            destination->name + " ARRIVAL",
+            "The expedition reached the first landing site. Continue the active scenario objective before the next route opens.",
+            "Arrival operations ready  •  " + funding
         };
     }
-    if (moonTransfer) {
+    if (teachingArrival) {
+        const int required = std::max(1, frontierReadinessRequired(state, catalog));
+        const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
         const std::string consequence = outcome.type == LaunchResultType::Destroyed
             ? (outcome.crewKilled
-                ? "The vehicle and crew were lost. Their final telemetry completed the lunar route archive."
-                : "The vehicle is gone, but rescue teams recovered the crew and the lunar route archive.")
-            : "The Moon escaped this burn, but the crew brought home a sharper route.";
+                ? "The vehicle and crew were lost. Their final telemetry remains in the route archive."
+                : "The vehicle is gone, but rescue teams recovered the crew and the route archive.")
+            : "The landing site escaped this burn, but the crew brought home a sharper route.";
         return {
             "TRANSFER LOST",
             consequence,
-            "Flight Data 3/3  •  " + funding + "  •  Retry 100%"
+            "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required)
+                + "  •  " + funding + "  •  Retry 100%"
         };
     }
 
-    if (earthFlight) {
-        const int required = tuning::mission::readinessBaseRequired;
+    if (provingRoute) {
+        const int required = std::max(1, frontierReadinessRequired(state, catalog));
         const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
         const std::string flightData = "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required);
+        const std::string nextName = next == nullptr ? std::string("the next frontier") : next->name;
         if (outcome.type == LaunchResultType::Destroyed) {
             return outcome.crewKilled
                 ? LaunchOutcomeSummaryPresentation {
@@ -113,9 +121,15 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
         }
 
         if (readiness >= required) {
+            const std::string readyTitle = next != nullptr && !next->provingRouteReadyTitle.empty()
+                ? next->provingRouteReadyTitle
+                : "ROUTE CHARTED";
+            const std::string readyConsequence = next != nullptr && !next->provingRouteReadyConsequence.empty()
+                ? next->provingRouteReadyConsequence
+                : "The route is complete. Mission Control has cleared the next launch for " + nextName + ".";
             return {
-                "LUNAR ROUTE CHARTED",
-                "The route is complete. Mission Control has cleared the next launch for the Moon.",
+                readyTitle,
+                readyConsequence,
                 flightData + "  •  " + funding
             };
         }
@@ -157,7 +171,7 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
                 flightData + "  •  " + funding}
             : LaunchOutcomeSummaryPresentation {
                 "FLIGHT RECALLED",
-                "The crew is home. The brief fell short, so the lunar route drew no new backing.",
+                "The crew is home. The brief fell short, so the route drew no new backing.",
                 flightData + "  •  " + funding};
     }
 
@@ -321,10 +335,7 @@ inline std::string launchOutcomeRecoveryLabel(
     if (destination == nullptr) {
         destination = &currentDestination(state, catalog);
     }
-    const Destination* saturn = catalog.findDestination(content::destination::saturn);
-    const bool outerExpedition = destination != nullptr &&
-        saturn != nullptr &&
-        destination->tier >= saturn->tier;
+    const bool outerExpedition = destination != nullptr && destination->oneWayExpedition;
     return text::enums::recovery::returnLabel(
         arkDiscovered(state),
         outerExpedition);

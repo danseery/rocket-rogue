@@ -147,6 +147,8 @@ Typed `ModalPresentation` records define modal identity, title, body, auto-open 
 
 The browser receives only `UiHostContext`: screen, surface kind, title state, and whether the current interaction is actively realtime. It never receives panel or HUD markup. Keyboard and pointer shortcuts must require that authoritative activity flag, and transitions to results, modal ownership, shutdown, or failed initialization must release held realtime input. This keeps named RmlUi actions authoritative for every claim and continuation.
 
+Scenario UI is also presentation-driven. Objective strips, mandatory briefings, map gates, activity HUDs, and result claims consume `ScenarioObjectivePresentation`; actions carry its scenario-instance ID, step ID, and `ScenarioActionKind`. Templates may choose geometry for `LOCKED`, `ACTIVE`, `READY TO CLAIM`, and `COMPLETE`, but they must not infer progression from a location name, title, reward copy, or markup query. A mandatory briefing's saved acknowledgement and dismissibility remain scenario data even when the same `rr-modal-shell` renders it. See [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md) for the content/runtime ownership boundary.
+
 ## Adding a Screen
 
 Use this sequence for every new screen:

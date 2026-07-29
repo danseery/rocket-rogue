@@ -3,10 +3,13 @@
 #include "render/SceneClip.h"
 #include "render/SceneComposer.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <type_traits>
@@ -16,6 +19,17 @@
 #if defined(_MSC_VER) && defined(_DEBUG)
 #include <crtdbg.h>
 #endif
+
+// Keep native CTest runs non-interactive: the standard MSVC debug assertion
+// dialog blocks the entire suite and hides the failing source location.
+#undef assert
+#define assert(condition) \
+    do { \
+        if (!(condition)) { \
+            std::fprintf(stderr, "FAILED assertion at %s:%d: %s\\n", __FILE__, __LINE__, #condition); \
+            std::exit(3); \
+        } \
+    } while (false)
 
 namespace rocket {
 
@@ -36,6 +50,28 @@ struct SceneComposerTestAccess {
     static ScenePacket beginFramePacket(SceneComposer& composer, const RenderSnapshot& snapshot)
     {
         composer.beginFrame(snapshot);
+        composer.finalizePacket();
+        return composer.packet_;
+    }
+
+    static ScenePacket poiGuidancePacket(
+        SceneComposer& composer,
+        std::string_view label,
+        PoiGuidanceKind kind,
+        double animationTime,
+        float directionY)
+    {
+        RenderSnapshot snapshot;
+        composer.beginFrame(snapshot);
+        composer.drawPoiGuidance(
+            0.0F,
+            0.0F,
+            0.0F,
+            directionY,
+            0.20F,
+            label,
+            kind,
+            animationTime);
         composer.finalizePacket();
         return composer.packet_;
     }
@@ -61,6 +97,19 @@ struct SceneComposerTestAccess {
         const SceneVertex vertex =
             unpackSceneVertex(composer.packet_.vertices.front());
         return {vertex.r, vertex.g, vertex.b, vertex.a};
+    }
+
+    static ScenePacket miningPickupTextPacket(
+        SceneComposer& composer,
+        MiningPickupKind kind,
+        int amount,
+        float age)
+    {
+        RenderSnapshot snapshot;
+        composer.beginFrame(snapshot);
+        composer.drawMiningPickupText(0.0F, 0.0F, 0.10F, kind, amount, age);
+        composer.finalizePacket();
+        return composer.packet_;
     }
 };
 
@@ -964,6 +1013,16 @@ RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
     return snapshot;
 }
 
+std::size_t countInstanceShape(const ScenePacket& packet, SceneInstanceShape shape)
+{
+    return static_cast<std::size_t>(std::count_if(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [shape](const PackedSceneInstance& packed) {
+            return rocket::unpackSceneInstance(packed).shape == shape;
+        }));
+}
+
 std::vector<PackedSceneInstance> attackDroneInstances(const RenderSnapshot& snapshot)
 {
     SceneComposer composer;
@@ -1287,15 +1346,25 @@ void testMiningCellsAndScannerMarksUseMaterialSilhouettes()
         mining.terrain.cells[6].maxToughness = 1.0;
         mining.terrain.cells[6].remainingToughness = 1.0;
 
+        SceneComposer scannerComposer;
+        scannerComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+        RenderSnapshot hiddenScannerSnapshot = miningSnapshot(mining);
+        hiddenScannerSnapshot.miningShipPresent = false;
+        hiddenScannerSnapshot.miningScannerPulse = 0.9;
+        const ScenePacket& hiddenScannerPacket = scannerComposer.compose(hiddenScannerSnapshot);
+        assert(!containsMiningMaterialMarker(hiddenScannerPacket, material, color));
+
+        // The simulation is authoritative for discovery. Once it marks the
+        // material revealed, scanner and terrain presentation may use its
+        // resource silhouette; an unrevealed cell must never leak through
+        // renderer-side adjacency caching.
+        mining.terrain.cells[6].revealed = true;
         RenderSnapshot scannerSnapshot = miningSnapshot(mining);
         scannerSnapshot.miningShipPresent = false;
         scannerSnapshot.miningScannerPulse = 0.9;
-        SceneComposer scannerComposer;
-        scannerComposer.setViewport({1280, 800, 1280, 800, 1.0F});
         const ScenePacket& scannerPacket = scannerComposer.compose(scannerSnapshot);
         assert(containsMiningMaterialMarker(scannerPacket, material, color));
 
-        mining.terrain.cells[6].revealed = true;
         RenderSnapshot cellSnapshot = miningSnapshot(mining);
         cellSnapshot.miningShipPresent = false;
         SceneComposer cellComposer;
@@ -1390,6 +1459,47 @@ void testMiningOrePaletteMakesCommonSilverAndRareGold()
     assert(rareShimmer.r > rareShimmer.g
         && rareShimmer.g > rareShimmer.b
         && rareShimmer.r - rareShimmer.b > 0.50F);
+}
+
+void testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime()
+{
+    const auto hasColor = [](const ScenePacket& packet, Color expected) {
+        for (const PackedSceneInstance& packed : packet.instances) {
+            const Color actual = rocket::unpackSceneInstance(packed).color;
+            if (std::abs(actual.r - expected.r) < 0.025F
+                && std::abs(actual.g - expected.g) < 0.025F
+                && std::abs(actual.b - expected.b) < 0.025F
+                && actual.a > 0.20F) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const std::array<std::pair<rocket::MiningPickupKind, Color>, 5> expected {{
+        {rocket::MiningPickupKind::CommonOre, {0.74F, 0.78F, 0.84F, 1.0F}},
+        {rocket::MiningPickupKind::RareOre, {1.0F, 0.74F, 0.24F, 1.0F}},
+        {rocket::MiningPickupKind::ExoticOre, {0.78F, 0.42F, 1.0F, 1.0F}},
+        {rocket::MiningPickupKind::Fuel, {1.0F, 0.34F, 0.04F, 1.0F}},
+        {rocket::MiningPickupKind::Oxygen, {0.48F, 0.88F, 1.0F, 1.0F}}
+    }};
+    for (const auto& [kind, color] : expected) {
+        SceneComposer composer;
+        const ScenePacket packet = rocket::SceneComposerTestAccess::miningPickupTextPacket(
+            composer, kind, 1, 0.30F);
+        assertValidDrawRanges(packet);
+        assert(!packet.instances.empty());
+        assert(hasColor(packet, color));
+    }
+
+    SceneComposer lateComposer;
+    const ScenePacket late = rocket::SceneComposerTestAccess::miningPickupTextPacket(
+        lateComposer, rocket::MiningPickupKind::CommonOre, 1, 1.99F);
+    assert(!late.instances.empty());
+
+    SceneComposer expiredComposer;
+    const ScenePacket expired = rocket::SceneComposerTestAccess::miningPickupTextPacket(
+        expiredComposer, rocket::MiningPickupKind::CommonOre, 1, 2.01F);
+    assert(expired.instances.empty() && expired.vertices.empty());
 }
 
 void testMiningRigSlerpsVerticalDuringExtraction()
@@ -1650,6 +1760,88 @@ void testFrameViewsKeepAuthoritativeEnemyIndices()
         baseDrone.size() * sizeof(PackedSceneInstance)) != 0);
 }
 
+void testHazardDroneTransitShimmerAndAssistantBeams()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 5;
+    mining.terrain.height = 3;
+    mining.terrain.cells.resize(15);
+    for (rocket::MiningCell& cell : mining.terrain.cells) {
+        cell.material = rocket::MiningCellMaterial::Empty;
+        cell.revealed = true;
+    }
+    rocket::MiningCell& solid = mining.terrain.cells[6];
+    solid.material = rocket::MiningCellMaterial::HardRock;
+    solid.maxToughness = 10.0;
+    solid.remainingToughness = 10.0;
+
+    rocket::MiningCell& target = mining.terrain.cells[8];
+    target.material = rocket::MiningCellMaterial::HazardPocket;
+    target.maxToughness = 10.0;
+    target.remainingToughness = 10.0;
+    target.hazard = true;
+    target.hazardAffinity = rocket::MiningElementalAffinity::Thermal;
+
+    mining.droneX = 2.5;
+    mining.droneY = 2.5;
+    mining.targetTipX = 2.5;
+    mining.targetTipY = 1.5;
+    mining.returnZoneX = 0.5;
+    mining.returnZoneY = 0.5;
+
+    rocket::MiningMiniDroneAgent hazard;
+    hazard.role = rocket::MiniDroneRole::Hazard;
+    hazard.roleIndex = 0;
+    hazard.upgradeLevel = 1;
+    hazard.behavior = rocket::MiningMiniDroneBehavior::Traveling;
+    hazard.x = 1.5;
+    hazard.y = 1.5;
+    hazard.velocityX = 1.0;
+    hazard.targetCellX = 3;
+    hazard.targetCellY = 1;
+    mining.miniDrones.push_back(hazard);
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setPresentationTime(1.0);
+    composer.setTextureReady(TextureId::MiniDroneHazard, true);
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    const ScenePacket& solidTransit = composer.compose(snapshot);
+    assertValidDrawRanges(solidTransit);
+    const std::size_t solidTransitGlows =
+        countInstanceShape(solidTransit, SceneInstanceShape::RadialGlow);
+
+    mining.miniDrones[0].x = 2.5;
+    snapshot = miningSnapshot(mining);
+    const ScenePacket& openTransit = composer.compose(snapshot);
+    assertValidDrawRanges(openTransit);
+    const std::size_t openTransitGlows =
+        countInstanceShape(openTransit, SceneInstanceShape::RadialGlow);
+    assert(solidTransitGlows == openTransitGlows + 1U);
+
+    mining.miniDrones[0].behavior = rocket::MiningMiniDroneBehavior::Working;
+    mining.miniDrones[0].x = 3.5;
+    mining.miniDrones[0].y = 0.8;
+    snapshot = miningSnapshot(mining);
+    const ScenePacket& singleWorker = composer.compose(snapshot);
+    assertValidDrawRanges(singleWorker);
+    const std::size_t singleWorkerGlows =
+        countInstanceShape(singleWorker, SceneInstanceShape::RadialGlow);
+
+    rocket::MiningMiniDroneAgent assistant = mining.miniDrones[0];
+    assistant.roleIndex = 1;
+    assistant.x = 4.2;
+    assistant.y = 1.5;
+    mining.miniDrones.push_back(assistant);
+    snapshot = miningSnapshot(mining);
+    const ScenePacket& assisted = composer.compose(snapshot);
+    assertValidDrawRanges(assisted);
+    const std::size_t assistedGlows =
+        countInstanceShape(assisted, SceneInstanceShape::RadialGlow);
+    assert(assistedGlows == singleWorkerGlows + 1U);
+}
+
 void testMiningTerrainPersistentStreamInvalidation()
 {
     rocket::MiningRunState mining;
@@ -1737,6 +1929,88 @@ void testMiningTerrainPersistentStreamInvalidation()
     assert(scannerLight.miningTerrainRevision != damagedTerrainRevision);
 }
 
+void testPoiGuidanceUsesOneDynamicBouncingArrow()
+{
+    const auto arrowInstance = [](const ScenePacket& packet) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+            TextureId::PoiGuidanceArrow, 0.0F, 0.0F, 1.0F, 1.0F);
+        assert(expected.valid);
+        constexpr float tolerance = 2.0F / 65535.0F;
+        for (const SceneDraw& draw : packet.draws) {
+            if (draw.texture != TextureId::PoiGuidanceArrow) {
+                continue;
+            }
+            assert(draw.drawType == SceneDrawType::InstancedQuad);
+            for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+                const SceneInstance instance =
+                    rocket::unpackSceneInstance(packet.instances[draw.firstInstance + index]);
+                if (instance.textured &&
+                    std::abs(instance.u0 - expected.u0) <= tolerance &&
+                    std::abs(instance.v0 - expected.v0) <= tolerance &&
+                    std::abs(instance.u1 - expected.u1) <= tolerance &&
+                    std::abs(instance.v1 - expected.v1) <= tolerance) {
+                    return instance;
+                }
+            }
+        }
+        assert(false && "Expected POI guidance arrow draw.");
+        return SceneInstance{};
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::PoiGuidanceArrow, true);
+    const ScenePacket atRest = rocket::SceneComposerTestAccess::poiGuidancePacket(
+        composer, "ARTIFACT", rocket::PoiGuidanceKind::Artifact, 0.0, -1.0F);
+    const SceneInstance restArrow = arrowInstance(atRest);
+    assert(atRest.vertices.size() > 200U);
+
+    const ScenePacket quarterSecond = rocket::SceneComposerTestAccess::poiGuidancePacket(
+        composer, "BOSS", rocket::PoiGuidanceKind::Boss, 0.25, -1.0F);
+    const SceneInstance bouncedArrow = arrowInstance(quarterSecond);
+    assert(bouncedArrow.centerY > restArrow.centerY + 0.01F);
+
+    const ScenePacket upward = rocket::SceneComposerTestAccess::poiGuidancePacket(
+        composer, "SHIP", rocket::PoiGuidanceKind::Ship, 0.0, 1.0F);
+    const SceneInstance upwardArrow = arrowInstance(upward);
+    assert(restArrow.axisYy > 0.0F);
+    assert(upwardArrow.axisYy < 0.0F);
+
+    RenderSnapshot push;
+    push.screen = rocket::Screen::SurfacePush;
+    push.animationTime = 0.5;
+    push.surfacePushSteps = 2;
+    push.surfacePushMaxSteps = 4;
+    push.surfacePushRewardMarkers = {
+        rocket::MiningCellMaterial::CommonOre,
+        rocket::MiningCellMaterial::RareOre,
+        rocket::MiningCellMaterial::ExoticVein,
+        rocket::MiningCellMaterial::ArtifactCache
+    };
+    push.surfacePushRewardDepthOffsets = {1, 1, 2, 2};
+    push.surfacePushForecastMarkers = {
+        rocket::MiningCellMaterial::CommonOre,
+        rocket::MiningCellMaterial::RareOre
+    };
+    push.surfacePushForecastDepthOffsets = {3, 4};
+    const ScenePacket pushPacket = composer.compose(push);
+    (void)arrowInstance(pushPacket);
+    const auto hasMarkerColor = [&](float red, float green, float blue) {
+        return std::any_of(
+            pushPacket.vertices.begin(),
+            pushPacket.vertices.end(),
+            [&](const PackedSceneVertex& packed) {
+                const SceneVertex vertex = rocket::unpackSceneVertex(packed);
+                return std::abs(vertex.r - red) < 0.02F &&
+                    std::abs(vertex.g - green) < 0.02F &&
+                    std::abs(vertex.b - blue) < 0.02F;
+            });
+    };
+    assert(hasMarkerColor(0.32F, 0.92F, 1.0F));
+    assert(hasMarkerColor(1.0F, 0.58F, 0.18F));
+    assert(hasMarkerColor(0.78F, 0.52F, 1.0F));
+}
+
 } // namespace
 
 int main()
@@ -1764,10 +2038,13 @@ int main()
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
     testSurfaceScannerMarksUseMaterialSilhouettes();
     testMiningOrePaletteMakesCommonSilverAndRareGold();
+    testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningRigSlerpsVerticalDuringExtraction();
     testMiningRigStaysVisibleAndTracksHeading();
     testMiningRigDrillStaysMountedThroughRecoilAndExtension();
     testFrameViewsKeepAuthoritativeEnemyIndices();
+    testHazardDroneTransitShimmerAndAssistantBeams();
     testMiningTerrainPersistentStreamInvalidation();
+    testPoiGuidanceUsesOneDynamicBouncingArrow();
     return 0;
 }

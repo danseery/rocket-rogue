@@ -78,6 +78,7 @@ inline constexpr std::string_view beginSaturnSlingshot = "begin_saturn_slingshot
 inline constexpr std::string_view retrySaturnSlingshot = "retry_saturn_slingshot";
 inline constexpr std::string_view acknowledgeSaturnSlingshotFailure = "acknowledge_saturn_slingshot_failure";
 inline constexpr std::string_view claimSaturnCourse = "claim_saturn_course";
+inline constexpr std::string_view scenarioActionPrefix = "scenario_action:";
 inline constexpr std::string_view redeemDroneUpgradeCreditPrefix = "redeem_drone_upgrade_credit:";
 
 inline std::string buyOffer(int index)
@@ -128,6 +129,18 @@ inline std::string upgradeDrone(int index)
 inline std::string redeemDroneUpgradeCredit(int index)
 {
     return std::string(redeemDroneUpgradeCreditPrefix) + std::to_string(index);
+}
+
+// Scenario IDs and step IDs are stable content identifiers. Keep the action
+// payload flat so it crosses native RmlUi and the web shell through the same
+// existing data-rr-action binding without positional button inference.
+inline std::string scenarioAction(
+    std::string_view scenarioId,
+    std::string_view stepId,
+    int actionKind)
+{
+    return std::string(scenarioActionPrefix) + std::string(scenarioId) + "|" +
+        std::string(stepId) + "|" + std::to_string(actionKind);
 }
 } // namespace actions
 

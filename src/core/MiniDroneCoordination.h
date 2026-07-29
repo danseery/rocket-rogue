@@ -2,7 +2,10 @@
 
 #include "core/GameTypes.h"
 
+#include <optional>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace rocket {
 
@@ -21,6 +24,24 @@ struct MiniDroneCoordinationPoint {
     double x = 0.0;
     double y = 0.0;
 };
+
+// Returns the number of navigable cell steps to a usable work position beside
+// a solid task cell, or -1 when the drone cannot reach it.
+int miniDroneTaskPathLength(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent,
+    int targetCellX,
+    int targetCellY,
+    double workRangeCells);
+
+// Provides the next navigable waypoint toward a task cell. Support Drones may
+// use suit-only passages, but never phase through terrain.
+std::optional<MiniDroneCoordinationPoint> miniDroneTaskNavigationWaypoint(
+    const MiningRunState& mining,
+    const MiningMiniDroneAgent& agent,
+    int targetCellX,
+    int targetCellY,
+    double workRangeCells);
 
 MiniDroneCoordinationPoint miniDroneOrbitPoint(
     const MiningRunState& mining,
@@ -63,16 +84,24 @@ public:
     bool acquireAssignment(MiningMiniDroneAgent& agent) override;
     void releaseAssignment(MiningMiniDroneAgent& agent) override;
 
+    void assignAvailableDrones();
+    std::vector<std::pair<int, int>> assignedTargets() const;
+    std::vector<MiningMiniDroneAgent*> assignedWorkers(int x, int y) const;
+    MiniDroneCoordinationPoint treatmentApproachPoint(
+        const MiningMiniDroneAgent& agent) const;
+    void releaseTargetAssignments(int x, int y);
     bool reservedByOther(int x, int y, const MiningMiniDroneAgent& agent) const;
 
 private:
+    bool acquireAssistAssignment(MiningMiniDroneAgent& agent);
     bool isCandidateCell(const MiningMiniDroneAgent& agent, int x, int y) const;
+    bool isEligibleTarget(const MiningMiniDroneAgent& agent, int x, int y) const;
     int cellKey(int x, int y) const;
     void clearAssignment(MiningMiniDroneAgent& agent);
 
     MiningRunState& mining_;
     std::vector<MiningMiniDroneAgent*> hazardDrones_;
-    std::unordered_map<int, MiningMiniDroneAgent*> reservations_;
+    std::unordered_map<int, std::vector<MiningMiniDroneAgent*>> reservations_;
 };
 
 class AttackDroneCoordinator final : public MiniDroneTaskCoordinator {

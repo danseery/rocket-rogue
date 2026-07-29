@@ -1096,10 +1096,11 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int droneLoadoutChipVerticalPadding = compactDroneWorkspaceVertical ? 2 : 4;
     const int refitChoiceCardHeight = std::clamp(viewportHeight - 240, 210, 360);
     const int arrivalChoiceCardHeight = std::clamp(viewportHeight - 220, 190, 280);
-    // Surface Ops keeps four decisions in a fixed bottom lane. Give their
-    // reserved footer lane enough room to breathe on desktop-sized boards;
-    // the context above remains the scrollable region at compact heights.
-    const int surfaceOpsChoiceCardHeight = std::clamp(viewportHeight - 330, 164, 244);
+    // Surface Ops is a top-to-bottom decision sequence: the choices follow
+    // Drone Ops instead of occupying a detached bottom dock. At compact
+    // heights, reserve enough vertical room for every card footer to remain
+    // pointer-reachable without changing the relaxed desktop card height.
+    const int surfaceOpsChoiceCardHeight = std::clamp(viewportHeight - 434, 156, 244);
     // Full-screen workspaces reserve 16 px above the shared header, a
     // 58 px header, its 12 px gap, and 28 px below the decision stack.
     // Expose the remaining height to reusable fixed-action workspaces rather

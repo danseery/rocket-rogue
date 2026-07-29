@@ -18,9 +18,9 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first Support Drone. Mars repeats the lesson with 40 local Common Ore and `Fabricate Drone Bay Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
+Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first Support Drone. Mars repeats the lesson with 40 local Common Ore and `Fabricate Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
 
-The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The story site presents outer and inner four-segment lava seals, then requires artifact towing and safe Surface extraction. The minor artifact grants one persistent, player-selected free Support Drone upgrade. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward.
+The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The current authored site presents outer and inner four-segment lava layers, then requires protected-Artifact towing and safe Surface extraction. The Artifact's scenario reward grants one persistent, player-selected free Support Drone upgrade. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward. Future protected sites configure the same reusable cocoon, objective, event, and reward boundaries rather than adding destination-specific mining code.
 
 ## Research Phase
 
@@ -73,8 +73,8 @@ Core resources:
 Core actions:
 
 - Survey site: low-risk, low-reward; improves knowledge and finds common materials.
-- Mine deposit: opens one direct-control Mining Rig run for the current surface loop. It spends shared fuel, not action kits.
-- Push Deeper: raises hazard and potential reward; this is the surface version of overburning. It is disabled after mining because the mining run commits the field team to extracting or wrapping the current site.
+- Mine deposit: opens one direct-control Mining Rig run at the selected start depth for the current surface loop. The ship remains at surface depth 0, and deployment spends shared fuel rather than action kits.
+- Push Deeper: its first layer is guaranteed and bankable. Attempting layer two or farther risks the unbanked route; successful mapped artifact layers confirm the artifact for mining. It is disabled after mining because the run commits the field team to extracting or wrapping the current site.
 - Extract payload: attempts to recover the current cargo to the shuttle; risk rises with hazard, cargo, low action kits, and spent fuel.
 
 Surface actions should be presented as decision cards, not mystery buttons. Each card should show action-kit or fuel cost, current hazard/extraction risk, a short explanation of the payoff, and the action button. The player should understand why a field-kit unlock changed the odds without needing to inspect code or external notes.
@@ -105,7 +105,7 @@ These events should remain short, readable pulses attached to menu actions. They
 
 The surface screen keeps a short recent mission log. It should preserve the last few site/action/hazard/event summaries so the player can understand why action kits, fuel, cargo, hazard, or blueprints changed after several clicks. Keep it bounded and lightweight; it is a memory aid, not a full journal.
 
-The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The Mining Rig digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and then returns to the ship to bank and leave or aborts back into the same surface outcome model. Autonomous Mining, Resource, Survey, Hazard, Attack, and Defense units are consistently labeled Support Drones. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
+The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The Mining Rig begins at the selected pushed depth, digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and ascends to the surface ship to bank, service, and leave. Safety warnings override the normal `ARTIFACT` POI pointer with `SHIP` guidance; cross-layer targets lead toward the correct depth boundary. Autonomous Mining, Resource, Survey, Hazard, Attack, and Defense units are consistently labeled Support Drones. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
 
 ## Post-Solar Enemy Layer
 
@@ -157,7 +157,7 @@ The current shared C++ native/web application should keep this scope focused:
 - Identified artifacts provide capped blueprint insight for later research, giving recovery/decoding a mechanical reward before story content exists.
 - The Legacy archive lists recovered artifacts by origin and decoded status without inventing final story lore.
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
-- Mining uses a direct-control Mining Rig screen with a normal 30s oxygen baseline, the Io story site's 60s baseline, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
+- Mining uses a direct-control Mining Rig screen with a normal 30s oxygen baseline, the current authored Io site's 60s baseline, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
 - Shared fuel is displayed as a shuttle/Mining Rig tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as `Mining Rig offline` with disabled button copy `Unavailable`.
 - Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the rig is offline.
 - Solar-system surface expeditions have environmental risk only.

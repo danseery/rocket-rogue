@@ -2,8 +2,11 @@
 
 #include "core/GameTypes.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace rocket {
@@ -22,6 +25,110 @@ struct MiningArtifactSnapshot {
     int gateType = 0;
     int gateState = 0;
 };
+
+enum class PoiGuidanceKind {
+    None,
+    Ship,
+    Artifact,
+    Boss,
+    Story
+};
+
+enum class PoiGuidanceDirection {
+    WorldTarget,
+    Ascend,
+    Descend
+};
+
+// Presentation-only guidance contract. Renderers consume the dynamic label and
+// direction without needing target-specific branches or baked text assets.
+struct PoiGuidanceTarget {
+    bool active = false;
+    PoiGuidanceKind kind = PoiGuidanceKind::None;
+    std::string label;
+    int targetDepthZone = 0;
+    double x = 0.0;
+    double y = 0.0;
+    PoiGuidanceDirection direction = PoiGuidanceDirection::WorldTarget;
+};
+
+inline PoiGuidanceTarget miningPoiGuidanceTarget(
+    const MiningRunState& mining,
+    double oxygenCapacity,
+    double cautionThreshold,
+    bool atReturnZone)
+{
+    if (!mining.active) {
+        return {};
+    }
+
+    const bool operatorActive =
+        mining.operatorMode == MiningOperatorMode::Jetpack &&
+        mining.operatorPresent;
+    const double oxygenPressure = oxygenCapacity > 0.0
+        ? std::clamp(1.0 - mining.oxygenSeconds / oxygenCapacity, 0.0, 1.0)
+        : 0.0;
+    const double actorPressure = std::clamp(
+        1.0 - (operatorActive ? mining.operatorIntegrity : mining.droneHealth),
+        0.0,
+        1.0);
+    const double drillPressure = std::clamp(1.0 - mining.drillIntegrity, 0.0, 1.0);
+    if (std::max({oxygenPressure, actorPressure, drillPressure}) >= cautionThreshold) {
+        if (mining.depthZone == mining.entryDepthZone && atReturnZone) {
+            return {};
+        }
+        return {
+            true,
+            PoiGuidanceKind::Ship,
+            "SHIP",
+            mining.entryDepthZone,
+            mining.returnZoneX,
+            mining.returnZoneY,
+            mining.depthZone > mining.entryDepthZone
+                ? PoiGuidanceDirection::Ascend
+                : PoiGuidanceDirection::WorldTarget
+        };
+    }
+
+    const auto recoverable = [](const MiningArtifactObject& artifact) {
+        return artifact.present &&
+            artifact.revealed &&
+            (artifact.state == MiningArtifactState::Embedded ||
+                artifact.state == MiningArtifactState::Loose);
+    };
+    const MiningArtifactObject* artifact = recoverable(mining.artifact)
+        ? &mining.artifact
+        : nullptr;
+    int artifactDepth = mining.depthZone;
+    if (artifact == nullptr) {
+        for (const MiningDepthLayerState& layer : mining.depthLayers) {
+            if (recoverable(layer.artifact)) {
+                artifact = &layer.artifact;
+                artifactDepth = layer.depthZone;
+                break;
+            }
+        }
+    }
+    if (artifact == nullptr) {
+        return {};
+    }
+
+    PoiGuidanceDirection direction = PoiGuidanceDirection::WorldTarget;
+    if (artifactDepth < mining.depthZone) {
+        direction = PoiGuidanceDirection::Ascend;
+    } else if (artifactDepth > mining.depthZone) {
+        direction = PoiGuidanceDirection::Descend;
+    }
+    return {
+        true,
+        PoiGuidanceKind::Artifact,
+        "ARTIFACT",
+        artifactDepth,
+        artifact->x,
+        artifact->y,
+        direction
+    };
+}
 
 // Immutable presentation input assembled from authoritative gameplay state.
 // Collection views remain valid only through the synchronous render call.
@@ -105,6 +212,7 @@ struct RenderSnapshot {
     MaterialInventory miningMaterials;
     MaterialInventory miningStowedMaterials;
     MiningArtifactSnapshot miningArtifact;
+    PoiGuidanceTarget miningPoiGuidance;
     std::span<const MiningGateMarker> miningGateMarkers;
     std::span<const MiningCell> miningCells;
     std::span<const MiningEnemy> miningEnemies;
@@ -112,6 +220,8 @@ struct RenderSnapshot {
     std::span<const MiningLooseChunk> miningLooseChunks;
     std::span<const MiningProjectileVisual> miningProjectiles;
     std::span<const MiningDamageNumber> miningDamageNumbers;
+    std::span<const MiningPickupEvent> miningPickupEvents;
+    std::uint64_t miningPickupEventSequence = 0;
     bool flybyCompleted = false;
     int flybyZone = 0;
     int flybyResult = 0;
@@ -171,6 +281,8 @@ struct RenderSnapshot {
         miningLooseChunks = mining.looseChunks;
         miningProjectiles = mining.combatProjectiles;
         miningDamageNumbers = mining.damageNumbers;
+        miningPickupEvents = mining.pickupEvents;
+        miningPickupEventSequence = mining.pickupEventSequence;
     }
 };
 

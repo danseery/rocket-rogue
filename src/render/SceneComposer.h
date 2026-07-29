@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef>
+#include <string_view>
 #include <vector>
 
 namespace rocket {
@@ -41,9 +42,11 @@ private:
     void drawMiningMaterialMarker(float cx, float cy, float radius, int material, Color color, bool worldSpace = true);
     void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
-    void drawMiningPickupText(float cx, float cy, float unitSize, int material, int amount, float age);
+    void drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age);
     void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);
     void drawMiningBankedText(float cx, float cy, float unitSize, float age);
+    void drawPoiLabel(float cx, float cy, float pixelSize, std::string_view label, PoiGuidanceKind kind);
+    void drawPoiGuidance(float cx, float cy, float directionX, float directionY, float size, std::string_view label, PoiGuidanceKind kind, double animationTime);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<SceneVertex>& scratchVertices(std::size_t reserveCount);
@@ -100,10 +103,17 @@ private:
         CoordinateSpace coordinateSpace) const;
     void finalizePacket();
 
+    enum class MiningPickupBurstKind {
+        Pickup,
+        Banked,
+        HazardTreatment
+    };
+
     struct MiningPickupBurst {
         float x = 0.0F;
         float y = 0.0F;
-        int material = 0;
+        MiningPickupBurstKind burstKind = MiningPickupBurstKind::Pickup;
+        MiningPickupKind kind = MiningPickupKind::CommonOre;
         int amount = 0;
         double startedAt = 0.0;
         float textOffsetX = 0.0F;
@@ -163,10 +173,9 @@ private:
     bool miningTerrainStreamUsed_ = false;
     std::vector<int> currentMiningMaterials_;
     std::vector<int> previousMiningMaterials_;
-    MaterialInventory previousMiningInventory_;
     MaterialInventory previousMiningStowedInventory_;
-    int previousMiningCargo_ = 0;
     int previousMiningStowedCargo_ = 0;
+    std::uint64_t lastMiningPickupEventSequence_ = 0;
     std::vector<const MiningMiniDroneAgent*> miningSurveyDrones_;
     std::vector<MiningPickupBurst> miningPickupBursts_;
     std::vector<MiningPickupBurst> miningPickupBurstScratch_;

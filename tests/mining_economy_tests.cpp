@@ -5,6 +5,7 @@
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
+#include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -253,6 +254,89 @@ void regolithNeverProducesCommonOre()
             && mining.temporaryMaterials.rare == before.rare
             && mining.temporaryMaterials.exotic == before.exotic,
         "breaking the old fourth-cell threshold should still award nothing from regolith");
+    require(mining.pickupEvents.empty(),
+        "regolith should not create a resource pickup event");
+}
+
+void supplyPocketsAreDeterministicAndPayImmediately()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 708);
+    prepareSurface(state, content::destination::mars);
+    state.run.surfaceExpedition.sharedFuel = 1;
+    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 4, 0xF00DULL}, false).applied,
+        "Mars supply-pocket arena should start");
+
+    MiningRunState& mining = state.run.mining;
+    const auto countMaterial = [&](MiningCellMaterial material) {
+        return static_cast<int>(std::count_if(
+            mining.terrain.cells.begin(),
+            mining.terrain.cells.end(),
+            [&](const MiningCell& cell) { return cell.material == material; }));
+    };
+    require(countMaterial(MiningCellMaterial::FuelPocket) == 1
+            && countMaterial(MiningCellMaterial::OxygenPocket) == 1,
+        "each eligible Mars arena should stamp exactly one fuel and oxygen pocket");
+    const auto parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(parsed.has_value(), "supply-pocket arena save should deserialize");
+    GameState restored = createNewGame(catalog, 710);
+    restoreSaveData(restored, catalog, *parsed);
+    require(std::count_if(
+                restored.run.mining.terrain.cells.begin(),
+                restored.run.mining.terrain.cells.end(),
+                [](const MiningCell& cell) { return cell.material == MiningCellMaterial::FuelPocket; }) == 1
+            && std::count_if(
+                restored.run.mining.terrain.cells.begin(),
+                restored.run.mining.terrain.cells.end(),
+                [](const MiningCell& cell) { return cell.material == MiningCellMaterial::OxygenPocket; }) == 1,
+        "appended supply-pocket material IDs should round trip through active saves");
+
+    mining.droneX = 32.0;
+    mining.droneY = 4.0;
+    setMiningMove(state, 1.0, 0.0);
+    setMiningMove(state, 0.0, 0.0);
+    auto drillTestCell = [&](MiningCellMaterial material) {
+        MiningCell* cell = miningCellAt(mining.terrain, 33, 4);
+        require(cell != nullptr, "supply-pocket test cell should exist");
+        *cell = {material, 0.01, 0.01, true, false};
+        setMiningDrilling(state, true);
+        for (int tick = 0; tick < 8 && cell->material != MiningCellMaterial::Empty; ++tick) {
+            updateMiningRun(state, catalog, 0.08);
+        }
+        require(cell->material == MiningCellMaterial::Empty, "supply pocket should be drillable");
+    };
+
+    const MaterialInventory materialsBefore = mining.temporaryMaterials;
+    const int fuelBefore = state.run.surfaceExpedition.sharedFuel;
+    drillTestCell(MiningCellMaterial::FuelPocket);
+    require(state.run.surfaceExpedition.sharedFuel == fuelBefore + 1,
+        "fuel pocket should restore one shared fuel immediately");
+    require(!mining.pickupEvents.empty()
+            && mining.pickupEvents.back().kind == MiningPickupKind::Fuel
+            && mining.pickupEvents.back().amount == 1,
+        "fuel pocket should emit one typed pickup event");
+
+    mining.oxygenSeconds = 5.0;
+    drillTestCell(MiningCellMaterial::OxygenPocket);
+    require(mining.oxygenSeconds > 14.5 && mining.oxygenSeconds <= 15.0,
+        "oxygen pocket should restore ten seconds immediately");
+    require(mining.pickupEvents.back().kind == MiningPickupKind::Oxygen
+            && mining.pickupEvents.back().amount == 1,
+        "oxygen pocket should emit one typed pickup event");
+    require(mining.temporaryMaterials.common == materialsBefore.common
+            && mining.temporaryMaterials.rare == materialsBefore.rare
+            && mining.temporaryMaterials.exotic == materialsBefore.exotic
+            && mining.cargo == 0,
+        "supply pockets should not add material inventory or cargo");
+
+    GameState moon = createNewGame(catalog, 709);
+    prepareSurface(moon, content::destination::moon);
+    require(startMiningRun(moon, catalog, {MiningAct::ActOne, 3, 0xC0DEULL}, false).applied,
+        "Moon control arena should start");
+    require(std::none_of(moon.run.mining.terrain.cells.begin(), moon.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
+        return cell.material == MiningCellMaterial::FuelPocket || cell.material == MiningCellMaterial::OxygenPocket;
+    }), "Moon should remain free of supply pockets");
 }
 
 void ioTerrainAndArtifactSealAreDeterministic()
@@ -265,14 +349,28 @@ void ioTerrainAndArtifactSealAreDeterministic()
     };
     auto makeIoState = [&](std::uint64_t stateSeed) {
         GameState state = createNewGame(catalog, stateSeed);
-        state.meta.ioHazardDroneCommissioned = true;
-        state.meta.unlockKeys.push_back(content::unlock::droneBay);
-        state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
-        state.meta.droneBaySlots = 2;
-        state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
-        state.meta.equippedDroneIds.push_back(content::drone::hazardDrone);
-        state.meta.droneUpgrades.push_back({content::drone::hazardDrone, 1});
+        state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
         prepareSurface(state, content::destination::jupiter);
+        const ScenarioActionOutcome commission = performScenarioAction(
+            state,
+            catalog,
+            content::scenario::volcanicDescent,
+            "commission",
+            ScenarioActionKind::BeginActivity);
+        require(commission.applied,
+            "the generic Io scenario fixture should commission Hazard support through its authored action");
+        const ScenarioActionOutcome recovery = performScenarioAction(
+            state,
+            catalog,
+            content::scenario::volcanicDescent,
+            "recovery",
+            ScenarioActionKind::BeginActivity);
+        require(recovery.applied && recovery.beginsActivity &&
+                recovery.miningSiteDefinitionId == content::miningSite::thermalLayeredRecovery,
+            "the generic Io recovery step should select its authored thermal mining site");
+        state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
+        state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+        state.run.surfaceExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
         state.run.surfaceExpedition.prospectMaterials = {
             .common = 5,
             .rare = 2,
@@ -292,9 +390,11 @@ void ioTerrainAndArtifactSealAreDeterministic()
     require(mining.oxygenSeconds >= tuning::mining::ioArtifactOxygenSeconds,
         "the fixed Io artifact expedition should start with at least 60 seconds of oxygen");
     require(mining.artifact.present
-            && mining.artifact.rewardType == ArtifactRewardType::DroneUpgradeCredit
-            && mining.artifact.kind == ArtifactKind::Boost,
-        "the Io artifact should grant a drone credit without using Ark story-artifact semantics");
+            && mining.artifact.id == content::protectedObjective::ioMinorArtifact
+            && mining.artifact.kind == ArtifactKind::Boost
+            && mining.artifact.rewardType == ArtifactRewardType::None
+            && mining.gate.protectedObjective.kind == ProtectedObjectiveKind::Artifact,
+        "the generic protected-objective adapter should own Io payload visibility while the scenario owns its drone-credit reward");
     require(mining.gate.outerShellTilesTotal == 4
             && mining.gate.outerShellTilesRemaining == 4
             && mining.gate.innerShellTilesTotal == 4
@@ -312,7 +412,9 @@ void ioTerrainAndArtifactSealAreDeterministic()
             "matching Io arena requests should reproduce material and affinity placement");
         require(cell.material != MiningCellMaterial::CommonOre
                 && cell.material != MiningCellMaterial::RareOre
-                && cell.material != MiningCellMaterial::ExoticVein,
+                && cell.material != MiningCellMaterial::ExoticVein
+                && cell.material != MiningCellMaterial::FuelPocket
+                && cell.material != MiningCellMaterial::OxygenPocket,
             "Io should contain no directly generated ore deposits");
         if (cell.material == MiningCellMaterial::HazardPocket) {
             ++thermalLava;
@@ -367,16 +469,30 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 1001);
-    state.meta.ioHazardDroneCommissioned = true;
-    state.meta.unlockKeys = {
-        content::unlock::droneBay,
-        content::unlock::ioHazardDrone
-    };
-    state.meta.droneBaySlots = 2;
-    state.meta.ownedDroneIds = {content::drone::hazardDrone};
+    state.meta.unlockKeys = {content::unlock::routeJupiter};
+    prepareSurface(state, content::destination::jupiter);
+    require(
+        performScenarioAction(
+            state,
+            catalog,
+            content::scenario::volcanicDescent,
+            "commission",
+            ScenarioActionKind::BeginActivity).applied,
+        "the thermal treatment fixture should commission its Hazard frame through the generic scenario");
+    const ScenarioActionOutcome recovery = performScenarioAction(
+        state,
+        catalog,
+        content::scenario::volcanicDescent,
+        "recovery",
+        ScenarioActionKind::BeginActivity);
+    require(recovery.applied && recovery.beginsActivity,
+        "the thermal treatment fixture should start the authored recovery activity");
+    state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
+    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    state.run.surfaceExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
+    state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::hazardDrone};
     state.meta.droneUpgrades = {{content::drone::hazardDrone, 1}};
-    prepareSurface(state, content::destination::jupiter);
     require(startMiningRun(
                 state,
                 catalog,
@@ -394,15 +510,10 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
         static_cast<int>(std::floor(mining.droneY)) + 2,
         1,
         mining.terrain.height - 2);
-    for (int y = std::max(1, targetY - 7);
-         y <= std::min(mining.terrain.height - 2, targetY + 7);
-         ++y) {
-        for (int x = std::max(1, targetX - 7);
-             x <= std::min(mining.terrain.width - 2, targetX + 7);
-             ++x) {
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        for (int x = 0; x < mining.terrain.width; ++x) {
             MiningCell* cell = miningCellAt(mining.terrain, x, y);
-            if (cell != nullptr && cell->material == MiningCellMaterial::HazardPocket
-                && !cell->gateAssociated) {
+            if (cell != nullptr && cell->material == MiningCellMaterial::HazardPocket) {
                 *cell = {
                     MiningCellMaterial::Regolith,
                     1.0,
@@ -448,6 +559,7 @@ int main()
         rewardLedgerAndPendingCreditRoundTrip();
         oxygenCapacityHasAHardCeiling();
         regolithNeverProducesCommonOre();
+        supplyPocketsAreDeterministicAndPayImmediately();
         ioTerrainAndArtifactSealAreDeterministic();
         ioLavaAlwaysCoolsIntoMineableCommonOre();
         std::cout << "Mining economy tests passed\n";

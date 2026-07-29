@@ -1,12 +1,9 @@
 #include "core/MiningProgression.h"
 
-#include "core/ContentIds.h"
-
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
-#include <sstream>
 
 namespace rocket {
 
@@ -160,6 +157,11 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
         rules.mechanics.contactRebound = true;
         rules.mechanics.fieldRepairs = true;
         allow(rules.allowedMaterials, MiningCellMaterial::RareOre);
+        // This pressure tier introduces the full oxygen-and-fuel mining loop. These are
+        // stamped as sparse, deterministic regolith replacements by the
+        // terrain generator rather than rolled as ordinary ore.
+        allow(rules.allowedMaterials, MiningCellMaterial::FuelPocket);
+        allow(rules.allowedMaterials, MiningCellMaterial::OxygenPocket);
     }
     if (difficulty >= 5) {
         rules.mechanics.cargoDrag = true;
@@ -178,9 +180,6 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
         allowGate(rules, MiningGateType::HazardCocoon);
         allowGate(rules, MiningGateType::SurveyTriangulation);
         allowGate(rules, MiningGateType::FragileExcavation);
-        if (difficulty == 8) {
-            rules.fixedStoryGate = MiningGateType::HazardCocoon;
-        }
     }
     if (difficulty >= 9) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Toxic);
@@ -193,7 +192,6 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
 void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
 {
     applyActOneProgression(rules, 10);
-    rules.fixedStoryGate = MiningGateType::None;
     rules.allowedAffinities[static_cast<std::size_t>(MiningElementalAffinity::Toxic)] = false;
     rules.mechanics.passiveDroneCombat = true;
     allow(rules.allowedEnemyTypes, MiningEnemyType::Ant);
@@ -201,9 +199,6 @@ void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
 
     if (difficulty >= 2) {
         allowGate(rules, MiningGateType::EnemySealedChamber);
-        if (difficulty <= 3) {
-            rules.fixedStoryGate = MiningGateType::EnemySealedChamber;
-        }
     }
 
     if (difficulty >= 4) {
@@ -218,8 +213,7 @@ void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
         allow(rules.allowedMaterials, MiningCellMaterial::ExoticVein);
         allow(rules.allowedEnemyTypes, MiningEnemyType::Elemental);
         allow(rules.allowedRoomFeatures, MiningCellFeature::HiveNest);
-        allowGate(rules, MiningGateType::CompoundStoryVault);
-        rules.fixedStoryGate = MiningGateType::CompoundStoryVault;
+        allowGate(rules, MiningGateType::CompoundVault);
     }
     if (difficulty >= 9) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Toxic);
@@ -229,7 +223,9 @@ void applyActTwoProgression(MiningArenaRules& rules, int difficulty)
         allow(rules.allowedEnemyTypes, MiningEnemyType::Spawner);
         rules.maxSpawners = 1;
     }
-    rules.maximumGateLocks = 2;
+    // Keep Act 2's opening encounter legible: a second simultaneous lock is
+    // introduced only with the level-7 compound-vault pressure tier.
+    rules.maximumGateLocks = difficulty >= 7 ? 2 : 1;
 }
 
 void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
@@ -241,9 +237,6 @@ void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
     allow(rules.allowedEnemyTypes, MiningEnemyType::Mammal);
     allow(rules.allowedRoomFeatures, MiningCellFeature::OrganicBurrow);
     allowGate(rules, MiningGateType::BurrowBreach);
-    if (difficulty <= 3) {
-        rules.fixedStoryGate = MiningGateType::BurrowBreach;
-    }
     if (difficulty >= 2) {
         allow(rules.allowedAffinities, MiningElementalAffinity::Radiation);
     }
@@ -257,7 +250,6 @@ void applyActThreeProgression(MiningArenaRules& rules, int difficulty)
     }
     if (difficulty >= 9) {
         rules.maxSpawners = 2;
-        rules.fixedStoryGate = MiningGateType::CompoundStoryVault;
     }
     rules.maximumGateLocks = 3;
 }
@@ -326,6 +318,70 @@ bool isAllowed(const std::array<bool, Size>& values, Enum value)
 {
     const auto index = static_cast<std::size_t>(value);
     return index < values.size() && values[index];
+}
+
+MiningElementalAffinity strongestAllowedHazardAffinity(const MiningArenaRules& rules)
+{
+    for (const MiningElementalAffinity affinity : {
+             MiningElementalAffinity::Radiation,
+             MiningElementalAffinity::Toxic,
+             MiningElementalAffinity::Cryo,
+             MiningElementalAffinity::Thermal}) {
+        if (isAllowed(rules.allowedAffinities, affinity)) {
+            return affinity;
+        }
+    }
+    return MiningElementalAffinity::None;
+}
+
+void applyThermalLavaSiteRules(MiningArenaRules& rules)
+{
+    rules.mechanics.fogAndScanner = true;
+    rules.mechanics.oxygenAndFuel = true;
+    rules.mechanics.drillHeat = true;
+    rules.mechanics.drillIntegrity = true;
+    rules.mechanics.contactRebound = true;
+    rules.mechanics.fieldRepairs = true;
+    rules.mechanics.cargoDrag = true;
+    rules.mechanics.environmentalHazards = true;
+    rules.mechanics.artifactRecovery = true;
+    rules.mechanics.artifactTethering = true;
+    rules.mechanics.siteAndDepthVariation = true;
+    rules.mechanics.passiveDroneCombat = false;
+
+    rules.allowedMaterials.fill(false);
+    allow(rules.allowedMaterials, MiningCellMaterial::Empty);
+    allow(rules.allowedMaterials, MiningCellMaterial::Regolith);
+    // Common Ore is a post-treatment result. Thermal sites do not place it
+    // directly in their terrain pass.
+    allow(rules.allowedMaterials, MiningCellMaterial::CommonOre);
+    allow(rules.allowedMaterials, MiningCellMaterial::ArtifactCache);
+    allow(rules.allowedMaterials, MiningCellMaterial::HazardPocket);
+    allow(rules.allowedMaterials, MiningCellMaterial::Bedrock);
+
+    rules.allowedAffinities.fill(false);
+    allow(rules.allowedAffinities, MiningElementalAffinity::None);
+    allow(rules.allowedAffinities, MiningElementalAffinity::Thermal);
+    rules.allowedEnemyTypes.fill(false);
+    rules.maxActiveEnemies = 0;
+    rules.maxSpawners = 0;
+
+    rules.allowedGateTypes.fill(false);
+    allowGate(rules, MiningGateType::HazardCocoon);
+    rules.maximumGateLocks = 1;
+    rules.rewardBudget = {};
+
+    rules.referenceDrones = {};
+    rules.referenceDrones.slots = 2;
+    rules.referenceDrones.maximumMark = 1;
+    addReferenceRole(rules.referenceDrones, MiniDroneRole::Hazard);
+    rules.referenceDrones.summary = "Hazard Drone Mk I";
+    rules.complication = "Layered thermal seal";
+    rules.tutorialCallout =
+        "Inert regolith hides no resources. Cool marked thermal seams, then drill the gray Common Ore.";
+    rules.mineralAvailability = "Common Ore inside Thermal seams only";
+    rules.knownEnemyRoles = "No hostile contacts";
+    rules.recommendedCounters = "Hazard Drone Mk I";
 }
 
 } // namespace
@@ -417,67 +473,29 @@ MiningArenaRules resolveMiningArenaRules(const MiningArenaRequest& rawRequest)
     return rules;
 }
 
-bool isIoMiningDestination(std::string_view destinationId)
-{
-    return destinationId == content::destination::jupiter;
-}
-
-MiningArenaRules resolveDestinationMiningArenaRules(
+MiningArenaRules resolveMiningSiteArenaRules(
     const MiningArenaRequest& request,
-    std::string_view destinationId)
+    const MiningSiteDefinition& site)
 {
-    MiningArenaRules rules = resolveMiningArenaRules(request);
-    if (!isIoMiningDestination(destinationId)) {
-        return rules;
+    MiningArenaRequest resolvedRequest = site.arena;
+    if (resolvedRequest.seed == 0) {
+        resolvedRequest.seed = request.seed;
+    }
+    if (resolvedRequest.gateOverride == MiningGateType::None &&
+        site.gateType != MiningGateType::None) {
+        resolvedRequest.gateOverrideEnabled = true;
+        resolvedRequest.gateOverride = site.gateType;
     }
 
-    rules.mechanics.fogAndScanner = true;
-    rules.mechanics.oxygenAndFuel = true;
-    rules.mechanics.drillHeat = true;
-    rules.mechanics.drillIntegrity = true;
-    rules.mechanics.contactRebound = true;
-    rules.mechanics.fieldRepairs = true;
-    rules.mechanics.cargoDrag = true;
-    rules.mechanics.environmentalHazards = true;
-    rules.mechanics.artifactRecovery = true;
-    rules.mechanics.artifactTethering = true;
-    rules.mechanics.siteAndDepthVariation = true;
-    rules.mechanics.passiveDroneCombat = false;
-
-    rules.allowedMaterials.fill(false);
-    allow(rules.allowedMaterials, MiningCellMaterial::Empty);
-    allow(rules.allowedMaterials, MiningCellMaterial::Regolith);
-    // Common Ore is an allowed post-treatment material, but Io generation
-    // never places it directly.
-    allow(rules.allowedMaterials, MiningCellMaterial::CommonOre);
-    allow(rules.allowedMaterials, MiningCellMaterial::ArtifactCache);
-    allow(rules.allowedMaterials, MiningCellMaterial::HazardPocket);
-    allow(rules.allowedMaterials, MiningCellMaterial::Bedrock);
-
-    rules.allowedAffinities.fill(false);
-    allow(rules.allowedAffinities, MiningElementalAffinity::None);
-    allow(rules.allowedAffinities, MiningElementalAffinity::Thermal);
-    rules.allowedEnemyTypes.fill(false);
-    rules.maxActiveEnemies = 0;
-    rules.maxSpawners = 0;
-
-    rules.allowedGateTypes.fill(false);
-    allowGate(rules, MiningGateType::HazardCocoon);
-    rules.fixedStoryGate = MiningGateType::HazardCocoon;
-    rules.maximumGateLocks = 1;
-    rules.rewardBudget = {};
-
-    rules.referenceDrones = {};
-    rules.referenceDrones.slots = 2;
-    rules.referenceDrones.maximumMark = 1;
-    addReferenceRole(rules.referenceDrones, MiniDroneRole::Hazard);
-    rules.referenceDrones.summary = "Hazard Drone Mk I";
-    rules.complication = "Two-stage lava seal";
-    rules.tutorialCallout =
-        "Io regolith is inert. Cool marked lava with Hazard support, then drill the gray Common Ore.";
-    rules.mineralAvailability = "Common Ore inside Thermal lava only";
-    rules.knownEnemyRoles = "No hostile contacts";
-    rules.recommendedCounters = "Hazard Drone Mk I";
+    MiningArenaRules rules = resolveMiningArenaRules(resolvedRequest);
+    if (site.biome == MiningSiteBiome::ThermalLava) {
+        applyThermalLavaSiteRules(rules);
+    }
+    if (site.gateType != MiningGateType::None) {
+        rules.request.gateOverrideEnabled = true;
+        rules.request.gateOverride = site.gateType;
+        allowGate(rules, site.gateType);
+    }
     return rules;
 }
 
@@ -493,7 +511,7 @@ std::string_view miningGateName(MiningGateType type)
     case MiningGateType::EnduranceVault: return "Endurance Vault";
     case MiningGateType::ShieldCorridor: return "Shield Corridor";
     case MiningGateType::BurrowBreach: return "Burrow Breach";
-    case MiningGateType::CompoundStoryVault: return "Compound Story Vault";
+    case MiningGateType::CompoundVault: return "Compound Vault";
     }
     return "None";
 }
@@ -522,16 +540,13 @@ MiningGateType selectMiningGateType(const MiningArenaRules& rules)
             ? rules.request.gateOverride
             : MiningGateType::None;
     }
-    if (rules.fixedStoryGate != MiningGateType::None) {
-        return rules.fixedStoryGate;
-    }
     std::array<MiningGateType, miningGateTypeCount> candidates {};
     std::size_t count = 0;
     for (int raw = static_cast<int>(MiningGateType::HazardCocoon);
-         raw <= static_cast<int>(MiningGateType::CompoundStoryVault);
+         raw <= static_cast<int>(MiningGateType::CompoundVault);
          ++raw) {
         const auto type = static_cast<MiningGateType>(raw);
-        if (miningGateAllowed(rules, type) && type != MiningGateType::CompoundStoryVault) {
+        if (miningGateAllowed(rules, type) && type != MiningGateType::CompoundVault) {
             candidates[count++] = type;
         }
     }
@@ -545,24 +560,22 @@ MiningGateType selectMiningGateType(const MiningArenaRules& rules)
 MiningGateDefinition resolveMiningGateDefinition(
     const MiningArenaRules& rules,
     MiningGateType type,
-    bool storyCritical)
+    bool compatibilityCritical)
 {
     MiningGateDefinition gate;
     gate.type = type;
-    gate.storyCritical = storyCritical;
+    gate.compatibilityCritical = compatibilityCritical;
     gate.name = miningGateName(type);
     switch (type) {
     case MiningGateType::None:
         break;
     case MiningGateType::HazardCocoon:
         gate.requiresHazardTreatment = true;
-        gate.hazardAffinity = rules.request.act == MiningAct::ActThree
-            ? MiningElementalAffinity::Radiation
-            : (rules.request.difficulty >= 9 ? MiningElementalAffinity::Toxic : MiningElementalAffinity::Thermal);
+        gate.hazardAffinity = strongestAllowedHazardAffinity(rules);
         gate.requiredHazardMark = gate.hazardAffinity == MiningElementalAffinity::Radiation ? 3
             : (gate.hazardAffinity == MiningElementalAffinity::Toxic ? 2 : 1);
         gate.requiredCapability = gate.requiredHazardMark == 1 ? "Hazard Drone Mk I" : (gate.requiredHazardMark == 2 ? "Hazard Drone Mk II" : "Hazard Drone Mk III");
-        gate.alternatives = "Hard story lock: every shell tile must be treated.";
+        gate.alternatives = "Hard protection lock: every shell tile must be treated.";
         break;
     case MiningGateType::EnemySealedChamber:
         gate.requiresEnemyClearance = true;
@@ -600,11 +613,10 @@ MiningGateDefinition resolveMiningGateDefinition(
         gate.requiredCapability = "Open the marked bedrock breach";
         gate.alternatives = "Lure a Mammal through it, or use Survey support to find the long route.";
         break;
-    case MiningGateType::CompoundStoryVault:
+    case MiningGateType::CompoundVault:
         gate.requiresHazardTreatment = true;
         gate.requiresEnemyClearance = true;
-        gate.hazardAffinity = rules.request.act == MiningAct::ActThree ? MiningElementalAffinity::Radiation
-            : (rules.request.difficulty >= 9 ? MiningElementalAffinity::Toxic : MiningElementalAffinity::Thermal);
+        gate.hazardAffinity = strongestAllowedHazardAffinity(rules);
         gate.requiredHazardMark = gate.hazardAffinity == MiningElementalAffinity::Radiation ? 3
             : (gate.hazardAffinity == MiningElementalAffinity::Toxic ? 2 : 1);
         gate.endurancePlacement = rules.request.act == MiningAct::ActThree;
@@ -612,56 +624,40 @@ MiningGateDefinition resolveMiningGateDefinition(
         gate.requiredCapability = rules.request.act == MiningAct::ActThree
             ? "Hazard treatment, encounter clearance, and extraction endurance"
             : "Hazard treatment plus encounter clearance";
-        gate.alternatives = "A compound story lock using previously taught systems.";
+        gate.alternatives = "A compound protection lock using previously taught systems.";
         break;
     }
     return gate;
 }
 
-const MiningStorySiteProgress* pendingMiningStorySite(
+MiningSiteProgress* pendingCompatibilityMiningSite(
+    MetaProgress& meta,
+    std::string_view destinationId)
+{
+    const auto site = std::find_if(meta.miningSites.begin(), meta.miningSites.end(), [&](const MiningSiteProgress& candidate) {
+        return candidate.legacyMigrated && !candidate.completed &&
+            candidate.destinationId == destinationId;
+    });
+    return site == meta.miningSites.end() ? nullptr : &*site;
+}
+
+const MiningSiteProgress* pendingCompatibilityMiningSite(
     const MetaProgress& meta,
     std::string_view destinationId)
 {
-    const auto site = std::find_if(meta.miningStorySites.begin(), meta.miningStorySites.end(), [&](const MiningStorySiteProgress& candidate) {
-        return !candidate.completed && candidate.destinationId == destinationId;
+    const auto site = std::find_if(meta.miningSites.begin(), meta.miningSites.end(), [&](const MiningSiteProgress& candidate) {
+        return candidate.legacyMigrated && !candidate.completed &&
+            candidate.destinationId == destinationId;
     });
-    return site == meta.miningStorySites.end() ? nullptr : &*site;
+    return site == meta.miningSites.end() ? nullptr : &*site;
 }
 
-MiningStorySiteProgress* ensureMiningStorySite(
-    MetaProgress& meta,
-    std::string_view destinationId,
-    const MiningArenaRules& rules)
-{
-    if (rules.fixedStoryGate == MiningGateType::None) {
-        return nullptr;
-    }
-    const auto existing = std::find_if(meta.miningStorySites.begin(), meta.miningStorySites.end(), [&](const MiningStorySiteProgress& candidate) {
-        return candidate.destinationId == destinationId && candidate.gateType == rules.fixedStoryGate;
-    });
-    if (existing != meta.miningStorySites.end()) {
-        return existing->completed ? nullptr : &*existing;
-    }
-    std::ostringstream id;
-    id << destinationId << "_story_gate_" << static_cast<int>(rules.fixedStoryGate);
-    MiningStorySiteProgress site;
-    site.siteId = id.str();
-    site.destinationId = std::string(destinationId);
-    site.act = rules.request.act;
-    site.difficulty = rules.request.difficulty;
-    site.seed = rules.request.seed;
-    site.gateType = rules.fixedStoryGate;
-    site.artifactId = site.siteId + "_artifact";
-    meta.miningStorySites.push_back(std::move(site));
-    return &meta.miningStorySites.back();
-}
-
-void creditExtractedMiningStoryArtifacts(
+void creditExtractedCompatibilityMiningSiteArtifacts(
     MetaProgress& meta,
     const std::vector<ArtifactRecord>& artifacts)
 {
-    for (MiningStorySiteProgress& site : meta.miningStorySites) {
-        if (site.completed) {
+    for (MiningSiteProgress& site : meta.miningSites) {
+        if (!site.legacyMigrated || site.completed) {
             continue;
         }
         const auto recovered = std::find_if(artifacts.begin(), artifacts.end(), [&](const ArtifactRecord& artifact) {
@@ -676,14 +672,14 @@ void creditExtractedMiningStoryArtifacts(
 
 MiningCampaignProgression resolveCampaignMiningProgression(
     GameChapter chapter,
-    std::string_view destinationId,
+    std::string_view /* destinationId */,
     int surfaceDepth,
     int completedHostileSorties)
 {
     MiningCampaignProgression progression;
     const int depth = std::max(0, surfaceDepth);
 
-    if (chapter == GameChapter::ProvingGround || destinationId == content::destination::earthOrbit) {
+    if (chapter == GameChapter::ProvingGround) {
         return progression;
     }
 
