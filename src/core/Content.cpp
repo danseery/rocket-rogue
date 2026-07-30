@@ -414,7 +414,7 @@ ContentCatalog createDefaultContent()
                     std::string("Most regolith is inert. Recover ") +
                         std::to_string(tuning::research::prospectorCommonOreGoal) +
                         " gray-seamed Common Ore deposits and return them safely.",
-                    "REWARD // PROSPECTOR MK I + SLOT 1", "Accept Lunar Contract", {},
+                    "REWARD // PROSPECTOR MK I + SLOT 1", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
@@ -439,7 +439,7 @@ ContentCatalog createDefaultContent()
                 {"briefing", {}, "MARS", "Bay Expansion",
                     std::string("Recover ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
                         " Martian Common Ore. Oxygen, drill heat, integrity, repairs, and the return decision are now live.",
-                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Accept Mars Contract", {},
+                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MARS", "Bay Expansion",

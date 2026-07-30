@@ -252,7 +252,6 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state);
 SurfaceActionOutcome startSurfacePushRun(GameState& state, Random& rng);
 SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng);
 SurfaceActionOutcome bankSurfacePush(GameState& state);
-SurfaceActionOutcome abortSurfacePush(GameState& state);
 SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng);
 SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng);
 

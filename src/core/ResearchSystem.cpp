@@ -3977,21 +3977,6 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
     return outcome;
 }
 
-SurfaceActionOutcome abortSurfacePush(GameState& state)
-{
-    SurfaceActionOutcome outcome;
-    if (!state.run.surfacePush.active && !state.run.surfacePush.completed) {
-        outcome.message = "No Push Deeper run is active.";
-        return outcome;
-    }
-    outcome.applied = true;
-    outcome.message = "Push Deeper recalled. No route payload banked.";
-    appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
-    resetSurfacePush(state);
-    state.screen = Screen::SurfaceExpedition;
-    return outcome;
-}
-
 SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
 {
     return extractSurfacePayload(state, legacyCampaignCatalog(), rng);

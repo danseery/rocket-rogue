@@ -1424,7 +1424,7 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
 
 inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
 {
-    return fieldSurfaceActionButton(state, text::buttons::pushDeeper, ui::actions::pushSurface, tuning::research::pushSupplyCost, "danger");
+    return fieldSurfaceActionButton(state, text::buttons::pushDeeper, ui::actions::pushSurface, tuning::research::pushSupplyCost, "warn");
 }
 
 inline std::string pushSurfaceActionAvailability(const GameState& state)

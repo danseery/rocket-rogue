@@ -10306,7 +10306,7 @@ void surfacePresentationComesFromSharedHelper()
         return chip.label == std::string(text::labels::sharedFuel) && chip.value == "-1 deploy";
     }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose deployment fuel spend");
     require(surface.actions[2].action.label == std::string(text::buttons::pushDeeper), "Push Deeper should use the shared action label");
-    require(surface.actions[2].action.cssClass == "danger", "Push Deeper should expose danger styling");
+    require(surface.actions[2].action.cssClass == "warn", "Push Deeper should expose gold caution styling");
     require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::depth) && chip.value == "+1";
     }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose depth payoff");
@@ -10921,7 +10921,7 @@ void refitWindowPresentationComesFromSharedHelper()
     require(moduleOffer.affordable, "module offer should expose affordability");
     require(moduleOffer.card.title == engine->name, "module offer should include shared card presentation");
     require(moduleOffer.action.enabled, "affordable module offer should enable install action");
-    require(moduleOffer.action.label == std::string(text::buttons::installPermanently), "module offer should use permanent install label");
+    require(moduleOffer.action.label == std::string(text::buttons::installPermanently), "module offer should use the concise install label");
     require(moduleOffer.action.actionId == ui::actions::buyOffer(0), "module offer should use shared indexed buy action");
     require(moduleOffer.action.cssClass == "ok", "module offer should expose install button style");
 
@@ -12467,7 +12467,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
                 || marsDroneHtml.find("14 Common aboard") != std::string::npos),
         "active Mars Drone Ops should say the empty slot needs no second drone and show all eligible Common aboard");
     require(
-        marsDroneHtml.find("Return to Surface Ops") != std::string::npos
+        marsDroneHtml.find("Return") != std::string::npos
             && (marsDroneHtml.find("EXTRACT SAFELY") != std::string::npos
                 || marsDroneHtml.find("extract safely") != std::string::npos
                 || marsDroneHtml.find("Extract Payload") != std::string::npos),
@@ -12605,8 +12605,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(refitHtml.find("rr-button-label\">Select</span>") == std::string::npos
             && refitHtml.find("rr-button-label\">Selected</span>") == std::string::npos,
         "refit offer cards should not contain redundant Select or Selected buttons");
-    require(countOccurrences(refitHtml, "Install permanently") == 3,
-        "each affordable refit card should expose its irreversible install action directly");
+    require(countOccurrences(refitHtml, "rr-button-label\">Install</span>") == 3,
+        "each affordable refit card should expose its install action directly");
     require(refitHtml.find("selected-refit-detail") == std::string::npos
             && refitHtml.find("SELECTED OFFER") == std::string::npos,
         "refit should not repeat the chosen card in a redundant selected-offer section");

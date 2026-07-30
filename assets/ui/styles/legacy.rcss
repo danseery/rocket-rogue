@@ -7146,6 +7146,81 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     margin: 0px 5px 0px 0px;
     padding: 5px 3px;
 }
+
+/* Science has three deliberately comparable projects. Do not inherit the
+   single-column management-row treatment here: it hides each project's value
+   and leaves the cost/action footer bunched at the edge of a wide card. */
+#rr-panel.research-family-panel .phase-board-research .board-primary {
+    width: 100%;
+    margin: 0px;
+    padding: 0px;
+    background-color: transparent;
+    border-width: 0px;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0px;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card {
+    flex: 1 1 0px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    min-height: 206px;
+    height: 206px;
+    margin: 0px 8px 0px 0px;
+    padding: 10px;
+    overflow: hidden;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card:last-child {
+    margin-right: 0px;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card > p,
+#rr-panel.research-family-panel .phase-board-research .ops-card .module-impact {
+    display: block;
+    width: 100%;
+    min-height: 0px;
+    max-height: 36px;
+    margin: 5px 0px 0px 0px;
+    overflow: hidden;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card h3 {
+    margin: 4px 0px 0px 0px;
+    font-size: 14px;
+    line-height: 1.12;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card .card-footer {
+    display: flex;
+    flex: 0 0 42px;
+    width: 100%;
+    min-height: 42px;
+    height: 42px;
+    margin: auto 0px 0px 0px;
+    padding: 6px 0px 0px 0px;
+    border-top-width: 1px;
+    border-color: #34596a;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card .card-footer span {
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
+    margin: 0px 6px 0px 0px;
+    padding: 8px 0px 0px 0px;
+    overflow: hidden;
+}
+#rr-panel.research-family-panel .phase-board-research .ops-card .card-footer button {
+    flex: 0 0 96px;
+    width: 96px;
+    min-width: 96px;
+    min-height: 36px;
+    height: 36px;
+    margin: 0px;
+    padding: 0px 5px;
+    font-size: 12px;
+}
 #rr-panel.drone-family-panel .phase-titlebar {
     min-height: 40px;
     height: auto;
@@ -8998,6 +9073,19 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     display: block;
     width: 100%;
     line-height: 1.2;
+    text-align: center;
+}
+
+/* RmlUi does not consistently apply flex cross-axis alignment to the
+   per-offer refit action. Give its single-line label the full button line
+   box so it remains centered on both renderers. */
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer button.rr-text-button,
+#rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer button.rr-text-button .rr-button-label {
+    height: 36px;
+    min-height: 36px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 36px;
     text-align: center;
 }
 #rr-panel .stat-chip,

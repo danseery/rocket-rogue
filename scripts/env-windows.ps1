@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param()
+param(
+    [switch]$NativeOnly
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -167,19 +169,23 @@ function Test-EmscriptenToolchain {
     }
 }
 
-if (Test-Path $VenvActivate) {
-    . $VenvActivate
-    Write-Host "Activated Python virtual environment: $VenvActivate"
-} else {
-    Write-Warning "Python virtual environment not found. Run scripts\install-windows.ps1 first."
-}
-
 Update-ProcessPath
 Import-VisualStudioEnvironment
 Update-ProcessPath
-Import-EmsdkEnvironment -SdkDir $EmsdkDir
-Update-ProcessPath
-Test-EmscriptenToolchain -SdkDir $EmsdkDir
+
+if (-not $NativeOnly) {
+    if (Test-Path $VenvActivate) {
+        . $VenvActivate
+        Write-Host "Activated Python virtual environment: $VenvActivate"
+    } else {
+        Write-Warning "Python virtual environment not found. Run scripts\install-windows.ps1 first."
+    }
+
+    Update-ProcessPath
+    Import-EmsdkEnvironment -SdkDir $EmsdkDir
+    Update-ProcessPath
+    Test-EmscriptenToolchain -SdkDir $EmsdkDir
+}
 
 Write-Host ""
 Write-Host "Rocket Rogue dev shell is ready for this PowerShell session."

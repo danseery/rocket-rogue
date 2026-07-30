@@ -81,7 +81,9 @@ function psQuote(value) {
 let result;
 if (process.platform === "win32") {
   const envScript = join(process.cwd(), "scripts", "env-windows.ps1");
-  const invocation = `. ${psQuote(envScript)}; & ${psQuote(command)} ${args.map(psQuote).join(" ")}`;
+  const nativeOnly = preset.startsWith("native-") || preset === "package-native";
+  const envArguments = nativeOnly ? " -NativeOnly" : "";
+  const invocation = `. ${psQuote(envScript)}${envArguments}; & ${psQuote(command)} ${args.map(psQuote).join(" ")}`;
   result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", invocation],

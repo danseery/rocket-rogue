@@ -903,7 +903,7 @@ std::string lunarMiningBriefingModal(const GameState& state)
         << "<div class=\"activity-introduction-payoff\"><span>Visual identification</span><strong>"
         << "Plain dirt yields nothing. Common Ore uses a silver seam, gray shimmer, and hex marker."
         << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Accept Lunar Contract", ui::actions::acknowledgeLunarMiningBriefing, "ok", true)
+        << button("Accept Contract", ui::actions::acknowledgeLunarMiningBriefing, "ok", true)
         << "</div></section>";
     return autoModalTemplate(
         ui::modals::lunarMiningBriefing,
@@ -928,7 +928,7 @@ std::string marsMiningBriefingModal(const GameState& state)
         << "<div class=\"activity-introduction-payoff\"><span>Support Drone Slot 2</span><strong>"
         << "Oxygen, drill heat, integrity, repairs, and the return decision are now live. The completed bay starts empty so you can choose the next specialist."
         << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Accept Mars Contract", ui::actions::acknowledgeMarsMiningBriefing, "ok", true)
+        << button("Accept Contract", ui::actions::acknowledgeMarsMiningBriefing, "ok", true)
         << "</div></section>";
     return autoModalTemplate(
         ui::modals::marsMiningBriefing,
@@ -3643,13 +3643,12 @@ std::string buildGamePanelMarkup(
         };
         std::vector<PanelButtonPresentation> actions;
         if (push.busted) {
-            actions.push_back(panelActionButton("Return to Surface Ops", ui::actions::surfacePushBank, "danger"));
+            actions.push_back(panelActionButton("Return", ui::actions::surfacePushBank, "ok"));
         } else {
             actions.push_back(push.completed
                 ? disabledPanelButton("Route limit reached")
-                : panelActionButton(text::buttons::pushDeeper, ui::actions::surfacePushStep, "danger"));
-            actions.push_back(panelActionButton(push.steps > 0 ? "Bank route" : "Return to Surface Ops", ui::actions::surfacePushBank, "ok"));
-            actions.push_back(panelActionButton("Abort descent", ui::actions::surfacePushAbort, "danger"));
+                : panelActionButton(text::buttons::pushDeeper, ui::actions::surfacePushStep, "warn"));
+            actions.push_back(panelActionButton("Return", ui::actions::surfacePushBank, "ok"));
         }
         out << surfaceMiniGamePanel(
             "push-minigame",

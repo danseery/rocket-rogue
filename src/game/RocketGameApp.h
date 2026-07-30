@@ -94,7 +94,6 @@ public:
     void scanSurfaceAbort();
     void pushSurfaceStep();
     void pushSurfaceBank();
-    void pushSurfaceAbort();
     void extractSurface();
     void selectSurfaceUpgrade(int index);
     void openDroneOps();

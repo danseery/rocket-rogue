@@ -597,16 +597,6 @@ void rr_surface_push_bank()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_surface_push_abort()
-{
-    if (g_app) {
-        g_app->pushSurfaceAbort();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_surface_upgrade(int index)
 {
     if (g_app) {

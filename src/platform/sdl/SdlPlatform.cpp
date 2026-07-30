@@ -615,7 +615,7 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
     case InputContext::SurfacePush:
         if (event.key == SDLK_SPACE) app.pushSurfaceStep();
         else if (event.key == SDLK_X) app.pushSurfaceBank();
-        else if (event.key == SDLK_ESCAPE) app.pushSurfaceAbort();
+        else if (event.key == SDLK_ESCAPE) app.pushSurfaceBank();
         break;
     case InputContext::MiningActive:
     case InputContext::MiningService:

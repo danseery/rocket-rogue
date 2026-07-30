@@ -60,7 +60,6 @@ inline constexpr std::string_view surfaceScanBank = "surface_scan_bank";
 inline constexpr std::string_view surfaceScanAbort = "surface_scan_abort";
 inline constexpr std::string_view surfacePushStep = "surface_push_step";
 inline constexpr std::string_view surfacePushBank = "surface_push_bank";
-inline constexpr std::string_view surfacePushAbort = "surface_push_abort";
 inline constexpr std::string_view miningScanner = "mining_scanner";
 inline constexpr std::string_view miningTether = "mining_tether";
 inline constexpr std::string_view miningRepairDrill = "mining_repair_drill";

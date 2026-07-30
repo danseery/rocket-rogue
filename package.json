@@ -22,7 +22,7 @@
     "serve:web": "node tools/serve.mjs build/web-release 8080",
     "configure:native": "node tools/run-cmake-preset.mjs configure native-debug",
     "build:native": "node tools/run-cmake-preset.mjs build native-debug",
-    "test:native": "node tools/run-cmake-preset.mjs test native-debug",
+    "test:native": "node tools/run-cmake-preset.mjs test native-debug --parallel 2",
     "configure:native:release": "node tools/run-cmake-preset.mjs configure native-release",
     "build:native:release": "node tools/run-cmake-preset.mjs build native-release",
     "test:native:release": "node tools/run-cmake-preset.mjs test native-release",

@@ -75,6 +75,30 @@ file(GLOB_RECURSE ROCKET_UI_ASSET_FILES CONFIGURE_DEPENDS
     "${ROCKET_UI_ASSET_DIRECTORY}/*.rml"
     "${ROCKET_UI_ASSET_DIRECTORY}/*.rcss")
 list(SORT ROCKET_UI_ASSET_FILES)
+file(GLOB_RECURSE ROCKET_FONT_ASSET_FILES CONFIGURE_DEPENDS
+    "${ROCKET_FONT_ASSET_DIRECTORY}/*")
+file(GLOB_RECURSE ROCKET_SCENE_ATLAS_ASSET_FILES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/assets/scene-atlas/*")
+file(GLOB_RECURSE ROCKET_SHADER_ASSET_FILES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/assets/shaders/*")
+list(SORT ROCKET_FONT_ASSET_FILES)
+list(SORT ROCKET_SCENE_ATLAS_ASSET_FILES)
+list(SORT ROCKET_SHADER_ASSET_FILES)
+
+# The manifests change when a globbed runtime asset is added or removed. They
+# make deletion visible to the stamp-based copy steps as well as ordinary file
+# edits, while avoiding a full copy on a no-op code build.
+string(JOIN "\n" ROCKET_UI_ASSET_MANIFEST_CONTENT ${ROCKET_UI_ASSET_FILES})
+set(ROCKET_UI_ASSET_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/rocket-ui-assets.manifest")
+file(GENERATE OUTPUT "${ROCKET_UI_ASSET_MANIFEST}" CONTENT "${ROCKET_UI_ASSET_MANIFEST_CONTENT}\n")
+set(ROCKET_RUNTIME_ASSET_FILES
+    ${ROCKET_UI_ASSET_FILES}
+    ${ROCKET_FONT_ASSET_FILES}
+    ${ROCKET_SCENE_ATLAS_ASSET_FILES}
+    ${ROCKET_SHADER_ASSET_FILES})
+string(JOIN "\n" ROCKET_RUNTIME_ASSET_MANIFEST_CONTENT ${ROCKET_RUNTIME_ASSET_FILES})
+set(ROCKET_RUNTIME_ASSET_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/rocket-runtime-assets.manifest")
+file(GENERATE OUTPUT "${ROCKET_RUNTIME_ASSET_MANIFEST}" CONTENT "${ROCKET_RUNTIME_ASSET_MANIFEST_CONTENT}\n")
 
 include(FetchContent)
 
@@ -143,15 +167,19 @@ else()
     set(ROCKET_RMLUI_SOURCE_DIR "${rmlui_source_SOURCE_DIR}")
 endif()
 
+add_library(rocket_game_panel
+    src/game/GamePanel.cpp)
+target_link_libraries(rocket_game_panel PUBLIC rocket_core)
+target_include_directories(rocket_game_panel PUBLIC src)
+
 add_library(rocket_app
-    src/game/GamePanel.cpp
     src/game/GameRmlUi.cpp
     src/game/GameRunner.cpp
     src/game/RocketGameApp.cpp
     src/performance/PerformanceMetrics.cpp
     src/render/FrameCapture.cpp
     src/render/SceneComposer.cpp)
-target_link_libraries(rocket_app PUBLIC rocket_core PRIVATE rmlui_core)
+target_link_libraries(rocket_app PUBLIC rocket_core rocket_game_panel PRIVATE rmlui_core)
 target_include_directories(rocket_app PUBLIC
     src
     "${ROCKET_RMLUI_SOURCE_DIR}/Backends"
@@ -167,8 +195,7 @@ if(EMSCRIPTEN)
 endif()
 
 add_executable(rocket_core_tests tests/core_tests.cpp)
-target_link_libraries(rocket_core_tests PRIVATE rocket_core)
-target_sources(rocket_core_tests PRIVATE src/game/GamePanel.cpp)
+target_link_libraries(rocket_core_tests PRIVATE rocket_core rocket_game_panel)
 set_target_properties(rocket_core_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
 add_executable(rocket_mining_progression_tests tests/mining_progression_tests.cpp)
@@ -257,10 +284,19 @@ add_test(NAME rocket_rmlui_resource_graph_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.test.mjs")
 add_test(NAME rocket_web_shell_input_contract_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/web-shell-input-contract.test.mjs")
-add_custom_target(validate_rocket_ui_resources
+set(ROCKET_UI_VALIDATION_STAMP "${CMAKE_CURRENT_BINARY_DIR}/validate-rocket-ui-resources.stamp")
+add_custom_command(
+    OUTPUT "${ROCKET_UI_VALIDATION_STAMP}"
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.mjs"
+    COMMAND ${CMAKE_COMMAND} -E touch "${ROCKET_UI_VALIDATION_STAMP}"
+    DEPENDS
+        ${ROCKET_UI_ASSET_FILES}
+        "${ROCKET_UI_ASSET_MANIFEST}"
+        "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.mjs"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Validating packaged RmlUi templates and styles")
+    COMMENT "Validating packaged RmlUi templates and styles"
+    VERBATIM)
+add_custom_target(validate_rocket_ui_resources DEPENDS "${ROCKET_UI_VALIDATION_STAMP}")
 
 if(EMSCRIPTEN)
     add_library(rocket_platform_web
@@ -275,7 +311,9 @@ if(EMSCRIPTEN)
     target_link_libraries(rocket_rogue PRIVATE rocket_app rocket_platform_web rmlui_core)
     target_compile_options(rocket_rogue PRIVATE -sUSE_FREETYPE=1)
 
-    add_custom_target(copy_rocket_assets
+    set(ROCKET_WEB_ASSET_STAMP "${CMAKE_CURRENT_BINARY_DIR}/copy-rocket-assets.stamp")
+    add_custom_command(
+        OUTPUT "${ROCKET_WEB_ASSET_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -287,12 +325,19 @@ if(EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_UI_ASSET_DIRECTORY}"
             "${CMAKE_CURRENT_BINARY_DIR}/assets/ui"
-        COMMENT "Copying Rocket Rogue web assets")
-    add_dependencies(copy_rocket_assets validate_rocket_ui_resources)
+        COMMAND ${CMAKE_COMMAND} -E touch "${ROCKET_WEB_ASSET_STAMP}"
+        DEPENDS
+            "${ROCKET_UI_VALIDATION_STAMP}"
+            "${ROCKET_RUNTIME_ASSET_MANIFEST}"
+            ${ROCKET_RUNTIME_ASSET_FILES}
+        COMMENT "Copying Rocket Rogue web assets"
+        VERBATIM)
+    add_custom_target(copy_rocket_assets DEPENDS "${ROCKET_WEB_ASSET_STAMP}")
     add_dependencies(rocket_rogue copy_rocket_assets)
 
     set(ROCKET_EXPORTED_FUNCTIONS
         "['_main','_rr_new_game','_rr_continue_game','_rr_prepare_launch','_rr_current_screen','_rr_start_launch','_rr_eject_now','_rr_return_home','_rr_arrival_ops','_rr_skip_arrival_fanfare','_rr_cut_engines','_rr_pressure_relief','_rr_close_relief_valve','_rr_jettison_cargo','_rr_next','_rr_attempt_frontier','_rr_open_navigation','_rr_ark_jump','_rr_select_navigation','_rr_buy_offer','_rr_select_refit_offer','_rr_reroll_offers','_rr_arrival_flyby','_rr_flyby_move','_rr_flyby_abort','_rr_flyby_continue','_rr_arrival_orbit','_rr_orbit_move','_rr_orbit_abort','_rr_orbit_continue','_rr_arrival_landing','_rr_research_project','_rr_skip_research','_rr_survey_surface','_rr_mine_surface','_rr_push_surface','_rr_extract_surface','_rr_surface_scan_pulse','_rr_surface_scan_bank','_rr_surface_scan_abort','_rr_surface_push_step','_rr_surface_push_bank','_rr_surface_push_abort','_rr_surface_upgrade','_rr_drone_ops','_rr_surface_ops','_rr_equip_drone','_rr_unequip_drone_slot','_rr_upgrade_drone','_rr_upgrade_drone_slot','_rr_mining_move','_rr_mining_aim','_rr_mining_pointer_aim','_rr_mining_fire','_rr_mining_drill','_rr_mining_scanner','_rr_mining_tether','_rr_mining_operator_toggle','_rr_mining_operator_toggle_progress','_rr_mining_stow','_rr_mining_abort','_rr_mining_failure_ack','_rr_debug_mining','_rr_debug_combat_mining','_rr_debug_mining_arena','_rr_debug_mining_preview','_rr_debug_surface_scan','_rr_debug_surface_push','_rr_debug_flyby','_rr_debug_orbit','_rr_debug_hangar','_rr_debug_results','_rr_debug_arrival_ops','_rr_debug_research','_rr_debug_refit','_rr_debug_surface_upgrade','_rr_debug_drone_ops','_rr_debug_navigation','_rr_debug_act_one_start','_rr_debug_act_one_previous','_rr_debug_act_one_next','_rr_debug_act_one_checkpoint','_rr_debug_exit','_rr_repair_ship','_rr_recruit_crew','_rr_recruit_candidate','_rr_train_crew','_rr_rest_crew','_rr_reset_save','_rr_rml_mouse_move','_rr_rml_mouse_down','_rr_rml_mouse_up','_rr_rml_wheel','_rr_rml_hit_test','_rr_ui_navigate','_rr_ui_activate_focused','_rr_ui_cancel','_rr_controller_debug_status','_rr_controller_app_debug_status','_rr_debug_controller_set','_rr_debug_controller_clear','_rr_controller_haptic']")
+    string(REPLACE "'_rr_surface_push_abort'," "" ROCKET_EXPORTED_FUNCTIONS "${ROCKET_EXPORTED_FUNCTIONS}")
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"
         SUFFIX ".html"
@@ -443,7 +488,9 @@ else()
     set_target_properties(RocketRogue PROPERTIES
         OUTPUT_NAME "RocketRogue"
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
-    add_custom_target(copy_native_assets
+    set(ROCKET_NATIVE_ASSET_STAMP "${CMAKE_CURRENT_BINARY_DIR}/copy-native-assets.stamp")
+    add_custom_command(
+        OUTPUT "${ROCKET_NATIVE_ASSET_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:RocketRogue>/assets"
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RocketRogue>/assets"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -458,8 +505,14 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_UI_ASSET_DIRECTORY}"
             "$<TARGET_FILE_DIR:RocketRogue>/assets/ui"
-        COMMENT "Copying native Rocket Rogue assets")
-    add_dependencies(copy_native_assets validate_rocket_ui_resources)
+        COMMAND ${CMAKE_COMMAND} -E touch "${ROCKET_NATIVE_ASSET_STAMP}"
+        DEPENDS
+            "${ROCKET_UI_VALIDATION_STAMP}"
+            "${ROCKET_RUNTIME_ASSET_MANIFEST}"
+            ${ROCKET_RUNTIME_ASSET_FILES}
+        COMMENT "Copying native Rocket Rogue assets"
+        VERBATIM)
+    add_custom_target(copy_native_assets DEPENDS "${ROCKET_NATIVE_ASSET_STAMP}")
     add_dependencies(RocketRogue copy_native_assets)
 
     add_executable(rocket_native_platform_tests tests/native_platform_tests.cpp)

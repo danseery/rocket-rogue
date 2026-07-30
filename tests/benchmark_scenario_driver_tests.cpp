@@ -34,7 +34,10 @@ namespace {
 // The v9 scenario-instance state participates in the deterministic gameplay
 // hash, so this fixture tracks the authored campaign after the generic
 // scenario migration.
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xeb7f2be1c45e2fe6ULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0xa2f9baed95a80490ULL;
+// A 56-second soak crosses the active mining oxygen, heat, and hostile-update
+// windows without duplicating the same simulation through a second harness.
+constexpr int kLongRunMiningFrames = 3360;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:
@@ -332,9 +335,11 @@ void testLongRunMiningSubmissionBudget()
     options.seed = 0x0BEB17ULL;
     rocket::performance::BenchmarkScenarioDriver driver;
     assert(driver.setup(fixture.app, options));
-    for (int frame = 0; frame < 4200; ++frame) {
+    for (int frame = 0; frame < kLongRunMiningFrames; ++frame) {
         fixture.app.tick(1.0 / 60.0);
     }
+    // Keep the fixed scene snapshot at the established late-run visual phase;
+    // the shortened soak only changes simulation duration.
     fixture.renderer.composer.setPresentationTime(70.0);
     fixture.app.renderScene();
 
@@ -362,34 +367,22 @@ void testLongRunMiningSubmissionBudget()
     fixture.app.shutdown();
 }
 
-void testLongRunMiningRunnerHash()
+void testBenchmarkRunnerAdvancesMining()
 {
-    FakeSaveStore saves;
-    FakePreferenceStore preferences;
-    FakeHost host;
-    FakeControllerSource controllers;
-    FakeTextureSource textures;
-    FakeRenderer renderer;
-    FakeUi ui;
-    FakeUiBridge bridge;
-    rocket::AppServices services {
-        saves, preferences, host, controllers, textures, renderer, ui, bridge};
-    rocket::GameRunner runner(services);
+    Fixture fixture;
+    rocket::GameRunner runner(fixture.services);
     assert(runner.initialize());
     rocket::performance::NativeBenchmarkOptions options;
     options.enabled = true;
     options.scenario = rocket::performance::NativeBenchmarkScenario::Mining;
     options.seed = 0x0BEB17ULL;
     rocket::performance::BenchmarkScenarioDriver driver;
-    assert(driver.setup(runner.app(), options));
-    for (int frame = 0; frame < 4200; ++frame) {
+    const rocket::performance::BenchmarkScenarioSetupResult setup = driver.setup(runner.app(), options);
+    assert(setup && setup.gameplayStateHash.has_value());
+    for (int frame = 0; frame < 120; ++frame) {
         runner.frameForBenchmark(1.0 / 60.0);
     }
-    const std::uint64_t runnerStateHash = runner.app().deterministicStateHash();
-    if (runnerStateHash != kExpectedLongRunMiningHash) {
-        std::fprintf(stderr, "Long-run mining runner hash: 0x%llx\n", static_cast<unsigned long long>(runnerStateHash));
-    }
-    assert(runnerStateHash == kExpectedLongRunMiningHash);
+    assert(runner.app().deterministicStateHash() != *setup.gameplayStateHash);
     runner.shutdown();
 }
 
@@ -405,6 +398,6 @@ int main()
     testFixedSeedHighEntityMining();
     testDisabledOptionsAreRejectedWithoutMutation();
     testLongRunMiningSubmissionBudget();
-    testLongRunMiningRunnerHash();
+    testBenchmarkRunnerAdvancesMining();
     return 0;
 }

@@ -1018,7 +1018,7 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
         } else if (context == InputContext::SurfaceScan) {
             scanSurfaceAbort();
         } else if (context == InputContext::SurfacePush) {
-            pushSurfaceAbort();
+            pushSurfaceBank();
         } else if (context == InputContext::MiningActive || context == InputContext::MiningService) {
             miningAbort();
         }
@@ -2639,18 +2639,6 @@ void RocketGameApp::pushSurfaceBank()
     panelDirty_ = true;
 }
 
-void RocketGameApp::pushSurfaceAbort()
-{
-    if (state_.screen != Screen::SurfacePush) {
-        return;
-    }
-
-    const SurfaceActionOutcome outcome = abortSurfacePush(state_);
-    state_.statusLine = surfaceActionSummary(outcome);
-    save();
-    panelDirty_ = true;
-}
-
 void RocketGameApp::miningAbort()
 {
     if (state_.screen != Screen::Mining || miningExtraction_.active) {
@@ -3911,8 +3899,6 @@ void RocketGameApp::runUiAction(const std::string& action)
         pushSurfaceStep();
     } else if (action == ui::actions::surfacePushBank) {
         pushSurfaceBank();
-    } else if (action == ui::actions::surfacePushAbort) {
-        pushSurfaceAbort();
     } else if (action == ui::actions::droneOps) {
         openDroneOps();
     } else if (action == ui::actions::backToSurfaceOps) {
