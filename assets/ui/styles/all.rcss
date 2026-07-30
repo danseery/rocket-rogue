@@ -6730,7 +6730,7 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     line-height: 1;
 }
 .mining-ore-entry.rare strong { color: #f1b72b; }
-.mining-ore-entry.exotic strong { color: #55d86d; }
+.mining-ore-entry.exotic strong { color: #ffaad9; }
 .mining-payload-tile {
     flex: 0 0 80px;
     width: 80px;
@@ -6766,10 +6766,14 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     min-height: 54px;
     height: 54px;
     margin: 0px 8px 0px 0px;
-    padding: 5px 8px;
+    padding: 0px 8px;
     color: #21d8ef;
     font-size: 12px;
     font-weight: normal;
+    line-height: 54px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
     background-color: #08161e;
     border-color: #21d8ef;
     border-radius: 4px;
@@ -7751,7 +7755,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     margin: 0px 6px 0px 0px;
     padding-left: 2px;
     padding-right: 2px;
-    font-size: 11px;
+    font-size: 16px;
 }
 #rr-document.rr-side-rail #rr-panel.phase-board-panel > .panel-head .panel-head-actions button:last-child,
 #rr-document.rr-side-rail #rr-panel.phase-board-panel > .rr-shell .rr-shell-content > .panel-head .panel-head-actions button:last-child,
@@ -9077,4 +9081,376 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.workspace-panel .surface-ops-screen.rr-fixed-action-stack .rr-fixed-action-lane {
     margin-top: 10px;
+}
+
+/* Keep Drone Ops readable without making the Steam Deck side rail scroll. */
+#rr-panel.drone-workspace-panel .drone-control-card {
+    min-height: 188px;
+    height: 188px;
+    max-height: 188px;
+    padding: 7px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .drone-card-head {
+    margin-bottom: 2px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .drone-control-status {
+    min-height: 14px;
+    max-height: 14px;
+    margin: 2px 0px 3px 0px;
+    line-height: 1.05;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .drone-card-summary {
+    min-height: 28px;
+    max-height: 28px;
+    margin: 2px 0px 4px 0px;
+    line-height: 1.1;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .card-footer {
+    min-height: 36px;
+    height: 36px;
+    padding-top: 5px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .card-footer button {
+    min-height: 30px;
+    height: 30px;
+    padding: 3px 5px;
+    font-size: 9px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot {
+    min-height: 96px;
+    height: 96px;
+    max-height: 96px;
+    padding: 7px 8px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-head {
+    min-height: 26px;
+    height: 26px;
+    margin-bottom: 3px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-content {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 0px;
+    height: auto;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-body {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0px;
+    margin: 0px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-body .card-title {
+    margin: 0px;
+    line-height: 1.05;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-role {
+    margin: 2px 0px 0px 0px;
+    line-height: 1.05;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-grid {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: auto;
+    min-height: 26px;
+    margin: 4px 0px 0px 6px;
+    gap: 4px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-chip {
+    min-width: 64px;
+    min-height: 24px;
+    height: 24px;
+    margin: 0px;
+    padding: 3px 5px;
+    font-size: 9px;
+}
+
+/* Player-facing controls share a readable baseline. Keep this normalization
+   last so old per-screen compact rules cannot pull text back to the top edge. */
+#rr-panel button,
+#rr-modal button {
+    box-sizing: border-box;
+    display: inline-block;
+    vertical-align: middle;
+    min-height: 40px;
+    height: auto;
+    padding: 8px 10px;
+    font-size: 14px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+#rr-panel .stat-chip,
+#rr-modal .stat-chip {
+    box-sizing: border-box;
+    display: inline-block;
+    vertical-align: middle;
+    min-height: 32px;
+    height: auto;
+    padding: 6px 9px;
+    font-size: 13px;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+}
+#rr-panel .surface-kpi,
+#rr-modal .surface-kpi {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+#rr-panel .surface-kpi span,
+#rr-panel .surface-kpi strong,
+#rr-modal .surface-kpi span,
+#rr-modal .surface-kpi strong {
+    display: block;
+    width: 100%;
+    text-align: center;
+}
+#rr-panel .drone-loadout-slot .slot-card-head button,
+#rr-panel .drone-control-card .card-footer button {
+    min-height: 32px;
+    height: 32px;
+    padding: 4px 7px;
+    font-size: 13px;
+}
+#rr-panel .drone-loadout-slot .stat-chip,
+#rr-panel .mining-fullscreen .stat-chip,
+#rr-panel .mining-hud .stat-chip {
+    min-height: 30px;
+    height: 30px;
+    font-size: 13px;
+}
+#rr-panel .flight-hud .primary-actions button {
+    min-height: 42px;
+    height: 42px;
+    padding: 8px 10px;
+    font-size: 18px;
+    line-height: 1.1;
+}
+#rr-panel .drone-loadout-slot .slot-card-head button,
+#rr-panel .drone-control-card .card-footer button {
+    line-height: 24px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+}
+#rr-panel .hangar-actions button,
+#rr-panel .primary-actions.rr-action-footer button {
+    min-height: 48px;
+    height: 48px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    font-size: 14px;
+    line-height: 48px;
+}
+
+/* Drone Ops readability tier. These final selectors intentionally outrank
+   the legacy Steam Deck compaction rules while preserving the existing card
+   grid and independent roster/loadout scrolling. */
+#rr-panel.drone-workspace-panel .drone-workspace-heading .ui-kicker,
+#rr-panel.drone-workspace-panel .section-heading .ui-kicker,
+#rr-panel.drone-workspace-panel .drone-bay-copy .ui-kicker {
+    font-size: 11px;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading p,
+#rr-panel.drone-workspace-panel .drone-bay-copy p,
+#rr-panel.drone-workspace-panel .section-heading p,
+#rr-panel.drone-workspace-panel .drone-credit-callout p,
+#rr-panel.drone-workspace-panel .drone-credit-callout > strong {
+    font-size: 12px;
+    line-height: 1.2;
+}
+#rr-panel.drone-workspace-panel .drone-workspace-heading h2 {
+    font-size: 22px;
+}
+#rr-panel.drone-workspace-panel .drone-bay-copy h2,
+#rr-panel.drone-workspace-panel .section-heading h2 {
+    font-size: 19px;
+}
+#rr-panel.drone-workspace-panel .drone-credit-callout h2 {
+    font-size: 16px;
+}
+#rr-panel.drone-workspace-panel .drone-card-id .card-topline,
+#rr-panel.drone-workspace-panel .drone-card-id .card-title {
+    font-size: 14px;
+}
+#rr-panel.drone-workspace-panel .drone-control-status {
+    font-size: 13px;
+}
+#rr-panel.drone-workspace-panel .drone-card-summary,
+#rr-panel.drone-workspace-panel .drone-card-description,
+#rr-panel.drone-workspace-panel .drone-build-hook,
+#rr-panel.drone-workspace-panel .drone-upgrade-summary {
+    font-size: 12px;
+    line-height: 1.2;
+}
+#rr-panel.drone-workspace-panel .drone-card-summary {
+    min-height: 36px;
+    max-height: 36px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .stat-chip,
+#rr-panel.drone-workspace-panel .drone-loadout-slot .stat-chip,
+#rr-panel.drone-workspace-panel .drone-bay-strip .stat-chip {
+    font-size: 12px;
+}
+#rr-panel.drone-workspace-panel .drone-control-card .card-footer button,
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-head button,
+#rr-panel.drone-workspace-panel .drone-workspace-actions button,
+#rr-panel.drone-workspace-panel .drone-bay-strip > button {
+    font-size: 13px;
+}
+#rr-panel.drone-workspace-panel .drone-loadout-slot .slot-role {
+    font-size: 12px;
+}
+
+/* The compact Push Deeper lane has one longer action label. Let that label
+   wrap inside its own button instead of inheriting the global single-line
+   toolbar rule and escaping the border. */
+#rr-panel.phase-board-surface-minigame .minigame-actions button.rr-text-button,
+#rr-panel.phase-board-surface-minigame .minigame-actions button.rr-text-button .rr-button-label {
+    white-space: normal;
+}
+
+/* Flight controls are two deliberate action rows. A legacy narrow-screen
+   rule made them columns; after labels became flex children that allowed each
+   button to shrink to the width of its colour treatment. Keep the launch
+   choices side-by-side with equal, bounded lanes. */
+#rr-panel.control-panel .flight-hud .primary-actions,
+#rr-panel.control-panel .flight-hud .system-actions {
+    flex-direction: row;
+    justify-content: flex-start;
+}
+#rr-panel.control-panel .flight-hud .primary-actions button.rr-text-button,
+#rr-panel.control-panel .flight-hud .system-actions button.rr-text-button {
+    box-sizing: border-box;
+    flex: 1 1 0px;
+    min-width: 0px;
+    width: auto;
+}
+#rr-panel .drone-loadout-slot .slot-card-head button,
+#rr-panel .drone-control-card .card-footer button {
+    min-height: 32px;
+    height: 32px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 32px;
+}
+
+/* RmlUi only centers button text reliably when it has a real child element. */
+#rr-panel button.rr-text-button,
+#rr-modal button.rr-text-button,
+.native-scene-launch-control.rr-text-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 1;
+}
+#rr-panel button.rr-text-button .rr-button-label,
+#rr-modal button.rr-text-button .rr-button-label,
+.native-scene-launch-control.rr-text-button .rr-button-label {
+    display: block;
+    width: 100%;
+    line-height: 1.2;
+    text-align: center;
+}
+#rr-panel .stat-chip,
+#rr-modal .stat-chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 1;
+}
+#rr-panel .stat-chip .rr-chip-label,
+#rr-modal .stat-chip .rr-chip-label {
+    display: block;
+    width: 100%;
+    line-height: 1.2;
+    text-align: center;
+}
+#rr-panel button,
+#rr-modal button {
+    min-height: 40px;
+    height: 40px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 40px;
+}
+#rr-panel .stat-chip,
+#rr-modal .stat-chip {
+    min-height: 32px;
+    height: 32px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 32px;
+}
+#rr-panel .warning-button,
+#rr-modal .warning-button {
+    height: auto;
+    min-height: 0px;
+    padding: 7px 9px;
+    line-height: 1.1;
+}
+#rr-panel .hangar-actions button,
+#rr-panel .primary-actions.rr-action-footer button {
+    min-height: 48px;
+    height: 48px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    line-height: 48px;
+}
+
+/* Flight controls keep the readable type size without clipping longer
+   commands such as Return to Earth. Wrap only inside the button's own lane
+   and let the control grow vertically so it never spills into its neighbor. */
+#rr-panel.control-panel .flight-hud .primary-actions button.rr-text-button,
+#rr-panel.control-panel .flight-hud .system-actions button.rr-text-button {
+    height: auto;
+    min-height: 48px;
+    padding: 6px 8px;
+    line-height: 1.15;
+    white-space: normal;
+    overflow: hidden;
+}
+#rr-panel.control-panel .flight-hud .primary-actions button.rr-text-button .rr-button-label,
+#rr-panel.control-panel .flight-hud .system-actions button.rr-text-button .rr-button-label {
+    white-space: normal;
+    line-height: 1.15;
+}
+
+/* The Drone Ops campaign banner spans the workspace. Reserve a useful lane
+   for its recovery CTA instead of collapsing the command into a tiny chip. */
+#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot {
+    width: 100%;
+    min-width: 0px;
+}
+#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot button.rr-text-button,
+#rr-panel.drone-workspace-panel .phase-board-drone-ops .scenario-objective .campaign-objective-foot button.rr-text-button {
+    flex: 0 0 280px;
+    width: 280px;
+    min-width: 280px;
+    min-height: 64px;
+    height: auto;
+    margin-left: 16px;
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1.15;
+    white-space: normal;
+    overflow: hidden;
+}
+#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot button.rr-text-button .rr-button-label {
+    white-space: normal;
+    line-height: 1.15;
 }

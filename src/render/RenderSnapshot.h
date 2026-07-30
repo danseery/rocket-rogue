@@ -198,6 +198,8 @@ struct RenderSnapshot {
     double miningOperatorFirePulse = 0.0;
     bool miningRigPresent = true;
     bool miningRigDisabled = false;
+    bool miningRigTethered = false;
+    bool miningOperatorRigTethered = false;
     bool miningAnchorValid = false;
     double miningAnchorX = 0.0;
     double miningAnchorY = 0.0;

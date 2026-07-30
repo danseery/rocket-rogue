@@ -34,7 +34,7 @@ namespace {
 // The v9 scenario-instance state participates in the deterministic gameplay
 // hash, so this fixture tracks the authored campaign after the generic
 // scenario migration.
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0x13d3aed0ca413ebaULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0xeb7f2be1c45e2fe6ULL;
 
 class FakeSaveStore final : public rocket::ISaveStore {
 public:

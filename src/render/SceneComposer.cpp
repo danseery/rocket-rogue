@@ -1313,7 +1313,7 @@ void SceneComposer::drawPoiLabel(
             ? Color{0.78F, 0.52F, 1.0F, 0.98F}
             : kind == PoiGuidanceKind::Boss
                 ? Color{1.0F, 0.22F, 0.16F, 0.98F}
-                : Color{0.32F, 0.92F, 1.0F, 0.98F};
+                : Color{0.74F, 0.78F, 0.84F, 0.98F};
     const float glyphAdvance = pixelSize * 6.0F;
     const float totalWidth = static_cast<float>(label.size()) * glyphAdvance - pixelSize;
     drawRect(
@@ -2551,6 +2551,21 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     drone.y -= miningVisualRecoilY_ * cellH;
     const Vec2 operatorPosition = cellCenter(snapshot.miningOperatorX, snapshot.miningOperatorY);
     const Vec2 activeActor = cellCenter(activeActorX, activeActorY);
+    if (snapshot.miningOperatorRigTethered && snapshot.miningRigPresent && snapshot.miningOperatorActive) {
+        const float pulse = 0.78F + 0.14F * std::sin(static_cast<float>(snapshot.animationTime) * 6.0F);
+        drawLine(operatorPosition.x, operatorPosition.y, drone.x, drone.y, {0.32F, 0.96F, 1.0F, pulse}, 2.6F);
+        drawRadialGlow(drone.x, drone.y, cellSize * 1.35F, {0.32F, 0.96F, 1.0F, 0.05F}, 16);
+    }
+    if (snapshot.miningRigTethered && snapshot.miningRigPresent) {
+        const double anchorY = snapshot.miningShipPresent
+            ? snapshot.miningReturnZoneY
+            : 1.5;
+        const Vec2 shipAnchor = cellCenter(snapshot.miningReturnZoneX, anchorY);
+        const float distance = std::hypot(shipAnchor.x - drone.x, shipAnchor.y - drone.y);
+        const float pulse = 0.76F + 0.12F * std::sin(static_cast<float>(snapshot.animationTime) * 5.0F);
+        drawLine(drone.x, drone.y, shipAnchor.x, shipAnchor.y, {0.30F, 0.88F, 1.0F, pulse}, 2.2F);
+        drawRadialGlow(shipAnchor.x, shipAnchor.y, cellSize * (1.0F + std::clamp(distance / (cellSize * 18.0F), 0.0F, 1.0F)), {0.30F, 0.88F, 1.0F, 0.06F}, 18);
+    }
     if (!miningOperatorModeInitialized_) {
         previousMiningOperatorActive_ = snapshot.miningOperatorActive;
         miningOperatorModeInitialized_ = true;
@@ -3980,7 +3995,9 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
             phaseSeed,
             confirmed ? 1.55F : 1.18F);
         const auto [label, kind] = markerLabel(material);
-        drawPoiLabel(position.x, position.y - markerRadius * 3.6F, 0.0062F, label, kind);
+        // Resource labels sit beside several markers on the same depth rung;
+        // keep them compact so the colored pockets remain the visual focus.
+        drawPoiLabel(position.x, position.y - markerRadius * 3.2F, 0.0044F, label, kind);
     };
 
     const int forecastCount = std::min(static_cast<int>(snapshot.surfacePushForecastMarkers.size()), 14);

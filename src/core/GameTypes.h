@@ -1434,6 +1434,10 @@ struct MiningRunState {
     double rigVelocityX = 0.0;
     double rigVelocityY = 0.0;
     bool rigDisabled = false;
+    // Rig mode engages the ship winch. EVA mode uses this separate line so
+    // the operator can physically tow the Mining Rig through a return shaft.
+    bool rigTethered = false;
+    bool operatorRigTethered = false;
     int rigDepthZone = 0;
     MiningOperatorMode operatorMode = MiningOperatorMode::Rig;
     bool operatorPresent = false;

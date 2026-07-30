@@ -603,6 +603,75 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
         "a revealed protected payload should become tetherable through the generic artifact adapter");
 }
 
+void rigTetherPullsTowardShip()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xA11CE);
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::mars;
+    state.run.surfaceExpedition.sharedFuel = 4;
+    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    require(startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 8, 0xA11CE, true, MiningGateType::None},
+                false)
+                .applied,
+        "rig tether test mining run should start");
+    MiningRunState& mining = state.run.mining;
+    mining.artifact = {};
+    for (int x = 1; x < mining.terrain.width - 1; ++x) {
+        if (MiningCell* cell = miningCellAt(mining.terrain, x, static_cast<int>(std::floor(mining.returnZoneY)))) {
+            cell->material = MiningCellMaterial::Empty;
+            cell->suitOnlyPassage = false;
+        }
+    }
+    mining.droneX = mining.returnZoneX + 3.0;
+    mining.droneY = mining.returnZoneY;
+    const double beforeDistance = std::hypot(
+        mining.droneX - mining.returnZoneX,
+        mining.droneY - mining.returnZoneY);
+    toggleMiningTether(state);
+    require(mining.rigTethered, "the player-controlled mining rig should accept the shared tether input");
+    updateMiningRun(state, catalog, 0.08);
+    const double afterDistance = std::hypot(
+        mining.droneX - mining.returnZoneX,
+        mining.droneY - mining.returnZoneY);
+    require(afterDistance < beforeDistance, "a tethered rig should be pulled toward the ship return zone");
+
+    // In EVA, the same tether control creates an operator-to-rig tow line,
+    // rather than reusing the autonomous ship winch.
+    mining.rigTethered = false;
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = mining.returnZoneX + 0.5;
+    mining.operatorY = mining.returnZoneY;
+    mining.droneX = mining.returnZoneX + 3.5;
+    mining.droneY = mining.returnZoneY;
+    mining.artifact.present = true;
+    mining.artifact.revealed = true;
+    mining.artifact.state = MiningArtifactState::Loose;
+    mining.artifact.x = mining.operatorX + 5.0;
+    mining.artifact.y = mining.operatorY;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    const double operatorTowBefore = std::hypot(
+        mining.droneX - mining.operatorX,
+        mining.droneY - mining.operatorY);
+    toggleMiningTether(state);
+    require(mining.operatorRigTethered && !mining.rigTethered,
+        "the EVA player should attach to the nearer Mining Rig even when an exposed artifact is also in range");
+    updateMiningRun(state, catalog, 0.08);
+    const double operatorTowAfter = std::hypot(
+        mining.droneX - mining.operatorX,
+        mining.droneY - mining.operatorY);
+    require(operatorTowAfter < operatorTowBefore,
+        "a jetpack tether should physically pull the Mining Rig toward the operator");
+    toggleMiningTether(state);
+    require(!mining.operatorRigTethered, "the shared tether input should release the EVA tow line");
+}
+
 } // namespace
 
 int main()
@@ -614,6 +683,7 @@ int main()
     miningGateContractsAndRuntimeAreDeterministic();
     thermalSiteRulesAreContentDriven();
     layeredCocoonsHonorAuthoredRevealPolicies();
+    rigTetherPullsTowardShip();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;
 }

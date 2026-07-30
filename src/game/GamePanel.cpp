@@ -176,10 +176,10 @@ std::string phaseTitle(Screen screen)
 
 std::string button(std::string_view label, std::string_view action, std::string cssClass = "", bool defaultFocus = false)
 {
-    const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
+    const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
     const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\" data-ui-focus-id=\"action:" +
-        htmlEscape(action) + "\"" + defaultAttr + ">" + htmlEscape(label) + "</button>";
+        htmlEscape(action) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
 
 std::string scenarioActionButton(
@@ -195,7 +195,7 @@ std::string scenarioActionButton(
         objective.scenarioId,
         objective.stepId,
         static_cast<int>(objective.action));
-    const std::string classAttr = cssClass.empty() ? "" : " class=\"" + std::string(cssClass) + "\"";
+    const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
     const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) +
         "\" data-scenario-id=\"" + htmlEscape(objective.scenarioId) +
@@ -203,7 +203,7 @@ std::string scenarioActionButton(
         "\" data-scenario-action=\"" + std::to_string(static_cast<int>(objective.action)) +
         "\" data-ui-focus-id=\"scenario:" + htmlEscape(objective.scenarioId) + ":" +
         htmlEscape(objective.stepId) + ":" + std::to_string(static_cast<int>(objective.action)) +
-        "\"" + defaultAttr + ">" + htmlEscape(objective.actionLabel) + "</button>";
+        "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(objective.actionLabel) + "</span></button>";
 }
 
 std::string missionStamp(
@@ -241,10 +241,10 @@ std::string missionStamp(
 
 std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
 {
-    const std::string classAttr = cssClass.empty() ? "" : " class=\"" + cssClass + "\"";
+    const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
     const std::string defaultAttr = cssClass == "ok" ? " data-ui-default-focus=\"1\"" : "";
     return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) +
-        "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\"" + defaultAttr + ">" + htmlEscape(label) + "</button>";
+        "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
 
 std::string droneDetailsModalId(int index)
@@ -326,8 +326,8 @@ void collectSharedUtilityModals()
         "</div>";
     const std::string systemMenuBody =
         "<div class=\"modal-actions action-row system-menu-actions\">"
-        "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
-        "data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\">Resume</button>" +
+        "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
+        "data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Resume</span></button>" +
         modalButton("Controls", "controls", "ghost") +
         modalButton("Settings", ui::modals::settings, "ghost") +
         modalButton("Map", ui::modals::map, "ghost") +
@@ -336,9 +336,9 @@ void collectSharedUtilityModals()
     const std::string resetBody =
         "<p class=\"modal-intro\">This permanently clears campaign progress and starts a new save.</p>"
         "<div class=\"modal-actions action-row\">"
-        "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-ui-focus-id=\"reset:cancel\" data-ui-default-focus=\"1\">Cancel</button>"
-        "<button type=\"button\" class=\"danger\" data-rr-action=\"reset_save\" data-ui-focus-id=\"action:reset_save\" "
-        "data-controller-hold-seconds=\"0.75\">Hold to reset save</button></div>";
+        "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"reset:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Cancel</span></button>"
+        "<button type=\"button\" class=\"danger rr-text-button\" data-rr-action=\"reset_save\" data-ui-focus-id=\"action:reset_save\" "
+        "data-controller-hold-seconds=\"0.75\"><span class=\"rr-button-label\">Hold to reset save</span></button></div>";
 
     collectModal({"system_menu", "Paused", systemMenuBody, {}, false, false, false});
     collectModal({"controls", "Controller controls", controlsBody});
@@ -347,7 +347,7 @@ void collectSharedUtilityModals()
 
 std::string disabledButton(std::string_view label)
 {
-    return "<button class=\"disabled\" disabled>" + htmlEscape(label) + "</button>";
+    return "<button class=\"disabled rr-text-button\" disabled><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
 
 std::string warningClass(double value)
@@ -441,12 +441,26 @@ std::string miningGravityLabel(const MiningRunState& mining)
 
 std::string miningTetherBurdenLabel(const MiningRunState& mining, const MiningLoadStats& load)
 {
-    const bool tethered = mining.artifact.present &&
+    const bool artifactTethered = mining.artifact.present &&
         mining.artifact.tethered &&
         mining.artifact.state != MiningArtifactState::Delivered &&
         mining.artifact.state != MiningArtifactState::Destroyed;
-    if (!tethered) {
+    const bool rigTethered = mining.rigTethered && !mining.rigDisabled;
+    const bool operatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled;
+    if (!artifactTethered && !rigTethered && !operatorRigTethered) {
         return "CLEAR";
+    }
+    if (operatorRigTethered && !artifactTethered) {
+        return "EVA TO DRONE / TOW TO SHIP";
+    }
+    if (operatorRigTethered && artifactTethered) {
+        return "EVA + ARTIFACT / " + display::fixed(load.burden, 1) + " LOAD";
+    }
+    if (rigTethered && !artifactTethered) {
+        return "DRONE / TOW TO SHIP";
+    }
+    if (rigTethered && artifactTethered) {
+        return "DRONE + ARTIFACT / " + display::fixed(load.burden, 1) + " LOAD";
     }
     return display::fixed(load.burden, 1) + " / " + display::percent(load.speedMultiplier) + " SPD";
 }
@@ -551,8 +565,8 @@ std::string statChip(const RefitStatChip& chip)
 {
     const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
     return "<span class=\"stat-chip " + std::string(chip.positive ? "up" : "down") +
-        std::string(wideChip ? " wide" : "") + "\">" +
-        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
+        std::string(wideChip ? " wide" : "") + "\"><span class=\"rr-chip-label\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span></span>";
 }
 
 std::string resourceChip(const PanelMetricPresentation& chip)
@@ -560,8 +574,8 @@ std::string resourceChip(const PanelMetricPresentation& chip)
     const bool positive = chip.value.empty() || chip.value.front() != '-';
     const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
     return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
-        std::string(wideChip ? " wide" : "") + "\">" +
-        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
+        std::string(wideChip ? " wide" : "") + "\"><span class=\"rr-chip-label\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span></span>";
 }
 
 std::string realtimeResourceChip(std::string_view id, const PanelMetricPresentation& chip)
@@ -569,8 +583,8 @@ std::string realtimeResourceChip(std::string_view id, const PanelMetricPresentat
     const bool positive = chip.value.empty() || chip.value.front() != '-';
     const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
     return "<span id=\"" + std::string(id) + "\" class=\"stat-chip " +
-        std::string(positive ? "up" : "down") + std::string(wideChip ? " wide" : "") + "\">" +
-        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span>";
+        std::string(positive ? "up" : "down") + std::string(wideChip ? " wide" : "") + "\"><span class=\"rr-chip-label\">" +
+        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span></span>";
 }
 
 std::string surfaceActionChipLabel(std::string_view label)
@@ -626,8 +640,8 @@ std::string fieldContextChip(const PanelMetricPresentation& chip)
     const bool positive = chip.value.empty() || chip.value.front() != '-';
     const bool wideChip = text.size() > 11 || label.find(' ') != std::string::npos;
     return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
-        std::string(wideChip ? " wide" : "") + "\">" +
-        htmlEscape(text) + "</span>";
+        std::string(wideChip ? " wide" : "") + "\"><span class=\"rr-chip-label\">" +
+        htmlEscape(text) + "</span></span>";
 }
 
 std::string statChipGrid(const std::vector<RefitStatChip>& chips)
@@ -755,12 +769,34 @@ std::string panelButton(const PanelButtonPresentation& action, bool defaultFocus
 {
     if (!action.enabled) {
         if (!action.actionId.empty()) {
-            return "<button type=\"button\" class=\"disabled\" data-rr-action=\"" + htmlEscape(action.actionId) + "\" disabled>" +
-                htmlEscape(action.label) + "</button>";
+            return "<button type=\"button\" class=\"disabled rr-text-button\" data-rr-action=\"" + htmlEscape(action.actionId) + "\" disabled><span class=\"rr-button-label\">" +
+                htmlEscape(action.label) + "</span></button>";
         }
         return disabledButton(action.label);
     }
     return button(action.label, action.actionId, action.cssClass, defaultFocus);
+}
+
+// The live mining dock uses a fixed-height, single-line control tier. Keep its
+// labels as direct text so RmlUi can center them with the button's line-height
+// without the zero-width flex-child layout seen in the responsive dock.
+std::string miningPanelButton(const PanelButtonPresentation& action, bool defaultFocus = false)
+{
+    const std::string cssClass = action.enabled ? action.cssClass : "disabled";
+    const std::string classAttr = " class=\"" + htmlEscape(cssClass) + " rr-mining-text-button\"";
+    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    std::ostringstream out;
+    out << "<button type=\"button\"" << classAttr;
+    if (!action.actionId.empty()) {
+        out << " data-rr-action=\"" << htmlEscape(action.actionId) << "\" data-ui-focus-id=\"action:"
+            << htmlEscape(action.actionId) << "\"";
+    }
+    out << defaultAttr;
+    if (!action.enabled) {
+        out << " disabled";
+    }
+    out << ">" << htmlEscape(action.label) << "</button>";
+    return out.str();
 }
 
 std::string introductoryPanelButton(const PanelButtonPresentation& action, std::string_view modalId)
@@ -1418,11 +1454,13 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
             }
         }
         const MiningArtifactObject& artifact = state.run.mining.artifact;
+        const bool rigTethered = (state.run.mining.rigTethered || state.run.mining.operatorRigTethered) &&
+            !state.run.mining.rigDisabled;
         const std::string objectiveState = artifact.revealed
             ? (artifact.state == MiningArtifactState::Delivered
                    ? "EXTRACT SAFELY"
                    : (artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED"))
-            : "CLEAR ACTIVE LAYER";
+            : (rigTethered ? "TOW DRONE TO SHUTTLE" : "CLEAR ACTIVE LAYER");
         out << " // " << objectiveState;
         return out.str();
     }
@@ -1441,11 +1479,15 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
 std::string miningCocoonObjectiveState(const MiningRunState& mining)
 {
     const MiningArtifactObject& artifact = mining.artifact;
+    const bool rigTethered = (mining.rigTethered || mining.operatorRigTethered) && !mining.rigDisabled;
     if (artifact.revealed) {
         if (artifact.state == MiningArtifactState::Delivered) {
             return "EXTRACT SAFELY";
         }
         return artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED";
+    }
+    if (rigTethered) {
+        return "TOW DRONE TO SHUTTLE";
     }
     return "CLEAR ACTIVE LAYER";
 }
@@ -1744,9 +1786,10 @@ std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
         out << "<strong class=\"slot-state\">" << htmlEscape(slot.status) << "</strong>";
     }
     out << "</div>";
-    out << "<div class=\"slot-card-body\"><h3 class=\"card-title\">" << htmlEscape(slot.title) << "</h3>";
+    out << "<div class=\"slot-card-content\"><div class=\"slot-card-body\"><h3 class=\"card-title\">"
+        << htmlEscape(slot.title) << "</h3>";
     out << "<p class=\"card-copy slot-role\">" << htmlEscape(slot.role) << "</p></div>";
-    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(slot.chips) << "</div>";
+    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(slot.chips) << "</div></div>";
     out << "</article>";
     return out.str();
 }
@@ -2217,6 +2260,9 @@ std::string scenarioMapCocoonDetail(
                 break;
             }
         }
+        if ((mining.rigTethered || mining.operatorRigTethered) && !mining.rigDisabled) {
+            out << " / TOW DRONE TO SHUTTLE";
+        }
         if (mining.artifact.revealed) {
             out << (mining.artifact.tethered ? " / TOW TO SHUTTLE" : " / OBJECTIVE EXPOSED");
         }
@@ -2482,8 +2528,8 @@ std::string buildGamePanelMarkup(
     settingsBody << "<section class=\"settings-control\" data-desktop-fullscreen-settings>"
         << "<div><h3>" << htmlEscape("Fullscreen") << "</h3>"
         << "<p>" << htmlEscape("Use the entire display. Native builds also support F11 and Alt+Enter.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
-        << htmlEscape("Enter fullscreen") << "</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
+        << "<span class=\"rr-button-label\">" << htmlEscape("Enter fullscreen") << "</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-frame-limit-settings>"
         << "<div><h3>" << htmlEscape("Frame rate") << "</h3>"
         << "<p>" << htmlEscape("Choose stable, refresh-compatible pacing. Balanced favors 40 or 45 FPS; Battery targets 30 FPS.") << "</p></div>"
@@ -2511,13 +2557,13 @@ std::string buildGamePanelMarkup(
     settingsBody << "<section class=\"settings-control\" data-help-settings>"
         << "<div><h3>" << htmlEscape("First-time introductions") << "</h3>"
         << "<p>" << htmlEscape("Show a short briefing the first time a new mission activity becomes available.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-help-toggle=\"1\" data-ui-focus-id=\"setting:mission_help\">"
-        << htmlEscape(context.firstTimeIntroductionsEnabled ? "Hide introductions" : "Show introductions") << "</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-help-toggle=\"1\" data-ui-focus-id=\"setting:mission_help\">"
+        << "<span class=\"rr-button-label\">" << htmlEscape(context.firstTimeIntroductionsEnabled ? "Hide introductions" : "Show introductions") << "</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-camera-shake-settings>"
         << "<div><h3>" << htmlEscape("Camera shake") << "</h3>"
         << "<p>" << htmlEscape("Keep impact and drilling screen shake enabled, or disable it for comfort.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
-        << htmlEscape("Disable camera shake") << "</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
+        << "<span class=\"rr-button-label\">" << htmlEscape("Disable camera shake") << "</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-keyboard-drill-mode-settings>"
         << "<div><h3>" << htmlEscape("Keyboard drill mode") << "</h3>"
         << "<p>" << htmlEscape("Toggle avoids holding Space. Hold drills only while Space remains pressed. Mouse and controller always use hold.") << "</p></div>"
@@ -2543,23 +2589,23 @@ std::string buildGamePanelMarkup(
         << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Invert flight Y") << "</h3>"
         << "<p>" << htmlEscape("Reverse vertical stick input during flyby and orbit flight.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-controller-invert-toggle=\"1\" data-ui-focus-id=\"setting:controller_invert\">Enable inverted Y</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-controller-invert-toggle=\"1\" data-ui-focus-id=\"setting:controller_invert\"><span class=\"rr-button-label\">Enable inverted Y</span></button></section>";
     settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Confirm / cancel") << "</h3>"
         << "<p>" << htmlEscape("Swap the positional South and East buttons for menu confirm and cancel.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-controller-swap-toggle=\"1\" data-ui-focus-id=\"setting:controller_swap\">Swap confirm and cancel</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-controller-swap-toggle=\"1\" data-ui-focus-id=\"setting:controller_swap\"><span class=\"rr-button-label\">Swap confirm and cancel</span></button></section>";
     settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Controller vibration") << "</h3>"
         << "<p>" << htmlEscape("Use supported controller haptics for impacts, drilling contact, and alerts.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-controller-vibration-toggle=\"1\" data-ui-focus-id=\"setting:controller_vibration\">Disable vibration</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-controller-vibration-toggle=\"1\" data-ui-focus-id=\"setting:controller_vibration\"><span class=\"rr-button-label\">Disable vibration</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
         << "<div><h3>" << htmlEscape("Debug screens") << "</h3>"
         << "<p>" << htmlEscape("Show sandbox screen tools for board, mining, flyby, and orbit checks. These do not write save data.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-debug-tools-toggle=\"1\" data-ui-focus-id=\"setting:debug_tools\">"
-        << htmlEscape("Show debug tools") << "</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-debug-tools-toggle=\"1\" data-ui-focus-id=\"setting:debug_tools\">"
+        << "<span class=\"rr-button-label\">" << htmlEscape("Show debug tools") << "</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-performance-stats-settings>"
         << "<div><h3>" << htmlEscape("Performance diagnostics") << "</h3>"
         << "<p>" << htmlEscape("Show FPS, frame pacing, CPU stage timings, drawable size, and scene rendering counters.") << "</p></div>"
-        << "<button class=\"settings-toggle\" data-performance-stats-toggle=\"1\" data-ui-focus-id=\"setting:performance_stats\">"
-        << htmlEscape("Show performance stats") << "</button></section>";
+        << "<button class=\"settings-toggle rr-text-button\" data-performance-stats-toggle=\"1\" data-ui-focus-id=\"setting:performance_stats\">"
+        << "<span class=\"rr-button-label\">" << htmlEscape("Show performance stats") << "</span></button></section>";
     settingsBody << "<div class=\"modal-actions action-row\">";
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         if (action.actionId == ui::actions::resetSave) {
@@ -2611,7 +2657,7 @@ std::string buildGamePanelMarkup(
             const std::string newGameBody =
                 "<p class=\"modal-intro\">Starting a new expedition replaces the current campaign save. Settings are preserved.</p>"
                 "<div class=\"modal-actions action-row\">"
-                "<button type=\"button\" class=\"ok\" data-ui-close-modal=\"1\" data-ui-focus-id=\"new-game:cancel\" data-ui-default-focus=\"1\">Keep current save</button>" +
+                "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"new-game:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Keep current save</span></button>" +
                 button("Start New Game", ui::actions::newGame, "danger") +
                 "</div>";
             out << modalTemplate("new_game_confirm", "Begin a new expedition?", newGameBody);
@@ -3371,7 +3417,7 @@ std::string buildGamePanelMarkup(
         out << "</section><section class=\"mining-command-dock" << (miningHud.atShip ? " at-ship" : " away")
             << "\"><div class=\"actions action-row system-actions\">";
         for (const PanelButtonPresentation& action : miningHud.actions) {
-            out << panelButton(action);
+            out << miningPanelButton(action);
         }
         out << "</div></section></footer>";
         const auto drillRepair = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const PanelButtonPresentation& action) {

@@ -2006,7 +2006,7 @@ void testPoiGuidanceUsesOneDynamicBouncingArrow()
                     std::abs(vertex.b - blue) < 0.02F;
             });
     };
-    assert(hasMarkerColor(0.32F, 0.92F, 1.0F));
+    assert(hasMarkerColor(0.74F, 0.78F, 0.84F));
     assert(hasMarkerColor(1.0F, 0.58F, 0.18F));
     assert(hasMarkerColor(0.78F, 0.52F, 1.0F));
 }

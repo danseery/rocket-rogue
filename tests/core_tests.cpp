@@ -8699,6 +8699,7 @@ void activeMiningRoundTripsThroughSave()
     state.run.mining.hullDirY = 0.8;
     state.run.mining.returnZoneX = 31.5;
     state.run.mining.returnZoneY = 4.25;
+    state.run.mining.rigTethered = true;
     state.run.mining.droneHealth = 0.72;
     state.run.mining.fuelCycleProgress = 0.30;
     state.run.mining.fuelSpent = 2;
@@ -8752,6 +8753,7 @@ void activeMiningRoundTripsThroughSave()
     require(std::abs(restored.run.mining.hullDirY - 0.8) < 0.000001, "mining hull heading y should round trip");
     require(std::abs(restored.run.mining.returnZoneX - 31.5) < 0.000001, "mining return zone x should round trip");
     require(std::abs(restored.run.mining.returnZoneY - 4.25) < 0.000001, "mining return zone y should round trip");
+    require(restored.run.mining.rigTethered, "active mining rig tether state should round trip");
     require(std::abs(restored.run.mining.droneHealth - 0.72) < 0.000001, "mining drone health should round trip");
     require(std::abs(restored.run.mining.fuelCycleProgress - 0.30) < 0.000001, "mining fuel cycle should round trip");
     require(restored.run.mining.fuelSpent == 2, "mining fuel spend should round trip");
@@ -9033,6 +9035,33 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
             result.miniDrones[1].stableFormationSlot == 1 &&
             std::abs(result.miniDrones[1].shieldCharge - 0.77) < 0.000001,
         "independent defense-drone state should round trip");
+}
+
+void operatorRigTetherRoundTripsThroughSave()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x70A);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied, "operator tether persistence test should start mining");
+
+    MiningRunState& mining = state.run.mining;
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = mining.returnZoneX + 1.0;
+    mining.operatorY = mining.returnZoneY;
+    mining.droneX = mining.returnZoneX + 3.0;
+    mining.droneY = mining.returnZoneY;
+    mining.rigTethered = false;
+    mining.operatorRigTethered = true;
+
+    const auto parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(parsed.has_value(), "operator tether save should deserialize");
+    GameState restored = createNewGame(catalog, 0x70B);
+    restoreSaveData(restored, catalog, *parsed);
+    require(restored.run.mining.operatorRigTethered && !restored.run.mining.rigTethered,
+        "an active EVA player-to-rig tether should round trip without restoring the ship winch");
 }
 
 void versionFiveMiningSavesMigrateToSeatedRigAndDeterministicSwarm()
@@ -11385,11 +11414,11 @@ void settingsResolutionSelectorExposesSupportedPresets()
         "shared panel header actions should form a bounded utility group");
     const std::string headerHtml = html.substr(headerActions, headerActionsEnd - headerActions);
     require(countOccurrences(headerHtml, "<button") == 3
-            && headerHtml.find(">Map</button>") != std::string::npos
-            && headerHtml.find(">Inventory</button>") != std::string::npos
-            && headerHtml.find(">Menu</button>") != std::string::npos
-            && headerHtml.find(">Settings</button>") == std::string::npos
-            && headerHtml.find(">Legacy</button>") == std::string::npos,
+            && headerHtml.find("rr-button-label\">Map</span>") != std::string::npos
+            && headerHtml.find("rr-button-label\">Inventory</span>") != std::string::npos
+            && headerHtml.find("rr-button-label\">Menu</span>") != std::string::npos
+            && headerHtml.find("rr-button-label\">Settings</span>") == std::string::npos
+            && headerHtml.find("rr-button-label\">Legacy</span>") == std::string::npos,
         "persistent chrome should expose exactly Map, Inventory, and Menu");
     require(settingsEnd != std::string::npos && selector != std::string::npos && selectorEnd != std::string::npos &&
             settingsTemplate < selector && selectorEnd < settingsEnd,
@@ -11526,7 +11555,7 @@ void titleScreenPresentationIsPortable()
             && briefingHtml.find("Humans have thoroughly fucked the planet.") != std::string::npos
             && briefingHtml.find("bootleg copy of KSP2") != std::string::npos
             && briefingHtml.find("small band of adorable varmints") != std::string::npos
-            && briefingHtml.find(">Help them</button>") != std::string::npos,
+            && briefingHtml.find("rr-button-label\">Help them</span>") != std::string::npos,
         "the campaign introduction should present the approved retro exposition and directive");
     require(briefingHtml.find("THE FRONTIER IS OPEN") == std::string::npos
             && briefingHtml.find("Push Past Safe") == std::string::npos,
@@ -11619,7 +11648,7 @@ void earlyGameProgressionAndOutcomeModalAreClear()
         "the compact outcome should keep detailed telemetry behind Flight Report");
     const std::size_t flightReportAction = recoveredHtml.find("data-ui-focus-id=\"modal:flight_report\"");
     const std::size_t continueAction = recoveredHtml.find(
-        "data-ui-focus-id=\"action:next\" data-ui-default-focus=\"1\">Continue");
+        "data-ui-focus-id=\"action:next\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Continue</span>");
     require(flightReportAction != std::string::npos
             && continueAction != std::string::npos
             && flightReportAction < continueAction,
@@ -11769,6 +11798,9 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
             && launchHtml.find("data-help-topic") == std::string::npos,
         "launch telemetry and controls should not contain inline tutorial help");
     require(launchHtml.find("data-help-toggle") != std::string::npos, "settings should expose a help toggle");
+    require(launchHtml.find("data-help-toggle=\"1\" data-ui-focus-id=\"setting:mission_help\"><span class=\"rr-button-label\">") != std::string::npos &&
+            launchHtml.find("data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\"><span class=\"rr-button-label\">") != std::string::npos,
+        "settings toggles should use the shared label child required by native RmlUi");
     require(launchHtml.find("First-time introductions") != std::string::npos
             && launchHtml.find("Hide introductions") != std::string::npos,
         "settings should describe the retained toggle as first-time introductions");
@@ -11795,7 +11827,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     PanelRenderContext arkLaunchContext {arkLaunchState, catalog, arkLaunch, arkLaunch};
     arkLaunchContext.currentMultiplier = 1.12;
     const std::string arkLaunchHtml = buildGamePanelHtml(arkLaunchContext);
-    require(arkLaunchHtml.find(">Return to Ark</button>") != std::string::npos, "Ark launch controls should show the Ark return label");
+    require(arkLaunchHtml.find("rr-button-label\">Return to Ark</span>") != std::string::npos, "Ark launch controls should show the Ark return label");
 
     launchContext.flightArmed = false;
     launchContext.preflightReady = false;
@@ -11815,7 +11847,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     const std::string preflightHtml = buildGamePanelHtml(launchContext);
     require(preflightHtml.find("data-preflight-launch=\"1\"") != std::string::npos, "pre-flight panel should signal the scene launch overlay");
     require(preflightHtml.find("data-preflight-ready=\"1\"") != std::string::npos, "sealed bay should enable the scene launch control");
-    require(preflightHtml.find(">Return to Earth</button>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
+    require(preflightHtml.find("rr-button-label\">Return to Earth</span>") == std::string::npos, "pre-flight panel should hide recovery controls until launch");
     require(preflightHtml.find("Launch corridor clear") != std::string::npos, "pre-flight panel should confirm the sealed bay");
 
     GameState arrivalState = createNewGame(catalog, 712);
@@ -11981,6 +12013,10 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(miningFuelCycleValue(0.25) == "75%", "next-fuel cadence should display normalized cycle remaining instead of seconds");
     require(miningHtml.find("data-rr-action=\"mining_scanner\"") != std::string::npos, "mining HUD should keep scanner control");
     require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos, "mining HUD should keep tether control");
+    require(miningHtml.find("data-rr-action=\"mining_tether\"") != std::string::npos &&
+            miningHtml.find("rr-mining-text-button") != std::string::npos &&
+            miningHtml.find(">TETHER") != std::string::npos,
+        "mining HUD tether control should use the dedicated visible mining control tier");
     require(miningHtml.find("data-rr-action=\"mining_abort\"") != std::string::npos, "mining HUD should keep abort control away from the ship");
     require(miningHtml.find("class=\"mining-command-list\"") == std::string::npos,
         "mining HUD should keep explanatory control copy in the bottom input helper instead of the payload rail");
@@ -12109,7 +12145,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
             && countOccurrences(droneHtml, "class=\"drone-loadout-slot ") == 6,
         "Drone Ops workspace should expose the complete drone roster beside all six loadout slots");
     require(
-        droneHtml.find("class=\"drone-done-action\"") != std::string::npos
+        droneHtml.find("drone-done-action") != std::string::npos
             && droneHtml.find("data-rr-action=\"back_to_surface_ops\"") != std::string::npos
             && droneHtml.find("Done") != std::string::npos,
         "Drone Ops workspace should provide an explicit Done action that returns to Surface Ops");
@@ -12192,7 +12228,7 @@ void surfaceHtmlPromotesMiningAction()
     require(usedMine != std::string::npos, "used mining action should still be visible in the compact surface actions");
     require(surveyAction != std::string::npos, "surface panel should keep field actions in the compact action grid");
     require(usedMine < surveyAction, "disabled mining action should stay first in the compact action grid");
-    require(usedHtml.find("class=\"disabled\" disabled>Unavailable</button>") != std::string::npos,
+    require(usedHtml.find("class=\"disabled rr-text-button\" disabled><span class=\"rr-button-label\">Unavailable</span></button>") != std::string::npos,
         "disabled unavailable buttons should carry the muted disabled style hook");
 
     GameState scenarioSiteState = createNewGame(catalog, 715);
@@ -12298,7 +12334,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         "research projects should render as compact management choice rows");
     require(researchHtml.find("class=\"phase-advisory") != std::string::npos, "research should include advisory styling");
     require(researchHtml.find("phase_briefing") == std::string::npos
-            && researchHtml.find(">Briefing</button>") == std::string::npos,
+            && researchHtml.find("rr-button-label\">Briefing</span>") == std::string::npos,
         "research should not emit an unused generic tutorial briefing");
     require(researchHtml.find("phase-status") == std::string::npos, "research should not duplicate the yellow mission status inside the board");
     require(researchHtml.find("Have:") == std::string::npos, "research cards should not repeat the shared material inventory in their yellow footer copy");
@@ -12331,8 +12367,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         "surface ops should render compact rows instead of legacy action cards");
     require(surfaceHtml.find("drone-ops-callout surface-controller-callout phase-lane phase-row") != std::string::npos, "surface ops drone callout should align to the shared phase lane");
     require(surfaceHtml.find("phase_briefing") == std::string::npos
-            && surfaceHtml.find(">Briefing</button>") == std::string::npos
-            && surfaceHtml.find(">Details</button>") != std::string::npos,
+            && surfaceHtml.find("rr-button-label\">Briefing</span>") == std::string::npos
+            && surfaceHtml.find("rr-button-label\">Details</span>") != std::string::npos,
         "surface ops should remove generic briefing clutter while retaining operational details");
     require(surfaceHtml.find("phase-status") == std::string::npos, "surface ops should not duplicate the yellow mission status inside the board");
 
@@ -12366,7 +12402,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(droneHtml.find("drone-combat-forecast") == std::string::npos,
         "drone ops should leave the full combat forecast in Details");
     require(
-        droneHtml.find("class=\"drone-done-action\"") != std::string::npos
+        droneHtml.find("drone-done-action") != std::string::npos
             && droneHtml.find("data-rr-action=\"back_to_surface_ops\"") != std::string::npos,
         "drone ops should keep its Surface Ops return action visible in the workspace toolbar");
 
@@ -12505,8 +12541,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
             && upgradeHtml.find("data-ui-focus-id=\"action:surface_upgrade:1\"") != std::string::npos
             && upgradeHtml.find("data-ui-focus-id=\"action:surface_upgrade:2\"") != std::string::npos,
         "surface upgrade should expose each install action directly with stable controller focus ids");
-    require(upgradeHtml.find(">Select</button>") == std::string::npos
-            && upgradeHtml.find(">Selected</button>") == std::string::npos,
+    require(upgradeHtml.find("rr-button-label\">Select</span>") == std::string::npos
+            && upgradeHtml.find("rr-button-label\">Selected</span>") == std::string::npos,
         "surface upgrade cards should not contain a redundant preview-selection step");
     require(countOccurrences(upgradeHtml, "Choose upgrade") == 3,
         "each surface upgrade card should expose its committing action directly");
@@ -12566,8 +12602,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
             && refitHtml.find("data-ui-focus-id=\"action:buy_offer:1\"") != std::string::npos
             && refitHtml.find("data-ui-focus-id=\"action:buy_offer:2\"") != std::string::npos,
         "refit should expose each install action directly with stable controller focus ids");
-    require(refitHtml.find(">Select</button>") == std::string::npos
-            && refitHtml.find(">Selected</button>") == std::string::npos,
+    require(refitHtml.find("rr-button-label\">Select</span>") == std::string::npos
+            && refitHtml.find("rr-button-label\">Selected</span>") == std::string::npos,
         "refit offer cards should not contain redundant Select or Selected buttons");
     require(countOccurrences(refitHtml, "Install permanently") == 3,
         "each affordable refit card should expose its irreversible install action directly");
@@ -12605,7 +12641,7 @@ void hangarHtmlShowsPilotIntakeModal()
     const std::size_t hangarDetails = html.find("hangar-detail-actions");
     const std::size_t hangarDetailsEnd = html.find("</div>", hangarDetails);
     require(hangarDetails != std::string::npos && hangarDetailsEnd != std::string::npos
-            && html.substr(hangarDetails, hangarDetailsEnd - hangarDetails).find(">Legacy</button>") != std::string::npos,
+            && html.substr(hangarDetails, hangarDetailsEnd - hangarDetails).find("rr-button-label\">Legacy</span>") != std::string::npos,
         "Hangar should move Legacy out of persistent chrome and into its Details row");
     const std::size_t hangarKpis = html.find("metric-grid rr-metric-strip panel-kpis");
     const std::size_t hangarKpisEnd = html.find("</div></div>", hangarKpis);
@@ -13572,11 +13608,11 @@ void miningThermalCutoffAndGuidanceAreExplicit()
     auto tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
         return action.label.find("tether") != std::string::npos || action.label.find("Tether") != std::string::npos;
     });
-    require(tether == presentation.actions.end(),
-        "tether guidance and controls should stay hidden before artifact recovery is available");
-    require(presentation.commandHints.size() == 1
-            && presentation.commandHints.front() == "Pulse Scanner (E) - Reveals nearby resources",
-        "the opening mining command list should contain only the available scanner guidance");
+    require(tether != presentation.actions.end() && tether->enabled && tether->label == "Tether drone",
+        "the mining rig should be tetherable before artifact recovery is available");
+    require(presentation.commandHints.size() == 2
+            && presentation.commandHints.back().find("Tether (T)") != std::string::npos,
+        "the opening mining command list should explain the shared drone and artifact tether control");
 
     mining.artifact.present = true;
     mining.artifact.state = MiningArtifactState::Embedded;
@@ -13584,12 +13620,12 @@ void miningThermalCutoffAndGuidanceAreExplicit()
     tether = std::find_if(presentation.actions.begin(), presentation.actions.end(), [](const PanelButtonPresentation& action) {
         return action.actionId == ui::actions::miningTether;
     });
-    require(tether != presentation.actions.end() && !tether->enabled,
-        "artifact recovery should reveal a contextual tether control before its target is exposed");
+    require(tether != presentation.actions.end() && tether->enabled && tether->label == "Tether drone",
+        "an embedded artifact should leave the drone tether available until the artifact is exposed");
     require(std::any_of(presentation.commandHints.begin(), presentation.commandHints.end(), [](const std::string& hint) {
-            return hint.find("Tether Artifact (T)") != std::string::npos;
+            return hint.find("Tether (T)") != std::string::npos;
         }),
-        "artifact recovery should unlock its own command-list line");
+        "artifact recovery should retain the shared tether command-list line");
 
     mining.miniDrones.emplace_back();
     presentation = miningRunPresentation(state, catalog);
@@ -13799,6 +13835,7 @@ int main()
     miningDetailsReportControlledActorEquipment();
     miningEvaFixedDrillProfileIgnoresRigUpgrades();
     activeMiningRoundTripsThroughSave();
+    operatorRigTetherRoundTripsThroughSave();
     miningEvaAndSwarmStateRoundTripsThroughVersionSixSave();
     versionFiveMiningSavesMigrateToSeatedRigAndDeterministicSwarm();
     miningDepthLayersAreBidirectionalAndPersistent();

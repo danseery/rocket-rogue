@@ -1941,7 +1941,8 @@ std::string serializeMiningRigState(const MiningRunState& mining)
     out << mining.rigVelocityX
         << save_schema::crewFieldDelimiter << mining.rigVelocityY
         << save_schema::crewFieldDelimiter << (mining.rigDisabled ? 1 : 0)
-        << save_schema::crewFieldDelimiter << mining.rigDepthZone;
+        << save_schema::crewFieldDelimiter << mining.rigDepthZone
+        << save_schema::crewFieldDelimiter << (mining.rigTethered ? 1 : 0);
     return out.str();
 }
 
@@ -1952,6 +1953,7 @@ void parseMiningRigState(std::string_view text, MiningRunState& mining)
     if (fields.size() > 1) mining.rigVelocityY = parseDouble(fields[1], mining.rigVelocityY);
     if (fields.size() > 2) mining.rigDisabled = parseInt(fields[2], mining.rigDisabled ? 1 : 0) != 0;
     if (fields.size() > 3) mining.rigDepthZone = std::max(0, parseInt(fields[3], mining.rigDepthZone));
+    if (fields.size() > 4) mining.rigTethered = parseInt(fields[4], mining.rigTethered ? 1 : 0) != 0;
 }
 
 std::string serializeMiningOperatorState(const MiningRunState& mining)
@@ -1967,7 +1969,8 @@ std::string serializeMiningOperatorState(const MiningRunState& mining)
         << save_schema::crewFieldDelimiter << mining.operatorAimDirY
         << save_schema::crewFieldDelimiter << mining.operatorIntegrity
         << save_schema::crewFieldDelimiter << mining.operatorFireCooldownSeconds
-        << save_schema::crewFieldDelimiter << mining.operatorFirePulseSeconds;
+        << save_schema::crewFieldDelimiter << mining.operatorFirePulseSeconds
+        << save_schema::crewFieldDelimiter << (mining.operatorRigTethered ? 1 : 0);
     return out.str();
 }
 
@@ -1993,6 +1996,9 @@ void parseMiningOperatorState(std::string_view text, MiningRunState& mining)
     }
     if (fields.size() > 10) {
         mining.operatorFirePulseSeconds = std::max(0.0, parseDouble(fields[10], mining.operatorFirePulseSeconds));
+    }
+    if (fields.size() > 11) {
+        mining.operatorRigTethered = parseInt(fields[11], mining.operatorRigTethered ? 1 : 0) != 0;
     }
 }
 
@@ -3105,6 +3111,17 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
 
         mining.rigDepthZone = std::max(0, mining.rigDepthZone);
+        if (mining.rigDisabled || mining.rigDepthZone != mining.depthZone) {
+            mining.rigTethered = false;
+            mining.operatorRigTethered = false;
+        }
+        if (mining.operatorMode != MiningOperatorMode::Jetpack || !mining.operatorPresent) {
+            mining.operatorRigTethered = false;
+        } else {
+            // Legacy saves could leave the ship winch active after the operator
+            // exited the rig. EVA always uses the player-to-rig tow line.
+            mining.rigTethered = false;
+        }
         mining.operatorIntegrity = std::clamp(mining.operatorIntegrity, 0.0, 1.0);
         mining.operatorFireCooldownSeconds = std::max(0.0, mining.operatorFireCooldownSeconds);
         mining.operatorFirePulseSeconds = std::max(0.0, mining.operatorFirePulseSeconds);

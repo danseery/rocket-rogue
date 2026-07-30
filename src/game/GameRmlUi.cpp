@@ -462,7 +462,11 @@ std::string syncControllerToggle(std::string html, std::string_view attribute, b
     const std::size_t tagEnd = html.find('>', attrStart);
     const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
     if (tagEnd != std::string::npos && closeStart != std::string::npos) {
-        html.replace(tagEnd + 1, closeStart - tagEnd - 1, std::string(enabled ? enabledLabel : disabledLabel));
+        const std::string label = std::string(enabled ? enabledLabel : disabledLabel);
+        html.replace(
+            tagEnd + 1,
+            closeStart - tagEnd - 1,
+            "<span class=\"rr-button-label\">" + label + "</span>");
     }
     return html;
 }
@@ -480,24 +484,12 @@ std::string syncCurrentControllerPreferences(std::string html)
 
 std::string syncCurrentDebugToolsToggle(std::string html)
 {
-    if (html.find("data-debug-tools-toggle") == std::string::npos) {
-        return html;
-    }
-
-    const std::string needle = "data-debug-tools-toggle";
-    const std::size_t attrStart = html.find(needle);
-    if (attrStart == std::string::npos) {
-        return html;
-    }
-    const std::size_t tagStart = html.rfind('<', attrStart);
-    const std::size_t tagEnd = html.find('>', attrStart);
-    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
-    if (tagStart != std::string::npos && tagEnd != std::string::npos && closeStart != std::string::npos) {
-        const bool enabled = rr_rml_debug_tools_enabled() != 0;
-        const std::string label = enabled ? "Hide debug tools" : "Show debug tools";
-        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
-    }
-    return html;
+    return syncControllerToggle(
+        std::move(html),
+        "data-debug-tools-toggle",
+        rr_rml_debug_tools_enabled() != 0,
+        "Hide debug tools",
+        "Show debug tools");
 }
 
 std::string syncCurrentPerformanceStatsToggle(std::string html)
@@ -512,44 +504,22 @@ std::string syncCurrentPerformanceStatsToggle(std::string html)
 
 std::string syncCurrentHelpToggle(std::string html)
 {
-    if (html.find("data-help-toggle") == std::string::npos) {
-        return html;
-    }
-
-    const std::string needle = "data-help-toggle";
-    const std::size_t attrStart = html.find(needle);
-    if (attrStart == std::string::npos) {
-        return html;
-    }
-    const std::size_t tagEnd = html.find('>', attrStart);
-    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
-    if (tagEnd != std::string::npos && closeStart != std::string::npos) {
-        const bool enabled = rr_rml_help_disabled() == 0;
-        const std::string label = enabled ? "Hide introductions" : "Show introductions";
-        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
-    }
-    return html;
+    return syncControllerToggle(
+        std::move(html),
+        "data-help-toggle",
+        rr_rml_help_disabled() == 0,
+        "Hide introductions",
+        "Show introductions");
 }
 
 std::string syncCurrentCameraShakeToggle(std::string html)
 {
-    if (html.find("data-camera-shake-toggle") == std::string::npos) {
-        return html;
-    }
-
-    const std::string needle = "data-camera-shake-toggle";
-    const std::size_t attrStart = html.find(needle);
-    if (attrStart == std::string::npos) {
-        return html;
-    }
-    const std::size_t tagEnd = html.find('>', attrStart);
-    const std::size_t closeStart = html.find("</button>", tagEnd == std::string::npos ? attrStart : tagEnd);
-    if (tagEnd != std::string::npos && closeStart != std::string::npos) {
-        const bool disabled = rr_rml_camera_shake_disabled() != 0;
-        const std::string label = disabled ? "Enable camera shake" : "Disable camera shake";
-        html.replace(tagEnd + 1, closeStart - tagEnd - 1, label);
-    }
-    return html;
+    return syncControllerToggle(
+        std::move(html),
+        "data-camera-shake-toggle",
+        rr_rml_camera_shake_disabled() != 0,
+        "Enable camera shake",
+        "Disable camera shake");
 }
 
 std::string syncDesktopFullscreenToggle(std::string html)
@@ -868,14 +838,15 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
     switch (presentation.metadata.overlay) {
     case PanelOverlayKind::PreflightLaunch: {
         const bool ready = presentation.runtime.preflightReady;
-        std::string markup = "<button id=\"rr-scene-launch-control\" class=\"native-scene-launch-control\" "
+        std::string markup = "<button id=\"rr-scene-launch-control\" class=\"native-scene-launch-control rr-text-button\" "
             "data-rr-action=\"start_launch\" data-ui-focus-id=\"action:start_launch\"";
         if (!ready) {
             markup += " disabled=\"1\"";
         }
         markup += ">";
+        markup += "<span class=\"rr-button-label\">";
         markup += ready ? "Launch" : "Securing Mining Rig";
-        markup += "</button>";
+        markup += "</span></button>";
         return markup;
     }
     case PanelOverlayKind::TelemetryLegend:
@@ -3726,8 +3697,8 @@ bool GameRmlUi::rebuildModalHost()
             + Rml::StringUtilities::EncodeRml(activeModal->title) + "</h2>";
         if (activeModal->dismissible && activeModal->showClose) {
             modalContent +=
-                "<button class=\"ghost\" data-ui-close-modal=\"1\" "
-                "data-ui-focus-id=\"modal:close\">Close</button>";
+                "<button class=\"ghost rr-text-button\" data-ui-close-modal=\"1\" "
+                "data-ui-focus-id=\"modal:close\"><span class=\"rr-button-label\">Close</span></button>";
         }
         modalContent += "</div><div class=\"modal-scroll-body\">"
             + withOpeningControllerLabels(

@@ -2412,18 +2412,37 @@ void RocketGameApp::miningTether()
     }
 
     const MiningArtifactObject before = state_.run.mining.artifact;
+    const bool beforeRigTethered = state_.run.mining.rigTethered;
+    const bool beforeOperatorRigTethered = state_.run.mining.operatorRigTethered;
+    const bool beforeRigAvailable = !state_.run.mining.rigDisabled &&
+        state_.run.mining.rigDepthZone == state_.run.mining.depthZone;
     toggleMiningTether(state_);
+    const MiningRunState& mining = state_.run.mining;
     const MiningArtifactObject& artifact = state_.run.mining.artifact;
-    if (!artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
-        state_.statusLine = "No recoverable artifact tether target.";
-    } else if (artifact.tethered) {
+    if (artifact.tethered && !before.tethered) {
         state_.statusLine = "Artifact tether locked. Pull it free and bring it to the ship bay.";
-    } else if (before.tethered) {
+    } else if (!artifact.tethered && before.tethered) {
         state_.statusLine = "Artifact tether released.";
+    } else if (mining.operatorRigTethered && !beforeOperatorRigTethered) {
+        state_.statusLine = "Jetpack tether locked to the Mining Rig. Tow it back to the ship.";
+    } else if (!mining.operatorRigTethered && beforeOperatorRigTethered) {
+        state_.statusLine = "Jetpack tether released.";
+    } else if (mining.rigTethered && !beforeRigTethered) {
+        state_.statusLine = "Drone tether locked. Tow it back through the shaft to the ship.";
+    } else if (!mining.rigTethered && beforeRigTethered) {
+        state_.statusLine = "Drone tether released.";
+    } else if (!beforeRigAvailable && !artifact.tethered) {
+        state_.statusLine = mining.rigDisabled
+            ? "The disabled drone cannot be tethered."
+            : "The drone is on another depth; return to its layer before tethering.";
+    } else if (!artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
+        state_.statusLine = mining.rigDisabled || mining.operatorMode == MiningOperatorMode::Jetpack
+            ? "No recoverable tether target."
+            : "Drone tether unavailable.";
     } else if (!artifact.revealed && artifact.state == MiningArtifactState::Embedded) {
-        state_.statusLine = "Expose the artifact before tethering it.";
+        state_.statusLine = "Drone tether unchanged. Expose the artifact to tether it.";
     } else {
-        state_.statusLine = "Move closer to the exposed artifact to tether it.";
+        state_.statusLine = "Move closer to the exposed artifact to tether it, or tow the drone to the ship.";
     }
     panelDirty_ = true;
 }
@@ -4086,6 +4105,9 @@ RenderSnapshot RocketGameApp::snapshot() const
             std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
         result.miningRigPresent = mining.rigDepthZone == mining.depthZone;
         result.miningRigDisabled = mining.rigDisabled;
+        result.miningRigTethered = mining.rigTethered && !mining.rigDisabled;
+        result.miningOperatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled &&
+            mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
         const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining);
         result.miningAnchorValid = anchor.valid;
         result.miningAnchorX = anchor.x;
