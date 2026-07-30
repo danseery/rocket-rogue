@@ -56,6 +56,7 @@ std::string frameLimitName(FrameLimitMode mode)
     case FrameLimitMode::Balanced: return "balanced";
     case FrameLimitMode::Battery30: return "battery30";
     case FrameLimitMode::Display: return "display";
+    case FrameLimitMode::AutoPower: return "auto_power";
     case FrameLimitMode::PlatformDefault:
     default: return "platform_default";
     }
@@ -67,6 +68,7 @@ FrameLimitMode parseFrameLimit(std::string_view value)
     if (value == "balanced") return FrameLimitMode::Balanced;
     if (value == "battery30") return FrameLimitMode::Battery30;
     if (value == "display") return FrameLimitMode::Display;
+    if (value == "auto_power") return FrameLimitMode::AutoPower;
     return FrameLimitMode::PlatformDefault;
 }
 

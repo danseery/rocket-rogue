@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 
 namespace {
 
@@ -75,6 +76,28 @@ int main()
     limit = resolveFrameLimit(FrameLimitMode::Display, 240.0, false);
     assert(approximately(limit.targetFramesPerSecond, 240.0));
     assert(limit.refreshDivisor == 1);
+
+    // Auto Power is intentionally inert on unconfirmed platforms and while
+    // power state is unknown. Confirmed handhelds use an exact refresh
+    // divisor: full refresh externally and half refresh on battery.
+    const AutoPowerEnvironment deckExternal {true, PowerSource::External};
+    const AutoPowerEnvironment deckBattery {true, PowerSource::Battery};
+    const AutoPowerEnvironment unknownPower {true, PowerSource::Unknown};
+    const AutoPowerEnvironment desktopBattery {false, PowerSource::Battery};
+    for (const double refreshRate : {60.0, 90.0, 120.0, 144.0}) {
+        limit = resolveFrameLimit(FrameLimitMode::AutoPower, refreshRate, true, deckExternal);
+        assert(approximately(limit.targetFramesPerSecond, refreshRate));
+        assert(limit.refreshDivisor == 1 && limit.exactModeTarget);
+        limit = resolveFrameLimit(FrameLimitMode::AutoPower, refreshRate, true, deckBattery);
+        assert(approximately(limit.targetFramesPerSecond, refreshRate / 2.0));
+        assert(limit.refreshDivisor == 2 && limit.exactModeTarget);
+    }
+    limit = resolveFrameLimit(FrameLimitMode::AutoPower, 90.0, true, unknownPower);
+    assert(limit.targetFramesPerSecond == 0.0 && limit.refreshDivisor == 0);
+    limit = resolveFrameLimit(FrameLimitMode::AutoPower, 90.0, false, desktopBattery);
+    assert(limit.targetFramesPerSecond == 0.0 && limit.refreshDivisor == 0);
+    limit = resolveFrameLimit(FrameLimitMode::AutoPower, 0.0, true, deckBattery);
+    assert(!limit.refreshRateKnown && limit.targetFramesPerSecond == 0.0);
 
     limit = resolveFrameLimit(FrameLimitMode::PlatformDefault, 0.0, false);
     assert(!limit.refreshRateKnown && limit.targetFramesPerSecond == 0.0);

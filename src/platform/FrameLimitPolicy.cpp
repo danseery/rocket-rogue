@@ -106,6 +106,8 @@ FrameLimitResolution unknownRefreshResolution(FrameLimitMode mode, bool runningO
         break;
     case FrameLimitMode::Display:
         break;
+    case FrameLimitMode::AutoPower:
+        break;
     }
     return result;
 }
@@ -126,7 +128,8 @@ void applyChoice(
 FrameLimitResolution resolveFrameLimit(
     FrameLimitMode mode,
     double activeRefreshRateHz,
-    bool runningOnSteamDeck)
+    bool runningOnSteamDeck,
+    AutoPowerEnvironment autoPower)
 {
     if (!validRefreshRate(activeRefreshRateHz)) {
         return unknownRefreshResolution(mode, runningOnSteamDeck);
@@ -136,6 +139,16 @@ FrameLimitResolution resolveFrameLimit(
     result.mode = mode;
     result.activeRefreshRateHz = activeRefreshRateHz;
     result.refreshRateKnown = true;
+
+    if (mode == FrameLimitMode::AutoPower) {
+        if (!autoPower.eligible || autoPower.powerSource == PowerSource::Unknown) {
+            return result;
+        }
+        const std::uint32_t divisor = autoPower.powerSource == PowerSource::Battery ? 2U : 1U;
+        result.nominalTargetFramesPerSecond = activeRefreshRateHz / static_cast<double>(divisor);
+        applyChoice(result, {result.nominalTargetFramesPerSecond, divisor}, true);
+        return result;
+    }
 
     if (mode == FrameLimitMode::Display
         || (mode == FrameLimitMode::PlatformDefault && !runningOnSteamDeck)) {

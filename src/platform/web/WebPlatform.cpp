@@ -48,6 +48,28 @@ EM_JS(int, rr_web_bool_preference, (int field), {
     return 0;
 });
 
+// Pack eligibility and raw power state so the C++ side can apply the same
+// conservative five-second debounce as native SDL. Only a positive mobile
+// UA-CH signal plus the secure Battery API makes browser Auto Power eligible.
+EM_JS(int, rr_web_auto_power_info, (), {
+    const state = Module.RocketAutoPowerState = Module.RocketAutoPowerState || {
+        installed: false, eligible: false, source: 0
+    };
+    if (!state.installed) {
+        state.installed = true;
+        const mobile = !!(navigator.userAgentData && navigator.userAgentData.mobile === true);
+        if (mobile && typeof navigator.getBattery === "function") {
+            state.eligible = true;
+            navigator.getBattery().then((battery) => {
+                const sync = () => { state.source = battery.charging ? 2 : 1; };
+                sync();
+                battery.addEventListener("chargingchange", sync);
+            }).catch(() => { state.eligible = false; state.source = 0; });
+        }
+    }
+    return (state.eligible ? 10 : 0) + state.source;
+});
+
 EM_JS(void, rr_web_install_preference_revision_observer, (), {
     const state = Module.RocketPreferenceRevisionState = Module.RocketPreferenceRevisionState || {
         revision: 0,
@@ -311,6 +333,7 @@ FrameLimitMode parseFrameLimitMode(std::string_view value)
     if (value == "balanced") return FrameLimitMode::Balanced;
     if (value == "battery30") return FrameLimitMode::Battery30;
     if (value == "display") return FrameLimitMode::Display;
+    if (value == "auto_power") return FrameLimitMode::AutoPower;
     return FrameLimitMode::PlatformDefault;
 }
 
@@ -321,6 +344,7 @@ const char* frameLimitModeName(FrameLimitMode mode)
     case FrameLimitMode::Balanced: return "balanced";
     case FrameLimitMode::Battery30: return "battery30";
     case FrameLimitMode::Display: return "display";
+    case FrameLimitMode::AutoPower: return "auto_power";
     case FrameLimitMode::PlatformDefault:
     default: return "platform_default";
     }
@@ -424,6 +448,38 @@ bool WebPlatformHost::createGraphicsContext()
 }
 
 double WebPlatformHost::monotonicSeconds() const { return emscripten_get_now() / 1000.0; }
+void WebPlatformHost::observeAnimationFrame(double timestampMilliseconds)
+{
+    if (animationFrameTimestampMilliseconds_ > 0.0) {
+        const double interval = timestampMilliseconds - animationFrameTimestampMilliseconds_;
+        if (interval >= 4.0 && interval <= 100.0) {
+            const double measuredRefresh = 1000.0 / interval;
+            animationFrameRefreshRateHz_ = animationFrameRefreshRateHz_ <= 0.0
+                ? measuredRefresh
+                : animationFrameRefreshRateHz_ * 0.8 + measuredRefresh * 0.2;
+        }
+    }
+    animationFrameTimestampMilliseconds_ = timestampMilliseconds;
+}
+double WebPlatformHost::displayRefreshRateHz() const { return animationFrameRefreshRateHz_; }
+AutoPowerEnvironment WebPlatformHost::autoPowerEnvironment()
+{
+    const int info = rr_web_auto_power_info();
+    const bool eligible = info >= 10;
+    const int rawSource = info % 10;
+    const PowerSource reported = rawSource == 1 ? PowerSource::Battery
+        : rawSource == 2 ? PowerSource::External
+        : PowerSource::Unknown;
+    const double now = monotonicSeconds();
+    if (reported != observedPowerSource_) {
+        observedPowerSource_ = reported;
+        powerSourceCandidateSinceSeconds_ = now;
+    } else if (reported != stablePowerSource_
+        && now - powerSourceCandidateSinceSeconds_ >= 5.0) {
+        stablePowerSource_ = reported;
+    }
+    return {eligible, stablePowerSource_};
+}
 ViewportMetrics WebPlatformHost::viewportMetrics()
 {
     const std::uint64_t revision = static_cast<std::uint64_t>(std::max(0.0, rr_web_viewport_revision()));

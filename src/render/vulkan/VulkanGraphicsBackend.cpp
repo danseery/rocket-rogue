@@ -1151,8 +1151,14 @@ void VulkanGraphicsBackend::render(const RenderSnapshot& snapshot)
     if (!initialized_ || renderingActive_) return;
 
     const double refreshRateHz = host_.displayRefreshRateHz();
-    if (std::abs(refreshRateHz - configuredRefreshRateHz_) > 0.05) {
+    const AutoPowerEnvironment autoPowerEnvironment = frameLimitMode_ == FrameLimitMode::AutoPower
+        ? host_.autoPowerEnvironment()
+        : AutoPowerEnvironment {};
+    if (std::abs(refreshRateHz - configuredRefreshRateHz_) > 0.05
+        || autoPowerEnvironment.eligible != autoPowerEnvironment_.eligible
+        || autoPowerEnvironment.powerSource != autoPowerEnvironment_.powerSource) {
         configuredRefreshRateHz_ = refreshRateHz;
+        autoPowerEnvironment_ = autoPowerEnvironment;
         refreshFrameLimit();
     }
 
@@ -2205,8 +2211,12 @@ void VulkanGraphicsBackend::setPreferences(const AppPreferences& preferences)
 void VulkanGraphicsBackend::refreshFrameLimit()
 {
     const SteamDeckRuntimeDetection deck = steamDeckDetector_.detect();
+    autoPowerEnvironment_ = frameLimitMode_ == FrameLimitMode::AutoPower
+        ? host_.autoPowerEnvironment()
+        : AutoPowerEnvironment {};
     const FrameLimitResolution resolution = resolveFrameLimit(
-        frameLimitMode_, configuredRefreshRateHz_, deck.queryAvailable && deck.runningOnSteamDeck);
+        frameLimitMode_, configuredRefreshRateHz_, deck.queryAvailable && deck.runningOnSteamDeck,
+        autoPowerEnvironment_);
     presentDeadline_.configure(resolution.targetFramesPerSecond);
     diagnostics_.nominalTargetFramesPerSecond = resolution.nominalTargetFramesPerSecond;
     diagnostics_.targetFramesPerSecond = resolution.targetFramesPerSecond;

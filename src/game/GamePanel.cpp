@@ -2532,7 +2532,8 @@ std::string buildGamePanelMarkup(
         << "<span class=\"rr-button-label\">" << htmlEscape("Enter fullscreen") << "</span></button></section>";
     settingsBody << "<section class=\"settings-control\" data-frame-limit-settings>"
         << "<div><h3>" << htmlEscape("Frame rate") << "</h3>"
-        << "<p>" << htmlEscape("Choose stable, refresh-compatible pacing. Balanced favors 40 or 45 FPS; Battery targets 30 FPS.") << "</p></div>"
+        << "<p>" << htmlEscape("Choose stable, refresh-compatible pacing. Auto Power uses full refresh on external power and half refresh on battery.") << "</p>"
+        << "<p id=\"frame-limit-status\" data-frame-limit-status>" << htmlEscape("Auto Power status is loading.") << "</p></div>"
         << "<label><span>" << htmlEscape("Frame limit") << "</span>"
         << "<select data-frame-limit-select data-ui-focus-id=\"setting:frame_limit\" aria-label=\"Frame rate limit\">"
         << "<option value=\"platform_default\">Platform default</option>"
@@ -2540,6 +2541,7 @@ std::string buildGamePanelMarkup(
         << "<option value=\"balanced\">Balanced (40 / 45 FPS)</option>"
         << "<option value=\"battery30\">Battery (30 FPS)</option>"
         << "<option value=\"display\">Display refresh</option>"
+        << "<option value=\"auto_power\">Auto Power</option>"
         << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
         << "<div><h3>" << htmlEscape("Game speed") << "</h3>"

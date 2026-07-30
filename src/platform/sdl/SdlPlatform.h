@@ -107,6 +107,7 @@ public:
 
     double monotonicSeconds() const override;
     double displayRefreshRateHz() const override;
+    AutoPowerEnvironment autoPowerEnvironment() override;
     ViewportMetrics viewportMetrics() override;
     bool focused() const override;
     bool visible() const override;
@@ -122,6 +123,7 @@ public:
     void setPreferences(const ControllerPreferences& preferences) override;
     InputSource activeSource() const override;
     void reset() override;
+    void setSteamDeckRuntimeDetector(SteamDeckRuntimeDetector detector) noexcept;
 
 private:
     struct OpenGamepad {
@@ -140,6 +142,7 @@ private:
     void setWindowVisible(RocketGameApp& app, bool visible);
     void refreshViewportMetrics();
     void refreshDisplayTiming();
+    void refreshAutoPowerEnvironment();
     void applySoftwareFramePacing();
 
     IPreferenceStore& preferences_;
@@ -158,6 +161,10 @@ private:
     int suspendedWakeWindowCount_ = 0;
     SDL_DisplayID displayId_ = 0;
     double displayRefreshRateHz_ = 0.0;
+    SteamDeckRuntimeDetector steamDeckDetector_;
+    PowerSource observedPowerSource_ = PowerSource::Unknown;
+    PowerSource stablePowerSource_ = PowerSource::Unknown;
+    std::uint64_t powerSourceCandidateSinceNanoseconds_ = 0;
     bool initialized_ = false;
     bool vulkanLibraryLoaded_ = false;
     bool fullscreen_ = false;

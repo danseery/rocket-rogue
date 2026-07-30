@@ -11435,8 +11435,9 @@ void settingsResolutionSelectorExposesSupportedPresets()
             html.find("<option value=\"smooth60\">Smooth (60 FPS)</option>") != std::string::npos &&
             html.find("<option value=\"balanced\">Balanced (40 / 45 FPS)</option>") != std::string::npos &&
             html.find("<option value=\"battery30\">Battery (30 FPS)</option>") != std::string::npos &&
-            html.find("<option value=\"display\">Display refresh</option>") != std::string::npos,
-        "frame-limit selector should expose every supported pacing mode");
+            html.find("<option value=\"display\">Display refresh</option>") != std::string::npos &&
+            html.find("<option value=\"auto_power\">Auto Power</option>") != std::string::npos,
+            "frame-limit selector should expose every supported pacing mode");
     require(countOccurrences(html, "data-desktop-fullscreen-settings") == 1 &&
             countOccurrences(html, "data-desktop-fullscreen-toggle") == 1 &&
             html.find("data-ui-focus-id=\"setting:fullscreen\"") != std::string::npos,

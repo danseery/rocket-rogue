@@ -32,8 +32,11 @@ public:
     explicit WebPlatformHost(WebGamepadSource& gamepads);
 
     bool createGraphicsContext();
+    void observeAnimationFrame(double timestampMilliseconds);
 
     double monotonicSeconds() const override;
+    double displayRefreshRateHz() const override;
+    AutoPowerEnvironment autoPowerEnvironment() override;
     ViewportMetrics viewportMetrics() override;
     bool focused() const override;
     bool visible() const override;
@@ -47,6 +50,11 @@ private:
     WebGamepadSource& gamepads_;
     ViewportMetrics cachedViewportMetrics_;
     std::uint64_t viewportRevision_ = 0;
+    double animationFrameTimestampMilliseconds_ = 0.0;
+    double animationFrameRefreshRateHz_ = 0.0;
+    PowerSource observedPowerSource_ = PowerSource::Unknown;
+    PowerSource stablePowerSource_ = PowerSource::Unknown;
+    double powerSourceCandidateSinceSeconds_ = 0.0;
 };
 
 class WebTextureSource final : public ITextureSource {

@@ -714,6 +714,37 @@ void SdlPlatform::refreshDisplayTiming()
     diagnostics_.softwareFrameLimiterActive = framePacer_.active();
 }
 
+void SdlPlatform::refreshAutoPowerEnvironment()
+{
+    PowerSource reported = PowerSource::Unknown;
+    switch (SDL_GetPowerInfo(nullptr, nullptr)) {
+    case SDL_POWERSTATE_ON_BATTERY:
+        reported = PowerSource::Battery;
+        break;
+    case SDL_POWERSTATE_CHARGING:
+    case SDL_POWERSTATE_CHARGED:
+    case SDL_POWERSTATE_NO_BATTERY:
+        reported = PowerSource::External;
+        break;
+    case SDL_POWERSTATE_ERROR:
+    case SDL_POWERSTATE_UNKNOWN:
+    default:
+        break;
+    }
+
+    const std::uint64_t now = SDL_GetTicksNS();
+    if (reported != observedPowerSource_) {
+        observedPowerSource_ = reported;
+        powerSourceCandidateSinceNanoseconds_ = now;
+        return;
+    }
+    constexpr std::uint64_t debounceNanoseconds = 5'000'000'000ULL;
+    if (reported != stablePowerSource_
+        && now - powerSourceCandidateSinceNanoseconds_ >= debounceNanoseconds) {
+        stablePowerSource_ = reported;
+    }
+}
+
 void SdlPlatform::applySoftwareFramePacing()
 {
     diagnostics_.frameLimiterMilliseconds = 0.0;
@@ -730,6 +761,12 @@ void SdlPlatform::applySoftwareFramePacing()
 
 double SdlPlatform::monotonicSeconds() const { return static_cast<double>(SDL_GetTicksNS()) / 1'000'000'000.0; }
 double SdlPlatform::displayRefreshRateHz() const { return displayRefreshRateHz_; }
+AutoPowerEnvironment SdlPlatform::autoPowerEnvironment()
+{
+    refreshAutoPowerEnvironment();
+    const SteamDeckRuntimeDetection deck = steamDeckDetector_.detect();
+    return {deck.queryAvailable && deck.runningOnSteamDeck, stablePowerSource_};
+}
 ViewportMetrics SdlPlatform::viewportMetrics()
 {
     return viewportMetrics_;
@@ -750,6 +787,11 @@ bool SdlPlatform::setFullscreen(bool enabled)
     preferences.fullscreen = enabled;
     if (!preferences_.store(preferences)) log(PlatformLogLevel::Warning, preferences_.lastError());
     return true;
+}
+
+void SdlPlatform::setSteamDeckRuntimeDetector(SteamDeckRuntimeDetector detector) noexcept
+{
+    steamDeckDetector_ = detector;
 }
 void SdlPlatform::log(PlatformLogLevel level, std::string_view message)
 {

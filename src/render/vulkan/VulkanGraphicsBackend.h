@@ -220,6 +220,7 @@ private:
     PresentIntervalDeadline presentDeadline_;
     SteamDeckRuntimeDetector steamDeckDetector_;
     FrameLimitMode frameLimitMode_ = FrameLimitMode::PlatformDefault;
+    AutoPowerEnvironment autoPowerEnvironment_;
     double configuredRefreshRateHz_ = 0.0;
     std::string deviceName_;
     std::string lastError_;

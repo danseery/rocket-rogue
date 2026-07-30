@@ -214,6 +214,7 @@ int main(int argumentCount, char** arguments)
         const int initialWidth = benchmarkOptions.enabled ? benchmarkOptions.resolution.width : 1280;
         const int initialHeight = benchmarkOptions.enabled ? benchmarkOptions.resolution.height : 800;
         if (!platform.initialize(initialWidth, initialHeight)) return 1;
+        platform.setSteamDeckRuntimeDetector(steam.deckDetector());
         if (!steamInitialized && !steam.lastError().empty()) {
             platform.log(rocket::PlatformLogLevel::Warning, steam.lastError());
         }

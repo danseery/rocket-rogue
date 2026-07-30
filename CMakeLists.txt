@@ -300,6 +300,7 @@ add_custom_target(validate_rocket_ui_resources DEPENDS "${ROCKET_UI_VALIDATION_S
 
 if(EMSCRIPTEN)
     add_library(rocket_platform_web
+        src/platform/FrameLimitPolicy.cpp
         src/platform/web/WebGamepadSource.cpp
         src/platform/web/WebPlatform.cpp
         src/platform/web/WebSaveStore.cpp)

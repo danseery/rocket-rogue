@@ -179,6 +179,7 @@ public:
     virtual ~IPlatformHost() = default;
     virtual double monotonicSeconds() const = 0;
     virtual double displayRefreshRateHz() const { return 0.0; }
+    virtual AutoPowerEnvironment autoPowerEnvironment() { return {}; }
     virtual ViewportMetrics viewportMetrics() = 0;
     virtual bool focused() const = 0;
     virtual bool visible() const = 0;

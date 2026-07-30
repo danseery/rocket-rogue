@@ -10,6 +10,22 @@ enum class FrameLimitMode {
     Balanced,
     Battery30,
     Display,
+    AutoPower,
+};
+
+enum class PowerSource {
+    Unknown,
+    External,
+    Battery,
+};
+
+// Auto Power is deliberately opt-in and only receives a positive eligibility
+// signal from a confirmed Deck or a supported, positively mobile web runtime.
+// Unknown power is not treated as battery power: it leaves presentation
+// uncapped rather than guessing on a PC, laptop, dock, or unsupported browser.
+struct AutoPowerEnvironment {
+    bool eligible = false;
+    PowerSource powerSource = PowerSource::Unknown;
 };
 
 struct FrameLimitResolution {
@@ -29,7 +45,8 @@ struct FrameLimitResolution {
 FrameLimitResolution resolveFrameLimit(
     FrameLimitMode mode,
     double activeRefreshRateHz,
-    bool runningOnSteamDeck);
+    bool runningOnSteamDeck,
+    AutoPowerEnvironment autoPower = {});
 
 struct FrameDeadlineDecision {
     std::uint64_t delayNanoseconds = 0;

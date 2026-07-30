@@ -12,6 +12,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 
@@ -37,6 +38,54 @@ int g_domLayoutHeight = -1;
 rocket::UiSurfaceKind g_domLayoutSurface = rocket::UiSurfaceKind::Fullscreen;
 
 #ifdef __EMSCRIPTEN__
+class WebAutoPowerPacer {
+public:
+    bool shouldRun(
+        const rocket::AppPreferences& preferences,
+        rocket::WebPlatformHost& host,
+        double nowMilliseconds)
+    {
+        if (preferences.frameLimitMode != rocket::FrameLimitMode::AutoPower) {
+            reset();
+            return true;
+        }
+        const rocket::FrameLimitResolution resolution = rocket::resolveFrameLimit(
+            preferences.frameLimitMode,
+            host.displayRefreshRateHz(),
+            false,
+            host.autoPowerEnvironment());
+        if (!resolution.refreshRateKnown || resolution.refreshDivisor <= 1U
+            || resolution.targetFramesPerSecond <= 0.0) {
+            reset();
+            return true;
+        }
+
+        const double intervalMilliseconds = 1000.0 / resolution.targetFramesPerSecond;
+        if (nextFrameMilliseconds_ <= 0.0 || std::abs(intervalMilliseconds - intervalMilliseconds_) > 0.1) {
+            intervalMilliseconds_ = intervalMilliseconds;
+            nextFrameMilliseconds_ = nowMilliseconds + intervalMilliseconds_;
+            return true;
+        }
+        if (nowMilliseconds + 0.2 < nextFrameMilliseconds_) return false;
+        const double missedIntervals = std::floor(
+            (nowMilliseconds - nextFrameMilliseconds_) / intervalMilliseconds_);
+        nextFrameMilliseconds_ += intervalMilliseconds_ * std::max(1.0, missedIntervals + 1.0);
+        return true;
+    }
+
+private:
+    void reset()
+    {
+        nextFrameMilliseconds_ = 0.0;
+        intervalMilliseconds_ = 0.0;
+    }
+
+    double nextFrameMilliseconds_ = 0.0;
+    double intervalMilliseconds_ = 0.0;
+};
+
+WebAutoPowerPacer g_autoPowerPacer;
+
 EM_JS(int, rr_controller_debug_tools_enabled, (), {
     try {
         return globalThis.localStorage.getItem("rocket_rogue_debug_tools") === "1" ? 1 : 0;
@@ -67,7 +116,13 @@ void syncDomViewportLayout()
 
 void mainLoop()
 {
-    if (g_runner) g_runner->frame();
+    if (!g_platformHost) return;
+    const double nowMilliseconds = emscripten_get_now();
+    g_platformHost->observeAnimationFrame(nowMilliseconds);
+    if (g_runner && g_preferenceStore
+        && g_autoPowerPacer.shouldRun(g_preferenceStore->load(), *g_platformHost, nowMilliseconds)) {
+        g_runner->frame();
+    }
     syncDomViewportLayout();
 }
 #endif

@@ -110,6 +110,7 @@ int rr_rml_frame_limit_preference()
     case FrameLimitMode::Balanced: return 2;
     case FrameLimitMode::Battery30: return 3;
     case FrameLimitMode::Display: return 4;
+    case FrameLimitMode::AutoPower: return 5;
     case FrameLimitMode::PlatformDefault:
     default: return 0;
     }
@@ -123,6 +124,7 @@ void rr_rml_set_frame_limit_preference(const char* rawValue)
     else if (value == "balanced") preferences.frameLimitMode = FrameLimitMode::Balanced;
     else if (value == "battery30") preferences.frameLimitMode = FrameLimitMode::Battery30;
     else if (value == "display") preferences.frameLimitMode = FrameLimitMode::Display;
+    else if (value == "auto_power") preferences.frameLimitMode = FrameLimitMode::AutoPower;
     else preferences.frameLimitMode = FrameLimitMode::PlatformDefault;
     storePreferences(std::move(preferences));
 }
@@ -357,9 +359,9 @@ std::string currentResolutionOptionValue()
 std::string currentFrameLimitOptionValue()
 {
     static constexpr const char* options[] = {
-        "platform_default", "smooth60", "balanced", "battery30", "display"
+        "platform_default", "smooth60", "balanced", "battery30", "display", "auto_power"
     };
-    return options[std::clamp(rr_rml_frame_limit_preference(), 0, 4)];
+    return options[std::clamp(rr_rml_frame_limit_preference(), 0, 5)];
 }
 
 std::string selectCurrentResolution(std::string html)
@@ -545,11 +547,48 @@ std::string syncDesktopFullscreenToggle(std::string html)
         "Enter fullscreen");
 }
 
+std::string autoPowerStatusText()
+{
+    if (currentPreferences().frameLimitMode != FrameLimitMode::AutoPower) {
+        return "Auto Power is opt-in; unsupported devices remain uncapped.";
+    }
+    if (!g_host) return "Auto Power status unavailable; no automatic cap.";
+    const AutoPowerEnvironment environment = g_host->autoPowerEnvironment();
+    if (!environment.eligible) {
+        return "Auto Power unavailable on this device; no automatic cap.";
+    }
+    const double refreshRate = g_host->displayRefreshRateHz();
+    if (environment.powerSource == PowerSource::Unknown || refreshRate <= 0.0) {
+        return "Auto Power is waiting for stable power and refresh data.";
+    }
+    const char* source = environment.powerSource == PowerSource::Battery ? "Battery" : "External";
+    const double targetFramesPerSecond = environment.powerSource == PowerSource::Battery
+        ? refreshRate / 2.0
+        : refreshRate;
+    return std::string(source) + " · "
+        + std::to_string(static_cast<int>(std::lround(refreshRate))) + " Hz → "
+        + std::to_string(static_cast<int>(std::lround(targetFramesPerSecond))) + " FPS";
+}
+
+std::string syncAutoPowerStatus(std::string html)
+{
+    const std::size_t marker = html.find("data-frame-limit-status");
+    if (marker == std::string::npos) return html;
+    const std::size_t tagEnd = html.find('>', marker);
+    const std::size_t close = html.find("</p>", tagEnd == std::string::npos ? marker : tagEnd);
+    if (tagEnd != std::string::npos && close != std::string::npos) {
+        html.replace(tagEnd + 1, close - tagEnd - 1, autoPowerStatusText());
+    }
+    return html;
+}
+
+void refreshAutoPowerStatusElement();
+
 std::string syncSettingsControls(std::string html)
 {
-    return syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
+    return syncAutoPowerStatus(syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
         syncCurrentPerformanceStatsToggle(syncCurrentDebugToolsToggle(
-            selectCurrentKeyboardDrillMode(selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html)))))))))));
+            selectCurrentKeyboardDrillMode(selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html))))))))))));
 }
 
 std::string collapsedText(std::string_view text)
@@ -1926,6 +1965,18 @@ struct FocusTarget {
 std::vector<FocusTarget> g_focusTargets;
 bool g_focusTargetsModalScoped = false;
 bool g_displayPreferenceChanged = false;
+std::string g_renderedAutoPowerStatus;
+
+void refreshAutoPowerStatusElement()
+{
+    if (!g_document) return;
+    Rml::Element* element = g_document->GetElementById("frame-limit-status");
+    if (!element) return;
+    const std::string status = autoPowerStatusText();
+    if (status == g_renderedAutoPowerStatus) return;
+    element->SetInnerRML(Rml::StringUtilities::EncodeRml(status));
+    g_renderedAutoPowerStatus = status;
+}
 
 enum class ControllerFocusRow {
     None,
@@ -2842,6 +2893,7 @@ void GameRmlUi::render()
         rootClip = expandedPanelClip(panelMode_);
     }
     renderHost_.setRootClip({rootClip.Left(), rootClip.Top(), rootClip.Right(), rootClip.Bottom()});
+    refreshAutoPowerStatusElement();
     g_context->Update();
     if (renderHost_.beginFrame()) {
         g_context->Render();

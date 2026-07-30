@@ -150,6 +150,7 @@ int main()
         rocket::FrameLimitMode::Balanced,
         rocket::FrameLimitMode::Battery30,
         rocket::FrameLimitMode::Display,
+        rocket::FrameLimitMode::AutoPower,
     };
     for (std::size_t index = 0; index < std::size(frameLimitModes); ++index) {
         const std::filesystem::path modeRoot = root / ("frame-limit-" + std::to_string(index));
