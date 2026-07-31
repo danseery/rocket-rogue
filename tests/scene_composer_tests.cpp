@@ -444,8 +444,9 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
         if (screen == rocket::Screen::Flyby) {
             activeFlybyWorldUnit = activePacket.transform.worldUnitX;
         } else {
-            assert(std::abs(activePacket.transform.worldUnitX - activeFlybyWorldUnit * 1.66F) < 0.001F);
-            assert(std::abs(activePacket.transform.worldUnitY - activeFlybyWorldUnit * 1.66F) < 0.001F);
+            const float expectedOrbitWorldUnit = activeFlybyWorldUnit / 1.50F * 1.66F;
+            assert(std::abs(activePacket.transform.worldUnitX - expectedOrbitWorldUnit) < 0.001F);
+            assert(std::abs(activePacket.transform.worldUnitY - expectedOrbitWorldUnit) < 0.001F);
         }
 
         snapshot.flybyCompleted = screen == rocket::Screen::Flyby;
@@ -455,8 +456,9 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
         assertRect(completedPacket.logicalSceneClip, {0, 0, 1280, 800});
         assert(std::abs(completedPacket.transform.pixelCenterX - 640.0F) < 0.001F);
         assert(std::abs(completedPacket.transform.pixelCenterY - 400.0F) < 0.001F);
-        assert(std::abs(completedPacket.transform.worldUnitX - 368.0F) < 0.001F);
-        assert(std::abs(completedPacket.transform.worldUnitY - 368.0F) < 0.001F);
+        const float expectedCompletedWorldUnit = screen == rocket::Screen::Flyby ? 368.0F * 1.50F : 368.0F;
+        assert(std::abs(completedPacket.transform.worldUnitX - expectedCompletedWorldUnit) < 0.001F);
+        assert(std::abs(completedPacket.transform.worldUnitY - expectedCompletedWorldUnit) < 0.001F);
     }
 }
 

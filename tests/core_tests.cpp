@@ -12145,6 +12145,18 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
             && countOccurrences(droneHtml, "class=\"drone-control-card ") == catalog.miniDrones.size()
             && countOccurrences(droneHtml, "class=\"drone-loadout-slot ") == 6,
         "Drone Ops workspace should expose the complete drone roster beside all six loadout slots");
+    const std::size_t droneRosterStart = droneHtml.find("drone-control-grid drone-controller-choice-row");
+    const std::size_t droneRosterEnd = droneHtml.find("</div></section>", droneRosterStart);
+    require(
+        droneRosterStart != std::string::npos && droneRosterEnd != std::string::npos,
+        "Drone Ops should keep the complete roster inside one bounded grid");
+    const std::string droneRosterHtml =
+        droneHtml.substr(droneRosterStart, droneRosterEnd - droneRosterStart);
+    for (const MiniDrone& drone : catalog.miniDrones) {
+        require(
+            droneRosterHtml.find(drone.description) != std::string::npos,
+            "every Drone Ops roster card should contain its complete operational description");
+    }
     require(
         droneHtml.find("drone-done-action") != std::string::npos
             && droneHtml.find("data-rr-action=\"back_to_surface_ops\"") != std::string::npos
@@ -12461,6 +12473,14 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const std::string marsDroneHtml =
         buildGamePanelHtml({marsContractState, catalog, marsContractLaunch, marsContractLaunch});
     require(
+        countOccurrences(marsDroneHtml, "class=\"drone-mission-strip scenario-objective ") == 1
+            && marsDroneHtml.find("data-objective-state=\"ACTIVE\"") != std::string::npos
+            && marsDroneHtml.find("class=\"drone-mission-title\">Bay Expansion</strong>") != std::string::npos
+            && marsDroneHtml.find(">0/40</b>") != std::string::npos
+            && marsDroneHtml.find("REWARD // EMPTY SUPPORT DRONE SLOT 2") != std::string::npos
+            && marsDroneHtml.find("scenario-extraction-objective") == std::string::npos,
+        "active Bay Expansion should use one compact strip with explicit state, progress, reward, and delivery guidance");
+    require(
         (marsDroneHtml.find("NO SECOND SUPPORT DRONE REQUIRED") != std::string::npos
             || marsDroneHtml.find("No second Support Drone is required") != std::string::npos)
             && (marsDroneHtml.find("ABOARD 14 COMMON") != std::string::npos
@@ -12481,6 +12501,42 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         marsSurfaceHtml.find("data-rr-action=\"extract_surface\"") != std::string::npos
             && marsSurfaceHtml.find("Deliver 14 Common Ore") != std::string::npos,
         "Surface Ops should expose the configured safe-delivery action for the aboard contract material");
+    marsContractState.screen = Screen::DroneOps;
+
+    require(
+        recordScenarioEvent(
+            marsContractState,
+            catalog,
+            {ScenarioEventKind::SafeMaterialDelivered,
+             {},
+             {},
+             content::destination::mars,
+             "common",
+             tuning::research::marsBayCommonOreGoal,
+             0}),
+        "the compact Drone Ops objective fixture should reach its explicit claim-ready state");
+    const std::string readyMarsDroneHtml =
+        buildGamePanelHtml({marsContractState, catalog, marsContractLaunch, marsContractLaunch});
+    require(
+        countOccurrences(readyMarsDroneHtml, "class=\"drone-mission-strip scenario-objective ") == 1
+            && readyMarsDroneHtml.find("data-objective-state=\"READY TO CLAIM\"") != std::string::npos
+            && readyMarsDroneHtml.find(">40/40</b>") != std::string::npos,
+        "claim-ready Bay Expansion should remain one compact strip with complete progress");
+    require(
+        performScenarioAction(
+            marsContractState,
+            catalog,
+            content::scenario::marsBayExpansion,
+            "delivery",
+            ScenarioActionKind::ClaimReward).applied,
+        "the compact Drone Ops objective fixture should claim the Bay Expansion reward");
+    const std::string completeMarsDroneHtml =
+        buildGamePanelHtml({marsContractState, catalog, marsContractLaunch, marsContractLaunch});
+    require(
+        countOccurrences(completeMarsDroneHtml, "class=\"drone-mission-strip scenario-objective ") == 1
+            && completeMarsDroneHtml.find("data-objective-state=\"COMPLETE\"") != std::string::npos
+            && completeMarsDroneHtml.find("OBJECTIVE COMPLETE") != std::string::npos,
+        "completed Bay Expansion should remain explicitly complete in the compact mission strip");
 
     GameState lunarContractState = createNewGame(catalog, 0x4C554E41);
     lunarContractState.run.destinationIndex = 1;

@@ -21,6 +21,7 @@ constexpr float kSceneViewportPadding = 0.92F;
 // orbital playfield, rather than individual sprites, so the band, ship, and
 // trajectory remain legible on a Steam Deck without changing simulation.
 constexpr float kOrbitSceneScale = 1.66F;
+constexpr float kFlybySceneScale = 1.50F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
@@ -776,6 +777,8 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * scenePadding);
     if (snapshot.screen == Screen::Orbit && !snapshot.orbitCompleted) {
         sceneWorldUnit_ *= kOrbitSceneScale;
+    } else if (snapshot.screen == Screen::Flyby) {
+        sceneWorldUnit_ *= kFlybySceneScale;
     }
     sceneWorldUnitX_ = sceneWorldUnit_;
     sceneWorldUnitY_ = sceneWorldUnit_;

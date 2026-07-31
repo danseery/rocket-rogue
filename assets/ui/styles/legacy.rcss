@@ -7784,6 +7784,93 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     font-size: 12px;
     font-weight: bold;
 }
+#rr-panel.drone-workspace-panel .drone-mission-strip {
+    flex: 0 0 var(--rr-legacy-layout-198, 58px);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    box-sizing: border-box;
+    width: var(--rr-legacy-layout-155, 100%);
+    min-height: var(--rr-legacy-layout-198, 58px);
+    height: var(--rr-legacy-layout-198, 58px);
+    max-height: var(--rr-legacy-layout-198, 58px);
+    margin: 0px 0px var(--rr-legacy-layout-199, 6px) 0px;
+    padding: 6px 10px;
+    overflow: hidden;
+    color: #dce8ed;
+    background-color: #211b0d;
+    border-width: 1px;
+    border-color: #9a7b25;
+    border-radius: 6px;
+}
+#rr-panel.drone-workspace-panel .drone-mission-strip.state-ready {
+    background-color: #30270f;
+    border-color: #ffd166;
+}
+#rr-panel.drone-workspace-panel .drone-mission-strip.state-complete {
+    background-color: #072a31;
+    border-color: #3aa8b9;
+}
+#rr-panel.drone-workspace-panel .drone-mission-identity {
+    flex: 0 0 104px;
+    width: 104px;
+    min-width: 104px;
+}
+#rr-panel.drone-workspace-panel .drone-mission-identity span,
+#rr-panel.drone-workspace-panel .drone-mission-identity em {
+    display: block;
+    font-size: 9px;
+    line-height: 1.1;
+}
+#rr-panel.drone-workspace-panel .drone-mission-identity span {
+    color: #ffd166;
+    font-weight: bold;
+}
+#rr-panel.drone-workspace-panel .drone-mission-identity em {
+    margin-top: 3px;
+    color: #d8c88c;
+    font-style: normal;
+}
+#rr-panel.drone-workspace-panel .drone-mission-title {
+    flex: 0 0 150px;
+    box-sizing: border-box;
+    width: 150px;
+    min-width: 150px;
+    padding-right: 10px;
+    color: #fff0b7;
+    font-size: 12px;
+    line-height: 1.15;
+}
+#rr-panel.drone-workspace-panel .drone-mission-progress {
+    flex: 0 0 54px;
+    width: 54px;
+    min-width: 54px;
+    color: #dff8ff;
+    font-size: 11px;
+    text-align: center;
+}
+#rr-panel.drone-workspace-panel .drone-mission-instruction {
+    flex: 1 1 auto;
+    min-width: 0px;
+    max-height: 34px;
+    margin: 0px 12px;
+    overflow: hidden;
+    color: #c5d3da;
+    font-size: 11px;
+    line-height: 1.2;
+}
+#rr-panel.drone-workspace-panel .drone-mission-reward {
+    flex: 0 0 190px;
+    width: 190px;
+    min-width: 190px;
+    max-height: 32px;
+    overflow: hidden;
+    color: #ffd166;
+    font-size: 9px;
+    line-height: 1.15;
+    text-align: right;
+}
 #rr-panel.drone-workspace-panel .drone-top-row {
     flex: 0 0 var(--rr-legacy-layout-168, 0px);
     display: block;
@@ -7891,11 +7978,15 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     margin: 0px;
     padding: 12px;
     overflow-x: hidden;
-    overflow-y: auto;
+    overflow-y: hidden;
     background-color: #06121a;
     border-width: 1px;
     border-color: #34596a;
     border-radius: 7px;
+}
+#rr-panel.drone-workspace-panel.drone-workspace-constrained .drone-roster,
+#rr-panel.drone-workspace-panel.drone-workspace-constrained .drone-loadout-bench {
+    overflow-y: auto;
 }
 #rr-panel.drone-workspace-panel .drone-roster {
     flex: 0 0 var(--rr-legacy-layout-173, 0px);
@@ -8151,17 +8242,21 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.drone-workspace-panel .drone-loadout-grid {
     display: flex;
-    flex-direction: column;
-    flex-wrap: nowrap;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     width: 100%;
     height: auto;
     margin: 0px;
+    gap: 0px var(--rr-legacy-layout-200, 0px);
     overflow: visible;
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot {
-    flex: 0 0 auto;
+    flex: 0 0 var(--rr-legacy-layout-201, 100%);
     box-sizing: border-box;
-    width: 100%;
+    width: var(--rr-legacy-layout-201, 100%);
+    min-width: var(--rr-legacy-layout-201, 100%);
+    max-width: var(--rr-legacy-layout-201, 100%);
     min-height: var(--rr-legacy-layout-184, 0px);
     height: var(--rr-legacy-layout-185, auto);
     max-height: var(--rr-legacy-layout-186, none);
@@ -8811,8 +8906,8 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     line-height: 1.05;
 }
 #rr-panel.drone-workspace-panel .drone-control-card .drone-card-summary {
-    min-height: 28px;
-    max-height: 28px;
+    min-height: 52px;
+    max-height: 52px;
     margin: 2px 0px 4px 0px;
     line-height: 1.1;
 }
@@ -8828,9 +8923,9 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     font-size: 9px;
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot {
-    min-height: 96px;
-    height: 96px;
-    max-height: 96px;
+    min-height: var(--rr-legacy-layout-184, 102px);
+    height: var(--rr-legacy-layout-185, 102px);
+    max-height: var(--rr-legacy-layout-186, 102px);
     padding: 7px 8px;
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-head {
@@ -8839,10 +8934,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     margin-bottom: 3px;
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot .slot-card-content {
-    display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: space-between;
+    display: block;
     width: 100%;
     min-height: 0px;
     height: auto;
@@ -8863,16 +8955,17 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot .stat-grid {
     display: flex;
-    flex: 0 0 auto;
     flex-direction: row;
     flex-wrap: nowrap;
-    width: auto;
+    width: 100%;
     min-height: 26px;
-    margin: 4px 0px 0px 6px;
+    margin: 3px 0px 0px 0px;
     gap: 4px;
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot .stat-chip {
-    min-width: 64px;
+    flex: 1 1 0px;
+    width: auto;
+    min-width: 0px;
     min-height: 24px;
     height: 24px;
     margin: 0px;
@@ -9154,27 +9247,18 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     line-height: 1.15;
 }
 
-/* The Drone Ops campaign banner spans the workspace. Reserve a useful lane
-   for its recovery CTA instead of collapsing the command into a tiny chip. */
-#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot {
+/* The side-rail cockpit is narrower than the desktop flight lane. Keep both
+   action rows inside their card instead of allowing the legacy 372px lane to
+   push buttons beyond the panel border. */
+#rr-panel.control-panel .flight-hud .primary-actions,
+#rr-panel.control-panel .flight-hud .system-actions {
+    box-sizing: border-box;
     width: 100%;
+    max-width: 100%;
     min-width: 0px;
 }
-#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot button.rr-text-button,
-#rr-panel.drone-workspace-panel .phase-board-drone-ops .scenario-objective .campaign-objective-foot button.rr-text-button {
-    flex: 0 0 280px;
-    width: 280px;
-    min-width: 280px;
-    min-height: 64px;
-    height: auto;
-    margin-left: 16px;
-    padding: 6px 10px;
-    font-size: 14px;
-    line-height: 1.15;
-    white-space: normal;
+#rr-panel.control-panel .flight-hud .primary-actions button.rr-text-button,
+#rr-panel.control-panel .flight-hud .system-actions button.rr-text-button {
+    max-width: 100%;
     overflow: hidden;
-}
-#rr-panel.drone-workspace-panel .scenario-objective .campaign-objective-foot button.rr-text-button .rr-button-label {
-    white-space: normal;
-    line-height: 1.15;
 }

@@ -1077,6 +1077,8 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int droneToolbarGap = compactDroneWorkspaceVertical ? 6 : 10;
     const int droneToolbarVerticalPadding = compactDroneWorkspaceVertical ? 6 : 8;
     const int droneToolbarButtonHeight = compactDroneWorkspaceVertical ? 40 : 46;
+    const int droneMissionStripHeight = compactDroneWorkspaceVertical ? 58 : 66;
+    const int droneMissionStripGap = compactDroneWorkspaceVertical ? 6 : 10;
     const int droneTopRowHeight = compactDroneWorkspaceVertical ? 72 : 92;
     const int droneTopRowGap = compactDroneWorkspaceVertical ? 6 : 10;
     const int droneBayVerticalPadding = compactDroneWorkspaceVertical ? 7 : 10;
@@ -1095,15 +1097,19 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int droneControlCardHeight = compactDroneWorkspaceVertical ? 224 : 240;
     const int droneControlCardPadding = compactDroneWorkspaceVertical ? 8 : 10;
     const int droneCardFooterButtonHeight = compactDroneWorkspaceVertical ? 36 : 40;
-    const int droneLoadoutSlotMinHeight = compactDroneWorkspaceVertical ? 94 : 112;
-    const std::string droneLoadoutSlotHeight = compactDroneWorkspaceVertical ? "94px" : "auto";
-    const std::string droneLoadoutSlotMaxHeight = compactDroneWorkspaceVertical ? "94px" : "none";
+    const int droneLoadoutSlotMinHeight = compactDroneWorkspaceVertical ? 102 : 112;
+    const std::string droneLoadoutSlotHeight = compactDroneWorkspaceVertical ? "102px" : "auto";
+    const std::string droneLoadoutSlotMaxHeight = compactDroneWorkspaceVertical ? "102px" : "none";
     const int droneLoadoutSlotGap = compactDroneWorkspaceVertical ? 6 : 8;
     const int droneLoadoutSlotVerticalPadding = compactDroneWorkspaceVertical ? 5 : 9;
     const int droneLoadoutButtonHeight = compactDroneWorkspaceVertical ? 28 : 36;
     const int droneLoadoutStatMarginTop = compactDroneWorkspaceVertical ? 2 : 7;
     const int droneLoadoutChipMinHeight = compactDroneWorkspaceVertical ? 20 : 25;
     const int droneLoadoutChipVerticalPadding = compactDroneWorkspaceVertical ? 2 : 4;
+    const int droneLoadoutColumnGap = compactDroneWorkspaceVertical ? 6 : 0;
+    const int droneLoadoutSlotWidth = compactDroneWorkspaceVertical
+        ? std::max(1, (droneLoadoutBenchWidth - 24 - droneLoadoutColumnGap) / 2)
+        : std::max(1, droneLoadoutBenchWidth - 24);
     const int refitChoiceCardHeight = std::clamp(viewportHeight - 240, 210, 360);
     const int arrivalChoiceCardHeight = std::clamp(viewportHeight - 220, 190, 280);
     // Surface Ops is a top-to-bottom decision sequence: the choices follow
@@ -1128,7 +1134,7 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     // space-between gutters fill the roster lane exactly, so the second row
     // cannot grow a lone card to a different size.
     const int droneControlCardWidth = std::max(
-        kDroneControlCardMinWidth,
+        viewportWidth >= 1280 ? kDroneControlCardMinWidth : 1,
         (droneRosterContentWidth - kDroneControlCardHorizontalGap * (kDroneControlColumns - 1))
             / kDroneControlColumns);
     const int modalGutter = 16;
@@ -1655,6 +1661,14 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     applied = element.SetProperty("--rr-legacy-layout-196", std::to_string(hangarOperationCardHeight) + "px") && applied;
     // --rr-legacy-layout-197: std::to_string(surfaceOpsChoiceCardHeight)px
     applied = element.SetProperty("--rr-legacy-layout-197", std::to_string(surfaceOpsChoiceCardHeight) + "px") && applied;
+    // --rr-legacy-layout-198: std::to_string(droneMissionStripHeight)px
+    applied = element.SetProperty("--rr-legacy-layout-198", std::to_string(droneMissionStripHeight) + "px") && applied;
+    // --rr-legacy-layout-199: std::to_string(droneMissionStripGap)px
+    applied = element.SetProperty("--rr-legacy-layout-199", std::to_string(droneMissionStripGap) + "px") && applied;
+    // --rr-legacy-layout-200: std::to_string(droneLoadoutColumnGap)px
+    applied = element.SetProperty("--rr-legacy-layout-200", std::to_string(droneLoadoutColumnGap) + "px") && applied;
+    // --rr-legacy-layout-201: std::to_string(droneLoadoutSlotWidth)px
+    applied = element.SetProperty("--rr-legacy-layout-201", std::to_string(droneLoadoutSlotWidth) + "px") && applied;
     return applied;
 }
 
@@ -2072,6 +2086,53 @@ FocusTarget* firstDirectionalControllerRowTarget(
     for (const ControllerFocusRow destinationRow : destinationRows) {
         if (FocusTarget* target = directionalControllerRowTarget(current, destinationRow, direction)) {
             return target;
+        }
+    }
+    return nullptr;
+}
+
+FocusTarget* compactDroneLoadoutGridTarget(FocusTarget& current, UiDirection direction)
+{
+    if (rr_rml_viewport_height() > 1080 || !current.element) {
+        return nullptr;
+    }
+    Rml::Element* currentSlot = current.element->Closest(".drone-loadout-slot");
+    if (!currentSlot) {
+        return nullptr;
+    }
+    const int currentIndex = currentSlot->GetAttribute<int>("data-drone-slot-index", -1);
+    if (currentIndex < 0) {
+        return nullptr;
+    }
+
+    int destinationIndex = -1;
+    switch (direction) {
+    case UiDirection::Left:
+        if (currentIndex % 2 == 1) destinationIndex = currentIndex - 1;
+        break;
+    case UiDirection::Right:
+        if (currentIndex % 2 == 0) destinationIndex = currentIndex + 1;
+        break;
+    case UiDirection::Up:
+        if (currentIndex >= 2) destinationIndex = currentIndex - 2;
+        break;
+    case UiDirection::Down:
+        if (currentIndex < 4) destinationIndex = currentIndex + 2;
+        break;
+    case UiDirection::Count:
+        break;
+    }
+    if (destinationIndex < 0) {
+        return nullptr;
+    }
+
+    for (FocusTarget& target : g_focusTargets) {
+        if (controllerFocusRow(target) != ControllerFocusRow::DroneLoadout || !target.element) {
+            continue;
+        }
+        Rml::Element* slot = target.element->Closest(".drone-loadout-slot");
+        if (slot && slot->GetAttribute<int>("data-drone-slot-index", -1) == destinationIndex) {
+            return &target;
         }
     }
     return nullptr;
@@ -3051,6 +3112,23 @@ bool GameRmlUi::navigate(UiDirection direction)
     }
 
     const ControllerFocusRow currentRow = controllerFocusRow(*current);
+    if (currentRow == ControllerFocusRow::DroneLoadout && rr_rml_viewport_height() <= 1080) {
+        if (FocusTarget* gridTarget = compactDroneLoadoutGridTarget(*current, direction)) {
+            return applyControllerFocus(
+                gridTarget,
+                focusedId_,
+                lastFocusCenterX_,
+                lastFocusCenterY_,
+                hasLastFocusCenter_);
+        }
+        // Left from the first column still crosses the roster/loadout seam
+        // below. Every other missing neighbor is the visual edge of the 2x3
+        // compact grid.
+        if (direction != UiDirection::Left || current->element->Closest(".drone-loadout-slot")
+                ->GetAttribute<int>("data-drone-slot-index", -1) % 2 == 1) {
+            return false;
+        }
+    }
     if ((direction == UiDirection::Left || direction == UiDirection::Right) && currentRow == ControllerFocusRow::SurfaceChoices) {
         return applyControllerFocus(
             directionalControllerRowTarget(*current, currentRow, direction),
@@ -3620,6 +3698,9 @@ bool GameRmlUi::applyDocumentPresentationState()
         break;
     case PanelSurfaceKind::DroneOps:
         panelClass += " drone-ops-panel";
+        if (rr_rml_viewport_width() < 1280 || rr_rml_viewport_height() < 800) {
+            panelClass += " drone-workspace-constrained";
+        }
         break;
     default:
         break;

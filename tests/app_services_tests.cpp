@@ -1211,7 +1211,7 @@ int main()
 
         FakePreferenceStore preferences;
         FakeHost host;
-        host.metrics = {1010, 1000, 1010, 1000, 1.0F};
+        host.metrics = {1280, 800, 1280, 800, 1.0F};
         FakeUiBridge bridge;
         NullRmlRenderHost renderHost;
         std::string pointerAction;
@@ -1274,21 +1274,47 @@ int main()
         assert(ui.focusedId().starts_with("modal:drone_details_")
             || ui.focusedId().starts_with("action:equip_drone:"));
 
+        // The compact Deck loadout is a visual 2 x 3 grid. Directional
+        // navigation must follow those rows and columns instead of treating
+        // the six slots as the former single vertical rail.
+        rocket::GameState gridState = state;
+        gridState.meta.droneBaySlots = 6;
+        gridState.meta.ownedDroneIds.assign(6, rocket::content::drone::miningDrone);
+        gridState.meta.equippedDroneIds.assign(6, rocket::content::drone::miningDrone);
+        rocket::ensureDroneBayState(gridState, catalog);
+        rocket::Random gridRng(0xD20E0F7ULL);
+        const rocket::PreparedLaunch gridLaunch = rocket::prepareLaunch(gridState, catalog, gridRng);
+        rocket::PanelRenderContext gridPanelContext {gridState, catalog, gridLaunch, gridLaunch};
+        gridPanelContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(gridPanelContext));
+        ui.requestFocus("action:unequip_drone_slot:0");
+        ui.refresh();
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "action:unequip_drone_slot:1");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:unequip_drone_slot:3");
+        assert(ui.navigate(rocket::UiDirection::Left));
+        assert(ui.focusedId() == "action:unequip_drone_slot:2");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:unequip_drone_slot:4");
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "action:unequip_drone_slot:5");
+
         const auto click = [&ui](int x, int y) {
             ui.mouseDown(x, y, 0);
             ui.mouseUp(x, y, 0);
         };
 
-        click(1002, 35);
+        click(1272, 35);
         assert(!ui.modalOpen());
-        click(950, 35);
+        click(1220, 35);
         assert(ui.modalOpen());
         ui.closeModal();
 
         pointerAction.clear();
-        click(1002, 112);
+        click(1272, 112);
         assert(pointerAction.empty());
-        click(900, 112);
+        click(1150, 112);
         assert(pointerAction == rocket::ui::actions::backToSurfaceOps);
         ui.shutdown();
     }

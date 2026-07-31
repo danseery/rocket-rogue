@@ -1097,6 +1097,35 @@ std::string scenarioObjectiveMarkup(
     return out.str();
 }
 
+std::string droneMissionStripMarkup(
+    const ScenarioObjectivePresentation& objective,
+    std::string_view instruction)
+{
+    if (!objective.available) {
+        return {};
+    }
+
+    std::ostringstream out;
+    out << "<section class=\"drone-mission-strip scenario-objective "
+        << scenarioObjectiveStateClass(objective.state)
+        << "\" data-scenario-id=\"" << htmlEscape(objective.scenarioId)
+        << "\" data-scenario-step-id=\"" << htmlEscape(objective.stepId)
+        << "\" data-objective-state=\"" << scenarioObjectiveStateLabel(objective.state) << "\">"
+        << "<div class=\"drone-mission-identity\"><span>" << htmlEscape(objective.location)
+        << "</span><em>" << htmlEscape(scenarioObjectiveStateLabel(objective.state)) << "</em></div>"
+        << "<strong class=\"drone-mission-title\">" << htmlEscape(objective.title) << "</strong>";
+    if (objective.required > 0) {
+        out << "<div class=\"drone-mission-progress\" aria-label=\""
+            << htmlEscape(std::to_string(objective.current) + " of " + std::to_string(objective.required))
+            << "\"><b>" << std::clamp(objective.current, 0, objective.required) << "/"
+            << objective.required << "</b></div>";
+    }
+    out << "<p class=\"drone-mission-instruction\">" << htmlEscape(instruction)
+        << "</p><small class=\"drone-mission-reward\">" << htmlEscape(objective.rewardPreview)
+        << "</small></section>";
+    return out.str();
+}
+
 std::string scenarioObjectiveModal(const ScenarioObjectivePresentation& objective)
 {
     if (!objective.available || objective.state == ScenarioStepState::Complete) {
@@ -1777,7 +1806,8 @@ std::string droneSynergyModalBody(const DroneOpsPresentation& presentation)
 std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
 {
     std::ostringstream out;
-    out << "<article class=\"drone-loadout-slot " << htmlEscape(slot.cssClass) << "\">";
+    out << "<article class=\"drone-loadout-slot " << htmlEscape(slot.cssClass)
+        << "\" data-drone-slot-index=\"" << std::max(0, slot.slot - 1) << "\">";
     out << "<div class=\"slot-card-head\"><span class=\"slot-number\">" << htmlEscape(std::to_string(slot.slot))
         << "</span>";
     if (!slot.action.label.empty()) {
@@ -2659,7 +2689,7 @@ std::string buildGamePanelMarkup(
             const std::string newGameBody =
                 "<p class=\"modal-intro\">Starting a new expedition replaces the current campaign save. Settings are preserved.</p>"
                 "<div class=\"modal-actions action-row\">"
-                "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"new-game:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Keep current save</span></button>" +
+                "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"new-game:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Cancel</span></button>" +
                 button("Start New Game", ui::actions::newGame, "danger") +
                 "</div>";
             out << modalTemplate("new_game_confirm", "Begin a new expedition?", newGameBody);
@@ -3186,7 +3216,7 @@ std::string buildGamePanelMarkup(
                 approachLocation + " APPROACH",
                 "You made it to " + arrivalDestination->name + ". Complete this site's active objective before the next route can open.",
                 "Begin with a flyby. Successful operations unlock Orbit, then Landing and the first explicit mining objective.",
-                "Review approach options",
+                "Review",
                 ui::actions::acknowledgeApproachIntroduction,
                 "ok",
                 true);
@@ -3463,10 +3493,21 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::DroneOps) {
         const DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
-        const ScenarioObjectivePresentation droneScenario = scenarioObjectiveForDestination(
+        const Destination& droneDestination = currentDestination(state, catalog);
+        ScenarioObjectivePresentation droneScenario = scenarioObjectiveForDestination(
             state,
             catalog,
-            currentDestination(state, catalog).id);
+            droneDestination.id);
+        if (droneDestination.id == content::destination::mars) {
+            const ScenarioObjectivePresentation bayExpansion = scenarioObjectivePresentation(
+                state,
+                catalog,
+                content::scenario::marsBayExpansion,
+                "delivery");
+            if (bayExpansion.available) {
+                droneScenario = bayExpansion;
+            }
+        }
         const ScenarioDefinition* droneScenarioDefinition = droneScenario.available
             ? findScenarioDefinition(catalog, droneScenario.scenarioId)
             : nullptr;
@@ -3500,33 +3541,29 @@ std::string buildGamePanelMarkup(
             << "<div class=\"utility-row utility-actions drone-workspace-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << modalButton("Synergies", ui::modals::droneSynergies, "ghost")
             << panelButton(dronePanel.backAction) << "</div></div>";
-        if (droneScenario.available) {
-            out << scenarioObjectiveMarkup(droneScenario, false);
-        }
+        std::string droneMissionInstruction = droneScenario.detail;
         if (droneScenarioStep != nullptr &&
             droneScenarioStep->completionEvent == ScenarioEventKind::SafeMaterialDelivered) {
-            const int commonAboard = scenarioCommonAboard(state, currentDestination(state, catalog).id);
-            out << "<section class=\"phase-advisory "
-                << (droneScenario.state == ScenarioStepState::Complete ? "ok" : "caution")
-                << " scenario-extraction-objective\"><strong>"
-                << htmlEscape(
-                       droneScenario.state == ScenarioStepState::Complete
-                           ? "OBJECTIVE COMPLETE"
-                           : "SAFE DELIVERY REQUIRED")
-                << "</strong><span>";
-            if (commonAboard > 0) {
-                out << htmlEscape(
-                    std::to_string(commonAboard)
-                    + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY.");
-            } else if (droneScenario.state == ScenarioStepState::Complete) {
-                out << htmlEscape(
-                    "The configured reward is claimed. Open slots remain your choice.");
+            constexpr std::string_view noSecondDroneRequired = "No second Support Drone is required.";
+            const std::string missionQualifier =
+                droneScenario.detail.find(noSecondDroneRequired) != std::string::npos
+                ? "No second Support Drone is required. // "
+                : "";
+            const int commonAboard = scenarioCommonAboard(state, droneDestination.id);
+            if (droneScenario.state == ScenarioStepState::Complete) {
+                droneMissionInstruction = missionQualifier
+                    + "OBJECTIVE COMPLETE // The configured reward is claimed. Open slots remain your choice.";
+            } else if (commonAboard > 0) {
+                droneMissionInstruction = missionQualifier + std::to_string(commonAboard)
+                    + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY.";
             } else {
-                out << htmlEscape(
-                    "Mine " + std::to_string(droneScenario.required) +
-                    " Common Ore, then extract it safely.");
+                droneMissionInstruction = missionQualifier + "SAFE DELIVERY REQUIRED // Mine "
+                    + std::to_string(droneScenario.required)
+                    + " Common Ore, then extract it safely.";
             }
-            out << "</span></section>";
+        }
+        if (droneScenario.available) {
+            out << droneMissionStripMarkup(droneScenario, droneMissionInstruction);
         }
         if (hazardSwapRequired) {
             out << "<section class=\"phase-advisory warn scenario-hazard-swap-objective\">"
