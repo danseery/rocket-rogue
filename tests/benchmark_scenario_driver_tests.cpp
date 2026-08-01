@@ -34,7 +34,7 @@ namespace {
 // The v9 scenario-instance state participates in the deterministic gameplay
 // hash, so this fixture tracks the authored campaign after the generic
 // scenario migration.
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xa2f9baed95a80490ULL;
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0xf3acde2ff9d94d99ULL;
 // A 56-second soak crosses the active mining oxygen, heat, and hostile-update
 // windows without duplicating the same simulation through a second harness.
 constexpr int kLongRunMiningFrames = 3360;

@@ -1199,6 +1199,7 @@ int main()
         state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
         state.meta.unlockKeys.push_back(rocket::content::unlock::droneSupportSuite);
         state.meta.droneBaySlots = 2;
+        state.meta.ownedDroneIds.push_back(rocket::content::drone::miningDrone);
         rocket::ensureDroneBayState(state, catalog);
         rocket::ui::briefings::acknowledge(
             state.meta.acknowledgedActivityBriefingIds,

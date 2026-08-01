@@ -82,7 +82,7 @@ for (const signature of [
   "bool startScenarioFlybyRun(",
   "void completeFlybyRun(GameState& state, const ContentCatalog& catalog)",
   "void abortFlybyRun(GameState& state, const ContentCatalog& catalog)",
-  "SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng)",
+  "SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog)",
 ]) {
   requireNoAuthoredIds(`src/core/ResearchSystem.cpp:${signature}`, functionBody(research, signature));
 }

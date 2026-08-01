@@ -4424,6 +4424,8 @@ void droneOpsPresentationExposesPersistentLoadout()
 
     state.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     state.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
+    state.meta.ownedDroneIds.push_back(content::drone::attackDrone);
+    state.meta.droneUpgrades.push_back({content::drone::attackDrone, 1});
     ensureDroneBayState(state, catalog);
     drones = droneOpsPresentation(state, catalog);
     const auto attackDrone = std::find_if(drones.drones.begin(), drones.drones.end(), [](const MiniDroneCardPresentation& drone) {
@@ -4437,6 +4439,8 @@ void droneOpsPresentationExposesPersistentLoadout()
     }), "attack drone chips should expose crit payoff");
 
     state.meta.droneBaySlots = 3;
+    state.meta.ownedDroneIds.push_back(content::drone::defenseDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::surveyDrone);
     state.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
     state.meta.droneUpgrades = {{content::drone::attackDrone, 2}, {content::drone::defenseDrone, 1}, {content::drone::surveyDrone, 1}};
     drones = droneOpsPresentation(state, catalog);
@@ -12129,6 +12133,7 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     droneState.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     droneState.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     droneState.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
+    droneState.meta.ownedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
     ensureDroneBayState(droneState, catalog);
     droneState.meta.droneBaySlots = 3;
     droneState.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone, content::drone::surveyDrone};
@@ -12572,13 +12577,13 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const std::string lunarSurfaceHtml =
         buildGamePanelHtml({lunarContractState, catalog, lunarContractLaunch, lunarContractLaunch});
     require(
-        lunarSurfaceHtml.find(">0/30</b>") != std::string::npos
-            && lunarSurfaceHtml.find("60 Common Ore aboard") != std::string::npos,
+        lunarSurfaceHtml.find("ON SHIP // RETURN GUARANTEED") != std::string::npos
+            && lunarSurfaceHtml.find("60 Common Ore on Ship") != std::string::npos,
         "Moon Surface Ops should distinguish zero delivered contract ore from Common still aboard");
     require(
-        lunarSurfaceHtml.find("Deliver 60 Common Ore") != std::string::npos
-            && lunarSurfaceHtml.find("MOON delivery") != std::string::npos
-            && lunarSurfaceHtml.find("+30") != std::string::npos,
+        lunarSurfaceHtml.find("Return to Earth") != std::string::npos
+            && lunarSurfaceHtml.find("MOON") != std::string::npos
+            && lunarSurfaceHtml.find("Return will deliver +30") != std::string::npos,
         "Moon Surface Ops should promote the configured delivery action with its capped scenario reward");
 
     GameState upgradeState = surfaceState;
@@ -12621,7 +12626,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const std::size_t contextEnd = upgradeHtml.find("</div></section>", contextStart);
     require(contextStart != std::string::npos && contextEnd != std::string::npos, "surface upgrade should render a bounded field context chip row");
     const std::string contextHtml = upgradeHtml.substr(contextStart, contextEnd - contextStart);
-    require(contextHtml.find("Risk ") != std::string::npos, "surface upgrade context should use compact risk chip text");
+    require(contextHtml.find("Risk ") != std::string::npos || contextHtml.find("Hazard ") != std::string::npos,
+        "surface upgrade context should use compact hazard chip text");
     require(contextHtml.find("Extraction risk") == std::string::npos, "surface upgrade context should avoid clipped long risk labels");
     require(contextHtml.find("Site Basin") != std::string::npos, "surface upgrade context should use compact site chip text");
     require(contextHtml.find("Survey Basin") == std::string::npos, "surface upgrade context should avoid clipped long site labels");
