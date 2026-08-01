@@ -335,6 +335,10 @@ void transferMiniDroneSwarmAnchor(
         return;
     }
     for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        if (agent.behavior == MiningMiniDroneBehavior::DeliveringToShip ||
+            agent.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
+            continue;
+        }
         if (!depthTransition &&
             agent.anchorTarget != MiningAnchorTarget::ControlledActor) {
             continue;

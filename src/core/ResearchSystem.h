@@ -34,8 +34,7 @@ struct SurfaceToolEffects {
     int surveyCommonBonus = 0;
     int mineCommonBonus = 0;
     double mineRareChanceBonus = 0.0;
-    double extractionRiskRelief = 0.0;
-    double cargoRiskRelief = 0.0;
+    double hazardRelief = 0.0;
     double enemyEncounterRelief = 0.0;
 };
 
@@ -45,7 +44,6 @@ struct SurfaceCrewEffects {
     int mineCommonBonus = 0;
     double mineRareChanceBonus = 0.0;
     double hazardRelief = 0.0;
-    double extractionRiskRelief = 0.0;
     double artifactChanceBonus = 0.0;
     std::string summary;
 };
@@ -56,7 +54,6 @@ struct SurfaceSiteProfileEffects {
     int mineCommonBonus = 0;
     double mineRareChanceBonus = 0.0;
     double hazardDelta = 0.0;
-    double extractionRiskDelta = 0.0;
     double artifactChanceBonus = 0.0;
 };
 
@@ -70,7 +67,6 @@ struct SurfaceUpgradeEffects {
     double hazardRelief = 0.0;
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
-    double extractionRiskRelief = 0.0;
     double droneStorage = 0.0;
     double droneEngineEfficiency = 0.0;
     double artifactTowEfficiency = 0.0;
@@ -92,7 +88,6 @@ struct MiniDroneLoadoutEffects {
     double scannerRadius = 0.0;
     double drillIntegrityRelief = 0.0;
     double hardRockBounceRelief = 0.0;
-    double extractionRiskRelief = 0.0;
     double enemyEncounterRelief = 0.0;
     double sentryDamagePerSecond = 0.0;
     double enemyDamageRelief = 0.0;
@@ -118,6 +113,10 @@ struct SurfaceActionOutcome {
     int supplyDelta = 0;
     int fuelDelta = 0;
     int cargoDelta = 0;
+    // Exact ledger values for a normal return. materialDelta remains the
+    // spendable inventory gain after mission allocations are committed.
+    MaterialInventory materialReturned;
+    MaterialInventory materialCommitted;
     MaterialInventory materialDelta;
     MaterialInventory materialLost;
     bool hazardTriggered = false;
@@ -131,8 +130,23 @@ struct SurfaceActionOutcome {
     bool enemyEncounter = false;
     bool cargoRecovered = false;
     bool prospectorUnlocked = false;
-    double extractionRisk = 0.0;
-    double extractionRiskDelta = 0.0;
+};
+
+struct SurfaceReturnAllocation {
+    std::string scenarioId;
+    std::string stepId;
+    std::string label;
+    std::string materialId;
+    int amount = 0;
+    int currentAfter = 0;
+    int required = 0;
+};
+
+struct SurfaceReturnLedger {
+    MaterialInventory onShip;
+    MaterialInventory toMaterials;
+    std::vector<SurfaceReturnAllocation> allocations;
+    int artifacts = 0;
 };
 
 // Compatibility-only campaign façade. New gameplay, routing, and UI actions
@@ -240,7 +254,8 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 bool rerollSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index);
-double surfaceExtractionRisk(const GameState& state);
+SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog);
+SurfaceReturnLedger surfaceReturnLedger(const GameState& state);
 double surfaceEnemyEncounterChance(const GameState& state);
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng);
 SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng);
@@ -252,7 +267,7 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state);
 SurfaceActionOutcome startSurfacePushRun(GameState& state, Random& rng);
 SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng);
 SurfaceActionOutcome bankSurfacePush(GameState& state);
-SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng);
-SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng);
+SurfaceActionOutcome extractSurfacePayload(GameState& state);
+SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog);
 
 } // namespace rocket

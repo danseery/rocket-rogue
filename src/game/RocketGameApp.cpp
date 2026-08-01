@@ -2169,7 +2169,7 @@ void RocketGameApp::extractSurface()
         return;
     }
 
-    const SurfaceActionOutcome outcome = extractSurfacePayload(state_, catalog_, rng_);
+    const SurfaceActionOutcome outcome = extractSurfacePayload(state_, catalog_);
     if (!outcome.applied) {
         panelDirty_ = true;
         return;
@@ -2539,7 +2539,7 @@ void RocketGameApp::miningStow()
         state_.screen = Screen::Mining;
     }
     state_.statusLine = outcome.applied
-        ? "Payload banked. Support Drones returning to bay."
+        ? "All rig and Support Drone ore loaded. Returning to surface."
         : std::string(text::status::miningStowed);
     save();
     panelDirty_ = true;
@@ -3711,6 +3711,13 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
             expedition.pendingMiningSiteDefinitionId = outcome.miningSiteDefinitionId;
             mineSurface();
         }
+    } else if (address.action == ScenarioActionKind::ClaimReward &&
+               address.scenarioId == content::scenario::lunarProspector &&
+               address.stepId == "delivery") {
+        // The Moon contract opens the Drone Bay and funds the first frame,
+        // but deliberately leaves fabrication/assignment to the player.
+        state_.screen = Screen::DroneOps;
+        state_.statusLine = "Drone Ops unlocked. Fabricate and assign Prospector Mk I to learn the bay.";
     } else if (supportDroneNeedsAssignment) {
         // The reward is owned, but no capacity was available for its
         // content-authored automatic assignment. Drone Ops provides the

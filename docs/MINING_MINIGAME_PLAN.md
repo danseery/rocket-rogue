@@ -20,7 +20,7 @@ Mining is the landed version of the rocket launch loop:
 
 - The player chooses whether to spend shared fuel, how much cargo to load, and when to return and leave or abort.
 - Better crew, tools, Support Drones, and surface upgrades make risk more readable and controllable, but never remove it.
-- Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and extraction risk.
+- Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and visible field-action hazard chances.
 - Hostile terrain and enemies stay out of the solar system and Aaru Vale. Enemy pressure begins only after Arkfall near Khepri Prime, when the agency is stranded in a hostile system.
 - The rig is durable, fast, and cargo-capable; the operator is slower but more agile, accelerates faster, and can enter suit-only passages.
 - Recoveries stay physical. Gravity, tether mass, loose chunks, a disabled rig, and the need to return discoveries to the shuttle create the pressure.
@@ -59,7 +59,7 @@ Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, th
 1. Pilot the rig through chunked terrain, drill straight ahead, scan hidden seams, tow artifacts, and carry ore.
 2. Exit into the jetpack suit from a safe adjacent cell to enter narrow passages, hand-drill, scan, tether an artifact, or defend yourself with the sidearm.
 3. Allow autonomous Support Drones to follow, orbit, defend, mine, survey, treat hazards, and collect loose chunks around whichever actor is controlled.
-4. Manage oxygen, shared fuel, gravity, inertia, drill heat, integrity, cargo, loose chunks, tether burden, and extraction risk.
+4. Manage oxygen, shared fuel, gravity, inertia, drill heat, integrity, cargo, loose chunks, tether burden, and field hazards. Normal leave recovers all Rig, intact Support Drone, and Ship manifests.
 5. Re-enter the rig within `1.25` cells on the same layer, or return to the shuttle under the failure rules below.
 
 The HUD distinguishes `SURFACE`, `START DEPTH +N`, and `SHIP ↑ N`. A single unlabeled arrow asset accepts a runtime POI kind, label, target depth, coordinate, and direction. Revealed recoverable artifacts use `ARTIFACT`; safety pressure at the existing caution threshold overrides them with `SHIP`. Below the surface it points to ascent, while on the surface it points directly to the ship and disappears inside the service zone. The arrow uses a one-second sine bounce and keeps its runtime label upright.
@@ -141,9 +141,9 @@ Normal extraction requires a functioning rig and operator in the return zone. Af
 - Drill integrity: durability. Low integrity raises failure pressure; zero integrity disables drilling until the bit is repaired at the ship or the run ends.
 - Ship service: while inside the shuttle ring, banked Common material can fully repair the rig drill, rig health, or suit integrity. Cost scales with missing integrity or health, and spent materials leave the recovered cargo.
 - Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
-- Cargo load: reward now, extraction risk later.
+- Cargo load: reward now; it is secure once loaded onto the Ship.
 - Loose chunks: spatial ore and salvage created by suit drilling or suit kills. They are not carried by the suit and must be collected by the rig or Mining/Resource Support Drones.
-- Hazard delta: mining-specific danger that feeds back into surface hazard and extraction risk.
+- Hazard delta: mining-specific danger that feeds back into visible surface-action hazard chances.
 - Scanner cooldown: limits how often the player can reveal hidden terrain.
 
 ## Terrain And Rewards
@@ -171,7 +171,7 @@ Training still levels the active crewmember. Animal class traits affect both men
 | --- | --- | --- |
 | Capybara Tank | Survival | Extra oxygen and safer endurance windows. |
 | Beaver Engineer | Resilience | Better drill integrity and fewer hard failures. |
-| Fox Ace | Navigation | Cleaner extraction risk and abort safety. |
+| Fox Ace | Navigation | Field-action hazard relief and cargo-engine efficiency. |
 | Prairie Dog Scout | Digging | Better survey/digging and stronger drilling role. |
 | Squirrel Hoarder | Resource Gathering | Better rare-material odds and cargo payoff. |
 | Chipmunk Speedster | Exploration | Faster Support Drone movement and traversal. |
@@ -215,7 +215,7 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/MiningSystem.*` owns terrain, actor physics, destination gravity, rig/operator state, loose chunks, drills, sidearm raycasts, tether forces, oxygen/fuel cadence, scanner pulses, mining enemies, finish/abort/failure outcomes, and payload conversion.
 - `src/core/MiniDroneCoordination.*` consumes `MiniDroneAnchorFrame` for all home, orbit, task, targeting, shield, scanner, and clearance decisions. These `MiniDrone*` names are legacy internal identifiers; `resolveMiniDroneAnchor` and `transferMiniDroneSwarmAnchor` are the only authoritative binding helpers.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, mode, gravity, suit integrity, drill heat, tether burden, loose-chunk count, Support Drone anchor status, `Suit carry: 0`, metrics, and detail rows.
-- `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and extraction risk.
+- `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and deterministic return allocation.
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and bank/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.

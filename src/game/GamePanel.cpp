@@ -499,6 +499,13 @@ std::string miningDroneParentLabel(const MiningRunState& mining)
 
 std::string miningSupportTileLabel(const MiningRunState& mining)
 {
+    const bool hasMiningDrone = std::any_of(
+        mining.miniDrones.begin(), mining.miniDrones.end(), [](const MiningMiniDroneAgent& drone) {
+            return drone.role == MiniDroneRole::Mining;
+        });
+    if (hasMiningDrone) {
+        return "SUPPORT DRONES";
+    }
     const bool hasHazardDrone = std::any_of(
         mining.miniDrones.begin(),
         mining.miniDrones.end(),
@@ -510,6 +517,29 @@ std::string miningSupportTileLabel(const MiningRunState& mining)
 
 std::string miningSupportTileValue(const MiningRunState& mining)
 {
+    for (const MiningMiniDroneAgent& drone : mining.miniDrones) {
+        if (drone.role != MiniDroneRole::Mining) {
+            continue;
+        }
+        const int capacity = tuning::mining::miningDroneCapacityChunks(drone.upgradeLevel);
+        const int ore = std::max(0, drone.haulMaterials.common) + std::max(0, drone.haulMaterials.rare) + std::max(0, drone.haulMaterials.exotic);
+        if (drone.behavior == MiningMiniDroneBehavior::Working) {
+            const MiningCell* cell = miningCellAt(mining.terrain, drone.targetCellX, drone.targetCellY);
+            const MiningCellMaterial material = cell == nullptr ? MiningCellMaterial::CommonOre : cell->material;
+            const double duration = tuning::mining::miningDroneWorkSeconds(drone.upgradeLevel, material);
+            return "MINING " + display::percent(std::clamp(drone.taskProgressSeconds / std::max(0.01, duration), 0.0, 1.0)) +
+                " â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+        }
+        if (drone.behavior == MiningMiniDroneBehavior::DeliveringToShip) {
+            return "RETURNING TO SHIP â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+        }
+        if (drone.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
+            return "RETURNING TO RIG â¢ ORE 0/" + std::to_string(capacity);
+        }
+        if (ore > 0 && drone.targetCellX < 0) {
+            return "NO REACHABLE ORE â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+        }
+    }
     std::vector<std::pair<int, int>> activeTargets;
     int total = 0;
     int working = 0;
@@ -1465,8 +1495,8 @@ std::string scenarioProgressTargetLabel(const ScenarioObjectivePresentation& pre
 std::string compactMiningScenarioObjective(const GameState& state, const ContentCatalog& catalog)
 {
     const ScenarioObjectivePresentation presentation = scenarioObjectiveForMining(state, catalog);
-    const int aboard = std::max(0, state.run.mining.stowedMaterials.common);
-    const int carried = std::max(0, state.run.mining.temporaryMaterials.common);
+    const int onShip = std::max(0, state.run.mining.stowedMaterials.common);
+    const int onRig = std::max(0, state.run.mining.temporaryMaterials.common);
     const MiningGateRuntime& gate = state.run.mining.gate;
     if (!gate.cocoonLayers.empty()) {
         std::ostringstream out;
@@ -1494,15 +1524,15 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
         return out.str();
     }
     if (!presentation.available) {
-        return "MINING // CARRIED " + std::to_string(carried) + " // ABOARD " + std::to_string(aboard);
+        return "MINING // RIG " + std::to_string(onRig) + " // SHIP " + std::to_string(onShip);
     }
     const std::string targetLabel = scenarioProgressTargetLabel(presentation);
     const std::string locationAndTarget = presentation.location +
         (targetLabel.empty() ? std::string {} : " " + targetLabel);
     return locationAndTarget + " // DELIVERED " +
         std::to_string(presentation.current) + "/" + std::to_string(presentation.required) +
-        " // ABOARD " + std::to_string(aboard) +
-        " // CARRIED " + std::to_string(carried);
+        " // SHIP " + std::to_string(onShip) +
+        " // RIG " + std::to_string(onRig);
 }
 
 std::string miningCocoonObjectiveState(const MiningRunState& mining)
@@ -2061,14 +2091,14 @@ std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
     return out;
 }
 
-std::string surfaceQuickbar(const SurfaceExpeditionState& expedition, double extractionRisk)
+std::string surfaceQuickbar(const SurfaceExpeditionState& expedition)
 {
     std::ostringstream out;
     out << "<section class=\"surface-quickbar phase-lane phase-row\">";
     out << surfaceQuickMetric(text::labels::supply, std::to_string(expedition.supply));
     out << surfaceQuickMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
-    out << surfaceQuickMetric(text::labels::extractionRisk, display::percent(extractionRisk), "", true);
+    out << surfaceQuickMetric("On Ship", std::to_string(expedition.temporaryMaterials.common) + " CM", "", true);
     out << "</section>";
     return out.str();
 }
@@ -3726,7 +3756,6 @@ std::string buildGamePanelMarkup(
                 "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
             displayedSurfaceScenario.action = ScenarioActionKind::None;
         }
-        const double extractionRisk = surfaceExtractionRisk(state);
         const bool showMiniDroneIntroduction = context.firstTimeIntroductionsEnabled
             && surfacePanel.droneOpsAction.enabled
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
@@ -3752,7 +3781,7 @@ std::string buildGamePanelMarkup(
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
         out << "</div></div>";
-        out << surfaceQuickbar(expedition, extractionRisk);
+        out << surfaceQuickbar(expedition);
         if (scenarioSurface) {
             out << scenarioObjectiveMarkup(displayedSurfaceScenario);
             if (surfaceDelivery.objective.available &&
@@ -3764,10 +3793,10 @@ std::string buildGamePanelMarkup(
                     0,
                     surfaceDelivery.objective.required - surfaceDelivery.objective.current);
                 out << "<section class=\"phase-advisory caution scenario-extraction-objective\">"
-                    << "<strong>PAYLOAD ABOARD // EXTRACT SAFELY</strong><span>"
+                    << "<strong>ON SHIP // RETURN GUARANTEED</strong><span>"
                     << htmlEscape(
                            std::to_string(surfaceDelivery.safelyAboard) + " " + material +
-                           " aboard. Safe extraction will deliver +" +
+                           " on Ship. Return will deliver +" +
                            std::to_string(std::min(remaining, surfaceDelivery.safelyAboard)) + ".")
                     << "</span></section>";
             }
@@ -3874,8 +3903,7 @@ std::string buildGamePanelMarkup(
         for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
             if (metricItem.label == text::labels::site
                 || metricItem.label == text::fuel::reserveLabel(arkDiscovered(state))
-                || metricItem.label == text::labels::cargo
-                || metricItem.label == text::labels::extractionRisk) {
+                || metricItem.label == text::labels::cargo) {
                 fieldContext.push_back(metricItem);
             }
         }

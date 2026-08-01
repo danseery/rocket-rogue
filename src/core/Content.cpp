@@ -286,22 +286,22 @@ ContentCatalog createDefaultContent()
     catalog.surfaceUpgrades = {
         surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines and steady deeper pushes.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4, .drillDurability = 0.4}, {"drill", "cooling", "depth"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams, bad pockets, and one deeper layer.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.5, .hazardRelief = 0.02}, {"scanner", "reveal", "depth"}),
-        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids help the drone bank heavier canisters before load drag gets ugly.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.02, .droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
+        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids help the Mining Rig haul heavier canisters without load drag getting ugly.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
         surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter and contact jolts.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.2, .hardRockBounceRelief = 0.18, .hazardRelief = 0.015}, {"drill", "durability", "recoil"}),
         surfaceUpgrade(content::surfaceUpgrade::oreScentArray, "Ore-Scent Array", "Spectral sniffers help the crew sort richer pockets from plain dust before the dig.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.14, .scannerRadius = 1.2, .hazardRelief = 0.01}, {"scanner", "yield", "survey"}),
         surfaceUpgrade(content::surfaceUpgrade::coolantMist, "Coolant Mist", "A hiss of cold vapor keeps the drill biting without cooking the head.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 1.6, .drillDurability = 0.6}, {"drill", "cooling"}),
         surfaceUpgrade(content::surfaceUpgrade::recoilBraces, "Recoil Braces", "Kickback struts turn hard-rock bonks into controlled shoves while the drone keeps moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.drillDurability = 0.5, .hardRockBounceRelief = 0.24, .droneSpeed = 0.25}, {"drone", "recoil", "control"}),
-        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rack gives loose ore a cleaner ride back to the ship zone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .extractionRiskRelief = 0.01, .droneStorage = 1.0}, {"drone", "yield"}),
-        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Emergency Winch", "A return tether preserves banked haul and softens emergency recall penalties.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.oxygenSeconds = 10.0, .extractionRiskRelief = 0.035, .artifactTowEfficiency = 0.25}, {"drone", "recovery"}),
+        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rack gives loose ore a cleaner ride back to the ship zone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .droneStorage = 1.0}, {"drone", "yield"}),
+        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Emergency Winch", "A return tether extends oxygen and makes artifact towing easier during a recall.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.oxygenSeconds = 10.0, .artifactTowEfficiency = 0.25}, {"drone", "recovery"}),
         surfaceUpgrade(content::surfaceUpgrade::deepEchoMapper, "Deep Echo Mapper", "Low-frequency pings read deeper silhouettes and artifact pockets before the flare fades.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.04, .scannerRadius = 3.0, .hazardRelief = 0.015}, {"scanner", "depth", "artifact"}),
         surfaceUpgrade(content::surfaceUpgrade::expandablePanniers, "Expandable Panniers", "Fold-out panniers widen the free carry buffer before ore starts slowing the drone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 3.0}, {"drone", "cargo", "storage"}),
         surfaceUpgrade(content::surfaceUpgrade::vectorNozzles, "Vector Nozzles", "Trim jets keep loaded turns crisp and burn less fuel under a heavy haul.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.15, .droneEngineEfficiency = 0.25}, {"drone", "engine", "load"}),
-        surfaceUpgrade(content::surfaceUpgrade::artifactTowline, "Artifact Towline", "Braided towline spreads artifact drag so tethered relics pull cleaner toward the ship.", Rarity::Rare, SurfaceUpgradeCategory::Drone, {.extractionRiskRelief = 0.015, .artifactTowEfficiency = 0.40}, {"drone", "artifact", "tether"})
+        surfaceUpgrade(content::surfaceUpgrade::artifactTowline, "Artifact Towline", "Braided towline spreads artifact drag so tethered relics pull cleaner toward the ship.", Rarity::Rare, SurfaceUpgradeCategory::Drone, {.artifactTowEfficiency = 0.40}, {"drone", "artifact", "tether"})
     };
 
     catalog.miniDrones = {
         miniDrone(content::drone::miningDrone, "Prospector Support Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
-        miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0, .extractionRiskRelief = 0.015}, content::unlock::droneSupportSuite, {"logistics", "endurance"}),
+        miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0}, content::unlock::droneSupportSuite, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneSupportSuite, {"exploration", "navigation"}),
         miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::ioHazardDrone, {"engineering", "remediation"}),
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
@@ -418,14 +418,14 @@ ContentCatalog createDefaultContent()
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
-                    "Deliver gray Common Ore from the Mining Rig. Carried, aboard, and recovered cargo are tracked separately; rough extraction credits only ore that reaches the ship.",
-                    "REWARD // PROSPECTOR MK I + SLOT 1", "Install Prospector Mk I", {},
+                    "Return gray Common Ore loaded onto the Ship. Normal departure recovers every Ship manifest; only Emergency Recall loses unshipped ore.",
+                    "REWARD // DRONE OPS + PROSPECTOR FABRICATION", "Open Drone Ops", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
                     tuning::research::prospectorCommonOreGoal, 0, false, true, false,
                     ScenarioActionKind::ClaimReward, {},
                     {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
                      {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
-                     {ScenarioRewardKind::SupportDrone, content::drone::miningDrone, 1, true},
+                     {ScenarioRewardKind::InventoryResources, {}, 0, false, {.common = 20}},
                      {ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false},
                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
             }
@@ -444,7 +444,7 @@ ContentCatalog createDefaultContent()
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MARS", "Bay Expansion",
                     std::string("Deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
-                        " Mars Common Ore from the Mining Rig. Rough extraction credits only ore that reaches the ship. The reward opens an empty slot. No second Support Drone is required.",
+                        " Mars Common Ore loaded onto the Ship. Normal departure returns all Ship ore. The reward opens an empty slot. No second Support Drone is required.",
                     "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Fabricate Slot 2", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
                     tuning::research::marsBayCommonOreGoal, 0, false, true, false,

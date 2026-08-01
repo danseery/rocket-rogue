@@ -1709,7 +1709,7 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         agent.behavior = static_cast<MiningMiniDroneBehavior>(std::clamp(
             parseInt(fields[7], static_cast<int>(MiningMiniDroneBehavior::Following)),
             static_cast<int>(MiningMiniDroneBehavior::Following),
-            static_cast<int>(MiningMiniDroneBehavior::Docked)));
+            static_cast<int>(MiningMiniDroneBehavior::ReturningFromShip)));
         if (fields.size() > 8) {
             agent.targetCellX = parseInt(fields[8], agent.targetCellX);
         }

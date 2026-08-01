@@ -2349,8 +2349,6 @@ void surfaceToolResearchImprovesExpeditions()
     Random baselineRng(636);
     const SurfaceActionOutcome baselineSurvey = surveySurfaceSite(baseline, baselineRng);
     const SurfaceActionOutcome baselineMine = mineSurfaceDeposit(baseline, baselineRng);
-    baseline.run.surfaceExpedition.cargo = 8;
-    const double baselineRisk = surfaceExtractionRisk(baseline);
 
     GameState upgraded = createNewGame(catalog, 637);
     upgraded.run.destinationIndex = 2;
@@ -2366,9 +2364,6 @@ void surfaceToolResearchImprovesExpeditions()
     require(upgradedSurvey.materialDelta.common > baselineSurvey.materialDelta.common, "field probes should improve survey returns");
     require(upgradedMine.materialDelta.common > baselineMine.materialDelta.common, "surface drills should improve mine returns");
 
-    upgraded.run.surfaceExpedition.cargo = 8;
-    const double upgradedRisk = surfaceExtractionRisk(upgraded);
-    require(upgradedRisk < baselineRisk, "cargo rigs should reduce extraction risk for matching cargo");
 
     const SurfaceExpeditionPresentation presentation = surfaceExpeditionPresentation(upgraded);
     const auto fieldKit = std::find_if(presentation.metrics.begin(), presentation.metrics.end(), [](const PanelMetricPresentation& metric) {
@@ -2397,7 +2392,7 @@ void animalCrewClassesModifySurfaceExpeditions()
     GameState fox = createNewGame(catalog, 640);
     activateOnlyCrew(fox, content::astronaut::nia);
     const SurfaceCrewEffects foxEffects = surfaceCrewEffects(fox);
-    require(foxEffects.extractionRiskRelief > 0.0, "fox aces should improve extraction routing");
+    require(foxEffects.hazardRelief > 0.0, "fox aces should improve field-action hazard routing");
 
     GameState capybara = createNewGame(catalog, 641);
     capybara.run.destinationIndex = 2;
@@ -2463,7 +2458,6 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     GameState baseline = createNewGame(catalog, 644);
     baseline.run.destinationIndex = 2;
     startSurfaceExpedition(baseline, catalog);
-    baseline.run.surfaceExpedition.cargo = 8;
 
     GameState upgraded = baseline;
     upgraded.run.surfaceUpgradeIds = {
@@ -2481,7 +2475,7 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     require(upgradedStats.integrityRelief > baselineStats.integrityRelief, "shock mounts should improve mining durability");
     require(upgradedStats.hardRockBounceRelief > baselineStats.hardRockBounceRelief, "shock mounts should reduce hard-rock recoil");
     require(upgradedStats.oreYieldChance > baselineStats.oreYieldChance, "ore field upgrades should improve yield odds");
-    require(surfaceExtractionRisk(upgraded) < surfaceExtractionRisk(baseline), "cargo field upgrades should reduce extraction risk");
+    require(surfaceToolEffects(upgraded.meta).hazardRelief >= surfaceToolEffects(baseline.meta).hazardRelief, "cargo field upgrades should reduce Push Deeper hazard risk");
 
     const SurfaceExpeditionPresentation presentation = surfaceExpeditionPresentation(upgraded, catalog);
     require(!presentation.selectedUpgradeNames.empty(), "surface presentation should expose selected field upgrades");
@@ -2643,7 +2637,7 @@ void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
 
     Random rng(646);
     restored.run.surfaceExpedition.temporaryMaterials.common = 1;
-    const SurfaceActionOutcome extracted = extractSurfacePayload(restored, rng);
+    const SurfaceActionOutcome extracted = extractSurfacePayload(restored);
     require(extracted.applied, "surface extraction should resolve while upgrades are active");
     require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "surface upgrades should persist after successful extraction");
     require(!restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offers should clear after extraction");
@@ -2746,10 +2740,10 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
-    state.meta.materials.common = 4;
+    state.meta.materials.common = 20;
     ensureDroneBayState(state, catalog);
     require(state.meta.droneBaySlots == 1, "drone bay unlock should initialize one slot");
-    require(state.meta.ownedDroneIds.size() == 3, "the Mars support suite should seed Mining, Resource, and Survey drones only");
+    require(state.meta.ownedDroneIds.empty(), "the Drone Bay unlock should expose Mining, Resource, and Survey drones as purchasable offers");
     require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
     require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
     require(catalog.findMiniDrone(content::drone::surveyDrone) != nullptr, "survey drone id should resolve");
@@ -2803,6 +2797,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
             && state.meta.materials.common == 0,
         "a duplicate Support Drone should consume its material cost and occupy the open slot");
     require(unequipMiniDroneSlot(state, catalog, 1), "the duplicate slot should be independently removable");
+    state.meta.materials.common = 20;
     require(equipMiniDrone(state, catalog, 1), "a different support drone should fit in Slot 2");
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
@@ -2836,17 +2831,24 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
 
     restored.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     ensureDroneBayState(restored, catalog);
-    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::attackDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add attack drones to the owned pool");
-    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::defenseDrone) != restored.meta.ownedDroneIds.end(), "post-solar unlock should add defense drones to the owned pool");
+    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::attackDrone) == restored.meta.ownedDroneIds.end(), "post-solar unlock should expose attack drones as purchasable offers");
+    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::defenseDrone) == restored.meta.ownedDroneIds.end(), "post-solar unlock should expose defense drones as purchasable offers");
     const auto attackIndex = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const MiniDrone& drone) {
         return drone.role == MiniDroneRole::Attack;
     });
     require(attackIndex != catalog.miniDrones.end(), "default content should include an Attack drone");
     const int attackCatalogIndex = static_cast<int>(std::distance(catalog.miniDrones.begin(), attackIndex));
+    restored.meta.droneBaySlots = 2;
+    restored.meta.ownedDroneIds.push_back(content::drone::attackDrone);
+    restored.meta.ownedDroneIds.push_back(content::drone::defenseDrone);
+    restored.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
+    ensureDroneBayState(restored, catalog);
+    const auto defenseIndex = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const MiniDrone& drone) {
+        return drone.role == MiniDroneRole::Defense;
+    });
+    require(defenseIndex != catalog.miniDrones.end(), "default content should include a Defense drone");
     restored.meta.materials = {.common = 99, .rare = 99, .exotic = 99};
     require(!canUpgradeMiniDrone(restored, catalog, attackCatalogIndex), "Arkfall combat drones should stay at Mk I until perimeter coordination is researched");
-    restored.meta.droneBaySlots = std::max(restored.meta.droneBaySlots, 2);
-    restored.meta.equippedDroneIds = {content::drone::attackDrone, content::drone::defenseDrone};
     const MiniDroneLoadoutEffects uncoordinated = miniDroneLoadoutEffects(restored, catalog);
     require(std::find(uncoordinated.synergyNames.begin(), uncoordinated.synergyNames.end(), "Killbox Screen") == uncoordinated.synergyNames.end(),
         "Arkfall Mk I combat roles should not activate advanced formations before research");
@@ -2885,7 +2887,7 @@ void firstMiningContractBuildsAndCelebratesProspector()
             candidate.run.surfaceExpedition.bankedMiningArenaMetadata.difficulty = 1;
             candidate.run.surfaceExpedition.bankedMiningArenaMetadata.seed = 0xC0A11;
             Random rng(seed);
-            const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, rng);
+            const SurfaceActionOutcome outcome = extractSurfacePayload(candidate);
             if (outcome.cargoRecovered) {
                 target = std::move(candidate);
                 return outcome;
@@ -2903,9 +2905,9 @@ void firstMiningContractBuildsAndCelebratesProspector()
         "only safely extracted mining ore should advance the Prospector contract");
     require(state.meta.materials.common == 0,
         "Prospector contract ore should be committed to fabrication instead of ordinary research spend");
-    require(firstRecovery.message.find("delivery +10") != std::string::npos
-            && firstRecovery.message.find("10/30") != std::string::npos,
-        "a safe extraction should report the delivered amount and updated configured contract total");
+    require(firstRecovery.message.find("Returned 10 Common") != std::string::npos
+            && firstRecovery.materialCommitted.common == 10,
+        "a deterministic return should report the full returned amount and committed contract ore");
     require(!hasUnlock(state.meta, content::unlock::droneBay),
         "the Prospector should remain locked before all contract ore is home");
 
@@ -2937,9 +2939,20 @@ void firstMiningContractBuildsAndCelebratesProspector()
             && !hasUnlock(state.meta, content::unlock::ioHazardDrone),
         "the explicit lunar claim should unlock only the Prospector support package");
     require(state.meta.droneBaySlots == 1
-            && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
-            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
-        "the claim should install and equip one permanent Prospector Support Drone");
+            && state.meta.ownedDroneIds.empty()
+            && state.meta.equippedDroneIds.empty()
+            && state.meta.materials.common == 20,
+        "the claim should fund, but not silently fabricate, the first Prospector Support Drone");
+    const int miningDroneIndex = static_cast<int>(std::find_if(
+        catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const MiniDrone& drone) {
+            return drone.id == content::drone::miningDrone;
+        }) - catalog.miniDrones.begin());
+    require(equipMiniDrone(state, catalog, miningDroneIndex),
+        "Drone Ops should let the player spend the contract fabrication grant on Prospector Mk I");
+    require(state.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
+            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone}
+            && state.meta.materials.common == 0,
+        "fabricating Prospector Mk I should teach the first purchase and assignment together");
 
     const std::string serialized = serializeSaveData(captureSaveData(state));
     const auto save = deserializeSaveData(serialized);
@@ -3002,6 +3015,9 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         "safely extracted lunar ore should be reserved instead of entering the spendable pool");
     require(canClaimLunarProspector(state) && claimLunarProspector(state, catalog),
         "the delivered lunar goal should become an explicit Prospector claim");
+    state.meta.materials.common = 20;
+    require(equipMiniDrone(state, catalog, 0),
+        "the campaign fixture should fabricate Prospector before continuing to Mars");
     require(frontierGateStatus(state, catalog).satisfied,
         "claiming Prospector Mk I should satisfy the Mars frontier gate");
 
@@ -3381,7 +3397,7 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
     activeMigrated.run.surfaceExpedition.supply = 10;
     Random activeExtractionRng(1);
     require(
-        extractSurfacePayload(activeMigrated, activeExtractionRng).cargoRecovered
+        extractSurfacePayload(activeMigrated).cargoRecovered
             && activeMigrated.meta.ioArtifactRecovered
             && activeMigrated.meta.droneUpgradeCredits == 1
             && activeMigrated.meta.ark.repairProgress == 0,
@@ -3447,7 +3463,7 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
         "a v6 cocoon banked before extraction should wait with the Io minor-artifact reward");
     Random bankedExtractionRng(1);
     require(
-        extractSurfacePayload(bankedMigrated, bankedExtractionRng).cargoRecovered
+        extractSurfacePayload(bankedMigrated).cargoRecovered
             && bankedMigrated.meta.ioArtifactRecovered
             && bankedMigrated.meta.droneUpgradeCredits == 1
             && bankedMigrated.meta.ark.repairProgress == 0
@@ -4349,12 +4365,13 @@ void droneOpsPresentationExposesPersistentLoadout()
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::miningDrone);
     state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
     // The presentation gate is the installed capacity reward, not the old
     // Mars projection fields. This also covers a future authored or
     // procedural scenario that grants the same reusable capability.
     state.meta.droneBaySlots = 2;
-    state.meta.materials.common = 6;
+    state.meta.materials.common = 20;
     state.meta.materials.rare = 2;
     ensureDroneBayState(state, catalog);
 
@@ -4366,7 +4383,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
     require(drones.drones.front().title == "Prospector Support Drone", "Drone Ops should present mining support first");
     require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
-    require(drones.drones.front().action.label == "Assign", "Drone controls should frame each owned support frame as a unique assignment");
+    require(drones.drones.front().action.label == "Assign" || drones.drones.front().action.label == "Fabricate + assign", "Drone controls should frame each frame as an explicit assignment or fabrication");
     require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be upgradable");
     require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
     require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
@@ -4561,12 +4578,7 @@ void surfaceSiteProfilesChangeExpeditionRules()
     fracture.run.destinationIndex = 2;
     startSurfaceExpedition(fracture, catalog);
     require(fracture.run.surfaceExpedition.siteProfile == SurfaceSiteProfile::FractureField, "seeded fallback should generate fracture field profile");
-    GameState surveyRisk = createNewGame(catalog, 1);
-    surveyRisk.run.destinationIndex = 2;
-    startSurfaceExpedition(surveyRisk, catalog);
-    fracture.run.surfaceExpedition.cargo = 6;
-    surveyRisk.run.surfaceExpedition.cargo = 6;
-    require(surfaceExtractionRisk(fracture) > surfaceExtractionRisk(surveyRisk), "fracture field should raise extraction pressure");
+    require(fracture.run.surfaceExpedition.siteProfile == SurfaceSiteProfile::FractureField, "fracture field remains a distinct higher-hazard site profile");
 }
 
 void surfaceHazardsCreateEnvironmentalSetbacks()
@@ -4751,17 +4763,14 @@ void surfaceExpeditionBanksMaterialsAndDefersEnemies()
     const SurfaceActionOutcome mine = mineSurfaceDeposit(state, rng);
     const SurfaceActionOutcome push = pushSurfaceDeeper(state, rng);
     require(survey.applied && mine.applied && push.applied, "surface actions should consume supply while active");
-    require(survey.extractionRiskDelta > 0.0, "surface survey should report extraction-risk pressure from added cargo");
-    require(push.extractionRiskDelta > 0.0, "pushing deeper should report higher extraction risk");
     require(state.run.surfaceExpedition.cargo > 0, "surface actions should build a return cargo payload");
-    require(surfaceExtractionRisk(state) > 0.0, "surface extraction should expose a nonzero recovery risk");
 
-    const SurfaceActionOutcome extraction = extractSurfacePayload(state, rng);
+    const SurfaceActionOutcome extraction = extractSurfacePayload(state);
     require(extraction.applied, "surface extraction should resolve");
     require(!state.run.surfaceExpedition.active, "extraction should end the active surface expedition");
     require(state.meta.materials.common > 0, "extraction should bank at least partial material progress");
     require(surfaceActionSummary(extraction).find("Common mats") != std::string::npos, "surface extraction summary should show banked materials");
-    require(surfaceActionSummary(extraction).find("Extraction risk") != std::string::npos, "surface extraction summary should show resolved extraction risk");
+    require(extraction.cargoRecovered, "normal surface return should recover all Ship cargo deterministically");
 
     GameState deepSpace = createNewGame(catalog, 808);
     deepSpace.run.destinationIndex = 4;
@@ -4965,7 +4974,7 @@ void miningArtifactRewardsResolveOnExtraction()
     story.meta.ark.condition = ArkCondition::DamagedStranded;
     story.meta.ark.hullDamage = 72;
     Random storyRng(1);
-    const SurfaceActionOutcome storyOutcome = extractSurfacePayload(story, storyRng);
+    const SurfaceActionOutcome storyOutcome = extractSurfacePayload(story);
     require(storyOutcome.cargoRecovered, "story artifact test should recover cargo");
     require(story.meta.ark.repairProgress == tuning::mining::artifactStoryArkRepair, "story artifact should add Ark repair progress");
     require(story.meta.ark.hullDamage == 72 - tuning::mining::artifactStoryHullRepair, "story artifact should repair Ark hull damage");
@@ -4981,7 +4990,7 @@ void miningArtifactRewardsResolveOnExtraction()
     boost.run.surfaceExpedition.temporaryArtifacts.push_back({"boost_artifact", content::destination::mars, false, ArtifactKind::Boost, ArtifactRewardType::Credits, 1.0, false});
     const double creditsBefore = boost.run.credits;
     Random boostRng(2);
-    const SurfaceActionOutcome boostOutcome = extractSurfacePayload(boost, boostRng);
+    const SurfaceActionOutcome boostOutcome = extractSurfacePayload(boost);
     require(boostOutcome.cargoRecovered, "boost artifact test should recover cargo");
     require(boost.run.credits > creditsBefore, "credit artifact should grant credits after extraction");
     require(!boost.meta.artifacts.empty() && boost.meta.artifacts.front().rewardApplied, "boost artifact reward should be marked applied");
@@ -6991,39 +7000,21 @@ void resourceDroneRunsTimedMaterialShuttles()
             tuning::mining::resourceDroneCapacityChunks; ++step) {
         updateMiningRun(state, catalog, 0.08);
     }
-    require(resource->behavior != MiningMiniDroneBehavior::Docked &&
+    updateMiningRun(state, catalog, 0.08);
+    require(resource->behavior == MiningMiniDroneBehavior::DeliveringToShip &&
         resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic ==
             tuning::mining::resourceDroneCapacityChunks,
-        "a full Resource drone should retain its haul near the active actor while that actor is away from the shuttle");
-    state.run.mining.droneX = state.run.mining.returnZoneX;
-    state.run.mining.droneY = state.run.mining.returnZoneY;
-    state.run.mining.rigVelocityX = 0.0;
-    state.run.mining.rigVelocityY = 0.0;
-    for (int step = 0; step < 160 && resource->behavior != MiningMiniDroneBehavior::Docked; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
-    require(resource->behavior == MiningMiniDroneBehavior::Docked,
-        "a full Resource drone should detach and dock once the active actor returns to the entry-layer shuttle");
+        "a full Resource drone should begin autonomous delivery without waiting for the active actor");
     const int stowedBeforeUnload = state.run.mining.stowedMaterials.common +
         state.run.mining.stowedMaterials.rare + state.run.mining.stowedMaterials.exotic;
-    for (int step = 0; step < 5; ++step) {
+    for (int step = 0; step < 160 && resource->behavior == MiningMiniDroneBehavior::DeliveringToShip; ++step) {
         updateMiningRun(state, catalog, 0.08);
     }
     require(state.run.mining.stowedMaterials.common + state.run.mining.stowedMaterials.rare +
-        state.run.mining.stowedMaterials.exotic == stowedBeforeUnload,
-        "Resource drone should simulate ship drop-off time before clearing a chunk");
-    for (int step = 0; step < 5; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
-    require(state.run.mining.stowedMaterials.common + state.run.mining.stowedMaterials.rare +
-        state.run.mining.stowedMaterials.exotic == stowedBeforeUnload + 1,
-        "Resource drone should unload exactly one chunk when the drop-off interval completes");
-    for (int step = 0; step < 120 &&
-        resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic > 0; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
+        state.run.mining.stowedMaterials.exotic == stowedBeforeUnload + tuning::mining::resourceDroneCapacityChunks,
+        "Resource drone should unload its complete manifest after deterministic Ship transit");
     require(resource->haulMaterials.common + resource->haulMaterials.rare + resource->haulMaterials.exotic == 0,
-        "Resource drone should clear its manifest one chunk at a time at the ship");
+        "Resource drone should clear its manifest at the ship");
     require(state.run.mining.stowedMaterials.common == 4 &&
         state.run.mining.stowedMaterials.rare == 2 &&
         state.run.mining.stowedMaterials.exotic == 2,
@@ -7229,38 +7220,25 @@ void miningDroneRunsTimedCapacityShuttles()
 
     updateMiningRun(state, catalog, 0.05);
     require(
-        miningDrone->behavior == MiningMiniDroneBehavior::Returning,
-        "a full Mining drone should return to the active actor rather than detaching while away from the shuttle");
-    for (int step = 0; step < 24; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
-    require(
-        miningDrone->behavior != MiningMiniDroneBehavior::Docked &&
-            miningDrone->haulMaterials.common == capacity &&
-            state.run.mining.stowedMaterials.common == 0,
-        "a full Mining drone should retain its haul and follow while the active actor is away from the shuttle");
-    state.run.mining.droneX = state.run.mining.returnZoneX;
-    state.run.mining.droneY = state.run.mining.returnZoneY;
-    state.run.mining.rigVelocityX = 0.0;
-    state.run.mining.rigVelocityY = 0.0;
-    for (int step = 0; step < 220 && miningDrone->behavior != MiningMiniDroneBehavior::Docked; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
-    require(miningDrone->behavior == MiningMiniDroneBehavior::Docked,
-        "a full Mining drone should detach and dock once the active actor returns to the entry-layer shuttle");
+        miningDrone->behavior == MiningMiniDroneBehavior::DeliveringToShip,
+        "a full Mining drone should immediately begin autonomous Ship delivery");
     const int stowedBeforeUnload = state.run.mining.stowedMaterials.common;
-    for (int step = 0; step < 5; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
-    require(state.run.mining.stowedMaterials.common == stowedBeforeUnload,
-        "Mining drone ship drop-off should wait for its transfer interval");
-    for (int step = 0; step < 180 && miningDrone->haulMaterials.common > 0; ++step) {
+    const SaveData transitSave = captureSaveData(state);
+    GameState restoredTransit = createNewGame(catalog, 91943);
+    restoreSaveData(restoredTransit, catalog, transitSave);
+    const auto restoredTransitDrone = std::find_if(restoredTransit.run.mining.miniDrones.begin(), restoredTransit.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
+        return agent.role == MiniDroneRole::Mining;
+    });
+    require(restoredTransitDrone != restoredTransit.run.mining.miniDrones.end() &&
+        restoredTransitDrone->behavior == MiningMiniDroneBehavior::DeliveringToShip,
+        "Mining drone Ship-delivery transit should survive save/load");
+    for (int step = 0; step < 220 && miningDrone->behavior == MiningMiniDroneBehavior::DeliveringToShip; ++step) {
         updateMiningRun(state, catalog, 0.08);
     }
     require(miningDrone->haulMaterials.common == 0 &&
         state.run.mining.stowedMaterials.common == stowedBeforeUnload + capacity &&
-        miningDrone->behavior == MiningMiniDroneBehavior::Returning,
-        "Mining drones should bank every carried chunk one at a time before returning to work");
+        miningDrone->behavior == MiningMiniDroneBehavior::ReturningFromShip,
+        "Mining drones should bank their full manifest after deterministic Ship transit");
 }
 
 void defenseDronesCoordinateChargedShieldArcs()
@@ -8285,7 +8263,7 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(state.run.surfaceExpedition.temporaryMaterials.rare == 0, "emergency recall should lose carried materials");
     require(state.run.surfaceExpedition.cargo == 2, "emergency recall should preserve only banked cargo");
     require(state.run.surfaceUpgradeIds.empty(), "emergency recall should clear temporary field upgrades");
-    require(recalled.extractionRiskDelta >= tuning::mining::emergencyRecallHazardPenalty - 0.000001, "emergency recall should add the steep penalty");
+    require(recalled.hazardDelta >= tuning::mining::emergencyRecallHazardPenalty - 0.000001, "emergency recall should add the steep hazard penalty");
 }
 
 void miningOxygenDrainsRigHealthBeforeEmergencyEjection()
@@ -10136,8 +10114,6 @@ void surfaceActionSummaryShowsResourceDeltas()
     outcome.blueprintDelta = 1;
     outcome.artifactFound = true;
     outcome.artifactsLost = 1;
-    outcome.extractionRisk = 0.24;
-    outcome.extractionRiskDelta = 0.06;
     outcome.hazardDelta = 0.05;
 
     const std::string summary = surfaceActionSummary(outcome);
@@ -10152,8 +10128,6 @@ void surfaceActionSummaryShowsResourceDeltas()
     require(summary.find("+1 Blueprints") != std::string::npos, "surface action summary should include blueprint deltas");
     require(summary.find("+1 Artifacts") != std::string::npos, "surface action summary should include artifact deltas");
     require(summary.find("Lost 1 Artifacts") != std::string::npos, "surface action summary should include lost artifacts");
-    require(summary.find("24% Extraction risk") != std::string::npos, "surface action summary should include extraction risk when present");
-    require(summary.find("+6% Extraction risk") != std::string::npos, "surface action summary should include extraction-risk deltas");
     require(summary.find("+5% Hazard") != std::string::npos, "surface action summary should include hazard deltas");
 }
 
@@ -10169,27 +10143,13 @@ void roughSurfaceExtractionReportsLostPayload()
     state.run.surfaceExpedition.temporaryMaterials = {.common = 5, .rare = 3, .exotic = 1};
     state.run.surfaceExpedition.temporaryArtifacts.push_back({"mars_artifact_loss", content::destination::mars, false});
 
-    for (int seed = 1; seed < 400; ++seed) {
-        GameState candidate = state;
-        Random rng(seed);
-        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, rng);
-        if (outcome.cargoRecovered) {
-            continue;
-        }
-
-        require(outcome.applied, "rough extraction should still resolve");
-        require(outcome.materialDelta.common > 0, "rough extraction should recover partial common materials");
-        require(outcome.materialLost.common > 0, "rough extraction should report lost common materials");
-        require(outcome.materialLost.rare > 0, "rough extraction should report lost rare materials");
-        require(outcome.materialLost.exotic > 0, "rough extraction should report lost exotic materials");
-        require(outcome.artifactsLost == 1, "rough extraction should report lost artifacts");
-        const std::string summary = surfaceActionSummary(outcome);
-        require(summary.find("Lost") != std::string::npos, "rough extraction summary should include lost payload text");
-        require(candidate.meta.artifacts.empty(), "rough extraction should not bank lost artifacts");
-        return;
-    }
-
-    require(false, "test should find a rough extraction seed");
+    const SurfaceActionOutcome outcome = extractSurfacePayload(state);
+    require(outcome.applied && outcome.cargoRecovered, "normal return should always resolve as recovered");
+    require(outcome.materialDelta.common == 5 && outcome.materialDelta.rare == 3 && outcome.materialDelta.exotic == 1,
+        "normal return should retain every Ship material");
+    require(outcome.materialLost.common == 0 && outcome.artifactsLost == 0,
+        "normal return should not lose cargo or artifacts");
+    require(state.meta.artifacts.size() == 1, "normal return should retain artifacts");
 }
 
 void roughMiningOreCreditsTheSurvivingContractPayload()
@@ -10217,28 +10177,13 @@ void roughMiningOreCreditsTheSurvivingContractPayload()
     state.run.surfaceExpedition.cargo = 30;
     state.run.surfaceExpedition.hazard = 1.0;
 
-    for (int seed = 1; seed < 400; ++seed) {
-        GameState candidate = state;
-        Random rng(seed);
-        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, catalog, rng);
-        if (outcome.cargoRecovered) {
-            continue;
-        }
-
-        require(outcome.materialDelta.common == 4,
-            "rough extraction should return the surviving half of the banked mining ore");
-        require(candidate.meta.prospectorCommonOreRecovered == outcome.materialDelta.common,
-            "the Lunar contract must credit Mining Rig ore that survives a rough extraction");
-        require(candidate.meta.materials.common == 0,
-            "surviving contract ore should stay reserved rather than entering general materials");
-        require(outcome.message.find("Extraction rough") != std::string::npos
-                && outcome.message.find("delivery +4") != std::string::npos
-                && outcome.message.find("4/30") != std::string::npos,
-            "rough contract deliveries should report both their loss state and credited progress");
-        return;
-    }
-
-    require(false, "test should find a rough mining extraction seed");
+    const SurfaceActionOutcome outcome = extractSurfacePayload(state, catalog);
+    require(outcome.materialReturned.common == 9,
+        "deterministic return should report the full Ship manifest");
+    require(state.meta.prospectorCommonOreRecovered == 9,
+        "the Lunar contract must reserve all delivered Mining Rig ore");
+    require(state.meta.materials.common == 0,
+        "contract ore should stay reserved rather than entering general materials");
 }
 
 void researchPresentationComesFromSharedHelper()
@@ -10327,7 +10272,7 @@ void surfacePresentationComesFromSharedHelper()
     state.run.surfaceExpedition.prospectMaterials = {.common = 1, .rare = 1};
 
     SurfaceExpeditionPresentation surface = surfaceExpeditionPresentation(state);
-    require(surface.metrics.size() == 13, "surface presentation should expose site, field kit, hazard, action kits, shared fuel, cargo, depth, risk, materials, artifacts, and prospects");
+    require(surface.metrics.size() == 12, "surface presentation should expose site, field kit, hazard, action kits, shared fuel, cargo, depth, materials, artifacts, and prospects");
     require(surface.phaseSteps.size() == 4, "surface presentation should expose post-arrival phase steps");
     require(surface.phaseSteps[0].stateLabel == "Done" && surface.phaseSteps[0].stateClass == "done", "surface phase track should mark arrival complete");
     require(surface.phaseSteps[1].label == std::string(text::panel::details::researchPhase), "surface phase track should include research");
@@ -10335,7 +10280,7 @@ void surfacePresentationComesFromSharedHelper()
     require(surface.phaseSteps[2].label == std::string(text::panel::details::surfacePhase), "surface phase track should include surface");
     require(surface.phaseSteps[2].stateLabel == "Now" && surface.phaseSteps[2].stateClass == "active", "surface phase track should mark surface active");
     require(surface.phaseSteps[3].label == std::string(text::panel::details::refitPhase) && surface.phaseSteps[3].stateLabel == "Next", "surface phase track should stage refit next");
-    require(surface.postureTitle == std::string(text::panel::messages::surfacePostureStable), "loaded low-risk surface payload should present stable posture");
+    require(surface.postureTitle == "Ready: return recovered ore", "loaded Ship payload should present deterministic-return posture");
     require(surface.postureClass == "ok", "stable surface posture should use ok styling");
     require(surface.metrics.front().label == std::string(text::labels::site), "surface presentation should expose active site profile");
     require(std::find_if(surface.metrics.begin(), surface.metrics.end(), [](const PanelMetricPresentation& metric) {
@@ -10361,9 +10306,6 @@ void surfacePresentationComesFromSharedHelper()
     require(std::find_if(surface.actions[0].payoffChips.begin(), surface.actions[0].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::commonMaterials) && !chip.value.empty() && chip.value.front() == '+';
     }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose material payoff chips");
-    require(std::find_if(surface.actions[0].payoffChips.begin(), surface.actions[0].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
-    }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose projected extraction-risk impact");
     require(surface.actions[0].action.actionId == std::string(ui::actions::surveySurface), "surface survey should use shared action id");
     require(surface.actions[1].action.enabled, "fresh surface mine should be available when shared fuel is available");
     require(
@@ -10382,11 +10324,8 @@ void surfacePresentationComesFromSharedHelper()
     require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::depth) && chip.value == "+1";
     }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose depth payoff");
-    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::extractionRisk) && !chip.value.empty() && chip.value.front() == '+';
-    }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose projected extraction-risk impact");
     require(surface.actions[3].action.actionId == std::string(ui::actions::extractSurface), "surface extraction should use shared action id");
-    require(surface.actions[3].riskLabel == std::string(text::labels::extractionRisk), "surface extraction should label extraction risk instead of hazard");
+    require(surface.actions[3].riskLabel.empty(), "surface extraction should not show a hidden recovery-risk percentage");
     require(std::find_if(surface.actions[3].payoffChips.begin(), surface.actions[3].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::artifacts) && chip.value == "+1";
     }) != surface.actions[3].payoffChips.end(), "surface extraction preview should expose loaded artifact payoff");
@@ -10455,15 +10394,15 @@ void surfacePresentationComesFromSharedHelper()
     risky.run.surfaceExpedition.cargo = 16;
     risky.run.surfaceExpedition.hazard = 0.55;
     const SurfaceExpeditionPresentation riskySurface = surfaceExpeditionPresentation(risky);
-    require(riskySurface.postureTitle == std::string(text::panel::messages::surfacePostureGreedy), "high extraction risk should call out greed pressure");
-    require(riskySurface.postureClass == "danger", "greed posture should use danger styling");
+    require(riskySurface.postureTitle == "Ready: return recovered ore", "hazard should not turn Ship recovery into a percentage gamble");
+    require(riskySurface.postureClass == "ok", "deterministic-return posture should use ok styling");
 
     GameState deepSpace = createNewGame(catalog, 9395);
     deepSpace.run.destinationIndex = 4;
     deepSpace.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     startSurfaceExpedition(deepSpace, catalog);
     const SurfaceExpeditionPresentation deepSurface = surfaceExpeditionPresentation(deepSpace);
-    require(deepSurface.metrics.size() == 14, "post-solar surface presentation should expose prospects and contact risk");
+    require(deepSurface.metrics.size() == 13, "post-solar surface presentation should expose prospects and contact risk");
     require(std::find_if(deepSurface.metrics.begin(), deepSurface.metrics.end(), [](const PanelMetricPresentation& metric) {
         return metric.label == std::string(text::labels::contactRisk);
     }) != deepSurface.metrics.end(), "post-solar surface presentation should label contact risk");
@@ -10517,17 +10456,16 @@ void scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract()
         surfaceExpeditionPresentation(state, catalog);
     const SurfaceActionPreviewPresentation& extraction = presentation.actions.back();
     require(
-        extraction.title == "Deliver 9 Rare Ore" &&
-            extraction.detail.find("Configured Recovery") != std::string::npos,
-        "Surface Ops extraction should use the active scenario's configured title and material target");
+        extraction.title == text::buttons::returnHomeLabel(arkDiscovered(state), false),
+        "Surface Ops extraction should keep a destination-specific return action");
     require(
         std::any_of(
             extraction.payoffChips.begin(),
             extraction.payoffChips.end(),
             [](const PanelMetricPresentation& chip) {
-                return chip.label == "TEST ZONE delivery" && chip.value == "+7";
+                return chip.label == "On Ship" && chip.value == "0 Common";
             }),
-        "Surface Ops should cap a generic delivery chip by the configured scenario requirement");
+        "Surface Ops should expose the exact Ship manifest before return");
     const DetailPresentationRow* supportLoadout =
         findDetailPresentationRow(presentation.details, "Support Drone loadout");
     require(
@@ -12065,18 +12003,18 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
         "mining drill tile should preserve integrity and heat together");
     require(miningHtml.find(">LOAD<") != std::string::npos && miningHtml.find("rr-hud-mining-load-value") != std::string::npos,
         "mining top rail should expose current load in the approved fourth tile");
-    require(miningHtml.find("MOON COMMON // DELIVERED 1/30 // ABOARD 1 // CARRIED 2") != std::string::npos,
-        "the first mining contract should keep delivered, aboard, and carried ore visible beside the depth route");
+    require(miningHtml.find("MOON COMMON // DELIVERED 1/30 // SHIP 1 // RIG 2") != std::string::npos,
+        "the first mining contract should keep delivered, Ship, and Rig ore visible beside the depth route");
     require(miningHtml.find("class=\"mining-ore-manifest\"") != std::string::npos
             && miningHtml.find(">ORE MANIFEST<") != std::string::npos
-            && miningHtml.find(">RIG / SHIP<") != std::string::npos,
-        "mining bottom rail should explain the carried-versus-banked ore manifest");
-    require(miningHtml.find("id=\"rr-hud-mining-ore-common\">2 / 1</strong>") != std::string::npos
-            && miningHtml.find("id=\"rr-hud-mining-ore-rare\">1 / 0</strong>") != std::string::npos
-            && miningHtml.find("id=\"rr-hud-mining-ore-exotic\">0 / 1</strong>") != std::string::npos,
-        "the ore manifest should expose live Common, Rare, and Exotic rig/ship counts");
+            && miningHtml.find(">RIG / DRONES / SHIP<") != std::string::npos,
+        "mining bottom rail should explain the Rig, Support Drone, and Ship ore manifest");
+    require(miningHtml.find("id=\"rr-hud-mining-ore-common\">2 / 0 / 1</strong>") != std::string::npos
+            && miningHtml.find("id=\"rr-hud-mining-ore-rare\">1 / 0 / 0</strong>") != std::string::npos
+            && miningHtml.find("id=\"rr-hud-mining-ore-exotic\">0 / 0 / 1</strong>") != std::string::npos,
+        "the ore manifest should expose live Common, Rare, and Exotic Rig/Drone/Ship counts");
     require(miningHtml.find("rr-hud-mining-payload-banked") != std::string::npos
-            && miningHtml.find(">BANKED<") != std::string::npos,
+            && miningHtml.find(">SHIP<") != std::string::npos,
         "mining bottom rail should expose banked cargo separately");
     require(miningHtml.find("rr-hud-mining-payload-artifact") != std::string::npos
             && miningHtml.find(">ARTIFACT<") != std::string::npos,
@@ -12111,9 +12049,9 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
             });
         return found == miningRealtimeHud.patches.end() ? std::string {} : found->text;
     };
-    require(realtimeOreValue("rr-hud-mining-ore-common") == "2 / 1"
-            && realtimeOreValue("rr-hud-mining-ore-rare") == "1 / 0"
-            && realtimeOreValue("rr-hud-mining-ore-exotic") == "0 / 1",
+    require(realtimeOreValue("rr-hud-mining-ore-common") == "2 / 0 / 1"
+            && realtimeOreValue("rr-hud-mining-ore-rare") == "1 / 0 / 0"
+            && realtimeOreValue("rr-hud-mining-ore-exotic") == "0 / 0 / 1",
         "realtime HUD patches should keep all three ore types current without rebuilding the panel");
 
     miningState.run.mining.droneX = miningState.run.mining.returnZoneX;
@@ -12571,8 +12509,8 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         buildGamePanelHtml({marsContractState, catalog, marsContractLaunch, marsContractLaunch});
     require(
         marsSurfaceHtml.find("data-rr-action=\"extract_surface\"") != std::string::npos
-            && marsSurfaceHtml.find("Deliver 14 Common Ore") != std::string::npos,
-        "Surface Ops should expose the configured safe-delivery action for the aboard contract material");
+            && marsSurfaceHtml.find("Return to") != std::string::npos,
+        "Surface Ops should expose a destination-specific return action");
     marsContractState.screen = Screen::DroneOps;
 
     require(

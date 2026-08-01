@@ -46,16 +46,16 @@ inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault con
 inline constexpr std::string_view surfaceUnexpectedDeposit = "Field team uncovered an unexpected deposit.";
 inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added a blueprint lead.";
 inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced the field team into a defensive retreat.";
-inline constexpr std::string_view miningStarted = "Mining Rig deployed. Mine outward, return to the ship to bank and refill oxygen, then leave or push again.";
-inline constexpr std::string_view miningStowed = "Payload banked at ship. Oxygen replenished.";
-inline constexpr std::string_view miningAborted = "Emergency recall fired. Banked payload is safe; carried payload was lost.";
+inline constexpr std::string_view miningStarted = "Mining Rig deployed. Mine outward; Support Drones deliver to the Ship automatically.";
+inline constexpr std::string_view miningStowed = "Ship cargo secured. Oxygen replenished.";
+inline constexpr std::string_view miningAborted = "Emergency recall fired. Ship cargo is safe; Rig and Support Drone ore was lost.";
 inline constexpr std::string_view miningDrillFailed = "Drill offline. Return, bank, tether, or recall.";
 inline constexpr std::string_view miningOxygenFailed = "O2 depleted: Mining Rig integrity draining.";
 inline constexpr std::string_view miningThermalHazard = "Thermal pocket contact: rig plating is taking damage. Back away while the Hazard Drone treats it.";
 inline constexpr std::string_view miningCryoHazard = "Cryo pocket contact: rig movement is impaired. Clear the pocket or route around it.";
 inline constexpr std::string_view miningToxicHazard = "Toxic pocket contact: drill integrity is degrading. Clear the pocket or route around it.";
-inline constexpr std::string_view miningRadiationHazard = "Radiation pocket contact: extraction risk is rising. Clear the pocket or route around it.";
-inline constexpr std::string_view miningReturnToShip = "Return to ship to bank haul and replenish oxygen.";
+inline constexpr std::string_view miningRadiationHazard = "Radiation pocket contact: rig plating is taking damage. Clear the pocket or route around it.";
+inline constexpr std::string_view miningReturnToShip = "Return the Rig to the ship to leave the mine and replenish oxygen.";
 inline constexpr std::string_view launchHullBlocked = "That vehicle is less rocket than cautionary sculpture.";
 inline constexpr std::string_view launchCrewBlocked = "Choose a pilot before launch.";
 inline constexpr std::string_view droneStowing = "Mining Rig transfer in progress. Press launch now to queue the burn for bay seal.";
@@ -466,7 +466,7 @@ inline constexpr std::string_view mineDeposit = "Mine deposit";
 inline constexpr std::string_view pushDeeper = "Push Deeper";
 inline constexpr std::string_view pulseScanner = "Pulse scanner";
 inline constexpr std::string_view tetherArtifact = "Tether artifact";
-inline constexpr std::string_view stowPayload = "Leave";
+inline constexpr std::string_view stowPayload = "Load all ore & leave mine";
 inline constexpr std::string_view abortMining = "Emergency recall";
 } // namespace buttons
 
@@ -699,7 +699,7 @@ inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
 inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining layer first; extra pulses preview layers available through Push Deeper.";
 inline constexpr std::string_view surfaceMineDetail = "Deploy the Mining Rig once for this surface loop; mining spends fuel, not action kits.";
 inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";
-inline constexpr std::string_view surfaceExtractDetail = "Recover the payload and return to Earth. Cargo rigs reduce extraction risk.";
+inline constexpr std::string_view surfaceExtractDetail = "Return every material and artifact loaded onto the Ship to Earth.";
 inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
     if (arkKnown) {
@@ -713,10 +713,10 @@ inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerE
 inline std::string surfaceExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
     if (arkKnown) {
-        return "Recover the payload and return to the Ark. Cargo rigs reduce extraction risk.";
+        return "Return every material and artifact loaded onto the Ship to the Ark.";
     }
     if (outerExpedition) {
-        return "Recover the payload to the expedition. Cargo rigs reduce extraction risk.";
+        return "Recover every material and artifact loaded onto the Ship to the expedition.";
     }
     return std::string(surfaceExtractDetail);
 }

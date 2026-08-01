@@ -52,7 +52,7 @@ GameState extractWithSuccessfulSeed(const GameState& beforeExtraction)
     for (std::uint64_t seed = 1; seed < 256; ++seed) {
         GameState candidate = beforeExtraction;
         Random rng(seed);
-        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, rng);
+        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate);
         if (outcome.cargoRecovered) {
             return candidate;
         }

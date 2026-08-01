@@ -426,7 +426,6 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
     if (stats.oxygenSeconds > 0.0) {
         chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
     }
-    addPercentChip(chips, text::labels::extractionRisk, stats.extractionRiskRelief);
     addDoubleChip(chips, "Storage", stats.droneStorage);
     addPercentChip(chips, "Haul engines", stats.droneEngineEfficiency);
     addPercentChip(chips, "Towline", stats.artifactTowEfficiency);
@@ -454,7 +453,6 @@ inline MiniDroneStats scaledMiniDroneStats(MiniDroneStats stats, int upgradeLeve
     stats.scannerRadius *= multiplier;
     stats.drillIntegrityRelief *= multiplier;
     stats.hardRockBounceRelief *= multiplier;
-    stats.extractionRiskRelief *= multiplier;
     stats.enemyEncounterRelief *= multiplier;
     stats.sentryDamagePerSecond *= multiplier;
     stats.enemyDamageRelief *= multiplier;
@@ -519,7 +517,6 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(
     addDoubleChip(chips, "Scanner", stats.scannerRadius);
     addPercentChip(chips, "Durability", stats.drillIntegrityRelief);
     addPercentChip(chips, "Bounce relief", stats.hardRockBounceRelief);
-    addPercentChip(chips, text::labels::extractionRisk, stats.extractionRiskRelief);
     addPercentChip(chips, text::labels::contactRisk, stats.enemyEncounterRelief);
     if (stats.sentryDamagePerSecond > 0.0) {
         chips.push_back(panelMetric("Auto-fire", display::fixed(tuning::mining::alliedShotIntervalSeconds, 2) + "s"));
@@ -562,7 +559,6 @@ inline std::string miniDroneBestUpgradePayoff(const MiniDroneStats& current, con
     addRate("scanner", current.scannerRadius, next.scannerRadius, 1.0, " radius", 12.0);
     addPercent("durability", current.drillIntegrityRelief, next.drillIntegrityRelief, 100.0);
     addPercent("bounce relief", current.hardRockBounceRelief, next.hardRockBounceRelief, 80.0);
-    addPercent("extraction risk", current.extractionRiskRelief, next.extractionRiskRelief, 130.0);
     addPercent("contact risk", current.enemyEncounterRelief, next.enemyEncounterRelief, 90.0);
     addRate("shot power", current.sentryDamagePerSecond, next.sentryDamagePerSecond, 1.0, "/s", 18.0);
     addPercent("shield", current.enemyDamageRelief + current.environmentalShieldRelief, next.enemyDamageRelief + next.environmentalShieldRelief, 120.0);
@@ -651,25 +647,27 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
     if (owned && unlocked && upgradeLevel < 3 && coordinationRequired) {
         upgradeSummary = "Mk " + std::to_string(upgradeLevel) + " tuning locked: complete Perimeter Drone Network research";
     }
-    if (owned && unlocked) {
+    if (unlocked) {
         if (!hasFreeSlot) {
             action = disabledPanelButton("Slot full");
         } else if (equippedCount < ownedCount) {
             action = panelActionButton("Assign", ui::actions::equipDrone(index), "ok");
         } else if (canAffordMaterials(state.meta.materials, additionalUnitCost)) {
-            action = panelActionButton("Build + assign", ui::actions::equipDrone(index), "ok");
-            status += " / Next " + materialSummary(additionalUnitCost);
+            action = panelActionButton(owned ? "Build + assign" : "Fabricate + assign", ui::actions::equipDrone(index), "ok");
+            status += " / Build " + materialSummary(additionalUnitCost);
         } else {
             action = disabledPanelButton("Need " + materialSummary(additionalUnitCost));
-            status += " / Next " + materialSummary(additionalUnitCost);
+            status += " / Build " + materialSummary(additionalUnitCost);
         }
-        upgradeAction = upgradeLevel >= 3
+        upgradeAction = !owned
+            ? disabledPanelButton("Fabricate first")
+            : (upgradeLevel >= 3
             ? disabledPanelButton("Mk III")
             : (coordinationRequired
                 ? disabledPanelButton("Need research")
                 : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
                 ? panelActionButton("Upgrade", ui::actions::upgradeDrone(index), "ok")
-                : disabledPanelButton("Need mats")));
+                : disabledPanelButton("Need mats"))));
     }
     return {
         index,
@@ -755,7 +753,7 @@ inline std::string droneBuildTitle(const MiniDroneLoadoutEffects& effects)
     if (effects.passiveMiningRate > 0.0) {
         return "Excavation support build";
     }
-    if (effects.oxygenSeconds > 0.0 || effects.extractionRiskRelief > 0.0) {
+    if (effects.oxygenSeconds > 0.0) {
         return "Endurance support build";
     }
     return "Field support build";
@@ -1034,7 +1032,7 @@ inline std::string droneRunPosture(const MiniDroneLoadoutEffects& effects)
     if (effects.passiveMiningRate > 0.0) {
         return "Ore tempo";
     }
-    if (effects.scannerRadius > 0.0 || effects.extractionRiskRelief > 0.0) {
+    if (effects.scannerRadius > 0.0) {
         return "Route scout";
     }
     return effects.names.empty() ? "Open bay" : "Field support";
@@ -1070,7 +1068,7 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
     if (effects.passiveMiningRate > 0.0) {
         priorities.push_back(MiniDroneRole::Mining);
     }
-    if (effects.oxygenSeconds > 0.0 || effects.extractionRiskRelief > 0.0) {
+    if (effects.oxygenSeconds > 0.0) {
         priorities.push_back(MiniDroneRole::Resource);
     }
     if (effects.scannerRadius > 0.0) {
@@ -1212,6 +1210,11 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     presentation.loadoutSlots = droneLoadoutSlots(state, catalog);
     presentation.buildRecipes = droneBuildRecipes(state, catalog);
     presentation.details = {
+        detailPresentationRow(
+            "First frame",
+            state.meta.ownedDroneIds.empty()
+                ? std::string("Fabricate a Support Drone frame, assign it to an open bay slot, then tune it toward Mk III. New roles unlock as the campaign expands.")
+                : std::string("Fabricate extra frames for open slots, assign roles, then tune each type toward Mk III.")),
         detailPresentationRow("Drone Bay", std::to_string(std::max(0, state.meta.droneBaySlots)) + " slot capacity"),
         detailPresentationRow("Loadout", miniDroneNameSummary(state, catalog)),
         detailPresentationRow("Build signature", effects.signatureName.empty() ? "None" : effects.signatureName),
@@ -1462,13 +1465,6 @@ inline SurfaceActionPreviewPresentation surfaceActionPreview(
     };
 }
 
-inline double projectedSurfaceExtractionRiskDelta(const GameState& state, const SurfaceExpeditionState& projectedExpedition)
-{
-    GameState projected = state;
-    projected.run.surfaceExpedition = projectedExpedition;
-    return surfaceExtractionRisk(projected) - surfaceExtractionRisk(state);
-}
-
 inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     SurfaceExpeditionState projected = expedition;
@@ -1494,7 +1490,6 @@ inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& s
     chips.push_back(panelMetric("Layer read", "+0 first"));
     chips.push_back(panelMetric("More pulses", "+1, +2..."));
     addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
-    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedSurveyExpedition(state.run.surfaceExpedition, tools, crew, site)));
     return chips;
 }
 
@@ -1511,7 +1506,6 @@ inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& sta
     chips.push_back(panelMetric("Layer +1", nextLayerScanned ? "Scanned" : "Unknown"));
     addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus));
     chips.push_back(panelMetric(text::labels::hazard, display::signedPercent(tuning::research::hazardPerDepth)));
-    addSignedPercentChip(chips, text::labels::extractionRisk, projectedSurfaceExtractionRiskDelta(state, projectedPushExpedition(state.run.surfaceExpedition)));
     return chips;
 }
 
@@ -1544,7 +1538,6 @@ inline bool surfaceUsesOuterExpeditionRecovery(
 
 inline SurfaceExpeditionPresentation surfacePosturePresentation(
     const SurfaceExpeditionState& expedition,
-    double extractionRisk,
     bool arkKnown,
     bool outerExpedition = false)
 {
@@ -1566,21 +1559,9 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(
         presentation.postureClass = "danger";
         return presentation;
     }
-    if (payloadLoaded && extractionRisk >= 0.45) {
-        presentation.postureTitle = std::string(text::panel::messages::surfacePostureGreedy);
-        presentation.postureDetail = std::string(text::panel::messages::surfacePostureGreedyDetail);
-        presentation.postureClass = "danger";
-        return presentation;
-    }
-    if (payloadLoaded && (extractionRisk >= 0.25 || expedition.supply <= tuning::research::pushSupplyCost)) {
-        presentation.postureTitle = std::string(text::panel::messages::surfacePostureNarrowing);
-        presentation.postureDetail = std::string(text::panel::messages::surfacePostureNarrowingDetail);
-        presentation.postureClass = "caution";
-        return presentation;
-    }
     if (payloadLoaded) {
-        presentation.postureTitle = std::string(text::panel::messages::surfacePostureStable);
-        presentation.postureDetail = std::string(text::panel::messages::surfacePostureStableDetail);
+        presentation.postureTitle = "Ready: return recovered ore";
+        presentation.postureDetail = "Every material and artifact on the Ship returns intact. Continue only for more field finds.";
         presentation.postureClass = "ok";
         return presentation;
     }
@@ -1699,7 +1680,6 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     const SurfaceExpeditionState& expedition,
     const SurfaceCrewEffects& crew,
     const SurfaceUpgradeEffects& upgrades,
-    double extractionRisk,
     bool arkKnown)
 {
     const MetaProgress& meta = state.meta;
@@ -1735,15 +1715,14 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and Mining Rig operations"),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
-        detailPresentationRow(text::labels::extractionRisk, display::percent(extractionRisk)),
         detailPresentationHeader(text::panel::details::fieldRules),
         detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then layers available through Push Deeper. Dust can still burn extra action kits.")),
         detailPresentationRow(text::panel::details::miningRisk, std::string("The Mining Rig deploys at the selected start depth while the ship remains at SURFACE; pushing deeper closes once the run is used.")),
         detailPresentationRow(text::panel::details::depthRisk, std::string("Layer +1 is guaranteed and bankable. Collapse risk begins when gambling on layer +2; confirmed finds remain marked for mining.")),
-        detailPresentationRow(text::panel::details::extraction, std::string("Cargo and hazard raise recovery risk; cargo rigs reduce the penalty from heavier payloads.")),
+        detailPresentationRow(text::panel::details::extraction, std::string("Normal return recovers every material and artifact loaded onto the Ship.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,
-            tools.supplyBonus > 0 || tools.mineCommonBonus > 0 || tools.extractionRiskRelief > 0.0
+            tools.supplyBonus > 0 || tools.mineCommonBonus > 0 || tools.hazardRelief > 0.0
                 ? std::string("Installed surface tools are already changing these odds.")
                 : std::string("Research field probes, drill rigs, and cargo rigs to improve future expeditions."))
     };
@@ -1760,7 +1739,6 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
-    const double extractionRisk = surfaceExtractionRisk(state);
     const bool arkKnown = arkDiscovered(state);
     const bool outerExpedition =
         surfaceUsesOuterExpeditionRecovery(expedition, catalog);
@@ -1773,7 +1751,6 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(
         expedition,
-        extractionRisk,
         arkKnown,
         outerExpedition);
     presentation.phaseSteps = postArrivalPhaseSteps(Screen::SurfaceExpedition);
@@ -1783,7 +1760,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         presentation.arenaTitle += " | Site: " + std::string(gate.name);
     }
     presentation.arenaDetail = miningArenaForecastDetail(arenaRules);
-    presentation.details = surfaceDetailsPresentation(state, catalog, expedition, crew, upgrades, extractionRisk, arkKnown);
+    presentation.details = surfaceDetailsPresentation(state, catalog, expedition, crew, upgrades, arkKnown);
     presentation.details.insert(presentation.details.begin(), {
         detailPresentationRow("Upcoming arena", presentation.arenaTitle),
         detailPresentationRow("Artifact site", std::string(gate.name)),
@@ -1811,7 +1788,6 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
         panelMetric("Start depth", "+" + std::to_string(expedition.depth)),
-        panelMetric(text::labels::extractionRisk, display::percent(extractionRisk)),
         panelMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common)),
         panelMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(expedition.temporaryMaterials.exotic)),
@@ -1868,7 +1844,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         std::string(text::panel::messages::surfacePushDetail),
         expedition.supply,
         tuning::research::pushSupplyCost,
-        surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, (tools.extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
+        surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, tools.hazardRelief + crew.hazardRelief + upgrades.hazardRelief),
         std::string(text::labels::hazard),
         pushPayoffChips(state, crew, site),
         pushSurfaceActionButton(state));
@@ -1878,47 +1854,34 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(pushPreview));
 
-    const ScenarioDeliveryPresentation delivery =
-        scenarioSafeDeliveryPresentation(state, catalog, expedition);
-    const bool safeDeliveryActive =
-        delivery.objective.available &&
-        delivery.objective.state == ScenarioStepState::Active &&
-        delivery.safelyAboard > 0;
-    const std::string deliveryMaterial =
-        scenarioTargetMaterialLabel(delivery.objective.eventTargetId);
-    const std::string extractionTitle = safeDeliveryActive
-        ? "Deliver " + std::to_string(delivery.safelyAboard) + " " + deliveryMaterial
-        : text::buttons::returnHomeLabel(arkKnown, outerExpedition);
-    const std::string extractionDetail = safeDeliveryActive
-        ? "Extract the aboard " + deliveryMaterial + " to advance " +
-            delivery.objective.title + ". A rough extraction credits only mining ore that reaches the ship; excess material banks normally."
-        : text::panel::messages::surfaceExtractDetailForHome(
-              arkKnown,
-              outerExpedition);
+    const SurfaceReturnLedger returnLedger = surfaceReturnLedger(state, catalog);
+    const std::string extractionTitle = text::buttons::returnHomeLabel(arkKnown, outerExpedition);
+    std::string extractionDetail = "On Ship: " + std::to_string(returnLedger.onShip.common) +
+        " Common. Normal return is guaranteed.";
+    if (!returnLedger.allocations.empty()) {
+        const SurfaceReturnAllocation& allocation = returnLedger.allocations.front();
+        extractionDetail += " Return allocation: " + std::to_string(allocation.amount) +
+            " -> " + allocation.label + "; " + std::to_string(returnLedger.toMaterials.common) + " -> Materials.";
+    }
     SurfaceActionPreviewPresentation extractionPreview = surfaceActionPreview(
         extractionTitle,
         extractionDetail,
         expedition.supply,
         0,
-        display::percent(extractionRisk),
-        std::string(text::labels::extractionRisk),
+        "",
+        "",
         extractPayoffChips(expedition),
         panelActionButton(
             extractionTitle,
             ui::actions::extractSurface,
             "ok"));
-    if (safeDeliveryActive) {
-        const int remaining = std::max(
-            0,
-            delivery.objective.required - delivery.objective.current);
-        extractionPreview.payoffChips.insert(
-            extractionPreview.payoffChips.begin(),
-            panelMetric(
-                delivery.objective.location.empty()
-                    ? (delivery.objective.title + " delivery")
-                    : (delivery.objective.location + " delivery"),
-                "+" + std::to_string(
-                    std::min(remaining, delivery.safelyAboard))));
+    extractionPreview.payoffChips.insert(
+        extractionPreview.payoffChips.begin(),
+        panelMetric("On Ship", std::to_string(returnLedger.onShip.common) + " Common"));
+    for (const SurfaceReturnAllocation& allocation : returnLedger.allocations) {
+        extractionPreview.payoffChips.push_back(panelMetric(
+            "Return allocation",
+            std::to_string(allocation.amount) + " " + allocation.materialId + " -> " + allocation.label));
     }
     presentation.actions.push_back(std::move(extractionPreview));
     return presentation;

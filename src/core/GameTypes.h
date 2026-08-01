@@ -127,7 +127,11 @@ enum class MiningMiniDroneBehavior {
     Engaging,
     Guarding,
     Scouting,
-    Docked
+    Docked,
+    // Logistics drones can make a deterministic off-screen run through a
+    // known shaft while the player remains on another depth layer.
+    DeliveringToShip,
+    ReturningFromShip
 };
 
 enum class MiningOperatorMode {
@@ -640,7 +644,6 @@ struct SurfaceUpgradeStats {
     double hazardRelief = 0.0;
     double droneSpeed = 0.0;
     double oxygenSeconds = 0.0;
-    double extractionRiskRelief = 0.0;
     double droneStorage = 0.0;
     double droneEngineEfficiency = 0.0;
     double artifactTowEfficiency = 0.0;
@@ -652,7 +655,6 @@ struct MiniDroneStats {
     double scannerRadius = 0.0;
     double drillIntegrityRelief = 0.0;
     double hardRockBounceRelief = 0.0;
-    double extractionRiskRelief = 0.0;
     double enemyEncounterRelief = 0.0;
     double sentryDamagePerSecond = 0.0;
     double enemyDamageRelief = 0.0;

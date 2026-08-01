@@ -41,30 +41,6 @@ bool projectUnlockedForDestination(const ResearchProject& project, const MetaPro
     return project.requiredDestinationTier <= destination.tier && hasUnlock(meta, project.unlockKey);
 }
 
-MaterialInventory halvedMaterials(const MaterialInventory& materials)
-{
-    return {
-        std::max(0, materials.common / 2),
-        std::max(0, materials.rare / tuning::research::extractionRareLossDivisor),
-        0
-    };
-}
-
-int attributedRecoveredMiningMaterial(int miningBanked, int totalBanked, int totalRecovered)
-{
-    const int clampedMining = std::clamp(miningBanked, 0, std::max(0, totalBanked));
-    const int clampedRecovered = std::clamp(totalRecovered, 0, std::max(0, totalBanked));
-    if (clampedMining <= 0 || clampedRecovered <= 0 || totalBanked <= 0) {
-        return 0;
-    }
-    if (clampedRecovered >= totalBanked) {
-        return clampedMining;
-    }
-    return std::min(
-        clampedMining,
-        static_cast<int>((static_cast<long long>(clampedRecovered) * clampedMining) / totalBanked));
-}
-
 int materialCargo(const MaterialInventory& materials)
 {
     return std::max(0, materials.common) + std::max(0, materials.rare) * 2 + std::max(0, materials.exotic) * 4;
@@ -562,10 +538,9 @@ void appendSurfaceLog(SurfaceExpeditionState& expedition, std::string entry)
     }
 }
 
-void finalizeSurfaceAction(GameState& state, SurfaceActionOutcome& outcome, Random& rng, double extractionRiskBefore)
+void finalizeSurfaceAction(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
 {
     applySurfaceEvent(state, outcome, rng);
-    outcome.extractionRiskDelta = surfaceExtractionRisk(state) - extractionRiskBefore;
     appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
 }
 
@@ -622,12 +597,6 @@ std::string surfaceDeltaSummary(const SurfaceActionOutcome& outcome)
         parts.push_back("+1 " + std::string(text::labels::artifacts));
     }
     addLoss(parts, outcome.artifactsLost, text::labels::artifacts);
-    if (outcome.extractionRisk > 0.0) {
-        parts.push_back(display::percent(outcome.extractionRisk) + " " + std::string(text::labels::extractionRisk));
-    }
-    if (std::abs(outcome.extractionRiskDelta) >= 0.005) {
-        parts.push_back(signedPercent(outcome.extractionRiskDelta) + " " + std::string(text::labels::extractionRisk));
-    }
     if (std::abs(outcome.hazardDelta) > 0.0001) {
         parts.push_back(signedPercent(outcome.hazardDelta) + " " + std::string(text::labels::hazard));
     }
@@ -2399,8 +2368,7 @@ SurfaceToolEffects surfaceToolEffects(const MetaProgress& meta)
         effects.mineRareChanceBonus += tuning::research::drillRareChanceBonus;
     }
     if (hasUnlock(meta, content::unlock::cargoRigs)) {
-        effects.extractionRiskRelief += tuning::research::cargoRigExtractionRiskRelief;
-        effects.cargoRiskRelief += tuning::research::cargoRigCargoRiskRelief;
+        effects.hazardRelief += tuning::research::cargoRigHazardRelief;
     }
     if (hasUnlock(meta, content::unlock::perimeterDrones)) {
         effects.enemyEncounterRelief += tuning::research::perimeterDroneEnemyRelief;
@@ -2423,14 +2391,13 @@ SurfaceCrewEffects surfaceCrewEffects(const GameState& state)
     if (astronaut->trait == tuning::traits::beastMode) {
         effects.supplyBonus = 1;
         effects.hazardRelief = std::min(0.08, 0.025 + trainedRiskRelief);
-        effects.extractionRiskRelief = std::min(0.10, 0.035 + static_cast<double>(training) * 0.004);
-        effects.summary = "Capybara survival: extra action kits, lower hazard, and safer extraction.";
+        effects.summary = "Capybara survival: extra action kits and lower field hazard.";
     } else if (astronaut->trait == tuning::traits::hardReboot) {
         effects.hazardRelief = std::min(0.09, 0.040 + static_cast<double>(training) * 0.004);
         effects.summary = "Beaver resilience: fewer equipment scares and steadier surface operations.";
     } else if (astronaut->trait == tuning::traits::outtaHere) {
-        effects.extractionRiskRelief = std::min(0.11, 0.055 + static_cast<double>(training) * 0.005);
-        effects.summary = "Fox navigation: cleaner extraction routes when the payload gets heavy.";
+        effects.hazardRelief = std::min(0.11, 0.055 + static_cast<double>(training) * 0.005);
+        effects.summary = "Fox navigation: cleaner field routes and lighter loaded handling.";
     } else if (astronaut->trait == tuning::traits::deepFocus) {
         effects.surveyCommonBonus = 1 + training / 5;
         effects.artifactChanceBonus = std::min(0.12, 0.030 + static_cast<double>(training) * 0.006);
@@ -2444,8 +2411,8 @@ SurfaceCrewEffects surfaceCrewEffects(const GameState& state)
         effects.hazardRelief = std::min(0.08, 0.025 + static_cast<double>(training) * 0.005);
         effects.summary = "Chipmunk exploration: faster site work with fewer field hazards.";
     } else if (astronaut->trait == tuning::traits::fieldInstincts) {
-        effects.extractionRiskRelief = std::min(0.06, 0.020 + trainedRiskRelief);
-        effects.summary = "Field instincts: modestly safer extractions.";
+        effects.hazardRelief = std::min(0.06, 0.020 + trainedRiskRelief);
+        effects.summary = "Field instincts: fewer surface hazards.";
     } else {
         effects.summary = astronaut->background.empty() ? astronaut->trait : astronaut->background;
     }
@@ -2468,7 +2435,6 @@ SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile)
         break;
     case SurfaceSiteProfile::FractureField:
         effects.hazardDelta += tuning::research::siteFractureFieldHazardIncrease;
-        effects.extractionRiskDelta += tuning::research::siteFractureFieldExtractionRiskIncrease;
         effects.artifactChanceBonus += tuning::research::siteFractureFieldArtifactChanceBonus;
         break;
     }
@@ -2492,7 +2458,6 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
         effects.hazardRelief += upgrade->stats.hazardRelief;
         effects.droneSpeed += upgrade->stats.droneSpeed;
         effects.oxygenSeconds += upgrade->stats.oxygenSeconds;
-        effects.extractionRiskRelief += upgrade->stats.extractionRiskRelief;
         effects.droneStorage += upgrade->stats.droneStorage;
         effects.droneEngineEfficiency += upgrade->stats.droneEngineEfficiency;
         effects.artifactTowEfficiency += upgrade->stats.artifactTowEfficiency;
@@ -2609,21 +2574,9 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
 
     state.meta.droneBaySlots = std::clamp(state.meta.droneBaySlots <= 0 ? 1 : state.meta.droneBaySlots, 1, 6);
 
-    const std::array<std::string_view, 1> starterDrones {
-        content::drone::miningDrone
-    };
-    for (std::string_view droneId : starterDrones) {
-        if (catalog.findMiniDrone(droneId) != nullptr
-            && std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), droneId) == state.meta.ownedDroneIds.end()) {
-            state.meta.ownedDroneIds.emplace_back(droneId);
-        }
-    }
-    for (const MiniDrone& drone : catalog.miniDrones) {
-        if (isMiniDroneUnlocked(state.meta, drone)
-            && std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) == state.meta.ownedDroneIds.end()) {
-            state.meta.ownedDroneIds.push_back(drone.id);
-        }
-    }
+    // Unlocking a drone type makes its frame purchasable in Drone Ops; it
+    // does not silently add a frame to the player's bay. Scenario rewards
+    // that intentionally grant a specific drone still add it explicitly.
 
     state.meta.ownedDroneIds.erase(
         std::remove_if(
@@ -2774,8 +2727,7 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
     }
 
     const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
-    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
-    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
+    if (!isMiniDroneUnlocked(state.meta, drone)) {
         state.statusLine = drone.name + " is still locked.";
         return false;
     }
@@ -2805,7 +2757,7 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
         catalog,
         {ScenarioEventKind::EquipmentAssigned, {}, {}, drone.id, {}, 1, 0});
     state.statusLine = equippedCount >= ownedCount
-        ? "Built and assigned another " + drone.name + " to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "."
+        ? "Built and assigned " + (ownedCount == 0 ? drone.name : ("another " + drone.name)) + " to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + "."
         : drone.name + " added to Drone Loadout slot " + std::to_string(static_cast<int>(state.meta.equippedDroneIds.size())) + ".";
     return true;
 }
@@ -2850,7 +2802,6 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.scannerRadius += drone->stats.scannerRadius * upgradeMultiplier;
         effects.drillIntegrityRelief += drone->stats.drillIntegrityRelief * upgradeMultiplier;
         effects.hardRockBounceRelief += drone->stats.hardRockBounceRelief * upgradeMultiplier;
-        effects.extractionRiskRelief += drone->stats.extractionRiskRelief * upgradeMultiplier;
         effects.enemyEncounterRelief += drone->stats.enemyEncounterRelief * upgradeMultiplier;
         effects.sentryDamagePerSecond += drone->stats.sentryDamagePerSecond * upgradeMultiplier;
         effects.enemyDamageRelief += drone->stats.enemyDamageRelief * upgradeMultiplier;
@@ -2910,12 +2861,10 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     if (miningDrones > 0 && resourceDrones > 0) {
         effects.passiveMiningRate += 0.035;
         effects.oxygenSeconds += 12.0;
-        effects.extractionRiskRelief += 0.012;
         addSynergy("Long Haul Rig");
     }
     if (resourceDrones > 0 && surveyDrones > 0) {
         effects.scannerRadius += 0.85;
-        effects.extractionRiskRelief += 0.012;
         addSynergy("Pathfinder Loop");
     }
 
@@ -2971,11 +2920,10 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     } else if (miningDrones > 0 && resourceDrones > 0 && surveyDrones > 0) {
         effects.passiveMiningRate += 0.020;
         effects.scannerRadius += 0.70;
-        effects.extractionRiskRelief += 0.018;
         setSignature(
             MiniDroneSignatureKind::RelicPathfinder,
             "Relic Pathfinder",
-            "Mining, Resource, and Survey drones favor artifact routes with wider scans, safer extraction, and steady passive excavation.",
+            "Mining, Resource, and Survey drones favor artifact routes with wider scans and steady passive excavation.",
             2);
     }
 
@@ -2983,7 +2931,6 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     effects.scannerRadius = std::clamp(effects.scannerRadius, 0.0, 5.0);
     effects.drillIntegrityRelief = std::clamp(effects.drillIntegrityRelief, 0.0, 0.35);
     effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.55);
-    effects.extractionRiskRelief = std::clamp(effects.extractionRiskRelief, 0.0, 0.08);
     effects.enemyEncounterRelief = std::clamp(effects.enemyEncounterRelief, 0.0, 0.18);
     effects.sentryDamagePerSecond = std::clamp(effects.sentryDamagePerSecond, 0.0, 8.0);
     effects.enemyDamageRelief = std::clamp(effects.enemyDamageRelief, 0.0, 0.55);
@@ -3241,32 +3188,6 @@ bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int i
     return true;
 }
 
-double surfaceExtractionRisk(const GameState& state)
-{
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    if (!expedition.active) {
-        return 0.0;
-    }
-
-    const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
-    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
-    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, createDefaultContent());
-    double risk = tuning::research::extractionRiskBase
-        + expedition.hazard * tuning::research::extractionRiskHazardScale
-        + static_cast<double>(std::max(0, expedition.cargo)) * std::max(0.0, tuning::research::extractionRiskCargoScale - tools.cargoRiskRelief)
-        - tools.extractionRiskRelief
-        - crew.extractionRiskRelief
-        - upgrades.extractionRiskRelief
-        - drones.extractionRiskRelief
-        + site.extractionRiskDelta;
-    if (expedition.supply <= 0) {
-        risk += tuning::research::extractionRiskLowSupplyPenalty;
-    }
-    return std::clamp(risk, 0.0, tuning::research::extractionRiskMaximum);
-}
-
 double surfaceEnemyEncounterChance(const GameState& state)
 {
     const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
@@ -3297,7 +3218,6 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
         outcome.message = "Mining run is complete. Extract before surveying again.";
         return outcome;
     }
-    const double extractionRiskBefore = surfaceExtractionRisk(state);
     outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
     if (!outcome.applied) {
         return outcome;
@@ -3331,14 +3251,13 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
     outcome.message = thermalSurface
         ? "Survey complete. The regolith is inert; ore signatures remain sealed inside thermal seams."
         : std::string(text::status::surfaceSurveyed);
-    finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
+    finalizeSurfaceAction(state, outcome, rng);
     return outcome;
 }
 
 SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    const double extractionRiskBefore = surfaceExtractionRisk(state);
     SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::mineSupplyCost);
     if (!outcome.applied) {
         return outcome;
@@ -3377,7 +3296,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     outcome.message = thermalSurface
         ? "Regolith broken. No resource recovered; treat a thermal seam with Hazard support."
         : std::string(text::status::surfaceMined);
-    finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
+    finalizeSurfaceAction(state, outcome, rng);
     return outcome;
 }
 
@@ -3389,7 +3308,6 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
         outcome.message = "Mining run is complete. Extract before pushing deeper.";
         return outcome;
     }
-    const double extractionRiskBefore = surfaceExtractionRisk(state);
     outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
         return outcome;
@@ -3415,13 +3333,13 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
         outcome,
         rng,
         tuning::research::pushHazardChanceScale,
-        (surfaceToolEffects(state.meta).extractionRiskRelief > 0.0 ? tuning::research::cargoRigHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
+        surfaceToolEffects(state.meta).hazardRelief + crew.hazardRelief + upgrades.hazardRelief,
         text::status::surfaceTerrainHazard,
         tuning::research::pushHazardSupplyLoss,
         0,
         tuning::research::unstableTerrainHazardIncrease);
     outcome.message = std::string(text::status::surfacePushed);
-    finalizeSurfaceAction(state, outcome, rng, extractionRiskBefore);
+    finalizeSurfaceAction(state, outcome, rng);
     return outcome;
 }
 
@@ -3977,12 +3895,90 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
     return outcome;
 }
 
-SurfaceActionOutcome extractSurfacePayload(GameState& state, Random& rng)
+SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog)
 {
-    return extractSurfacePayload(state, legacyCampaignCatalog(), rng);
+    SurfaceReturnLedger ledger;
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active) {
+        return ledger;
+    }
+
+    ledger.onShip = expedition.temporaryMaterials;
+    ledger.toMaterials = ledger.onShip;
+    ledger.artifacts = static_cast<int>(expedition.temporaryArtifacts.size());
+    if (!expedition.bankedMiningArenaValid || !expedition.bankedMiningProgressionEligible) {
+        return ledger;
+    }
+
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition = findScenarioDefinition(
+            catalog,
+            instance.definitionId.empty() ? std::string_view(instance.id) : std::string_view(instance.definitionId));
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            const std::string materialId = step.eventTargetId.empty() ? "common" : step.eventTargetId;
+            const ScenarioEvent deliveryEvent {
+                ScenarioEventKind::SafeMaterialDelivered,
+                {}, {}, expedition.destinationId, materialId, 1, 0
+            };
+            if (!scenarioStepMatchesEvent(step, deliveryEvent) ||
+                scenarioStepState(state, catalog, instance.id, step.id) != ScenarioStepState::Active) {
+                continue;
+            }
+            const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+            if (progress == nullptr) {
+                continue;
+            }
+            const auto eligibleMaterial = [&]() {
+                if (materialId == "rare") {
+                    return std::max(0, std::min(expedition.bankedMiningMaterials.rare, ledger.toMaterials.rare));
+                }
+                if (materialId == "exotic") {
+                    return std::max(0, std::min(expedition.bankedMiningMaterials.exotic, ledger.toMaterials.exotic));
+                }
+                return std::max(0, std::min(expedition.bankedMiningMaterials.common, ledger.toMaterials.common));
+            };
+            const int allocation = std::min(
+                eligibleMaterial(),
+                std::max(0, step.requiredProgress - progress->progress));
+            if (allocation <= 0) {
+                continue;
+            }
+            ledger.allocations.push_back({
+                instance.id,
+                step.id,
+                step.title.empty() ? step.location : step.title,
+                materialId,
+                allocation,
+                progress->progress + allocation,
+                std::max(0, step.requiredProgress)
+            });
+            if (materialId == "rare") {
+                ledger.toMaterials.rare = std::max(0, ledger.toMaterials.rare - allocation);
+            } else if (materialId == "exotic") {
+                ledger.toMaterials.exotic = std::max(0, ledger.toMaterials.exotic - allocation);
+            } else {
+                ledger.toMaterials.common = std::max(0, ledger.toMaterials.common - allocation);
+            }
+        }
+    }
+    return ledger;
 }
 
-SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog, Random& rng)
+SurfaceReturnLedger surfaceReturnLedger(const GameState& state)
+{
+    return surfaceReturnLedger(state, legacyCampaignCatalog());
+}
+
+SurfaceActionOutcome extractSurfacePayload(GameState& state)
+{
+    return extractSurfacePayload(state, legacyCampaignCatalog());
+}
+
+SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog)
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
@@ -3990,121 +3986,70 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
         return outcome;
     }
 
+    ensureScenarioInstances(state, catalog);
+    const SurfaceReturnLedger ledger = surfaceReturnLedger(state, catalog);
     outcome.applied = true;
-    outcome.extractionRisk = surfaceExtractionRisk(state);
-    outcome.cargoRecovered = !rng.chance(outcome.extractionRisk);
-    if (outcome.cargoRecovered) {
-        addMaterials(state.meta.materials, expedition.temporaryMaterials);
-        applyRecoveredArtifactRewards(
+    outcome.cargoRecovered = true;
+    outcome.materialReturned = ledger.onShip;
+    outcome.materialDelta = ledger.toMaterials;
+    for (const SurfaceReturnAllocation& allocation : ledger.allocations) {
+        if (allocation.materialId == "rare") {
+            outcome.materialCommitted.rare += allocation.amount;
+        } else if (allocation.materialId == "exotic") {
+            outcome.materialCommitted.exotic += allocation.amount;
+        } else {
+            outcome.materialCommitted.common += allocation.amount;
+        }
+        (void)recordScenarioEvent(
             state,
             catalog,
-            expedition.temporaryArtifacts,
-            expedition.pendingMiningSiteDefinitionId);
-        creditExtractedCompatibilityMiningSiteArtifacts(
-            state.meta,
-            expedition.temporaryArtifacts);
-        state.meta.artifacts.insert(state.meta.artifacts.end(), expedition.temporaryArtifacts.begin(), expedition.temporaryArtifacts.end());
-        outcome.materialDelta = expedition.temporaryMaterials;
-        outcome.artifactFound = !expedition.temporaryArtifacts.empty();
-        outcome.message = std::string(text::status::surfaceExtracted);
-    } else {
-        const MaterialInventory recovered = halvedMaterials(expedition.temporaryMaterials);
-        addMaterials(state.meta.materials, recovered);
-        outcome.materialDelta = recovered;
-        outcome.materialLost = {
-            std::max(0, expedition.temporaryMaterials.common - recovered.common),
-            std::max(0, expedition.temporaryMaterials.rare - recovered.rare),
-            std::max(0, expedition.temporaryMaterials.exotic - recovered.exotic)
-        };
-        outcome.artifactsLost = static_cast<int>(expedition.temporaryArtifacts.size());
-        outcome.message = std::string(text::status::surfaceExtractionRough);
+            {ScenarioEventKind::SafeMaterialDelivered,
+             allocation.scenarioId,
+             allocation.stepId,
+             expedition.destinationId,
+             allocation.materialId,
+             allocation.amount,
+             0});
     }
+    writeLegacyCampaignSaveProjection(state, catalog);
+    addMaterials(state.meta.materials, outcome.materialDelta);
+    applyRecoveredArtifactRewards(
+        state,
+        catalog,
+        expedition.temporaryArtifacts,
+        expedition.pendingMiningSiteDefinitionId);
+    creditExtractedCompatibilityMiningSiteArtifacts(
+        state.meta,
+        expedition.temporaryArtifacts);
+    state.meta.artifacts.insert(
+        state.meta.artifacts.end(),
+        expedition.temporaryArtifacts.begin(),
+        expedition.temporaryArtifacts.end());
+    outcome.artifactFound = !expedition.temporaryArtifacts.empty();
 
-    int recoveredMiningCommon = 0;
     if (expedition.bankedMiningArenaValid && expedition.bankedMiningProgressionEligible) {
-        const MiningArenaRequest request {
+        const MiningArenaRules rules = resolveMiningArenaRules({
             expedition.bankedMiningArenaMetadata.act,
             expedition.bankedMiningArenaMetadata.difficulty,
             expedition.bankedMiningArenaMetadata.seed
-        };
-        const MiningArenaRules rules = resolveMiningArenaRules(request);
-        // A rough extraction still returns a partial material payload. Credit
-        // the contract with the attributable Mining Rig ore that actually
-        // reached the ship, just as first-clear rewards use the returned
-        // partial payload below. Previously this path awarded ordinary Common
-        // materials while silently suppressing all contract progress.
-        recoveredMiningCommon = attributedRecoveredMiningMaterial(
-            expedition.bankedMiningMaterials.common,
-            expedition.temporaryMaterials.common,
-            outcome.materialDelta.common);
-        const int rareBanked = attributedRecoveredMiningMaterial(
-            expedition.bankedMiningMaterials.rare,
-            expedition.temporaryMaterials.rare,
-            outcome.materialDelta.rare);
-        const int exoticBanked = attributedRecoveredMiningMaterial(
-            expedition.bankedMiningMaterials.exotic,
-            expedition.temporaryMaterials.exotic,
-            outcome.materialDelta.exotic);
-        creditBankedMiningFirstClearRewards(state.meta, rules, rareBanked, exoticBanked);
+        });
+        creditBankedMiningFirstClearRewards(
+            state.meta,
+            rules,
+            std::max(0, std::min(expedition.bankedMiningMaterials.rare, ledger.onShip.rare)),
+            std::max(0, std::min(expedition.bankedMiningMaterials.exotic, ledger.onShip.exotic)));
     }
 
-    if (recoveredMiningCommon > 0) {
-        const int delivered = creditCampaignCommonOre(
-            state,
-            catalog,
-            expedition.destinationId,
-            recoveredMiningCommon);
-        if (delivered > 0) {
-            const ScenarioEvent deliveryEvent {
-                ScenarioEventKind::SafeMaterialDelivered,
-                {},
-                {},
-                expedition.destinationId,
-                "common",
-                delivered,
-                0
-            };
-            bool deliveryPresented = false;
-            for (const ScenarioInstance& instance : state.meta.scenarios) {
-                const std::string_view definitionId = instance.definitionId.empty()
-                    ? std::string_view(instance.id)
-                    : std::string_view(instance.definitionId);
-                const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
-                if (definition == nullptr) {
-                    continue;
-                }
-                const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
-                for (const ScenarioStepDefinition& step : resolved.steps) {
-                    if (!scenarioStepMatchesEvent(step, deliveryEvent)) {
-                        continue;
-                    }
-                    const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
-                    if (progress == nullptr) {
-                        continue;
-                    }
-                    outcome.message = (outcome.cargoRecovered ? std::string {} : "Extraction rough; ")
-                        + step.location + " delivery +" + std::to_string(delivered)
-                        + " // " + std::to_string(progress->progress) + "/"
-                        + std::to_string(std::max(0, step.requiredProgress))
-                        + (progress->completed && !progress->claimed
-                              ? " // READY TO CLAIM."
-                              : " // continue the local contract.");
-                    deliveryPresented = true;
-                    break;
-                }
-                if (deliveryPresented) {
-                    break;
-                }
-            }
-        }
+    outcome.message = "Returned " + std::to_string(ledger.onShip.common) + " Common";
+    if (outcome.materialCommitted.common > 0) {
+        outcome.message += ". " + std::to_string(outcome.materialCommitted.common) + " committed to " +
+            ledger.allocations.front().label + ".";
+    }
+    if (outcome.materialDelta.common > 0) {
+        outcome.message += " " + std::to_string(outcome.materialDelta.common) + " added to Materials.";
     }
 
-    // A mining-site completion is distinct from a protected-objective
-    // extraction: generic scenarios may complete a site with no payload at
-    // all. It is recorded only after the expedition has extracted safely, and
-    // the active scenario address prevents a shared site definition from
-    // advancing another runtime instance.
-    if (outcome.cargoRecovered && !expedition.pendingMiningSiteDefinitionId.empty()) {
+    if (!expedition.pendingMiningSiteDefinitionId.empty()) {
         (void)recordScenarioEvent(
             state,
             catalog,

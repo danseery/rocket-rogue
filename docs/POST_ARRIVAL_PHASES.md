@@ -18,7 +18,7 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes carried, aboard, and delivered ore before `Install Prospector Mk I` can grant the first Support Drone. Mars repeats the lesson with 40 local Common Ore and `Fabricate Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
+Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes Rig, Drone, Ship, and committed ore before it opens Drone Ops with a funded Prospector Mk I fabrication. The player explicitly fabricates and assigns that first frame, introducing future drone purchases and Mk upgrades. Mars repeats the lesson with 40 local Common Ore and `Fabricate Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
 
 The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The current authored site presents outer and inner four-segment lava layers, then requires protected-Artifact towing and safe Surface extraction. The Artifact's scenario reward grants one persistent, player-selected free Support Drone upgrade. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward. Future protected sites configure the same reusable cocoon, objective, event, and reward boundaries rather than adding destination-specific mining code.
 
@@ -48,7 +48,7 @@ The current POC treats research facilities and surface tools as small unlock lay
 - Mission Analysis Lab adds a small blueprint bonus to future research, representing better debriefs and sample processing.
 - Field probes add action-kit margin and improve survey yield.
 - Surface drills improve mining yield and rare-material odds.
-- Cargo return rigs reduce extraction risk, especially when cargo gets heavy.
+- Cargo rigs reduce Push Deeper hazard chances while retaining their visible hauling benefits.
 - The Moon Prospector contract unlocks the first Prospector Support Drone and Slot 1; the Mars contract unlocks empty Slot 2; Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the first Hazard Support Drone.
 - Arkfall grants Mk I Attack/Defense Support Drones, at least three bay slots, and hostile-contact mitigation. Perimeter Drone Network research grants Perimeter Coordination for advanced tuning and synergies.
 
@@ -65,9 +65,9 @@ Core resources:
 - Site profile: each expedition rolls a site such as Survey Basin, Ore Shelf, or Fracture Field. The site changes action yield, hazard, extraction pressure, or artifact odds.
 - Action kits: the surface action clock. Surveying, pushing deeper, and hazard responses spend it.
 - Shared fuel: the shuttle and Mining Rig reserve. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains; before the Ark, it is labeled shared fuel, and after Ark discovery it is framed as Ark fuel.
-- Cargo: increases reward but raises extraction risk.
+- Cargo: increases reward and is guaranteed once loaded onto the Ship.
 - Hazard: destination difficulty plus depth pressure.
-- Materials: banked only if extraction succeeds enough to recover the payload.
+- Materials: normal departure returns every material on the Rig, intact Support Drones, and the Ship; Emergency Recall and disabled-rig recovery retain only Ship cargo.
 - Artifacts: rare finds that require research to identify.
 
 Core actions:
@@ -75,7 +75,7 @@ Core actions:
 - Survey site: low-risk, low-reward; improves knowledge and finds common materials.
 - Mine deposit: opens one direct-control Mining Rig run at the selected start depth for the current surface loop. The ship remains at surface depth 0, and deployment spends shared fuel rather than action kits.
 - Push Deeper: its first layer is guaranteed and bankable. Attempting layer two or farther risks the unbanked route; successful mapped artifact layers confirm the artifact for mining. It is disabled after mining because the run commits the field team to extracting or wrapping the current site.
-- Extract payload: attempts to recover the current cargo to the shuttle; risk rises with hazard, cargo, low action kits, and spent fuel.
+- Return: atomically recalls intact Support Drones, loads every remaining manifest onto the Ship, and settles the exact objective allocation plus spendable surplus.
 
 Surface actions should be presented as decision cards, not mystery buttons. Each card should show action-kit or fuel cost, current hazard/extraction risk, a short explanation of the payoff, and the action button. The player should understand why a field-kit unlock changed the odds without needing to inspect code or external notes.
 

@@ -18,7 +18,6 @@ struct MiningDrillStats {
     double scannerRadius = 0.0;
     double oxygenSeconds = 0.0;
     double integrityRelief = 0.0;
-    double extractionRiskRelief = 0.0;
     double passiveDroneMiningRate = 0.0;
     double hardRockBounceRelief = 0.0;
     double rareYieldChance = 0.0;

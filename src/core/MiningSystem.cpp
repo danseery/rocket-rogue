@@ -1662,6 +1662,49 @@ bool unloadOneMiniDroneChunk(MiningRunState& mining, MiningMiniDroneAgent& agent
     return false;
 }
 
+double miniDroneShipTransitSeconds(const MiningRunState& mining)
+{
+    return 0.80 + static_cast<double>(std::max(0, mining.depthZone - mining.entryDepthZone)) * 0.55;
+}
+
+void beginMiniDroneShipDelivery(MiningRunState& mining, MiningMiniDroneAgent& agent)
+{
+    agent.targetCellX = -1;
+    agent.targetCellY = -1;
+    agent.targetEnemyIndex = -1;
+    agent.taskProgressSeconds = 0.0;
+    agent.finishTargetBeforeReturn = false;
+    agent.behavior = MiningMiniDroneBehavior::DeliveringToShip;
+    agent.actionCooldownSeconds = miniDroneShipTransitSeconds(mining);
+}
+
+void unloadAllMiniDroneCargo(MiningRunState& mining, MiningMiniDroneAgent& agent)
+{
+    while (unloadOneMiniDroneChunk(mining, agent)) {
+    }
+}
+
+MaterialInventory miniDroneCargoManifest(const MiningRunState& mining)
+{
+    MaterialInventory result;
+    for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
+        addMiningMaterials(result, agent.haulMaterials);
+    }
+    return result;
+}
+
+void recallMiniDroneCargoToShip(MiningRunState& mining)
+{
+    for (MiningMiniDroneAgent& agent : mining.miniDrones) {
+        unloadAllMiniDroneCargo(mining, agent);
+        if (agent.behavior == MiningMiniDroneBehavior::DeliveringToShip ||
+            agent.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
+            agent.behavior = MiningMiniDroneBehavior::Following;
+            agent.actionCooldownSeconds = 0.0;
+        }
+    }
+}
+
 bool miniDroneTargetEnemyValid(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
 {
     return agent.targetEnemyIndex >= 0 && agent.targetEnemyIndex < static_cast<int>(mining.enemies.size()) &&
@@ -1928,6 +1971,29 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
             agent.behavior = MiningMiniDroneBehavior::Returning;
         }
         const MiniDroneHomePoint home = miniDroneHomePoint(mining, agent);
+        // Ship delivery is intentionally independent of the controlled actor.  A
+        // support drone uses the known shaft/return route as a timed transit so
+        // a player never has to escort a full drone back to the shuttle.
+        if ((agent.role == MiniDroneRole::Mining || agent.role == MiniDroneRole::Resource) &&
+            agent.behavior == MiningMiniDroneBehavior::DeliveringToShip) {
+            if (agent.actionCooldownSeconds <= 0.0) {
+                unloadAllMiniDroneCargo(mining, agent);
+                agent.behavior = MiningMiniDroneBehavior::ReturningFromShip;
+                agent.actionCooldownSeconds = miniDroneShipTransitSeconds(mining);
+            }
+            continue;
+        }
+        if ((agent.role == MiniDroneRole::Mining || agent.role == MiniDroneRole::Resource) &&
+            agent.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
+            if (agent.actionCooldownSeconds <= 0.0) {
+                agent.x = home.x;
+                agent.y = home.y;
+                agent.velocityX = 0.0;
+                agent.velocityY = 0.0;
+                agent.behavior = MiningMiniDroneBehavior::Following;
+            }
+            continue;
+        }
         if (hardRecall) {
             moveMiniDroneTowardOpenPoint(
                 agent,
@@ -1945,8 +2011,6 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
             const double leashSq = tuning::mining::miningDroneLeashRadiusCells * tuning::mining::miningDroneLeashRadiusCells;
             const int capacity = tuning::mining::miningDroneCapacityChunks(agent.upgradeLevel);
             int carriedChunks = miniDroneHaulChunkCount(agent);
-            const MiniDroneHomePoint dock = miniDroneShipDockPoint(mining, agent);
-            const bool deliveryAllowed = controlledActorAtReturnZone(mining);
 
             if (carriedChunks >= capacity && miningCoordinator.hasAssignment(agent)) {
                 miningCoordinator.releaseAssignment(agent);
@@ -1954,49 +2018,9 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                 agent.behavior = MiningMiniDroneBehavior::Traveling;
             }
 
-            const bool deliveryInProgress = carriedChunks > 0 &&
-                !miningCoordinator.hasAssignment(agent) &&
-                (agent.behavior == MiningMiniDroneBehavior::Traveling ||
-                    agent.behavior == MiningMiniDroneBehavior::Docked);
-            if ((carriedChunks >= capacity || deliveryInProgress) && !deliveryAllowed) {
+            if (carriedChunks >= capacity) {
                 miningCoordinator.releaseAssignment(agent);
-                agent.behavior = MiningMiniDroneBehavior::Returning;
-                moveMiniDroneToward(
-                    agent,
-                    mining,
-                    home.x,
-                    home.y,
-                    returnSpeed,
-                    dt,
-                    MiniDroneArrivalStyle::SmoothFormation);
-                break;
-            }
-            if (carriedChunks >= capacity || deliveryInProgress) {
-                if (agent.behavior != MiningMiniDroneBehavior::Docked) {
-                    agent.behavior = MiningMiniDroneBehavior::Traveling;
-                    if (moveMiniDroneToward(
-                            agent,
-                            mining,
-                            dock.x,
-                            dock.y,
-                            tuning::mining::miniDroneTravelSpeedCellsPerSecond,
-                            dt)) {
-                        agent.behavior = MiningMiniDroneBehavior::Docked;
-                        agent.actionCooldownSeconds = std::max(
-                            agent.actionCooldownSeconds,
-                            tuning::mining::miningDroneDropoffSeconds);
-                    }
-                    break;
-                }
-                slowMiniDroneAtTask(agent, mining, dt);
-                if (agent.actionCooldownSeconds <= 0.0 && unloadOneMiniDroneChunk(mining, agent)) {
-                    agent.actionCooldownSeconds = tuning::mining::miningDroneDropoffSeconds;
-                    carriedChunks = miniDroneHaulChunkCount(agent);
-                }
-                if (carriedChunks <= 0) {
-                    agent.behavior = MiningMiniDroneBehavior::Returning;
-                    agent.actionCooldownSeconds = 0.0;
-                }
+                beginMiniDroneShipDelivery(mining, agent);
                 break;
             }
 
@@ -2079,7 +2103,7 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                 moveMiniDroneToward(agent, mining, home.x, home.y, returnSpeed, dt);
             } else if (!miningCoordinator.acquireAssignment(agent)) {
                 if (carriedChunks > 0) {
-                    agent.behavior = MiningMiniDroneBehavior::Traveling;
+                    beginMiniDroneShipDelivery(mining, agent);
                 } else {
                     agent.actionCooldownSeconds = 0.45;
                     agent.behavior = MiningMiniDroneBehavior::Following;
@@ -2126,31 +2150,12 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
         }
         case MiniDroneRole::Resource: {
             const double transferInterval = resourceDroneTransferInterval(agent);
-            const MiniDroneHomePoint dock = miniDroneShipDockPoint(mining, agent);
             int carriedChunks = miniDroneHaulChunkCount(agent);
-            const bool shouldDeliver = controlledActorAtReturnZone(mining) && carriedChunks > 0 &&
-                (agent.behavior == MiningMiniDroneBehavior::Traveling ||
-                    agent.behavior == MiningMiniDroneBehavior::Docked ||
-                    carriedChunks >= tuning::mining::resourceDroneCapacityChunks ||
+            const bool shouldDeliver = carriedChunks > 0 &&
+                (carriedChunks >= tuning::mining::resourceDroneCapacityChunks ||
                     !resourceDroneHasCollectibleMaterial(mining, agent));
             if (shouldDeliver) {
-                if (agent.behavior != MiningMiniDroneBehavior::Docked) {
-                    agent.behavior = MiningMiniDroneBehavior::Traveling;
-                    if (moveMiniDroneToward(agent, mining, dock.x, dock.y, tuning::mining::miniDroneTravelSpeedCellsPerSecond, dt)) {
-                        agent.behavior = MiningMiniDroneBehavior::Docked;
-                        agent.actionCooldownSeconds = std::max(agent.actionCooldownSeconds, transferInterval);
-                    }
-                    break;
-                }
-                slowMiniDroneAtTask(agent, mining, dt);
-                if (agent.actionCooldownSeconds <= 0.0 && unloadOneMiniDroneChunk(mining, agent)) {
-                    agent.actionCooldownSeconds = transferInterval;
-                    carriedChunks = miniDroneHaulChunkCount(agent);
-                }
-                if (carriedChunks <= 0) {
-                    agent.behavior = MiningMiniDroneBehavior::Returning;
-                    agent.actionCooldownSeconds = 0.0;
-                }
+                beginMiniDroneShipDelivery(mining, agent);
                 break;
             }
 
@@ -5373,7 +5378,7 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
         stats.integrityRelief += tuning::mining::beaverIntegrityRelief;
     }
     if (traitIs(state, tuning::traits::outtaHere)) {
-        stats.extractionRiskRelief += tuning::mining::foxExtractionRiskRelief;
+        stats.engineEfficiency += tuning::mining::foxExtractionRiskRelief;
     }
     if (traitIs(state, tuning::traits::deepFocus)) {
         stats.power += tuning::mining::prairieDogDrillBonus;
@@ -5394,7 +5399,6 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.heatCoolingPerSecond += surfaceUpgrades.drillCooling * 0.025;
     stats.integrityRelief += surfaceUpgrades.drillDurability * 0.070;
     stats.hardRockBounceRelief += surfaceUpgrades.hardRockBounceRelief;
-    stats.extractionRiskRelief += surfaceUpgrades.extractionRiskRelief;
     stats.storage += surfaceUpgrades.droneStorage;
     stats.engineEfficiency += surfaceUpgrades.droneEngineEfficiency;
     stats.artifactTowEfficiency += surfaceUpgrades.artifactTowEfficiency;
@@ -5405,7 +5409,6 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.scannerRadius += drones.scannerRadius;
     stats.integrityRelief += drones.drillIntegrityRelief;
     stats.hardRockBounceRelief += drones.hardRockBounceRelief;
-    stats.extractionRiskRelief += drones.extractionRiskRelief;
     stats.hardRockBounceRelief += miningDurability * 0.035;
 
     stats.oreYieldChance = std::clamp(stats.oreYieldChance, 0.0, 0.36);
@@ -6872,27 +6875,39 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
                     : std::string(text::status::miningReturnToShip));
         return outcome;
     }
-    if (!abort) {
+    const bool recoveryLoss = abort || mining.rigDisabled;
+    const MaterialInventory droneManifest = miniDroneCargoManifest(mining);
+    if (!recoveryLoss) {
+        // A normal departure is atomic: every intact Support Drone is recalled
+        // and its manifest becomes Ship cargo before the surface ledger settles.
+        recallMiniDroneCargoToShip(mining);
         bankMiningPayloadAtShip(state, catalog);
         bankPhysicallyDeliveredArtifactsAtShip(mining);
+    } else {
+        outcome.materialLost = mining.temporaryMaterials;
+        addMiningMaterials(outcome.materialLost, droneManifest);
     }
 
     outcome.applied = true;
     outcome.message = abort
         ? (mining.failureMessage.empty() ? std::string(text::status::miningAborted) : mining.failureMessage)
         : (mining.rigDisabled
-                ? std::string("Operator recovered. Physically delivered artifact secured; rig cargo remains with the wreck.")
-                : std::string("Banked payload loaded for surface extraction."));
+                ? std::string("Disabled-rig recovery keeps Ship cargo; Rig and Support Drone ore were lost.")
+                : std::string("All rig and Support Drone ore loaded for surface return."));
     outcome.materialDelta = mining.stowedMaterials;
     outcome.artifactFound = !mining.stowedArtifacts.empty();
     outcome.cargoDelta = mining.stowedCargo;
     const double recallPenalty = abort ? tuning::mining::emergencyRecallHazardPenalty : 0.0;
-    const double payloadHazard = std::max(
-        0.0,
-        mining.hazardDelta +
-            static_cast<double>(std::max(0, mining.stowedCargo)) * tuning::mining::cargoExtractionRiskScale -
-            miningDrillStats(state, catalog).extractionRiskRelief);
-    outcome.hazardDelta = payloadHazard + recallPenalty;
+    outcome.hazardDelta = recallPenalty;
+    if (recoveryLoss) {
+        const int shipOre = std::max(0, outcome.materialDelta.common) +
+            std::max(0, outcome.materialDelta.rare) + std::max(0, outcome.materialDelta.exotic);
+        const int lostOre = std::max(0, outcome.materialLost.common) +
+            std::max(0, outcome.materialLost.rare) + std::max(0, outcome.materialLost.exotic);
+        outcome.message = (abort ? "Emergency Recall" : "Disabled-rig recovery") +
+            std::string(": keep ") + std::to_string(shipOre) + " Ship Ore; lose " +
+            std::to_string(lostOre) + " Rig/Drone Ore.";
+    }
     const bool emergencyRecall = abort;
     const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
 
@@ -6905,7 +6920,6 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     expedition.cargo += mining.stowedCargo;
     expedition.depth = std::max(expedition.depth, mining.deepestDepthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
-    outcome.extractionRiskDelta = std::max(0.0, outcome.hazardDelta);
     if (emergencyRecall) {
         state.run.surfaceUpgradeIds.clear();
         if (hadDroneUpgrades) {
