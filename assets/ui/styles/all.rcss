@@ -203,6 +203,7 @@ body {
 .rr-shell {
 	display: flex;
 	flex-direction: column;
+	align-items: center;
 }
 
 .rr-shell-lane {
@@ -219,6 +220,19 @@ body {
 .rr-shell-lane > .rr-shell-content {
 	width: var(--rr-phase-content-width);
 	max-width: 100%;
+}
+
+/* Desktop Hangar content is deliberately a compact planning board. Keep its
+   fixed 736px frame centered in the full viewport instead of leaving a large
+   empty field to the right and below it. Other shells retain their full-height
+   lane for long or scrollable workspaces. */
+.rr-shell.rr-family-hangar {
+	justify-content: center;
+}
+
+.rr-shell.rr-family-hangar > .rr-shell-lane,
+.rr-shell.rr-family-hangar > .rr-shell-lane > .rr-shell-content {
+	height: auto;
 }
 
 .rr-workspace-lane {

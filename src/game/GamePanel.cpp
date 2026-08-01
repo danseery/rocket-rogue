@@ -2114,7 +2114,11 @@ std::vector<PanelMetricPresentation> compactHeaderMetrics(
         return {
             panelMetric("Credits", display::money(state.run.credits)),
             panelMetric("Hull", display::wholePercent(state.run.shipDamage)),
-            panelMetric("Crew", activeAstronaut(state) == nullptr ? "NEED PILOT" : "READY")
+            panelMetric(
+                "Crew",
+                activeAstronaut(state) == nullptr
+                    ? "NEED PILOT"
+                    : std::string(crewStressLevel(activeAstronaut(state)->stress)))
         };
     }
     case Screen::Navigation:

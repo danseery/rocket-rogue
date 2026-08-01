@@ -11346,6 +11346,34 @@ void launchReadinessPresentationComesFromSharedHelper()
     require(recruitAction != nullptr && recruitAction->enabled && recruitAction->actionId == ui::actions::recruitCrew, "crew readiness should expose recruit action");
 }
 
+void crewStressLevelsMapToHangarReadout()
+{
+    struct StressLevelCase {
+        int stress;
+        std::string_view expected;
+    };
+    constexpr std::array<StressLevelCase, 10> cases {{
+        {100, "Crisis"}, {90, "Panicked"}, {80, "Alarmed"}, {70, "Overwhelmed"},
+        {60, "Anxious"}, {50, "Tense"}, {40, "Focused"}, {20, "Ready"},
+        {1, "Calm"}, {0, "Sanguine"}
+    }};
+    for (const StressLevelCase& entry : cases) {
+        require(crewStressLevel(entry.stress) == entry.expected,
+            "Hangar crew readout should use the authored stress-level ladder");
+    }
+
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xC0FFEE);
+    state.screen = Screen::Hangar;
+    Astronaut* pilot = activeAstronaut(state);
+    require(pilot != nullptr, "Hangar crew level test needs an active astronaut");
+    pilot->stress = 65;
+    PreparedLaunch launch;
+    const std::string hangarHtml = buildGamePanelHtml({state, catalog, launch, launch});
+    require(hangarHtml.find("<strong>Anxious</strong><span>Crew</span>") != std::string::npos,
+        "Hangar Crew chip should surface the active astronaut's stress level");
+}
+
 void panelChromePresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -13939,6 +13967,7 @@ int main()
     flightProgressHelpersShareTravelAndReturnMath();
     launchPanelPresentationComesFromSharedHelper();
     launchReadinessPresentationComesFromSharedHelper();
+    crewStressLevelsMapToHangarReadout();
     panelChromePresentationComesFromSharedHelper();
     settingsResolutionSelectorExposesSupportedPresets();
     titleScreenPresentationIsPortable();

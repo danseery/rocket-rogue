@@ -22,6 +22,23 @@ struct HangarOperationCardPresentation {
     std::string cssClass;
 };
 
+// A short emotional readout for the Hangar header. Stress still uses the
+// existing numeric rules everywhere else; this simply makes the crew chip
+// react visibly after risky assignments and difficult sorties.
+inline std::string_view crewStressLevel(int stress)
+{
+    if (stress >= 100) return "Crisis";
+    if (stress >= 90) return "Panicked";
+    if (stress >= 80) return "Alarmed";
+    if (stress >= 70) return "Overwhelmed";
+    if (stress >= 60) return "Anxious";
+    if (stress >= 50) return "Tense";
+    if (stress >= 40) return "Focused";
+    if (stress >= 20) return "Ready";
+    if (stress >= 1) return "Calm";
+    return "Sanguine";
+}
+
 inline HangarOperationCardPresentation hangarOperationCard(
     std::string_view title,
     std::string detail,
