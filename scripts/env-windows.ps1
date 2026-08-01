@@ -88,41 +88,69 @@ function Import-EmsdkEnvironment {
 }
 
 function Import-VisualStudioEnvironment {
-    if (Get-Command cl -ErrorAction SilentlyContinue) {
-        Write-Host "Visual Studio C++ toolchain already active."
-        return
-    }
-
     $vsWhereCandidates = @()
     if (${env:ProgramFiles(x86)}) {
         $vsWhereCandidates += (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe")
     }
     $vsWhereCandidates += "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
 
-    $installPath = $null
+    $installPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($vsWhere in $vsWhereCandidates) {
         if (-not (Test-Path $vsWhere)) {
             continue
         }
 
-        $candidate = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($candidate)) {
-            $installPath = $candidate.Trim()
-            break
+        $candidates = & $vsWhere -all -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($candidate in $candidates) {
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    $installPaths.Add($candidate.Trim())
+                }
+            }
         }
     }
 
-    if ([string]::IsNullOrWhiteSpace($installPath)) {
-        $fallbackRoots = @(
-            "C:\Program Files\Microsoft Visual Studio\2022\Community",
-            "C:\Program Files\Microsoft Visual Studio\2022\Professional",
-            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
-            "C:\Program Files\Microsoft Visual Studio\2022\BuildTools"
-        )
-        foreach ($root in $fallbackRoots) {
-            if (Test-Path (Join-Path $root "Common7\Tools\VsDevCmd.bat")) {
-                $installPath = $root
-                break
+    $fallbackRoots = @(
+        "C:\Program Files\Microsoft Visual Studio\2022\Community",
+        "C:\Program Files\Microsoft Visual Studio\2022\Professional",
+        "C:\Program Files\Microsoft Visual Studio\2022\Enterprise",
+        "C:\Program Files\Microsoft Visual Studio\2022\BuildTools",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\Professional",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\Enterprise",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools"
+    )
+    foreach ($root in $fallbackRoots) {
+        if (Test-Path (Join-Path $root "Common7\Tools\VsDevCmd.bat")) {
+            $installPaths.Add($root)
+        }
+    }
+
+    # A CMake cache records the compiler path, but a later build only sees the
+    # current linker and standard-library environment. Choose the highest
+    # installed MSVC toolset rather than vswhere's single product ordering so
+    # those three pieces cannot silently come from different VS installs.
+    $installPath = $null
+    $bestToolsetVersion = [Version]::new(0, 0)
+    $seenInstallPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($candidate in $installPaths) {
+        if (-not $seenInstallPaths.Add($candidate)) {
+            continue
+        }
+        $devCmd = Join-Path $candidate "Common7\Tools\VsDevCmd.bat"
+        $toolsetRoot = Join-Path $candidate "VC\Tools\MSVC"
+        if (-not (Test-Path $devCmd) -or -not (Test-Path $toolsetRoot)) {
+            continue
+        }
+        foreach ($toolset in Get-ChildItem -LiteralPath $toolsetRoot -Directory -ErrorAction SilentlyContinue) {
+            try {
+                $toolsetVersion = [Version]$toolset.Name
+            } catch {
+                continue
+            }
+            if ($toolsetVersion -gt $bestToolsetVersion) {
+                $bestToolsetVersion = $toolsetVersion
+                $installPath = $candidate
             }
         }
     }

@@ -1274,9 +1274,9 @@ int main()
         assert(ui.focusedId().starts_with("modal:drone_details_")
             || ui.focusedId().starts_with("action:equip_drone:"));
 
-        // The compact Deck loadout is a visual 2 x 3 grid. Directional
-        // navigation must follow those rows and columns instead of treating
-        // the six slots as the former single vertical rail.
+        // The loadout is a visual 2 x 3 grid at every workspace height.
+        // Directional navigation must follow those rows and columns instead
+        // of treating the six slots as the former single vertical rail.
         rocket::GameState gridState = state;
         gridState.meta.droneBaySlots = 6;
         gridState.meta.ownedDroneIds.assign(6, rocket::content::drone::miningDrone);
@@ -1316,6 +1316,17 @@ int main()
         assert(pointerAction.empty());
         click(1150, 112);
         assert(pointerAction == rocket::ui::actions::backToSurfaceOps);
+
+        // A tall desktop viewport used to reinstate the vertical rail. Keep
+        // the same grid and its controller mapping after the layout relaxes.
+        host.metrics = {1920, 1200, 1920, 1200, 1.0F};
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(gridPanelContext));
+        ui.requestFocus("action:unequip_drone_slot:0");
+        ui.refresh();
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "action:unequip_drone_slot:1");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:unequip_drone_slot:3");
         ui.shutdown();
     }
 #endif

@@ -9468,14 +9468,22 @@ void miningEvaTogglePassagesAndExtractionRulesAreSafe()
     mining.droneX = 20.5;
     mining.droneY = 20.5;
     require(toggleMiningOperator(state), "rig exit should use a safe adjacent open cell");
+    require(tuning::mining::operatorEntryDistanceCells == 2.50,
+        "the operator re-entry radius should be doubled to 2.5 cells");
     mining.operatorX =
         mining.droneX + tuning::mining::operatorEntryDistanceCells + 0.10;
     mining.operatorY = mining.droneY;
+    setMiningOperatorToggleProgress(state, 0.50);
+    require(mining.operatorToggleProgress == 0.0,
+        "the re-entry hold ring should stay hidden when the rig cannot be boarded");
     require(
         !toggleMiningOperator(state),
-        "the operator should not board from beyond the 1.25-cell entry distance");
+        "the operator should not board from beyond the 2.5-cell entry distance");
     mining.operatorX =
         mining.droneX + tuning::mining::operatorEntryDistanceCells - 0.05;
+    setMiningOperatorToggleProgress(state, 0.50);
+    require(mining.operatorToggleProgress == 0.50,
+        "the re-entry hold ring should appear once boarding is possible");
     require(toggleMiningOperator(state), "the operator should board from within the entry distance");
 
     mining.droneX = 20.30;
@@ -9506,6 +9514,21 @@ void miningEvaTogglePassagesAndExtractionRulesAreSafe()
     require(
         mining.operatorX > 21.25,
         "the smaller suit collider should traverse the same suit-only passage");
+
+    mining.droneX = 12.0;
+    mining.droneY = static_cast<double>(mining.terrain.height) - 2.2;
+    mining.rigDepthZone = mining.depthZone;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    mining.operatorX = mining.droneX + tuning::mining::operatorEntryDistanceCells - 0.05;
+    mining.operatorY = mining.droneY;
+    mining.operatorVelocityX = 0.0;
+    mining.operatorVelocityY = 0.0;
+    mining.depthTransitionCooldownSeconds = 0.0;
+    setMiningMove(state, 0.0, 0.0);
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.depthZone == mining.rigDepthZone,
+        "an EVA operator in re-entry range at the lower boundary should not be forced into the next depth");
 
     mining.operatorX = mining.returnZoneX;
     mining.operatorY = mining.returnZoneY;
@@ -10169,6 +10192,55 @@ void roughSurfaceExtractionReportsLostPayload()
     require(false, "test should find a rough extraction seed");
 }
 
+void roughMiningOreCreditsTheSurvivingContractPayload()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 8182);
+    state.run.destinationIndex = 1;
+    state.meta.furthestTier = 1;
+    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
+        "the lunar contract must be active before testing a rough delivery");
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied,
+        "the lunar contract should start a normal Mining Rig loop");
+    state.run.mining.stowedMaterials.common = 9;
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
+    require(finishMiningRun(state, catalog, false).applied,
+        "returned mining ore should transfer through the normal surface-extraction handoff");
+    require(state.run.surfaceExpedition.bankedMiningArenaValid &&
+            state.run.surfaceExpedition.bankedMiningProgressionEligible &&
+            state.run.surfaceExpedition.bankedMiningMaterials.common == 9,
+        "the normal return handoff should retain mining-payload provenance for contract credit");
+    state.run.surfaceExpedition.supply = 0;
+    state.run.surfaceExpedition.cargo = 30;
+    state.run.surfaceExpedition.hazard = 1.0;
+
+    for (int seed = 1; seed < 400; ++seed) {
+        GameState candidate = state;
+        Random rng(seed);
+        const SurfaceActionOutcome outcome = extractSurfacePayload(candidate, catalog, rng);
+        if (outcome.cargoRecovered) {
+            continue;
+        }
+
+        require(outcome.materialDelta.common == 4,
+            "rough extraction should return the surviving half of the banked mining ore");
+        require(candidate.meta.prospectorCommonOreRecovered == outcome.materialDelta.common,
+            "the Lunar contract must credit Mining Rig ore that survives a rough extraction");
+        require(candidate.meta.materials.common == 0,
+            "surviving contract ore should stay reserved rather than entering general materials");
+        require(outcome.message.find("Extraction rough") != std::string::npos
+                && outcome.message.find("delivery +4") != std::string::npos
+                && outcome.message.find("4/30") != std::string::npos,
+            "rough contract deliveries should report both their loss state and credited progress");
+        return;
+    }
+
+    require(false, "test should find a rough mining extraction seed");
+}
+
 void researchPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -10460,7 +10532,7 @@ void scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract()
         findDetailPresentationRow(presentation.details, "Support Drone loadout");
     require(
         supportLoadout != nullptr &&
-            supportLoadout->value.find("Configured Recovery: 0/7 Rare Ore safely delivered.") != std::string::npos,
+            supportLoadout->value.find("Configured Recovery: 0/7 Rare Ore delivered from the Mining Rig.") != std::string::npos,
         "Surface details should use the generic delivery progress instead of a named campaign projection");
 }
 
@@ -13905,6 +13977,7 @@ int main()
     miningEvaAuditRegressionGuardsHold();
     surfaceActionSummaryShowsResourceDeltas();
     roughSurfaceExtractionReportsLostPayload();
+    roughMiningOreCreditsTheSurvivingContractPayload();
     researchPresentationComesFromSharedHelper();
     surfacePresentationComesFromSharedHelper();
     scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract();

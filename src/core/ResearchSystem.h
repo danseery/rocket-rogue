@@ -141,12 +141,12 @@ struct SurfaceActionOutcome {
 // non-authoritative legacy fields remain readable during migration.
 CampaignObjectiveStatus campaignObjectiveStatus(const GameState& state, CampaignObjectiveId objective);
 bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId objective);
-int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int safelyExtractedCommonOre);
+int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int deliveredCommonOre);
 int creditCampaignCommonOre(
     GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId,
-    int safelyExtractedCommonOre);
+    int deliveredCommonOre);
 bool canClaimLunarProspector(const GameState& state);
 bool claimLunarProspector(GameState& state, const ContentCatalog& catalog);
 bool canClaimMarsBayExpansion(const GameState& state);

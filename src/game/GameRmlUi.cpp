@@ -1106,10 +1106,13 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int droneLoadoutStatMarginTop = compactDroneWorkspaceVertical ? 2 : 7;
     const int droneLoadoutChipMinHeight = compactDroneWorkspaceVertical ? 20 : 25;
     const int droneLoadoutChipVerticalPadding = compactDroneWorkspaceVertical ? 2 : 4;
-    const int droneLoadoutColumnGap = compactDroneWorkspaceVertical ? 6 : 0;
-    const int droneLoadoutSlotWidth = compactDroneWorkspaceVertical
-        ? std::max(1, (droneLoadoutBenchWidth - 24 - droneLoadoutColumnGap) / 2)
-        : std::max(1, droneLoadoutBenchWidth - 24);
+    // The six-slot bench is always a visual 2 x 3 grid. A tall desktop has
+    // the vertical room, but keeping a one-column rail there still hides the
+    // lower slots and disagrees with the controller's visual navigation.
+    const int droneLoadoutColumnGap = compactDroneWorkspaceVertical ? 6 : 8;
+    const int droneLoadoutSlotWidth = std::max(
+        1,
+        (droneLoadoutBenchWidth - 24 - droneLoadoutColumnGap) / 2);
     const int refitChoiceCardHeight = std::clamp(viewportHeight - 240, 210, 360);
     const int arrivalChoiceCardHeight = std::clamp(viewportHeight - 220, 190, 280);
     // Surface Ops is a top-to-bottom decision sequence: the choices follow
@@ -2091,9 +2094,9 @@ FocusTarget* firstDirectionalControllerRowTarget(
     return nullptr;
 }
 
-FocusTarget* compactDroneLoadoutGridTarget(FocusTarget& current, UiDirection direction)
+FocusTarget* droneLoadoutGridTarget(FocusTarget& current, UiDirection direction)
 {
-    if (rr_rml_viewport_height() > 1080 || !current.element) {
+    if (!current.element) {
         return nullptr;
     }
     Rml::Element* currentSlot = current.element->Closest(".drone-loadout-slot");
@@ -3112,8 +3115,8 @@ bool GameRmlUi::navigate(UiDirection direction)
     }
 
     const ControllerFocusRow currentRow = controllerFocusRow(*current);
-    if (currentRow == ControllerFocusRow::DroneLoadout && rr_rml_viewport_height() <= 1080) {
-        if (FocusTarget* gridTarget = compactDroneLoadoutGridTarget(*current, direction)) {
+    if (currentRow == ControllerFocusRow::DroneLoadout) {
+        if (FocusTarget* gridTarget = droneLoadoutGridTarget(*current, direction)) {
             return applyControllerFocus(
                 gridTarget,
                 focusedId_,
@@ -3123,7 +3126,7 @@ bool GameRmlUi::navigate(UiDirection direction)
         }
         // Left from the first column still crosses the roster/loadout seam
         // below. Every other missing neighbor is the visual edge of the 2x3
-        // compact grid.
+        // loadout grid.
         if (direction != UiDirection::Left || current->element->Closest(".drone-loadout-slot")
                 ->GetAttribute<int>("data-drone-slot-index", -1) % 2 == 1) {
             return false;

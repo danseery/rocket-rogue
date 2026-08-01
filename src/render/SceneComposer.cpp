@@ -4462,10 +4462,14 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         drawRadialGlow(endpoint.x, endpoint.y, bodySize * 0.58F, {0.24F, 0.64F, 0.88F, 0.10F}, 72);
         drawBodySprite(bodyAsset, endpoint, bodySize, 0.98F);
     } else if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
-        const float earthX = -0.16F;
-        const float earthY = -1.10F;
-        const float earthR = 0.58F;
-        const Vec2 distantMoon {0.72F, 0.50F};
+        // The launch board has ample negative space around its HUD. Use it for
+        // a legible Earth and Moon pair instead of a tiny destination dot.
+        const bool launchScene = snapshot.screen == Screen::Launch;
+        const float earthX = launchScene ? -0.38F : -0.16F;
+        const float earthY = launchScene ? -0.96F : -1.10F;
+        const float earthR = launchScene ? 0.70F : 0.58F;
+        const Vec2 distantMoon = launchScene ? Vec2 {0.58F, 0.34F} : Vec2 {0.72F, 0.50F};
+        const float moonSize = launchScene ? 0.28F : 0.13F;
         if (textureReady(EarthAsset)) {
             drawSprite(earthX, earthY, earthR * 2.25F, earthR * 2.25F, {1.0F, 1.0F, 1.0F, 0.95F}, EarthAsset);
         } else {
@@ -4476,16 +4480,18 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
         drawEllipseLine(earthX, earthY, earthR * 1.08F, earthR * 0.56F, {0.45F, 0.88F, 1.0F, 0.22F}, 42, 0.13F * kPi, 0.92F * kPi);
         if (textureReady(MoonAsset)) {
-            drawSprite(distantMoon.x, distantMoon.y, 0.13F, 0.13F, {1.0F, 1.0F, 1.0F, 0.72F}, MoonAsset);
+            drawSprite(distantMoon.x, distantMoon.y, moonSize, moonSize, {1.0F, 1.0F, 1.0F, 0.72F}, MoonAsset);
         } else {
-            drawCircle(distantMoon.x, distantMoon.y, 0.036F, {0.72F, 0.74F, 0.72F, 0.58F}, 32);
-            drawCircle(distantMoon.x + 0.010F, distantMoon.y + 0.008F, 0.010F, {0.48F, 0.50F, 0.50F, 0.30F}, 12);
+            drawCircle(distantMoon.x, distantMoon.y, moonSize * 0.28F, {0.72F, 0.74F, 0.72F, 0.58F}, 32);
+            drawCircle(distantMoon.x + moonSize * 0.08F, distantMoon.y + moonSize * 0.06F, moonSize * 0.08F, {0.48F, 0.50F, 0.50F, 0.30F}, 12);
         }
     } else if (snapshot.destinationTier == 1) {
         const Vec2 moon = routePoint(snapshot, 1.0F);
-        const float earthX = -0.26F;
-        const float earthY = -0.88F;
-        const float earthR = 0.30F;
+        const bool launchScene = snapshot.screen == Screen::Launch;
+        const float earthX = launchScene ? -0.36F : -0.26F;
+        const float earthY = launchScene ? -0.92F : -0.88F;
+        const float earthR = launchScene ? 0.38F : 0.30F;
+        const float moonSize = launchScene ? 0.34F : 0.22F;
         if (textureReady(EarthAsset)) {
             drawSprite(earthX, earthY, earthR * 2.32F, earthR * 2.32F, {1.0F, 1.0F, 1.0F, 0.86F}, EarthAsset);
         } else {
@@ -4496,10 +4502,10 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
         drawEllipseLine(earthX, earthY, 1.08F, 0.76F, {0.40F, 0.62F, 0.78F, 0.20F}, 96, -0.04F * kPi, 0.82F * kPi);
         if (textureReady(MoonAsset)) {
-            drawSprite(moon.x, moon.y, 0.22F, 0.22F, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
+            drawSprite(moon.x, moon.y, moonSize, moonSize, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
         } else {
-            drawCircle(moon.x, moon.y, 0.060F, {0.72F, 0.74F, 0.72F, 0.78F}, 48);
-            drawCircle(moon.x + 0.018F, moon.y + 0.015F, 0.018F, {0.48F, 0.50F, 0.50F, 0.36F}, 16);
+            drawCircle(moon.x, moon.y, moonSize * 0.28F, {0.72F, 0.74F, 0.72F, 0.78F}, 48);
+            drawCircle(moon.x + moonSize * 0.08F, moon.y + moonSize * 0.07F, moonSize * 0.08F, {0.48F, 0.50F, 0.50F, 0.36F}, 16);
         }
     } else {
         const float tier = static_cast<float>(snapshot.destinationTier);
@@ -4559,7 +4565,8 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             }
         }
         if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
-            drawSprite(endpoint.x, endpoint.y, radius * 2.55F, radius * 2.55F, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
+            const float marsScale = snapshot.screen == Screen::Launch ? 3.60F : 2.55F;
+            drawSprite(endpoint.x, endpoint.y, radius * marsScale, radius * marsScale, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
         } else if (snapshot.destinationTier >= 3 && snapshot.destinationTier <= 6) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
                 ? 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 8.0F)

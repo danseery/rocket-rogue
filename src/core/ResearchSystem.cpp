@@ -1106,22 +1106,22 @@ bool acknowledgeCampaignObjectiveBriefing(GameState& state, CampaignObjectiveId 
     return true;
 }
 
-int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int safelyExtractedCommonOre)
+int creditCampaignCommonOre(GameState& state, std::string_view destinationId, int deliveredCommonOre)
 {
     return creditCampaignCommonOre(
         state,
         legacyCampaignCatalog(),
         destinationId,
-        safelyExtractedCommonOre);
+        deliveredCommonOre);
 }
 
 int creditCampaignCommonOre(
     GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId,
-    int safelyExtractedCommonOre)
+    int deliveredCommonOre)
 {
-    const int recovered = std::max(0, safelyExtractedCommonOre);
+    const int recovered = std::max(0, deliveredCommonOre);
     if (recovered <= 0) {
         return 0;
     }
@@ -4028,12 +4028,15 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
             expedition.bankedMiningArenaMetadata.seed
         };
         const MiningArenaRules rules = resolveMiningArenaRules(request);
-        recoveredMiningCommon = outcome.cargoRecovered
-            ? attributedRecoveredMiningMaterial(
-                expedition.bankedMiningMaterials.common,
-                expedition.temporaryMaterials.common,
-                outcome.materialDelta.common)
-            : 0;
+        // A rough extraction still returns a partial material payload. Credit
+        // the contract with the attributable Mining Rig ore that actually
+        // reached the ship, just as first-clear rewards use the returned
+        // partial payload below. Previously this path awarded ordinary Common
+        // materials while silently suppressing all contract progress.
+        recoveredMiningCommon = attributedRecoveredMiningMaterial(
+            expedition.bankedMiningMaterials.common,
+            expedition.temporaryMaterials.common,
+            outcome.materialDelta.common);
         const int rareBanked = attributedRecoveredMiningMaterial(
             expedition.bankedMiningMaterials.rare,
             expedition.temporaryMaterials.rare,
@@ -4079,7 +4082,8 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
                     if (progress == nullptr) {
                         continue;
                     }
-                    outcome.message = step.location + " delivery +" + std::to_string(delivered)
+                    outcome.message = (outcome.cargoRecovered ? std::string {} : "Extraction rough; ")
+                        + step.location + " delivery +" + std::to_string(delivered)
                         + " // " + std::to_string(progress->progress) + "/"
                         + std::to_string(std::max(0, step.requiredProgress))
                         + (progress->completed && !progress->claimed

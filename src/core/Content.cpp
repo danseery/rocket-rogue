@@ -418,7 +418,7 @@ ContentCatalog createDefaultContent()
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
-                    "Safely deliver gray Common Ore. Carried, aboard, and delivered cargo are tracked separately.",
+                    "Deliver gray Common Ore from the Mining Rig. Carried, aboard, and recovered cargo are tracked separately; rough extraction credits only ore that reaches the ship.",
                     "REWARD // PROSPECTOR MK I + SLOT 1", "Install Prospector Mk I", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
                     tuning::research::prospectorCommonOreGoal, 0, false, true, false,
@@ -443,8 +443,8 @@ ContentCatalog createDefaultContent()
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MARS", "Bay Expansion",
-                    std::string("Safely deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
-                        " Mars Common Ore. The reward opens an empty slot. No second Support Drone is required.",
+                    std::string("Deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
+                        " Mars Common Ore from the Mining Rig. Rough extraction credits only ore that reaches the ship. The reward opens an empty slot. No second Support Drone is required.",
                     "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Fabricate Slot 2", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
                     tuning::research::marsBayCommonOreGoal, 0, false, true, false,

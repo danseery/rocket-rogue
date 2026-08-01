@@ -1725,7 +1725,7 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         return delivery.objective.title + ": " +
             std::to_string(std::clamp(delivery.objective.current, 0, delivery.objective.required)) + "/" +
             std::to_string(delivery.objective.required) + " " +
-            scenarioTargetMaterialLabel(delivery.objective.eventTargetId) + " safely delivered.";
+            scenarioTargetMaterialLabel(delivery.objective.eventTargetId) + " delivered from the Mining Rig.";
     };
     std::vector<DetailPresentationRow> rows {
         detailPresentationRow(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
@@ -1890,8 +1890,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         ? "Deliver " + std::to_string(delivery.safelyAboard) + " " + deliveryMaterial
         : text::buttons::returnHomeLabel(arkKnown, outerExpedition);
     const std::string extractionDetail = safeDeliveryActive
-        ? "Safely extract the aboard " + deliveryMaterial + " to advance " +
-            delivery.objective.title + ". Excess material banks normally."
+        ? "Extract the aboard " + deliveryMaterial + " to advance " +
+            delivery.objective.title + ". A rough extraction credits only mining ore that reaches the ship; excess material banks normally."
         : text::panel::messages::surfaceExtractDetailForHome(
               arkKnown,
               outerExpedition);

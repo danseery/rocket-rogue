@@ -102,6 +102,18 @@ bool operatorControlled(const MiningRunState& mining)
     return mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
 }
 
+bool operatorCanReenterRig(const MiningRunState& mining)
+{
+    if (!operatorControlled(mining) || mining.rigDisabled ||
+        mining.depthZone != mining.rigDepthZone) {
+        return false;
+    }
+    return std::hypot(
+               mining.operatorX - mining.droneX,
+               mining.operatorY - mining.droneY) <=
+        tuning::mining::operatorEntryDistanceCells;
+}
+
 double controlledActorX(const MiningRunState& mining)
 {
     return operatorControlled(mining) ? mining.operatorX : mining.droneX;
@@ -6233,7 +6245,11 @@ void setMiningFire(GameState& state, bool firing)
 void setMiningOperatorToggleProgress(GameState& state, double progress)
 {
     MiningRunState& mining = state.run.mining;
-    mining.operatorToggleProgress = mining.active && !mining.failurePending
+    // EVA re-entry has a real proximity/depth constraint. Do not animate the
+    // hold ring until the requested action can actually succeed; otherwise a
+    // completed-looking ring is misleading when the rig is unreachable.
+    const bool toggleAvailable = !operatorControlled(mining) || operatorCanReenterRig(mining);
+    mining.operatorToggleProgress = mining.active && !mining.failurePending && toggleAvailable
         ? std::clamp(progress, 0.0, 1.0)
         : 0.0;
 }
@@ -6247,17 +6263,14 @@ bool toggleMiningOperator(GameState& state)
 
     mining.operatorToggleProgress = 0.0;
     if (operatorControlled(mining)) {
-        if (mining.rigDisabled || mining.depthZone != mining.rigDepthZone) {
-            state.statusLine = mining.rigDisabled
-                ? "The disabled rig cannot be re-entered."
-                : "Return to the rig's depth before boarding.";
-            return false;
-        }
-        const double distance = std::hypot(
-            mining.operatorX - mining.droneX,
-            mining.operatorY - mining.droneY);
-        if (distance > tuning::mining::operatorEntryDistanceCells) {
-            state.statusLine = "Move within 1.25 cells of the rig to enter.";
+        if (!operatorCanReenterRig(mining)) {
+            if (mining.rigDisabled || mining.depthZone != mining.rigDepthZone) {
+                state.statusLine = mining.rigDisabled
+                    ? "The disabled rig cannot be re-entered."
+                    : "Return to the rig's depth before boarding.";
+                return false;
+            }
+            state.statusLine = "Move within 2.5 cells of the rig to enter.";
             return false;
         }
         const MiningOperatorMode previous = mining.operatorMode;
@@ -6730,6 +6743,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             suitActive)) {
         transitionDepthZone(state, catalog, -1);
     } else if (mining.depthTransitionCooldownSeconds <= 0.0 &&
+        !operatorCanReenterRig(mining) &&
         activeY > static_cast<double>(mining.terrain.height - 3) &&
         canOccupyActor(
             mining.terrain,
