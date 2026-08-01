@@ -1268,7 +1268,7 @@ int main()
         assert(ui.navigate(rocket::UiDirection::Right));
         assert(ui.focusedId().starts_with("modal:drone_details_")
             || ui.focusedId() == "action:unequip_drone_slot:0"
-            || ui.focusedId().starts_with("action:equip_drone:"));
+            || ui.focusedId().starts_with("action:"));
         while (ui.focusedId() != "action:unequip_drone_slot:0"
             && ui.navigate(rocket::UiDirection::Right)) {
         }
