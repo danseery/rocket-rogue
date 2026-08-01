@@ -262,21 +262,23 @@ body {
 	max-width: none;
 }
 
-/* Hangar is the one compact legacy board. Its authored content still owns
-   vertical sizing, but it must reclaim the shared fixed lane so flex alignment
-   can center it on desktop instead of leaving it against the left edge. */
+/* Center the Hangar's existing 1200px workspace as one unit. The compatibility
+   content keeps owning its internal widths; this wrapper only positions that
+   unchanged layout in a wider viewport. */
 #rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane {
-	width: var(--rr-phase-board-width);
+	width: var(--rr-workspace-max-width);
 	max-width: 100%;
-	margin-left: auto;
-	margin-right: auto;
-	padding-left: var(--rr-phase-lane-inset);
-	padding-right: var(--rr-phase-lane-inset);
+	position: relative;
+	left: var(--rr-workspace-centered-offset);
+	margin-left: 0px;
+	margin-right: 0px;
+	padding-left: 0px;
+	padding-right: 0px;
 }
 
 #rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane > .rr-shell-content {
-	width: var(--rr-phase-content-width);
-	max-width: 100%;
+	width: 100%;
+	max-width: none;
 }
 
 .rr-control-shell,

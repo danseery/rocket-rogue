@@ -50,6 +50,24 @@ try {
       ),
       "legacy content-owned lane compatibility must require its explicit shell class"
     );
+    assert(
+      shellStyles.includes(
+        "#rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane {\n"
+          + "\twidth: var(--rr-workspace-max-width);\n"
+          + "\tmax-width: 100%;\n"
+          + "\tposition: relative;\n"
+          + "\tleft: var(--rr-workspace-centered-offset);"
+      ),
+      "Hangar centering must preserve the authored 1200px workspace width and position only its wrapper"
+    );
+    assert(
+      shellStyles.includes(
+        "#rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane > .rr-shell-content {\n"
+          + "\twidth: 100%;\n"
+          + "\tmax-width: none;"
+      ),
+      "Hangar centering must not replace its content-owned internal geometry"
+    );
   }
 
   {

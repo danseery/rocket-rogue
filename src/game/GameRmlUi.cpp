@@ -1008,6 +1008,9 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
             kWorkspaceContentMaxWidth,
             panelWidth - kWorkspaceHorizontalPadding * 2))
         : std::max(1, panelWidth - 30);
+    const int centeredWorkspaceOffset = std::max(
+        0,
+        (panelWidth - kWorkspaceHorizontalPadding * 2 - kWorkspaceContentMaxWidth) / 2);
     const bool compactResponsivePanel = responsiveContentWidth < kPhaseContentLaneWidth;
     const int responsiveMetricWidth = std::min(
         150,
@@ -1572,6 +1575,7 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     applied = element.SetProperty("--rr-legacy-layout-150", std::to_string(kWorkspaceHorizontalPadding) + "px") && applied;
     // --rr-legacy-layout-151: std::to_string(kWorkspaceContentMaxWidth)px
     applied = element.SetProperty("--rr-legacy-layout-151", std::to_string(kWorkspaceContentMaxWidth) + "px") && applied;
+    applied = element.SetProperty("--rr-workspace-centered-offset", std::to_string(centeredWorkspaceOffset) + "px") && applied;
     // --rr-legacy-layout-152: std::to_string(droneWorkspaceVerticalPadding)px
     applied = element.SetProperty("--rr-legacy-layout-152", std::to_string(droneWorkspaceVerticalPadding) + "px") && applied;
     // --rr-legacy-layout-153: std::to_string(kDroneWorkspaceHorizontalPadding)px
