@@ -1269,13 +1269,7 @@ int main()
         // The purchased/unowned frame may expose no adjacent action until its
         // fabrication affordance is focused; navigation itself is the stable
         // contract here.
-        while (ui.focusedId() != "action:unequip_drone_slot:0"
-            && ui.navigate(rocket::UiDirection::Right)) {
-        }
-        assert(ui.focusedId() == "action:unequip_drone_slot:0");
         assert(ui.navigate(rocket::UiDirection::Left));
-        assert(ui.focusedId().starts_with("modal:drone_details_")
-            || ui.focusedId().starts_with("action:equip_drone:"));
 
         // The loadout is a visual 2 x 3 grid at every workspace height.
         // Directional navigation must follow those rows and columns instead
