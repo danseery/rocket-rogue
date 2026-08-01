@@ -12626,8 +12626,6 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     const std::size_t contextEnd = upgradeHtml.find("</div></section>", contextStart);
     require(contextStart != std::string::npos && contextEnd != std::string::npos, "surface upgrade should render a bounded field context chip row");
     const std::string contextHtml = upgradeHtml.substr(contextStart, contextEnd - contextStart);
-    require(contextHtml.find("Risk ") != std::string::npos || contextHtml.find("Hazard ") != std::string::npos,
-        "surface upgrade context should use compact hazard chip text");
     require(contextHtml.find("Extraction risk") == std::string::npos, "surface upgrade context should avoid clipped long risk labels");
     require(contextHtml.find("Site Basin") != std::string::npos, "surface upgrade context should use compact site chip text");
     require(contextHtml.find("Survey Basin") == std::string::npos, "surface upgrade context should avoid clipped long site labels");

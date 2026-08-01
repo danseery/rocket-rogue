@@ -517,6 +517,7 @@ std::string activeDroneBaySurfaceExpeditionSave()
     rocket::startSurfaceExpedition(state, catalog);
     state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
     state.meta.droneBaySlots = 2;
+    state.meta.materials.common = 20;
     rocket::ensureDroneBayState(state, catalog);
     rocket::ui::briefings::acknowledge(
         state.meta.acknowledgedActivityBriefingIds,
