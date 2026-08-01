@@ -23,7 +23,7 @@ on:
       - "tools/verify-steam-readiness*.mjs"
       - ".github/workflows/native-release.yml"
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "CMakeLists.txt"
       - "CMakePresets.json"
