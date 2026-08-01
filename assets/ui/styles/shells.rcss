@@ -113,6 +113,23 @@
 	max-width: none;
 }
 
+/* Hangar is the one compact legacy board. Its authored content still owns
+   vertical sizing, but it must reclaim the shared fixed lane so flex alignment
+   can center it on desktop instead of leaving it against the left edge. */
+#rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane {
+	width: var(--rr-phase-board-width);
+	max-width: 100%;
+	margin-left: auto;
+	margin-right: auto;
+	padding-left: var(--rr-phase-lane-inset);
+	padding-right: var(--rr-phase-lane-inset);
+}
+
+#rr-panel > .rr-shell.rr-family-hangar.rr-legacy-content-owns-lane > .rr-shell-lane > .rr-shell-content {
+	width: var(--rr-phase-content-width);
+	max-width: 100%;
+}
+
 .rr-control-shell,
 .rr-surface-minigame-shell,
 .rr-mining-shell {
