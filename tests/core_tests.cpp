@@ -11346,7 +11346,7 @@ void launchReadinessPresentationComesFromSharedHelper()
     require(recruitAction != nullptr && recruitAction->enabled && recruitAction->actionId == ui::actions::recruitCrew, "crew readiness should expose recruit action");
 }
 
-void crewStressLevelsMapToHangarReadout()
+void hangarConditionLevelsMapToReadout()
 {
     struct StressLevelCase {
         int stress;
@@ -11362,16 +11362,33 @@ void crewStressLevelsMapToHangarReadout()
             "Hangar crew readout should use the authored stress-level ladder");
     }
 
+    struct HullLevelCase {
+        int damage;
+        std::string_view expected;
+    };
+    constexpr std::array<HullLevelCase, 10> hullCases {{
+        {100, "Totaled"}, {90, "Junk"}, {80, "Mangled"}, {70, "Damaged"},
+        {60, "Beat-up"}, {50, "Worn"}, {40, "Scuffed"}, {20, "Ready"},
+        {1, "Like-new"}, {0, "Pristine"}
+    }};
+    for (const HullLevelCase& entry : hullCases) {
+        require(hullDamageLevel(entry.damage) == entry.expected,
+            "Hangar hull readout should use the authored damage-level ladder");
+    }
+
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0xC0FFEE);
     state.screen = Screen::Hangar;
     Astronaut* pilot = activeAstronaut(state);
     require(pilot != nullptr, "Hangar crew level test needs an active astronaut");
     pilot->stress = 65;
+    state.run.shipDamage = 65;
     PreparedLaunch launch;
     const std::string hangarHtml = buildGamePanelHtml({state, catalog, launch, launch});
     require(hangarHtml.find("<strong>Anxious</strong><span>Crew</span>") != std::string::npos,
         "Hangar Crew chip should surface the active astronaut's stress level");
+    require(hangarHtml.find("<strong>Beat-up</strong><span>Hull</span>") != std::string::npos,
+        "Hangar Hull chip should surface the active ship's damage level");
 }
 
 void panelChromePresentationComesFromSharedHelper()
@@ -11595,7 +11612,7 @@ void titleScreenPresentationIsPortable()
     const PreparedLaunch briefingLaunch = prepareLaunch(briefingState, catalog, briefingRng);
     const std::string briefingHtml = buildGamePanelHtml({briefingState, catalog, briefingLaunch, briefingLaunch});
     require(briefingHtml.find("<h1>THE YEAR IS 20X6</h1>") != std::string::npos
-            && briefingHtml.find("Humans have thoroughly fucked the planet.") != std::string::npos
+            && briefingHtml.find("Humans have thoroughly f@#$ed the planet.") != std::string::npos
             && briefingHtml.find("bootleg copy of KSP2") != std::string::npos
             && briefingHtml.find("small band of adorable varmints") != std::string::npos
             && briefingHtml.find("rr-button-label\">Help them</span>") != std::string::npos,
@@ -12446,8 +12463,9 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         "drone ops should pair the available-frame roster with the active loadout");
     require(
         countOccurrences(droneHtml, "class=\"drone-control-card ") == catalog.miniDrones.size()
-            && countOccurrences(droneHtml, "class=\"drone-loadout-slot ") == 6,
-        "drone ops should render the complete roster and six-slot deployment bench");
+            && countOccurrences(droneHtml, "class=\"drone-loadout-slot ") == 6
+            && countOccurrences(droneHtml, "class=\"drone-loadout-row\"") == 3,
+        "drone ops should render the complete roster and a two-column, three-row deployment bench");
     require(droneHtml.find("module-art") == std::string::npos, "drone ops should devote its workspace to usable controls instead of decorative module art");
     require(droneHtml.find("drone-bay-materials") == std::string::npos
             && droneHtml.find(">Common ") != std::string::npos
@@ -13967,7 +13985,7 @@ int main()
     flightProgressHelpersShareTravelAndReturnMath();
     launchPanelPresentationComesFromSharedHelper();
     launchReadinessPresentationComesFromSharedHelper();
-    crewStressLevelsMapToHangarReadout();
+    hangarConditionLevelsMapToReadout();
     panelChromePresentationComesFromSharedHelper();
     settingsResolutionSelectorExposesSupportedPresets();
     titleScreenPresentationIsPortable();

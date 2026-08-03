@@ -39,6 +39,23 @@ inline std::string_view crewStressLevel(int stress)
     return "Sanguine";
 }
 
+// Like crew stress, hull damage remains numeric in the systems that calculate
+// it. The Hangar turns that percentage into a quick condition readout so the
+// player can feel the ship's state change after a rough mission or repair.
+inline std::string_view hullDamageLevel(int damage)
+{
+    if (damage >= 100) return "Totaled";
+    if (damage >= 90) return "Junk";
+    if (damage >= 80) return "Mangled";
+    if (damage >= 70) return "Damaged";
+    if (damage >= 60) return "Beat-up";
+    if (damage >= 50) return "Worn";
+    if (damage >= 40) return "Scuffed";
+    if (damage >= 20) return "Ready";
+    if (damage >= 1) return "Like-new";
+    return "Pristine";
+}
+
 inline HangarOperationCardPresentation hangarOperationCard(
     std::string_view title,
     std::string detail,

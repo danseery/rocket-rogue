@@ -2113,7 +2113,7 @@ std::vector<PanelMetricPresentation> compactHeaderMetrics(
     case Screen::Hangar: {
         return {
             panelMetric("Credits", display::money(state.run.credits)),
-            panelMetric("Hull", display::wholePercent(state.run.shipDamage)),
+            panelMetric("Hull", std::string(hullDamageLevel(state.run.shipDamage))),
             panelMetric(
                 "Crew",
                 activeAstronaut(state) == nullptr
@@ -2751,7 +2751,7 @@ std::string buildGamePanelMarkup(
             out << "<span class=\"story-kicker\">ARCHIVE PLAYBACK // EARTH, 20X6</span>"
                 << "<h1>THE YEAR IS 20X6</h1>"
                 << "<div class=\"story-exposition\">"
-                << "<p>Humans have thoroughly fucked the planet.</p>"
+                << "<p>Humans have thoroughly f@#$ed the planet.</p>"
                 << "<p>After getting their hands on a bootleg copy of KSP2, a small band of adorable varmints have decided to take to the stars where they can dig and tunnel and forge their way through new, pure, un-human-tainted soils.</p>"
                 << "<p class=\"story-directive\">Help them. Help them trek out across the stars to build a brand new space empire.</p>"
                 << "</div>"
@@ -3638,8 +3638,14 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"board-primary drone-loadout-bench\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
             << htmlEscape("NEXT DEPLOYMENT") << "</span><h2>" << htmlEscape("Active loadout")
             << "</h2></div><p>" << htmlEscape("These Support Drones deploy with the Mining Rig.") << "</p></div><div class=\"drone-loadout-grid drone-controller-loadout-row\">";
-        for (const DroneLoadoutSlotPresentation& slot : dronePanel.loadoutSlots) {
-            out << droneLoadoutSlotCard(slot);
+        for (std::size_t slotIndex = 0; slotIndex < dronePanel.loadoutSlots.size(); ++slotIndex) {
+            if (slotIndex % 2 == 0) {
+                out << "<div class=\"drone-loadout-row\">";
+            }
+            out << droneLoadoutSlotCard(dronePanel.loadoutSlots[slotIndex]);
+            if (slotIndex % 2 == 1 || slotIndex + 1 == dronePanel.loadoutSlots.size()) {
+                out << "</div>";
+            }
         }
         out << "</div></section></div>";
         out << phaseBoardClose();

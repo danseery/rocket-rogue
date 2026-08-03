@@ -8639,17 +8639,27 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.drone-workspace-panel .drone-loadout-grid {
     display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: column;
+    flex-wrap: nowrap;
     justify-content: flex-start;
     width: 100%;
     height: auto;
     margin: 0px;
-    gap: 0px var(--rr-legacy-layout-200, 0px);
     overflow: visible;
 }
+#rr-panel.drone-workspace-panel .drone-loadout-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    width: 100%;
+    height: auto;
+    margin: 0px;
+}
 #rr-panel.drone-workspace-panel .drone-loadout-slot {
-    flex: 0 0 var(--rr-legacy-layout-201, 100%);
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: var(--rr-legacy-layout-201, 100%);
     box-sizing: border-box;
     width: var(--rr-legacy-layout-201, 100%);
     min-width: var(--rr-legacy-layout-201, 100%);
