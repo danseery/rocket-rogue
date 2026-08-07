@@ -141,6 +141,17 @@ struct RenderSnapshot {
     double travelProgress = 0.0;
     double heat = 0.0;
     double warning = 0.0;
+    double launchPressure = 0.0;
+    double launchThrottle = 0.60;
+    double launchFuel = 1.0;
+    double launchCourseOffset = 0.0;
+    double launchCourseVelocity = 0.0;
+    double launchCourseLimit = 1.0;
+    double launchIncidentWarningSeconds = 0.0;
+    double launchIncidentDirection = 0.0;
+    double launchHeatFailureProgress = 0.0;
+    double launchPressureFailureProgress = 0.0;
+    double launchCourseFailureProgress = 0.0;
     double shipDamage = 0.0;
     int destinationTier = 0;
     int debugActOneCheckpoint = -1;

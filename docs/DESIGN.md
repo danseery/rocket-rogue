@@ -14,8 +14,8 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 
 1. Configure the ship in the hangar.
 2. Launch a proving flight on the current frontier.
-3. Watch multiplier, telemetry channels, return risk, and distance climb.
-4. Use the current recovery action to bank data, cut engines to cool the ship while risking navigation drift, or eject for an expensive rescue. Recovery is `Return to Earth` before Saturn, `Recover to Expedition` on the one-way outer route, and `Return to Ark` after the Straylight discovery.
+3. Pilot the route corridor while managing persistent throttle, fuel, temperature, pressure, and telegraphed incidents.
+4. Turn home and actively fly the return leg to bank data, cut engines to cool at the cost of thrust and steering authority, vent pressure while correcting the resulting drift, or eject for an expensive rescue. Recovery is `Return to Earth` before Saturn, `Recover to Expedition` on the one-way outer route, and `Return to Ark` after the Straylight discovery.
 5. A flight that banks new Flight Data or reaches a destination earns one saved refit opportunity. Buy one permanent ship system or keep the credits; crashes, shallow returns, and capped proving data go directly to the next phase.
 6. Return to hangar operations: repair damage, recruit crew, train, rest, and plan the next flight.
 7. Repeat proving flights until enough frontier readiness is banked.
@@ -39,7 +39,7 @@ The first implemented phase model is:
 
 The first selection of optional Flyby and Orbit activities retains saved introductions. Campaign-critical surface beats use mandatory, non-dismissible briefings and explicit claims: deliver 30 lunar Common Ore and install Prospector Mk I/Slot 1; deliver 40 Mars Common Ore and fabricate empty Slot 2; commission the Hazard Support Drone Mk I on Io, cool and mine two four-segment lava seals, and safely extract the minor artifact; then claim a Perfect Jupiter slingshot to open Saturn. Moon remains the simple excavation-and-return lesson; Mars makes repeated oxygen, heat, integrity, repair, cargo, and return decisions mandatory. Live objectives expose carried, aboard, delivered, ready-to-claim, and complete state rather than advancing silently.
 
-Surface exploration should stay distinct from the launch gamble. Before Saturn, the launch loop asks "can we get there and back?" The surface loop asks "how much can we safely recover before the expedition overextends?" Claiming the Saturn course commits the expedition outward; later recovery copy says `Recover to Expedition`, never promises a return to Earth, and changes to `Return to Ark` only after the Straylight discovery. The solar system and Aaru Vale do not have enemies. Enemy encounters begin only after Arkfall near Khepri Prime, when the game leaves familiar exploration and introduces hostile unknowns.
+Surface exploration should stay distinct from active launch piloting. Before Saturn, the launch loop asks "can we fly there and back?" The surface loop asks "how much can we safely recover before the expedition overextends?" Claiming the Saturn course commits the expedition outward; later recovery copy says `Recover to Expedition`, never promises a return to Earth, and changes to `Return to Ark` only after the Straylight discovery. The solar system and Aaru Vale do not have enemies. Enemy encounters begin only after Arkfall near Khepri Prime, when the game leaves familiar exploration and introduces hostile unknowns.
 
 Shared fuel is intentional friction in the surface loop. The shuttle and Mining Rig draw from the same reserve, so mining should be visibly framed as spending route-home margin for payload. Push Deeper guarantees and banks layer +1 before collapse risk begins on the layer +2 gamble; a scanned artifact is confirmed when its mapped layer succeeds. The rig deploys directly at the banked start depth while the ship remains fixed at surface depth 0, so extraction and service require ascending through the intervening layers. The current normal mining baseline is 30 seconds of oxygen; the fixed Io artifact introduction uses 60 seconds. Oxygen improvements can come from crew class, Support Drone loadouts, and surface upgrades, but mining remains a once-per-surface-loop commitment; after the run is used, the rig is offline and `Push Deeper` is unavailable.
 
@@ -59,39 +59,27 @@ Support Drones belong to the player rather than the Mining Rig. They follow, orb
 
 Research rewards should primarily widen the roguelite possibility space: module families, research facilities, special components, artifact threads, and story leads. Material-funded projects can directly unlock new module or facility families. Artifact-tagged projects identify one recovered artifact when possible; the identified record is tracked now, while its specific story payload remains a later content pass. Raw permanent stat inflation should remain secondary.
 
-## Risk model
+## Skill-based launch model
 
-Each launch creates a deterministic hidden crash point from:
+Active launches are deterministic stateful flights. A session-only `LaunchFlightState` carries route leg/progress, selected throttle, fuel, heat, pressure, course offset/velocity, incident forecast, safety timers, and an explicit terminal cause. The version-9 hidden-crash fields remain readable for older records, but they do not decide live piloted survival or rewards.
 
-- Frontier hazard and multiplier ceiling.
-- Aggregated ship module stats.
-- Assigned astronaut training, stress, and trait.
-- Seeded random tail behavior.
+- Launch starts at 60% throttle. Up/down changes the persistent setting at 35 percentage points per second; left/right steers. Higher throttle increases route speed while fuel consumption, heat, and pressure rise nonlinearly.
+- Cutting engines sets thrust and fuel use to zero, preserves the selected throttle for restoration, reduces steering authority, and produces net cooling on early routes unless an active external thermal pulse overwhelms it.
+- Temperature and pressure caution at 70%, become critical at 90%, and fail only after staying at 100%. Thermal failure takes 1.5 seconds. Pressure rupture takes `1.25 + 0.35 x Hull` seconds, capped at 4 seconds.
+- The corridor uses safe, caution, and lost-course boundaries at +/-0.35, +/-0.65, and the sensor-adjusted outer limit beginning at +/-1.0. Remaining outside the outer boundary for two seconds loses the route; ordinary caution excursions are recoverable.
+- The reusable relief valve deterministically drains pressure after a short toggle cooldown. Opening it produces strong directional drift until closed; Pressure Control improves vent rate and reduces that drift.
+- `Return Home` changes the route target and preserves fuel, heat, pressure, course, and control state. It does not resolve the launch; the player flies home.
+- Seeded incidents remain for telegraphed variety only. They create thermal, pressure, vibration, or directional pulses with sensor-dependent warning lead time. No incident or hidden roll can directly destroy a competent early-route pilot.
+- Failure count never changes live difficulty. Successful profiles, crew skill, installed upgrades, and player input may improve the result; repeated losses alone do not.
 
-Telemetry hints become more alarming as the current multiplier approaches the hidden crash point. Sensors improve warning quality but never reveal certainty.
+Launch upgrades map directly onto the active mechanics: Thrust increases powered correction and route speed; Fuel adds range; Cooling improves engine-off recovery; Hull extends pressure grace and remains the future impact-damage stat; Sensors add incident warning, course tolerance, and auto-trim; Pressure Control slows pressure growth, improves venting, and reduces valve drift; Volatility amplifies disturbances.
 
-Each prepared launch also seeds a few deterministic telemetry incidents. An incident is a short pulse on one or two channels, such as injector pressure, frame vibration, fuel mix, guidance, or abort margin. These pulses can rise and settle before the hidden crash point, creating mid-flight press-your-luck decisions instead of saving all danger for the final exponential cliff. Module stats damp related incidents, so upgrades change the shape of risk without making a launch guaranteed.
-
-`Cut Engines` is modeled as a temporary flight-model transform in `rocket_core`: it lowers throttle, heat, and vibration while increasing guidance risk. The app layer only owns whether the control is active.
-
-Emergency flight actions are also core flight-model transforms:
-
-- `Relief valve` vents physical pressure, reducing the `PRESS` channel while adding navigation drift. It can fail, and rare rapid decompression destroys the vehicle.
-- `Jettison cargo` stabilizes fuel mix but adds debris/mass-shift penalties to `NAV` and `VIB`, plus a recovery-risk penalty because the ship has fewer reserves.
-- These actions are single-use during outbound flight and should be presented as tactical risk swaps, not universal upgrades.
-
-Mission pressure is a separate modifier on the `PRESS` telemetry channel:
-
-- Never attempted a destination: +50% pressure.
-- Attempted but never completed it: starts at +25% and decays with repeated attempts.
-- Completed proving profiles: pressure drops to a lower nonzero floor so routine flights still carry tension.
-- Pressure-control modules subtract from that modifier before telemetry is generated.
-- Unproven routes also cap early hidden-crash ceilings. A first full Earth Orbit profile should be a long-shot, while shorter proving returns are the intended way to bank data, buy upgrades, and make the later full profile feel earned.
+`Jettison cargo` remains a separate mass/fuel-mix tradeoff. Manual eject remains the explicit emergency exit.
 
 Crew stress is a separate human-performance modifier:
 
 - Every 14 stress is one stress step.
-- Each stress step cancels one effective training level for the hidden launch performance curve.
+- Each stress step cancels one effective training level for launch performance.
 - Each stress step adds a small `NAV` penalty to represent piloting mistakes under load.
 - `ABORT` scales by stress steps from x1.00 at calm to x2.00 at maximum stress.
 - Simulator burns add training and stress; rest removes enough stress to erase at least one step in most practical cases.
@@ -150,7 +138,7 @@ See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contra
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 
-Flight controls that modify the launch model should flow through `FlightActionState` and `applyFlightActions` in `src/core/LaunchSimulation.*`. `RocketGameApp` owns when an action is available or consumed during the session, but core owns how active actions compose into telemetry, pacing, and return risk.
+Flight controls flow through `LaunchControlInput`, `LaunchFlightState`, and `FlightActionState` in `src/core/LaunchSimulation.*`. `RocketGameApp` owns session input and action availability, while core owns stateful heat, pressure, fuel, course, incidents, pacing, warning timers, and terminal causes.
 
 Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
 
@@ -171,7 +159,7 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/GameFormat.h` owns reusable numeric display formatting such as credits, signed deltas, multipliers, percentages, readiness fractions, damage summaries, and crew stress/training summaries.
 - `src/core/GameMath.h` owns reusable equation helpers such as clamped `smoothStep` shaping. Do not duplicate easing or shaping formulas inside app, panel, or simulation code.
 - `src/core/FlightProgress.h` owns shared travel/return progress equations: burn-depth-to-route progress, return completion, return visual travel, and return duration. App, panel, and renderer-facing snapshots should use these helpers instead of retyping the same progress math.
-- `src/core/LaunchBalance.h` owns pure launch-preparation equations: ship performance score, readiness/overprepared math, transfer hazard, hidden-crash ceiling penalties and bonuses, sensor quality, heat/pressure prep, and telemetry incident setup. `LaunchSimulation` should orchestrate these helpers instead of carrying raw balance coefficients inline.
+- `src/core/LaunchBalance.h` owns launch-preparation equations and version-9 legacy record compatibility: ship performance score, readiness/overprepared math, legacy hidden-crash fields, sensor quality, heat/pressure prep, and seeded incident setup. `LaunchSimulation` owns live piloted survival and should orchestrate these helpers instead of carrying raw balance coefficients inline.
 - `src/core/DetailPresentation.h` owns reusable detail-row/header data for modal detail screens. Core presenters should return these rows, and `GamePanel` should only render them to HTML.
 - `src/core/PanelPresentation.h` owns small reusable panel primitives such as metric and button presentation data. Screen-specific presenters should reuse these data shapes instead of inventing local copies.
 - `src/core/PanelChromePresentation.h` owns shared panel chrome data: top-level mission metrics, active display destination, crew stress summary, and settings modal rows/actions. `GamePanel` should render this data instead of recomputing always-visible metrics.

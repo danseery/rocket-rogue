@@ -1320,11 +1320,10 @@ void pressureTracksFrontierExperience()
     failed.destinationId = earthOrbit.id;
     failed.ejectMultiplier = 1.10;
     applyLaunchOutcome(state, catalog, failed);
-    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.25) < 0.000001, "attempted but unsucceeded frontier should drop to +25 pressure");
+    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.50) < 0.000001, "a failed attempt must not secretly reduce frontier pressure");
 
     applyLaunchOutcome(state, catalog, failed);
-    require(missionPressureModifier(state, catalog, earthOrbit) < 0.25, "repeated failed attempts should reduce pressure");
-    require(missionPressureModifier(state, catalog, earthOrbit) > 0.0, "failed-attempt pressure should never reach zero");
+    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.50) < 0.000001, "repeated failures must not create hidden pity assistance");
 
     LaunchOutcome succeeded;
     succeeded.type = LaunchResultType::MissionComplete;
@@ -1334,6 +1333,217 @@ void pressureTracksFrontierExperience()
     applyLaunchOutcome(state, catalog, succeeded);
     require(missionPressureModifier(state, catalog, earthOrbit) < 0.25, "successful proving runs should reduce pressure below failed-attempt pressure");
     require(missionPressureModifier(state, catalog, earthOrbit) >= 0.05, "successful proving pressure should keep a nonzero floor");
+}
+
+void skillBasedLaunchFlightIsStatefulRecoverableAndFair()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const auto runPolicy = [&](const PreparedLaunch& launch, const Destination& destination, bool steer) {
+        LaunchFlightState flight = beginLaunchFlight(launch, destination);
+        bool enginesCut = false;
+        bool valveOpen = false;
+        bool turnedHome = false;
+        LaunchFlightStep step;
+        for (int frame = 0; frame < 2500; ++frame) {
+            if (flight.heat >= tuning::launch::pilotingWarningThreshold) enginesCut = true;
+            if (flight.heat <= 0.52) enginesCut = false;
+            if (flight.pressure >= tuning::launch::pilotingWarningThreshold) valveOpen = true;
+            if (flight.pressure <= 0.46) valveOpen = false;
+            const double correction = steer
+                ? std::clamp(-flight.courseOffset * 2.8 - flight.courseVelocity * 1.4, -1.0, 1.0)
+                : 0.0;
+            step = updateLaunchFlight(
+                flight,
+                launch,
+                destination,
+                {correction, 0.0, enginesCut, valveOpen},
+                tuning::launch::maxFrameStepSeconds);
+            if (step.failed || step.reachedHome) break;
+            if (step.reachedDestination && !turnedHome) {
+                beginLaunchReturn(flight);
+                turnedHome = true;
+            }
+        }
+        return std::pair {flight, step};
+    };
+
+    for (int destinationIndex = 0; destinationIndex <= 3; ++destinationIndex) {
+        GameState state = createNewGame(catalog, 0x5100 + destinationIndex);
+        state.run.destinationIndex = destinationIndex;
+        syncLaunchConfig(state, catalog);
+        const Destination& destination = catalog.destinations[static_cast<std::size_t>(destinationIndex)];
+        for (int seed = 0; seed < 5000; ++seed) {
+            Random rng(0xA1100000ULL + static_cast<std::uint64_t>(destinationIndex) * 5000ULL + static_cast<std::uint64_t>(seed));
+            const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+            const auto [flight, step] = runPolicy(launch, destination, true);
+            require(!step.failed && step.reachedHome && flight.failureCause == LaunchFailureCause::None,
+                "reasonable cruise/steer/cool/vent policy must survive 5,000 seeds at every early destination");
+        }
+    }
+
+    GameState jupiterState = createNewGame(catalog, 0x5151);
+    jupiterState.run.destinationIndex = 3;
+    syncLaunchConfig(jupiterState, catalog);
+    Random jupiterRng(0x5151);
+    PreparedLaunch jupiterLaunch = prepareLaunch(jupiterState, catalog, jupiterRng);
+    const Destination& jupiter = catalog.destinations[3];
+
+    PreparedLaunch ignoredLaunch = jupiterLaunch;
+    ignoredLaunch.incidentCount = 0;
+    LaunchFlightState ignoredSteering = beginLaunchFlight(ignoredLaunch, jupiter);
+    LaunchFlightStep ignoredStep;
+    for (int frame = 0; frame < 1200 && !ignoredStep.failed; ++frame) {
+        ignoredStep = updateLaunchFlight(
+            ignoredSteering,
+            ignoredLaunch,
+            jupiter,
+            {0.0, 0.0, false, true},
+            tuning::launch::maxFrameStepSeconds);
+    }
+    require(ignoredStep.failed && ignoredStep.failureCause == LaunchFailureCause::CourseLost,
+        "venting without steering correction should lose a later early-game route");
+
+    LaunchFlightState fullThrottle = beginLaunchFlight(jupiterLaunch, jupiter);
+    LaunchFlightStep fullThrottleStep;
+    bool fullThrottleTurned = false;
+    for (int frame = 0; frame < 2500 && !fullThrottleStep.failed && !fullThrottleStep.reachedHome; ++frame) {
+        fullThrottleStep = updateLaunchFlight(
+            fullThrottle,
+            jupiterLaunch,
+            jupiter,
+            {std::clamp(-fullThrottle.courseOffset * 2.8, -1.0, 1.0), 1.0, false, false},
+            tuning::launch::maxFrameStepSeconds);
+        if (fullThrottleStep.reachedDestination && !fullThrottleTurned) {
+            beginLaunchReturn(fullThrottle);
+            fullThrottleTurned = true;
+        }
+    }
+    require(fullThrottleStep.failed &&
+            (fullThrottleStep.failureCause == LaunchFailureCause::ThermalRunaway ||
+                fullThrottleStep.failureCause == LaunchFailureCause::FuelExhausted),
+        "sustained full throttle through visible warnings should reliably destroy or strand an early Jupiter ship");
+
+    PreparedLaunch controlled = jupiterLaunch;
+    controlled.incidentCount = 0;
+    LaunchFlightState cooling = beginLaunchFlight(controlled, jupiter);
+    cooling.heat = 0.82;
+    const double hotStart = cooling.heat;
+    for (int frame = 0; frame < 12; ++frame) {
+        updateLaunchFlight(cooling, controlled, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
+    }
+    require(cooling.heat < hotStart, "cut engines should produce net cooling without an overpowering external thermal incident");
+    require(cooling.selectedThrottle == tuning::launch::pilotingInitialThrottle,
+        "cut engines should preserve the selected throttle for restoration");
+
+    LaunchFlightState vented = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState sealed = vented;
+    vented.pressure = sealed.pressure = 0.82;
+    for (int frame = 0; frame < 20; ++frame) {
+        updateLaunchFlight(vented, controlled, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
+        updateLaunchFlight(sealed, controlled, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    }
+    require(vented.pressure + 0.10 < sealed.pressure, "an open relief valve should deterministically drain pressure");
+    require(std::abs(vented.courseOffset) > std::abs(sealed.courseOffset) + 0.10,
+        "pressure relief should impose a strong visible directional drift tradeoff");
+    vented.courseOffset = (vented.courseOffset >= 0.0 ? 1.0 : -1.0) * 0.72;
+    vented.courseVelocity = 0.0;
+    const double ventDirection = vented.courseOffset > 0.0 ? -1.0 : 1.0;
+    for (int frame = 0; frame < 80 && std::abs(vented.courseOffset) >= tuning::launch::pilotingCourseSafe; ++frame) {
+        updateLaunchFlight(vented, controlled, jupiter, {ventDirection, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    }
+    require(vented.failureCause == LaunchFailureCause::None &&
+            std::abs(vented.courseOffset) < tuning::launch::pilotingCourseSafe,
+        "steering against valve drift should recover a caution-level excursion before course failure");
+
+    LaunchFlightState returnContinuity = beginLaunchFlight(controlled, jupiter);
+    returnContinuity.travelProgress = 0.72;
+    returnContinuity.fuelRemaining = 0.63;
+    returnContinuity.heat = 0.58;
+    returnContinuity.pressure = 0.61;
+    beginLaunchReturn(returnContinuity);
+    require(returnContinuity.returningHome && returnContinuity.travelProgress == 0.72 &&
+            returnContinuity.fuelRemaining == 0.63 && returnContinuity.heat == 0.58 && returnContinuity.pressure == 0.61,
+        "starting the return leg should preserve route, fuel, heat, and pressure state");
+
+    PreparedLaunch weakHull = controlled;
+    PreparedLaunch strongHull = controlled;
+    weakHull.stats.hull = 0.0;
+    strongHull.stats.hull = 5.0;
+    require(std::abs(launchPressureGraceSeconds(weakHull) - 1.25) < 0.000001 &&
+            std::abs(launchPressureGraceSeconds(strongHull) - 3.0) < 0.000001,
+        "hull should add exactly 0.35 seconds of visible pressure grace per point");
+
+    PreparedLaunch upgraded = controlled;
+    upgraded.stats.thrust += 2.0;
+    upgraded.stats.fuel += 2.0;
+    upgraded.stats.cooling += 2.0;
+    upgraded.stats.sensors += 2.0;
+    upgraded.stats.pressure += 2.0;
+    LaunchFlightState baseFlight = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState upgradedFlight = beginLaunchFlight(upgraded, jupiter);
+    updateLaunchFlight(baseFlight, controlled, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    updateLaunchFlight(upgradedFlight, upgraded, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    require(upgradedFlight.travelProgress > baseFlight.travelProgress &&
+            upgradedFlight.courseVelocity > baseFlight.courseVelocity,
+        "thrust should directly improve travel speed and powered correction");
+    require(upgradedFlight.fuelCapacity > baseFlight.fuelCapacity, "fuel upgrades should add measurable usable range");
+    require(launchCourseLimit(upgraded) > launchCourseLimit(controlled) &&
+            launchIncidentWarningLeadSeconds(upgraded) > launchIncidentWarningLeadSeconds(controlled),
+        "sensors should increase course tolerance and incident warning lead time");
+
+    PreparedLaunch fuelUpgrade = controlled;
+    fuelUpgrade.stats.fuel += 2.0;
+    const auto [baseRangeFlight, baseRangeStep] = runPolicy(controlled, jupiter, true);
+    const auto [upgradedRangeFlight, upgradedRangeStep] = runPolicy(fuelUpgrade, jupiter, true);
+    require(baseRangeStep.reachedHome && upgradedRangeStep.reachedHome &&
+            upgradedRangeFlight.fuelRemaining > baseRangeFlight.fuelRemaining + 0.20,
+        "fuel upgrades should leave a measurable Jupiter return reserve under the same cruise policy");
+
+    PreparedLaunch coolingUpgrade = controlled;
+    coolingUpgrade.stats.cooling += 2.0;
+    LaunchFlightState baseCooling = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState upgradedCooling = beginLaunchFlight(coolingUpgrade, jupiter);
+    baseCooling.heat = upgradedCooling.heat = 0.80;
+    updateLaunchFlight(baseCooling, controlled, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
+    updateLaunchFlight(upgradedCooling, coolingUpgrade, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
+    require(upgradedCooling.heat < baseCooling.heat, "cooling upgrades should directly improve engine-off heat recovery");
+
+    PreparedLaunch pressureUpgrade = controlled;
+    pressureUpgrade.stats.pressure += 2.0;
+    LaunchFlightState basePressure = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState upgradedPressure = beginLaunchFlight(pressureUpgrade, jupiter);
+    basePressure.pressure = upgradedPressure.pressure = 0.80;
+    updateLaunchFlight(basePressure, controlled, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
+    updateLaunchFlight(upgradedPressure, pressureUpgrade, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
+    require(upgradedPressure.pressure < basePressure.pressure &&
+            std::abs(upgradedPressure.courseVelocity) < std::abs(basePressure.courseVelocity),
+        "pressure control should improve venting and reduce valve-induced course drift");
+
+    PreparedLaunch sensorUpgrade = controlled;
+    sensorUpgrade.stats.sensors += 2.0;
+    LaunchFlightState baseTrim = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState upgradedTrim = beginLaunchFlight(sensorUpgrade, jupiter);
+    baseTrim.courseOffset = upgradedTrim.courseOffset = 0.50;
+    updateLaunchFlight(baseTrim, controlled, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    updateLaunchFlight(upgradedTrim, sensorUpgrade, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    require(upgradedTrim.courseVelocity < baseTrim.courseVelocity,
+        "sensors should directly strengthen automatic course trim");
+
+    PreparedLaunch stableIncident = controlled;
+    stableIncident.stats.volatility = 0.0;
+    stableIncident.incidentCount = 1;
+    stableIncident.incidents[0] = {};
+    stableIncident.incidents[0].centerMultiplier = 1.0;
+    stableIncident.incidents[0].width = 0.50;
+    stableIncident.incidents[0].heat = 0.60;
+    PreparedLaunch volatileIncident = stableIncident;
+    volatileIncident.stats.volatility = 2.0;
+    LaunchFlightState stablePulse = beginLaunchFlight(stableIncident, jupiter);
+    LaunchFlightState volatilePulse = beginLaunchFlight(volatileIncident, jupiter);
+    updateLaunchFlight(stablePulse, stableIncident, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
+    updateLaunchFlight(volatilePulse, volatileIncident, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
+    require(volatilePulse.heat > stablePulse.heat,
+        "volatility should directly amplify seeded flight disturbances");
 }
 
 void crewStressTracksPeakTelemetryDanger()
@@ -1586,9 +1796,10 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     require(html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos
             && html.find("FIRST FLIGHT BRIEF") != std::string::npos,
         "a fresh campaign should introduce the first proving launch from its launch button");
-    require(html.find("Every safe mile beyond it brings richer findings and more funding.") != std::string::npos
+    require(html.find("Left/right corrects drift; up/down changes persistent throttle.") != std::string::npos
+            && html.find("Warnings are real reaction windows") != std::string::npos
             && html.find("data-rr-action=\"prepare_launch\"") != std::string::npos,
-        "the launch introduction should explain over-target rewards and continue directly into preflight");
+        "the launch introduction should teach piloting and visible system reactions before preflight");
 
     hangarContext.firstTimeIntroductionsEnabled = false;
     html = buildGamePanelHtml(hangarContext);
@@ -10772,6 +10983,18 @@ void launchOutcomePresentationIsShared()
     require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("recovered"), "surviving a vehicle loss should create a major rescue result beat");
     require(presentation.crewFate.title == text::panel::crewFate::recoveredTitle, "survived failure result beat should use rescue copy");
 
+    LaunchOutcome pilotedFailure = recoveredFailure;
+    pilotedFailure.pilotedFlight = true;
+    pilotedFailure.failureCause = LaunchFailureCause::PressureRupture;
+    pilotedFailure.minimumSafetyMargin = -0.02;
+    presentation = launchOutcomePresentation(pilotedFailure);
+    require(!presentation.notes.empty() && presentation.notes[0].find("Pressure rupture") != std::string::npos &&
+            presentation.notes[0].find("visible safety countdown") != std::string::npos,
+        "piloted failures should report the explicit visible terminal cause");
+    require(presentation.notes[0].find("failure point") == std::string::npos &&
+            presentation.metricGroups[1].metrics[1].label == "Safety margin",
+        "piloted results should remove legacy hidden-failure-point copy");
+
     LaunchOutcome transfer;
     transfer.type = LaunchResultType::MissionComplete;
     transfer.recoveryMethod = RecoveryMethod::TransferArrival;
@@ -10894,12 +11117,15 @@ void refitPresentationComesFromSharedHelper()
     require(engineCard.category == std::string(text::enums::slot::engine), "module presentation should expose shared slot label");
     require(engineCard.rarity == std::string(text::enums::rarity::common), "module presentation should expose shared rarity label");
     require(engineCard.glyph == "E", "module presentation should expose a stable card glyph");
-    require(engineCard.detail == std::string(text::moduleThreats::shortensExposure), "engine presentation should use shared threat copy");
+    require(engineCard.detail.find("Powered correction +0.24") != std::string::npos &&
+            engineCard.detail.find("route speed") != std::string::npos,
+        "engine presentation should quantify its launch correction and route-speed effects");
     require(engineCard.primaryImpact == "+2.0 Speed", "module presentation should expose strongest stat impact");
     require(hasRefitChip(engineCard, text::moduleStats::speedChip, "+2.0", true), "module presentation should expose speed stat chip");
 
     RefitPresentation tankCard = moduleRefitPresentation(*tank);
-    require(tankCard.detail == std::string(text::moduleThreats::stabilizesPressure), "fuel pressure modules should use pressure threat copy");
+    require(tankCard.detail.find("Valve venting +1.6%/s") != std::string::npos,
+        "fuel pressure modules should quantify their valve-venting effect");
     require(hasRefitChip(tankCard, text::moduleStats::pressureChip, "+0.4", true), "module presentation should expose pressure stat chip");
 
     RefitPresentation crewCard = crewUpgradeRefitPresentation(*simBay);
@@ -11032,11 +11258,21 @@ void shipDetailsPresentationComesFromSharedHelper()
     const DetailPresentationRow* thrust = findDetailPresentationRow(rows, text::moduleStats::thrustDetail);
     const DetailPresentationRow* damage = findDetailPresentationRow(rows, text::moduleStats::damage);
     const DetailPresentationRow* engine = findDetailPresentationRow(rows, "Built in");
+    const DetailPresentationRow* correction = findDetailPresentationRow(rows, "Powered correction");
+    const DetailPresentationRow* fuelCapacity = findDetailPresentationRow(rows, "Fuel capacity");
+    const DetailPresentationRow* cooling = findDetailPresentationRow(rows, "Engine-off cooling");
+    const DetailPresentationRow* pressureGrace = findDetailPresentationRow(rows, "Pressure grace");
+    const DetailPresentationRow* venting = findDetailPresentationRow(rows, "Valve venting");
+    const DetailPresentationRow* corridor = findDetailPresentationRow(rows, "Course corridor");
+    const DetailPresentationRow* warning = findDetailPresentationRow(rows, "Incident warning");
 
     require(thrust != nullptr && !thrust->value.empty(), "ship presentation should expose formatted ship stats");
     require(damage != nullptr && damage->value == display::wholePercent(state.run.shipDamage), "ship presentation should expose damage row");
     require(hasDetailPresentationHeader(rows, "Installed ship systems"), "ship presentation should include permanent systems section");
     require(engine != nullptr && engine->value.find("Sparrow Engine") != std::string::npos, "ship presentation should summarize built-in modules");
+    require(correction != nullptr && fuelCapacity != nullptr && cooling != nullptr && pressureGrace != nullptr &&
+            venting != nullptr && corridor != nullptr && warning != nullptr,
+        "Ship Details should numerically expose every practical early-launch upgrade effect");
 
     const ShipModule* spareModule = catalog.findModule(content::module::cryoLoop);
     require(spareModule != nullptr, "ship presentation test needs a non-starter spare module");
@@ -11145,6 +11381,12 @@ void launchPanelPresentationComesFromSharedHelper()
     PreparedLaunch launch = prepareLaunch(state, catalog, rng);
 
     const double currentMultiplier = 1.24;
+    LaunchFlightState liveFlight = beginLaunchFlight(launch, catalog.destinations[0]);
+    liveFlight.currentMultiplier = currentMultiplier;
+    liveFlight.travelProgress = 0.40;
+    liveFlight.fuelRemaining = liveFlight.fuelCapacity * 0.82;
+    liveFlight.heat = 0.43;
+    liveFlight.pressure = 0.51;
     LaunchPanelPresentation panel = launchPanelPresentation(
         state,
         catalog,
@@ -11154,23 +11396,29 @@ void launchPanelPresentationComesFromSharedHelper()
         0.0,
         tuning::session::returnDefaultDuration,
         {},
-        false);
+        false,
+        &liveFlight);
 
-    const PanelMetricPresentation* burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
-    const PanelMetricPresentation* dataGoal = findPanelMetric(panel.metrics, text::labels::dataGoal);
+    const PanelMetricPresentation* route = findPanelMetric(panel.metrics, "Route");
+    const PanelMetricPresentation* throttle = findPanelMetric(panel.metrics, "Throttle");
+    const PanelMetricPresentation* fuel = findPanelMetric(panel.metrics, "Fuel");
+    const PanelMetricPresentation* course = findPanelMetric(panel.metrics, "Course");
+    const PanelMetricPresentation* temperature = findPanelMetric(panel.metrics, "Temperature");
+    const PanelMetricPresentation* pressure = findPanelMetric(panel.metrics, "Pressure");
     const PanelMetricPresentation* returnRisk = findPanelMetric(panel.metrics, text::labels::returnRisk);
-    require(panel.sectionTitle == text::panel::sections::provingFlight, "launch presentation should select proving section title");
-    require(burn != nullptr && burn->value == display::multiplier(currentMultiplier), "launch presentation should expose displayed burn depth");
-    require(dataGoal != nullptr && dataGoal->value == display::multiplier(launch.config.burnGoalMultiplier), "launch presentation should expose the actual proving data goal");
-    require(returnRisk != nullptr && returnRisk->value == display::percent(returnHomeRisk(launch, catalog, state, currentMultiplier)), "launch presentation should share return risk math");
-    require(panel.telemetry.size() == telemetrySamples(telemetryAt(launch, currentMultiplier)).size(), "launch presentation should expose all telemetry channel samples");
+    require(panel.sectionTitle.find("Outbound leg") != std::string::npos && panel.sectionTitle.find("Earth Orbit") != std::string::npos,
+        "launch presentation should name the active route leg and destination");
+    require(route != nullptr && throttle != nullptr && fuel != nullptr && course != nullptr && temperature != nullptr && pressure != nullptr,
+        "live launch presentation should expose route, throttle, fuel, course, temperature, and pressure");
+    require(returnRisk == nullptr, "live piloting HUD must not expose random Return Risk copy");
+    require(panel.telemetry.size() == telemetrySamples(launchTelemetryAt(launch, liveFlight)).size(), "launch presentation should expose all stateful telemetry channel samples");
 
     const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
     const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
     require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
     require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
     require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "launch presentation should not expose a manual approach button");
-    require(panel.systemActions.empty(), "first Earth Orbit proving flights should teach only return/eject controls");
+    require(!panel.systemActions.empty(), "first Earth Orbit proving flights should expose engine and pressure controls from the start");
 
     GameState moonState = createNewGame(catalog, 908);
     moonState.run.destinationIndex = 1;
@@ -11210,7 +11458,7 @@ void launchPanelPresentationComesFromSharedHelper()
         returning,
         false);
 
-    burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
+    const PanelMetricPresentation* burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
     const PanelMetricPresentation* returnProgress = findPanelMetric(panel.metrics, text::labels::returnProgress);
     returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returningHome);
     cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
@@ -11218,7 +11466,7 @@ void launchPanelPresentationComesFromSharedHelper()
     require(burn != nullptr && burn->value == display::multiplier(returnTelemetryMultiplier(returnBurnMultiplier, moonLaunch.crashMultiplier, returnElapsed, returnDuration)), "launch presentation should share return telemetry multiplier");
     require(returnProgress != nullptr && returnProgress->value == display::percent(flight_progress::returnCompletion(returnElapsed, returnDuration)), "launch presentation should share return progress math");
     require(returnHome != nullptr && !returnHome->enabled, "returning-home action should be disabled once committed");
-    require(cutEngines != nullptr && !cutEngines->enabled, "system actions should be disabled during return home");
+    require(cutEngines != nullptr && cutEngines->enabled, "system actions should stay live during return home");
 
     GameState arkState = createNewGame(catalog, 909);
     discoverArk(arkState, catalog);
@@ -11286,8 +11534,14 @@ void launchPanelPresentationComesFromSharedHelper()
 
     reliefOpen.pressureReliefFailed = true;
     panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
-    const FlightActionButtonPresentation* failedValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValveFailed);
-    require(failedValve != nullptr && !failedValve->enabled, "failed relief valve should be disabled in presentation");
+    closeValve = findFlightActionButton(panel.systemActions, text::buttons::closeValve);
+    require(closeValve != nullptr && closeValve->enabled,
+        "legacy failed-valve state must not disable the deterministic reusable live valve");
+    reliefOpen.pressureReliefOpen = false;
+    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
+    reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
+    require(reliefValve != nullptr && reliefValve->enabled,
+        "a closed valve should be reusable even after it was previously opened");
 
     GameState marsState = createNewGame(catalog, 911);
     marsState.run.destinationIndex = 2;
@@ -11626,7 +11880,9 @@ void titleScreenPresentationIsPortable()
             && briefingHtml.find("Keyboard + mouse") != std::string::npos
             && briefingHtml.find("Controller") != std::string::npos,
         "the introduction guide should identify its keyboard and controller references");
-    require(briefingHtml.find("Space launches or returns") != std::string::npos
+    require(briefingHtml.find("WASD / Arrows steer and change throttle") != std::string::npos
+            && briefingHtml.find("C cuts or restores engines") != std::string::npos
+            && briefingHtml.find("V opens or closes pressure relief") != std::string::npos
             && briefingHtml.find("Space or left click drills") != std::string::npos
             && briefingHtml.find("Left click fires") != std::string::npos
             && briefingHtml.find("data-controller-rt") != std::string::npos
@@ -11659,18 +11915,26 @@ void earlyGameProgressionAndOutcomeModalAreClear()
     state.launchConfig.destinationId = content::destination::moon;
     state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
     launch = prepareLaunch(state, catalog, rng);
-    html = buildGamePanelHtml({state, catalog, launch, launch});
-    require(html.find(">Confidence</span>") != std::string::npos && html.find("85%") != std::string::npos,
-        "first Moon preflight should expose its compact numeric confidence");
-    require(countOccurrences(html, ">Confidence</span>") == 1, "Moon confidence should appear once rather than repeat across the launch UI");
+    LaunchFlightState moonFlight = beginLaunchFlight(launch, catalog.destinations[1]);
+    PanelRenderContext moonContext {state, catalog, launch, launch};
+    moonContext.launchFlight = &moonFlight;
+    html = buildGamePanelHtml(moonContext);
+    require(html.find(">Confidence</span>") == std::string::npos &&
+            html.find(">Throttle</span>") != std::string::npos &&
+            html.find(">Fuel</span>") != std::string::npos &&
+            html.find(">Course</span>") != std::string::npos &&
+            html.find(">Temperature</span>") != std::string::npos &&
+            html.find(">Pressure</span>") != std::string::npos,
+        "Moon preflight should show skill-based flight gauges without adaptive confidence copy");
 
     GameState fundingBrief = createNewGame(catalog, 1911);
     fundingBrief.screen = Screen::Launch;
     Random fundingBriefRng(1911);
     const PreparedLaunch fundingBriefLaunch = prepareLaunch(fundingBrief, catalog, fundingBriefRng);
     const std::string fundingBriefHtml = buildGamePanelHtml({fundingBrief, catalog, fundingBriefLaunch, fundingBriefLaunch});
-    require(fundingBriefHtml.find("Push farther for richer findings and more funding") != std::string::npos,
-        "opening launch instructions should explain the reward for safely pushing beyond the brief");
+    require(fundingBriefHtml.find("Pilot to the yellow brief") != std::string::npos &&
+            fundingBriefHtml.find("fly the return leg") != std::string::npos,
+        "opening launch instructions should explain that outbound and return legs are actively piloted");
 
     GameState recovered = createNewGame(catalog, 1912);
     LaunchOutcome usefulReturn;
@@ -11806,6 +12070,74 @@ void earlyGameProgressionAndOutcomeModalAreClear()
             && failedMoonHtml.find("Funding lost") != std::string::npos
             && failedMoonHtml.find("Retry 100%") != std::string::npos,
         "failed Moon modal should distinguish crew and funding loss from preserved route data");
+}
+
+void hangarLaunchButtonsNameCurrentAndNextDestinations()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    for (int destinationIndex = 0; destinationIndex <= 3; ++destinationIndex) {
+        GameState state = createNewGame(catalog, 0xB077 + destinationIndex);
+        state.run.destinationIndex = destinationIndex;
+        state.meta.furthestTier = destinationIndex;
+        state.screen = Screen::Hangar;
+        syncLaunchConfig(state, catalog);
+        Random rng(0xB077 + destinationIndex);
+        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+        PanelRenderContext context {state, catalog, launch, launch};
+        context.firstTimeIntroductionsEnabled = false;
+        const std::string html = buildGamePanelHtml(context);
+        require(html.find("Prepare for launch: " + catalog.destinations[static_cast<std::size_t>(destinationIndex)].name) != std::string::npos,
+            "every early Hangar should name the green proving-flight destination");
+    }
+
+    GameState state = createNewGame(catalog, 0xB0A1);
+    state.run.destinationIndex = 1;
+    state.meta.furthestTier = 1;
+    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
+        "button-label fixture should acknowledge the lunar contract");
+    state.meta.materials.common = tuning::research::prospectorCommonOreGoal;
+    require(creditCampaignCommonOre(state, content::destination::moon, tuning::research::prospectorCommonOreGoal)
+            == tuning::research::prospectorCommonOreGoal &&
+            claimLunarProspector(state, catalog),
+        "button-label fixture should complete the lunar contract");
+    state.meta.materials.common = 20;
+    require(equipMiniDrone(state, catalog, 0), "button-label fixture should fabricate Prospector Mk I");
+    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    state.screen = Screen::Hangar;
+    syncLaunchConfig(state, catalog);
+    require(canCommitToNextFrontier(state, catalog),
+        "completed lunar button-label fixture should unlock the Mars attempt");
+    Random moonRng(0xB0A1);
+    PreparedLaunch launch = prepareLaunch(state, catalog, moonRng);
+    PanelRenderContext context {state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+    std::string html = buildGamePanelHtml(context);
+    require(html.find("Prepare for launch: Moon") != std::string::npos &&
+            html.find("Attempt Mars") != std::string::npos,
+        "Moon Hangar should place green Prepare for launch: Moon beside red Attempt Mars");
+
+    state.run.destinationIndex = 2;
+    state.meta.furthestTier = 2;
+    startSurfaceExpedition(state, catalog);
+    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::MarsBayExpansion),
+        "button-label fixture should acknowledge the Mars contract");
+    state.run.surfaceExpedition = {};
+    state.screen = Screen::Hangar;
+    state.meta.materials.common = tuning::research::marsBayCommonOreGoal;
+    require(creditCampaignCommonOre(state, content::destination::mars, tuning::research::marsBayCommonOreGoal)
+            == tuning::research::marsBayCommonOreGoal &&
+            claimMarsBayExpansion(state, catalog),
+        "button-label fixture should complete the Mars contract");
+    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    syncLaunchConfig(state, catalog);
+    Random marsRng(0xB0A2);
+    launch = prepareLaunch(state, catalog, marsRng);
+    PanelRenderContext marsContext {state, catalog, launch, launch};
+    marsContext.firstTimeIntroductionsEnabled = false;
+    html = buildGamePanelHtml(marsContext);
+    require(html.find("Prepare for launch: Mars") != std::string::npos &&
+            html.find("Attempt Jupiter") != std::string::npos,
+        "Mars Hangar should place green Prepare for launch: Mars beside red Attempt Jupiter");
 }
 
 void solarMapModalTracksCampaignDiscovery()
@@ -12841,7 +13173,7 @@ void destinationRiskEscalates()
     require(galaxyDestroyed > earthDestroyed, "farther destination should be more dangerous at target multiplier");
 }
 
-void starterMoonTransferUsesVisibleConfidenceAndPity()
+void starterMoonTransferConfidenceDoesNotAddPity()
 {
     const ContentCatalog catalog = createDefaultContent();
     int completed = 0;
@@ -12901,8 +13233,8 @@ void starterMoonTransferUsesVisibleConfidenceAndPity()
     retry.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
     Random retryRng(9876);
     const PreparedLaunch retryLaunch = prepareLaunch(retry, catalog, retryRng);
-    require(retryLaunch.objectiveConfidence == 1.0, "the first unsuccessful Moon attempt should raise retry confidence to 100%");
-    require(retryLaunch.crashMultiplier > catalog.destinations[1].targetMultiplier, "the 100% retry should keep the arrival corridor reachable");
+    require(retryLaunch.objectiveConfidence >= 0.85 && retryLaunch.objectiveConfidence < 0.87,
+        "an unsuccessful Moon attempt must not add hidden retry confidence");
 }
 
 void frontierReadinessGatesProgression()
@@ -13853,6 +14185,7 @@ int main()
     lowCreditRefitWindowIncludesAffordableOffer();
     destroyedLaunchesPreserveProvingFlights();
     pressureTracksFrontierExperience();
+    skillBasedLaunchFlightIsStatefulRecoverableAndFair();
     crewStressTracksPeakTelemetryDanger();
     pressureControlModulesReducePressureTelemetry();
     starterEarthOrbitIsProvingFirst();
@@ -13990,6 +14323,7 @@ int main()
     settingsResolutionSelectorExposesSupportedPresets();
     titleScreenPresentationIsPortable();
     earlyGameProgressionAndOutcomeModalAreClear();
+    hangarLaunchButtonsNameCurrentAndNextDestinations();
     solarMapModalTracksCampaignDiscovery();
     panelHtmlKeepsTutorialsOutOfOperationalSurfaces();
     surfaceHtmlPromotesMiningAction();
@@ -13997,7 +14331,7 @@ int main()
     hangarHtmlShowsPilotIntakeModal();
     launchBalanceHelpersDrivePreparedLaunch();
     destinationRiskEscalates();
-    starterMoonTransferUsesVisibleConfidenceAndPity();
+    starterMoonTransferConfidenceDoesNotAddPity();
     frontierReadinessGatesProgression();
     transferAttemptAdvancesOnlyOnSuccess();
     overpreparedReadinessRaisesProvingStakes();

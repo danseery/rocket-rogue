@@ -161,7 +161,7 @@ inline constexpr WarningCopy vibration {"VIB: structural oscillation", "VIB: fra
 inline constexpr WarningCopy guidance {"NAV: guidance divergence", "NAV: tracking solution drifting"};
 inline constexpr WarningCopy fuelMix {"MIX: fuel ratio out of range", "MIX: combustion efficiency falling"};
 inline constexpr WarningCopy abortRisk {"ABORT: escape window collapsing", "ABORT: capsule margin thinning"};
-inline constexpr WarningCopy instability {"INSTABILITY: failure imminent", "INSTABILITY: hidden failure margin narrowing"};
+inline constexpr WarningCopy instability {"COURSE: loss countdown active", "COURSE: outer corridor approaching"};
 } // namespace telemetry
 
 namespace labels {
@@ -757,7 +757,7 @@ inline std::string lostModule(std::string_view moduleId)
 
 inline std::string attemptFrontier(std::string_view destinationName)
 {
-    return "Attempt: " + std::string(destinationName);
+    return "Attempt " + std::string(destinationName);
 }
 
 inline std::string rerollOffers(std::string cost)

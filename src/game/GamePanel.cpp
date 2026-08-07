@@ -71,6 +71,36 @@ std::string metricClass(std::string_view label, std::string_view cssClass = {})
     return result;
 }
 
+std::string launchMetricSeverity(const PanelRenderContext& context, std::size_t index)
+{
+    if (context.launchFlight == nullptr) return {};
+    const LaunchFlightState& flight = *context.launchFlight;
+    double caution = tuning::launch::pilotingWarningThreshold;
+    double critical = tuning::launch::pilotingCriticalThreshold;
+    double value = 0.0;
+    switch (index) {
+    case 2:
+        value = 1.0 - flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
+        caution = 0.75;
+        critical = 0.90;
+        break;
+    case 3:
+        value = std::abs(flight.courseOffset);
+        caution = tuning::launch::pilotingCourseSafe;
+        critical = tuning::launch::pilotingCourseCaution;
+        break;
+    case 4:
+        value = flight.heat;
+        break;
+    case 5:
+        value = flight.pressure;
+        break;
+    default:
+        return {};
+    }
+    return value >= critical ? "critical" : (value >= caution ? "caution" : std::string {});
+}
+
 void appendHudText(RealtimeHudState& state, std::string_view id, std::string value)
 {
     state.patches.push_back({std::string(id), std::move(value), {}, true, false});
@@ -106,7 +136,7 @@ std::string expeditionControlsMarkup()
 <article class="opening-control-card opening-keyboard-controls">
 <span class="opening-control-title">Keyboard + mouse</span>
 <div class="opening-control-row"><strong>Menus</strong><p>Mouse or WASD / Arrows navigate. Enter / Space selects. Esc goes back or pauses.</p></div>
-<div class="opening-control-row"><strong>Launch</strong><p>Space launches or returns. R returns. E ejects. Use the mouse for ship systems.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p>Space launches. WASD / Arrows steer and change throttle. R turns home. C cuts or restores engines. V opens or closes pressure relief. E ejects.</p></div>
 <div class="opening-control-row"><strong>Flight</strong><p>WASD / Arrows steer approaches. Esc aborts.</p></div>
 <div class="opening-control-row"><strong>Mining rig</strong><p>WASD / Arrows move. Space or left click drills. E scans. T tethers. F exits the rig. R banks payload at the ship.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>WASD / Arrows thrust. Mouse aims. Left click fires. Right click drills. E scans. T tethers. F enters the rig.</p></div>
@@ -115,7 +145,7 @@ std::string expeditionControlsMarkup()
 <span class="opening-control-title">Controller</span>
 <div class="opening-control-row"><strong>Menus</strong><p>L-stick / D-pad navigate. <strong data-controller-south>{{controller_south}}</strong> selects. <strong data-controller-east>{{controller_east}}</strong> goes back. R-stick scrolls.</p></div>
 <div class="opening-control-row"><strong>Shortcuts</strong><p><strong data-controller-menu>{{controller_menu}}</strong> pauses. <strong data-controller-view>{{controller_view}}</strong> opens Map. <strong data-controller-north>{{controller_north}}</strong> opens Inventory.</p></div>
-<div class="opening-control-row"><strong>Launch</strong><p><strong data-controller-south>{{controller_south}}</strong> launches or returns. Hold <strong data-controller-east>{{controller_east}}</strong> to eject. <strong data-controller-west>{{controller_west}}</strong> engines. <strong data-controller-north>{{controller_north}}</strong> pressure. Hold <strong data-controller-rb>{{controller_rb}}</strong> to jettison.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p>L-stick steers and changes throttle. <strong data-controller-south>{{controller_south}}</strong> launches or turns home. Hold <strong data-controller-east>{{controller_east}}</strong> to eject. <strong data-controller-west>{{controller_west}}</strong> engines. <strong data-controller-north>{{controller_north}}</strong> pressure.</p></div>
 <div class="opening-control-row"><strong>Flight / Mining rig</strong><p>L-stick steers or moves. Hold <strong data-controller-east>{{controller_east}}</strong> to abort. <strong data-controller-rt>{{controller_rt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Tap <strong data-controller-south>{{controller_south}}</strong> to bank or leave; hold it to exit the rig.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>L-stick thrusts. R-stick aims. <strong data-controller-rt>{{controller_rt}}</strong> fires. <strong data-controller-lt>{{controller_lt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Hold <strong data-controller-south>{{controller_south}}</strong> to enter the rig.</p></div>
 </article>
@@ -3038,7 +3068,8 @@ std::string buildGamePanelMarkup(
             context.returnElapsed,
             context.returnDuration,
             context.flightActions,
-            context.pressureReliefUsed);
+            context.pressureReliefUsed,
+            context.launchFlight);
         if (!context.flightArmed) {
             out << "<div data-preflight-launch=\"1\" data-preflight-ready=\""
                 << (context.preflightReady ? "1" : "0") << "\" data-preflight-queued=\""
@@ -3046,7 +3077,7 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(launchPanel.sectionTitle)
-            << "</h2><p>Reach the brief, then choose the next move.</p></div>"
+            << "</h2><p>Steer the corridor, manage throttle, and react to visible warnings.</p></div>"
             << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
         const bool openingEarthFlight = currentDestination(state, catalog).id == content::destination::earthOrbit
             && !context.flightModel.config.frontierTransfer;
@@ -3054,21 +3085,25 @@ std::string buildGamePanelMarkup(
             && context.flightModel.config.destinationId == content::destination::moon;
         if (openingEarthFlight) {
             const int required = frontierReadinessRequired(state, catalog);
-            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Chart the route to the Moon</strong><p>Reach the yellow brief and return. Push farther for richer findings and more funding. Flight Data "
+            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Chart the route to the Moon</strong><p>Pilot to the yellow brief, then turn home and fly the return leg. Flight Data "
                 << state.run.frontierReadiness << "/" << required << ".</p></section>";
         } else if (openingMoonTransfer) {
             out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Reach the Moon</strong><p>Commit to the lunar transfer.</p></section>";
         } else {
-            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Reach the required burn or data goal, then recover.</strong>"
-                << "<p>Yellow marks the brief. INSTABILITY marks failure risk.</p></section>";
+            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Fly the route and keep the ship inside its safety limits.</strong>"
+                << "<p>Use steering and throttle continuously. Cut engines for cooling; vent pressure, then correct the valve drift.</p></section>";
         }
-        out << "<div class=\"metric-grid rr-metric-strip flight-readout\">";
-        for (std::size_t index = 0; index < launchPanel.metrics.size() && index < 3; ++index) {
+        out << "<div class=\"metric-grid rr-metric-strip flight-readout launch-readout\">";
+        const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
+            ? std::min<std::size_t>(3, launchPanel.metrics.size())
+            : launchPanel.metrics.size();
+        for (std::size_t index = 0; index < visibleLaunchMetricCount; ++index) {
             const PanelMetricPresentation& metricItem = launchPanel.metrics[index];
             out << realtimeMetric(
                 "rr-hud-launch-metric-" + std::to_string(index),
                 metricItem.label,
-                metricItem.value);
+                metricItem.value,
+                launchMetricSeverity(context, index));
         }
         out << "</div>";
 
@@ -4075,6 +4110,7 @@ std::string buildGamePanelMarkup(
     const bool showLaunchIntroduction = context.firstTimeIntroductionsEnabled
         && currentFrontier.id == content::destination::earthOrbit
         && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
+    const std::string prepareLaunchLabel = "Prepare for launch: " + currentFrontier.name;
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
@@ -4083,10 +4119,10 @@ std::string buildGamePanelMarkup(
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
     out << (launchReadiness.blocked
-        ? modalButton(text::buttons::launchProvingFlight, ui::modals::launchBlocked, "ok")
+        ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok")
         : (showLaunchIntroduction
-            ? modalButton(text::buttons::launchProvingFlight, ui::modals::launchIntroduction, "ok")
-            : button(text::buttons::launchProvingFlight, ui::actions::prepareLaunch, "ok")));
+            ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok")
+            : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok")));
     if (next != nullptr && !navigationAvailable(state)) {
         if (canCommitToNextFrontier(state, catalog)) {
             const bool oneWayCommit = next->oneWayExpedition;
@@ -4128,8 +4164,8 @@ std::string buildGamePanelMarkup(
         out << activityIntroductionModal(
             ui::modals::launchIntroduction,
             "FIRST FLIGHT BRIEF",
-            "Reach the yellow brief, then decide how much farther to push. Every safe mile beyond it brings richer findings and more funding.",
-            "Return banks recovered Flight Data, but the trip home still carries risk. Eject is the costly emergency way out.",
+            "Pilot inside the course corridor. Left/right corrects drift; up/down changes persistent throttle. Faster burns cost more fuel and build heat and pressure faster.",
+            "Warnings are real reaction windows: cut engines to cool, vent pressure and correct its drift, then choose Return Home and fly the same ship back.",
             "Begin preflight",
             ui::actions::prepareLaunch,
             "ok");
@@ -4425,12 +4461,20 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             context.returnElapsed,
             context.returnDuration,
             context.flightActions,
-            context.pressureReliefUsed);
+            context.pressureReliefUsed,
+            context.launchFlight);
+        const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
+            ? std::min<std::size_t>(3, launchPanel.metrics.size())
+            : launchPanel.metrics.size();
         for (std::size_t index = 0;
-             index < launchPanel.metrics.size() && index < 3;
+             index < visibleLaunchMetricCount;
              ++index) {
             const PanelMetricPresentation& item = launchPanel.metrics[index];
-            appendMetric("rr-hud-launch-metric-" + std::to_string(index), item.label, item.value);
+            appendMetric(
+                "rr-hud-launch-metric-" + std::to_string(index),
+                item.label,
+                item.value,
+                launchMetricSeverity(context, index));
         }
         appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
         return;

@@ -35,6 +35,7 @@ struct PanelRenderContext {
     std::string_view titleNotice;
     bool firstTimeIntroductionsEnabled = true;
     int selectedRefitOfferIndex = 0;
+    const LaunchFlightState* launchFlight = nullptr;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

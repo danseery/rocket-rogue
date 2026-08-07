@@ -6573,6 +6573,17 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 }
 #rr-panel.control-panel .flight-readout .metric:last-child { margin-right: 0px; }
 #rr-panel.control-panel .flight-readout .metric strong { font-size: 16px; }
+#rr-panel.control-panel .launch-readout {
+    flex-wrap: wrap;
+    row-gap: 5px;
+}
+#rr-panel.control-panel .launch-readout .metric {
+    flex: 1 1 92px;
+    width: 92px;
+    min-height: 52px;
+    margin-top: 0px;
+}
+#rr-panel.control-panel .launch-readout .metric strong { font-size: 14px; }
 .live-hud-actions {
     display: flex;
     width: 100%;

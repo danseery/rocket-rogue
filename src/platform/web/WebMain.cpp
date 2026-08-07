@@ -164,6 +164,16 @@ void rr_start_launch()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_launch_move(double steerAxis, double throttleAxis)
+{
+    if (g_app) {
+        g_app->launchMove(steerAxis, throttleAxis);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_prepare_launch()
 {
     if (g_app) {

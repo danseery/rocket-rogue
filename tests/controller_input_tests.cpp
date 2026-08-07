@@ -503,6 +503,21 @@ void launchBindingsOverrideCockpitFocus()
     require(!heldInput.has(GameInputAction::ReturnHome),
         "a held Cross/South button must not restart the return action every frame");
 
+    frame = {};
+    frame.connected = true;
+    frame.meaningfulInput = true;
+    frame.leftX = -0.80;
+    frame.leftY = -0.60;
+    const RoutedGameInput pilotingInput = router.route(InputContext::Launch, frame, preferences);
+    require(std::abs(pilotingInput.moveX + 0.80) < 0.000001 &&
+            std::abs(pilotingInput.moveY - 0.60) < 0.000001,
+        "active launch should continuously route left-stick steering and upward throttle input");
+    preferences.invertFlightY = true;
+    const RoutedGameInput invertedPilotingInput = router.route(InputContext::Launch, frame, preferences);
+    require(std::abs(invertedPilotingInput.moveY + 0.60) < 0.000001,
+        "launch throttle axis should respect the shared flight-Y inversion preference");
+    preferences.invertFlightY = false;
+
     const RoutedGameInput outcomeHeldInput = router.route(InputContext::Ui, frame, preferences);
     require(!outcomeHeldInput.has(GameInputAction::ActivateFocused),
         "a held Return confirm must be released before it can acknowledge a launch outcome");

@@ -153,15 +153,37 @@ inline std::string moduleThreat(const ShipModule& module)
 
     switch (module.slot) {
     case SlotType::Engine:
-        return std::string(module.stats.thrust >= 0.0 ? text::moduleThreats::shortensExposure : text::moduleThreats::reducesEngineLoad);
+        return "Powered correction " + display::signedFixed(
+            module.stats.thrust * tuning::launch::pilotingSteeringThrustScale,
+            2) + "; route speed changes with thrust";
     case SlotType::Fuel:
-        return std::string(module.stats.pressure > 0.0 ? text::moduleThreats::stabilizesPressure : text::moduleThreats::extendsReturnMargin);
+        if (module.stats.pressure > 0.0) {
+            return "Valve venting " + display::signedFixed(
+                module.stats.pressure * tuning::launch::pilotingValveReliefStatScale * 100.0,
+                1) + "%/s";
+        }
+        return "Fuel capacity " + display::signedFixed(
+            module.stats.fuel * tuning::launch::pilotingFuelStatCapacityScale * 100.0,
+            0) + "%";
     case SlotType::Hull:
-        return std::string(text::moduleThreats::absorbsDamage);
+        return "Pressure reaction window " + display::signedFixed(
+            module.stats.hull * tuning::launch::pilotingPressureGraceHullSeconds,
+            2) + "s; also protects against impacts";
     case SlotType::Cooling:
-        return std::string(text::moduleThreats::lowersTemperature);
+        return "Engine-off cooling " + display::signedFixed(
+            module.stats.cooling * tuning::launch::pilotingCoolingStatScale * 100.0,
+            1) + "%/s";
     case SlotType::Sensors:
-        return std::string(module.stats.pressure > 0.0 ? text::moduleThreats::reducesPressureUncertainty : text::moduleThreats::improvesWarningLuck);
+        if (module.stats.pressure > 0.0) {
+            return "Valve venting " + display::signedFixed(
+                module.stats.pressure * tuning::launch::pilotingValveReliefStatScale * 100.0,
+                1) + "%/s";
+        }
+        return "Incident warning " + display::signedFixed(
+            module.stats.sensors * tuning::launch::pilotingIncidentWarningSensorSeconds,
+            2) + "s; course tolerance " + display::signedFixed(
+            module.stats.sensors * tuning::launch::pilotingCourseSensorToleranceScale * 100.0,
+            0) + "%";
     case SlotType::Escape:
         return std::string(text::moduleThreats::improvesCrewSurvival);
     }

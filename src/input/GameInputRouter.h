@@ -153,6 +153,8 @@ public:
             break;
 
         case InputContext::Launch:
+            result.moveX = frame.leftX;
+            result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
             if (frame.wasPressed(ControllerButton::South)) {
                 add(GameInputAction::ReturnHome);
             }

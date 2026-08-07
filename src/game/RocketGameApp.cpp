@@ -4,6 +4,7 @@
 #include "core/ContentIds.h"
 #include "core/GameUi.h"
 #include "core/GameText.h"
+#include "core/GameMath.h"
 #include "core/LaunchPresentation.h"
 #include "core/LaunchStatus.h"
 #include "core/MiniDroneCoordination.h"
@@ -132,28 +133,28 @@ void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog,
 
 std::vector<TelemetryEvent> chartTelemetryForOutcome(
     const PreparedLaunch& launch,
-    const ContentCatalog& catalog,
-    double burnMultiplier,
-    bool returningHome,
-    double travelProgress)
+    const LaunchFlightState& finalFlight,
+    bool returningHome)
 {
     constexpr int sampleCapacity = tuning::launch::telemetrySampleCount;
-    const Destination* destination = catalog.findDestination(launch.config.destinationId);
-    const double destinationTarget = destination == nullptr ? burnMultiplier : destination->targetMultiplier;
-    const double sampleCeiling = returningHome
-        ? burnMultiplier
-        : std::max(burnMultiplier, destinationTarget);
-    const double plotProgress = returningHome ? 1.0 : std::clamp(travelProgress, 0.0, 1.0);
-    const int sampleCount = std::clamp(
-        static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
-        2,
-        sampleCapacity);
-
     std::vector<TelemetryEvent> telemetry;
-    telemetry.reserve(static_cast<std::size_t>(sampleCount));
-    for (int i = 0; i < sampleCount; ++i) {
+    telemetry.reserve(sampleCapacity);
+    for (int i = 0; i < sampleCapacity; ++i) {
         const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
-        telemetry.push_back(telemetryAt(launch, 1.0 + (sampleCeiling - 1.0) * t));
+        LaunchFlightState sample = finalFlight;
+        const double routeShape = returningHome ? std::sin(t * math::pi) : t;
+        sample.currentMultiplier = 1.0 + (finalFlight.peakMultiplier - 1.0) * routeShape;
+        sample.heat = tuning::launch::pilotingHeatInitial +
+            (finalFlight.heat - tuning::launch::pilotingHeatInitial) * t;
+        sample.pressure = tuning::launch::pilotingPressureInitial +
+            (finalFlight.pressure - tuning::launch::pilotingPressureInitial) * t;
+        sample.courseOffset = finalFlight.courseOffset * t;
+        sample.fuelRemaining = sample.fuelCapacity -
+            (sample.fuelCapacity - finalFlight.fuelRemaining) * t;
+        sample.heatFailureSeconds = finalFlight.heatFailureSeconds * t;
+        sample.pressureFailureSeconds = finalFlight.pressureFailureSeconds * t;
+        sample.courseFailureSeconds = finalFlight.courseFailureSeconds * t;
+        telemetry.push_back(launchTelemetryAt(launch, sample));
     }
     return telemetry;
 }
@@ -417,6 +418,10 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
     session_.preparedLaunch = preparedLaunch;
+    const Destination* destination = catalog_.findDestination(preparedLaunch.config.destinationId);
+    session_.flight = beginLaunchFlight(
+        preparedLaunch,
+        destination == nullptr ? currentDestination(state_, catalog_) : *destination);
     session_.flightArmed = false;
     session_.launchQueued = false;
     session_.preflightElapsed = miningDroneTransferEnabled(state_)
@@ -426,6 +431,8 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
     session_.peakAbortRisk = 0.0;
+    session_.steerInput = 0.0;
+    session_.throttleInput = 0.0;
     clearFlightControls();
     clearResultView();
     session_.arrivalFanfare = {};
@@ -439,14 +446,7 @@ void RocketGameApp::consumeNextLaunchBoost()
 
 double RocketGameApp::liveBurnMultiplier() const
 {
-    if (!session_.controls.actions.returningHome) {
-        return session_.currentMultiplier;
-    }
-    return returnTelemetryMultiplier(
-        session_.returnTrip.burnMultiplier,
-        currentFlightModel().crashMultiplier,
-        session_.returnTrip.elapsed,
-        session_.returnTrip.duration);
+    return session_.flight.currentMultiplier;
 }
 
 void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
@@ -845,6 +845,8 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     state_.run.flyby.inputY = 0.0;
     state_.run.orbit.inputX = 0.0;
     state_.run.orbit.inputY = 0.0;
+    session_.steerInput = 0.0;
+    session_.throttleInput = 0.0;
     state_.run.mining.moveX = 0.0;
     state_.run.mining.moveY = 0.0;
     state_.run.mining.drilling = false;
@@ -860,6 +862,10 @@ void RocketGameApp::applyRealtimeInputs()
     const double moveY = useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
 
     switch (state_.screen) {
+    case Screen::Launch:
+        session_.steerInput = moveX;
+        session_.throttleInput = moveY;
+        break;
     case Screen::Flyby:
         setFlybyMove(state_, moveX, moveY);
         break;
@@ -1069,7 +1075,7 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 
 void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
 {
-    if (context == InputContext::FlybyActive) {
+    if (context == InputContext::Launch || context == InputContext::FlybyActive) {
         // Flyby steering is angular: its existing keyboard convention maps A
         // (left) to positive turn authority.
         controllerRealtimeInput_.moveX = -input.moveX;
@@ -1360,60 +1366,42 @@ void RocketGameApp::tick(double deltaSeconds)
         const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
 
-        if (session_.controls.actions.returningHome) {
-            session_.returnTrip.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-            const double returnProgress = flight_progress::returnCompletion(session_.returnTrip.elapsed, session_.returnTrip.duration);
-            const double returnTelemetry = returnTelemetryMultiplier(
-                session_.returnTrip.burnMultiplier,
-                flightModel.crashMultiplier,
-                session_.returnTrip.elapsed,
-                session_.returnTrip.duration);
-            if (returnProgress >= 1.0) {
-                recordTelemetryPeak(telemetryAt(flightModel, returnTelemetry));
-                completeLaunch(returnTelemetry, RecoveryMethod::ReturnHome);
-            } else {
-                const TelemetryEvent event = telemetryAt(flightModel, returnTelemetry);
-                recordTelemetryPeak(event);
-                state_.statusLine = launchStatusLine({
-                    event,
-                    session_.controls.actions,
-                    session_.preparedLaunch.config.frontierTransfer,
-                    arkDiscovered(state_),
-                    session_.controls.returnDriftHome,
-                    false,
-                    returnProgress,
-                    launchUsesOuterExpeditionRecovery(catalog_, destination)
-                });
-            }
-        } else {
-            const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-            session_.currentMultiplier += burnMultiplierDelta(flightModel, destination, session_.elapsed, clampedDelta);
-            session_.elapsed += clampedDelta;
+        const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+        const LaunchFlightStep step = updateLaunchFlight(
+            session_.flight,
+            session_.preparedLaunch,
+            destination,
+            {
+                session_.steerInput,
+                session_.throttleInput,
+                session_.controls.actions.cutEnginesActive,
+                session_.controls.actions.pressureReliefOpen,
+            },
+            clampedDelta);
+        session_.elapsed += clampedDelta;
+        session_.currentMultiplier = session_.flight.currentMultiplier;
+        const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
+        recordTelemetryPeak(event);
 
-            if (session_.currentMultiplier >= flightModel.crashMultiplier) {
-                recordTelemetryPeak(telemetryAt(flightModel, flightModel.crashMultiplier));
-                completeLaunch(flightModel.crashMultiplier, RecoveryMethod::None);
-            } else if (session_.preparedLaunch.config.frontierTransfer && session_.currentMultiplier >= destination.targetMultiplier) {
-                recordTelemetryPeak(telemetryAt(flightModel, destination.targetMultiplier));
-                completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
-            } else if (!session_.preparedLaunch.config.frontierTransfer && destination.tier >= 1 && session_.currentMultiplier >= destination.targetMultiplier) {
-                recordTelemetryPeak(telemetryAt(flightModel, destination.targetMultiplier));
-                completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
-            } else {
-                const TelemetryEvent event = telemetryAt(flightModel, session_.currentMultiplier);
-                recordTelemetryPeak(event);
-                const bool pastDataGoal = !session_.preparedLaunch.config.frontierTransfer && session_.currentMultiplier >= destination.targetMultiplier;
-                state_.statusLine = launchStatusLine({
-                    event,
-                    session_.controls.actions,
-                    session_.preparedLaunch.config.frontierTransfer,
-                    arkDiscovered(state_),
-                    session_.controls.returnDriftHome,
-                    pastDataGoal,
-                    0.0,
-                    launchUsesOuterExpeditionRecovery(catalog_, destination)
-                });
-            }
+        if (step.failed) {
+            completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::None, step.failureCause);
+        } else if (step.reachedHome) {
+            completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ReturnHome);
+        } else if (step.reachedDestination && session_.preparedLaunch.config.frontierTransfer) {
+            completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
+        } else {
+            const bool pastDataGoal = !session_.preparedLaunch.config.frontierTransfer &&
+                session_.flight.peakMultiplier >= session_.preparedLaunch.config.burnGoalMultiplier;
+            state_.statusLine = launchStatusLine({
+                event,
+                session_.controls.actions,
+                session_.preparedLaunch.config.frontierTransfer,
+                arkDiscovered(state_),
+                false,
+                pastDataGoal,
+                session_.flight.returningHome ? 1.0 - session_.flight.travelProgress : 0.0,
+                launchUsesOuterExpeditionRecovery(catalog_, destination)
+            });
         }
 
         if (state_.screen == Screen::Launch) {
@@ -1611,14 +1599,23 @@ void RocketGameApp::startLaunch()
     refreshPanel();
 }
 
+void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
+{
+    if (state_.screen != Screen::Launch || !session_.flightArmed) {
+        return;
+    }
+    keyboardRealtimeInput_.moveX = std::clamp(steerAxis, -1.0, 1.0);
+    keyboardRealtimeInput_.moveY = std::clamp(throttleAxis, -1.0, 1.0);
+    applyRealtimeInputs();
+}
+
 void RocketGameApp::ejectNow()
 {
     if (state_.screen != Screen::Launch || !session_.flightArmed) {
         return;
     }
-    const double liveMultiplier = liveBurnMultiplier();
-    recordTelemetryPeak(telemetryAt(currentFlightModel(), liveMultiplier));
-    completeLaunch(liveMultiplier, RecoveryMethod::ManualEject);
+    recordTelemetryPeak(launchTelemetryAt(currentFlightModel(), session_.flight));
+    completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ManualEject);
 }
 
 void RocketGameApp::returnHome()
@@ -1627,28 +1624,12 @@ void RocketGameApp::returnHome()
         return;
     }
 
-    const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
-    const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
-    session_.returnTrip.burnMultiplier = session_.currentMultiplier;
-    session_.returnTrip.startTravelProgress = flight_progress::travelProgressForBurn(session_.currentMultiplier, destination);
-    session_.returnTrip.elapsed = 0.0;
     const PreparedLaunch flightModel = currentFlightModel();
-    const TelemetryEvent event = telemetryAt(flightModel, session_.currentMultiplier);
+    const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
     recordTelemetryPeak(event);
-    const double fuelReserve = std::max(0.0, flightModel.stats.fuel);
-    session_.controls.returnDriftHome = event.fuelMix > tuning::session::driftFuelMixThreshold ||
-        (fuelReserve < tuning::session::driftFuelReserveThreshold &&
-            session_.currentMultiplier > destination.targetMultiplier * tuning::session::driftTargetShare);
-    session_.returnTrip.duration = flight_progress::returnDuration(
-        session_.returnTrip.startTravelProgress,
-        session_.controls.returnDriftHome);
+    beginLaunchReturn(session_.flight);
     session_.controls.actions.returningHome = true;
-    session_.controls.actions.cutEnginesActive = false;
-    state_.statusLine = session_.controls.returnDriftHome
-        ? text::status::fuelReserveGoneForHome(
-              arkDiscovered(state_),
-              launchUsesOuterExpeditionRecovery(catalog_, destination))
-        : std::string(text::status::returnBurnRotating);
+    state_.statusLine = std::string(text::status::returnBurnRotating);
     panelDirty_ = true;
 }
 
@@ -1686,7 +1667,7 @@ void RocketGameApp::acknowledgeStoryBriefing()
 
 void RocketGameApp::cutEngines()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed) {
         return;
     }
 
@@ -1699,41 +1680,20 @@ void RocketGameApp::cutEngines()
 
 void RocketGameApp::pressureReliefValve()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.controls.pressureReliefUsed) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed) {
         return;
     }
-
-    const PreparedLaunch flightModel = currentFlightModel();
-    const TelemetryEvent event = telemetryAt(flightModel, session_.currentMultiplier);
-    recordTelemetryPeak(event);
-    const double failureChance = std::clamp(
-        tuning::session::pressureReliefFailureBase +
-            event.pressure * tuning::session::pressureReliefFailurePressureScale -
-            flightModel.stats.pressure * tuning::session::pressureReliefFailureControlScale -
-            flightModel.stats.hull * tuning::session::pressureReliefFailureHullScale,
-        tuning::session::pressureReliefFailureMinimum,
-        tuning::session::pressureReliefFailureMaximum);
-    const double decompressionChance = std::clamp(
-        tuning::session::decompressionBase +
-            event.pressure * tuning::session::decompressionPressureScale +
-            static_cast<double>(state_.run.shipDamage) * tuning::session::decompressionDamageScale -
-            flightModel.stats.hull * tuning::session::decompressionHullScale,
-        tuning::session::decompressionMinimum,
-        tuning::session::decompressionMaximum);
-
+    if (session_.controls.actions.pressureReliefOpen) {
+        closePressureReliefValve();
+        return;
+    }
+    if (session_.flight.valveToggleCooldown > 0.0) {
+        return;
+    }
     session_.controls.pressureReliefUsed = true;
     session_.controls.actions.pressureReliefOpen = true;
-    if (rng_.chance(decompressionChance)) {
-        completeLaunch(session_.currentMultiplier, RecoveryMethod::None);
-        state_.statusLine = std::string(text::status::rapidDecompression);
-        save();
-        return;
-    }
-
-    session_.controls.actions.pressureReliefFailed = rng_.chance(failureChance);
-    state_.statusLine = session_.controls.actions.pressureReliefFailed
-        ? std::string(text::status::pressureReliefStuck)
-        : std::string(text::status::pressureReliefOpened);
+    session_.flight.valveToggleCooldown = tuning::launch::pilotingValveToggleCooldown;
+    state_.statusLine = std::string(text::status::pressureReliefOpened);
     panelDirty_ = true;
 }
 
@@ -1741,13 +1701,13 @@ void RocketGameApp::closePressureReliefValve()
 {
     if (state_.screen != Screen::Launch ||
         !session_.flightArmed ||
-        session_.controls.actions.returningHome ||
         !session_.controls.actions.pressureReliefOpen ||
-        session_.controls.actions.pressureReliefFailed) {
+        session_.flight.valveToggleCooldown > 0.0) {
         return;
     }
 
     session_.controls.actions.pressureReliefOpen = false;
+    session_.flight.valveToggleCooldown = tuning::launch::pilotingValveToggleCooldown;
     state_.statusLine = std::string(text::status::pressureReliefClosed);
     panelDirty_ = true;
 }
@@ -3507,24 +3467,29 @@ bool RocketGameApp::uiCancel()
     return services_.ui.cancel();
 }
 
-void RocketGameApp::completeLaunch(double burnMultiplier, RecoveryMethod method)
+void RocketGameApp::completeLaunch(
+    double burnMultiplier,
+    RecoveryMethod method,
+    LaunchFailureCause failureCause)
 {
     const PreparedLaunch flightModel = currentFlightModel();
     const bool wasReturningHome = session_.controls.actions.returningHome;
-    double frozenTravelProgress = flight_progress::travelProgressForBurn(burnMultiplier, currentDestination(state_, catalog_));
-    if (wasReturningHome) {
-        frozenTravelProgress = flight_progress::returnTravelProgress(
-            session_.returnTrip.startTravelProgress,
-            session_.returnTrip.elapsed,
-            session_.returnTrip.duration);
-    } else if (const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId)) {
-        frozenTravelProgress = flight_progress::travelProgressForBurn(burnMultiplier, *activeDestination);
-    }
+    const double frozenTravelProgress = session_.flight.travelProgress;
 
-    LaunchOutcome outcome = resolveLaunch(flightModel, catalog_, state_, burnMultiplier, method, rng_);
+    LaunchOutcome outcome = resolveLaunch(
+        flightModel,
+        catalog_,
+        state_,
+        burnMultiplier,
+        method,
+        rng_,
+        {true, failureCause, session_.flight.minimumSafetyMargin});
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
     outcome.peakAbortRisk = std::max(outcome.peakAbortRisk, session_.peakAbortRisk);
-    outcome.telemetry = chartTelemetryForOutcome(flightModel, catalog_, burnMultiplier, wasReturningHome, frozenTravelProgress);
+    outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, wasReturningHome);
+    if (!outcome.telemetry.empty()) {
+        outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);
+    }
     applyLaunchOutcome(state_, catalog_, outcome);
     if (shouldOpenArrivalOps(outcome, catalog_)) {
         if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
@@ -3586,6 +3551,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         titleNotice_,
         firstTimeIntroductionsEnabled_,
         selectedRefitOfferIndex_,
+        &session_.flight,
     };
 }
 
@@ -4002,15 +3968,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
-    if (state_.screen == Screen::Launch && !session_.flightArmed) {
-        result.travelProgress = 0.0;
-    } else if (session_.controls.actions.returningHome) {
-        result.travelProgress = flight_progress::returnTravelProgress(
-            session_.returnTrip.startTravelProgress,
-            session_.returnTrip.elapsed,
-            session_.returnTrip.duration);
-        result.returningHome = true;
-        result.returnTurnProgress = std::clamp(session_.returnTrip.elapsed / tuning::session::returnTurnSeconds, 0.0, 1.0);
+    if (state_.screen == Screen::Launch) {
+        result.travelProgress = session_.flightArmed ? session_.flight.travelProgress : 0.0;
+        result.returningHome = session_.flight.returningHome;
+        result.returnTurnProgress = result.returningHome ? 1.0 : 0.0;
     } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
         result.travelProgress = 0.985;
     } else if (state_.screen == Screen::ArrivalOps) {
@@ -4209,23 +4170,39 @@ RenderSnapshot RocketGameApp::snapshot() const
         }
 
         const double displayedMultiplier = liveBurnMultiplier();
-        const TelemetryEvent event = telemetryAt(flightModel, displayedMultiplier);
+        const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
         result.heat = event.heat;
         result.warning = event.warning;
+        result.launchPressure = session_.flight.pressure;
+        result.launchThrottle = session_.controls.actions.cutEnginesActive ? 0.0 : session_.flight.selectedThrottle;
+        result.launchFuel = session_.flight.fuelRemaining / std::max(0.01, session_.flight.fuelCapacity);
+        result.launchCourseOffset = session_.flight.courseOffset;
+        result.launchCourseVelocity = session_.flight.courseVelocity;
+        result.launchCourseLimit = launchCourseLimit(session_.preparedLaunch);
+        result.launchIncidentWarningSeconds = session_.flight.forecastIncidentIndex >= 0
+            ? session_.flight.incidentWarningSeconds
+            : 0.0;
+        result.launchIncidentDirection = session_.flight.forecastIncidentIndex >= 0
+            ? (session_.flight.forecastIncidentIndex % 2 == 0 ? 1.0 : -1.0)
+            : 0.0;
+        result.launchHeatFailureProgress = std::clamp(
+            session_.flight.heatFailureSeconds / tuning::launch::pilotingHeatFailureSeconds,
+            0.0,
+            1.0);
+        result.launchPressureFailureProgress = std::clamp(
+            session_.flight.pressureFailureSeconds / launchPressureGraceSeconds(session_.preparedLaunch),
+            0.0,
+            1.0);
+        result.launchCourseFailureProgress = std::clamp(
+            session_.flight.courseFailureSeconds / tuning::launch::pilotingCourseFailureSeconds,
+            0.0,
+            1.0);
         const int sampleCapacity = static_cast<int>(result.telemetry.size());
-        double plotProgress = std::clamp(result.travelProgress, 0.0, 1.0);
+        double plotProgress = session_.flight.returningHome
+            ? std::clamp(1.0 - result.travelProgress, 0.0, 1.0)
+            : std::clamp(result.travelProgress, 0.0, 1.0);
         double sampleCeiling = std::max(session_.currentMultiplier, result.targetMultiplier);
-        if (session_.controls.actions.returningHome) {
-            const double outboundProgress = std::clamp(session_.returnTrip.startTravelProgress, 0.0, 1.0);
-            const double returnProgress = flight_progress::returnCompletion(
-                session_.returnTrip.elapsed,
-                session_.returnTrip.duration);
-            plotProgress = std::clamp(
-                outboundProgress + (1.0 - outboundProgress) * returnProgress,
-                0.0,
-                1.0);
-            sampleCeiling = std::max(session_.returnTrip.burnMultiplier, result.targetMultiplier);
-        }
+        if (session_.flight.returningHome) sampleCeiling = std::max(session_.flight.peakMultiplier, result.targetMultiplier);
         const int liveSampleCount = std::clamp(
             static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
             2,
@@ -4233,14 +4210,21 @@ RenderSnapshot RocketGameApp::snapshot() const
         for (int i = 0; i < liveSampleCount; ++i) {
             const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
             const double sampleMultiplier = 1.0 + (sampleCeiling - 1.0) * t;
-            const TelemetryEvent sample = telemetryAt(flightModel, sampleMultiplier);
-            result.telemetry[static_cast<std::size_t>(i)] = sample.warning;
-            result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sample.heat, 0.0, 1.0);
+            LaunchFlightState sampledFlight = session_.flight;
+            sampledFlight.currentMultiplier = sampleMultiplier;
+            sampledFlight.heat = tuning::launch::pilotingHeatInitial +
+                (session_.flight.heat - tuning::launch::pilotingHeatInitial) * t;
+            sampledFlight.pressure = tuning::launch::pilotingPressureInitial +
+                (session_.flight.pressure - tuning::launch::pilotingPressureInitial) * t;
+            sampledFlight.courseOffset = session_.flight.courseOffset * t;
+            sampledFlight.fuelRemaining = sampledFlight.fuelCapacity -
+                (sampledFlight.fuelCapacity - session_.flight.fuelRemaining) * t;
+            const TelemetryEvent sampledEvent = launchTelemetryAt(flightModel, sampledFlight);
+            result.telemetry[static_cast<std::size_t>(i)] = sampledEvent.warning;
+            result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sampledEvent.heat, 0.0, 1.0);
         }
         result.telemetryCount = liveSampleCount;
-        result.poweredFlight = session_.flightArmed && (session_.controls.actions.returningHome
-            ? !session_.controls.returnDriftHome
-            : !session_.controls.actions.cutEnginesActive);
+        result.poweredFlight = session_.flightArmed && !session_.controls.actions.cutEnginesActive;
         result.launchShake = session_.flightArmed
             ? std::clamp(1.0 - session_.elapsed / tuning::session::launchShakeSeconds, 0.0, 1.0)
             : 0.0;

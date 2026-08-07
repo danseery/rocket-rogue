@@ -259,7 +259,14 @@ inline std::string_view launchOutcomeNextActionLabel(const LaunchOutcome& outcom
 inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome, bool opensPostArrivalPhases = false)
 {
     std::vector<std::string> notes;
-    if (outcome.type == LaunchResultType::Destroyed) {
+    if (outcome.pilotedFlight) {
+        if (outcome.failureCause != LaunchFailureCause::None) {
+            notes.push_back("Flight ended by " + std::string(toString(outcome.failureCause)) +
+                " after its visible safety countdown expired.");
+        } else {
+            notes.push_back("Minimum visible safety margin: " + display::percent(outcome.minimumSafetyMargin) + ".");
+        }
+    } else if (outcome.type == LaunchResultType::Destroyed) {
         notes.push_back("Burn " + display::multiplier(outcome.ejectMultiplier)
             + " reached the revealed failure point at " + display::multiplier(outcome.crashMultiplier) + ".");
     } else {
@@ -284,7 +291,9 @@ inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome,
 inline std::vector<AchievementPresentation> launchOutcomeAchievements(const LaunchOutcome& outcome)
 {
     std::vector<AchievementPresentation> achievements;
-    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    const double survivalMargin = outcome.pilotedFlight
+        ? outcome.minimumSafetyMargin
+        : outcome.crashMultiplier - outcome.ejectMultiplier;
     if (outcome.type != LaunchResultType::Destroyed && survivalMargin > 0.0 && survivalMargin <= tuning::records::closeCallSurvivalMargin) {
         achievements.push_back({
             content::achievement::skinOfYourTeeth,
@@ -348,7 +357,7 @@ inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGrou
     if (recoveryLabel.empty()) {
         recoveryLabel = std::string(toString(outcome.recoveryMethod));
     }
-    return {
+    std::vector<LaunchOutcomeMetricGroupPresentation> groups {
         {
             text::panel::sections::missionResult,
             "primary",
@@ -358,14 +367,26 @@ inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGrou
                 {text::labels::creditDelta, display::signedMoney(outcome.payout - outcome.recoveryCost)}
             }
         },
-        {
-            text::panel::sections::burnProfile,
-            "",
-            {
-                {text::labels::burnDepth, display::multiplier(outcome.ejectMultiplier)},
-                {text::labels::failurePoint, display::multiplier(outcome.crashMultiplier)}
+        outcome.pilotedFlight
+            ? LaunchOutcomeMetricGroupPresentation {
+                text::panel::sections::burnProfile,
+                "",
+                {
+                    {text::labels::burnDepth, display::multiplier(outcome.ejectMultiplier)},
+                    {"Safety margin", display::percent(outcome.minimumSafetyMargin)},
+                    {"Terminal cause", outcome.failureCause == LaunchFailureCause::None
+                        ? std::string("None")
+                        : std::string(toString(outcome.failureCause))}
+                }
             }
-        },
+            : LaunchOutcomeMetricGroupPresentation {
+                text::panel::sections::burnProfile,
+                "",
+                {
+                    {text::labels::burnDepth, display::multiplier(outcome.ejectMultiplier)},
+                    {text::labels::failurePoint, display::multiplier(outcome.crashMultiplier)}
+                }
+            },
         {
             text::panel::sections::peakTelemetry,
             "",
@@ -375,6 +396,7 @@ inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGrou
             }
         }
     };
+    return groups;
 }
 
 inline LaunchOutcomePresentation launchOutcomePresentation(const LaunchOutcome& outcome, bool opensPostArrivalPhases = false)

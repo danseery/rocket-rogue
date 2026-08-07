@@ -30,7 +30,7 @@ test("completed realtime screens return input ownership to RmlUi", () => {
     "active-to-results transitions on the same Screen enum must release held realtime input",
   );
 
-  for (const helper of ["isFlybyActive", "isOrbitActive", "isMiningActive"]) {
+  for (const helper of ["isLaunchActive", "isFlybyActive", "isOrbitActive", "isMiningActive"]) {
     assert.match(
       functionBody(helper),
       /rmlUiAvailable[\s\S]*currentUiHostContext\.realtimeActivityActive/,
@@ -54,10 +54,15 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(pointerDown[0], /if \(!isMiningActive\(\)\) return/);
 
   const keyDown = functionBody("handleRealtimeKeyDown");
+  assert.match(keyDown, /if \(isLaunchActive\(\)\)/);
+  assert.match(keyDown, /launchKeys\.add\(key\)[\s\S]*updateLaunchMove\(\)/);
+  assert.match(keyDown, /key === "c"[\s\S]*rr_cut_engines/);
+  assert.match(keyDown, /key === "v"[\s\S]*rr_pressure_relief/);
   assert.match(keyDown, /if \(isFlybyActive\(\)\)/);
   assert.match(keyDown, /if \(isOrbitActive\(\)\)/);
   assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);
   assert.doesNotMatch(keyDown, /flybyContinue|orbitContinue/);
+  assert.match(functionBody("releaseRealtimeInputs"), /launchKeys\.clear\(\)[\s\S]*updateLaunchMove\(\)/);
 });
 
 test("surface shortcuts yield to result actions and shutdown clears input ownership", () => {

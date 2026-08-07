@@ -760,6 +760,23 @@ std::string_view toString(RecoveryMethod method)
     return text::enums::unknown;
 }
 
+std::string_view toString(LaunchFailureCause cause)
+{
+    switch (cause) {
+    case LaunchFailureCause::None:
+        return "None";
+    case LaunchFailureCause::ThermalRunaway:
+        return "Thermal runaway";
+    case LaunchFailureCause::PressureRupture:
+        return "Pressure rupture";
+    case LaunchFailureCause::CourseLost:
+        return "Course lost";
+    case LaunchFailureCause::FuelExhausted:
+        return "Fuel exhausted";
+    }
+    return "None";
+}
+
 std::string_view toString(CampaignMilestone milestone)
 {
     switch (milestone) {

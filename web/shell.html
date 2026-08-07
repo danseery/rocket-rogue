@@ -766,6 +766,7 @@
     window.rr = {
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
+      launchMove: (steerAxis, throttleAxis) => rrCall("rr_launch_move", [steerAxis, throttleAxis], ["number", "number"]),
       ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
       skipArrivalFanfare: () => rrCall("rr_skip_arrival_fanfare"),
@@ -1015,6 +1016,7 @@
       syncDebugActOneControls();
     });
 
+    const launchKeys = new Set();
     const flybyKeys = new Set();
     const orbitKeys = new Set();
     const miningKeys = new Set();
@@ -1035,6 +1037,21 @@
         && currentUiHostContext.realtimeActivityActive
         && !isTitleScreenActive()
         && currentScreen() === rrScreen.flyby;
+    }
+
+    function isLaunchActive() {
+      return rmlUiAvailable
+        && currentUiHostContext.realtimeActivityActive
+        && !isTitleScreenActive()
+        && currentScreen() === rrScreen.launch;
+    }
+
+    function updateLaunchMove() {
+      const left = launchKeys.has("a") || launchKeys.has("arrowleft");
+      const right = launchKeys.has("d") || launchKeys.has("arrowright");
+      const up = launchKeys.has("w") || launchKeys.has("arrowup");
+      const down = launchKeys.has("s") || launchKeys.has("arrowdown");
+      rr.launchMove((left ? 1 : 0) - (right ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
     }
 
     function isOrbitActive() {
@@ -1085,11 +1102,13 @@
     }
 
     function releaseRealtimeInputs() {
+      launchKeys.clear();
       flybyKeys.clear();
       orbitKeys.clear();
       miningKeys.clear();
       releaseMiningDrill();
       if (!window.rr) return;
+      updateLaunchMove();
       updateFlybyMove();
       updateOrbitMove();
       updateMiningMove();
@@ -1099,6 +1118,24 @@
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
       const key = event.key.toLowerCase();
       const movement = ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"];
+      if (isLaunchActive()) {
+        if (movement.includes(key)) {
+          launchKeys.add(key);
+          updateLaunchMove();
+        } else if (!event.repeat && key === "r") {
+          rr.returnHome();
+        } else if (!event.repeat && key === "e") {
+          rr.ejectNow();
+        } else if (!event.repeat && key === "c") {
+          rrCall("rr_cut_engines");
+        } else if (!event.repeat && key === "v") {
+          rrCall("rr_pressure_relief");
+        } else {
+          return false;
+        }
+        event.preventDefault();
+        return true;
+      }
       if (isFlybyActive()) {
         if (movement.includes(key)) {
           flybyKeys.add(key);
@@ -1148,6 +1185,7 @@
 
     function handleRealtimeKeyUp(event) {
       const key = event.key.toLowerCase();
+      if (launchKeys.delete(key)) updateLaunchMove();
       if (flybyKeys.delete(key)) updateFlybyMove();
       if (orbitKeys.delete(key)) updateOrbitMove();
       if (miningKeys.delete(key)) updateMiningMove();

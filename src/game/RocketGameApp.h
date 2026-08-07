@@ -47,6 +47,7 @@ public:
 
     void prepareForLaunch();
     void startLaunch();
+    void launchMove(double steerAxis, double throttleAxis);
     void returnHome();
     void arrivalOps();
     void skipArrivalFanfare();
@@ -193,6 +194,7 @@ private:
 
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
+        LaunchFlightState flight;
         bool flightArmed = false;
         bool launchQueued = false;
         double preflightElapsed = 0.0;
@@ -200,13 +202,18 @@ private:
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;
         double peakAbortRisk = 0.0;
+        double steerInput = 0.0;
+        double throttleInput = 0.0;
         ReturnTripState returnTrip;
         FlightControlState controls;
         ResultViewState result;
         ArrivalFanfareState arrivalFanfare;
     };
 
-    void completeLaunch(double burnMultiplier, RecoveryMethod method);
+    void completeLaunch(
+        double burnMultiplier,
+        RecoveryMethod method,
+        LaunchFailureCause failureCause = LaunchFailureCause::None);
     void beginArrivalFanfare();
     void finishArrivalFanfare();
     void loadSavedGameOrDefault(bool showTitleScreen);

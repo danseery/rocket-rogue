@@ -4257,6 +4257,54 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     const float flash = arrivalFanfare
         ? 0.42F + 0.28F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
         : 0.0F;
+    if (snapshot.screen == Screen::Launch) {
+        const auto drawCorridorBoundary = [&](float normalizedOffset, Color color, float width) {
+            std::vector<SceneVertex>& vertices = scratchVertices(56 * 16);
+            for (float side : {-1.0F, 1.0F}) {
+                Vec2 previousCenter = routePoint(snapshot, 0.0F);
+                Vec2 previousTangent = routeTangent(snapshot, 0.0F);
+                Vec2 previous {
+                    previousCenter.x + previousTangent.y * normalizedOffset * side,
+                    previousCenter.y - previousTangent.x * normalizedOffset * side
+                };
+                for (int i = 1; i <= 28; ++i) {
+                    const float t = static_cast<float>(i) / 28.0F;
+                    const Vec2 center = routePoint(snapshot, t);
+                    const Vec2 tangent = routeTangent(snapshot, t);
+                    const Vec2 next {
+                        center.x + tangent.y * normalizedOffset * side,
+                        center.y - tangent.x * normalizedOffset * side
+                    };
+                    appendLine(vertices, previous.x, previous.y, next.x, next.y, color);
+                    previous = next;
+                }
+            }
+            submitLines(vertices, width);
+        };
+        const float limitScale = static_cast<float>(std::clamp(snapshot.launchCourseLimit, 1.0, 1.2));
+        drawCorridorBoundary(0.035F / limitScale, {0.35F, 0.92F, 0.62F, 0.34F}, 1.0F);
+        drawCorridorBoundary(0.065F / limitScale, {1.0F, 0.78F, 0.24F, 0.28F}, 1.0F);
+        drawCorridorBoundary(0.10F, {1.0F, 0.25F, 0.20F, 0.32F}, 1.5F);
+
+        if (snapshot.launchIncidentWarningSeconds > 0.0) {
+            const float direction = snapshot.returningHome ? -1.0F : 1.0F;
+            const float cueProgress = std::clamp(
+                static_cast<float>(snapshot.travelProgress) + direction * 0.12F,
+                0.0F,
+                1.0F);
+            const Vec2 cueCenter = routePoint(snapshot, cueProgress);
+            const Vec2 cueTangent = routeTangent(snapshot, cueProgress);
+            const float cueSide = snapshot.launchIncidentDirection >= 0.0 ? 1.0F : -1.0F;
+            const Vec2 cue {
+                cueCenter.x + cueTangent.y * 0.055F * cueSide,
+                cueCenter.y - cueTangent.x * 0.055F * cueSide
+            };
+            const float pulse = 0.014F + 0.004F * std::sin(static_cast<float>(snapshot.animationTime) * 10.0F);
+            drawCircle(cue.x, cue.y, pulse, {1.0F, 0.68F, 0.20F, 0.24F}, 20);
+            drawCircle(cue.x, cue.y, 0.005F, {1.0F, 0.84F, 0.35F, 0.90F}, 16);
+        }
+    }
+
     std::vector<SceneVertex>& routeVertices = scratchVertices(28 * 16);
     Vec2 previous = routePoint(snapshot, 0.0F);
     for (int i = 1; i <= 28; ++i) {
@@ -4301,8 +4349,17 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
 {
-    const Vec2 route = routePoint(snapshot, static_cast<float>(snapshot.travelProgress));
-    Vec2 forward = routeTangent(snapshot, static_cast<float>(snapshot.travelProgress));
+    const Vec2 centerRoute = routePoint(snapshot, static_cast<float>(snapshot.travelProgress));
+    Vec2 routeForward = routeTangent(snapshot, static_cast<float>(snapshot.travelProgress));
+    const Vec2 routeRight {routeForward.y, -routeForward.x};
+    const float courseVisualOffset = snapshot.screen == Screen::Launch
+        ? static_cast<float>(snapshot.launchCourseOffset) * 0.10F / static_cast<float>(std::max(1.0, snapshot.launchCourseLimit))
+        : 0.0F;
+    const Vec2 route {
+        centerRoute.x + routeRight.x * courseVisualOffset,
+        centerRoute.y + routeRight.y * courseVisualOffset
+    };
+    Vec2 forward = routeForward;
     if (snapshot.returningHome) {
         const float turn = static_cast<float>(std::clamp(snapshot.returnTurnProgress, 0.0, 1.0));
         const float outboundAngle = std::atan2(forward.y, forward.x);
@@ -4313,6 +4370,15 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
+    if (snapshot.screen == Screen::Launch && std::abs(snapshot.launchCourseOffset) >= tuning::launch::pilotingCourseSafe) {
+        const Color correctionColor = std::abs(snapshot.launchCourseOffset) >= snapshot.launchCourseLimit
+            ? Color {1.0F, 0.24F, 0.18F, 0.92F}
+            : Color {1.0F, 0.78F, 0.24F, 0.82F};
+        std::vector<SceneVertex>& correction = scratchVertices(16);
+        appendLine(correction, cx, cy, centerRoute.x, centerRoute.y, correctionColor);
+        submitLines(correction, 2.0F);
+        drawCircle(centerRoute.x, centerRoute.y, 0.005F, correctionColor, 14);
+    }
     const float scale = std::clamp(0.26F - static_cast<float>(snapshot.travelProgress) * 0.06F, 0.16F, 0.26F);
     auto world = [&](float localX, float localY) {
         return Vec2 {

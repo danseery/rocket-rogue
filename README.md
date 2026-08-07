@@ -1,6 +1,6 @@
 # OREBIT (Rocket Rogue project)
 
-OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications for Windows and Linux plus a fully supported WebGL2/Emscripten build. The repository and some internal identifiers retain the Rocket Rogue project name. The game borrows the tension of a hidden crash-point launch, then wraps it in permanent ship systems, light astronaut consequences, surface extraction, and persistent roguelite unlock variety.
+OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications for Windows and Linux plus a fully supported WebGL2/Emscripten build. The repository and some internal identifiers retain the Rocket Rogue project name. Launches use active corridor piloting and visible system-management tradeoffs, wrapped in permanent ship systems, light astronaut consequences, surface extraction, and persistent roguelite unlock variety.
 
 ## What is implemented
 
@@ -257,13 +257,15 @@ All player-facing screens in the native and web builds support standard-mapped X
 Use the on-screen mission-control buttons or their controller prompts:
 
 - Launch proving flights from the current frontier to bank flight data.
+- During launch, left/right steers toward the corridor center and up/down changes persistent throttle. Native and web keyboard controls use WASD/arrows; controllers use the left stick.
+- The launch HUD shows route leg, course, throttle, fuel, temperature, pressure, incident forecasts, and any active failure countdown. Heat and pressure caution at 70%, become critical at 90%, and fail only after staying at 100% for their visible grace period. A lost course must remain outside the red boundary for two seconds.
+- Higher throttle travels faster but consumes fuel and builds heat and pressure nonlinearly. `Cut engines` stops thrust and fuel use, keeps the selected throttle ready for restoration, reduces steering authority, and normally cools the ship.
+- `Relief valve` deterministically vents pressure and can be opened again after a short toggle cooldown. While open it pushes the ship sideways, so the pilot must close it and correct course.
+- `Return to Earth` turns the ship toward home without resolving the launch. Fuel, heat, pressure, course, and all controls carry onto the return leg. After the one-way Saturn commitment, recovery becomes `Recover to Expedition`; after the Straylight discovery, it becomes `Return to Ark`.
 - The yellow marker is the mission brief. Recovering safely from farther beyond it banks richer findings and more mission funding.
-- During inner-system flight, choose `Return to Earth`, `Cut engines`, or `Eject`. After the one-way Saturn commitment, recovery becomes `Recover to Expedition`; after the Straylight discovery, it becomes `Return to Ark`.
-- `Cut engines` lowers heat and vibration, slows the burn, and increases navigation drift.
-- `Relief valve` vents physical pressure at the cost of navigation drift, with a small failure/decompression risk.
 - `Jettison cargo` stabilizes fuel mix, but worsens navigation, vibration, and recovery risk.
-- Seeded telemetry incidents create temporary one-or-two-system spikes, so a bad PRESS, VIB, MIX, NAV, or ABORT read can become a short decision window rather than a guaranteed cascade.
-- New frontiers carry high mission pressure; repeated attempts and successful profiles reduce it, while pressure-control modules dampen the `PRESS` telemetry channel.
+- Seeded telemetry incidents create telegraphed thermal, pressure, vibration, or directional pulses. Their variety is random; survival is decided by the visible ship state and player response, not a hidden crash roll.
+- Failed attempts do not secretly reduce difficulty. Successful profiles, installed upgrades, crew skill, and player input are the ways the ship improves.
 - Useful Flight Data or a successful arrival earns one permanent refit opportunity; crashes, shallow returns, and already-capped data do not.
 - Before the Moon, choose the next unique Reach, Control, or Recovery upgrade, or keep the credits. Later refit boards return to randomized, role-diverse offers without duplicates.
 - In the hangar, repair damage, recruit crew, train/rest astronauts, then launch again.

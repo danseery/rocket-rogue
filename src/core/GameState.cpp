@@ -1268,11 +1268,8 @@ double missionPressureModifier(const GameState& state, const ContentCatalog& cat
     const int attempts = attemptsIndex < state.meta.destinationAttempts.size() ? state.meta.destinationAttempts[attemptsIndex] : 0;
     const int successes = attemptsIndex < state.meta.destinationSuccesses.size() ? state.meta.destinationSuccesses[attemptsIndex] : 0;
 
-    if (attempts <= 0) {
+    if (attempts <= 0 || successes <= 0) {
         return tuning::mission::unattemptedDifficulty;
-    }
-    if (successes <= 0) {
-        return std::max(tuning::mission::failedAttemptDifficultyFloor, tuning::mission::failedAttemptDifficultyBase / static_cast<double>(attempts));
     }
     return std::max(tuning::mission::provenDifficultyFloor, tuning::mission::provenDifficultyBase / static_cast<double>(successes + 1));
 }
@@ -1327,18 +1324,22 @@ void updateLegacyRecords(MetaProgress& meta, const LaunchOutcome& outcome)
     meta.bestCreditDelta = std::max(meta.bestCreditDelta, creditDelta);
     meta.worstCreditDelta = std::min(meta.worstCreditDelta, creditDelta);
 
-    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    const double survivalMargin = outcome.pilotedFlight
+        ? outcome.minimumSafetyMargin
+        : outcome.crashMultiplier - outcome.ejectMultiplier;
     if (outcome.type != LaunchResultType::Destroyed && survivalMargin > 0.0
         && (meta.closestSurvivalMargin <= 0.0 || survivalMargin < meta.closestSurvivalMargin)) {
         meta.closestSurvivalMargin = survivalMargin;
         meta.closestSurvivalBurn = outcome.ejectMultiplier;
-        meta.closestSurvivalFailurePoint = outcome.crashMultiplier;
+        meta.closestSurvivalFailurePoint = outcome.pilotedFlight ? 1.0 : outcome.crashMultiplier;
     }
 }
 
 bool isSkinOfYourTeethOutcome(const LaunchOutcome& outcome)
 {
-    const double survivalMargin = outcome.crashMultiplier - outcome.ejectMultiplier;
+    const double survivalMargin = outcome.pilotedFlight
+        ? outcome.minimumSafetyMargin
+        : outcome.crashMultiplier - outcome.ejectMultiplier;
     return outcome.type != LaunchResultType::Destroyed &&
         survivalMargin > 0.0 &&
         survivalMargin <= tuning::records::closeCallSurvivalMargin;

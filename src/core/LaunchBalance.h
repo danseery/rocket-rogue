@@ -27,9 +27,8 @@ inline double performanceScore(const ModuleStats& stats, double crewTrainingBonu
 
 inline double openingMoonTransferConfidence(double performance, int overpreparedData, int attempts, int successes)
 {
-    if (successes > 0 || attempts > 0) {
-        return 1.0;
-    }
+    static_cast<void>(attempts);
+    static_cast<void>(successes);
     return std::clamp(
         tuning::mission::openingMoonConfidenceBase +
             std::max(0.0, performance - tuning::mission::openingMoonConfidencePerformanceBaseline) *

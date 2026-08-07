@@ -606,6 +606,14 @@ enum class RecoveryMethod {
     TransferArrival
 };
 
+enum class LaunchFailureCause {
+    None,
+    ThermalRunaway,
+    PressureRupture,
+    CourseLost,
+    FuelExhausted
+};
+
 struct ModuleStats {
     double thrust = 0.0;
     double fuel = 0.0;
@@ -991,6 +999,9 @@ struct LaunchOutcome {
     int blueprintGain = 0;
     double peakWarning = 0.0;
     double peakAbortRisk = 0.0;
+    bool pilotedFlight = false;
+    LaunchFailureCause failureCause = LaunchFailureCause::None;
+    double minimumSafetyMargin = 1.0;
     std::vector<TelemetryEvent> telemetry;
 };
 
@@ -1585,6 +1596,7 @@ std::string_view toString(MiniDroneRole role);
 std::string_view toString(CrewStatus status);
 std::string_view toString(LaunchResultType result);
 std::string_view toString(RecoveryMethod method);
+std::string_view toString(LaunchFailureCause cause);
 std::string_view toString(CampaignMilestone milestone);
 std::string_view toString(GameChapter chapter);
 int chapterNumber(GameChapter chapter);

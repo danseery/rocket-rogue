@@ -29,6 +29,44 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
     }
 
     rows.push_back(detailPresentationRow(text::moduleStats::damage, display::wholePercent(state.run.shipDamage)));
+    rows.push_back(detailPresentationHeader("Launch handling"));
+    const double poweredCorrection =
+        (tuning::launch::pilotingSteeringBase +
+            std::max(0.0, stats.thrust) * tuning::launch::pilotingSteeringThrustScale +
+            std::max(0.0, stats.sensors) * tuning::launch::pilotingSteeringSensorScale) *
+        (tuning::launch::pilotingPoweredSteeringBase +
+            tuning::launch::pilotingInitialThrottle * tuning::launch::pilotingPoweredSteeringThrottleScale);
+    const double fuelCapacity = std::max(
+        0.55,
+        1.0 + (stats.fuel - 1.0) * tuning::launch::pilotingFuelStatCapacityScale);
+    const double courseLimit = tuning::launch::pilotingCourseLost * (1.0 + std::min(
+        tuning::launch::pilotingCourseMaximumSensorTolerance,
+        std::max(0.0, stats.sensors) * tuning::launch::pilotingCourseSensorToleranceScale));
+    const double warningLead = std::min(
+        tuning::launch::pilotingIncidentWarningMaximumSeconds,
+        tuning::launch::pilotingIncidentWarningBaseSeconds +
+            std::max(0.0, stats.sensors) * tuning::launch::pilotingIncidentWarningSensorSeconds);
+    const double coolingRate = tuning::launch::pilotingCoolingBase +
+        std::max(0.0, stats.cooling) * tuning::launch::pilotingCoolingStatScale +
+        tuning::launch::pilotingCutCoolingBonus;
+    const double pressureGrace = std::clamp(
+        tuning::launch::pilotingPressureGraceBaseSeconds +
+            std::max(0.0, stats.hull) * tuning::launch::pilotingPressureGraceHullSeconds,
+        tuning::launch::pilotingPressureGraceBaseSeconds,
+        tuning::launch::pilotingPressureGraceMaximumSeconds);
+    const double ventRate = tuning::launch::pilotingValveReliefBase +
+        std::max(0.0, stats.pressure) * tuning::launch::pilotingValveReliefStatScale;
+    rows.push_back(detailPresentationRow("Cruise throttle", display::percent(tuning::launch::pilotingInitialThrottle)));
+    rows.push_back(detailPresentationRow("Powered correction", display::fixed(poweredCorrection, 2) + " course/s"));
+    rows.push_back(detailPresentationRow("Fuel capacity", display::fixed(fuelCapacity * 100.0, 0) + "%"));
+    rows.push_back(detailPresentationRow("Engine-off cooling", display::fixed(coolingRate * 100.0, 1) + "%/s before incidents"));
+    rows.push_back(detailPresentationRow("Pressure grace", display::fixed(pressureGrace, 2) + "s at 100%"));
+    rows.push_back(detailPresentationRow("Valve venting", display::fixed(ventRate * 100.0, 1) + "%/s"));
+    rows.push_back(detailPresentationRow("Course corridor", "\xC2\xB1" + display::fixed(courseLimit, 2)));
+    rows.push_back(detailPresentationRow("Incident warning", display::fixed(warningLead, 2) + "s"));
+    rows.push_back(detailPresentationRow(
+        "Disturbance strength",
+        display::multiplier(std::max(0.50, 1.0 + stats.volatility * tuning::launch::pilotingVolatilityIncidentScale))));
     rows.push_back(detailPresentationHeader("Installed ship systems"));
     for (const std::string& moduleId : state.meta.ownedModuleIds) {
         if (const ShipModule* module = catalog.findModule(moduleId)) {
