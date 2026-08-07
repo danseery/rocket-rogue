@@ -145,6 +145,7 @@ const requireNativeCssRule = (selector, tokens, contract) => {
 };
 
 for (const [pattern, contract] of [
+  [/const int modalActivityHeight\s*=\s*std::max\(1,\s*std::min\(360,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped activity briefing height"],
   [/const int modalOutcomeHeight\s*=\s*std::max\(1,\s*std::min\(\d+,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped launch outcome height"],
   [/const int modalOutcomeTop\s*=\s*std::max\(modalGutter,\s*\(viewportHeight - modalOutcomeHeight\) \/ 2\);/, "centered launch outcome position"],
   [/const bool modalOutcomeNeedsScroll\s*=\s*modalOutcomeHeight < \d+;/, "short-height launch outcome scrolling"],
@@ -168,9 +169,21 @@ requireNativeCssRule(
   ["top: var(--rr-legacy-layout-115, 0px);", "height: var(--rr-legacy-layout-116, 0px);"],
   "launch outcome geometry");
 requireNativeCssRule(
+  "#rr-modal.modal-launch_outcome.modal-tone-positive {",
+  ["background-color: #071b15;", "border-width: 2px;", "border-color: #46c587;"],
+  "positive launch outcome hue and outline");
+requireNativeCssRule(
+  "#rr-modal.modal-launch_outcome.modal-tone-negative {",
+  ["background-color: #200b0e;", "border-width: 2px;", "border-color: #e36868;"],
+  "negative launch outcome hue and outline");
+requireNativeCssRule(
   "#rr-modal.modal-launch_outcome .modal-scroll-body {",
   ["display: flex;", "flex-direction: column;", "overflow-y: var(--rr-legacy-layout-117, hidden);"],
   "launch outcome short-height body");
+requireNativeCssRule(
+  "#rr-modal.modal-launch_introduction .modal-scroll-body,",
+  ["overflow-y: auto;", "padding-right: 8px;"],
+  "activity briefing short-height fallback");
 requireNativeCssRule(
   ".launch-outcome-summary {",
   ["flex: 1 1 auto;", "min-height: 0px;", "height: 100%;"],

@@ -185,13 +185,24 @@ bool operatorAtReturnZone(const MiningRunState& mining)
         tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
 }
 
+bool tetheredRigRecoverableAtShip(const MiningRunState& mining)
+{
+    return operatorControlled(mining) &&
+        operatorAtReturnZone(mining) &&
+        mining.operatorRigTethered &&
+        !mining.rigDisabled &&
+        mining.depthZone == mining.entryDepthZone &&
+        mining.rigDepthZone == mining.entryDepthZone;
+}
+
 bool miningExtractionReady(const MiningRunState& mining)
 {
     if (mining.rigDisabled) {
         return operatorAtReturnZone(mining);
     }
     if (operatorControlled(mining)) {
-        return rigAtReturnZone(mining) && operatorAtReturnZone(mining);
+        return operatorAtReturnZone(mining) &&
+            (rigAtReturnZone(mining) || tetheredRigRecoverableAtShip(mining));
     }
     return rigAtReturnZone(mining);
 }
@@ -4846,17 +4857,22 @@ void simulateMiningActorMotion(
         const double tetherDistance = std::hypot(tetherDx, tetherDy);
         if (tetherDistance > tuning::mining::operatorRigTetherRestLengthCells) {
             const double extension = tetherDistance - tuning::mining::operatorRigTetherRestLengthCells;
+            const double directionX = tetherDx / tetherDistance;
+            const double directionY = tetherDy / tetherDistance;
+            // Dampen only relative motion along the tow line. Damping the
+            // rig's entire velocity made its steady towing speed slower than
+            // the operator, so the line stretched instead of following.
+            const double relativeTowSpeed =
+                (mining.operatorVelocityX - velocityX) * directionX +
+                (mining.operatorVelocityY - velocityY) * directionY;
             const double pull = std::min(
                 tuning::mining::rigTetherPullAccelerationCellsPerSecondSquared,
-                extension * tuning::mining::operatorRigTetherSpring);
-            velocityX += tetherDx / tetherDistance * pull * dt;
-            velocityY += tetherDy / tetherDistance * pull * dt;
-            const double damping = std::clamp(
-                1.0 - tuning::mining::operatorRigTetherDamping * dt,
-                0.0,
-                1.0);
-            velocityX *= damping;
-            velocityY *= damping;
+                std::max(
+                    0.0,
+                    extension * tuning::mining::operatorRigTetherSpring +
+                        relativeTowSpeed * tuning::mining::operatorRigTetherDamping));
+            velocityX += directionX * pull * dt;
+            velocityY += directionY * pull * dt;
         }
     }
 
@@ -5637,8 +5653,22 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
 bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
-    if (mining.rigDisabled || !rigAtReturnZone(mining)) {
+    if (mining.rigDisabled) {
         return false;
+    }
+    if (!rigAtReturnZone(mining)) {
+        if (!tetheredRigRecoverableAtShip(mining)) {
+            return false;
+        }
+        // Reaching the shuttle with a live same-layer tow line hands the rig
+        // to the ship winch. Dock it before settling cargo so Bank / Leave is
+        // atomic and cannot discard payload held by the recovered rig.
+        mining.droneX = mining.returnZoneX;
+        mining.droneY = mining.returnZoneY;
+        mining.rigVelocityX = 0.0;
+        mining.rigVelocityY = 0.0;
+        mining.rigDepthZone = mining.entryDepthZone;
+        mining.operatorRigTethered = false;
     }
     const bool hasPayload = mining.cargo > 0 ||
         mining.temporaryMaterials.common > 0 ||

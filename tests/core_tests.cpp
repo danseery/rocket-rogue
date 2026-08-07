@@ -3163,6 +3163,11 @@ void firstMiningContractBuildsAndCelebratesProspector()
             && state.meta.equippedDroneIds.empty()
             && state.meta.materials.common == 20,
         "the claim should fund, but not silently fabricate, the first Prospector Support Drone");
+    const DroneOpsPresentation firstDroneOps = droneOpsPresentation(state, catalog);
+    require(!firstDroneOps.drones.empty()
+            && firstDroneOps.drones.front().title == "Prospector Support Drone"
+            && firstDroneOps.drones.front().action.label == "Fabricate",
+        "the first Drone Ops fabrication action should use a short Steam Deck-safe label");
     const int miningDroneIndex = static_cast<int>(std::find_if(
         catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const MiniDrone& drone) {
             return drone.id == content::drone::miningDrone;
@@ -4603,7 +4608,7 @@ void droneOpsPresentationExposesPersistentLoadout()
     require(drones.drones.size() == catalog.miniDrones.size(), "Drone Ops should present the full drone roster");
     require(drones.drones.front().title == "Prospector Support Drone", "Drone Ops should present mining support first");
     require(drones.drones.front().action.enabled, "owned starter drones should be equippable");
-    require(drones.drones.front().action.label == "Assign" || drones.drones.front().action.label == "Fabricate + assign", "Drone controls should frame each frame as an explicit assignment or fabrication");
+    require(drones.drones.front().action.label == "Assign" || drones.drones.front().action.label == "Fabricate", "Drone controls should use a short assignment or fabrication label");
     require(drones.drones.front().upgradeAction.enabled, "funded starter drones should be upgradable");
     require(drones.drones.front().upgradeSummary.find("Mk 1") != std::string::npos, "drone cards should show current tuning level");
     require(drones.drones.front().upgradeSummary.find("-> Mk 2") != std::string::npos, "drone cards should preview the next tuning tier");
@@ -13813,7 +13818,9 @@ void structuredPanelPresentationCarriesTypedModalPolicy()
         settingsModal != lunarPresentation.modals.end()
             && !settingsModal->autoOpen
             && settingsModal->dismissible
-            && settingsModal->showClose,
+            && settingsModal->showClose
+            && settingsModal->tone == ModalTone::Neutral
+            && modalToneCssClass(settingsModal->tone).empty(),
         "ordinary utility modals should remain explicitly dismissible in typed metadata");
 
     GameState results = createNewGame(catalog, 0xA117);
@@ -13835,8 +13842,26 @@ void structuredPanelPresentationCarriesTypedModalPolicy()
     require(
         outcomeModal != resultsPresentation.modals.end()
             && outcomeModal->autoOpen
-            && !outcomeModal->dismissible,
-        "the Results acknowledgement should preserve its mandatory auto-open modal policy");
+            && !outcomeModal->dismissible
+            && outcomeModal->tone == ModalTone::Negative
+            && modalToneCssClass(outcomeModal->tone) == "modal-tone-negative",
+        "an incomplete return should preserve mandatory acknowledgement and use the negative outcome tone");
+
+    results.lastOutcome.type = LaunchResultType::MissionComplete;
+    results.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    const PanelDocumentPresentation successfulResultsPresentation =
+        buildGamePanelPresentation({results, catalog, resultsLaunch, resultsLaunch});
+    const auto successfulOutcomeModal = std::find_if(
+        successfulResultsPresentation.modals.begin(),
+        successfulResultsPresentation.modals.end(),
+        [](const ModalPresentation& modal) {
+            return modal.id == ui::modals::launchOutcome;
+        });
+    require(
+        successfulOutcomeModal != successfulResultsPresentation.modals.end()
+            && successfulOutcomeModal->tone == ModalTone::Positive
+            && modalToneCssClass(successfulOutcomeModal->tone) == "modal-tone-positive",
+        "a completed return should use the positive outcome tone");
 }
 
 void contentIdsResolveAgainstDefaultCatalog()

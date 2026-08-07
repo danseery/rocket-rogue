@@ -3,6 +3,7 @@
 #include "core/PanelPresentation.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocket {
@@ -42,6 +43,22 @@ enum class PanelOverlayKind {
     SurfaceScanReadout
 };
 
+enum class ModalTone {
+    Neutral,
+    Positive,
+    Negative
+};
+
+constexpr std::string_view modalToneCssClass(ModalTone tone) noexcept
+{
+    switch (tone) {
+    case ModalTone::Positive: return "modal-tone-positive";
+    case ModalTone::Negative: return "modal-tone-negative";
+    case ModalTone::Neutral:
+    default: return {};
+    }
+}
+
 struct PanelPresentationMetadata {
     Screen screen = Screen::Hangar;
     PanelVisualFamily visualFamily = PanelVisualFamily::Fullscreen;
@@ -74,6 +91,7 @@ struct ModalPresentation {
     bool autoOpen = false;
     bool dismissible = true;
     bool showClose = true;
+    ModalTone tone = ModalTone::Neutral;
 };
 
 struct PanelDocumentPresentation {

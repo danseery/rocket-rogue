@@ -1844,6 +1844,14 @@ int main()
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
         assert(fixture.ui.html.find("<template data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"next\"") != std::string::npos);
+        const auto launchOutcomeModal = std::find_if(
+            fixture.ui.presentation.modals.begin(),
+            fixture.ui.presentation.modals.end(),
+            [](const rocket::ModalPresentation& modal) {
+                return modal.id == rocket::ui::modals::launchOutcome;
+            });
+        assert(launchOutcomeModal != fixture.ui.presentation.modals.end());
+        assert(launchOutcomeModal->tone == rocket::ModalTone::Negative);
 
         fixture.ui.openModal(std::string(rocket::ui::modals::launchOutcome));
         fixture.ui.focusedIdValue = "action:next";

@@ -645,9 +645,11 @@ void rigTetherPullsTowardShip()
     mining.rigTethered = false;
     mining.operatorMode = MiningOperatorMode::Jetpack;
     mining.operatorPresent = true;
-    mining.operatorX = mining.returnZoneX + 0.5;
+    // Keep this input-contract check outside the shuttle's recovery radius;
+    // entering it with a live tow line now intentionally winches the rig home.
+    mining.operatorX = mining.returnZoneX + 6.0;
     mining.operatorY = mining.returnZoneY;
-    mining.droneX = mining.returnZoneX + 3.5;
+    mining.droneX = mining.returnZoneX + 9.0;
     mining.droneY = mining.returnZoneY;
     mining.artifact.present = true;
     mining.artifact.revealed = true;
@@ -672,6 +674,77 @@ void rigTetherPullsTowardShip()
     require(!mining.operatorRigTethered, "the shared tether input should release the EVA tow line");
 }
 
+void evaTetherFollowsAndRecoversAtShip()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x70A11E);
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::mars;
+    state.run.surfaceExpedition.sharedFuel = 4;
+    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    require(startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 8, 0x70A11E, true, MiningGateType::None},
+                false)
+                .applied,
+        "EVA surface towing test mining run should start");
+
+    MiningRunState& mining = state.run.mining;
+    mining.artifact = {};
+    const double towX = std::min(
+        mining.returnZoneX + 10.0,
+        static_cast<double>(mining.terrain.width - 4));
+    for (int y = 1; y <= 14; ++y) {
+        for (int x = static_cast<int>(std::floor(towX)) - 2;
+             x <= static_cast<int>(std::floor(towX)) + 2;
+             ++x) {
+            if (MiningCell* cell = miningCellAt(mining.terrain, x, y)) {
+                cell->material = MiningCellMaterial::Empty;
+                cell->suitOnlyPassage = false;
+            }
+        }
+    }
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = towX;
+    mining.operatorY = 6.0;
+    mining.droneX = towX;
+    mining.droneY = 10.5;
+    mining.rigDepthZone = mining.depthZone;
+    mining.operatorVelocityX = 0.0;
+    mining.operatorVelocityY = 0.0;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    toggleMiningTether(state);
+    require(mining.operatorRigTethered,
+        "EVA should attach to a functioning same-layer rig before towing");
+
+    setMiningMove(state, 0.0, -1.0);
+    for (int frame = 0; frame < 35; ++frame) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    setMiningMove(state, 0.0, 0.0);
+    const double followedDistance = std::hypot(
+        mining.droneX - mining.operatorX,
+        mining.droneY - mining.operatorY);
+    require(mining.droneY < 6.0 && followedDistance <= 3.0,
+        "a vertically towed rig should follow the EVA operator instead of leaving a stretched line at the top boundary");
+
+    mining.operatorX = mining.returnZoneX;
+    mining.operatorY = mining.returnZoneY;
+    mining.droneX = mining.returnZoneX + 5.0;
+    mining.droneY = mining.returnZoneY;
+    mining.rigDepthZone = mining.entryDepthZone;
+    mining.operatorRigTethered = true;
+    mining.cargo = 3;
+    mining.temporaryMaterials.common = 3;
+    const SurfaceActionOutcome recovery = finishMiningRun(state, catalog, false);
+    require(recovery.applied && recovery.cargoDelta == 3 && recovery.materialDelta.common == 3,
+        "Bank / Leave should winch a tethered same-layer rig into the shuttle and bank its payload");
+}
+
 } // namespace
 
 int main()
@@ -684,6 +757,7 @@ int main()
     thermalSiteRulesAreContentDriven();
     layeredCocoonsHonorAuthoredRevealPolicies();
     rigTetherPullsTowardShip();
+    evaTetherFollowsAndRecoversAtShip();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;
 }

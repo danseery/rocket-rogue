@@ -330,7 +330,8 @@ std::string autoModalTemplate(
     std::string_view title,
     std::string body,
     bool dismissible = true,
-    std::string_view closeAction = {})
+    std::string_view closeAction = {},
+    ModalTone tone = ModalTone::Neutral)
 {
     collectModal({
         std::string(modalId),
@@ -340,6 +341,7 @@ std::string autoModalTemplate(
         true,
         dismissible,
         true,
+        tone,
     });
     return {};
 }
@@ -3162,6 +3164,11 @@ std::string buildGamePanelMarkup(
             catalog,
             opensPostArrival);
         const LaunchOutcomeSummaryPresentation summary = launchOutcomeSummaryPresentation(state, catalog);
+        const ModalTone outcomeTone = state.lastOutcome.type == LaunchResultType::MissionComplete
+            ? ModalTone::Positive
+            : (state.lastOutcome.type == LaunchResultType::None
+                ? ModalTone::Neutral
+                : ModalTone::Negative);
         std::ostringstream report;
         report << crewFateCard(presentation.crewFate) << "<div class=\"result-grid rr-card-grid\">";
         for (const LaunchOutcomeMetricGroupPresentation& group : presentation.metricGroups) {
@@ -3198,7 +3205,13 @@ std::string buildGamePanelMarkup(
         // inherit the generic Close/Escape behaviour: the player needs to
         // deliberately choose Continue (or inspect the Flight Report) after
         // the flight has resolved.
-        out << autoModalTemplate(ui::modals::launchOutcome, summary.title, summaryBody.str(), false);
+        out << autoModalTemplate(
+            ui::modals::launchOutcome,
+            summary.title,
+            summaryBody.str(),
+            false,
+            {},
+            outcomeTone);
         out << modalTemplate(ui::modals::flightReport, "Flight Report", report.str());
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);

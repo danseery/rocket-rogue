@@ -653,7 +653,7 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         } else if (equippedCount < ownedCount) {
             action = panelActionButton("Assign", ui::actions::equipDrone(index), "ok");
         } else if (canAffordMaterials(state.meta.materials, additionalUnitCost)) {
-            action = panelActionButton(owned ? "Build + assign" : "Fabricate + assign", ui::actions::equipDrone(index), "ok");
+            action = panelActionButton("Fabricate", ui::actions::equipDrone(index), "ok");
             status += " / Build " + materialSummary(additionalUnitCost);
         } else {
             action = disabledPanelButton("Need " + materialSummary(additionalUnitCost));
