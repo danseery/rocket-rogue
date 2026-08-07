@@ -1051,7 +1051,7 @@
       const right = launchKeys.has("d") || launchKeys.has("arrowright");
       const up = launchKeys.has("w") || launchKeys.has("arrowup");
       const down = launchKeys.has("s") || launchKeys.has("arrowdown");
-      rr.launchMove((left ? 1 : 0) - (right ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
+      rr.launchMove((right ? 1 : 0) - (left ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
     }
 
     function isOrbitActive() {

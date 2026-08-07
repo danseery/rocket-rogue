@@ -54,8 +54,14 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(pointerDown[0], /if \(!isMiningActive\(\)\) return/);
 
   const keyDown = functionBody("handleRealtimeKeyDown");
+  const launchMove = functionBody("updateLaunchMove");
   assert.match(keyDown, /if \(isLaunchActive\(\)\)/);
   assert.match(keyDown, /launchKeys\.add\(key\)[\s\S]*updateLaunchMove\(\)/);
+  assert.match(
+    launchMove,
+    /rr\.launchMove\(\(right \? 1 : 0\) - \(left \? 1 : 0\)/,
+    "launch left/right keys must preserve the screen-space steering sign",
+  );
   assert.match(keyDown, /key === "c"[\s\S]*rr_cut_engines/);
   assert.match(keyDown, /key === "v"[\s\S]*rr_pressure_relief/);
   assert.match(keyDown, /if \(isFlybyActive\(\)\)/);

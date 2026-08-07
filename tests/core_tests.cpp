@@ -1435,6 +1435,15 @@ void skillBasedLaunchFlightIsStatefulRecoverableAndFair()
     require(cooling.selectedThrottle == tuning::launch::pilotingInitialThrottle,
         "cut engines should preserve the selected throttle for restoration");
 
+    LaunchFlightState steerLeft = beginLaunchFlight(controlled, jupiter);
+    LaunchFlightState steerRight = beginLaunchFlight(controlled, jupiter);
+    for (int frame = 0; frame < 12; ++frame) {
+        updateLaunchFlight(steerLeft, controlled, jupiter, {-1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+        updateLaunchFlight(steerRight, controlled, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
+    }
+    require(steerLeft.courseOffset < 0.0 && steerRight.courseOffset > 0.0,
+        "negative launch steering should move left and positive launch steering should move right");
+
     LaunchFlightState vented = beginLaunchFlight(controlled, jupiter);
     LaunchFlightState sealed = vented;
     vented.pressure = sealed.pressure = 0.82;

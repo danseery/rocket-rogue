@@ -1075,7 +1075,12 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 
 void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
 {
-    if (context == InputContext::Launch || context == InputContext::FlybyActive) {
+    if (context == InputContext::Launch) {
+        // Launch steering is lateral: negative moves toward the left side of
+        // the rendered corridor, matching the raw left-stick X convention.
+        controllerRealtimeInput_.moveX = input.moveX;
+        controllerRealtimeInput_.moveY = input.moveY;
+    } else if (context == InputContext::FlybyActive) {
         // Flyby steering is angular: its existing keyboard convention maps A
         // (left) to positive turn authority.
         controllerRealtimeInput_.moveX = -input.moveX;

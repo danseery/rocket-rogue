@@ -141,6 +141,7 @@ public:
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
         flybyInputY = snapshot.flybyInputY;
+        launchCourseOffset = snapshot.launchCourseOffset;
         surfacePushSteps = snapshot.surfacePushSteps;
         surfacePushMaterials = snapshot.surfacePushMaterials;
         surfacePushRewardMarkers = snapshot.surfacePushRewardMarkers;
@@ -201,6 +202,7 @@ public:
     double shipDamage = 0.0;
     double miningHeat = 0.0;
     double flybyInputY = 0.0;
+    double launchCourseOffset = 0.0;
     double miningViewChecksum = 0.0;
     int surfacePushSteps = 0;
     rocket::MaterialInventory surfacePushMaterials;
@@ -1780,6 +1782,35 @@ int main()
         fixture.runner.frame();
         assert(fixture.runner.app().inputContext() == rocket::InputContext::FlybyActive);
         assert(fixture.ui.cancelCount == 1);
+        fixture.runner.shutdown();
+    }
+
+    // Launch steering keeps the controller's screen-space X direction through
+    // routing and app dispatch: stick-left must move the ship left.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("new_game");
+        fixture.ui.dispatchAction("acknowledge_story_briefing");
+        fixture.runner.app().prepareForLaunch();
+        fixture.runner.app().startLaunch();
+        for (int frame = 0;
+             frame < 600 && fixture.runner.app().inputContext() != rocket::InputContext::Launch;
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
+
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.leftX = -0.80;
+        for (int frame = 0; frame < 12; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.launchCourseOffset < 0.0);
         fixture.runner.shutdown();
     }
 

@@ -630,6 +630,69 @@ void testPackedVertexConversion()
     assert(rocket::mergedSceneAtlasPage(0U, rocket::kNoSceneAtlasPage) == 0U);
 }
 
+void testLaunchDestinationGateUsesCorridorEndpoints()
+{
+    struct LineSegment {
+        SceneVertex start;
+        SceneVertex end;
+    };
+    const auto lineSegmentsWithColor = [](
+        const ScenePacket& packet,
+        float red,
+        float green,
+        float blue,
+        float alpha) {
+        std::vector<LineSegment> result;
+        for (const PackedSceneInstance& packed : packet.instances) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            if (instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r - red) < 0.01F
+                && std::abs(instance.color.g - green) < 0.01F
+                && std::abs(instance.color.b - blue) < 0.01F
+                && std::abs(instance.color.a - alpha) < 0.01F) {
+                result.push_back({
+                    {instance.centerX - instance.axisYx, instance.centerY - instance.axisYy},
+                    {instance.centerX + instance.axisYx, instance.centerY + instance.axisYy}
+                });
+            }
+        }
+        return result;
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    for (int destinationTier = 0; destinationTier <= 3; ++destinationTier) {
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Launch;
+        snapshot.destinationTier = destinationTier;
+        snapshot.launchCourseLimit = 1.2;
+
+        const ScenePacket& packet = composer.compose(snapshot);
+        const std::vector<LineSegment> destinationGate =
+            lineSegmentsWithColor(packet, 0.98F, 0.82F, 0.36F, 0.70F);
+        const std::vector<LineSegment> lostCourseBoundary =
+            lineSegmentsWithColor(packet, 1.0F, 0.25F, 0.20F, 0.32F);
+        assert(destinationGate.size() == 1U);
+        assert(!lostCourseBoundary.empty());
+
+        for (const SceneVertex& gateEndpoint : {
+                 destinationGate.front().start,
+                 destinationGate.front().end}) {
+            const bool touchesBoundary = std::any_of(
+                lostCourseBoundary.begin(),
+                lostCourseBoundary.end(),
+                [&](const LineSegment& boundary) {
+                    const auto touches = [&](const SceneVertex& boundaryVertex) {
+                        return std::abs(gateEndpoint.x - boundaryVertex.x) < 0.001F
+                            && std::abs(gateEndpoint.y - boundaryVertex.y) < 0.001F;
+                    };
+                    return touches(boundary.start) || touches(boundary.end);
+                });
+            assert(touchesBoundary);
+        }
+    }
+}
+
 void testManifestAndLogicalTextureMapping()
 {
     assert(rocket::kSceneAtlasTextures.size() == rocket::textureIndex(TextureId::Count));
@@ -2028,6 +2091,7 @@ int main()
     testCompletedFlybyAndOrbitUseFullscreenSceneSurface();
     testLogicalSceneClipScalesToFramebuffer();
     testPackedVertexConversion();
+    testLaunchDestinationGateUsesCorridorEndpoints();
     testManifestAndLogicalTextureMapping();
     testCampaignIntroductionDrawsHeroicCapybara();
     testPolygonInstanceMatchesTriangleFan();
