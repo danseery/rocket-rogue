@@ -27,7 +27,7 @@ Using the Surface Ops capture as the visual reference, show a compact left decis
 
 ### 03 - Launch/Flyby/Orbit live HUD, 1280x800
 
-Using the Launch capture as the visual reference, show a compact left live-flight rail and a separate complete launch scene. Exact labels: `OREBIT`, `LAUNCH`, `MAP`, `INV`, `MENU`, `Reach stable orbit`, `ALTITUDE`, `VELOCITY`, `PRESSURE`, `Stage 1`, `BOOST`, `VENT`, and `ABORT`. Keep one objective/progress line, exactly three live gauges, and no more than two primary immediate actions plus secondary Abort. Move global resources and extended telemetry out of persistent view.
+Using the Launch capture as the visual reference, show a compact left live-flight rail and a separate complete launch scene. Demonstrate one curriculum stage at a time: Fuel Survey uses `FUEL` and `TURN AROUND`; Controls adds `THROTTLE` plus the course corridor; Mars adds `TEMPERATURE` and `ENGINES OFF`; Jupiter adds `HULL` and the asteroid belt. Keep one objective line, no gauge that has not been taught, and no Pressure, Vent, Jettison, or manual Eject action. Move global resources and unrelated telemetry out of persistent view.
 
 ### 04 - Surface Scan/Push controls, 1280x800
 

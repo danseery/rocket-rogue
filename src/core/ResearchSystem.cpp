@@ -3626,7 +3626,7 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     scan.message = "Scanner lattice armed. Pulse 1 maps +0; later pulses preview deeper push layers.";
     state.run.surfaceScan = scan;
     state.screen = Screen::SurfaceScan;
-    outcome.message = "Scanner lattice armed. Map layers before deciding whether to use Push Deeper.";
+    outcome.message = "Scanner lattice armed. Survey levels before deciding where to Dig.";
     return outcome;
 }
 
@@ -3687,7 +3687,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     outcome.hazardDelta = scanHazardDelta;
     outcome.message = scan.pulses >= scan.maxPulses
         ? "Full spectrum scan complete. Bank the forecast before the window collapses."
-        : "Scan mapped layer +" + std::to_string(depthOffset) + ". Use Push Deeper to test that forecast.";
+        : "Survey mapped level +" + std::to_string(depthOffset) + ". Dig to make that level the Mining Rig's start point.";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
         scan.completed = true;
@@ -3723,7 +3723,7 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
         expedition.miningSitePrepared = true;
         outcome.hazardDelta = scan.hazardDelta;
         outcome.message = !scan.depthProspects.empty()
-            ? "Scan banked. Layer forecasts now line up with Push Deeper."
+            ? "Survey banked. Level forecasts now show what each Dig can reach."
             : "Scan banked. The crew found a clean mining line, but no strong payload.";
     }
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
@@ -3758,7 +3758,7 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
 
     outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
-        outcome.message = "Need two action kits to use Push Deeper.";
+        outcome.message = "Need two action kits to Dig.";
         return outcome;
     }
 
@@ -3785,7 +3785,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
     if (!push.active || push.completed) {
-        outcome.message = "Push Deeper is not active.";
+        outcome.message = "Dig is not active.";
         return outcome;
     }
 
@@ -3798,7 +3798,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
         outcome.hazardTriggered = true;
         outcome.hazardMessage = "A shelf collapsed across the descent lane.";
         outcome.hazardDelta = tuning::research::pushCollapseHazardIncrease;
-        outcome.message = "Push Deeper busted. The route collapsed before the crew could bank it.";
+        outcome.message = "Dig failed. The tunnel collapsed before the crew could secure the new start depth.";
         push.message = surfaceActionSummary(outcome);
         appendSurfaceLog(expedition, push.message);
         return outcome;

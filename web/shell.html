@@ -334,7 +334,7 @@
       <div class="debug-act-one-actions">
         <button type="button" data-debug-action="act-one-previous" data-debug-act-one-previous disabled>Previous</button>
         <button type="button" data-debug-action="act-one-next" data-debug-act-one-next disabled>Next</button>
-        <button class="warn" type="button" data-debug-action="act-one-start">Start at Earth Orbit</button>
+        <button class="warn" type="button" data-debug-action="act-one-start">Start at Moon training</button>
       </div>
     </section>
 
@@ -446,7 +446,7 @@
           <button type="button" data-debug-action="research">Research board</button>
           <button type="button" data-debug-action="refit">Refit board</button>
           <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
-          <button class="danger" type="button" data-debug-action="push">Push Deeper sandbox</button>
+          <button class="danger" type="button" data-debug-action="push">Dig sandbox</button>
           <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
         </div>
       </section>
@@ -614,6 +614,12 @@
       debugTools.classList.toggle("is-visible", sessionOverride || debugToolsVisible());
     }
 
+    function requestedDebugLaunchLesson() {
+      const rawValue = new URLSearchParams(window.location.search).get("debug_launch_lesson");
+      if (rawValue === null || !/^[0-3]$/.test(rawValue)) return null;
+      return Number(rawValue);
+    }
+
     function normalizedControllerPreferences(value = {}) {
       const promptFamilies = ["auto", "generic", "xbox", "playstation", "steamdeck"];
       const promptFamily = promptFamilies.includes(value.promptFamily) ? value.promptFamily : "auto";
@@ -767,7 +773,6 @@
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
       launchMove: (steerAxis, throttleAxis) => rrCall("rr_launch_move", [steerAxis, throttleAxis], ["number", "number"]),
-      ejectNow: () => rrCall("rr_eject_now"),
       returnHome: () => rrCall("rr_return_home"),
       skipArrivalFanfare: () => rrCall("rr_skip_arrival_fanfare"),
       flybyMove: (xAxis, yAxis) => rrCall("rr_flyby_move", [xAxis, yAxis], ["number", "number"]),
@@ -813,6 +818,11 @@
       debugActOnePrevious: () => rrCall("rr_debug_act_one_previous"),
       debugActOneNext: () => rrCall("rr_debug_act_one_next"),
       debugActOneCheckpoint: () => rrCall("rr_debug_act_one_checkpoint", [], [], "number"),
+      debugLaunchLesson: (lessonIndex) => rrCall(
+        "rr_debug_launch_lesson",
+        [lessonIndex],
+        ["number"]),
+      debugExit: () => rrCall("rr_debug_exit"),
       rmlMouseMove: (x, y) => rrCall("rr_rml_mouse_move", [x, y], ["number", "number"], "number") === 1,
       rmlMouseDown: (x, y, button) => rrCall("rr_rml_mouse_down", [x, y, button], ["number", "number", "number"], "number") === 1,
       rmlMouseUp: (x, y, button) => rrCall("rr_rml_mouse_up", [x, y, button], ["number", "number", "number"], "number") === 1,
@@ -823,7 +833,7 @@
     };
 
     const debugActOneLabels = Object.freeze([
-      "1/7 Earth Orbit / Proving Mission",
+      "1/7 Moon / Fuel Training",
       "2/7 Moon",
       "3/7 Mars",
       "4/7 Jupiter",
@@ -1124,12 +1134,8 @@
           updateLaunchMove();
         } else if (!event.repeat && key === "r") {
           rr.returnHome();
-        } else if (!event.repeat && key === "e") {
-          rr.ejectNow();
         } else if (!event.repeat && key === "c") {
           rrCall("rr_cut_engines");
-        } else if (!event.repeat && key === "v") {
-          rrCall("rr_pressure_relief");
         } else {
           return false;
         }
@@ -1318,11 +1324,6 @@
           event.preventDefault();
           return;
         }
-        if (key === "e") {
-          rr.ejectNow();
-          event.preventDefault();
-          return;
-        }
       }
       handleRmlUiKey(event);
     });
@@ -1343,6 +1344,8 @@
         window.setTimeout(() => {
           refreshDebugMiningPreview();
           syncDebugActOneControls();
+          const lessonIndex = requestedDebugLaunchLesson();
+          if (lessonIndex !== null) window.rr.debugLaunchLesson(lessonIndex);
         }, 0);
       },
       locateFile(path, prefix) {

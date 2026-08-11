@@ -628,7 +628,8 @@ void routerMapsEveryGameplayContext()
     frame.pressed.set(index(ControllerButton::North));
     input = router.route(InputContext::Launch, frame, preferences);
     require(input.has(GameInputAction::ToggleEngines), "West should toggle engines during launch");
-    require(input.has(GameInputAction::TogglePressureRelief), "North should toggle pressure relief during launch");
+    require(input.actions.count() == 1,
+        "launch should expose only the engine toggle; the retired pressure control must not route");
 
     router.reset();
     frame = routedFrame();
@@ -958,14 +959,14 @@ void routerHonorsConfirmSwapAndRealTimeHolds()
     require(!input.has(GameInputAction::Abort), "a held action should fire only once");
 
     input = router.route(InputContext::Launch, frame, preferences);
-    require(!input.has(GameInputAction::Eject), "a hold carried into another context must remain suppressed until release");
+    require(input.actions.none(), "a hold carried into launch must not trigger a removed manual-eject action");
     frame.down.reset(index(ControllerButton::East));
     frame.heldSeconds[index(ControllerButton::East)] = 0.0;
     router.route(InputContext::Launch, frame, preferences);
     frame.down.set(index(ControllerButton::East));
     frame.heldSeconds[index(ControllerButton::East)] = 0.75;
     input = router.route(InputContext::Launch, frame, preferences);
-    require(input.has(GameInputAction::Eject), "a fresh 750ms East hold should eject during launch");
+    require(input.actions.none(), "East must remain unbound during launch now that manual eject is removed");
 }
 
 } // namespace

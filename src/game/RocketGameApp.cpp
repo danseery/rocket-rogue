@@ -6,7 +6,6 @@
 #include "core/GameText.h"
 #include "core/GameMath.h"
 #include "core/LaunchPresentation.h"
-#include "core/LaunchStatus.h"
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
@@ -28,6 +27,8 @@
 namespace rocket {
 namespace {
 
+constexpr double asteroidImpactFeedbackDuration = 0.32;
+
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
 struct DebugActOneCheckpoint {
@@ -36,7 +37,7 @@ struct DebugActOneCheckpoint {
 };
 
 constexpr std::array<DebugActOneCheckpoint, 7> kDebugActOneCheckpoints {{
-    {"Earth Orbit / Proving Mission", content::destination::earthOrbit},
+    {"Moon / Fuel Training", content::destination::moon},
     {"Moon", content::destination::moon},
     {"Mars", content::destination::mars},
     {"Jupiter", content::destination::jupiter},
@@ -70,11 +71,11 @@ LaunchOutcome debugTransferOutcome(std::string destinationId)
     outcome.payout = 260.0;
     outcome.blueprintGain = 3;
     outcome.peakWarning = 0.38;
-    outcome.peakAbortRisk = 0.24;
+    outcome.peakAbortRisk = 0.0;
     outcome.telemetry = {
-        {1.0, 0.12, 0.10, 0.05, 0.92, 0.86, 0.04, 0.0, 0.10, 0.12, "Debug launch nominal."},
-        {1.7, 0.32, 0.24, 0.20, 0.72, 0.70, 0.12, 0.0, 0.18, 0.28, "Transfer burn committed."},
-        {2.4, 0.46, 0.36, 0.30, 0.44, 0.62, 0.24, 0.0, 0.26, 0.38, "Arrival corridor reached."}
+        {1.0, 0.12, 0.10, 0.05, 0.0, 0.86, 0.0, 0.0, 0.10, 0.12, "Debug launch nominal."},
+        {1.7, 0.32, 0.24, 0.20, 0.0, 0.70, 0.0, 0.0, 0.18, 0.28, "Transfer burn committed."},
+        {2.4, 0.46, 0.36, 0.30, 0.0, 0.62, 0.0, 0.0, 0.26, 0.38, "Arrival corridor reached."}
     };
     return outcome;
 }
@@ -146,14 +147,12 @@ std::vector<TelemetryEvent> chartTelemetryForOutcome(
         sample.currentMultiplier = 1.0 + (finalFlight.peakMultiplier - 1.0) * routeShape;
         sample.heat = tuning::launch::pilotingHeatInitial +
             (finalFlight.heat - tuning::launch::pilotingHeatInitial) * t;
-        sample.pressure = tuning::launch::pilotingPressureInitial +
-            (finalFlight.pressure - tuning::launch::pilotingPressureInitial) * t;
         sample.courseOffset = finalFlight.courseOffset * t;
         sample.fuelRemaining = sample.fuelCapacity -
             (sample.fuelCapacity - finalFlight.fuelRemaining) * t;
         sample.heatFailureSeconds = finalFlight.heatFailureSeconds * t;
-        sample.pressureFailureSeconds = finalFlight.pressureFailureSeconds * t;
         sample.courseFailureSeconds = finalFlight.courseFailureSeconds * t;
+        sample.fuelFailureSeconds = finalFlight.fuelFailureSeconds * t;
         telemetry.push_back(launchTelemetryAt(launch, sample));
     }
     return telemetry;
@@ -350,13 +349,12 @@ RocketGameApp::RocketGameApp(AppServices& services)
 
 PreparedLaunch RocketGameApp::currentFlightModel() const
 {
-    return applyFlightActions(session_.preparedLaunch, session_.controls.actions);
+    return session_.preparedLaunch;
 }
 
 void RocketGameApp::recordTelemetryPeak(const TelemetryEvent& event)
 {
     session_.peakWarning = std::max(session_.peakWarning, event.warning);
-    session_.peakAbortRisk = std::max(session_.peakAbortRisk, event.abortRisk);
 }
 
 void RocketGameApp::clearFlightControls()
@@ -430,9 +428,10 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.elapsed = 0.0;
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
-    session_.peakAbortRisk = 0.0;
     session_.steerInput = 0.0;
     session_.throttleInput = 0.0;
+    session_.asteroidImpactFeedbackSeconds = 0.0;
+    session_.lunarImpact = {};
     clearFlightControls();
     clearResultView();
     session_.arrivalFanfare = {};
@@ -465,6 +464,16 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     if (const auto saveData = deserializeSaveData(services_.saves.load())) {
         restoreSaveData(state_, catalog_, *saveData);
         rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
+        const bool staleCompatibilityOffer = std::any_of(
+            state_.run.offerModuleIds.begin(),
+            state_.run.offerModuleIds.end(),
+            [&](const std::string& moduleId) {
+                const ShipModule* module = catalog_.findModule(moduleId);
+                return module != nullptr && module->compatibilityOnly;
+            });
+        if (staleCompatibilityOffer && state_.run.refitEntitled) {
+            generateModuleOffers(state_, catalog_, rng_);
+        }
         state_.statusLine = std::string(text::status::saveRestored);
         hasSavedGame_ = true;
     }
@@ -638,7 +647,9 @@ InputContext RocketGameApp::gameplayInputContext() const
     }
     switch (state_.screen) {
     case Screen::Launch:
-        return session_.flightArmed ? InputContext::Launch : InputContext::Preflight;
+        return session_.lunarImpact.active
+            ? InputContext::Stamp
+            : (session_.flightArmed ? InputContext::Launch : InputContext::Preflight);
     case Screen::Results:
     case Screen::ArrivalFanfare:
     case Screen::StoryBriefing:
@@ -728,10 +739,7 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::OpenInventory: return "open_inventory";
     case GameInputAction::StartOrContinue: return "start_or_continue";
     case GameInputAction::ReturnHome: return "return_home";
-    case GameInputAction::Eject: return "eject";
     case GameInputAction::ToggleEngines: return "toggle_engines";
-    case GameInputAction::TogglePressureRelief: return "toggle_pressure_relief";
-    case GameInputAction::JettisonCargo: return "jettison_cargo";
     case GameInputAction::Abort: return "abort";
     case GameInputAction::PrimarySurfaceAction: return "surface_primary";
     case GameInputAction::BankSurfaceAction: return "surface_bank";
@@ -1000,21 +1008,8 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::ReturnHome:
         returnHome();
         break;
-    case GameInputAction::Eject:
-        ejectNow();
-        break;
     case GameInputAction::ToggleEngines:
         cutEngines();
-        break;
-    case GameInputAction::TogglePressureRelief:
-        if (session_.controls.actions.pressureReliefOpen && !session_.controls.actions.pressureReliefFailed) {
-            closePressureReliefValve();
-        } else {
-            pressureReliefValve();
-        }
-        break;
-    case GameInputAction::JettisonCargo:
-        jettisonCargo();
         break;
     case GameInputAction::Abort:
         if (context == InputContext::FlybyActive) {
@@ -1352,6 +1347,26 @@ void RocketGameApp::tick(double deltaSeconds)
     }
 
     if (state_.screen == Screen::Launch) {
+        if (session_.lunarImpact.active) {
+            const double clampedDelta = std::clamp(
+                deltaSeconds,
+                0.0,
+                tuning::launch::maxFrameStepSeconds);
+            session_.lunarImpact.elapsed = std::min(
+                session_.lunarImpact.elapsed + clampedDelta,
+                tuning::session::lunarImpactSequenceSeconds);
+            if (session_.lunarImpact.elapsed >= tuning::session::lunarImpactSequenceSeconds) {
+                const double burnMultiplier = session_.lunarImpact.burnMultiplier;
+                session_.lunarImpact.active = false;
+                completeLaunch(
+                    burnMultiplier,
+                    RecoveryMethod::None,
+                    LaunchFailureCause::LunarImpact);
+            } else {
+                realtimeHudDirty_ = true;
+            }
+            return;
+        }
         if (!session_.flightArmed) {
             const bool wasReady = session_.preflightElapsed >= tuning::session::preflightBoardingSeconds;
             session_.preflightElapsed = std::min(
@@ -1372,6 +1387,9 @@ void RocketGameApp::tick(double deltaSeconds)
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
 
         const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+        session_.asteroidImpactFeedbackSeconds = std::max(
+            0.0,
+            session_.asteroidImpactFeedbackSeconds - clampedDelta);
         const LaunchFlightStep step = updateLaunchFlight(
             session_.flight,
             session_.preparedLaunch,
@@ -1380,33 +1398,33 @@ void RocketGameApp::tick(double deltaSeconds)
                 session_.steerInput,
                 session_.throttleInput,
                 session_.controls.actions.cutEnginesActive,
-                session_.controls.actions.pressureReliefOpen,
             },
             clampedDelta);
         session_.elapsed += clampedDelta;
         session_.currentMultiplier = session_.flight.currentMultiplier;
         const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
         recordTelemetryPeak(event);
+        if (step.asteroidHit) {
+            session_.asteroidImpactFeedbackSeconds = asteroidImpactFeedbackDuration;
+        }
 
-        if (step.failed) {
+        if (step.failed && step.failureCause == LaunchFailureCause::LunarImpact) {
+            beginLunarImpactCinematic();
+        } else if (step.failed) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::None, step.failureCause);
         } else if (step.reachedHome) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ReturnHome);
         } else if (step.reachedDestination && session_.preparedLaunch.config.frontierTransfer) {
             completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
+        } else if (step.asteroidHit) {
+            state_.statusLine = "ASTEROID IMPACT \xE2\x80\x94 HULL " +
+                display::fixed(std::max(0.0, session_.flight.hullRemaining), 0) + " / " +
+                display::fixed(session_.flight.hullMaximum, 0) + " HP";
         } else {
-            const bool pastDataGoal = !session_.preparedLaunch.config.frontierTransfer &&
-                session_.flight.peakMultiplier >= session_.preparedLaunch.config.burnGoalMultiplier;
-            state_.statusLine = launchStatusLine({
-                event,
-                session_.controls.actions,
-                session_.preparedLaunch.config.frontierTransfer,
-                arkDiscovered(state_),
-                false,
-                pastDataGoal,
-                session_.flight.returningHome ? 1.0 - session_.flight.travelProgress : 0.0,
-                launchUsesOuterExpeditionRecovery(catalog_, destination)
-            });
+            state_.statusLine = launchStatusMessage(
+                session_.preparedLaunch,
+                session_.flight,
+                session_.controls.actions);
         }
 
         if (state_.screen == Screen::Launch) {
@@ -1548,20 +1566,40 @@ void RocketGameApp::prepareForLaunch()
         return;
     }
 
+    syncLaunchConfig(state_, catalog_);
+    const Destination& currentFrontier = currentDestination(state_, catalog_);
+    const bool hiddenStarterOrigin = currentFrontier.hiddenFromProgression;
+    if (hiddenStarterOrigin && !launchMissionReady(state_, catalog_)) {
+        state_.statusLine = "Install the required launch upgrade before this mission.";
+        refreshPanel();
+        return;
+    }
+
     if (!ui::briefings::acknowledged(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch)) {
         ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
         // Persist while the campaign is still safely in the Hangar. Active
         // launch sessions are intentionally not restored from save data.
         save();
     }
+    if (state_.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration) {
+        ui::briefings::acknowledge(
+            state_.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::flightControlsCalibration);
+        // Store the acknowledgement while there is still no active flight to
+        // restore. This also covers keyboard/controller activation.
+        save();
+    }
 
     state_.run.active = true;
-    syncLaunchConfig(state_, catalog_);
-    state_.launchConfig.frontierTransfer = hostileSystemActive(state_);
-    state_.launchConfig.destinationId = currentDestination(state_, catalog_).id;
-    state_.launchConfig.burnGoalMultiplier = state_.launchConfig.frontierTransfer
-        ? currentDestination(state_, catalog_).targetMultiplier
-        : defaultProvingTarget(currentDestination(state_, catalog_));
+    if (!hiddenStarterOrigin) {
+        state_.launchConfig.frontierTransfer =
+            hostileSystemActive(state_) || launchStageUsesArrival(state_.meta.launchLessons.stage);
+        state_.launchConfig.missionKind = LaunchMissionKind::Standard;
+        state_.launchConfig.destinationId = currentFrontier.id;
+        state_.launchConfig.burnGoalMultiplier = state_.launchConfig.frontierTransfer
+            ? currentFrontier.targetMultiplier
+            : defaultProvingTarget(currentFrontier);
+    }
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
@@ -1591,22 +1629,15 @@ void RocketGameApp::startLaunch()
 
     session_.launchQueued = false;
     session_.flightArmed = true;
-    const Destination* activeDestination =
-        catalog_.findDestination(session_.preparedLaunch.config.destinationId);
-    const Destination& destination = activeDestination == nullptr
-        ? currentDestination(state_, catalog_)
-        : *activeDestination;
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
-        : text::status::provingBurnStartedForHome(
-              arkDiscovered(state_),
-              launchUsesOuterExpeditionRecovery(catalog_, destination));
+        : std::string(text::status::provingBurnStarted);
     refreshPanel();
 }
 
 void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.lunarImpact.active) {
         return;
     }
     keyboardRealtimeInput_.moveX = std::clamp(steerAxis, -1.0, 1.0);
@@ -1614,18 +1645,10 @@ void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
     applyRealtimeInputs();
 }
 
-void RocketGameApp::ejectNow()
-{
-    if (state_.screen != Screen::Launch || !session_.flightArmed) {
-        return;
-    }
-    recordTelemetryPeak(launchTelemetryAt(currentFlightModel(), session_.flight));
-    completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ManualEject);
-}
-
 void RocketGameApp::returnHome()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed ||
+        session_.lunarImpact.active || session_.controls.actions.returningHome) {
         return;
     }
 
@@ -1672,7 +1695,8 @@ void RocketGameApp::acknowledgeStoryBriefing()
 
 void RocketGameApp::cutEngines()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed) {
+    if (state_.screen != Screen::Launch || !session_.flightArmed ||
+        session_.lunarImpact.active || !session_.preparedLaunch.heatEnabled) {
         return;
     }
 
@@ -1680,51 +1704,6 @@ void RocketGameApp::cutEngines()
     state_.statusLine = session_.controls.actions.cutEnginesActive
         ? std::string(text::status::engineCutConfirmed)
         : std::string(text::status::thrustRestored);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::pressureReliefValve()
-{
-    if (state_.screen != Screen::Launch || !session_.flightArmed) {
-        return;
-    }
-    if (session_.controls.actions.pressureReliefOpen) {
-        closePressureReliefValve();
-        return;
-    }
-    if (session_.flight.valveToggleCooldown > 0.0) {
-        return;
-    }
-    session_.controls.pressureReliefUsed = true;
-    session_.controls.actions.pressureReliefOpen = true;
-    session_.flight.valveToggleCooldown = tuning::launch::pilotingValveToggleCooldown;
-    state_.statusLine = std::string(text::status::pressureReliefOpened);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::closePressureReliefValve()
-{
-    if (state_.screen != Screen::Launch ||
-        !session_.flightArmed ||
-        !session_.controls.actions.pressureReliefOpen ||
-        session_.flight.valveToggleCooldown > 0.0) {
-        return;
-    }
-
-    session_.controls.actions.pressureReliefOpen = false;
-    session_.flight.valveToggleCooldown = tuning::launch::pilotingValveToggleCooldown;
-    state_.statusLine = std::string(text::status::pressureReliefClosed);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::jettisonCargo()
-{
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.controls.actions.cargoJettisoned) {
-        return;
-    }
-
-    session_.controls.actions.cargoJettisoned = true;
-    state_.statusLine = std::string(text::status::cargoJettisoned);
     panelDirty_ = true;
 }
 
@@ -2908,7 +2887,7 @@ void RocketGameApp::debugStartSurfaceScan()
 
 void RocketGameApp::debugStartSurfacePush()
 {
-    beginDebugSandbox("Debug Push Deeper sandbox. No materials, artifacts, or save data will be written.");
+    beginDebugSandbox("Debug Dig sandbox. No materials, artifacts, or save data will be written.");
     state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
     state_.run.surfaceExpedition = {};
     state_.run.surfaceExpedition.active = true;
@@ -2925,7 +2904,7 @@ void RocketGameApp::debugStartSurfacePush()
     state_.run.surfaceExpedition.depthProspects.push_back(artifactForecast);
     const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
     state_.statusLine = outcome.applied
-        ? "Debug Push Deeper sandbox. Descend, bank, or collapse without touching your save."
+        ? "Debug Dig sandbox. Tunnel, secure the start depth, or collapse without touching your save."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -2988,6 +2967,8 @@ void RocketGameApp::debugShowResearch()
 void RocketGameApp::debugShowRefit()
 {
     beginDebugSandbox("Debug Refit board. No save data will be written.");
+    state_.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    seedDebugResearchAccess(state_);
     state_.run.refitEntitled = true;
     state_.run.credits = std::max(state_.run.credits, 100.0);
     generateModuleOffers(state_, catalog_, rng_);
@@ -3091,6 +3072,68 @@ int RocketGameApp::debugActOneCheckpoint() const
     return debugActOneCheckpoint_;
 }
 
+void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
+{
+    if (lessonIndex < 0 || lessonIndex > 3) {
+        return;
+    }
+
+    static constexpr std::array<std::string_view, 4> lessonLabels {
+        "Fuel Survey",
+        "Flight Controls Calibration",
+        "Thermal Qualification",
+        "Asteroid Belt Survey"};
+
+    beginDebugSandbox("Debug launch lesson. No progress, rewards, or save data will be written.");
+    state_.meta.campaignIntroductionAcknowledged = true;
+    state_.meta.launchUpgrades = {};
+
+    std::string_view currentDestinationId = content::destination::earthOrbit;
+    switch (lessonIndex) {
+    case 0:
+        state_.meta.launchLessons.stage = LaunchTrainingStage::FuelCalibration;
+        state_.meta.chapter = GameChapter::ProvingGround;
+        state_.meta.furthestTier = 0;
+        break;
+    case 1:
+        state_.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+        state_.meta.launchUpgrades.fuelTanks = 1;
+        state_.meta.chapter = GameChapter::ProvingGround;
+        state_.meta.furthestTier = 0;
+        break;
+    case 2:
+        state_.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+        state_.meta.launchUpgrades.fuelTanks = 2;
+        state_.meta.launchUpgrades.flightControls = 1;
+        state_.meta.chapter = GameChapter::LunarProgram;
+        state_.meta.furthestTier = 1;
+        currentDestinationId = content::destination::moon;
+        addDebugUnlock(state_, content::unlock::routeMars);
+        break;
+    case 3:
+        state_.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+        state_.meta.launchUpgrades.fuelTanks = 3;
+        state_.meta.launchUpgrades.flightControls = 1;
+        state_.meta.chapter = GameChapter::RedFrontier;
+        state_.meta.furthestTier = 2;
+        currentDestinationId = content::destination::mars;
+        addDebugUnlock(state_, content::unlock::routeMars);
+        addDebugUnlock(state_, content::unlock::routeJupiter);
+        break;
+    }
+
+    state_.run.destinationIndex = destinationIndexForId(catalog_, currentDestinationId);
+    syncLaunchConfig(state_, catalog_);
+    beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+    session_.flightArmed = true;
+    state_.screen = Screen::Launch;
+    state_.statusLine = "Debug launch lesson " + std::to_string(lessonIndex + 1) +
+        "/4: " + std::string(lessonLabels[static_cast<std::size_t>(lessonIndex)]) +
+        ". Real save remains untouched.";
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
+}
+
 void RocketGameApp::applyDebugActOneCheckpoint()
 {
     debugActOneCheckpoint_ = std::clamp(
@@ -3179,7 +3222,17 @@ void RocketGameApp::attemptFrontierTransfer()
         return;
     }
 
-    if (!canCommitToNextFrontier(state_, catalog_)) {
+    syncLaunchConfig(state_, catalog_);
+    if (!launchMissionReady(state_, catalog_)) {
+        state_.statusLine = "Install the required launch upgrade before this route attempt.";
+        refreshPanel();
+        return;
+    }
+
+    const bool qualificationFlight =
+        state_.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
+        !state_.launchConfig.frontierTransfer;
+    if (!qualificationFlight && !canCommitToNextFrontier(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next == nullptr ? std::string(text::status::noFartherFrontier) : std::string(text::status::moreProvingDataBeforeTransfer);
         refreshPanel();
@@ -3193,9 +3246,11 @@ void RocketGameApp::attemptFrontierTransfer()
         return;
     }
 
-    state_.launchConfig.frontierTransfer = true;
-    state_.launchConfig.destinationId = next->id;
-    state_.launchConfig.burnGoalMultiplier = next->targetMultiplier;
+    if (state_.meta.launchLessons.stage == LaunchTrainingStage::Complete) {
+        state_.launchConfig.frontierTransfer = true;
+        state_.launchConfig.destinationId = next->id;
+        state_.launchConfig.burnGoalMultiplier = next->targetMultiplier;
+    }
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
     state_.screen = Screen::Launch;
@@ -3247,12 +3302,13 @@ void RocketGameApp::selectNavigationDestination(int index)
 
 void RocketGameApp::selectRefitOffer(int index)
 {
-    if (state_.screen == Screen::Upgrade && index >= 0 && index < 3) {
+    if (state_.screen == Screen::Upgrade && index >= 0) {
         selectedRefitOfferIndex_ = index;
         const RefitWindowPresentation refitWindow = refitWindowPresentation(state_, catalog_);
         if (static_cast<std::size_t>(index) < refitWindow.offers.size() &&
             refitWindow.offers[static_cast<std::size_t>(index)].affordable) {
-            services_.ui.requestFocus("action:" + ui::actions::buyOffer(index));
+            services_.ui.requestFocus(
+                "action:" + refitWindow.offers[static_cast<std::size_t>(index)].action.actionId);
         }
         panelDirty_ = true;
     }
@@ -3266,6 +3322,22 @@ void RocketGameApp::buyOffer(int index)
     if (rocket::buyOffer(state_, catalog_, index)) {
         selectedRefitOfferIndex_ = 0;
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::installLaunchUpgrade(LaunchUpgradeKind kind)
+{
+    if ((state_.screen != Screen::Hangar && state_.screen != Screen::Upgrade) ||
+        kind == LaunchUpgradeKind::None) {
+        return;
+    }
+    if (rocket::installLaunchUpgrade(state_, catalog_, kind)) {
+        selectedRefitOfferIndex_ = 0;
+        if (state_.screen == Screen::Upgrade) {
+            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        }
         save();
     }
     panelDirty_ = true;
@@ -3454,8 +3526,11 @@ bool RocketGameApp::uiNavigate(UiDirection direction)
     }
 
     int offerIndex = 0;
+    const RefitWindowPresentation refitWindow = refitWindowPresentation(state_, catalog_);
     if (consumeIndexedAction(services_.ui.focusedId(), "refit-offer:", offerIndex) &&
-        offerIndex >= 0 && offerIndex < 3 && offerIndex != selectedRefitOfferIndex_) {
+        offerIndex >= 0 &&
+        static_cast<std::size_t>(offerIndex) < refitWindow.offers.size() &&
+        offerIndex != selectedRefitOfferIndex_) {
         selectedRefitOfferIndex_ = offerIndex;
         panelDirty_ = true;
     }
@@ -3470,6 +3545,25 @@ bool RocketGameApp::uiActivateFocused()
 bool RocketGameApp::uiCancel()
 {
     return services_.ui.cancel();
+}
+
+void RocketGameApp::beginLunarImpactCinematic()
+{
+    if (session_.lunarImpact.active) {
+        return;
+    }
+
+    session_.lunarImpact = {
+        true,
+        0.0,
+        session_.flight.peakMultiplier,
+    };
+    releaseRealtimeInputs(true);
+    session_.controls.actions.cutEnginesActive = false;
+    state_.statusLine = "LUNAR IMPACT \xE2\x80\x94 UNCALIBRATED LANDING";
+    queueControllerHapticCue(ControllerHapticCue::Failure);
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
 }
 
 void RocketGameApp::completeLaunch(
@@ -3488,14 +3582,14 @@ void RocketGameApp::completeLaunch(
         burnMultiplier,
         method,
         rng_,
-        {true, failureCause, session_.flight.minimumSafetyMargin});
+        {true, failureCause, session_.flight.minimumSafetyMargin, session_.flight.hullDamageTaken});
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
-    outcome.peakAbortRisk = std::max(outcome.peakAbortRisk, session_.peakAbortRisk);
     outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, wasReturningHome);
     if (!outcome.telemetry.empty()) {
         outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);
     }
     applyLaunchOutcome(state_, catalog_, outcome);
+    session_.lunarImpact.active = false;
     if (shouldOpenArrivalOps(outcome, catalog_)) {
         if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
             // Neptune is the one arrival whose ordinary fanfare gives way to a
@@ -3510,7 +3604,6 @@ void RocketGameApp::completeLaunch(
     }
     session_.currentMultiplier = outcome.ejectMultiplier;
     session_.peakWarning = 0.0;
-    session_.peakAbortRisk = 0.0;
     session_.result.usesTravelProgress = wasReturningHome;
     session_.result.travelProgress = frozenTravelProgress;
     session_.result.elapsed = 0.0;
@@ -3545,7 +3638,6 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         session_.controls.actions,
         session_.flightArmed,
         session_.launchQueued,
-        session_.controls.pressureReliefUsed,
         session_.preflightElapsed >= tuning::session::preflightBoardingSeconds,
         miningDroneTransferEnabled(state_),
         debugActOneCheckpoint_,
@@ -3793,6 +3885,11 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectRefitOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
         buyOffer(index);
+    } else if (consumeIndexedAction(action, ui::actions::installLaunchUpgradePrefix, index)) {
+        if (index >= static_cast<int>(LaunchUpgradeKind::FuelTanks) &&
+            index <= static_cast<int>(LaunchUpgradeKind::Hull)) {
+            installLaunchUpgrade(static_cast<LaunchUpgradeKind>(index));
+        }
     } else if (consumeIndexedAction(action, ui::actions::researchProjectPrefix, index)) {
         selectResearchProject(index);
     } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {
@@ -3813,8 +3910,6 @@ void RocketGameApp::runUiAction(const std::string& action)
         prepareForLaunch();
     } else if (action == ui::actions::startLaunch) {
         startLaunch();
-    } else if (action == ui::actions::ejectNow) {
-        ejectNow();
     } else if (action == ui::actions::returnHome) {
         returnHome();
     } else if (action == ui::actions::arrivalOps) {
@@ -3825,12 +3920,6 @@ void RocketGameApp::runUiAction(const std::string& action)
         acknowledgeStoryBriefing();
     } else if (action == ui::actions::cutEngines) {
         cutEngines();
-    } else if (action == ui::actions::pressureRelief) {
-        pressureReliefValve();
-    } else if (action == ui::actions::closeReliefValve) {
-        closePressureReliefValve();
-    } else if (action == ui::actions::jettisonCargo) {
-        jettisonCargo();
     } else if (action == ui::actions::next) {
         next();
     } else if (action == ui::actions::attemptFrontier) {
@@ -3922,10 +4011,15 @@ RenderSnapshot RocketGameApp::snapshot() const
     const PreparedLaunch flightModel = currentFlightModel();
     result.screen = state_.screen;
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
+    result.lastLaunchFailureCause = state_.screen == Screen::Results
+        ? state_.lastOutcome.failureCause
+        : LaunchFailureCause::None;
     result.currentMultiplier = session_.currentMultiplier;
     result.animationTime = session_.result.elapsed;
     if (state_.screen == Screen::Launch) {
-        result.animationTime = session_.flightArmed ? session_.elapsed : session_.preflightElapsed;
+        result.animationTime = session_.lunarImpact.active
+            ? session_.lunarImpact.elapsed
+            : (session_.flightArmed ? session_.elapsed : session_.preflightElapsed);
     } else if (state_.screen == Screen::Mining) {
         result.animationTime = miningExtraction_.active ? miningExtraction_.elapsed : state_.run.mining.elapsedSeconds;
     } else if (state_.screen == Screen::Flyby) {
@@ -3974,6 +4068,11 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
     if (state_.screen == Screen::Launch) {
+        result.launchMissionTargetProgress = std::clamp(
+            (flightModel.config.burnGoalMultiplier - 1.0) /
+                std::max(0.01, visualDestination->targetMultiplier - 1.0),
+            0.0,
+            1.0);
         result.travelProgress = session_.flightArmed ? session_.flight.travelProgress : 0.0;
         result.returningHome = session_.flight.returningHome;
         result.returnTurnProgress = result.returningHome ? 1.0 : 0.0;
@@ -4167,6 +4266,31 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
 
     if (state_.screen == Screen::Launch) {
+        result.launchLunarImpactActive = session_.lunarImpact.active;
+        result.launchLunarImpactElapsed = session_.lunarImpact.elapsed;
+        result.launchManualControlsEnabled = flightModel.manualControlsEnabled;
+        result.launchHeatEnabled = flightModel.heatEnabled;
+        result.launchAsteroidsEnabled = flightModel.asteroidsEnabled;
+        result.launchFuelCapacity = flightModel.fuelCapacity;
+        result.launchFuelRemaining = session_.flight.fuelRemaining;
+        result.launchProjectedFuelReserve = session_.flight.projectedFuelReserve;
+        result.launchInsertionReserve = flightModel.arrivalReserveFuel;
+        result.launchCourseLimit = launchCourseLimit(flightModel);
+        result.launchAsteroidCount = std::clamp(
+            flightModel.asteroidCount,
+            0,
+            static_cast<int>(result.launchAsteroids.size()));
+        for (int index = 0; index < result.launchAsteroidCount; ++index) {
+            const LaunchAsteroid& asteroid = flightModel.asteroids[static_cast<std::size_t>(index)];
+            LaunchAsteroidSnapshot& snapshot = result.launchAsteroids[static_cast<std::size_t>(index)];
+            snapshot.routeProgress = asteroid.routeProgress;
+            snapshot.courseOffset = asteroid.courseOffset;
+            snapshot.radius = asteroid.radius;
+            snapshot.scale = asteroid.scale;
+            snapshot.rotation = asteroid.rotation;
+            snapshot.spin = asteroid.spin;
+            snapshot.hit = session_.flight.asteroidHit[static_cast<std::size_t>(index)];
+        }
         if (!session_.flightArmed) {
             result.telemetryCount = 0;
             result.poweredFlight = false;
@@ -4174,65 +4298,41 @@ RenderSnapshot RocketGameApp::snapshot() const
             return result;
         }
 
-        const double displayedMultiplier = liveBurnMultiplier();
         const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
-        result.heat = event.heat;
+        result.heat = flightModel.heatEnabled ? session_.flight.heat : 0.0;
         result.warning = event.warning;
-        result.launchPressure = session_.flight.pressure;
         result.launchThrottle = session_.controls.actions.cutEnginesActive ? 0.0 : session_.flight.selectedThrottle;
         result.launchFuel = session_.flight.fuelRemaining / std::max(0.01, session_.flight.fuelCapacity);
         result.launchCourseOffset = session_.flight.courseOffset;
         result.launchCourseVelocity = session_.flight.courseVelocity;
-        result.launchCourseLimit = launchCourseLimit(session_.preparedLaunch);
-        result.launchIncidentWarningSeconds = session_.flight.forecastIncidentIndex >= 0
-            ? session_.flight.incidentWarningSeconds
-            : 0.0;
-        result.launchIncidentDirection = session_.flight.forecastIncidentIndex >= 0
-            ? (session_.flight.forecastIncidentIndex % 2 == 0 ? 1.0 : -1.0)
-            : 0.0;
+        result.launchHullRemaining = session_.flight.hullRemaining;
+        result.launchHullMaximum = session_.flight.hullMaximum;
         result.launchHeatFailureProgress = std::clamp(
             session_.flight.heatFailureSeconds / tuning::launch::pilotingHeatFailureSeconds,
-            0.0,
-            1.0);
-        result.launchPressureFailureProgress = std::clamp(
-            session_.flight.pressureFailureSeconds / launchPressureGraceSeconds(session_.preparedLaunch),
             0.0,
             1.0);
         result.launchCourseFailureProgress = std::clamp(
             session_.flight.courseFailureSeconds / tuning::launch::pilotingCourseFailureSeconds,
             0.0,
             1.0);
-        const int sampleCapacity = static_cast<int>(result.telemetry.size());
-        double plotProgress = session_.flight.returningHome
-            ? std::clamp(1.0 - result.travelProgress, 0.0, 1.0)
-            : std::clamp(result.travelProgress, 0.0, 1.0);
-        double sampleCeiling = std::max(session_.currentMultiplier, result.targetMultiplier);
-        if (session_.flight.returningHome) sampleCeiling = std::max(session_.flight.peakMultiplier, result.targetMultiplier);
-        const int liveSampleCount = std::clamp(
-            static_cast<int>(std::ceil(plotProgress * static_cast<double>(sampleCapacity - 1))) + 1,
-            2,
-            sampleCapacity);
-        for (int i = 0; i < liveSampleCount; ++i) {
-            const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
-            const double sampleMultiplier = 1.0 + (sampleCeiling - 1.0) * t;
-            LaunchFlightState sampledFlight = session_.flight;
-            sampledFlight.currentMultiplier = sampleMultiplier;
-            sampledFlight.heat = tuning::launch::pilotingHeatInitial +
-                (session_.flight.heat - tuning::launch::pilotingHeatInitial) * t;
-            sampledFlight.pressure = tuning::launch::pilotingPressureInitial +
-                (session_.flight.pressure - tuning::launch::pilotingPressureInitial) * t;
-            sampledFlight.courseOffset = session_.flight.courseOffset * t;
-            sampledFlight.fuelRemaining = sampledFlight.fuelCapacity -
-                (sampledFlight.fuelCapacity - session_.flight.fuelRemaining) * t;
-            const TelemetryEvent sampledEvent = launchTelemetryAt(flightModel, sampledFlight);
-            result.telemetry[static_cast<std::size_t>(i)] = sampledEvent.warning;
-            result.heatTelemetry[static_cast<std::size_t>(i)] = std::clamp(sampledEvent.heat, 0.0, 1.0);
-        }
-        result.telemetryCount = liveSampleCount;
-        result.poweredFlight = session_.flightArmed && !session_.controls.actions.cutEnginesActive;
-        result.launchShake = session_.flightArmed
+        result.launchFuelFailureProgress = std::clamp(
+            session_.flight.fuelFailureSeconds / tuning::launch::pilotingFuelFailureSeconds,
+            0.0,
+            1.0);
+        result.telemetryCount = 0;
+        result.poweredFlight = session_.flightArmed &&
+            !session_.lunarImpact.active &&
+            !session_.controls.actions.cutEnginesActive;
+        result.launchImpactFlash = std::clamp(
+            session_.asteroidImpactFeedbackSeconds / asteroidImpactFeedbackDuration,
+            0.0,
+            1.0);
+        const double launchStartShake = session_.flightArmed
             ? std::clamp(1.0 - session_.elapsed / tuning::session::launchShakeSeconds, 0.0, 1.0)
             : 0.0;
+        result.launchShake = session_.lunarImpact.active
+            ? 0.0
+            : std::max(launchStartShake, result.launchImpactFlash);
     } else if (!state_.lastOutcome.telemetry.empty()) {
         const int count = std::min(static_cast<int>(result.telemetry.size()), static_cast<int>(state_.lastOutcome.telemetry.size()));
         for (int i = 0; i < count; ++i) {

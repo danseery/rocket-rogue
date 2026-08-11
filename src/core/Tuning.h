@@ -73,7 +73,7 @@ inline constexpr double escapeBonusPerTraining = 0.025;
 } // namespace crew
 
 namespace hangar {
-inline constexpr double startingCredits = 100.0;
+inline constexpr double startingCredits = 0.0;
 inline constexpr double minimumExpeditionCredits = 45.0;
 inline constexpr int emergencyReplacementStress = 15;
 inline constexpr int injuredCarryoverStress = 8;
@@ -99,6 +99,20 @@ inline constexpr int emergencyRecruitStress = 18;
 inline constexpr int recruitStress = 8;
 inline constexpr int recruitTrainingPenalty = 1;
 } // namespace hangar
+
+namespace launchProgression {
+inline constexpr int maximumUpgradeRank = 3;
+inline constexpr double upgradeCost = 22.0;
+inline constexpr double lessonReward = 22.0;
+inline constexpr double baseFuelCapacity = 10.0;
+inline constexpr double fuelPerTankRank = 5.0;
+inline constexpr double moonTransitFuel = 10.0;
+inline constexpr double moonCaptureFuel = 5.0;
+inline constexpr double calibrationTargetShare = 0.50;
+inline constexpr int moonRequiredUpgradeCount = 2;
+inline constexpr int marsRequiredUpgradeCount = 2;
+inline constexpr int jupiterRequiredUpgradeCount = 2;
+} // namespace launchProgression
 
 inline double escalatedHangarOpCost(double baseCost, int uses)
 {
@@ -160,17 +174,78 @@ inline constexpr BlueprintUnlock blueprintUnlocks[] = {
 } // namespace unlocks
 
 namespace launch {
-struct PerformanceWeights {
-    double thrust;
-    double fuel;
-    double hull;
-    double cooling;
-    double sensors;
-};
+// Skill-based route model. Fuel is expressed in whole, player-facing units;
+// 60% throttle is the calibrated consumption baseline.
+inline constexpr double routeFuelBase = 5.0;
+inline constexpr double routeFuelPerTier = 5.0;
+inline constexpr double routeFuelMaximum = 20.0;
+inline constexpr double arrivalReserveFuel = 5.0;
+// Insertion guidance can safely stretch the taught reserve by one unit. The
+// HUD still teaches five as the target, but a pilot experimenting with the
+// controls is not destroyed for arriving slightly under it.
+inline constexpr double arrivalReserveGraceFuel = 1.0;
+inline constexpr double calibratedThrottle = 0.60;
+inline constexpr double fuelDistanceBaseMultiplier = 0.70;
+inline constexpr double fuelDistanceThrottleMultiplier = 0.30;
+inline constexpr double poweredVelocityResponse = 5.0;
+inline constexpr double coastDecelerationPerSecond = 0.060;
+inline constexpr double coastStopSpeed = 0.002;
 
-inline constexpr PerformanceWeights performanceWeights {0.060, 0.040, 0.055, 0.050, 0.035};
+inline constexpr double controlChaosRankZero = 1.00;
+inline constexpr double controlChaosRankOne = 0.55;
+inline constexpr double controlChaosRankTwo = 0.20;
+inline constexpr double controlChaosRankThree = 0.00;
+inline constexpr double controlRightOvershoot = 0.45;
+inline constexpr double controlSteeringResponseVariance = 0.20;
+inline constexpr double controlStartupDrift = 0.80;
+inline constexpr double controlThrottleKick = 0.35;
+inline constexpr double controlThrottleKickThreshold = 0.05;
+inline constexpr double controlThrottleKickCooldown = 0.35;
+inline constexpr double controlDampingMinimum = 0.55;
+inline constexpr double controlDampingChaosRelief = 0.55;
+inline constexpr double controlAutoTrimMinimum = 0.05;
+inline constexpr double controlAutoTrimChaosRelief = 0.20;
+
+inline constexpr double poweredHeatIdleInput = 0.010;
+// At Mars, an uninterrupted 60% qualification burn crosses the visible
+// warning and fails before returning home. Brief engine cuts are therefore
+// the taught skill, while low throttle remains a cooler skilled alternative.
+inline constexpr double poweredHeatThrottleInput = 0.280;
+inline constexpr double poweredHeatHazardInput = 0.018;
+inline constexpr double poweredHeatCoolingBase = 0.020;
+inline constexpr double poweredHeatRankZeroMultiplier = 1.00;
+inline constexpr double poweredHeatRankOneMultiplier = 0.88;
+inline constexpr double poweredHeatRankTwoMultiplier = 0.76;
+inline constexpr double poweredHeatRankThreeMultiplier = 0.64;
+inline constexpr double engineOffCoolingRankZero = 0.10;
+inline constexpr double engineOffCoolingRankOne = 0.14;
+inline constexpr double engineOffCoolingRankTwo = 0.18;
+inline constexpr double engineOffCoolingRankThree = 0.22;
+
+inline constexpr double hullBaseIntegrity = 100.0;
+inline constexpr double hullIntegrityPerRank = 25.0;
+inline constexpr int asteroidCount = 10;
+inline constexpr int asteroidRowCount = 5;
+inline constexpr int asteroidLaneCount = 3;
+inline constexpr double asteroidBeltStart = 0.46;
+inline constexpr double asteroidBeltEnd = 0.82;
+inline constexpr double asteroidLaneOffset = 0.62;
+inline constexpr double asteroidBaseRadius = 0.10;
+inline constexpr double asteroidMinimumScale = 0.75;
+inline constexpr double asteroidMaximumScale = 1.25;
+inline constexpr double asteroidShipRadius = 0.065;
+// Route progress spans roughly sixteen times the visible course-offset scale.
+// Matching that aspect ratio keeps swept collision circles round in screen
+// space and leaves enough distance to steer between adjacent open lanes.
+inline constexpr double asteroidRouteAxisScale = 16.0;
+inline constexpr double asteroidInvulnerabilitySeconds = 0.75;
+inline constexpr double asteroidImpactDamageBase = 40.0;
+inline constexpr double hullImpactRankZeroMultiplier = 1.00;
+inline constexpr double hullImpactRankOneMultiplier = 0.80;
+inline constexpr double hullImpactRankTwoMultiplier = 0.65;
+inline constexpr double hullImpactRankThreeMultiplier = 0.50;
+
 inline constexpr int telemetrySampleCount = 12;
-inline constexpr int peakTelemetrySampleCount = 18;
 inline constexpr double warningCautionThreshold = 0.62;
 inline constexpr double warningCriticalThreshold = 0.88;
 inline constexpr double overburnMinimumDenominator = 0.20;
@@ -178,323 +253,35 @@ inline constexpr double overburnExponent = 2.65;
 inline constexpr double overburnMaximumMultiplier = 8.0;
 inline constexpr double baseTravelSpeedMultiplier = 2.625;
 inline constexpr double maxFrameStepSeconds = 0.08;
-inline constexpr double minimumEffectiveThrust = 0.40;
 inline constexpr double cruiseBaseRate = 0.016;
-inline constexpr double cruiseThrustScale = 0.0017;
 inline constexpr double cruiseTierScale = 0.0008;
 inline constexpr double accelerationBaseRate = 0.00026;
 inline constexpr double accelerationHazardScale = 0.00008;
-inline constexpr double cutEngineThrottleFactor = 0.58;
-inline constexpr double cutEngineHeatRelief = 0.18;
-inline constexpr double cutEngineVibrationRelief = 0.14;
-inline constexpr double cutEngineGuidancePenalty = 0.22;
 inline constexpr double pilotingInitialThrottle = 0.60;
 inline constexpr double pilotingThrottleChangePerSecond = 0.35;
 inline constexpr double pilotingMinimumPoweredThrottle = 0.18;
 inline constexpr double pilotingBaseProgressRate = 0.085;
-inline constexpr double pilotingThrustProgressScale = 0.080;
 inline constexpr double pilotingTierDurationScale = 0.080;
-inline constexpr double pilotingCoastProgressScale = 0.18;
-inline constexpr double pilotingFuelStatCapacityScale = 0.12;
-inline constexpr double pilotingFuelIdleRate = 0.010;
-inline constexpr double pilotingFuelThrottleRate = 0.025;
 inline constexpr double pilotingHeatInitial = 0.18;
-inline constexpr double pilotingHeatIdleInput = 0.010;
-inline constexpr double pilotingHeatThrottleInput = 0.085;
-inline constexpr double pilotingHeatHazardInput = 0.018;
-inline constexpr double pilotingHeatVolatilityInput = 0.015;
-inline constexpr double pilotingCoolingBase = 0.018;
-inline constexpr double pilotingCoolingStatScale = 0.012;
-inline constexpr double pilotingCutCoolingBonus = 0.055;
-inline constexpr double pilotingIncidentHeatRate = 0.090;
-inline constexpr double pilotingPressureInitial = 0.18;
-inline constexpr double pilotingPressureIdleInput = 0.008;
-inline constexpr double pilotingPressureThrottleInput = 0.025;
-inline constexpr double pilotingPressureHazardInput = 0.010;
-inline constexpr double pilotingPressureMissionInput = 0.040;
-inline constexpr double pilotingPressureHeatInput = 0.015;
-inline constexpr double pilotingPressureStatRelief = 0.004;
-inline constexpr double pilotingPressureNaturalRelief = 0.012;
-inline constexpr double pilotingIncidentPressureRate = 0.080;
-inline constexpr double pilotingValveReliefBase = 0.20;
-inline constexpr double pilotingValveReliefStatScale = 0.040;
-inline constexpr double pilotingValveDriftBase = 0.90;
-inline constexpr double pilotingValveDriftControlScale = 0.060;
-inline constexpr double pilotingValveToggleCooldown = 0.35;
 inline constexpr double pilotingCourseSafe = 0.35;
 inline constexpr double pilotingCourseCaution = 0.65;
 inline constexpr double pilotingCourseLost = 1.00;
-inline constexpr double pilotingCourseSensorToleranceScale = 0.040;
-inline constexpr double pilotingCourseMaximumSensorTolerance = 0.20;
 inline constexpr double pilotingSteeringBase = 0.95;
-inline constexpr double pilotingSteeringThrustScale = 0.12;
-inline constexpr double pilotingSteeringSensorScale = 0.08;
 inline constexpr double pilotingCutSteeringScale = 0.45;
 inline constexpr double pilotingPoweredSteeringBase = 0.65;
-inline constexpr double pilotingPoweredSteeringThrottleScale = 0.35;
-inline constexpr double pilotingAutoTrimBase = 0.25;
-inline constexpr double pilotingAutoTrimSensorScale = 0.10;
-inline constexpr double pilotingLateralDamping = 1.10;
-inline constexpr double pilotingIncidentGuidanceRate = 0.62;
-inline constexpr double pilotingVolatilityIncidentScale = 0.12;
-inline constexpr double pilotingIncidentWarningBaseSeconds = 0.75;
-inline constexpr double pilotingIncidentWarningSensorSeconds = 0.12;
-inline constexpr double pilotingIncidentWarningMaximumSeconds = 1.50;
 inline constexpr double pilotingWarningThreshold = 0.70;
 inline constexpr double pilotingCriticalThreshold = 0.90;
 inline constexpr double pilotingFailureThreshold = 1.00;
 inline constexpr double pilotingHeatFailureSeconds = 1.50;
-inline constexpr double pilotingPressureGraceBaseSeconds = 1.25;
-inline constexpr double pilotingPressureGraceHullSeconds = 0.35;
-inline constexpr double pilotingPressureGraceMaximumSeconds = 4.00;
 inline constexpr double pilotingCourseFailureSeconds = 2.00;
 inline constexpr double pilotingFuelFailureSeconds = 1.00;
 inline constexpr double pilotingMaximumTravelProgress = 1.42;
-inline constexpr double pressureReliefSuccessAmount = 0.24;
-inline constexpr double pressureReliefFailedAmount = 0.05;
-inline constexpr double pressureReliefFailurePenalty = 0.16;
-inline constexpr double pressureReliefGuidancePenalty = 0.14;
-inline constexpr double pressureReliefFailedGuidancePenalty = 0.08;
-inline constexpr double cargoFuelRelief = 0.22;
-inline constexpr double cargoGuidancePenalty = 0.16;
-inline constexpr double cargoVibrationPenalty = 0.12;
-inline constexpr double cargoReturnPenalty = 0.075;
-inline constexpr double dampenedMinimum = 0.03;
-inline constexpr double dampenedMaximum = 0.52;
-inline constexpr int overpreparedDataRiskCap = 3;
-inline constexpr double transferPrepReadinessScale = 0.18;
-inline constexpr double transferPrepOverpreparedScale = 0.050;
-inline constexpr double transferHazardMinimum = 0.50;
-inline constexpr double transferHazardBase = 1.00;
-inline constexpr double transferHazardTierScale = 0.10;
-inline constexpr double unprovenHazardBase = 0.20;
-inline constexpr double unprovenHazardAttemptRelief = 0.035;
-inline constexpr double destinationHazardScale = 0.26;
-inline constexpr double volatilityHazardScale = 0.11;
-inline constexpr double shipDamageHazardScale = 0.008;
-inline constexpr double safetyBase = 1.0;
-inline constexpr double safetyMinimum = 0.55;
-inline constexpr double safetyMaximum = 1.75;
-inline constexpr double longShotChanceBase = 0.012;
-inline constexpr double longShotChanceAttemptScale = 0.006;
-inline constexpr double longShotChanceSensorScale = 0.0015;
-inline constexpr double longShotChanceMinimum = 0.012;
-inline constexpr double longShotChanceMaximum = 0.055;
-inline constexpr double longShotBonusMinimum = 0.24;
-inline constexpr double longShotBonusMaximum = 0.52;
-inline constexpr double transferCeilingPenaltyMinimum = 0.28;
-inline constexpr double transferCeilingPenaltyBase = 0.90;
-inline constexpr double transferCeilingTierScale = 0.10;
-inline constexpr double transferCeilingPerformanceRelief = 0.32;
-inline constexpr double transferCeilingReadinessRelief = 0.22;
-inline constexpr double transferCeilingOverpreparedRelief = 0.080;
-inline constexpr double unprovenPrepReadinessRelief = 0.20;
-inline constexpr double unprovenPrepOverpreparedRelief = 0.075;
-inline constexpr int unprovenCeilingAttemptCap = 8;
-inline constexpr double unprovenCeilingPenaltyMinimum = 0.42;
-inline constexpr double unprovenCeilingPenaltyBase = 0.86;
-inline constexpr double unprovenCeilingAttemptRelief = 0.025;
-inline constexpr double pressureCeilingUnprovenScale = 0.38;
-inline constexpr double pressureCeilingProvenScale = 0.12;
-inline constexpr double transferReadinessCeilingBonusScale = 0.20;
-inline constexpr double transferOverpreparedCeilingBonusScale = 0.12;
-inline constexpr double provingOverpreparedCeilingBonusScale = 0.18;
-inline constexpr double minimumCrashSpan = 0.18;
-inline constexpr double safetyCeilingBonusScale = 0.14;
-inline constexpr double sensorQualityBase = 0.22;
-inline constexpr double sensorQualityScale = 0.065;
-inline constexpr double sensorQualityMinimum = 0.15;
-inline constexpr double sensorQualityMaximum = 0.92;
-inline constexpr double transferHeatBase = 0.04;
-inline constexpr double transferHeatTierScale = 0.035;
-inline constexpr double heatHazardScale = 0.56;
-inline constexpr double heatVolatilityScale = 0.16;
-inline constexpr double heatCoolingRelief = 0.046;
-inline constexpr double heatRateMinimum = 0.34;
-inline constexpr double heatRateMaximum = 2.45;
-inline constexpr double pressureControlScale = 0.040;
-inline constexpr double pressureModifierMinimum = 0.03;
-inline constexpr double pressureModifierMaximum = 0.60;
-inline constexpr int incidentBaseCount = 2;
-inline constexpr int incidentTierDivisor = 2;
-inline constexpr int incidentTransferBonus = 1;
-inline constexpr int incidentMinimumCount = 2;
-inline constexpr double incidentProfileMinimumSpan = 0.16;
-inline constexpr double incidentSeverityBase = 0.12;
-inline constexpr double incidentSeverityHazardScale = 0.032;
-inline constexpr double incidentSeverityPressureScale = 0.10;
-inline constexpr double incidentSeverityVolatilityScale = 0.035;
-inline constexpr double incidentSeverityDamageScale = 0.0012;
-inline constexpr double incidentLaneJitterMinimum = 0.22;
-inline constexpr double incidentLaneJitterMaximum = 0.82;
-inline constexpr double incidentCenterMinimum = 1.04;
-inline constexpr double incidentCenterFallbackMaximum = 1.05;
-inline constexpr double incidentCrashMargin = 0.035;
-inline constexpr double incidentWidthMinimum = 0.045;
-inline constexpr double incidentWidthMaximum = 0.105;
-inline constexpr double incidentWidthHazardScale = 0.006;
-inline constexpr double incidentAmountMinimum = 0.78;
-inline constexpr double incidentAmountMaximum = 1.42;
-inline constexpr int incidentVariantCount = 6;
-inline constexpr double incidentHeatOffset = 0.08;
-inline constexpr double incidentHeatCoolingMitigation = 0.026;
-inline constexpr double incidentHeatPressureScale = 0.34;
-inline constexpr double incidentHeatPressureMitigation = 0.020;
-inline constexpr double incidentPressureOffset = 0.07;
-inline constexpr double incidentPressureControlMitigation = 0.034;
-inline constexpr double incidentPressureFuelMitigation = 0.010;
-inline constexpr double incidentPressureFuelMixScale = 0.42;
-inline constexpr double incidentPressureFuelMixMitigation = 0.019;
-inline constexpr double incidentVibrationOffset = 0.06;
-inline constexpr double incidentVibrationHullMitigation = 0.030;
-inline constexpr double incidentVibrationGuidanceScale = 0.36;
-inline constexpr double incidentVibrationGuidanceMitigation = 0.024;
-inline constexpr double incidentFuelMixOffset = 0.05;
-inline constexpr double incidentFuelMixFuelMitigation = 0.034;
-inline constexpr double incidentFuelMixPressureScale = 0.30;
-inline constexpr double incidentFuelMixPressureMitigation = 0.024;
-inline constexpr double incidentGuidanceOffset = 0.06;
-inline constexpr double incidentGuidanceSensorMitigation = 0.036;
-inline constexpr double incidentGuidanceVibrationScale = 0.28;
-inline constexpr double incidentGuidanceVibrationMitigation = 0.022;
-inline constexpr double incidentAbortOffset = 0.05;
-inline constexpr double incidentAbortEscapeMitigation = 0.040;
-inline constexpr double incidentAbortSensorMitigation = 0.018;
-inline constexpr double incidentAbortGuidanceScale = 0.32;
-inline constexpr double incidentAbortGuidanceMitigation = 0.026;
 } // namespace launch
 
 namespace telemetry {
-struct PulseProfile {
-    double base;
-    double waveScale;
-    double frequency;
-    double phase;
-};
-
-inline constexpr double progressDenominator = 0.01;
-inline constexpr double progressMaximum = 1.40;
-inline constexpr double burnLoadDenominator = 0.10;
-inline constexpr double burnLoadMaximum = 1.45;
-inline constexpr double lateFlightStart = 0.45;
-inline constexpr double lateFlightRange = 0.65;
-
-inline constexpr double damagedHullScale = 0.16;
-inline constexpr double thrustFuelOffset = 0.48;
-inline constexpr double coolingReliefScale = 0.030;
-inline constexpr double hullReliefScale = 0.035;
-inline constexpr double fuelReliefScale = 0.032;
-inline constexpr double sensorReliefScale = 0.040;
-inline constexpr double escapeReliefScale = 0.052;
-
-inline constexpr PulseProfile pressurePulse {0.75, 0.55, 10.7, 2.1};
-inline constexpr PulseProfile vibrationPulse {0.70, 0.65, 15.9, 4.4};
-inline constexpr PulseProfile fuelMixPulse {0.78, 0.48, 8.3, 5.6};
-inline constexpr PulseProfile guidancePulse {0.72, 0.52, 6.6, 3.2};
-
-inline constexpr double earlyPressureBase = 0.090;
-inline constexpr double earlyPressureThrustScale = 0.014;
-inline constexpr double earlyPressureVolatilityScale = 0.035;
-inline constexpr double earlyPressureFuelRelief = 0.22;
-inline constexpr double earlyPressureCoolingRelief = 0.16;
-inline constexpr double earlyVibrationBase = 0.080;
-inline constexpr double earlyVibrationThrustScale = 0.012;
-inline constexpr double earlyVibrationVolatilityScale = 0.050;
-inline constexpr double earlyVibrationDamageScale = 0.35;
-inline constexpr double earlyVibrationHullRelief = 0.22;
-inline constexpr double earlyVibrationSensorRelief = 0.14;
-inline constexpr double earlyFuelMixBase = 0.060;
-inline constexpr double earlyFuelMixImbalanceScale = 0.014;
-inline constexpr double earlyFuelMixVolatilityScale = 0.030;
-inline constexpr double earlyFuelMixFuelRelief = 0.18;
-inline constexpr double earlyFuelMixSensorRelief = 0.08;
-
 inline constexpr double heatMaximum = 1.25;
-inline constexpr double pressureLateBase = 0.31;
-inline constexpr double pressureLateThrustScale = 0.052;
-inline constexpr double pressureLateVolatilityScale = 0.075;
-inline constexpr double pressureHeatScale = 0.15;
-inline constexpr double pressureFuelRelief = 0.18;
-inline constexpr double pressureCoolingRelief = 0.08;
-inline constexpr double vibrationLateBase = 0.24;
-inline constexpr double vibrationLateVolatilityScale = 0.15;
-inline constexpr double vibrationLateThrustScale = 0.017;
-inline constexpr double vibrationDamageScale = 0.65;
-inline constexpr double vibrationHullRelief = 0.20;
-inline constexpr double vibrationSensorRelief = 0.08;
-inline constexpr double fuelMixLateBase = 0.23;
-inline constexpr double fuelMixLateThrustOverFuelScale = 0.052;
-inline constexpr double fuelMixLateVolatilityScale = 0.042;
-inline constexpr double fuelMixPressureScale = 0.15;
-inline constexpr double fuelMixFuelRelief = 0.22;
-inline constexpr double crewNavBase = 0.35;
-inline constexpr double crewNavBurnScale = 0.65;
-inline constexpr double guidanceBase = 0.045;
-inline constexpr double guidanceVibrationLoadScale = 0.070;
-inline constexpr double guidancePressureLoadScale = 0.050;
-inline constexpr double guidanceLateBase = 0.28;
-inline constexpr double guidanceLateVolatilityScale = 0.055;
-inline constexpr double guidanceVibrationScale = 0.20;
-inline constexpr double guidancePressureScale = 0.10;
-inline constexpr double guidanceSensorRelief = 0.48;
-
-inline constexpr double readableLoadBase = 0.040;
-inline constexpr double readableLoadVolatilityScale = 0.014;
-inline constexpr double readablePressureBase = 0.75;
-inline constexpr double readablePressurePulseScale = 0.38;
-inline constexpr double readablePressureFuelRelief = 0.04;
-inline constexpr double readablePressureCoolingRelief = 0.03;
-inline constexpr double readablePressureMaximum = 0.32;
-inline constexpr double readableVibrationBase = 0.85;
-inline constexpr double readableVibrationPulseScale = 0.42;
-inline constexpr double readableVibrationHullRelief = 0.04;
-inline constexpr double readableVibrationSensorRelief = 0.03;
-inline constexpr double readableVibrationCargoScale = 0.48;
-inline constexpr double readableVibrationMaximum = 0.36;
-inline constexpr double readableFuelMixBase = 0.70;
-inline constexpr double readableFuelMixPulseScale = 0.34;
-inline constexpr double readableFuelMixFuelRelief = 0.04;
-inline constexpr double readableFuelMixSensorRelief = 0.02;
-inline constexpr double readableFuelMixCargoRelief = 0.35;
-inline constexpr double readableFuelMixMaximum = 0.24;
-inline constexpr double readableGuidanceBase = 0.62;
-inline constexpr double readableGuidancePulseScale = 0.30;
-inline constexpr double readableGuidanceVibrationScale = 0.05;
-inline constexpr double readableGuidanceSensorRelief = 0.04;
-inline constexpr double readableGuidanceCutPenaltyScale = 0.48;
-inline constexpr double readableGuidanceReliefPenaltyScale = 0.52;
-inline constexpr double readableGuidanceCargoPenaltyScale = 0.58;
-inline constexpr double readableGuidanceCrewNavScale = 0.74;
-inline constexpr double readableGuidanceMaximum = 0.58;
-
-inline constexpr double earlyThermalStart = 0.60;
-inline constexpr double earlyThermalRange = 0.55;
-inline constexpr double earlyThermalScale = 0.38;
-inline constexpr double warningStartBase = 0.84;
-inline constexpr double warningStartSensorScale = 0.22;
-inline constexpr double certaintyWindowMinimumRange = 0.05;
-inline constexpr double instabilityStart = 0.80;
-inline constexpr double instabilityHighProximity = 0.94;
-inline constexpr double instabilityHighWarning = 0.65;
-inline constexpr double instabilityCriticalProximity = 0.985;
-inline constexpr double instabilityCriticalWarning = 0.90;
-inline constexpr double earlyAbortBase = 0.040;
-inline constexpr double earlyAbortGuidanceScale = 0.080;
-inline constexpr double earlyAbortVibrationScale = 0.050;
-inline constexpr double earlyAbortProgressScale = 0.030;
-inline constexpr double earlyAbortEscapeRelief = 0.10;
-inline constexpr double certaintyAbortBase = 0.54;
-inline constexpr double certaintyAbortGuidanceScale = 0.25;
-inline constexpr double certaintyAbortVibrationScale = 0.22;
-inline constexpr double abortHeatScale = 0.10;
-inline constexpr double abortEscapeRelief = 0.76;
-
 inline constexpr double stressHeatScale = 0.28;
-inline constexpr double stressPressureScale = 0.20;
-inline constexpr double stressVibrationScale = 0.22;
 inline constexpr double stressGuidanceScale = 0.18;
-inline constexpr double stressAbortScale = 0.32;
-inline constexpr double stressProgressScale = 0.08;
 } // namespace telemetry
 
 namespace session {
@@ -507,6 +294,9 @@ inline constexpr double returnDurationPerProgress = 1.40;
 inline constexpr double returnDriftDurationMultiplier = 1.25;
 inline constexpr double returnTurnSeconds = 1.15;
 inline constexpr double launchShakeSeconds = 0.55;
+inline constexpr double lunarImpactHoldSeconds = 0.08;
+inline constexpr double lunarImpactExplosionEndSeconds = 0.92;
+inline constexpr double lunarImpactSequenceSeconds = 0.95;
 inline constexpr double arrivalFanfareSeconds = 2.50;
 inline constexpr double returnTelemetryProgressDenominator = 0.10;
 inline constexpr double returnTelemetryHeadroomMinimum = 0.04;
@@ -516,24 +306,6 @@ inline constexpr double returnTelemetryOvershootExtraHeadroomScale = 0.10;
 inline constexpr double returnTelemetrySettleHeadroomScale = 0.08;
 inline constexpr double returnTelemetrySettleMaximum = 0.06;
 inline constexpr double returnTelemetryCrashMargin = 0.02;
-inline constexpr double returnEarlyProgressThreshold = 0.28;
-inline constexpr double returnWarningThreshold = 0.78;
-inline constexpr double heatCautionThreshold = 0.82;
-inline constexpr double driftFuelMixThreshold = 0.86;
-inline constexpr double driftFuelReserveThreshold = 1.0;
-inline constexpr double driftTargetShare = 0.85;
-inline constexpr double pressureReliefFailureBase = 0.16;
-inline constexpr double pressureReliefFailurePressureScale = 0.16;
-inline constexpr double pressureReliefFailureControlScale = 0.035;
-inline constexpr double pressureReliefFailureHullScale = 0.010;
-inline constexpr double pressureReliefFailureMinimum = 0.04;
-inline constexpr double pressureReliefFailureMaximum = 0.34;
-inline constexpr double decompressionBase = 0.012;
-inline constexpr double decompressionPressureScale = 0.045;
-inline constexpr double decompressionDamageScale = 0.00025;
-inline constexpr double decompressionHullScale = 0.0035;
-inline constexpr double decompressionMinimum = 0.004;
-inline constexpr double decompressionMaximum = 0.08;
 } // namespace session
 
 namespace flyby {
@@ -634,7 +406,6 @@ inline constexpr double provingPayoutPerExtraData = 0.20;
 inline constexpr double provingPayoutBonusMaximum = 0.60;
 inline constexpr double returnHomeBasePayoutFactor = 0.74;
 inline constexpr double returnHomeReachedGoalFactor = 1.18;
-inline constexpr double manualEjectPayoutFactor = 0.26;
 inline constexpr double transferArrivalPayoutFactor = 1.45;
 inline constexpr double fullProfileRewardFloor = 1.00;
 inline constexpr double pushedProfileShelfShare = 0.45;
@@ -740,6 +511,12 @@ inline constexpr double ioArtifactOxygenSeconds = 60.0;
 inline constexpr double maximumOxygenSeconds = 120.0;
 inline constexpr double oxygenPocketRestoreSeconds = 10.0;
 inline constexpr double fuelCycleProgressPerSecond = 1.0 / 15.0;
+// Presentation reserve for a deliberate return through generated terrain.
+// Ideal straight-line speed badly understates acceleration, gravity, steering,
+// and the time needed to find each layer transition.
+inline constexpr double returnEnduranceTraversalScale = 2.40;
+inline constexpr double returnEnduranceDockingSeconds = 2.0;
+inline constexpr int returnEnduranceCautionSeconds = 8;
 inline constexpr double targetRunSeconds = 120.0;
 inline constexpr double droneSpeedCellsPerSecond = 7.2;
 inline constexpr double rigAccelerationCellsPerSecondSquared = 14.0;
@@ -1068,13 +845,11 @@ inline constexpr double enemySpawnerSpawnRadiusCells = 1.65;
 } // namespace mining
 
 namespace outcomes {
-inline constexpr double manualEjectSurvivalBase = 0.48;
 inline constexpr double vehicleLossSurvivalBase = 0.22;
 inline constexpr double survivalEscapeScale = 0.07;
 inline constexpr double survivalHazardScale = 0.035;
 inline constexpr double survivalMinimum = 0.05;
 inline constexpr double survivalMaximum = 0.90;
-inline constexpr double manualEjectInjuryChance = 0.42;
 inline constexpr double vehicleLossInjuryChance = 0.58;
 
 inline constexpr double returnProfileDepthMaximum = 1.80;
@@ -1094,25 +869,6 @@ inline constexpr double returnRiskMinimum = 0.01;
 inline constexpr double returnRiskMaximum = 0.42;
 
 inline constexpr double payoutStatScale = 0.045;
-inline constexpr double manualEjectRecoveryBase = 14.0;
-inline constexpr double manualEjectRecoveryTierScale = 7.0;
-inline constexpr double manualEjectRecoveryBurnScale = 3.0;
-inline constexpr double manualEjectRecoveryEscapeRelief = 1.2;
-inline constexpr double manualEjectRecoveryMinimum = 8.0;
-inline constexpr double manualEjectRecoveryMaximum = 64.0;
-inline constexpr double manualEjectDamageHazardScale = 3.8;
-inline constexpr double manualEjectDamageBurnScale = 2.2;
-inline constexpr double manualEjectDamageAbortScale = 10.0;
-inline constexpr double manualEjectDamageEscapeRelief = 0.75;
-inline constexpr int manualEjectDamageMinimum = 4;
-inline constexpr int manualEjectDamageMaximum = 34;
-inline constexpr double manualEjectCrewInjuryBase = 0.14;
-inline constexpr double manualEjectCrewInjuryAbortScale = 0.32;
-inline constexpr double manualEjectCrewInjuryDamageScale = 0.002;
-inline constexpr double manualEjectCrewInjuryEscapeRelief = 0.030;
-inline constexpr double manualEjectCrewInjuryMinimum = 0.02;
-inline constexpr double manualEjectCrewInjuryMaximum = 0.48;
-inline constexpr double manualEjectBlueprintTargetShare = 0.82;
 
 inline constexpr double transferArrivalDamageHazardScale = 5.8;
 inline constexpr double transferArrivalDamageBurnScale = 1.9;
@@ -1138,7 +894,6 @@ inline constexpr int returnHomeDamageCompleteMaximum = 26;
 inline constexpr double returnHomeBlueprintTargetShare = 0.75;
 
 inline constexpr double transferUsefulDataTargetShare = 0.55;
-inline constexpr double manualEjectUsefulDataTargetShare = 0.90;
 inline constexpr double returnUsefulDataTargetShare = 0.70;
 } // namespace outcomes
 

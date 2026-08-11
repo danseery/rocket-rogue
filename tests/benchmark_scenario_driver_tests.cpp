@@ -31,10 +31,10 @@
 
 namespace {
 
-// The v9 scenario-instance state participates in the deterministic gameplay
-// hash, so this fixture tracks the authored campaign after the generic
-// scenario migration.
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xf3acde2ff9d94d99ULL;
+// The v10 launch-curriculum state participates in the deterministic gameplay
+// hash, so this fixture tracks the authored campaign after the launch/save
+// migration.
+constexpr std::uint64_t kExpectedLongRunMiningHash = 0xd7bdb5031012dc29ULL;
 // A 56-second soak crosses the active mining oxygen, heat, and hostile-update
 // windows without duplicating the same simulation through a second harness.
 constexpr int kLongRunMiningFrames = 3360;

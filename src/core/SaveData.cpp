@@ -13,12 +13,21 @@
 #include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <initializer_list>
 #include <iterator>
 #include <sstream>
 
 namespace rocket {
 
 namespace {
+
+namespace launchSaveField {
+inline constexpr std::string_view fuelTanksRank = "launchFuelTanksRank";
+inline constexpr std::string_view flightControlsRank = "launchFlightControlsRank";
+inline constexpr std::string_view coolingRank = "launchCoolingRank";
+inline constexpr std::string_view hullRank = "launchHullRank";
+inline constexpr std::string_view trainingStage = "launchTrainingStage";
+} // namespace launchSaveField
 
 std::vector<std::string> split(std::string_view text, char delimiter)
 {
@@ -479,6 +488,19 @@ StoryBriefingId storyBriefingFromInt(int value)
     if (value == 1) return StoryBriefingId::CampaignIntroduction;
     if (value == 2) return StoryBriefingId::StraylightDiscovery;
     return StoryBriefingId::None;
+}
+
+int launchTrainingStageToInt(LaunchTrainingStage stage)
+{
+    return static_cast<int>(stage);
+}
+
+LaunchTrainingStage launchTrainingStageFromInt(int value)
+{
+    return static_cast<LaunchTrainingStage>(std::clamp(
+        value,
+        static_cast<int>(LaunchTrainingStage::FuelCalibration),
+        static_cast<int>(LaunchTrainingStage::Complete)));
 }
 
 int campaignMilestoneToInt(CampaignMilestone milestone)
@@ -2466,6 +2488,99 @@ void appendUnique(std::vector<std::string>& values, const std::string& value)
     }
 }
 
+bool containsAnyId(
+    const std::vector<std::string>& values,
+    std::initializer_list<std::string_view> ids)
+{
+    return std::any_of(ids.begin(), ids.end(), [&](std::string_view id) {
+        return std::find(values.begin(), values.end(), id) != values.end();
+    });
+}
+
+void eraseLegacyLaunchModules(std::vector<std::string>& values)
+{
+    static constexpr std::array<std::string_view, 9> legacyIds {
+        content::module::sparrowInjectorTune,
+        content::module::reserveFeedManifold,
+        content::module::sustainedBurnPackage,
+        content::module::radiatorVaneExtension,
+        content::module::telemetryNoiseFilter,
+        content::module::pressureBalanceBaffles,
+        content::module::patchworkCrossBracing,
+        content::module::springCapsuleRetropack,
+        content::module::recoveryCradle};
+    values.erase(
+        std::remove_if(values.begin(), values.end(), [&](const std::string& id) {
+            return std::find(legacyIds.begin(), legacyIds.end(), id) != legacyIds.end();
+        }),
+        values.end());
+}
+
+void migrateVersionNineLaunchProgress(GameState& state)
+{
+    const std::vector<std::string> legacyOwned = state.meta.ownedModuleIds;
+    LaunchUpgradeRanks& ranks = state.meta.launchUpgrades;
+
+    if (containsAnyId(legacyOwned, {content::module::reserveFeedManifold})) ranks.fuelTanks = std::max(ranks.fuelTanks, 1);
+    if (containsAnyId(legacyOwned, {content::module::sustainedBurnPackage, content::module::slushTank})) ranks.fuelTanks = std::max(ranks.fuelTanks, 2);
+    if (containsAnyId(legacyOwned, {content::module::deepReservoir})) ranks.fuelTanks = std::max(ranks.fuelTanks, 3);
+
+    if (containsAnyId(legacyOwned, {content::module::sparrowInjectorTune})) ranks.flightControls = std::max(ranks.flightControls, 1);
+    if (containsAnyId(legacyOwned, {content::module::telemetryNoiseFilter, content::module::kestrelEngine, content::module::hazardRadar})) ranks.flightControls = std::max(ranks.flightControls, 2);
+    if (containsAnyId(legacyOwned, {content::module::pressureBalanceBaffles, content::module::novaDrive, content::module::predictiveGuidance})) ranks.flightControls = std::max(ranks.flightControls, 3);
+
+    if (containsAnyId(legacyOwned, {content::module::radiatorVaneExtension})) ranks.cooling = std::max(ranks.cooling, 1);
+    if (containsAnyId(legacyOwned, {content::module::cryoLoop})) ranks.cooling = std::max(ranks.cooling, 2);
+    if (containsAnyId(legacyOwned, {content::module::sacrificialSink})) ranks.cooling = std::max(ranks.cooling, 3);
+
+    if (containsAnyId(legacyOwned, {content::module::patchworkCrossBracing})) ranks.hull = std::max(ranks.hull, 1);
+    if (containsAnyId(legacyOwned, {
+            content::module::springCapsuleRetropack,
+            content::module::titaniumRib,
+            content::module::ablativeSkin,
+            content::module::abortTower})) ranks.hull = std::max(ranks.hull, 2);
+    if (containsAnyId(legacyOwned, {content::module::recoveryCradle, content::module::phoenixPod})) ranks.hull = std::max(ranks.hull, 3);
+
+    // Version 9 used three generic Flight Data points for the first Moon
+    // transfer. Preserve that earned progress without carrying the old grind
+    // into live survival. One or two points conservatively complete the fuel
+    // lesson; a full three-point record is Moon-transfer ready.
+    if (state.meta.furthestTier == 0 && state.run.destinationIndex == 0) {
+        if (state.run.frontierReadiness >= 1) {
+            ranks.fuelTanks = std::max(ranks.fuelTanks, 1);
+        }
+        if (state.run.frontierReadiness >= 3) {
+            ranks.flightControls = std::max(ranks.flightControls, 1);
+        }
+    }
+
+    if (state.meta.furthestTier >= 3) {
+        ranks.fuelTanks = std::max(ranks.fuelTanks, 3);
+        ranks.flightControls = std::max(ranks.flightControls, 1);
+        state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    } else if (state.meta.furthestTier >= 2) {
+        ranks.fuelTanks = std::max(ranks.fuelTanks, 2);
+        ranks.flightControls = std::max(ranks.flightControls, 1);
+        state.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    } else if (state.meta.furthestTier >= 1) {
+        ranks.fuelTanks = std::max(ranks.fuelTanks, 1);
+        ranks.flightControls = std::max(ranks.flightControls, 1);
+        state.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+    } else if (ranks.fuelTanks >= 1 && ranks.flightControls >= 1) {
+        state.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
+    } else if (ranks.fuelTanks >= 1) {
+        state.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    } else {
+        state.meta.launchLessons.stage = LaunchTrainingStage::FuelCalibration;
+    }
+
+    eraseLegacyLaunchModules(state.meta.ownedModuleIds);
+    eraseLegacyLaunchModules(state.meta.defaultEquippedModuleIds);
+    eraseLegacyLaunchModules(state.run.inventoryModuleIds);
+    eraseLegacyLaunchModules(state.run.equippedModuleIds);
+    state.run.offerModuleIds = {};
+}
+
 std::string scenarioRewardId(
     std::string_view scenarioId,
     std::string_view stepId,
@@ -2946,6 +3061,8 @@ SaveData captureSaveData(const GameState& state)
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
     save.navigation = state.meta.navigation;
+    save.launchUpgrades = state.meta.launchUpgrades;
+    save.launchLessons = state.meta.launchLessons;
     save.storyBriefing = state.storyBriefing;
     save.acknowledgedActivityBriefingIds = state.meta.acknowledgedActivityBriefingIds;
     save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
@@ -3317,6 +3434,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.chapter = save.chapter;
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
+    state.meta.launchUpgrades = save.launchUpgrades;
+    state.meta.launchLessons = save.launchLessons;
     state.storyBriefing = save.storyBriefing;
     state.meta.campaignIntroductionAcknowledged = save.version < 2 ? true : save.campaignIntroductionAcknowledged;
     state.meta.straylightDiscoveryAcknowledged = save.version < 2 ? legacyArkDiscovered : save.straylightDiscoveryAcknowledged;
@@ -3332,6 +3451,39 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     state.meta.furthestTier = save.furthestTier;
+    if (save.version < 10) {
+        migrateVersionNineLaunchProgress(state);
+        const auto allZero = [](const std::vector<int>& values) {
+            return std::all_of(values.begin(), values.end(), [](int value) { return value == 0; });
+        };
+        const LaunchUpgradeRanks& ranks = state.meta.launchUpgrades;
+        constexpr double legacyVersionNineStartingCredits = 100.0;
+        const bool pristineVersionNine = save.version == 9 &&
+            std::abs(save.credits - legacyVersionNineStartingCredits) <= 0.000001 &&
+            save.destinationIndex == 0 &&
+            save.frontierReadiness == 0 &&
+            save.furthestTier == 0 &&
+            save.shipsLost == 0 &&
+            save.astronautsLost == 0 &&
+            save.maxBurnDepth <= 0.0 &&
+            save.blueprintProgress == 0 &&
+            save.materials.common == 0 &&
+            save.materials.rare == 0 &&
+            save.materials.exotic == 0 &&
+            save.crewUpgradeIds.empty() &&
+            save.artifacts.empty() &&
+            save.famousLaunches.empty() &&
+            save.memorials.empty() &&
+            allZero(save.destinationAttempts) &&
+            allZero(save.destinationSuccesses) &&
+            ranks.fuelTanks == 0 &&
+            ranks.flightControls == 0 &&
+            ranks.cooling == 0 &&
+            ranks.hull == 0;
+        if (pristineVersionNine) {
+            state.run.credits = tuning::hangar::startingCredits;
+        }
+    }
     {
         const int marsIndex = [&]() {
             const Destination* destination = catalog.findDestination(content::destination::mars);
@@ -3645,6 +3797,11 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::navigationArkLocation, save.navigation.arkLocationId);
     writeField(out, save_schema::field::navigationSelectedDestination, save.navigation.selectedDestinationId);
     writeField(out, save_schema::field::navigationDiscoveredDestinations, join(save.navigation.discoveredDestinationIds, save_schema::listDelimiter));
+    writeField(out, launchSaveField::fuelTanksRank, save.launchUpgrades.fuelTanks);
+    writeField(out, launchSaveField::flightControlsRank, save.launchUpgrades.flightControls);
+    writeField(out, launchSaveField::coolingRank, save.launchUpgrades.cooling);
+    writeField(out, launchSaveField::hullRank, save.launchUpgrades.hull);
+    writeField(out, launchSaveField::trainingStage, launchTrainingStageToInt(save.launchLessons.stage));
     writeField(out, save_schema::field::storyPending, storyBriefingToInt(save.storyBriefing.pending));
     writeField(out, save_schema::field::storyContinuation, screenToInt(save.storyBriefing.continuation));
     writeField(out, save_schema::field::acknowledgedActivityBriefings, join(save.acknowledgedActivityBriefingIds, save_schema::listDelimiter));
@@ -3878,6 +4035,18 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.navigation.selectedDestinationId = std::string(value);
         } else if (key == save_schema::field::navigationDiscoveredDestinations) {
             save.navigation.discoveredDestinationIds = split(value, save_schema::listDelimiter);
+        } else if (key == launchSaveField::fuelTanksRank) {
+            save.launchUpgrades.fuelTanks = parseInt(value, save.launchUpgrades.fuelTanks);
+        } else if (key == launchSaveField::flightControlsRank) {
+            save.launchUpgrades.flightControls = parseInt(value, save.launchUpgrades.flightControls);
+        } else if (key == launchSaveField::coolingRank) {
+            save.launchUpgrades.cooling = parseInt(value, save.launchUpgrades.cooling);
+        } else if (key == launchSaveField::hullRank) {
+            save.launchUpgrades.hull = parseInt(value, save.launchUpgrades.hull);
+        } else if (key == launchSaveField::trainingStage) {
+            save.launchLessons.stage = launchTrainingStageFromInt(parseInt(
+                value,
+                launchTrainingStageToInt(save.launchLessons.stage)));
         } else if (key == save_schema::field::storyPending) {
             save.storyBriefing.pending = storyBriefingFromInt(parseInt(value, 0));
         } else if (key == save_schema::field::storyContinuation) {

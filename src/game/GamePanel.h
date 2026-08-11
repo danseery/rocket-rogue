@@ -24,7 +24,6 @@ struct PanelRenderContext {
     FlightActionState flightActions;
     bool flightArmed = true;
     bool launchQueued = false;
-    bool pressureReliefUsed = false;
     bool preflightReady = true;
     bool droneTransferEnabled = true;
     int debugActOneCheckpoint = -1;

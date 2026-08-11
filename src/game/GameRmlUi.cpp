@@ -1873,10 +1873,15 @@ std::string inputPromptBar(
         prompt += item(labels.south, "Pulse / push") + item(labels.west, "Bank")
             + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
     } else if (screen == Screen::Launch
-        && presentation.metadata.overlay == PanelOverlayKind::TelemetryLegend) {
-        prompt += item(labels.south, "Return") + item(labels.east, "Hold: Eject")
-            + item(labels.west, "Engines") + item(labels.north, "Pressure relief")
-            + item(labels.rightBumper, "Hold: Jettison") + item(labels.menu, "Pause");
+        && presentation.metadata.overlay != PanelOverlayKind::PreflightLaunch) {
+        if (presentation.contentMarkup.find("data-launch-manual-controls=\"1\"") != std::string::npos) {
+            prompt += describedItem("Steer / throttle", "L-stick");
+        }
+        prompt += describedItem("Turn Around", labels.south);
+        if (presentation.contentMarkup.find("data-rr-action=\"cut_engines\"") != std::string::npos) {
+            prompt += describedItem("Engines Off / On", labels.west);
+        }
+        prompt += item(labels.menu, "Pause");
     } else if (presentation.metadata.overlay == PanelOverlayKind::PreflightLaunch) {
         prompt += item(
             labels.south,

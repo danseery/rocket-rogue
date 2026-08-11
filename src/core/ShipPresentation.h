@@ -8,9 +8,82 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocket {
+
+struct LaunchUpgradeInstallPresentation {
+    LaunchUpgradeKind kind = LaunchUpgradeKind::None;
+    std::string title;
+    int currentRank = 0;
+    int nextRank = 0;
+    std::string currentEffect;
+    std::string nextEffect;
+    int cost = 0;
+    PanelButtonPresentation action;
+};
+
+inline std::string launchUpgradeTrackName(LaunchUpgradeKind kind)
+{
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks: return "Fuel Tanks";
+    case LaunchUpgradeKind::FlightControls: return "Flight Controls";
+    case LaunchUpgradeKind::Cooling: return "Engine Cooling";
+    case LaunchUpgradeKind::Hull: return "Hull Plating";
+    case LaunchUpgradeKind::None: break;
+    }
+    return "Launch Upgrade";
+}
+
+inline std::string launchUpgradeEffect(LaunchUpgradeKind kind, int rank)
+{
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks:
+        return display::fixed(launchFuelCapacityForRank(rank), 0) + " fuel";
+    case LaunchUpgradeKind::FlightControls:
+        return display::percent(launchControlChaosForRank(rank)) + " control chaos";
+    case LaunchUpgradeKind::Cooling:
+        return display::percent(launchPoweredHeatMultiplierForRank(rank)) +
+            " powered heat / " +
+            display::fixed(launchEngineOffCoolingForRank(rank) * 100.0, 0) +
+            "%/s off cooling";
+    case LaunchUpgradeKind::Hull:
+        return display::fixed(
+            tuning::launch::hullBaseIntegrity +
+                static_cast<double>(rank) * tuning::launch::hullIntegrityPerRank,
+            0) + " HP / " + display::percent(launchHullImpactMultiplierForRank(rank)) + " impact";
+    case LaunchUpgradeKind::None:
+        break;
+    }
+    return {};
+}
+
+inline std::string launchUpgradeLockLabel(LaunchUpgradeKind kind, int nextRank)
+{
+    if (nextRank <= 1) {
+        switch (kind) {
+        case LaunchUpgradeKind::FuelTanks: return "Complete fuel test";
+        case LaunchUpgradeKind::FlightControls: return "Complete controls test";
+        case LaunchUpgradeKind::Cooling: return "Complete heat test";
+        case LaunchUpgradeKind::Hull: return "Complete asteroid test";
+        case LaunchUpgradeKind::None: break;
+        }
+    }
+    if (kind == LaunchUpgradeKind::FuelTanks) {
+        return nextRank == 2 ? "Reveal Mars route" : "Reveal Jupiter route";
+    }
+    const int requiredTier = kind == LaunchUpgradeKind::Hull
+        ? nextRank + 1
+        : (kind == LaunchUpgradeKind::Cooling ? nextRank : nextRank - 1);
+    switch (requiredTier) {
+    case 1: return "Reach Moon";
+    case 2: return "Reach Mars";
+    case 3: return "Reach Jupiter";
+    case 4: return "Reach Saturn";
+    default: return "Locked";
+    }
+}
 
 inline std::string shipModuleSummary(const ShipModule& module)
 {
@@ -29,47 +102,12 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
     }
 
     rows.push_back(detailPresentationRow(text::moduleStats::damage, display::wholePercent(state.run.shipDamage)));
-    rows.push_back(detailPresentationHeader("Launch handling"));
-    const double poweredCorrection =
-        (tuning::launch::pilotingSteeringBase +
-            std::max(0.0, stats.thrust) * tuning::launch::pilotingSteeringThrustScale +
-            std::max(0.0, stats.sensors) * tuning::launch::pilotingSteeringSensorScale) *
-        (tuning::launch::pilotingPoweredSteeringBase +
-            tuning::launch::pilotingInitialThrottle * tuning::launch::pilotingPoweredSteeringThrottleScale);
-    const double fuelCapacity = std::max(
-        0.55,
-        1.0 + (stats.fuel - 1.0) * tuning::launch::pilotingFuelStatCapacityScale);
-    const double courseLimit = tuning::launch::pilotingCourseLost * (1.0 + std::min(
-        tuning::launch::pilotingCourseMaximumSensorTolerance,
-        std::max(0.0, stats.sensors) * tuning::launch::pilotingCourseSensorToleranceScale));
-    const double warningLead = std::min(
-        tuning::launch::pilotingIncidentWarningMaximumSeconds,
-        tuning::launch::pilotingIncidentWarningBaseSeconds +
-            std::max(0.0, stats.sensors) * tuning::launch::pilotingIncidentWarningSensorSeconds);
-    const double coolingRate = tuning::launch::pilotingCoolingBase +
-        std::max(0.0, stats.cooling) * tuning::launch::pilotingCoolingStatScale +
-        tuning::launch::pilotingCutCoolingBonus;
-    const double pressureGrace = std::clamp(
-        tuning::launch::pilotingPressureGraceBaseSeconds +
-            std::max(0.0, stats.hull) * tuning::launch::pilotingPressureGraceHullSeconds,
-        tuning::launch::pilotingPressureGraceBaseSeconds,
-        tuning::launch::pilotingPressureGraceMaximumSeconds);
-    const double ventRate = tuning::launch::pilotingValveReliefBase +
-        std::max(0.0, stats.pressure) * tuning::launch::pilotingValveReliefStatScale;
-    rows.push_back(detailPresentationRow("Cruise throttle", display::percent(tuning::launch::pilotingInitialThrottle)));
-    rows.push_back(detailPresentationRow("Powered correction", display::fixed(poweredCorrection, 2) + " course/s"));
-    rows.push_back(detailPresentationRow("Fuel capacity", display::fixed(fuelCapacity * 100.0, 0) + "%"));
-    rows.push_back(detailPresentationRow("Engine-off cooling", display::fixed(coolingRate * 100.0, 1) + "%/s before incidents"));
-    rows.push_back(detailPresentationRow("Pressure grace", display::fixed(pressureGrace, 2) + "s at 100%"));
-    rows.push_back(detailPresentationRow("Valve venting", display::fixed(ventRate * 100.0, 1) + "%/s"));
-    rows.push_back(detailPresentationRow("Course corridor", "\xC2\xB1" + display::fixed(courseLimit, 2)));
-    rows.push_back(detailPresentationRow("Incident warning", display::fixed(warningLead, 2) + "s"));
-    rows.push_back(detailPresentationRow(
-        "Disturbance strength",
-        display::multiplier(std::max(0.50, 1.0 + stats.volatility * tuning::launch::pilotingVolatilityIncidentScale))));
     rows.push_back(detailPresentationHeader("Installed ship systems"));
     for (const std::string& moduleId : state.meta.ownedModuleIds) {
         if (const ShipModule* module = catalog.findModule(moduleId)) {
+            if (module->launchUpgradeKind != LaunchUpgradeKind::None) {
+                continue;
+            }
             const bool operational = std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end();
             const bool builtIn = module->refitTrack == RefitTrack::None && module->unlockKey == content::unlock::starter;
             const std::string status = builtIn ? "Built in" : (operational ? "Installed" : "Offline this expedition");
@@ -78,6 +116,47 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
     }
 
     return rows;
+}
+
+inline std::vector<LaunchUpgradeInstallPresentation> launchUpgradeInstallPresentation(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    std::vector<LaunchUpgradeInstallPresentation> upgrades;
+    for (const LaunchUpgradeKind kind : {
+             LaunchUpgradeKind::FuelTanks,
+             LaunchUpgradeKind::FlightControls,
+             LaunchUpgradeKind::Cooling,
+             LaunchUpgradeKind::Hull}) {
+        const int currentRank = launchUpgradeRank(state, kind);
+        const ShipModule* module = nextLaunchUpgrade(state, catalog, kind);
+        const int nextRank = module == nullptr ? currentRank : module->launchUpgradeRank;
+        const int cost = static_cast<int>(tuning::launchProgression::upgradeCost);
+        PanelButtonPresentation action;
+        if (module == nullptr) {
+            action = disabledPanelButton("MAX");
+        } else if (!launchUpgradeUnlocked(state, kind, nextRank)) {
+            action = disabledPanelButton(launchUpgradeLockLabel(kind, nextRank));
+        } else if (!canInstallLaunchUpgrade(state, catalog, kind)) {
+            action = disabledPanelButton(text::needCredits(cost));
+        } else {
+            action = panelActionButton(
+                text::buttons::install,
+                ui::actions::installLaunchUpgrade(static_cast<int>(kind)),
+                "ok");
+        }
+        upgrades.push_back({
+            kind,
+            launchUpgradeTrackName(kind),
+            currentRank,
+            nextRank,
+            launchUpgradeEffect(kind, currentRank),
+            module == nullptr ? std::string("Maximum rank") : launchUpgradeEffect(kind, nextRank),
+            cost,
+            std::move(action)
+        });
+    }
+    return upgrades;
 }
 
 } // namespace rocket

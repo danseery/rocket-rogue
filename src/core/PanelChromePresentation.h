@@ -53,7 +53,18 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
             }
         }
     }
-    return currentDestination(state, catalog);
+    const Destination& current = currentDestination(state, catalog);
+    if (current.hiddenFromProgression) {
+        if (const Destination* launchTarget = catalog.findDestination(state.launchConfig.destinationId)) {
+            if (!launchTarget->hiddenFromProgression) {
+                return *launchTarget;
+            }
+        }
+        if (const Destination* next = nextDestination(state, catalog)) {
+            return *next;
+        }
+    }
+    return current;
 }
 
 inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
@@ -65,22 +76,15 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
     std::vector<PanelMetricPresentation> metrics;
     const Destination& displayDestination = panelDisplayDestination(state, catalog, activeLaunch);
     const bool transferLaunch = state.screen == Screen::Launch && activeLaunch.config.frontierTransfer;
-    const int requiredReadiness = frontierReadinessRequired(state, catalog);
     const Astronaut* astronaut = activeAstronaut(state);
 
     metrics.push_back(panelMetric(text::labels::missionCredits, display::money(state.run.credits)));
     metrics.push_back(panelMetric(text::labels::chapter, chapterLabel(state.meta.chapter)));
     metrics.push_back(panelMetric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage)));
     metrics.push_back(panelMetric(transferLaunch ? text::labels::transferTarget : text::labels::currentFrontier, displayDestination.name));
-    metrics.push_back(panelMetric(
-        transferLaunch ? text::labels::requiredBurn : text::labels::flightData,
-        transferLaunch ? display::multiplier(displayDestination.targetMultiplier) :
-                         (requiredReadiness == 0 ? std::string(text::panel::complete) : display::fraction(state.run.frontierReadiness, requiredReadiness))));
-    metrics.push_back(panelMetric(
-        text::labels::missionDifficulty,
-        display::signedPercent(state.screen == Screen::Launch
-            ? flightModel.pressureModifier
-            : missionPressureModifier(state, catalog, displayDestination))));
+    if (state.screen == Screen::Launch) {
+        metrics.push_back(panelMetric("Launch lesson", std::string(toString(flightModel.config.missionKind))));
+    }
     metrics.push_back(panelMetric(text::labels::crewStress, crewStressSummary(astronaut)));
     const double pendingFuelBoost = state.screen == Screen::Launch ? activeLaunch.slingshotFuelBoost : state.run.nextLaunchFuelBoost;
     const double pendingSpeedBoost = state.screen == Screen::Launch ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;

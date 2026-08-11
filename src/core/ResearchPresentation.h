@@ -45,6 +45,24 @@ struct PhaseAdvisoryPresentation {
     std::string cssClass;
 };
 
+enum class SurfaceReturnSafetySeverity {
+    Safe,
+    Caution,
+    Critical
+};
+
+struct SurfaceReturnSafetyPresentation {
+    SurfaceReturnSafetySeverity severity = SurfaceReturnSafetySeverity::Safe;
+    int depth = 0;
+    int estimatedReturnSeconds = 0;
+    int oxygenSeconds = 0;
+    int fuelNeededAfterDeployment = 0;
+    int fuelAvailableAfterDeployment = 0;
+    std::string title;
+    std::string detail;
+    std::string cssClass;
+};
+
 struct ResearchPhasePresentation {
     std::vector<PhaseStepPresentation> phaseSteps;
     PhaseAdvisoryPresentation advisory;
@@ -1398,7 +1416,7 @@ inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
     if (state.run.surfaceExpedition.sharedFuel <= 0) {
         return disabledPanelButton(text::buttons::unavailable);
     }
-    return panelActionButton(text::buttons::mineDeposit, ui::actions::mineSurface);
+    return panelActionButton(text::buttons::mineDeposit, ui::actions::mineSurface, "risk");
 }
 
 inline std::string surfaceActionAvailability(int supply, int cost)
@@ -1427,7 +1445,12 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
 
 inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
 {
-    return fieldSurfaceActionButton(state, text::buttons::pushDeeper, ui::actions::pushSurface, tuning::research::pushSupplyCost, "warn");
+    return fieldSurfaceActionButton(
+        state,
+        text::buttons::pushDeeper,
+        ui::actions::pushSurface,
+        tuning::research::pushSupplyCost,
+        "warn");
 }
 
 inline std::string pushSurfaceActionAvailability(const GameState& state)
@@ -1545,8 +1568,8 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(
     const bool payloadLoaded = hasSurfacePayload(expedition);
     const bool miningWindowOpen = expedition.sharedFuel > 0 && !expedition.miningRunUsed;
     if (!payloadLoaded && miningWindowOpen) {
-        presentation.postureTitle = "Recommended: mine deposit";
-        presentation.postureDetail = "The site is opened. Mining uses fuel instead of action kits, and only runs once this loop.";
+        presentation.postureTitle = "Recommended: survey, dig, then mine";
+        presentation.postureDetail = "Survey reveals each level, Dig chooses the Mining Rig's start depth, and Mine begins the hands-on extraction run.";
         presentation.postureClass = "neutral";
         return presentation;
     }
@@ -1656,6 +1679,79 @@ inline MiningArenaRules upcomingMiningArenaRules(
     return resolveMiningArenaRules(request);
 }
 
+inline SurfaceReturnSafetyPresentation surfaceReturnSafetyPresentation(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int absoluteDepth)
+{
+    SurfaceReturnSafetyPresentation presentation;
+    presentation.depth = std::max(0, absoluteDepth);
+    const MiningArenaRules rules = upcomingMiningArenaRules(
+        state,
+        catalog,
+        presentation.depth - state.run.surfaceExpedition.depth);
+    if (!rules.mechanics.oxygenAndFuel || presentation.depth <= 0) {
+        return presentation;
+    }
+
+    const MiningDrillStats stats = miningDrillStats(state, catalog);
+    presentation.oxygenSeconds = static_cast<int>(std::floor(stats.oxygenSeconds));
+
+    // Returning to the surface means crossing every intervening arena. Start
+    // with the unobstructed vertical distance, then reserve time for
+    // acceleration, gravity, each layer transition, and docking. This is a
+    // safe-return estimate, not a promise that an obstructed route is faster.
+    const double verticalCells = std::max(1, stats.terrainHeight - 7);
+    const double idealLayerSeconds = verticalCells / std::max(0.1, stats.speed);
+    const double safeLayerSeconds =
+        (idealLayerSeconds + 0.65) *
+        tuning::mining::returnEnduranceTraversalScale;
+    const double estimatedSeconds =
+        tuning::mining::returnEnduranceDockingSeconds +
+        static_cast<double>(presentation.depth) * safeLayerSeconds;
+    presentation.estimatedReturnSeconds =
+        static_cast<int>(std::ceil(estimatedSeconds));
+    presentation.fuelNeededAfterDeployment = static_cast<int>(std::ceil(
+        estimatedSeconds * tuning::mining::fuelCycleProgressPerSecond));
+    presentation.fuelAvailableAfterDeployment = std::max(
+        0,
+        state.run.surfaceExpedition.sharedFuel - 1);
+
+    const int oxygenMargin =
+        presentation.oxygenSeconds - presentation.estimatedReturnSeconds;
+    const int fuelMargin =
+        presentation.fuelAvailableAfterDeployment -
+        presentation.fuelNeededAfterDeployment;
+    const bool oxygenCritical = oxygenMargin < 0;
+    const bool fuelCritical = fuelMargin < 0;
+    const bool oxygenCaution =
+        oxygenMargin <= tuning::mining::returnEnduranceCautionSeconds;
+    const bool fuelCaution = fuelMargin == 0;
+
+    if (oxygenCritical || fuelCritical) {
+        presentation.severity = SurfaceReturnSafetySeverity::Critical;
+        presentation.title = "RETURN RANGE CRITICAL";
+        presentation.cssClass = "danger dig-endurance-warning";
+    } else if (oxygenCaution || fuelCaution) {
+        presentation.severity = SurfaceReturnSafetySeverity::Caution;
+        presentation.title = "RETURN MARGIN LOW";
+        presentation.cssClass = "caution dig-endurance-warning";
+    } else {
+        return presentation;
+    }
+
+    presentation.detail =
+        "DEPTH +" + std::to_string(presentation.depth) +
+        " RETURN: ~" + std::to_string(presentation.estimatedReturnSeconds) + "s\n" +
+        "OXYGEN: " + std::to_string(presentation.oxygenSeconds) + "s\n" +
+        "FUEL: " + std::to_string(presentation.fuelAvailableAfterDeployment) +
+        " available / " + std::to_string(presentation.fuelNeededAfterDeployment) + " needed\n\n";
+    presentation.detail += presentation.severity == SurfaceReturnSafetySeverity::Critical
+        ? "DO NOT MINE HERE.\nUpgrade endurance first."
+        : "MINE BRIEFLY.\nReturn as soon as the first payload is secured.";
+    return presentation;
+}
+
 inline std::string miningArenaForecastTitle(const MiningArenaRules& rules)
 {
     return std::string(miningActName(rules.request.act))
@@ -1716,9 +1812,9 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and Mining Rig operations"),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationHeader(text::panel::details::fieldRules),
-        detailPresentationRow(text::panel::details::surveyRisk, std::string("Scans forecast one layer per pulse: +0 first, then layers available through Push Deeper. Dust can still burn extra action kits.")),
-        detailPresentationRow(text::panel::details::miningRisk, std::string("The Mining Rig deploys at the selected start depth while the ship remains at SURFACE; pushing deeper closes once the run is used.")),
-        detailPresentationRow(text::panel::details::depthRisk, std::string("Layer +1 is guaranteed and bankable. Collapse risk begins when gambling on layer +2; confirmed finds remain marked for mining.")),
+        detailPresentationRow(text::panel::details::surveyRisk, std::string("Survey forecasts one level per pulse: the current level first, then deeper levels. Dust can still burn extra action kits.")),
+        detailPresentationRow(text::panel::details::miningRisk, std::string("Mine puts you in direct control of the Mining Rig drone at the selected start depth to recover ore and artifacts.")),
+        detailPresentationRow(text::panel::details::depthRisk, std::string("Dig tunnels to a deeper starting level. Level +1 is guaranteed; collapse risk begins when gambling on level +2.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Normal return recovers every material and artifact loaded onto the Ship.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,
@@ -1813,10 +1909,30 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surfaceHazardRisk(expedition.hazard, tuning::research::surveyHazardChanceScale, (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief),
         std::string(text::labels::hazard),
         surveyPayoffChips(state, tools, crew, site),
-        fieldSurfaceActionButton(state, text::buttons::surveySite, ui::actions::surveySurface, tuning::research::surveySupplyCost));
+        fieldSurfaceActionButton(
+            state,
+            text::buttons::surveySite,
+            ui::actions::surveySurface,
+            tuning::research::surveySupplyCost,
+            "ok"));
     surveyPreview.payoffChips.push_back(panelMetric("Arena", std::string(miningActName(arenaRules.request.act)) + " L" + std::to_string(arenaRules.request.difficulty)));
     presentation.actions.push_back(std::move(surveyPreview));
     presentation.actions.back().availability = fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
+
+    SurfaceActionPreviewPresentation pushPreview = surfaceActionPreview(
+        text::buttons::pushDeeper,
+        std::string(text::panel::messages::surfacePushDetail),
+        expedition.supply,
+        tuning::research::pushSupplyCost,
+        surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, tools.hazardRelief + crew.hazardRelief + upgrades.hazardRelief),
+        std::string(text::labels::hazard),
+        pushPayoffChips(state, crew, site),
+        pushSurfaceActionButton(state));
+    pushPreview.availability = pushSurfaceActionAvailability(state);
+    pushPreview.payoffChips.push_back(panelMetric("Layer +1", "GUARANTEED"));
+    const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
+    pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
+    presentation.actions.push_back(std::move(pushPreview));
 
     SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(
         text::buttons::mineDeposit,
@@ -1839,21 +1955,6 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     addPositiveChip(miningPreview.payoffChips, "Tagged AR", expedition.prospectArtifacts);
     presentation.actions.push_back(std::move(miningPreview));
 
-    SurfaceActionPreviewPresentation pushPreview = surfaceActionPreview(
-        text::buttons::pushDeeper,
-        std::string(text::panel::messages::surfacePushDetail),
-        expedition.supply,
-        tuning::research::pushSupplyCost,
-        surfaceHazardRisk(expedition.hazard, tuning::research::pushHazardChanceScale, tools.hazardRelief + crew.hazardRelief + upgrades.hazardRelief),
-        std::string(text::labels::hazard),
-        pushPayoffChips(state, crew, site),
-        pushSurfaceActionButton(state));
-    pushPreview.availability = pushSurfaceActionAvailability(state);
-    pushPreview.payoffChips.push_back(panelMetric("Layer +1", "GUARANTEED"));
-    const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
-    pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
-    presentation.actions.push_back(std::move(pushPreview));
-
     const SurfaceReturnLedger returnLedger = surfaceReturnLedger(state, catalog);
     const std::string extractionTitle = text::buttons::returnHomeLabel(arkKnown, outerExpedition);
     std::string extractionDetail = "On Ship: " + std::to_string(returnLedger.onShip.common) +
@@ -1874,7 +1975,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelActionButton(
             extractionTitle,
             ui::actions::extractSurface,
-            "ok"));
+            "ghost"));
     extractionPreview.payoffChips.insert(
         extractionPreview.payoffChips.begin(),
         panelMetric("On Ship", std::to_string(returnLedger.onShip.common) + " Common"));

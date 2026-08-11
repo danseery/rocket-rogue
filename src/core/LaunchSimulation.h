@@ -3,88 +3,97 @@
 #include "core/GameState.h"
 
 #include <array>
+#include <cstddef>
 
 namespace rocket {
 
-struct TelemetryIncident {
-    double centerMultiplier = 1.0;
-    double width = 0.10;
-    double heat = 0.0;
-    double pressure = 0.0;
-    double vibration = 0.0;
-    double fuelMix = 0.0;
-    double guidance = 0.0;
-    double abortRisk = 0.0;
+inline constexpr std::size_t launchControlKickCapacity = 16;
+inline constexpr std::size_t launchAsteroidCapacity = 24;
+
+struct LaunchAsteroidState {
+    double routeProgress = 0.0;
+    double courseOffset = 0.0;
+    double radius = 0.10;
+    double scale = 1.0;
+    double rotation = 0.0;
+    double spin = 0.0;
 };
+
+using LaunchAsteroid = LaunchAsteroidState;
 
 struct PreparedLaunch {
     LaunchConfig config;
-    ModuleStats stats;
-    double crashMultiplier = 1.0;
-    double sensorQuality = 0.0;
-    double heatRate = 1.0;
-    double pressureModifier = 0.0;
-    double throttleFactor = 1.0;
-    double cutHeatRelief = 0.0;
-    double cutVibrationRelief = 0.0;
-    double cutGuidancePenalty = 0.0;
-    double pressureRelief = 0.0;
-    double pressureReliefFailure = 0.0;
-    double reliefGuidancePenalty = 0.0;
-    double cargoFuelRelief = 0.0;
-    double cargoGuidancePenalty = 0.0;
-    double cargoVibrationPenalty = 0.0;
-    double cargoReturnPenalty = 0.0;
+
+    // Legacy outcome records still expose a failure point. Live piloted
+    // survival never consults this value.
+    double crashMultiplier = 0.0;
     double slingshotFuelBoost = 0.0;
     double slingshotSpeedBoost = 0.0;
     int overpreparedData = 0;
     double provingPayoutBonus = 0.0;
-    double objectiveConfidence = 0.0;
-    int crewStressSteps = 0;
-    double crewGuidancePenalty = 0.0;
-    double crewAbortMultiplier = 1.0;
-    std::array<TelemetryIncident, 4> incidents {};
-    int incidentCount = 0;
+
+    double fuelCapacity = 10.0;
+    double cruiseFuelCost = 10.0;
+    double arrivalReserveFuel = 0.0;
+    int flightControlRank = 0;
+    int coolingRank = 0;
+    int hullRank = 0;
+    int existingShipDamage = 0;
+    bool manualControlsEnabled = true;
+    bool heatEnabled = false;
+    bool asteroidsEnabled = false;
+    bool trainingMission = false;
+
+    double controlChaos = 0.0;
+    double controlSteeringResponseVariation = 0.0;
+    std::array<double, launchControlKickCapacity> controlKickDirections {};
+    int controlKickCount = 0;
+
+    std::array<LaunchAsteroid, launchAsteroidCapacity> asteroids {};
+    int asteroidCount = 0;
 };
 
 struct FlightActionState {
     bool returningHome = false;
     bool cutEnginesActive = false;
-    bool pressureReliefOpen = false;
-    bool pressureReliefFailed = false;
-    bool cargoJettisoned = false;
 };
 
 struct LaunchControlInput {
     double steer = 0.0;
     double throttle = 0.0;
     bool enginesCut = false;
-    bool pressureReliefOpen = false;
 };
 
 struct LaunchFlightState {
     bool active = false;
     bool returningHome = false;
     double travelProgress = 0.0;
+    double previousTravelProgress = 0.0;
     double currentMultiplier = 1.0;
     double peakMultiplier = 1.0;
     double selectedThrottle = 0.60;
     double burnRatePerSecond = 0.0;
-    double fuelCapacity = 1.0;
-    double fuelRemaining = 1.0;
-    double heat = 0.18;
-    double pressure = 0.18;
+    double travelVelocity = 0.0;
+    double fuelCapacity = 10.0;
+    double fuelRemaining = 10.0;
+    double projectedFuelRequired = 0.0;
+    double projectedFuelReserve = 10.0;
+    double heat = 0.0;
     double courseOffset = 0.0;
     double courseVelocity = 0.0;
-    double valveToggleCooldown = 0.0;
+    bool throttleInputActive = false;
+    double throttleAtLastKick = 0.60;
+    double throttleKickCooldownSeconds = 0.0;
+    int nextControlKickIndex = 0;
     double heatFailureSeconds = 0.0;
-    double pressureFailureSeconds = 0.0;
     double courseFailureSeconds = 0.0;
     double fuelFailureSeconds = 0.0;
     double minimumSafetyMargin = 1.0;
-    double incidentStrength = 0.0;
-    double incidentWarningSeconds = 0.0;
-    int forecastIncidentIndex = -1;
+    double hullMaximum = 100.0;
+    double hullRemaining = 100.0;
+    int hullDamageTaken = 0;
+    double asteroidInvulnerabilitySeconds = 0.0;
+    std::array<bool, launchAsteroidCapacity> asteroidHit {};
     LaunchFailureCause failureCause = LaunchFailureCause::None;
 };
 
@@ -92,6 +101,9 @@ struct LaunchFlightStep {
     bool reachedDestination = false;
     bool reachedHome = false;
     bool failed = false;
+    bool asteroidHit = false;
+    bool trainingRescue = false;
+    int hullDamageTaken = 0;
     LaunchFailureCause failureCause = LaunchFailureCause::None;
 };
 
@@ -99,18 +111,23 @@ struct LaunchResolutionContext {
     bool pilotedFlight = false;
     LaunchFailureCause failureCause = LaunchFailureCause::None;
     double minimumSafetyMargin = 1.0;
+    int hullDamageTaken = 0;
 };
 
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng);
-PreparedLaunch withCutEngines(const PreparedLaunch& launch);
-PreparedLaunch withPressureRelief(const PreparedLaunch& launch, bool failed);
-PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch);
-PreparedLaunch applyFlightActions(const PreparedLaunch& launch, const FlightActionState& actions);
+double launchFuelCapacityForRank(int rank, double oneLaunchBoost = 0.0);
+double launchCruiseFuelCostForTier(int tier);
+double launchFuelUseMultiplier(double throttle);
+double launchControlChaosForRank(int rank);
+double launchPoweredHeatMultiplierForRank(int rank);
+double launchEngineOffCoolingForRank(int rank);
+double launchHullImpactMultiplierForRank(int rank);
+double launchAsteroidRowProgress(int row);
+double launchAsteroidLaneOffset(int lane);
+double launchAsteroidImpactDamage(int hullRank, double asteroidScale);
 LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination);
 void beginLaunchReturn(LaunchFlightState& flight);
-double launchPressureGraceSeconds(const PreparedLaunch& launch);
 double launchCourseLimit(const PreparedLaunch& launch);
-double launchIncidentWarningLeadSeconds(const PreparedLaunch& launch);
 LaunchFlightStep updateLaunchFlight(
     LaunchFlightState& flight,
     const PreparedLaunch& launch,
@@ -118,9 +135,6 @@ LaunchFlightStep updateLaunchFlight(
     const LaunchControlInput& input,
     double deltaSeconds);
 TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const LaunchFlightState& flight);
-double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds);
-double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration);
-double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier);
 LaunchOutcome resolveLaunch(
     const PreparedLaunch& launch,
     const ContentCatalog& catalog,

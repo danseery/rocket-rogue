@@ -7,9 +7,9 @@
 namespace rocket {
 
 struct SaveData {
-    int version = 9;
+    int version = 10;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
-    double credits = 100.0;
+    double credits = 0.0;
     int destinationIndex = 0;
     int frontierReadiness = 0;
     bool refitEntitled = false;
@@ -28,6 +28,8 @@ struct SaveData {
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
+    LaunchUpgradeRanks launchUpgrades;
+    LaunchLessonState launchLessons;
     StoryBriefingState storyBriefing;
     std::vector<std::string> acknowledgedActivityBriefingIds;
     bool campaignIntroductionAcknowledged = false;

@@ -77,7 +77,7 @@ Base gravity is `6 cells/s²` multiplied by destination scale:
 
 | Destination | Scale | Destination | Scale |
 | --- | ---: | --- | ---: |
-| Earth Orbit | 0.15 | Moon | 0.35 |
+| Earth Orbit (internal compatibility only) | 0.15 | Moon | 0.35 |
 | Mars | 0.60 | Jupiter | 1.15 |
 | Saturn | 0.95 | Uranus | 0.80 |
 | Neptune | 1.05 | Khepri Prime | 1.20 |
@@ -219,6 +219,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and bank/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 9 retains version 8's rig/operator, loose-chunk, disabled-rig, purchased-frame, and Support Drone anchor/formation state while adding scenario instance/site context plus generic cocoon definition, protected-objective, layer, reveal, and cell-tag state. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize v9 scenario/cocoon state without replaying rewards.
+- Save version 10 retains version 9's rig/operator, loose-chunk, disabled-rig, purchased-frame, Support Drone anchor/formation, scenario/site, cocoon, protected-objective, layer, reveal, and cell-tag state while adding launch-curriculum progress. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize the v9 scenario/cocoon state before v10 launch migration without replaying rewards.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

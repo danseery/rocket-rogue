@@ -83,6 +83,23 @@ class SceneAtlasTests(unittest.TestCase):
                 self.assertEqual(source_rect["height"], generated["frameHeight"])
         self.assertEqual(self.metadata["frameCount"], frame_count)
 
+    def test_asteroid_sprite_is_clean_transparent_art(self) -> None:
+        with Image.open(REPO_ROOT / "assets/art/asteroid.png") as opened:
+            asteroid = opened.convert("RGBA")
+        self.assertEqual(asteroid.size, (512, 512))
+        alpha = asteroid.getchannel("A")
+        self.assertEqual(
+            [asteroid.getpixel(point)[3] for point in ((0, 0), (511, 0), (0, 511), (511, 511))],
+            [0, 0, 0, 0],
+        )
+        self.assertIsNotNone(alpha.getbbox())
+        magenta_family = sum(
+            1
+            for red, green, blue, opacity in asteroid.get_flattened_data()
+            if opacity > 0 and red > 180 and blue > 100 and green < 100
+        )
+        self.assertEqual(magenta_family, 0)
+
     def test_padded_rectangles_do_not_overlap_or_exceed_webgl_limit(self) -> None:
         page_rects: dict[int, list[tuple[int, int, int, int]]] = {
             page["index"]: [] for page in self.metadata["pages"]

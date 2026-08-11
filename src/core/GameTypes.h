@@ -85,6 +85,44 @@ enum class RefitTrack {
     Recovery
 };
 
+enum class LaunchUpgradeKind {
+    None,
+    FuelTanks,
+    FlightControls,
+    Cooling,
+    Hull
+};
+
+struct LaunchUpgradeRanks {
+    int fuelTanks = 0;
+    int flightControls = 0;
+    int cooling = 0;
+    int hull = 0;
+};
+
+enum class LaunchTrainingStage {
+    FuelCalibration,
+    FlightControlsCalibration,
+    MoonTransfer,
+    ThermalManagement,
+    MarsTransfer,
+    HullIntegrity,
+    JupiterTransfer,
+    Complete
+};
+
+struct LaunchLessonState {
+    LaunchTrainingStage stage = LaunchTrainingStage::FuelCalibration;
+};
+
+enum class LaunchMissionKind {
+    Standard,
+    FuelCalibration,
+    FlightControlsCalibration,
+    ThermalManagement,
+    AsteroidBelt
+};
+
 enum class Rarity {
     Common,
     Uncommon,
@@ -611,7 +649,13 @@ enum class LaunchFailureCause {
     ThermalRunaway,
     PressureRupture,
     CourseLost,
-    FuelExhausted
+    FuelExhausted,
+    TrainingRescue,
+    HullBreach,
+    // The controls-calibration sortie is intentionally not cleared for a
+    // lunar landing. Reaching the Moon before its navigation upgrade is a
+    // distinct, visible collision rather than a generic training rescue.
+    LunarImpact
 };
 
 struct ModuleStats {
@@ -704,6 +748,11 @@ struct ShipModule {
     int refitRank = 0;
     std::string prerequisiteId;
     bool provingTier = false;
+    LaunchUpgradeKind launchUpgradeKind = LaunchUpgradeKind::None;
+    int launchUpgradeRank = 0;
+    // Retained so old saves can still resolve, equip, and display the module.
+    // Compatibility modules must never enter newly generated Refit offers.
+    bool compatibilityOnly = false;
 };
 
 struct CrewUpgrade {
@@ -957,12 +1006,16 @@ struct Destination {
     // destination ID.
     std::string provingRouteReadyTitle;
     std::string provingRouteReadyConsequence;
+    // Hidden origins remain addressable for save compatibility and route
+    // calculations, but never appear as a player-facing destination.
+    bool hiddenFromProgression = false;
 };
 
 struct LaunchConfig {
     std::string destinationId;
     double burnGoalMultiplier = 1.5;
     bool frontierTransfer = false;
+    LaunchMissionKind missionKind = LaunchMissionKind::Standard;
     std::string astronautId;
     std::string frameId;
     std::vector<std::string> equippedModuleIds;
@@ -1027,6 +1080,8 @@ struct MetaProgress {
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
+    LaunchUpgradeRanks launchUpgrades;
+    LaunchLessonState launchLessons;
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
     MaterialInventory materials;
@@ -1549,7 +1604,7 @@ struct RunState {
     int frontierReadiness = 0;
     bool refitEntitled = false;
     int shipDamage = 0;
-    double credits = 100.0;
+    double credits = 0.0;
     std::string frameId;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
@@ -1590,6 +1645,9 @@ struct GameState {
 
 std::string_view toString(SlotType slot);
 std::string_view toString(RefitTrack track);
+std::string_view toString(LaunchUpgradeKind kind);
+std::string_view toString(LaunchTrainingStage stage);
+std::string_view toString(LaunchMissionKind kind);
 std::string_view toString(Rarity rarity);
 std::string_view toString(SurfaceUpgradeCategory category);
 std::string_view toString(MiniDroneRole role);

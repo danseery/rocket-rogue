@@ -141,7 +141,8 @@ int destinationIndexForId(const ContentCatalog& catalog, const std::string& dest
 
 bool isShallowRecoveryOutcome(const Destination& destination, const LaunchOutcome& outcome)
 {
-    return (outcome.recoveryMethod == RecoveryMethod::ReturnHome || outcome.recoveryMethod == RecoveryMethod::ManualEject)
+    return outcome.failureCause != LaunchFailureCause::TrainingRescue &&
+        outcome.recoveryMethod == RecoveryMethod::ReturnHome
         && outcome.ejectMultiplier < 1.0 + (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
 }
 
@@ -164,6 +165,164 @@ int navigationFuelCost(const Destination& destination)
     return 2 + destination.tier;
 }
 
+int& launchUpgradeRankRef(LaunchUpgradeRanks& ranks, LaunchUpgradeKind kind)
+{
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks: return ranks.fuelTanks;
+    case LaunchUpgradeKind::FlightControls: return ranks.flightControls;
+    case LaunchUpgradeKind::Cooling: return ranks.cooling;
+    case LaunchUpgradeKind::Hull: return ranks.hull;
+    case LaunchUpgradeKind::None: break;
+    }
+    static int unused = 0;
+    unused = 0;
+    return unused;
+}
+
+int launchTrainingStageOrdinal(LaunchTrainingStage stage)
+{
+    return static_cast<int>(stage);
+}
+
+bool launchTrainingAtLeast(const GameState& state, LaunchTrainingStage stage)
+{
+    return launchTrainingStageOrdinal(state.meta.launchLessons.stage) >= launchTrainingStageOrdinal(stage);
+}
+
+const std::array<const char*, 3>& launchUpgradeIds(LaunchUpgradeKind kind)
+{
+    static constexpr std::array<const char*, 3> fuel {
+        content::module::fuelTanks1,
+        content::module::fuelTanks2,
+        content::module::fuelTanks3};
+    static constexpr std::array<const char*, 3> controls {
+        content::module::flightControls1,
+        content::module::flightControls2,
+        content::module::flightControls3};
+    static constexpr std::array<const char*, 3> cooling {
+        content::module::coolingSystem1,
+        content::module::coolingSystem2,
+        content::module::coolingSystem3};
+    static constexpr std::array<const char*, 3> hull {
+        content::module::hullPlating1,
+        content::module::hullPlating2,
+        content::module::hullPlating3};
+    static constexpr std::array<const char*, 3> none {"", "", ""};
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks: return fuel;
+    case LaunchUpgradeKind::FlightControls: return controls;
+    case LaunchUpgradeKind::Cooling: return cooling;
+    case LaunchUpgradeKind::Hull: return hull;
+    case LaunchUpgradeKind::None: return none;
+    }
+    return none;
+}
+
+const Destination* launchTrainingDestination(const GameState& state, const ContentCatalog& catalog)
+{
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FuelCalibration:
+    case LaunchTrainingStage::FlightControlsCalibration:
+    case LaunchTrainingStage::MoonTransfer:
+        return catalog.findDestination(content::destination::moon);
+    case LaunchTrainingStage::ThermalManagement:
+    case LaunchTrainingStage::MarsTransfer:
+        return catalog.findDestination(content::destination::mars);
+    case LaunchTrainingStage::HullIntegrity:
+    case LaunchTrainingStage::JupiterTransfer:
+        return catalog.findDestination(content::destination::jupiter);
+    case LaunchTrainingStage::Complete:
+        return nullptr;
+    }
+    return nullptr;
+}
+
+bool launchTrainingTransferStage(LaunchTrainingStage stage)
+{
+    return launchStageUsesArrival(stage);
+}
+
+bool launchLessonMissionActive(
+    LaunchTrainingStage trainingStage,
+    LaunchMissionKind missionKind)
+{
+    return
+        (trainingStage == LaunchTrainingStage::FuelCalibration &&
+            missionKind == LaunchMissionKind::FuelCalibration) ||
+        (trainingStage == LaunchTrainingStage::FlightControlsCalibration &&
+            missionKind == LaunchMissionKind::FlightControlsCalibration) ||
+        (trainingStage == LaunchTrainingStage::ThermalManagement &&
+            missionKind == LaunchMissionKind::ThermalManagement) ||
+        (trainingStage == LaunchTrainingStage::HullIntegrity &&
+            missionKind == LaunchMissionKind::AsteroidBelt);
+}
+
+bool launchLessonReturnSucceeded(
+    LaunchTrainingStage trainingStage,
+    LaunchMissionKind missionKind,
+    const LaunchOutcome& outcome,
+    double targetMultiplier)
+{
+    return launchLessonMissionActive(trainingStage, missionKind) &&
+        outcome.type != LaunchResultType::Destroyed &&
+        outcome.failureCause == LaunchFailureCause::None &&
+        outcome.recoveryMethod == RecoveryMethod::ReturnHome &&
+        outcome.ejectMultiplier + 0.000001 >= targetMultiplier;
+}
+
+bool launchLessonArrivalSucceeded(
+    LaunchTrainingStage trainingStage,
+    LaunchMissionKind missionKind,
+    const LaunchOutcome& outcome)
+{
+    const bool arrivalLesson =
+        (trainingStage == LaunchTrainingStage::ThermalManagement &&
+            missionKind == LaunchMissionKind::ThermalManagement) ||
+        (trainingStage == LaunchTrainingStage::HullIntegrity &&
+            missionKind == LaunchMissionKind::AsteroidBelt);
+    return arrivalLesson &&
+        outcome.type == LaunchResultType::MissionComplete &&
+        outcome.failureCause == LaunchFailureCause::None &&
+        outcome.frontierTransfer &&
+        outcome.recoveryMethod == RecoveryMethod::TransferArrival;
+}
+
+void advanceLaunchLessonAfterReturn(GameState& state, LaunchMissionKind missionKind)
+{
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FuelCalibration:
+        if (missionKind == LaunchMissionKind::FuelCalibration) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+        }
+        break;
+    case LaunchTrainingStage::FlightControlsCalibration:
+        if (missionKind == LaunchMissionKind::FlightControlsCalibration) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
+        }
+        break;
+    case LaunchTrainingStage::ThermalManagement:
+        if (missionKind == LaunchMissionKind::ThermalManagement) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::MarsTransfer;
+        }
+        break;
+    case LaunchTrainingStage::HullIntegrity:
+        if (missionKind == LaunchMissionKind::AsteroidBelt) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::JupiterTransfer;
+        }
+        break;
+    case LaunchTrainingStage::MoonTransfer:
+    case LaunchTrainingStage::MarsTransfer:
+    case LaunchTrainingStage::JupiterTransfer:
+    case LaunchTrainingStage::Complete:
+        break;
+    }
+}
+
+double expeditionCreditFloor(const GameState& state)
+{
+    return launchTutorialComplete(state) ? tuning::hangar::minimumExpeditionCredits : 0.0;
+}
+
 } // namespace
 
 int moduleOfferCost(Rarity rarity)
@@ -179,6 +338,257 @@ int moduleOfferCost(const ShipModule& module)
 int crewUpgradeCost(const CrewUpgrade& upgrade)
 {
     return moduleOfferCost(upgrade.rarity);
+}
+
+int launchUpgradeRank(const GameState& state, LaunchUpgradeKind kind)
+{
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks: return state.meta.launchUpgrades.fuelTanks;
+    case LaunchUpgradeKind::FlightControls: return state.meta.launchUpgrades.flightControls;
+    case LaunchUpgradeKind::Cooling: return state.meta.launchUpgrades.cooling;
+    case LaunchUpgradeKind::Hull: return state.meta.launchUpgrades.hull;
+    case LaunchUpgradeKind::None: return 0;
+    }
+    return 0;
+}
+
+double launchFuelCapacity(const GameState& state)
+{
+    return tuning::launchProgression::baseFuelCapacity +
+        static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks)) *
+            tuning::launchProgression::fuelPerTankRank;
+}
+
+const ShipModule* nextLaunchUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    LaunchUpgradeKind kind)
+{
+    if (kind == LaunchUpgradeKind::None) {
+        return nullptr;
+    }
+    const int nextRank = launchUpgradeRank(state, kind) + 1;
+    if (nextRank > tuning::launchProgression::maximumUpgradeRank) {
+        return nullptr;
+    }
+    const auto found = std::find_if(catalog.modules.begin(), catalog.modules.end(), [&](const ShipModule& module) {
+        return module.launchUpgradeKind == kind && module.launchUpgradeRank == nextRank;
+    });
+    return found == catalog.modules.end() ? nullptr : &*found;
+}
+
+bool launchUpgradeUnlocked(const GameState& state, LaunchUpgradeKind kind, int rank)
+{
+    if (rank < 1 || rank > tuning::launchProgression::maximumUpgradeRank) {
+        return false;
+    }
+    if (rank <= launchUpgradeRank(state, kind)) {
+        return true;
+    }
+    if (rank != launchUpgradeRank(state, kind) + 1) {
+        return false;
+    }
+
+    if (rank == 1) {
+        switch (kind) {
+        case LaunchUpgradeKind::FuelTanks:
+            return launchTrainingAtLeast(state, LaunchTrainingStage::FlightControlsCalibration);
+        case LaunchUpgradeKind::FlightControls:
+            return launchTrainingAtLeast(state, LaunchTrainingStage::MoonTransfer);
+        case LaunchUpgradeKind::Cooling:
+            return launchTrainingAtLeast(state, LaunchTrainingStage::MarsTransfer);
+        case LaunchUpgradeKind::Hull:
+            return launchTrainingAtLeast(state, LaunchTrainingStage::JupiterTransfer);
+        case LaunchUpgradeKind::None:
+            return false;
+        }
+    }
+
+    switch (kind) {
+    case LaunchUpgradeKind::FuelTanks:
+        if (rank == 2) {
+            return hasUnlock(state.meta, content::unlock::routeMars);
+        }
+        return hasUnlock(state.meta, content::unlock::routeJupiter);
+    case LaunchUpgradeKind::FlightControls:
+        return state.meta.furthestTier >= rank - 1;
+    case LaunchUpgradeKind::Cooling:
+        return state.meta.furthestTier >= rank;
+    case LaunchUpgradeKind::Hull:
+        return state.meta.furthestTier >= rank + 1;
+    case LaunchUpgradeKind::None:
+        return false;
+    }
+    return false;
+}
+
+bool canInstallLaunchUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    LaunchUpgradeKind kind)
+{
+    const ShipModule* module = nextLaunchUpgrade(state, catalog, kind);
+    return module != nullptr &&
+        launchUpgradeUnlocked(state, kind, module->launchUpgradeRank) &&
+        state.run.credits >= tuning::launchProgression::upgradeCost;
+}
+
+bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind)
+{
+    const ShipModule* module = nextLaunchUpgrade(state, catalog, kind);
+    if (module == nullptr || !launchUpgradeUnlocked(state, kind, module->launchUpgradeRank)) {
+        return false;
+    }
+    if (state.run.credits < tuning::launchProgression::upgradeCost) {
+        state.statusLine = text::insufficientCreditsFor(module->name);
+        return false;
+    }
+
+    state.run.credits -= tuning::launchProgression::upgradeCost;
+    launchUpgradeRankRef(state.meta.launchUpgrades, kind) = module->launchUpgradeRank;
+    addUniqueId(state.meta.ownedModuleIds, module->id);
+    addUniqueId(state.meta.defaultEquippedModuleIds, module->id);
+    addUniqueId(state.run.inventoryModuleIds, module->id);
+    addUniqueId(state.run.equippedModuleIds, module->id);
+    state.run.refitEntitled = false;
+    state.run.offerModuleIds = {};
+    state.run.offerCrewUpgradeIds = {};
+    state.statusLine = text::refitInstalled(module->name);
+    syncLaunchConfig(state, catalog);
+    return true;
+}
+
+bool launchTutorialComplete(const GameState& state)
+{
+    return state.meta.furthestTier >= 1 ||
+        launchTrainingAtLeast(state, LaunchTrainingStage::ThermalManagement);
+}
+
+bool launchStageUsesArrival(LaunchTrainingStage stage)
+{
+    return stage != LaunchTrainingStage::FuelCalibration &&
+        stage != LaunchTrainingStage::FlightControlsCalibration;
+}
+
+bool launchMissionReady(const GameState& state)
+{
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FuelCalibration:
+    case LaunchTrainingStage::Complete:
+        return true;
+    case LaunchTrainingStage::FlightControlsCalibration:
+        return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 1;
+    case LaunchTrainingStage::MoonTransfer:
+        return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 1 &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FlightControls) >= 1;
+    case LaunchTrainingStage::ThermalManagement:
+        return hasUnlock(state.meta, content::unlock::routeMars) &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 2;
+    case LaunchTrainingStage::MarsTransfer:
+        return hasUnlock(state.meta, content::unlock::routeMars) &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 2;
+    case LaunchTrainingStage::HullIntegrity:
+        return hasUnlock(state.meta, content::unlock::routeJupiter) &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+    case LaunchTrainingStage::JupiterTransfer:
+        return hasUnlock(state.meta, content::unlock::routeJupiter) &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+    }
+    return false;
+}
+
+bool launchMissionReady(const GameState& state, const ContentCatalog& catalog)
+{
+    if (!launchMissionReady(state)) {
+        return false;
+    }
+    if (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
+        state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity) {
+        const Destination* trainingDestination = launchTrainingDestination(state, catalog);
+        return trainingDestination != nullptr &&
+            scenarioRouteRequirementStatus(state, catalog, *trainingDestination).satisfied;
+    }
+    if (!launchTrainingTransferStage(state.meta.launchLessons.stage)) {
+        return true;
+    }
+    return canCommitToNextFrontier(state, catalog);
+}
+
+LaunchMissionKind currentLaunchMissionKind(const GameState& state, const ContentCatalog& catalog)
+{
+    static_cast<void>(catalog);
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FuelCalibration:
+        return LaunchMissionKind::FuelCalibration;
+    case LaunchTrainingStage::FlightControlsCalibration:
+        return LaunchMissionKind::FlightControlsCalibration;
+    case LaunchTrainingStage::ThermalManagement:
+        return LaunchMissionKind::ThermalManagement;
+    case LaunchTrainingStage::HullIntegrity:
+        return LaunchMissionKind::AsteroidBelt;
+    case LaunchTrainingStage::MoonTransfer:
+    case LaunchTrainingStage::MarsTransfer:
+    case LaunchTrainingStage::JupiterTransfer:
+    case LaunchTrainingStage::Complete:
+        return LaunchMissionKind::Standard;
+    }
+    return LaunchMissionKind::Standard;
+}
+
+void syncLaunchTrainingProgress(GameState& state, const ContentCatalog& catalog)
+{
+    for (const LaunchUpgradeKind kind : {
+             LaunchUpgradeKind::FuelTanks,
+             LaunchUpgradeKind::FlightControls,
+             LaunchUpgradeKind::Cooling,
+             LaunchUpgradeKind::Hull}) {
+        int& rank = launchUpgradeRankRef(state.meta.launchUpgrades, kind);
+        rank = std::clamp(rank, 0, tuning::launchProgression::maximumUpgradeRank);
+        const auto& ids = launchUpgradeIds(kind);
+        for (int index = 0; index < tuning::launchProgression::maximumUpgradeRank; ++index) {
+            const ShipModule* module = catalog.findModule(ids[static_cast<std::size_t>(index)]);
+            if (module != nullptr && containsId(state.meta.ownedModuleIds, module->id)) {
+                rank = std::max(rank, index + 1);
+            }
+        }
+    }
+
+    if (state.meta.furthestTier >= 3) {
+        state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+        state.meta.launchUpgrades.fuelTanks = std::max(3, state.meta.launchUpgrades.fuelTanks);
+        state.meta.launchUpgrades.flightControls = std::max(1, state.meta.launchUpgrades.flightControls);
+    } else if (state.meta.furthestTier >= 2) {
+        state.meta.launchUpgrades.fuelTanks = std::max(2, state.meta.launchUpgrades.fuelTanks);
+        state.meta.launchUpgrades.flightControls = std::max(1, state.meta.launchUpgrades.flightControls);
+        if (!launchTrainingAtLeast(state, LaunchTrainingStage::HullIntegrity)) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+        }
+    } else if (state.meta.furthestTier >= 1) {
+        state.meta.launchUpgrades.fuelTanks = std::max(1, state.meta.launchUpgrades.fuelTanks);
+        state.meta.launchUpgrades.flightControls = std::max(1, state.meta.launchUpgrades.flightControls);
+        if (!launchTrainingAtLeast(state, LaunchTrainingStage::ThermalManagement)) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+        }
+    }
+
+    for (const LaunchUpgradeKind kind : {
+             LaunchUpgradeKind::FuelTanks,
+             LaunchUpgradeKind::FlightControls,
+             LaunchUpgradeKind::Cooling,
+             LaunchUpgradeKind::Hull}) {
+        const int rank = launchUpgradeRank(state, kind);
+        const auto& ids = launchUpgradeIds(kind);
+        for (int index = 0; index < rank; ++index) {
+            const std::string id = ids[static_cast<std::size_t>(index)];
+            if (catalog.findModule(id) == nullptr) {
+                continue;
+            }
+            addUniqueId(state.meta.ownedModuleIds, id);
+            addUniqueId(state.meta.defaultEquippedModuleIds, id);
+            addUniqueId(state.run.inventoryModuleIds, id);
+            addUniqueId(state.run.equippedModuleIds, id);
+        }
+    }
 }
 
 bool canAffordMaterials(const MaterialInventory& owned, const MaterialInventory& cost)
@@ -236,6 +646,10 @@ double crewAbortRiskMultiplierFromStress(int stress)
 
 PostLaunchCrewStress postLaunchCrewStress(const LaunchOutcome& outcome, const CrewUpgradeStats& upgrades)
 {
+    if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
+        return {};
+    }
+
     const double warningLoad = std::clamp(
         (outcome.peakWarning - tuning::stress::warningStressStart) / tuning::stress::warningStressRange,
         0.0,
@@ -290,6 +704,7 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     ensureDestinationHistory(state, catalog);
     ensureScenarioInstances(state, catalog);
     ensurePermanentModuleState(state, catalog);
+    syncLaunchTrainingProgress(state, catalog);
     state.screen = hostileSystemActive(state) ? Screen::Navigation : Screen::Hangar;
     state.run.active = true;
     if (hostileSystemActive(state) && !state.meta.navigation.selectedDestinationId.empty()) {
@@ -311,8 +726,9 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.repairOpsThisExpedition = 0;
     state.run.trainingOpsThisExpedition = 0;
     state.run.restOpsThisExpedition = 0;
-    if (state.run.credits < tuning::hangar::minimumExpeditionCredits) {
-        state.run.credits = tuning::hangar::minimumExpeditionCredits;
+    const double creditFloor = expeditionCreditFloor(state);
+    if (state.run.credits < creditFloor) {
+        state.run.credits = creditFloor;
     }
 
     if (state.run.crew.empty()) {
@@ -338,21 +754,32 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     }
 
     syncLaunchConfig(state, catalog);
-    state.launchConfig.burnGoalMultiplier = defaultProvingTarget(currentDestination(state, catalog));
 }
 
 void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
 {
     ensureDestinationHistory(state, catalog);
-    const Destination* destination = catalog.findDestination(state.launchConfig.destinationId);
-    if (destination == nullptr || !state.launchConfig.frontierTransfer) {
-        destination = &currentDestination(state, catalog);
+    syncLaunchTrainingProgress(state, catalog);
+    const Destination* destination = launchTrainingDestination(state, catalog);
+    if (destination != nullptr) {
         state.launchConfig.destinationId = destination->id;
+        state.launchConfig.frontierTransfer = launchTrainingTransferStage(state.meta.launchLessons.stage);
+    } else {
+        destination = catalog.findDestination(state.launchConfig.destinationId);
+        if (destination == nullptr || !state.launchConfig.frontierTransfer) {
+            destination = &currentDestination(state, catalog);
+            state.launchConfig.destinationId = destination->id;
+        }
     }
+    state.launchConfig.missionKind = currentLaunchMissionKind(state, catalog);
     state.launchConfig.frameId = state.run.frameId;
     state.launchConfig.equippedModuleIds = state.run.equippedModuleIds;
 
-    if (state.launchConfig.burnGoalMultiplier < tuning::mission::launchConfigMinimumMultiplier ||
+    if (launchTrainingDestination(state, catalog) != nullptr) {
+        state.launchConfig.burnGoalMultiplier = state.launchConfig.frontierTransfer
+            ? destination->targetMultiplier
+            : 1.0 + (destination->targetMultiplier - 1.0) * tuning::launchProgression::calibrationTargetShare;
+    } else if (state.launchConfig.burnGoalMultiplier < tuning::mission::launchConfigMinimumMultiplier ||
         state.launchConfig.burnGoalMultiplier > destination->targetMultiplier + tuning::mission::launchConfigOverTargetAllowance) {
         state.launchConfig.burnGoalMultiplier = state.launchConfig.frontierTransfer ? destination->targetMultiplier : defaultProvingTarget(*destination);
     }
@@ -379,7 +806,14 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
 
 bool curatedProvingRefitsActive(const GameState& state)
 {
-    return state.run.refitEntitled && state.meta.furthestTier < 1;
+    if (!state.run.refitEntitled) {
+        return false;
+    }
+    const LaunchTrainingStage stage = state.meta.launchLessons.stage;
+    return stage == LaunchTrainingStage::FlightControlsCalibration ||
+        stage == LaunchTrainingStage::MoonTransfer ||
+        stage == LaunchTrainingStage::MarsTransfer ||
+        stage == LaunchTrainingStage::JupiterTransfer;
 }
 
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
@@ -403,26 +837,39 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     };
 
     if (curatedProvingRefitsActive(state)) {
-        std::size_t offerIndex = 0;
-        for (const RefitTrack track : {RefitTrack::Reach, RefitTrack::Control, RefitTrack::Recovery}) {
-            const ShipModule* next = nullptr;
-            for (const ShipModule* module : modulePool) {
-                if (!module->provingTier || module->refitTrack != track || ownsModule(module->id) || !ownsModule(module->prerequisiteId)) {
-                    continue;
-                }
-                if (next == nullptr || module->refitRank < next->refitRank) {
-                    next = module;
-                }
-            }
-            if (next != nullptr && offerIndex < state.run.offerModuleIds.size()) {
-                state.run.offerModuleIds[offerIndex++] = next->id;
-            }
+        LaunchUpgradeKind requiredKind = LaunchUpgradeKind::None;
+        switch (state.meta.launchLessons.stage) {
+        case LaunchTrainingStage::FlightControlsCalibration:
+            requiredKind = LaunchUpgradeKind::FuelTanks;
+            break;
+        case LaunchTrainingStage::MoonTransfer:
+            requiredKind = LaunchUpgradeKind::FlightControls;
+            break;
+        case LaunchTrainingStage::MarsTransfer:
+            requiredKind = LaunchUpgradeKind::Cooling;
+            break;
+        case LaunchTrainingStage::JupiterTransfer:
+            requiredKind = LaunchUpgradeKind::Hull;
+            break;
+        case LaunchTrainingStage::FuelCalibration:
+        case LaunchTrainingStage::ThermalManagement:
+        case LaunchTrainingStage::HullIntegrity:
+        case LaunchTrainingStage::Complete:
+            break;
+        }
+        const ShipModule* next = nextLaunchUpgrade(state, catalog, requiredKind);
+        if (next != nullptr && launchUpgradeUnlocked(state, requiredKind, next->launchUpgradeRank)) {
+            state.run.offerModuleIds[0] = next->id;
         }
         return;
     }
 
     std::vector<RefitCandidate> candidates;
     for (const ShipModule* module : modulePool) {
+        if (module->launchUpgradeKind != LaunchUpgradeKind::None ||
+            module->compatibilityOnly) {
+            continue;
+        }
         if (ownsModule(module->id) || !ownsModule(module->prerequisiteId)) {
             continue;
         }
@@ -540,6 +987,10 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
     const CrewUpgrade* crewUpgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[offerIndex]);
     if (module == nullptr && crewUpgrade == nullptr) {
         return false;
+    }
+
+    if (module != nullptr && module->launchUpgradeKind != LaunchUpgradeKind::None) {
+        return installLaunchUpgrade(state, catalog, module->launchUpgradeKind);
     }
 
     const int cost = module != nullptr ? moduleOfferCost(*module) : crewUpgradeCost(*crewUpgrade);
@@ -1145,7 +1596,7 @@ int frontierReadinessRequired(const GameState& state, const ContentCatalog& cata
     // by a narrative destination ID. Authored route requirements take
     // precedence in frontierGateStatusForDestination below.
     if (next->tier <= 1) {
-        return tuning::mission::moonReadinessRequired;
+        return tuning::launchProgression::moonRequiredUpgradeCount;
     }
     return tuning::mission::readinessBaseRequired + destination.tier;
 }
@@ -1179,6 +1630,46 @@ FrontierGateStatus frontierGateStatusForDestination(
     const Destination* destination = catalog.findDestination(destinationId);
     if (destination == nullptr) {
         return status;
+    }
+
+    const Destination& origin = currentDestination(state, catalog);
+    if (destination->tier == 1 && origin.hiddenFromProgression) {
+        status.kind = FrontierGateKind::FlightData;
+        status.current = (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 1 ? 1 : 0) +
+            (launchUpgradeRank(state, LaunchUpgradeKind::FlightControls) >= 1 ? 1 : 0);
+        status.required = tuning::launchProgression::moonRequiredUpgradeCount;
+        status.satisfied = state.meta.launchLessons.stage == LaunchTrainingStage::MoonTransfer &&
+            status.current >= status.required;
+        status.blockerText = "Install Fuel Tanks I and Flight Controls I before the Moon transfer.";
+        return status;
+    }
+    if (destination->tier == 2 &&
+        !launchTrainingAtLeast(state, LaunchTrainingStage::HullIntegrity)) {
+        status.kind = FrontierGateKind::FlightData;
+        status.current = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 2 ? 1 : 0;
+        status.required = 1;
+        status.satisfied =
+            (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
+                state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer) &&
+            status.current >= status.required;
+        status.blockerText = "Install Fuel Tanks II before the Mars transfer. Engine Cooling is optional safety margin.";
+        if (!status.satisfied) {
+            return status;
+        }
+    }
+    if (destination->tier == 3 &&
+        !launchTrainingAtLeast(state, LaunchTrainingStage::Complete)) {
+        status.kind = FrontierGateKind::FlightData;
+        status.current = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3 ? 1 : 0;
+        status.required = 1;
+        status.satisfied =
+            (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
+                state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
+            status.current >= status.required;
+        status.blockerText = "Install Fuel Tanks III before the Jupiter transfer. Hull Plating is optional safety margin.";
+        if (!status.satisfied) {
+            return status;
+        }
     }
 
     const ScenarioRouteRequirementStatus scenarioRequirement = scenarioRouteRequirementStatus(
@@ -1348,8 +1839,23 @@ bool isSkinOfYourTeethOutcome(const LaunchOutcome& outcome)
 void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const LaunchOutcome& rawOutcome)
 {
     const int readinessBefore = state.run.frontierReadiness;
+    const LaunchTrainingStage trainingStage = state.meta.launchLessons.stage;
+    const LaunchMissionKind missionKind = state.launchConfig.missionKind;
+    const double lessonTargetMultiplier = state.launchConfig.burnGoalMultiplier;
     LaunchOutcome outcome = rawOutcome;
-    if (isSkinOfYourTeethOutcome(outcome)) {
+    const bool lessonMissionActive = launchLessonMissionActive(trainingStage, missionKind);
+    const bool lessonReturnSucceeded = launchLessonReturnSucceeded(
+        trainingStage,
+        missionKind,
+        outcome,
+        lessonTargetMultiplier);
+    const bool lessonArrivalSucceeded = launchLessonArrivalSucceeded(
+        trainingStage,
+        missionKind,
+        outcome);
+    if (lessonReturnSucceeded || lessonArrivalSucceeded) {
+        outcome.payout = outcome.recoveryCost + tuning::launchProgression::lessonReward;
+    } else if (!lessonMissionActive && isSkinOfYourTeethOutcome(outcome)) {
         outcome.payout *= 1.0 + tuning::records::skinOfYourTeethCreditBonus;
     }
 
@@ -1367,9 +1873,12 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         && outcomeDestination->tier == state.run.destinationIndex + 1;
     const bool selectedHostileSortie = hostileSystemActive(state)
         && outcomeDestinationIndex == state.run.destinationIndex;
+    const bool solarFrontierRevisit = !hostileSystemActive(state)
+        && outcomeDestinationIndex == state.run.destinationIndex;
     const bool validDestinationSuccess = outcome.type == LaunchResultType::MissionComplete
         && outcomeDestination != nullptr
-        && (!outcome.frontierTransfer || solarFrontierAdvance || selectedHostileSortie);
+        && (!lessonMissionActive || lessonArrivalSucceeded)
+        && (!outcome.frontierTransfer || solarFrontierAdvance || solarFrontierRevisit || selectedHostileSortie);
     if (outcomeDestinationIndex >= 0) {
         const auto index = static_cast<std::size_t>(outcomeDestinationIndex);
         state.meta.destinationAttempts[index] += 1;
@@ -1411,7 +1920,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
 
     if (outcome.type == LaunchResultType::Destroyed) {
         state.meta.shipsLost += 1;
-        state.run.credits = std::max(tuning::hangar::minimumExpeditionCredits, state.run.credits - tuning::mission::destroyedCreditPenalty);
+        state.run.credits = std::max(expeditionCreditFloor(state), state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.surfaceUpgradeIds.clear();
         state.run.active = false;
         if (cleanShallowRecoveryDestroyed) {
@@ -1427,7 +1936,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         state.run.restOpsThisExpedition = 0;
         state.run.credits = std::max(0.0, state.run.credits + outcome.payout - outcome.recoveryCost);
         const Destination* destination = outcomeDestination;
-        if (destination != nullptr) {
+        if (destination != nullptr && !lessonMissionActive) {
             if (!outcome.frontierTransfer || outcome.type == LaunchResultType::MissionComplete) {
                 state.meta.furthestTier = std::max(state.meta.furthestTier, destination->tier);
             }
@@ -1436,7 +1945,29 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             state.meta.famousLaunches.push_back(famous.str());
         }
 
-        if (outcome.frontierTransfer) {
+        if (lessonMissionActive) {
+            if (lessonReturnSucceeded) {
+                advanceLaunchLessonAfterReturn(state, missionKind);
+                state.statusLine = "Calibration data banked. A direct launch upgrade is ready.";
+            } else if (lessonArrivalSucceeded) {
+                if (destination != nullptr && solarFrontierAdvance) {
+                    state.run.destinationIndex += 1;
+                    state.run.frontierReadiness = 0;
+                    state.meta.furthestTier = std::max(state.meta.furthestTier, destination->tier);
+                    state.launchConfig.destinationId = destination->id;
+                    state.statusLine = text::transferAchievedNewRoute(destination->name);
+                }
+                if (trainingStage == LaunchTrainingStage::ThermalManagement) {
+                    state.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+                } else if (trainingStage == LaunchTrainingStage::HullIntegrity) {
+                    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+                }
+            } else {
+                state.statusLine = launchStageUsesArrival(trainingStage)
+                    ? "Arrival incomplete. Reach the destination with enough fuel to land."
+                    : "Calibration incomplete. Return after reaching the marked data point.";
+            }
+        } else if (outcome.frontierTransfer) {
             if (outcome.type == LaunchResultType::MissionComplete) {
                 if (destination != nullptr && solarFrontierAdvance) {
                     state.run.destinationIndex += 1;
@@ -1447,19 +1978,17 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                     state.statusLine = text::transferAchievedNewRoute(destination->name);
                 } else if (destination != nullptr && selectedHostileSortie) {
                     state.statusLine = text::transferAchievedNewRoute(destination->name);
+                } else if (destination != nullptr && solarFrontierRevisit) {
+                    state.statusLine = "Arrived at " + destination->name + ". Surface operations are ready.";
                 } else {
                     state.statusLine = std::string(text::status::transferLedgerRejected);
                 }
             } else {
                 if (destination != nullptr && outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::transferUsefulDataTargetShare) {
                     state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
-                    state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
-                        ? std::string(text::status::transferAbortedEject)
-                        : std::string(text::status::transferAbortedReturn);
+                    state.statusLine = std::string(text::status::transferAbortedReturn);
                 } else {
-                    state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
-                        ? std::string(text::status::transferEjectEarly)
-                        : std::string(text::status::transferReturnEarly);
+                    state.statusLine = std::string(text::status::transferReturnEarly);
                 }
             }
         } else if (outcome.type == LaunchResultType::MissionComplete) {
@@ -1475,28 +2004,38 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             }
         } else {
             const Destination& current = currentDestination(state, catalog);
-            const double usefulDataTargetShare = outcome.recoveryMethod == RecoveryMethod::ManualEject
-                ? tuning::outcomes::manualEjectUsefulDataTargetShare
-                : tuning::outcomes::returnUsefulDataTargetShare;
-            const double usefulDataThreshold = current.targetMultiplier * usefulDataTargetShare;
+            const double usefulDataThreshold =
+                current.targetMultiplier * tuning::outcomes::returnUsefulDataTargetShare;
             if (!shallowRecovery
                 && outcome.ejectMultiplier >= usefulDataThreshold
                 && frontierReadinessRequired(state, catalog) > 0) {
                 state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
-                state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
-                    ? std::string(text::status::emergencyEjectUseful)
-                    : std::string(text::status::earlyReturnUseful);
+                state.statusLine = std::string(text::status::earlyReturnUseful);
             } else {
-                state.statusLine = outcome.recoveryMethod == RecoveryMethod::ManualEject
-                    ? std::string(text::status::emergencyEjectShallow)
-                    : std::string(text::status::earlyReturnShallow);
+                state.statusLine = std::string(text::status::earlyReturnShallow);
             }
         }
     }
 
     state.run.refitEntitled = state.run.refitEntitled ||
+        lessonReturnSucceeded ||
+        lessonArrivalSucceeded ||
         state.run.frontierReadiness > readinessBefore ||
         validDestinationSuccess;
+
+    if (validDestinationSuccess && outcome.frontierTransfer && outcomeDestination != nullptr) {
+        if (outcomeDestination->id == content::destination::moon &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::MoonTransfer) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+        } else if (outcomeDestination->id == content::destination::mars &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+        } else if (outcomeDestination->id == content::destination::jupiter &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) {
+            state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+        }
+    }
+    syncLaunchTrainingProgress(state, catalog);
 
     if (outcome.type == LaunchResultType::MissionComplete &&
         outcomeDestination != nullptr &&

@@ -3254,6 +3254,10 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     border-color: #4c6d5a;
     background-color: #111f22;
 }
+.phase-board-surface .surface-action-card.risk-action {
+    border-color: #df7a32;
+    background-color: #241711;
+}
 .phase-board-surface .surface-action-card h3 {
     margin-top: 3px;
     margin-bottom: 3px;
@@ -5463,6 +5467,11 @@ button.rare {
     background-color: #3c3014;
     border-color: #d7aa3a;
 }
+button.risk {
+    color: #ffe1c2;
+    background-color: #8a431b;
+    border-color: #ff9148;
+}
 button.danger {
     background-color: #4a2421;
     border-color: #b85b51;
@@ -5581,6 +5590,29 @@ button.settings-toggle:hover {
 .warn,
 .caution {
     border-color: #c8a446;
+}
+.dig-endurance-warning {
+    margin-top: 12px;
+    margin-right: 0px;
+    border-width: 2px;
+}
+.dig-endurance-warning.caution {
+    color: #ffe18a;
+    background-color: #352d15;
+    border-color: #e3b83f;
+}
+.dig-endurance-warning.danger {
+    color: #ffb1aa;
+    background-color: #3a1719;
+    border-color: #ef655c;
+}
+.dig-endurance-warning strong,
+.dig-endurance-warning span {
+    display: block;
+}
+.dig-endurance-warning span {
+    margin-top: 5px;
+    white-space: pre-line;
 }
 .ok {
     border-color: #5ba77f;
@@ -9057,6 +9089,91 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 #rr-panel.selection-family-panel .phase-board-refit .refit-choice-card .draft-card-footer button {
     flex: 0 0 132px;
     padding: 4px 8px;
+}
+/* The four launch lessons offer one direct upgrade. It is not a compact
+   selector row: give it the same readable, self-contained card lanes as a
+   normal refit without stretching a single lesson offer across the board. */
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row {
+    position: relative;
+    display: flex;
+    flex: 0 0 420px;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 420px;
+    min-width: 420px;
+    min-height: var(--rr-legacy-layout-193, 0px);
+    height: var(--rr-legacy-layout-193, 0px);
+    margin: 0px;
+    padding: 16px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .pilot-card-top,
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .card-title {
+    width: 100%;
+    min-height: 0px;
+    height: auto;
+    margin: 0px 0px 8px 0px;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .pilot-card-top {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .pilot-card-top strong {
+    display: block;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .card-title {
+    color: #edf4f8;
+    font-size: 22px;
+    line-height: 1.15;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .refit-offer-detail {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    max-height: 40px;
+    margin: 0px 0px 8px 0px;
+    color: #9fb7c5;
+    font-size: 14px;
+    line-height: 1.3;
+    overflow: hidden;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .module-impact {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0px;
+    margin: 0px 12px 0px 0px;
+    color: #e9f7fb;
+    font-size: 14px;
+    line-height: 1.2;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .draft-card-footer {
+    position: static;
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    min-height: 48px;
+    height: auto;
+    margin: auto 0px 0px 0px;
+    padding: 10px 0px 0px 0px;
+    border-top-width: 1px;
+    border-top-color: #34596a;
+}
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .draft-card-footer button,
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .draft-card-footer button.rr-text-button,
+#rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .draft-card-footer button.rr-text-button .rr-button-label {
+    flex: 0 0 144px;
+    width: 144px;
+    min-width: 144px;
+    min-height: 40px;
+    height: 40px;
+    margin: 0px;
+    padding: 0px 8px;
+    font-size: 12px;
+    line-height: 40px;
 }
 #rr-panel.selection-family-panel .phase-board-refit .draft-actions {
     display: flex;

@@ -53,10 +53,6 @@ public:
     void skipArrivalFanfare();
     void acknowledgeStoryBriefing();
     void cutEngines();
-    void pressureReliefValve();
-    void closePressureReliefValve();
-    void jettisonCargo();
-    void ejectNow();
     void next();
     void attemptFrontierTransfer();
     void openNavigation();
@@ -64,6 +60,7 @@ public:
     void selectNavigationDestination(int index);
     void selectRefitOffer(int index);
     void buyOffer(int index);
+    void installLaunchUpgrade(LaunchUpgradeKind kind);
     void rerollOffers();
     void acknowledgeApproachIntroduction();
     void acknowledgeProspectorCompletion();
@@ -141,6 +138,7 @@ public:
     void debugPreviousActOneCheckpoint();
     void debugNextActOneCheckpoint();
     int debugActOneCheckpoint() const;
+    void debugStartLaunchLesson(int lessonIndex);
     void debugExit();
     void repairShip();
     void recruitCrew();
@@ -171,7 +169,6 @@ private:
 
     struct FlightControlState {
         bool returnDriftHome = false;
-        bool pressureReliefUsed = false;
         FlightActionState actions;
     };
 
@@ -192,6 +189,12 @@ private:
         double elapsed = 0.0;
     };
 
+    struct LunarImpactCinematicState {
+        bool active = false;
+        double elapsed = 0.0;
+        double burnMultiplier = 1.0;
+    };
+
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
         LaunchFlightState flight;
@@ -201,9 +204,10 @@ private:
         double elapsed = 0.0;
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;
-        double peakAbortRisk = 0.0;
         double steerInput = 0.0;
         double throttleInput = 0.0;
+        double asteroidImpactFeedbackSeconds = 0.0;
+        LunarImpactCinematicState lunarImpact;
         ReturnTripState returnTrip;
         FlightControlState controls;
         ResultViewState result;
@@ -214,6 +218,7 @@ private:
         double burnMultiplier,
         RecoveryMethod method,
         LaunchFailureCause failureCause = LaunchFailureCause::None);
+    void beginLunarImpactCinematic();
     void beginArrivalFanfare();
     void finishArrivalFanfare();
     void loadSavedGameOrDefault(bool showTitleScreen);

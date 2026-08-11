@@ -66,19 +66,91 @@ inline std::string launchFundingSummary(const LaunchOutcome& outcome)
         : "Funding " + display::signedMoney(netFunding);
 }
 
+inline bool rewardedLaunchLessonReturn(const LaunchOutcome& outcome)
+{
+    const double netFunding = outcome.payout - outcome.recoveryCost;
+    return !outcome.frontierTransfer &&
+        outcome.recoveryMethod == RecoveryMethod::ReturnHome &&
+        outcome.failureCause == LaunchFailureCause::None &&
+        std::abs(netFunding - tuning::launchProgression::lessonReward) < 0.5;
+}
+
+inline std::string launchLessonUpgradeName(LaunchTrainingStage nextStage)
+{
+    switch (nextStage) {
+    case LaunchTrainingStage::FlightControlsCalibration: return "Fuel Tanks I";
+    case LaunchTrainingStage::MoonTransfer: return "Flight Controls I";
+    case LaunchTrainingStage::MarsTransfer: return "Engine Cooling I";
+    case LaunchTrainingStage::JupiterTransfer: return "Hull Plating I";
+    case LaunchTrainingStage::FuelCalibration:
+    case LaunchTrainingStage::ThermalManagement:
+    case LaunchTrainingStage::HullIntegrity:
+    case LaunchTrainingStage::Complete:
+        break;
+    }
+    return "the next launch upgrade";
+}
+
 inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const LaunchOutcome& outcome = state.lastOutcome;
     const Destination* destination = catalog.findDestination(outcome.destinationId);
-    const Destination* next = nextDestination(state, catalog);
-    // The starter proving loop and first-arrival presentation are authored
-    // destination capabilities. A catalog can move either teaching beat
-    // without this reusable presenter recognizing a destination ID.
-    const bool provingRoute = destination != nullptr && !outcome.frontierTransfer &&
-        next != nullptr && next->requiresArrivalSurveySequence;
     const bool teachingArrival = destination != nullptr &&
         destination->requiresArrivalSurveySequence && outcome.frontierTransfer;
     const std::string funding = launchFundingSummary(outcome);
+
+    if (outcome.failureCause == LaunchFailureCause::LunarImpact) {
+        return {
+            "LUNAR IMPACT",
+            "The uncalibrated landing solution carried the ship into the Moon. Flight Controls I is required before attempting a lunar transfer.",
+            "No calibration data banked | Rebuild and complete the test flight"
+        };
+    }
+    if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
+        return {
+            "TRAINING RESCUE",
+            "Mission Control recovered the crew after a visible flight limit was ignored. No calibration data was banked.",
+            "No upgrade unlocked | Review the warning and retry"
+        };
+    }
+    if (outcome.failureCause == LaunchFailureCause::FuelExhausted &&
+        outcome.frontierTransfer) {
+        return {
+            "INSERTION FUEL SHORT",
+            "The ship reached the destination approach without the minimum fuel needed to complete insertion.",
+            "Reduce throttle earlier | Keep at least 4 fuel for landing"
+        };
+    }
+    if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
+        rewardedLaunchLessonReturn(outcome)) {
+        const std::string upgrade = launchLessonUpgradeName(state.meta.launchLessons.stage);
+        return {
+            "CALIBRATION DATA BANKED",
+            "The crew completed the lesson and returned the test ship safely.",
+            funding + " | Install " + upgrade
+        };
+    }
+    const bool calibrationMission = !outcome.frontierTransfer &&
+        outcome.type != LaunchResultType::Destroyed &&
+        outcome.failureCause == LaunchFailureCause::None &&
+        state.launchConfig.missionKind != LaunchMissionKind::Standard &&
+        state.launchConfig.destinationId == outcome.destinationId;
+    if (calibrationMission) {
+        return {
+            "CALIBRATION INCOMPLETE",
+            "The ship returned before the marked data point. The crew is safe, but the lesson is not complete.",
+            funding + " | No upgrade unlocked"
+        };
+    }
+    if (outcome.frontierTransfer &&
+        outcome.type != LaunchResultType::MissionComplete &&
+        state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+        return {
+            "TRANSFER INCOMPLETE",
+            "The ship did not reach the destination. Review fuel and the active lesson before trying again.",
+            funding + " | Retry the route"
+        };
+    }
 
     if (teachingArrival && outcome.type == LaunchResultType::MissionComplete) {
         return {
@@ -88,91 +160,16 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
         };
     }
     if (teachingArrival) {
-        const int required = std::max(1, frontierReadinessRequired(state, catalog));
-        const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
         const std::string consequence = outcome.type == LaunchResultType::Destroyed
             ? (outcome.crewKilled
                 ? "The vehicle and crew were lost. Their final telemetry remains in the route archive."
                 : "The vehicle is gone, but rescue teams recovered the crew and the route archive.")
-            : "The landing site escaped this burn, but the crew brought home a sharper route.";
+            : "The destination was not reached. The crew can review the visible limit and try again.";
         return {
-            "TRANSFER LOST",
+            "TRANSFER INCOMPLETE",
             consequence,
-            "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required)
-                + "  •  " + funding + "  •  Retry 100%"
+            funding + " | Retry the route"
         };
-    }
-
-    if (provingRoute) {
-        const int required = std::max(1, frontierReadinessRequired(state, catalog));
-        const int readiness = std::clamp(state.run.frontierReadiness, 0, required);
-        const std::string flightData = "Flight Data " + std::to_string(readiness) + "/" + std::to_string(required);
-        const std::string nextName = next == nullptr ? std::string("the next frontier") : next->name;
-        if (outcome.type == LaunchResultType::Destroyed) {
-            return outcome.crewKilled
-                ? LaunchOutcomeSummaryPresentation {
-                    "CREW LOST",
-                    "The vehicle and crew did not return. No new route data survived the loss.",
-                    "Flight Data held at " + std::to_string(readiness) + "/" + std::to_string(required) + "  •  Funding lost"}
-                : LaunchOutcomeSummaryPresentation {
-                    "CREW RECOVERED",
-                    "Rescue teams brought the crew home. No new route data survived the loss.",
-                    "Flight Data held at " + std::to_string(readiness) + "/" + std::to_string(required) + "  •  Funding lost"};
-        }
-
-        if (readiness >= required) {
-            const std::string readyTitle = next != nullptr && !next->provingRouteReadyTitle.empty()
-                ? next->provingRouteReadyTitle
-                : "ROUTE CHARTED";
-            const std::string readyConsequence = next != nullptr && !next->provingRouteReadyConsequence.empty()
-                ? next->provingRouteReadyConsequence
-                : "The route is complete. Mission Control has cleared the next launch for " + nextName + ".";
-            return {
-                readyTitle,
-                readyConsequence,
-                flightData + "  •  " + funding
-            };
-        }
-
-        const bool shallow = outcome.ejectMultiplier < 1.0 +
-            (destination->targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
-        const double usefulShare = outcome.recoveryMethod == RecoveryMethod::ManualEject
-            ? tuning::outcomes::manualEjectUsefulDataTargetShare
-            : tuning::outcomes::returnUsefulDataTargetShare;
-        const bool usefulReturn = !shallow && outcome.ejectMultiplier >= destination->targetMultiplier * usefulShare;
-        if (outcome.type == LaunchResultType::MissionComplete) {
-            const bool outperformedBrief = outcome.ejectMultiplier > destination->targetMultiplier + 0.001;
-            return {
-                outperformedBrief ? "ROUTE OUTPERFORMED" : "ROUTE DATA SECURED",
-                outperformedBrief
-                    ? "The flight delivered the route we needed—and extra distance brought back richer findings."
-                    : "The flight delivered the route we needed and renewed the program's backing.",
-                flightData + "  •  " + funding
-            };
-        }
-        if (usefulReturn) {
-            if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
-                return {
-                    "CAPSULE RECOVERED",
-                    "The crew and usable telemetry made it home; recovery costs took their share.",
-                    flightData + "  •  " + funding
-                };
-            }
-            return {
-                "USEFUL DATA HOME",
-                "The crew turned back with usable readings and enough backing to keep the program moving.",
-                flightData + "  •  " + funding
-            };
-        }
-        return outcome.recoveryMethod == RecoveryMethod::ManualEject
-            ? LaunchOutcomeSummaryPresentation {
-                "CAPSULE RECOVERED",
-                "The crew is safe, but the short flight and rescue bill left no useful return.",
-                flightData + "  •  " + funding}
-            : LaunchOutcomeSummaryPresentation {
-                "FLIGHT RECALLED",
-                "The crew is home. The brief fell short, so the route drew no new backing.",
-                flightData + "  •  " + funding};
     }
 
     const std::string destinationName = destination == nullptr ? std::string("the frontier") : destination->name;
@@ -204,31 +201,30 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
             funding + "  •  The next route is closer"
         };
     }
-    if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
-        return {
-            "CAPSULE RECOVERED",
-            "The crew and surviving telemetry are home; the recovery bill consumed the mission's return.",
-            funding + "  •  Prepare the next launch"
-        };
-    }
     return {
-        "USEFUL DATA HOME",
-        "The crew returned early with readings the program can still build on.",
+        "SAFE RETURN",
+        "The crew and ship are home. Any completed lesson data has been banked.",
         funding + "  •  Prepare the next launch"
     };
 }
 
 inline std::string_view launchOutcomeLabel(const LaunchOutcome& outcome)
 {
+    if (outcome.failureCause == LaunchFailureCause::LunarImpact) {
+        return "Lunar Impact";
+    }
+    if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
+        return "Training Rescue";
+    }
+    if (outcome.failureCause == LaunchFailureCause::FuelExhausted &&
+        outcome.frontierTransfer) {
+        return "Insertion Fuel Short";
+    }
     if (outcome.type == LaunchResultType::Destroyed) {
         if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
             return text::panel::outcomes::returnFailure;
         }
         return outcome.frontierTransfer ? text::panel::outcomes::transferLost : text::panel::outcomes::vehicleLost;
-    }
-
-    if (outcome.recoveryMethod == RecoveryMethod::ManualEject) {
-        return text::panel::outcomes::emergencyEject;
     }
 
     if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
@@ -260,19 +256,18 @@ inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome,
 {
     std::vector<std::string> notes;
     if (outcome.pilotedFlight) {
-        if (outcome.failureCause != LaunchFailureCause::None) {
+        if (outcome.failureCause == LaunchFailureCause::LunarImpact) {
+            notes.emplace_back("The ship collided with the Moon because lunar landing guidance has not been calibrated.");
+        } else if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
+            notes.emplace_back("Mission Control recovered the crew. No calibration data was banked.");
+        } else if (outcome.failureCause != LaunchFailureCause::None) {
             notes.push_back("Flight ended by " + std::string(toString(outcome.failureCause)) +
                 " after its visible safety countdown expired.");
         } else {
             notes.push_back("Minimum visible safety margin: " + display::percent(outcome.minimumSafetyMargin) + ".");
         }
-    } else if (outcome.type == LaunchResultType::Destroyed) {
-        notes.push_back("Burn " + display::multiplier(outcome.ejectMultiplier)
-            + " reached the revealed failure point at " + display::multiplier(outcome.crashMultiplier) + ".");
     } else {
-        notes.push_back("Burn " + display::multiplier(outcome.ejectMultiplier)
-            + " stopped " + display::multiplier(std::max(0.0, outcome.crashMultiplier - outcome.ejectMultiplier))
-            + " before the revealed failure point at " + display::multiplier(outcome.crashMultiplier) + ".");
+        notes.emplace_back("Legacy launch record preserved for save compatibility.");
     }
     if (opensPostArrivalPhases) {
         notes.emplace_back(text::panel::messages::postArrivalResearchReady);
@@ -336,8 +331,13 @@ inline std::string launchOutcomeRecoveryLabel(
     const ContentCatalog& catalog,
     const LaunchOutcome& outcome)
 {
-    if (outcome.recoveryMethod != RecoveryMethod::ReturnHome) {
+    if (outcome.recoveryMethod == RecoveryMethod::TransferArrival ||
+        outcome.recoveryMethod == RecoveryMethod::None) {
         return std::string(toString(outcome.recoveryMethod));
+    }
+
+    if (outcome.recoveryMethod != RecoveryMethod::ReturnHome) {
+        return "Crew recovered";
     }
 
     const Destination* destination = catalog.findDestination(outcome.destinationId);
@@ -369,32 +369,24 @@ inline std::vector<LaunchOutcomeMetricGroupPresentation> launchOutcomeMetricGrou
         },
         outcome.pilotedFlight
             ? LaunchOutcomeMetricGroupPresentation {
-                text::panel::sections::burnProfile,
+                "Flight systems",
                 "",
                 {
-                    {text::labels::burnDepth, display::multiplier(outcome.ejectMultiplier)},
                     {"Safety margin", display::percent(outcome.minimumSafetyMargin)},
+                    {"Hull damage", display::wholePercent(outcome.shipDamage)},
                     {"Terminal cause", outcome.failureCause == LaunchFailureCause::None
                         ? std::string("None")
                         : std::string(toString(outcome.failureCause))}
                 }
             }
             : LaunchOutcomeMetricGroupPresentation {
-                text::panel::sections::burnProfile,
+                "Archived record",
                 "",
                 {
-                    {text::labels::burnDepth, display::multiplier(outcome.ejectMultiplier)},
-                    {text::labels::failurePoint, display::multiplier(outcome.crashMultiplier)}
+                    {"Record", "Legacy launch"},
+                    {"Runtime", "Retired rules"}
                 }
-            },
-        {
-            text::panel::sections::peakTelemetry,
-            "",
-            {
-                {text::labels::peakWarning, display::percent(outcome.peakWarning)},
-                {text::labels::peakAbort, display::percent(outcome.peakAbortRisk)}
             }
-        }
     };
     return groups;
 }

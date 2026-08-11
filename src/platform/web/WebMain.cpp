@@ -184,16 +184,6 @@ void rr_prepare_launch()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_eject_now()
-{
-    if (g_app) {
-        g_app->ejectNow();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_return_home()
 {
     if (g_app) {
@@ -236,36 +226,6 @@ void rr_cut_engines()
 {
     if (g_app) {
         g_app->cutEngines();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_pressure_relief()
-{
-    if (g_app) {
-        g_app->pressureReliefValve();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_close_relief_valve()
-{
-    if (g_app) {
-        g_app->closePressureReliefValve();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_jettison_cargo()
-{
-    if (g_app) {
-        g_app->jettisonCargo();
     }
 }
 
@@ -1091,6 +1051,16 @@ EMSCRIPTEN_KEEPALIVE
 int rr_debug_act_one_checkpoint()
 {
     return g_app ? g_app->debugActOneCheckpoint() : -1;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_launch_lesson(int lessonIndex)
+{
+    if (g_app) {
+        g_app->debugStartLaunchLesson(lessonIndex);
+    }
 }
 
 #ifdef __EMSCRIPTEN__

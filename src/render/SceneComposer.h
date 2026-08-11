@@ -64,6 +64,7 @@ private:
     void drawSurfacePush(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
+    void drawLaunchAsteroids(const RenderSnapshot& snapshot);
     void drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end);
     void submit(
         const std::vector<SceneVertex>& vertices,

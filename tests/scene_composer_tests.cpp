@@ -1,4 +1,5 @@
 #include "core/UiViewportLayout.h"
+#include "core/Tuning.h"
 #include "render/SceneAtlas.h"
 #include "render/SceneClip.h"
 #include "render/SceneComposer.h"
@@ -34,6 +35,14 @@
 namespace rocket {
 
 struct SceneComposerTestAccess {
+    static std::pair<float, float> frameCenter(
+        SceneComposer& composer,
+        const RenderSnapshot& snapshot)
+    {
+        composer.beginFrame(snapshot);
+        return {composer.scenePixelCenterX_, composer.scenePixelCenterY_};
+    }
+
     static const ScenePacket& composeLines(
         SceneComposer& composer,
         const std::vector<SceneVertex>& vertices,
@@ -2076,6 +2085,127 @@ void testPoiGuidanceUsesOneDynamicBouncingArrow()
     assert(hasMarkerColor(0.78F, 0.52F, 1.0F));
 }
 
+void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
+{
+    const auto hasTextureFrame = [](const ScenePacket& packet, TextureId texture, int frame, int frameCount = 1) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+            texture,
+            static_cast<float>(frame) / static_cast<float>(frameCount),
+            0.0F,
+            static_cast<float>(frame + 1) / static_cast<float>(frameCount),
+            1.0F);
+        if (!expected.valid) {
+            return false;
+        }
+        constexpr float tolerance = 2.0F / 65535.0F;
+        for (const SceneDraw& draw : packet.draws) {
+            if (draw.drawType != SceneDrawType::InstancedQuad) {
+                continue;
+            }
+            for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+                const SceneInstance instance = rocket::unpackSceneInstance(
+                    packet.instances[draw.firstInstance + index]);
+                if (instance.textured &&
+                    std::abs(instance.u0 - expected.u0) <= tolerance &&
+                    std::abs(instance.v0 - expected.v0) <= tolerance &&
+                    std::abs(instance.u1 - expected.u1) <= tolerance &&
+                    std::abs(instance.v1 - expected.v1) <= tolerance) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    const auto explosionFrame = [&](const ScenePacket& packet) {
+        for (int frame = 0; frame < 8; ++frame) {
+            if (hasTextureFrame(packet, TextureId::Explosion, frame, 8)) {
+                return frame;
+            }
+        }
+        return -1;
+    };
+
+    RenderSnapshot impact;
+    impact.screen = rocket::Screen::Launch;
+    impact.destinationTier = 1;
+    impact.travelProgress = 1.0;
+    impact.launchLunarImpactActive = true;
+    impact.launchLunarImpactElapsed = 0.04;
+    impact.animationTime = impact.launchLunarImpactElapsed;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+    composer.setTextureReady(TextureId::Explosion, true);
+    const ScenePacket& contact = composer.compose(impact);
+    assert(hasTextureFrame(contact, TextureId::RocketClosed, 0));
+    assert(explosionFrame(contact) < 0);
+    const std::size_t contactDrawCount = contact.draws.size();
+
+    impact.launchLunarImpactElapsed = 0.09;
+    impact.animationTime = impact.launchLunarImpactElapsed;
+    const ScenePacket& firstBlast = composer.compose(impact);
+    assert(!hasTextureFrame(firstBlast, TextureId::RocketClosed, 0));
+    assert(explosionFrame(firstBlast) == 0);
+    const std::size_t firstBlastDrawCount = firstBlast.draws.size();
+    assert(firstBlastDrawCount > contactDrawCount);
+
+    const double frameDuration =
+        (rocket::tuning::session::lunarImpactExplosionEndSeconds -
+            rocket::tuning::session::lunarImpactHoldSeconds) /
+        8.0;
+    for (int frame = 0; frame < 8; ++frame) {
+        impact.launchLunarImpactElapsed =
+            rocket::tuning::session::lunarImpactHoldSeconds +
+            (static_cast<double>(frame) + 0.5) * frameDuration;
+        impact.animationTime = impact.launchLunarImpactElapsed;
+        const ScenePacket& blastFrame = composer.compose(impact);
+        assert(explosionFrame(blastFrame) == frame);
+    }
+
+    RenderSnapshot still = impact;
+    still.launchLunarImpactElapsed = 0.12;
+    still.animationTime = still.launchLunarImpactElapsed;
+    SceneComposer shakeComposer;
+    shakeComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto shakenCenter = rocket::SceneComposerTestAccess::frameCenter(shakeComposer, still);
+    SceneComposer accessibleComposer;
+    accessibleComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    accessibleComposer.setCameraShakeEnabled(false);
+    const auto stableCenter = rocket::SceneComposerTestAccess::frameCenter(accessibleComposer, still);
+    const float lunarShakeDistance = std::hypot(
+        shakenCenter.first - stableCenter.first,
+        shakenCenter.second - stableCenter.second);
+    assert(lunarShakeDistance > 8.0F);
+    RenderSnapshot ordinaryImpact = still;
+    ordinaryImpact.launchLunarImpactActive = false;
+    ordinaryImpact.launchShake = 1.0;
+    SceneComposer ordinaryComposer;
+    ordinaryComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto ordinaryCenter = rocket::SceneComposerTestAccess::frameCenter(
+        ordinaryComposer,
+        ordinaryImpact);
+    assert(lunarShakeDistance > std::hypot(
+        ordinaryCenter.first - stableCenter.first,
+        ordinaryCenter.second - stableCenter.second));
+    accessibleComposer.setTextureReady(TextureId::Explosion, true);
+    const ScenePacket& accessibleBlast = accessibleComposer.compose(still);
+    assert(explosionFrame(accessibleBlast) >= 0);
+
+    RenderSnapshot lunarResult;
+    lunarResult.screen = rocket::Screen::Results;
+    lunarResult.lastResult = rocket::LaunchResultType::Destroyed;
+    lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::LunarImpact;
+    lunarResult.animationTime = 0.20;
+    const ScenePacket& resolvedLunarImpact = composer.compose(lunarResult);
+    assert(explosionFrame(resolvedLunarImpact) < 0);
+    assert(!hasTextureFrame(resolvedLunarImpact, TextureId::RocketClosed, 0));
+
+    lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::FuelExhausted;
+    const ScenePacket& genericDestroyed = composer.compose(lunarResult);
+    assert(explosionFrame(genericDestroyed) >= 0);
+}
+
 } // namespace
 
 int main()
@@ -2112,5 +2242,6 @@ int main()
     testHazardDroneTransitShimmerAndAssistantBeams();
     testMiningTerrainPersistentStreamInvalidation();
     testPoiGuidanceUsesOneDynamicBouncingArrow();
+    testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;
 }

@@ -11,21 +11,51 @@
 
 namespace rocket {
 
+inline std::string launchCurriculumLabel(LaunchTrainingStage stage)
+{
+    switch (stage) {
+    case LaunchTrainingStage::FuelCalibration: return "Fuel calibration";
+    case LaunchTrainingStage::FlightControlsCalibration: return "Flight controls calibration";
+    case LaunchTrainingStage::MoonTransfer: return "Moon transfer";
+    case LaunchTrainingStage::ThermalManagement: return "Thermal management";
+    case LaunchTrainingStage::MarsTransfer: return "Mars transfer";
+    case LaunchTrainingStage::HullIntegrity: return "Hull integrity";
+    case LaunchTrainingStage::JupiterTransfer: return "Jupiter transfer";
+    case LaunchTrainingStage::Complete: return "Frontier operations";
+    }
+    return "Launch training";
+}
+
 inline std::vector<DetailPresentationRow> frontierDetailsPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     std::vector<DetailPresentationRow> rows;
-    const Destination& currentFrontier = currentDestination(state, catalog);
+    const Destination& savedFrontier = currentDestination(state, catalog);
     const Destination* next = nextDestination(state, catalog);
-    const int requiredReadiness = frontierReadinessRequired(state, catalog);
+    const Destination* visibleFrontier = &savedFrontier;
+    if (savedFrontier.hiddenFromProgression && next != nullptr) {
+        visibleFrontier = next;
+    }
 
-    rows.push_back(detailPresentationRow(text::panel::details::current, currentFrontier.name));
     rows.push_back(detailPresentationRow(
-        text::labels::flightData,
-        requiredReadiness == 0 ? std::string(text::panel::complete) : display::fraction(state.run.frontierReadiness, requiredReadiness)));
-    rows.push_back(detailPresentationRow(text::labels::missionDifficulty, display::signedPercent(missionPressureModifier(state, catalog, currentFrontier))));
-    if (next != nullptr) {
-        rows.push_back(detailPresentationRow(text::panel::details::next, next->name));
-        rows.push_back(detailPresentationRow(text::panel::details::transferBurn, display::multiplier(next->targetMultiplier)));
+        text::panel::details::current,
+        savedFrontier.hiddenFromProgression
+            ? visibleFrontier->name + " training"
+            : visibleFrontier->name));
+    rows.push_back(detailPresentationRow("Launch lesson", launchCurriculumLabel(state.meta.launchLessons.stage)));
+    std::string gateStatus = std::string(text::panel::ready);
+    if (!launchMissionReady(state, catalog)) {
+        const bool storyLocked =
+            (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement &&
+                !hasUnlock(state.meta, content::unlock::routeMars)) ||
+            (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity &&
+                !hasUnlock(state.meta, content::unlock::routeJupiter));
+        gateStatus = storyLocked ? "Complete story objective" : "Install required";
+    }
+    rows.push_back(detailPresentationRow("Launch gate", gateStatus));
+
+    const Destination* visibleNext = savedFrontier.hiddenFromProgression ? visibleFrontier : next;
+    if (visibleNext != nullptr) {
+        rows.push_back(detailPresentationRow(text::panel::details::next, visibleNext->name));
     } else {
         rows.push_back(detailPresentationRow(text::panel::details::next, text::panel::noneCharted));
     }
@@ -50,9 +80,6 @@ inline std::vector<DetailPresentationRow> legacyDetailsPresentation(const GameSt
         detailPresentationRow(text::panel::details::astronautsLost, std::to_string(state.meta.astronautsLost)),
         detailPresentationRow(text::panel::details::furthestTier, std::to_string(state.meta.furthestTier)),
         detailPresentationRow(text::panel::details::closestSurvival, state.meta.closestSurvivalMargin > 0.0 ? display::multiplier(state.meta.closestSurvivalMargin) : std::string(text::enums::launchResult::none)),
-        detailPresentationRow(text::panel::details::maxBurnDepth, display::multiplier(state.meta.maxBurnDepth)),
-        detailPresentationRow(text::panel::details::maxPeakWarning, display::percent(state.meta.maxPeakWarning)),
-        detailPresentationRow(text::panel::details::maxPeakAbort, display::percent(state.meta.maxPeakAbortRisk)),
         detailPresentationRow(text::panel::details::bestCreditDelta, display::signedMoney(state.meta.bestCreditDelta)),
         detailPresentationRow(text::panel::details::worstCreditDelta, display::signedMoney(state.meta.worstCreditDelta))
     };

@@ -32,7 +32,7 @@ Controller names use positions so the same rule applies to every prompt family: 
 |---|---|
 | Menus, cards, drafts, settings, modals | Left stick or D-pad navigates; South confirms; East backs out; right stick scrolls; Menu opens the system menu; View opens Map; North opens Inventory outside real-time play. |
 | Preflight, fanfare, results | South launches or continues. During Mining Rig transfer, South queues launch and the burn begins automatically when the bay seals. |
-| Active launch | Left stick steers left/right and raises/lowers persistent throttle; South turns toward the context-appropriate home target without ending the flight; hold East 0.75 s to Eject; West toggles engines; North opens or closes pressure relief; hold RB 0.45 s to jettison cargo. |
+| Active launch | Fuel Survey ignores movement input and South turns around at the fuel light. From Controls Calibration onward, left stick steers left/right and raises/lowers persistent throttle; South turns around without ending the flight. West toggles engines only after Temperature is introduced. Manual Eject, pressure relief, and launch cargo jettison are not bound. |
 | Flyby | Left stick steers and throttles; South continues after completion; hold East 0.45 s to abort. |
 | Orbit | Left stick supplies radial and tangential thrust; South continues after completion; hold East 0.45 s to abort. |
 | Surface Scan / Push Deeper | South pulses or pushes; West banks; hold East 0.45 s to abort. Screen actions remain spatially focusable. |
@@ -42,7 +42,7 @@ Controller names use positions so the same rule applies to every prompt family: 
 
 The Mining Rig drill stays forward-facing. EVA uses twin-stick movement and independent aim: the right stick rotates the reticle while RT fires an immediate shot and continues at a 0.18-second cadence. LT is the suit hand drill. Support Drone targeting remains autonomous around the active actor.
 
-During launch, keyboard WASD/arrows steer left/right and raise/lower throttle, `C` cuts or restores engines, `V` opens or closes pressure relief, `R` turns home, and `E` ejects. In mining, keyboard and mouse use WASD/arrows for thrust, mouse for operator aim, left click for sidearm fire, right click for the hand drill, `E` for scan, `T` for tether, and `F` for immediate exit/entry. Space retains the rig drill's configured Toggle/Hold behavior, and `R` retains bank/leave at the shuttle.
+During launch, keyboard WASD/arrows steer left/right and raise/lower throttle after the first Fuel Survey, `C` cuts or restores engines after Temperature is introduced, and `R` turns around. Launch has no keyboard binding for manual eject, pressure relief, or cargo jettison. In mining, keyboard and mouse use WASD/arrows for thrust, mouse for operator aim, left click for sidearm fire, right click for the hand drill, `E` for scan, `T` for tether, and `F` for immediate exit/entry. Space retains the rig drill's configured Toggle/Hold behavior, and `R` retains bank/leave at the shuttle.
 
 Holding South displays an `EXIT` or `ENTER` progress ring around the rig. The threshold is exactly 0.6 seconds; releasing before it fires routes through the existing tap action. `F` switches immediately and produces a confirmation pulse.
 

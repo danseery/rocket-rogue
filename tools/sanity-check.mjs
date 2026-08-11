@@ -34,7 +34,6 @@ const required = [
   "docs/STEAM_RELEASE_READINESS.md",
   "src/core/GameTypes.h",
   "src/core/GameText.h",
-  "src/core/Telemetry.h",
   "src/core/Tuning.h",
   "src/core/Content.cpp",
   "src/core/GameState.cpp",

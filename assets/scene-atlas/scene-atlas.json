@@ -5,8 +5,8 @@
   "packingPageSize": 3776,
   "padding": 2,
   "pageCount": 3,
-  "textureCount": 36,
-  "frameCount": 56,
+  "textureCount": 37,
+  "frameCount": 57,
   "pages": [
     {
       "index": 0,
@@ -22,15 +22,15 @@
       "path": "assets/scene-atlas/scene-atlas-1.png",
       "width": 3774,
       "height": 3678,
-      "pixelSha256": "f2e950812cf7cf8b4bd83d1c1fa3eac7c0af9e56f7e27d17d6f7ec40a061947a"
+      "pixelSha256": "c107865d4d63e76d1856d33fde5f50d03bb5158453691577d5d820197533f28a"
     },
     {
       "index": 2,
       "key": "scene_atlas_2",
       "path": "assets/scene-atlas/scene-atlas-2.png",
       "width": 3612,
-      "height": 2580,
-      "pixelSha256": "5be957658a5d21468e785c10d1fb1eadc46354227897724db751b6dbc2853a15"
+      "height": 3096,
+      "pixelSha256": "76917a72b3db3b4fc658c37ecf2dea2421aac5a639da7bb9b8fa556a3e449213"
     }
   ],
   "textures": [
@@ -57,13 +57,13 @@
           },
           "atlasRect": {
             "x": 3086,
-            "y": 1260,
+            "y": 1776,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 3084,
-            "y": 1258,
+            "y": 1774,
             "width": 516,
             "height": 516
           }
@@ -92,13 +92,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2582,
+            "x": 3098,
             "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2580,
+            "x": 3096,
             "y": 0,
             "width": 516,
             "height": 516
@@ -128,14 +128,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 3086,
-            "y": 2292,
+            "x": 2058,
+            "y": 2808,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 3084,
-            "y": 2290,
+            "x": 2056,
+            "y": 2806,
             "width": 516,
             "height": 516
           }
@@ -536,13 +536,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2066,
+            "x": 2582,
             "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2064,
+            "x": 2580,
             "y": 0,
             "width": 516,
             "height": 516
@@ -820,13 +820,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2058,
+            "x": 2574,
             "y": 2808,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2056,
+            "x": 2572,
             "y": 2806,
             "width": 516,
             "height": 516
@@ -857,13 +857,13 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 2066,
+            "y": 2582,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 0,
-            "y": 2064,
+            "y": 2580,
             "width": 516,
             "height": 516
           }
@@ -893,13 +893,13 @@
           },
           "atlasRect": {
             "x": 3086,
-            "y": 1776,
+            "y": 2292,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 3084,
-            "y": 1774,
+            "y": 2290,
             "width": 516,
             "height": 516
           }
@@ -911,42 +911,6 @@
       "key": "saturn",
       "source": "assets/art/saturn.png",
       "sourceSha256": "b0c0de2e9f5d2fadcf0c3ccab0ea0b58023e7865911edc62cf718f74efe6d29d",
-      "width": 512,
-      "height": 512,
-      "columns": 1,
-      "rows": 1,
-      "frameWidth": 512,
-      "frameHeight": 512,
-      "frames": [
-        {
-          "index": 0,
-          "page": 2,
-          "sourceRect": {
-            "x": 0,
-            "y": 0,
-            "width": 512,
-            "height": 512
-          },
-          "atlasRect": {
-            "x": 2,
-            "y": 1034,
-            "width": 512,
-            "height": 512
-          },
-          "paddedRect": {
-            "x": 0,
-            "y": 1032,
-            "width": 516,
-            "height": 516
-          }
-        }
-      ]
-    },
-    {
-      "textureId": "Uranus",
-      "key": "uranus",
-      "source": "assets/art/uranus.png",
-      "sourceSha256": "d4feb19a8bf54aa13a18b4212b5bd6a3cf96a1a280b72cbd58f56151b142f234",
       "width": 512,
       "height": 512,
       "columns": 1,
@@ -979,6 +943,42 @@
       ]
     },
     {
+      "textureId": "Uranus",
+      "key": "uranus",
+      "source": "assets/art/uranus.png",
+      "sourceSha256": "d4feb19a8bf54aa13a18b4212b5bd6a3cf96a1a280b72cbd58f56151b142f234",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 2,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2,
+            "y": 2066,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 0,
+            "y": 2064,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
       "textureId": "Neptune",
       "key": "neptune",
       "source": "assets/art/neptune.png",
@@ -1000,14 +1000,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 3098,
-            "y": 2,
+            "x": 2,
+            "y": 518,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 3096,
-            "y": 0,
+            "x": 0,
+            "y": 516,
             "width": 516,
             "height": 516
           }
@@ -1468,42 +1468,6 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 518,
-            "y": 2,
-            "width": 512,
-            "height": 512
-          },
-          "paddedRect": {
-            "x": 516,
-            "y": 0,
-            "width": 516,
-            "height": 516
-          }
-        }
-      ]
-    },
-    {
-      "textureId": "MiniDroneResource",
-      "key": "mini_drone_resource",
-      "source": "assets/art/mini-drone-resource.png",
-      "sourceSha256": "44dcb6c059202f0e889e2957814f1e277b5e9efbcfb10ff90799d603bdb9f076",
-      "width": 512,
-      "height": 512,
-      "columns": 1,
-      "rows": 1,
-      "frameWidth": 512,
-      "frameHeight": 512,
-      "frames": [
-        {
-          "index": 0,
-          "page": 2,
-          "sourceRect": {
-            "x": 0,
-            "y": 0,
-            "width": 512,
-            "height": 512
-          },
-          "atlasRect": {
             "x": 1034,
             "y": 2,
             "width": 512,
@@ -1519,10 +1483,10 @@
       ]
     },
     {
-      "textureId": "MiniDroneSurvey",
-      "key": "mini_drone_survey",
-      "source": "assets/art/mini-drone-survey.png",
-      "sourceSha256": "29ac38d0fc5cf07e190c4172d0fde07bdb0910772b2feb8d8a3e7688c30e591c",
+      "textureId": "MiniDroneResource",
+      "key": "mini_drone_resource",
+      "source": "assets/art/mini-drone-resource.png",
+      "sourceSha256": "44dcb6c059202f0e889e2957814f1e277b5e9efbcfb10ff90799d603bdb9f076",
       "width": 512,
       "height": 512,
       "columns": 1,
@@ -1555,6 +1519,42 @@
       ]
     },
     {
+      "textureId": "MiniDroneSurvey",
+      "key": "mini_drone_survey",
+      "source": "assets/art/mini-drone-survey.png",
+      "sourceSha256": "29ac38d0fc5cf07e190c4172d0fde07bdb0910772b2feb8d8a3e7688c30e591c",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 2,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 2066,
+            "y": 2,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 2064,
+            "y": 0,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
       "textureId": "MiniDroneHazard",
       "key": "mini_drone_hazard",
       "source": "assets/art/mini-drone-hazard.png",
@@ -1576,13 +1576,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2,
+            "x": 518,
             "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 0,
+            "x": 516,
             "y": 0,
             "width": 516,
             "height": 516
@@ -1612,13 +1612,13 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 2574,
+            "x": 3090,
             "y": 2808,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 2572,
+            "x": 3088,
             "y": 2806,
             "width": 516,
             "height": 516
@@ -1640,7 +1640,7 @@
       "frames": [
         {
           "index": 0,
-          "page": 1,
+          "page": 2,
           "sourceRect": {
             "x": 0,
             "y": 0,
@@ -1648,14 +1648,14 @@
             "height": 512
           },
           "atlasRect": {
-            "x": 3090,
-            "y": 2808,
+            "x": 2,
+            "y": 2,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
-            "x": 3088,
-            "y": 2806,
+            "x": 0,
+            "y": 0,
             "width": 516,
             "height": 516
           }
@@ -1757,13 +1757,49 @@
           },
           "atlasRect": {
             "x": 2,
-            "y": 518,
+            "y": 1034,
             "width": 512,
             "height": 512
           },
           "paddedRect": {
             "x": 0,
-            "y": 516,
+            "y": 1032,
+            "width": 516,
+            "height": 516
+          }
+        }
+      ]
+    },
+    {
+      "textureId": "Asteroid",
+      "key": "asteroid",
+      "source": "assets/art/asteroid.png",
+      "sourceSha256": "0ad3d283e61b4f990fab635140789b00f4d9ac2361b1dc5ceb8c12488a1b8d7f",
+      "width": 512,
+      "height": 512,
+      "columns": 1,
+      "rows": 1,
+      "frameWidth": 512,
+      "frameHeight": 512,
+      "frames": [
+        {
+          "index": 0,
+          "page": 1,
+          "sourceRect": {
+            "x": 0,
+            "y": 0,
+            "width": 512,
+            "height": 512
+          },
+          "atlasRect": {
+            "x": 3086,
+            "y": 1260,
+            "width": 512,
+            "height": 512
+          },
+          "paddedRect": {
+            "x": 3084,
+            "y": 1258,
             "width": 516,
             "height": 516
           }

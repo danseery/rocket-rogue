@@ -79,6 +79,9 @@ inline std::vector<HangarOperationCardPresentation> hangarOperationCards(const G
     std::vector<HangarOperationCardPresentation> cards;
     const Astronaut* astronaut = activeAstronaut(state);
     const HangarOperationPreview preview = hangarOperationPreview(state, catalog);
+    const bool starterLaunchLesson =
+        state.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration ||
+        state.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration;
     const bool salvageRebuild = state.run.shipDamage >= tuning::damage::destroyedShipDamage &&
         preview.repairAmount > 0 &&
         preview.repairCost <= state.run.credits &&
@@ -86,17 +89,19 @@ inline std::vector<HangarOperationCardPresentation> hangarOperationCards(const G
             tuning::hangar::repairBaseCost + static_cast<double>(preview.repairAmount) * tuning::hangar::repairCostPerDamage,
             state.run.repairOpsThisExpedition);
 
-    cards.push_back(hangarOperationCard(
-        text::panel::ops::repairBay,
-        preview.repairAmount > 0
-            ? (salvageRebuild ? text::panel::salvageRebuildDetail(preview.repairAmount) : text::panel::repairDetail(preview.repairAmount))
-            : std::string(text::panel::messages::noStructuralWork),
-        preview.repairAmount > 0
-            ? (salvageRebuild ? std::string(text::panel::messages::salvageRebuildCost) : display::credits(preview.repairCost))
-            : std::string(text::panel::shipStable),
-        ui::actions::repairShip,
-        preview.repairAvailable,
-        "repair"));
+    if (!starterLaunchLesson) {
+        cards.push_back(hangarOperationCard(
+            text::panel::ops::repairBay,
+            preview.repairAmount > 0
+                ? (salvageRebuild ? text::panel::salvageRebuildDetail(preview.repairAmount) : text::panel::repairDetail(preview.repairAmount))
+                : std::string(text::panel::messages::noStructuralWork),
+            preview.repairAmount > 0
+                ? (salvageRebuild ? std::string(text::panel::messages::salvageRebuildCost) : display::credits(preview.repairCost))
+                : std::string(text::panel::shipStable),
+            ui::actions::repairShip,
+            preview.repairAvailable,
+            "repair"));
+    }
 
     if (astronaut == nullptr) {
         cards.push_back(hangarOperationCard(
@@ -106,7 +111,7 @@ inline std::vector<HangarOperationCardPresentation> hangarOperationCards(const G
             ui::actions::recruitCrew,
             preview.recruitAvailable,
             "crew"));
-    } else {
+    } else if (!starterLaunchLesson) {
         std::string simulatorDetail = text::panel::simulatorDetail(preview.trainingGain, preview.trainingStressGain);
         std::string simulatorCost = display::credits(preview.trainingCost);
         if (astronaut->training >= tuning::crew::maxTraining) {

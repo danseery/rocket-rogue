@@ -23,7 +23,9 @@ ShipModule module(
     RefitTrack refitTrack = RefitTrack::None,
     int refitRank = 0,
     std::string prerequisiteId = {},
-    bool provingTier = false)
+    bool provingTier = false,
+    LaunchUpgradeKind launchUpgradeKind = LaunchUpgradeKind::None,
+    int launchUpgradeRank = 0)
 {
     ShipModule result;
     result.id = std::move(id);
@@ -38,6 +40,8 @@ ShipModule module(
     result.refitRank = refitRank;
     result.prerequisiteId = std::move(prerequisiteId);
     result.provingTier = provingTier;
+    result.launchUpgradeKind = launchUpgradeKind;
+    result.launchUpgradeRank = launchUpgradeRank;
     return result;
 }
 
@@ -230,15 +234,18 @@ ContentCatalog createDefaultContent()
     ContentCatalog catalog;
 
     catalog.modules = {
-        module(content::module::sparrowInjectorTune, "Sparrow Injector Tune", SlotType::Engine, Rarity::Common, {.thrust = 0.8}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 1, "", true),
-        module(content::module::reserveFeedManifold, "Reserve Feed Manifold", SlotType::Fuel, Rarity::Uncommon, {.fuel = 1.2}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 2, content::module::sparrowInjectorTune, true),
-        module(content::module::sustainedBurnPackage, "Sustained-Burn Package", SlotType::Engine, Rarity::Rare, {.thrust = 0.5, .fuel = 0.6}, content::unlock::starter, {"reach", "proving"}, {}, RefitTrack::Reach, 3, content::module::reserveFeedManifold, true),
-        module(content::module::radiatorVaneExtension, "Radiator Vane Extension", SlotType::Cooling, Rarity::Common, {.cooling = 1.0}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 1, "", true),
-        module(content::module::telemetryNoiseFilter, "Telemetry Noise Filter", SlotType::Sensors, Rarity::Uncommon, {.sensors = 1.2}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 2, content::module::radiatorVaneExtension, true),
-        module(content::module::pressureBalanceBaffles, "Pressure-Balance Baffles", SlotType::Fuel, Rarity::Rare, {.pressure = 0.8, .volatility = -0.1}, content::unlock::starter, {"control", "proving"}, {}, RefitTrack::Control, 3, content::module::telemetryNoiseFilter, true),
-        module(content::module::patchworkCrossBracing, "Patchwork Cross-Bracing", SlotType::Hull, Rarity::Common, {.hull = 1.0}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 1, "", true),
-        module(content::module::springCapsuleRetropack, "Spring Capsule Retropack", SlotType::Escape, Rarity::Uncommon, {.escape = 1.2}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 2, content::module::patchworkCrossBracing, true),
-        module(content::module::recoveryCradle, "Recovery Cradle", SlotType::Hull, Rarity::Rare, {.hull = 0.5, .escape = 0.7}, content::unlock::starter, {"recovery", "proving"}, {}, RefitTrack::Recovery, 3, content::module::springCapsuleRetropack, true),
+        module(content::module::fuelTanks1, "Fuel Tanks I", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 1, "", true, LaunchUpgradeKind::FuelTanks, 1),
+        module(content::module::fuelTanks2, "Fuel Tanks II", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 2, content::module::fuelTanks1, true, LaunchUpgradeKind::FuelTanks, 2),
+        module(content::module::fuelTanks3, "Fuel Tanks III", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 3, content::module::fuelTanks2, true, LaunchUpgradeKind::FuelTanks, 3),
+        module(content::module::flightControls1, "Flight Controls I", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 1, "", true, LaunchUpgradeKind::FlightControls, 1),
+        module(content::module::flightControls2, "Flight Controls II", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 2, content::module::flightControls1, true, LaunchUpgradeKind::FlightControls, 2),
+        module(content::module::flightControls3, "Flight Controls III", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 3, content::module::flightControls2, true, LaunchUpgradeKind::FlightControls, 3),
+        module(content::module::coolingSystem1, "Engine Cooling I", SlotType::Cooling, Rarity::Common, {}, content::unlock::starter, {"launch", "temperature"}, {}, RefitTrack::Control, 1, "", true, LaunchUpgradeKind::Cooling, 1),
+        module(content::module::coolingSystem2, "Engine Cooling II", SlotType::Cooling, Rarity::Common, {}, content::unlock::starter, {"launch", "temperature"}, {}, RefitTrack::Control, 2, content::module::coolingSystem1, true, LaunchUpgradeKind::Cooling, 2),
+        module(content::module::coolingSystem3, "Engine Cooling III", SlotType::Cooling, Rarity::Common, {}, content::unlock::starter, {"launch", "temperature"}, {}, RefitTrack::Control, 3, content::module::coolingSystem2, true, LaunchUpgradeKind::Cooling, 3),
+        module(content::module::hullPlating1, "Hull Plating I", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 1, "", true, LaunchUpgradeKind::Hull, 1),
+        module(content::module::hullPlating2, "Hull Plating II", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 2, content::module::hullPlating1, true, LaunchUpgradeKind::Hull, 2),
+        module(content::module::hullPlating3, "Hull Plating III", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 3, content::module::hullPlating2, true, LaunchUpgradeKind::Hull, 3),
 
         module(content::module::sparrowEngine, "Sparrow Engine", SlotType::Engine, Rarity::Common, {.thrust = 2.0, .volatility = 0.2}, content::unlock::starter, {"steady", content::unlock::starter}),
         module(content::module::kestrelEngine, "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 1.6, .fuel = -0.4, .volatility = 0.25, .payout = 0.4}, content::unlock::deepSpace, {"fast", "hungry"}, {}, RefitTrack::Reach, 1, content::module::sparrowEngine),
@@ -274,6 +281,19 @@ ContentCatalog createDefaultContent()
         module(content::module::haulerThrusters, "Hauler Thrusters", SlotType::Engine, Rarity::Uncommon, {.thrust = 0.6, .fuel = -0.2, .volatility = 0.20, .miningEngineEfficiency = 0.24}, content::unlock::cargoRigs, {"surface", "mining", "hauler"}, {.common = 2, .rare = 1}, RefitTrack::Reach),
         module(content::module::massDriverWinch, "Mass Driver Winch", SlotType::Escape, Rarity::Rare, {.escape = 0.6, .volatility = 0.25, .miningStorage = 2.0, .miningEngineEfficiency = 0.34}, content::unlock::cargoRigs, {"surface", "mining", "artifact"}, {.rare = 2, .exotic = 1}, RefitTrack::Recovery)
     };
+
+    // The pre-v10 ship packages remain resolvable for existing saves. New
+    // offers consist only of the four direct Launch tracks and purpose-built
+    // Surface/Mining modules.
+    for (ShipModule& moduleDefinition : catalog.modules) {
+        const bool surfaceModule = std::find(
+            moduleDefinition.tags.begin(),
+            moduleDefinition.tags.end(),
+            "surface") != moduleDefinition.tags.end();
+        moduleDefinition.compatibilityOnly =
+            moduleDefinition.launchUpgradeKind == LaunchUpgradeKind::None &&
+            !surfaceModule;
+    }
 
     catalog.crewUpgrades = {
         crewUpgrade(content::crewUpgrade::analogSimBay, "Analog Simulator Bay", "Lower-stress rehearsal gear for routine burns.", Rarity::Common, {.trainingStressRelief = 8}, content::unlock::starter, {"simulator", "training"}, RefitTrack::Control),
@@ -351,6 +371,7 @@ ContentCatalog createDefaultContent()
     };
 
     for (Destination& destination : catalog.destinations) {
+        destination.hiddenFromProgression = destination.id == content::destination::earthOrbit;
         // The outer-system navigation mode is authored as destination data;
         // route traversal never needs to recognize a specific destination.
         destination.requiresHostileSystem = destination.tier >= 7;
@@ -670,6 +691,45 @@ std::string_view toString(RefitTrack track)
     return "SYSTEM";
 }
 
+std::string_view toString(LaunchUpgradeKind kind)
+{
+    switch (kind) {
+    case LaunchUpgradeKind::None: return "None";
+    case LaunchUpgradeKind::FuelTanks: return "Fuel Tanks";
+    case LaunchUpgradeKind::FlightControls: return "Flight Controls";
+    case LaunchUpgradeKind::Cooling: return "Engine Cooling";
+    case LaunchUpgradeKind::Hull: return "Hull Plating";
+    }
+    return "None";
+}
+
+std::string_view toString(LaunchTrainingStage stage)
+{
+    switch (stage) {
+    case LaunchTrainingStage::FuelCalibration: return "Fuel calibration";
+    case LaunchTrainingStage::FlightControlsCalibration: return "Flight controls calibration";
+    case LaunchTrainingStage::MoonTransfer: return "Moon transfer";
+    case LaunchTrainingStage::ThermalManagement: return "Thermal management";
+    case LaunchTrainingStage::MarsTransfer: return "Mars transfer";
+    case LaunchTrainingStage::HullIntegrity: return "Hull integrity";
+    case LaunchTrainingStage::JupiterTransfer: return "Jupiter transfer";
+    case LaunchTrainingStage::Complete: return "Launch training complete";
+    }
+    return "Fuel calibration";
+}
+
+std::string_view toString(LaunchMissionKind kind)
+{
+    switch (kind) {
+    case LaunchMissionKind::Standard: return "Standard";
+    case LaunchMissionKind::FuelCalibration: return "Fuel calibration";
+    case LaunchMissionKind::FlightControlsCalibration: return "Flight controls calibration";
+    case LaunchMissionKind::ThermalManagement: return "Thermal management";
+    case LaunchMissionKind::AsteroidBelt: return "Asteroid belt";
+    }
+    return "Standard";
+}
+
 std::string_view toString(Rarity rarity)
 {
     switch (rarity) {
@@ -773,6 +833,12 @@ std::string_view toString(LaunchFailureCause cause)
         return "Course lost";
     case LaunchFailureCause::FuelExhausted:
         return "Fuel exhausted";
+    case LaunchFailureCause::TrainingRescue:
+        return "Training rescue";
+    case LaunchFailureCause::HullBreach:
+        return "Hull breach";
+    case LaunchFailureCause::LunarImpact:
+        return "Lunar impact";
     }
     return "None";
 }

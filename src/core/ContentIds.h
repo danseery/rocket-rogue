@@ -41,6 +41,19 @@ inline constexpr const char* ioMinorArtifact = "io_minor_artifact";
 } // namespace protectedObjective
 
 namespace module {
+inline constexpr const char* fuelTanks1 = "fuel_tanks_1";
+inline constexpr const char* fuelTanks2 = "fuel_tanks_2";
+inline constexpr const char* fuelTanks3 = "fuel_tanks_3";
+inline constexpr const char* flightControls1 = "flight_controls_1";
+inline constexpr const char* flightControls2 = "flight_controls_2";
+inline constexpr const char* flightControls3 = "flight_controls_3";
+inline constexpr const char* coolingSystem1 = "cooling_system_1";
+inline constexpr const char* coolingSystem2 = "cooling_system_2";
+inline constexpr const char* coolingSystem3 = "cooling_system_3";
+inline constexpr const char* hullPlating1 = "hull_plating_1";
+inline constexpr const char* hullPlating2 = "hull_plating_2";
+inline constexpr const char* hullPlating3 = "hull_plating_3";
+// Version-nine launch refit ids remain available only for save migration.
 inline constexpr const char* sparrowInjectorTune = "sparrow_injector_tune";
 inline constexpr const char* reserveFeedManifold = "reserve_feed_manifold";
 inline constexpr const char* sustainedBurnPackage = "sustained_burn_package";

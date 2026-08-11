@@ -68,7 +68,8 @@ enum ArtAsset {
     MiniDroneDefenseAsset = 32,
     HeroicCapybaraAsset = 33,
     JetpackCapybaraAsset = 34,
-    PoiGuidanceArrowAsset = 35
+    PoiGuidanceArrowAsset = 35,
+    AsteroidAsset = 36
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -91,6 +92,11 @@ struct RouteCurve {
 
 RouteCurve routeCurve(const RenderSnapshot& snapshot)
 {
+    if (snapshot.screen == Screen::Launch && !snapshot.launchManualControlsEnabled) {
+        const Vec2 start {-0.18F, -0.70F};
+        const Vec2 end {0.58F, 0.38F};
+        return {start, {(start.x + end.x) * 0.5F, (start.y + end.y) * 0.5F}, end};
+    }
     if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         return {{-0.16F, -0.72F}, {-0.12F, -0.20F}, {0.30F, 0.10F}};
     }
@@ -749,7 +755,40 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         drawBackdrop(snapshot);
         if (snapshot.screen != Screen::StoryBriefing) {
             drawRocket(snapshot);
-            drawTelemetry(snapshot);
+            if (snapshot.screen == Screen::Launch && snapshot.launchLunarImpactActive &&
+                snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+                const float blastTime = static_cast<float>(
+                    snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+                const float whiteFlash = 1.0F - std::clamp(blastTime / 0.18F, 0.0F, 1.0F);
+                const float redWash = 1.0F - std::clamp(
+                    blastTime /
+                        static_cast<float>(
+                            tuning::session::lunarImpactExplosionEndSeconds -
+                            tuning::session::lunarImpactHoldSeconds),
+                    0.0F,
+                    1.0F);
+                drawRect(
+                    0.0F,
+                    0.0F,
+                    2.0F,
+                    2.0F,
+                    {1.0F, 0.82F, 0.46F, 0.32F * whiteFlash},
+                    false);
+                drawRect(
+                    0.0F,
+                    0.0F,
+                    2.0F,
+                    2.0F,
+                    {0.82F, 0.05F, 0.02F, 0.13F * redWash},
+                    false);
+            }
+            if (snapshot.screen == Screen::Launch && snapshot.launchImpactFlash > 0.0) {
+                const float impact = static_cast<float>(std::clamp(snapshot.launchImpactFlash, 0.0, 1.0));
+                drawRect(0.0F, 0.0F, 2.0F, 2.0F, {1.0F, 0.20F, 0.08F, 0.14F * impact}, false);
+            }
+            if (snapshot.screen != Screen::Launch) {
+                drawTelemetry(snapshot);
+            }
         }
     }
     finalizePacket();
@@ -806,6 +845,18 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         const float shake = launchShake * launchShake;
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 72.0F) * shake * 7.0F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 61.0F) * shake * 5.0F;
+    }
+    if (cameraShakeEnabled && snapshot.launchLunarImpactActive &&
+        snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+        const float impactTime = static_cast<float>(
+            snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+        const float impactDuration = static_cast<float>(
+            tuning::session::lunarImpactSequenceSeconds -
+            tuning::session::lunarImpactHoldSeconds);
+        const float envelope = 1.0F - std::clamp(impactTime / impactDuration, 0.0F, 1.0F);
+        const float shake = envelope * envelope;
+        scenePixelCenterX_ += std::sin(impactTime * 108.0F) * shake * 12.0F;
+        scenePixelCenterY_ += std::cos(impactTime * 91.0F) * shake * 8.0F;
     }
     if (cameraShakeEnabled && snapshot.screen == Screen::ArrivalFanfare) {
         const float arrival = 1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0));
@@ -4274,7 +4325,7 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     const float flash = arrivalFanfare
         ? 0.42F + 0.28F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
         : 0.0F;
-    if (snapshot.screen == Screen::Launch) {
+    if (snapshot.screen == Screen::Launch && snapshot.launchManualControlsEnabled) {
         const auto drawCorridorBoundary = [&](double courseOffset, Color color, float width) {
             std::vector<SceneVertex>& vertices = scratchVertices(56 * 16);
             for (float side : {-1.0F, 1.0F}) {
@@ -4292,23 +4343,6 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
         drawCorridorBoundary(tuning::launch::pilotingCourseCaution, {1.0F, 0.78F, 0.24F, 0.28F}, 1.0F);
         drawCorridorBoundary(snapshot.launchCourseLimit, {1.0F, 0.25F, 0.20F, 0.32F}, 1.5F);
 
-        if (snapshot.launchIncidentWarningSeconds > 0.0) {
-            const float direction = snapshot.returningHome ? -1.0F : 1.0F;
-            const float cueProgress = std::clamp(
-                static_cast<float>(snapshot.travelProgress) + direction * 0.12F,
-                0.0F,
-                1.0F);
-            const Vec2 cueCenter = routePoint(snapshot, cueProgress);
-            const Vec2 cueTangent = routeTangent(snapshot, cueProgress);
-            const float cueSide = snapshot.launchIncidentDirection >= 0.0 ? 1.0F : -1.0F;
-            const Vec2 cue {
-                cueCenter.x + cueTangent.y * 0.055F * cueSide,
-                cueCenter.y - cueTangent.x * 0.055F * cueSide
-            };
-            const float pulse = 0.014F + 0.004F * std::sin(static_cast<float>(snapshot.animationTime) * 10.0F);
-            drawCircle(cue.x, cue.y, pulse, {1.0F, 0.68F, 0.20F, 0.24F}, 20);
-            drawCircle(cue.x, cue.y, 0.005F, {1.0F, 0.84F, 0.35F, 0.90F}, 16);
-        }
     }
 
     std::vector<SceneVertex>& routeVertices = scratchVertices(28 * 16);
@@ -4353,6 +4387,46 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     submitLines(overburnVertices, 1.0F);
 }
 
+void SceneComposer::drawLaunchAsteroids(const RenderSnapshot& snapshot)
+{
+    if (!snapshot.launchAsteroidsEnabled || snapshot.launchAsteroidCount <= 0) {
+        return;
+    }
+
+    const int count = std::min(
+        snapshot.launchAsteroidCount,
+        static_cast<int>(snapshot.launchAsteroids.size()));
+    for (int index = 0; index < count; ++index) {
+        const LaunchAsteroidSnapshot& asteroid = snapshot.launchAsteroids[static_cast<std::size_t>(index)];
+        const Vec2 position = launchCorridorPoint(
+            snapshot,
+            static_cast<float>(asteroid.routeProgress),
+            asteroid.courseOffset);
+        const float scale = std::clamp(
+            static_cast<float>(asteroid.scale),
+            static_cast<float>(tuning::launch::asteroidMinimumScale),
+            static_cast<float>(tuning::launch::asteroidMaximumScale));
+        const float size = 0.072F * scale;
+        const float angle = static_cast<float>(asteroid.rotation + asteroid.spin * snapshot.animationTime);
+        const Vec2 forward {std::sin(angle), std::cos(angle)};
+        const float alpha = asteroid.hit ? 0.22F : 0.96F;
+
+        if (textureReady(AsteroidAsset)) {
+            drawSpriteRotated(
+                position.x,
+                position.y,
+                size,
+                size,
+                forward.x,
+                forward.y,
+                {1.0F, 1.0F, 1.0F, alpha},
+                AsteroidAsset);
+        } else {
+            drawCircle(position.x, position.y, size * 0.38F, {0.58F, 0.50F, 0.46F, alpha}, 18);
+        }
+    }
+}
+
 void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
 {
     const Vec2 centerRoute = routePoint(snapshot, static_cast<float>(snapshot.travelProgress));
@@ -4374,7 +4448,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
-    if (snapshot.screen == Screen::Launch && std::abs(snapshot.launchCourseOffset) >= tuning::launch::pilotingCourseSafe) {
+    if (snapshot.screen == Screen::Launch && snapshot.launchManualControlsEnabled &&
+        std::abs(snapshot.launchCourseOffset) >= tuning::launch::pilotingCourseSafe) {
         const Color correctionColor = std::abs(snapshot.launchCourseOffset) >= snapshot.launchCourseLimit
             ? Color {1.0F, 0.24F, 0.18F, 0.92F}
             : Color {1.0F, 0.78F, 0.24F, 0.82F};
@@ -4420,10 +4495,58 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         return true;
     };
 
-    if (snapshot.lastResult == LaunchResultType::Destroyed && textureReady(ExplosionAsset)) {
+    if (snapshot.lastResult == LaunchResultType::Destroyed) {
+        if (snapshot.lastLaunchFailureCause == LaunchFailureCause::LunarImpact) {
+            // The dedicated launch-screen cinematic has already played. Keep
+            // the result backdrop still beneath the red outcome modal.
+            return;
+        }
+        if (!textureReady(ExplosionAsset)) {
+            return;
+        }
         const int frame = std::clamp(static_cast<int>(snapshot.animationTime * 9.5), 0, 7);
         const float blastSize = std::max(0.22F, 1.55F * scale);
         drawSprite(cx, cy, blastSize, blastSize, {1.0F, 1.0F, 1.0F, 1.0F}, ExplosionAsset, frame, 8);
+        return;
+    }
+
+    if (snapshot.launchLunarImpactActive &&
+        snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+        const float blastTime = static_cast<float>(
+            snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+        const float blastDuration = static_cast<float>(
+            tuning::session::lunarImpactExplosionEndSeconds -
+            tuning::session::lunarImpactHoldSeconds);
+        const float progress = std::clamp(blastTime / blastDuration, 0.0F, 1.0F);
+        const int frame = std::min(7, static_cast<int>(progress * 8.0F));
+        const float eased = 1.0F - (1.0F - progress) * (1.0F - progress);
+        const float blastSize = std::max(0.28F, (1.62F + eased * 0.48F) * scale);
+        const float shockwaveProgress = std::clamp(blastTime / 0.52F, 0.0F, 1.0F);
+        const float shockwaveRadius = 0.035F + shockwaveProgress * 0.23F;
+        const float shockwaveAlpha = (1.0F - shockwaveProgress) * 0.86F;
+        drawRadialGlow(cx, cy, blastSize * 0.62F, {1.0F, 0.30F, 0.04F, 0.34F}, 48);
+        drawEllipseLine(
+            cx,
+            cy,
+            shockwaveRadius,
+            shockwaveRadius,
+            {1.0F, 0.88F, 0.48F, shockwaveAlpha},
+            64,
+            0.0F,
+            2.0F * kPi);
+        if (textureReady(ExplosionAsset)) {
+            drawSprite(
+                cx,
+                cy,
+                blastSize,
+                blastSize,
+                {1.0F, 1.0F, 1.0F, 1.0F},
+                ExplosionAsset,
+                frame,
+                8);
+        } else {
+            drawRadialGlow(cx, cy, blastSize, {1.0F, 0.72F, 0.18F, 0.88F}, 64);
+        }
         return;
     }
 
@@ -4678,15 +4801,22 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
     }
 
     drawRoute(snapshot);
+    if (snapshot.screen == Screen::Launch) {
+        drawLaunchAsteroids(snapshot);
+    }
 
     if (snapshot.screen == Screen::Launch) {
+        const float targetProgress = static_cast<float>(std::clamp(
+            snapshot.launchMissionTargetProgress,
+            0.0,
+            1.0));
         const Vec2 targetLeft = launchCorridorPoint(
             snapshot,
-            1.0F,
+            targetProgress,
             -snapshot.launchCourseLimit);
         const Vec2 targetRight = launchCorridorPoint(
             snapshot,
-            1.0F,
+            targetProgress,
             snapshot.launchCourseLimit);
         drawLine(
             targetLeft.x,

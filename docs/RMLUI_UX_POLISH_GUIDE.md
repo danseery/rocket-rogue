@@ -44,8 +44,8 @@ For implementation ownership, template selection, shared assets, and the extensi
 ## Screen-Specific Notes
 
 - Hangar: keep Hangar ops three-wide when possible. Cost/status and action controls need their own footer area.
-- Flight: controls should help the player act under pressure. Telemetry needs readable values and stable button rows that do not shift after choosing `Return to Earth`, post-Saturn `Recover to Expedition`, or post-discovery `Return to Ark`.
-- Debrief: present the outcome first, then mission result, burn profile, peak telemetry, achievements, and one centered next action.
+- Flight: reveal only the current lesson's controls and gauges. Fuel Survey shows Fuel and `Turn Around`; Controls adds throttle/corridor; Mars adds Temperature and `Engines Off`; Jupiter adds Hull and asteroids. Stable button rows should not shift after turning around or entering later recovery contexts.
+- Debrief: present the outcome first, use a red outlined surface for rescue/failure and a green outlined surface for safe return/arrival, then show the lesson result and one centered next action.
 - Refit: cards should feel collectible and tactile. Preserve the Pokemon-card-like framing, art/glyph area, stat chips, and clear install/skip affordance.
 - Settings: dropdowns must look intentional. Avoid stray arrow artifacts and expose the selected value clearly.
 

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { validateResourceGraph } from "./validate-rmlui-resources.mjs";
 
 const buildDir = "build/web-release";
@@ -10,12 +10,6 @@ const requiredFiles = [
   "rocket_rogue.js",
   "rocket_rogue.data",
   "rocket_rogue.wasm"
-];
-
-const requiredSceneAtlasFiles = [
-  "scene-atlas-0.png",
-  "scene-atlas-1.png",
-  "scene-atlas.json"
 ];
 
 const requiredFontFiles = [
@@ -96,8 +90,23 @@ if (!existsSync(join(buildDir, "assets"))) {
   console.error(`Missing copied assets directory: ${join(buildDir, "assets")}`);
   process.exit(1);
 }
+const sceneAtlasDirectory = join(buildDir, "assets", "scene-atlas");
+const sceneAtlasMetadataPath = join(sceneAtlasDirectory, "scene-atlas.json");
+if (!existsSync(sceneAtlasMetadataPath)) {
+  console.error(`Missing generated scene atlas metadata: ${sceneAtlasMetadataPath}`);
+  process.exit(1);
+}
+const sceneAtlasMetadata = JSON.parse(readFileSync(sceneAtlasMetadataPath, "utf8"));
+if (!Array.isArray(sceneAtlasMetadata.pages) || sceneAtlasMetadata.pages.length !== sceneAtlasMetadata.pageCount) {
+  console.error(`Invalid generated scene atlas page metadata: ${sceneAtlasMetadataPath}`);
+  process.exit(1);
+}
+const requiredSceneAtlasFiles = [
+  "scene-atlas.json",
+  ...sceneAtlasMetadata.pages.map((page) => basename(page.path))
+];
 for (const file of requiredSceneAtlasFiles) {
-  const path = join(buildDir, "assets", "scene-atlas", file);
+  const path = join(sceneAtlasDirectory, file);
   if (!existsSync(path)) {
     console.error(`Missing generated scene atlas asset: ${path}`);
     process.exit(1);

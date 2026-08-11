@@ -1,42 +1,22 @@
 #include "core/LaunchSimulation.h"
+
 #include "core/GameMath.h"
 #include "core/GameText.h"
-#include "core/LaunchBalance.h"
-#include "core/Telemetry.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
 #include <cmath>
-#include <sstream>
+#include <string>
 
 namespace rocket {
 
 namespace {
 
-double crewTrainingBonus(const GameState& state, const ContentCatalog& catalog)
-{
-    const Astronaut* astronaut = activeAstronaut(state);
-    if (astronaut == nullptr) {
-        return 0.0;
-    }
-
-    double bonus = static_cast<double>(effectiveTrainingLevel(*astronaut)) * tuning::crew::effectiveTrainingPerformanceBonus;
-    const double traitMultiplier = 1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier);
-
-    if (astronaut->trait == tuning::traits::calmUnderHeat) {
-        bonus += tuning::traits::calmUnderHeatBonus * traitMultiplier;
-    } else if (astronaut->trait == tuning::traits::hardReboot) {
-        bonus += tuning::traits::hardRebootPerformanceBonus * traitMultiplier;
-    } else if (astronaut->trait == tuning::traits::readsTelemetryEarly) {
-        bonus += tuning::traits::readsTelemetryEarlyBonus * traitMultiplier;
-    } else if (astronaut->trait == tuning::traits::phaseShift) {
-        bonus += tuning::traits::phaseShiftPerformanceBonus * traitMultiplier;
-    } else if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
-        bonus += tuning::traits::improvesEjectionOddsPerformanceBonus * traitMultiplier;
-    }
-
-    return bonus;
-}
+constexpr double asteroidRouteJitter = 0.012;
+constexpr double asteroidCourseJitter = 0.035;
+constexpr double asteroidSpinMinimum = 0.14;
+constexpr double asteroidSpinMaximum = 0.38;
+constexpr double asteroidCourseImpulse = 0.24;
 
 double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
 {
@@ -47,60 +27,54 @@ double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
 
     double bonus = static_cast<double>(astronaut->training) * tuning::crew::escapeBonusPerTraining;
     if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
-        bonus += tuning::traits::improvesEjectionOddsEscapeBonus * (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
+        bonus += tuning::traits::improvesEjectionOddsEscapeBonus *
+            (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
     }
     return bonus;
 }
 
-std::vector<TelemetryEvent> buildTelemetry(const PreparedLaunch& launch)
+bool isTrainingMission(LaunchMissionKind kind)
 {
-    std::vector<TelemetryEvent> events;
-    events.reserve(tuning::launch::telemetrySampleCount);
-
-    const double maxSample = std::max(launch.config.burnGoalMultiplier, launch.crashMultiplier);
-    for (int i = 0; i < tuning::launch::telemetrySampleCount; ++i) {
-        const double t = static_cast<double>(i) / static_cast<double>(tuning::launch::telemetrySampleCount - 1);
-        const double multiplier = 1.0 + (maxSample - 1.0) * t;
-        events.push_back(telemetryAt(launch, multiplier));
-    }
-
-    return events;
+    return kind == LaunchMissionKind::FuelCalibration ||
+        kind == LaunchMissionKind::FlightControlsCalibration ||
+        kind == LaunchMissionKind::ThermalManagement ||
+        kind == LaunchMissionKind::AsteroidBelt;
 }
 
-TelemetryEvent peakTelemetryThrough(const PreparedLaunch& launch, double endMultiplier)
+bool missionUsesHeat(LaunchMissionKind kind, const Destination& destination)
 {
-    TelemetryEvent peak;
-    const double maxSample = std::max(1.0, endMultiplier);
-    for (int i = 0; i < tuning::launch::peakTelemetrySampleCount; ++i) {
-        const double t = static_cast<double>(i) / static_cast<double>(tuning::launch::peakTelemetrySampleCount - 1);
-        const double multiplier = 1.0 + (maxSample - 1.0) * t;
-        const TelemetryEvent sample = telemetryAt(launch, multiplier);
-        if (sample.warning >= peak.warning) {
-            peak = sample;
-        }
-        peak.abortRisk = std::max(peak.abortRisk, sample.abortRisk);
-        peak.stress = std::max(peak.stress, sample.stress);
-    }
-    return peak;
+    return kind == LaunchMissionKind::ThermalManagement ||
+        kind == LaunchMissionKind::AsteroidBelt ||
+        (kind == LaunchMissionKind::Standard && destination.tier >= 2);
+}
+
+bool missionUsesAsteroids(LaunchMissionKind kind, const Destination& destination)
+{
+    return kind == LaunchMissionKind::AsteroidBelt ||
+        (kind == LaunchMissionKind::Standard && destination.tier >= 3);
 }
 
 std::string warningMessage(const TelemetryEvent& event)
 {
-    const TelemetryChannelSample worst = strongestTelemetrySample(event);
-
-    if (worst.value > tuning::launch::warningCriticalThreshold) {
-        return std::string(worst.warningCopy.critical);
+    if (event.heat >= tuning::launch::pilotingCriticalThreshold) {
+        return "TEMPERATURE CRITICAL - turn engines off";
     }
-    if (worst.value > tuning::launch::warningCautionThreshold) {
-        return std::string(worst.warningCopy.caution);
+    if (event.guidance >= tuning::launch::pilotingCriticalThreshold) {
+        return "COURSE CRITICAL - steer toward center";
     }
-
+    if (event.heat >= tuning::launch::pilotingWarningThreshold) {
+        return "Temperature caution - prepare to turn engines off";
+    }
+    if (event.guidance >= tuning::launch::pilotingWarningThreshold) {
+        return "Course caution - correct toward center";
+    }
     return std::string(text::telemetry::nominal);
 }
 
 bool isShallowRecovery(const Destination& destination, double multiplier)
 {
-    return multiplier < 1.0 + (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
+    return multiplier < 1.0 +
+        (destination.targetMultiplier - 1.0) * tuning::rewards::shallowRecoveryTargetShare;
 }
 
 double shallowRecoveryPenalty(int shallowRecoveryStreak)
@@ -123,31 +97,34 @@ double overburnJackpotMultiplier(const Destination& destination, double burnMult
         return 1.0;
     }
 
-    const double normalizedOverburn = overGoal / std::max(tuning::launch::overburnMinimumDenominator, destination.targetMultiplier - 1.0);
-    return std::clamp(std::exp(normalizedOverburn * tuning::launch::overburnExponent), 1.0, tuning::launch::overburnMaximumMultiplier);
+    const double normalizedOverburn = overGoal /
+        std::max(tuning::launch::overburnMinimumDenominator, destination.targetMultiplier - 1.0);
+    return std::clamp(
+        std::exp(normalizedOverburn * tuning::launch::overburnExponent),
+        1.0,
+        tuning::launch::overburnMaximumMultiplier);
 }
 
-void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const ContentCatalog& catalog, const Destination& destination, const GameState& state, Random& rng)
+void markDestroyed(
+    LaunchOutcome& outcome,
+    const ContentCatalog& catalog,
+    const Destination& destination,
+    const GameState& state,
+    Random& rng)
 {
     outcome.type = LaunchResultType::Destroyed;
     outcome.shipDamage = tuning::damage::destroyedShipDamage;
     outcome.blueprintGain = std::max(0, destination.tier / 2);
 
-    const double baseSurvival = outcome.recoveryMethod == RecoveryMethod::ManualEject
-        ? tuning::outcomes::manualEjectSurvivalBase
-        : tuning::outcomes::vehicleLossSurvivalBase;
     const double survivalChance = std::clamp(
-        baseSurvival +
-            launch.stats.escape * tuning::outcomes::survivalEscapeScale +
+        tuning::outcomes::vehicleLossSurvivalBase +
             crewEscapeBonus(state, catalog) -
             destination.hazard * tuning::outcomes::survivalHazardScale,
         tuning::outcomes::survivalMinimum,
         tuning::outcomes::survivalMaximum);
     const bool survived = rng.chance(survivalChance);
     outcome.crewKilled = !survived;
-    outcome.crewInjured = survived && rng.chance(outcome.recoveryMethod == RecoveryMethod::ManualEject
-        ? tuning::outcomes::manualEjectInjuryChance
-        : tuning::outcomes::vehicleLossInjuryChance);
+    outcome.crewInjured = survived && rng.chance(tuning::outcomes::vehicleLossInjuryChance);
 
     if (!state.run.equippedModuleIds.empty() && rng.chance(tuning::damage::moduleLossChance)) {
         const int index = rng.rangeInt(0, static_cast<int>(state.run.equippedModuleIds.size()) - 1);
@@ -155,47 +132,10 @@ void markDestroyed(LaunchOutcome& outcome, const PreparedLaunch& launch, const C
     }
 }
 
-double telemetryWave(double multiplier, double crashMultiplier, double frequency, double phase)
-{
-    return 0.5 + std::sin(multiplier * frequency + crashMultiplier * phase) * 0.5;
-}
-
-double telemetryPulse(const tuning::telemetry::PulseProfile& profile, double multiplier, double crashMultiplier)
-{
-    return profile.base + telemetryWave(multiplier, crashMultiplier, profile.frequency, profile.phase) * profile.waveScale;
-}
-
-int destinationHistoryIndex(const ContentCatalog& catalog, std::string_view destinationId)
-{
-    for (std::size_t i = 0; i < catalog.destinations.size(); ++i) {
-        if (catalog.destinations[i].id == destinationId) {
-            return static_cast<int>(i);
-        }
-    }
-    return -1;
-}
-
-int destinationHistoryValue(const std::vector<int>& values, int index)
-{
-    if (index < 0 || static_cast<std::size_t>(index) >= values.size()) {
-        return 0;
-    }
-    return values[static_cast<std::size_t>(index)];
-}
-
-double incidentPulse(const TelemetryIncident& incident, double multiplier)
-{
-    const double distance = std::abs(multiplier - incident.centerMultiplier);
-    const double pulse = std::clamp(1.0 - distance / std::max(0.01, incident.width), 0.0, 1.0);
-    return math::smoothStep(pulse);
-}
-
-double dampened(double amount, double mitigation)
-{
-    return std::clamp(amount - std::max(0.0, mitigation), tuning::launch::dampenedMinimum, tuning::launch::dampenedMaximum);
-}
-
-double returnHomeNetRewardFloor(const PreparedLaunch& launch, const Destination& destination, double burnMultiplier)
+double returnHomeNetRewardFloor(
+    const PreparedLaunch& launch,
+    const Destination& destination,
+    double burnMultiplier)
 {
     if (launch.config.frontierTransfer) {
         return 0.0;
@@ -206,210 +146,283 @@ double returnHomeNetRewardFloor(const PreparedLaunch& launch, const Destination&
         return 0.0;
     }
 
+    if (isTrainingMission(launch.config.missionKind)) {
+        return tuning::launchProgression::lessonReward;
+    }
     if (burnMultiplier + 0.000001 >= destination.targetMultiplier) {
         return static_cast<double>(moduleOfferCost(Rarity::Rare));
     }
 
-    const double uncommonThreshold = dataGoal + (destination.targetMultiplier - dataGoal) * tuning::rewards::pushedProfileShelfShare;
+    const double uncommonThreshold = dataGoal +
+        (destination.targetMultiplier - dataGoal) * tuning::rewards::pushedProfileShelfShare;
     if (burnMultiplier + 0.000001 >= uncommonThreshold) {
         return static_cast<double>(moduleOfferCost(Rarity::Uncommon));
     }
-
     return static_cast<double>(moduleOfferCost(Rarity::Common));
 }
 
+double pointToSegmentDistance(
+    double pointX,
+    double pointY,
+    double startX,
+    double startY,
+    double endX,
+    double endY)
+{
+    const double segmentX = endX - startX;
+    const double segmentY = endY - startY;
+    const double lengthSquared = segmentX * segmentX + segmentY * segmentY;
+    if (lengthSquared <= 0.0000001) {
+        return std::hypot(pointX - startX, pointY - startY);
+    }
+    const double t = std::clamp(
+        ((pointX - startX) * segmentX + (pointY - startY) * segmentY) / lengthSquared,
+        0.0,
+        1.0);
+    return std::hypot(
+        pointX - (startX + segmentX * t),
+        pointY - (startY + segmentY * t));
+}
+
+LaunchFailureCause terminalFailureCause(const PreparedLaunch& launch, LaunchFailureCause cause)
+{
+    if (cause == LaunchFailureCause::LunarImpact) {
+        return cause;
+    }
+    const bool rescueLesson =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration ||
+        launch.config.missionKind == LaunchMissionKind::FlightControlsCalibration;
+    return rescueLesson ? LaunchFailureCause::TrainingRescue : cause;
+}
+
+void populateAsteroidField(PreparedLaunch& launch, const Destination& destination, Random& rng)
+{
+    static_cast<void>(destination);
+    if (!launch.asteroidsEnabled) {
+        return;
+    }
+
+    int safeLane = rng.rangeInt(0, tuning::launch::asteroidLaneCount - 1);
+    int previousSafeLane = safeLane;
+    launch.asteroidCount = std::min(
+        tuning::launch::asteroidCount,
+        static_cast<int>(launch.asteroids.size()));
+
+    int asteroidIndex = 0;
+    for (int row = 0; row < tuning::launch::asteroidRowCount; ++row) {
+        for (int lane = 0; lane < tuning::launch::asteroidLaneCount; ++lane) {
+            if (lane == safeLane || asteroidIndex >= launch.asteroidCount) {
+                continue;
+            }
+            LaunchAsteroid asteroid;
+            double routeJitter = rng.range(-asteroidRouteJitter, asteroidRouteJitter);
+            double courseJitter = rng.range(-asteroidCourseJitter, asteroidCourseJitter);
+            const bool guardsLaneTransition = row > 0 &&
+                safeLane != previousSafeLane &&
+                lane == previousSafeLane;
+            if (guardsLaneTransition) {
+                // The rock that closes the previous row's safe lane sits on
+                // the far/later side of its jitter window. This preserves the
+                // randomized band while guaranteeing a visible diagonal gap
+                // toward the adjacent safe lane.
+                routeJitter = std::abs(routeJitter);
+                courseJitter = safeLane > previousSafeLane
+                    ? -std::abs(courseJitter)
+                    : std::abs(courseJitter);
+            }
+            asteroid.routeProgress = std::clamp(
+                launchAsteroidRowProgress(row) +
+                    routeJitter,
+                tuning::launch::asteroidBeltStart - asteroidRouteJitter,
+                tuning::launch::asteroidBeltEnd + asteroidRouteJitter);
+            asteroid.courseOffset = launchAsteroidLaneOffset(lane) +
+                courseJitter;
+            asteroid.scale = rng.range(
+                tuning::launch::asteroidMinimumScale,
+                tuning::launch::asteroidMaximumScale);
+            asteroid.radius = tuning::launch::asteroidBaseRadius * asteroid.scale;
+            asteroid.rotation = rng.range(0.0, math::pi * 2.0);
+            const double spinMagnitude = rng.range(
+                asteroidSpinMinimum,
+                asteroidSpinMaximum);
+            asteroid.spin = rng.chance(0.5) ? -spinMagnitude : spinMagnitude;
+            launch.asteroids[static_cast<std::size_t>(asteroidIndex++)] = asteroid;
+        }
+        previousSafeLane = safeLane;
+        safeLane = rng.rangeInt(
+            std::max(0, safeLane - 1),
+            std::min(tuning::launch::asteroidLaneCount - 1, safeLane + 1));
+    }
+}
+
 } // namespace
+
+double launchFuelCapacityForRank(int rank, double oneLaunchBoost)
+{
+    return tuning::launchProgression::baseFuelCapacity +
+        static_cast<double>(std::clamp(
+            rank,
+            0,
+            tuning::launchProgression::maximumUpgradeRank)) *
+            tuning::launchProgression::fuelPerTankRank +
+        std::max(0.0, oneLaunchBoost);
+}
+
+double launchCruiseFuelCostForTier(int tier)
+{
+    const int routeTier = std::max(1, tier);
+    return std::min(
+        tuning::launch::routeFuelMaximum,
+        tuning::launch::routeFuelBase +
+            static_cast<double>(routeTier) * tuning::launch::routeFuelPerTier);
+}
+
+double launchFuelUseMultiplier(double throttle)
+{
+    const double normalized = std::max(0.0, throttle) /
+        std::max(0.01, tuning::launch::calibratedThrottle);
+    return tuning::launch::fuelDistanceBaseMultiplier +
+        tuning::launch::fuelDistanceThrottleMultiplier * normalized * normalized;
+}
+
+double launchControlChaosForRank(int rank)
+{
+    switch (std::clamp(rank, 0, tuning::launchProgression::maximumUpgradeRank)) {
+    case 0: return tuning::launch::controlChaosRankZero;
+    case 1: return tuning::launch::controlChaosRankOne;
+    case 2: return tuning::launch::controlChaosRankTwo;
+    default: return tuning::launch::controlChaosRankThree;
+    }
+}
+
+double launchPoweredHeatMultiplierForRank(int rank)
+{
+    switch (std::clamp(rank, 0, tuning::launchProgression::maximumUpgradeRank)) {
+    case 0: return tuning::launch::poweredHeatRankZeroMultiplier;
+    case 1: return tuning::launch::poweredHeatRankOneMultiplier;
+    case 2: return tuning::launch::poweredHeatRankTwoMultiplier;
+    default: return tuning::launch::poweredHeatRankThreeMultiplier;
+    }
+}
+
+double launchEngineOffCoolingForRank(int rank)
+{
+    switch (std::clamp(rank, 0, tuning::launchProgression::maximumUpgradeRank)) {
+    case 0: return tuning::launch::engineOffCoolingRankZero;
+    case 1: return tuning::launch::engineOffCoolingRankOne;
+    case 2: return tuning::launch::engineOffCoolingRankTwo;
+    default: return tuning::launch::engineOffCoolingRankThree;
+    }
+}
+
+double launchHullImpactMultiplierForRank(int rank)
+{
+    switch (std::clamp(rank, 0, tuning::launchProgression::maximumUpgradeRank)) {
+    case 0: return tuning::launch::hullImpactRankZeroMultiplier;
+    case 1: return tuning::launch::hullImpactRankOneMultiplier;
+    case 2: return tuning::launch::hullImpactRankTwoMultiplier;
+    default: return tuning::launch::hullImpactRankThreeMultiplier;
+    }
+}
+
+double launchAsteroidRowProgress(int row)
+{
+    const int clampedRow = std::clamp(row, 0, tuning::launch::asteroidRowCount - 1);
+    return tuning::launch::asteroidBeltStart +
+        (tuning::launch::asteroidBeltEnd - tuning::launch::asteroidBeltStart) *
+            static_cast<double>(clampedRow) /
+            static_cast<double>(tuning::launch::asteroidRowCount - 1);
+}
+
+double launchAsteroidLaneOffset(int lane)
+{
+    switch (std::clamp(lane, 0, tuning::launch::asteroidLaneCount - 1)) {
+    case 0: return -tuning::launch::asteroidLaneOffset;
+    case 1: return 0.0;
+    default: return tuning::launch::asteroidLaneOffset;
+    }
+}
+
+double launchAsteroidImpactDamage(int hullRank, double asteroidScale)
+{
+    return tuning::launch::asteroidImpactDamageBase *
+        std::clamp(
+            asteroidScale,
+            tuning::launch::asteroidMinimumScale,
+            tuning::launch::asteroidMaximumScale) *
+        launchHullImpactMultiplierForRank(hullRank);
+}
 
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng)
 {
     PreparedLaunch launch;
     launch.config = state.launchConfig;
-    launch.stats = aggregateShipStats(state, catalog);
     launch.slingshotFuelBoost = std::max(0.0, state.run.nextLaunchFuelBoost);
     launch.slingshotSpeedBoost = std::max(0.0, state.run.nextLaunchSpeedBoost);
-    launch.stats.fuel += launch.slingshotFuelBoost;
 
     const Destination* configuredDestination = catalog.findDestination(launch.config.destinationId);
-    const Destination& destination = configuredDestination == nullptr ? currentDestination(state, catalog) : *configuredDestination;
+    const Destination& destination = configuredDestination == nullptr
+        ? currentDestination(state, catalog)
+        : *configuredDestination;
     launch.config.destinationId = destination.id;
     launch.config.frameId = state.run.frameId;
     launch.config.equippedModuleIds = state.run.equippedModuleIds;
 
-    const double performance = launch_balance::performanceScore(launch.stats, crewTrainingBonus(state, catalog));
-
-    const double missionPressure = missionPressureModifier(state, catalog, destination);
-    const int historyIndex = destinationHistoryIndex(catalog, destination.id);
-    const int attempts = destinationHistoryValue(state.meta.destinationAttempts, historyIndex);
-    const int successes = destinationHistoryValue(state.meta.destinationSuccesses, historyIndex);
-    const int requiredReadiness = frontierReadinessRequired(state, catalog);
-    const int currentReadiness = std::max(0, state.run.frontierReadiness);
-    const double readinessRatio = launch_balance::readinessRatio(currentReadiness, requiredReadiness);
-    launch.overpreparedData = launch_balance::overpreparedData(currentReadiness, requiredReadiness);
-    launch.provingPayoutBonus = launch_balance::provingPayoutBonus(launch.overpreparedData, launch.config.frontierTransfer);
-    const double transferPrep = launch_balance::transferPreparation(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
-    const double transferHazard = launch_balance::transferHazard(destination, transferPrep, launch.config.frontierTransfer);
-    const double unprovenHazard = launch_balance::unprovenHazard(attempts, successes);
-    const double hazard = launch_balance::launchHazard(destination, launch.stats, state.run.shipDamage, transferHazard, unprovenHazard);
-    const double safety = launch_balance::launchSafety(performance, hazard);
-    const bool longShotBreak = successes == 0 && rng.chance(launch_balance::longShotChance(attempts, launch.stats.sensors));
-    const double tail = std::pow(rng.next01(), 1.0 / safety);
-
-    const double minCrash = destination.minCrashMultiplier;
-    const double transferCeilingPenalty = launch_balance::transferCeilingPenalty(destination, performance, readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
-    const double unprovenPrepRelief = launch_balance::unprovenPrepRelief(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
-    const double unprovenCeilingPenalty = launch_balance::unprovenCeilingPenalty(attempts, successes, unprovenPrepRelief);
-    const double pressureCeilingPenalty = launch_balance::pressureCeilingPenalty(successes, missionPressure);
-    const double longShotBonus = longShotBreak
-        ? rng.range(tuning::launch::longShotBonusMinimum, tuning::launch::longShotBonusMaximum)
+    launch.flightControlRank = std::clamp(
+        state.meta.launchUpgrades.flightControls,
+        0,
+        tuning::launchProgression::maximumUpgradeRank);
+    launch.coolingRank = std::clamp(
+        state.meta.launchUpgrades.cooling,
+        0,
+        tuning::launchProgression::maximumUpgradeRank);
+    launch.hullRank = std::clamp(
+        state.meta.launchUpgrades.hull,
+        0,
+        tuning::launchProgression::maximumUpgradeRank);
+    const int fuelRank = std::clamp(
+        state.meta.launchUpgrades.fuelTanks,
+        0,
+        tuning::launchProgression::maximumUpgradeRank);
+    launch.fuelCapacity = launchFuelCapacityForRank(fuelRank, launch.slingshotFuelBoost);
+    launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
+    launch.arrivalReserveFuel = launch.config.frontierTransfer
+        ? tuning::launch::arrivalReserveFuel
         : 0.0;
-    const double transferReadinessCeilingBonus = launch_balance::transferReadinessCeilingBonus(readinessRatio, launch.overpreparedData, launch.config.frontierTransfer);
-    const double overpreparedCeilingBonus = launch_balance::provingOverpreparedCeilingBonus(launch.overpreparedData, launch.config.frontierTransfer);
-    const double maxCrash = launch_balance::maxCrashCeiling(destination, transferCeilingPenalty, unprovenCeilingPenalty, pressureCeilingPenalty, longShotBonus, transferReadinessCeilingBonus, overpreparedCeilingBonus, safety);
-    launch.crashMultiplier = std::clamp(minCrash + (maxCrash - minCrash) * tail, minCrash, maxCrash);
-    const bool openingEarthProvingFlight = destination.id == content::destination::earthOrbit
-        && !launch.config.frontierTransfer
-        && currentReadiness < requiredReadiness
-        && launch.config.burnGoalMultiplier <= defaultProvingTarget(destination) + 0.001;
-    if (openingEarthProvingFlight) {
-        launch.crashMultiplier = std::max(
-            launch.crashMultiplier,
-            launch.config.burnGoalMultiplier + tuning::mission::openingProvingGoalMargin);
+    launch.trainingMission = isTrainingMission(launch.config.missionKind) &&
+        !launch.config.frontierTransfer;
+    launch.manualControlsEnabled = launch.config.missionKind != LaunchMissionKind::FuelCalibration;
+    launch.heatEnabled = missionUsesHeat(launch.config.missionKind, destination);
+    launch.asteroidsEnabled = missionUsesAsteroids(launch.config.missionKind, destination);
+    launch.controlChaos = launchControlChaosForRank(launch.flightControlRank);
+    launch.controlSteeringResponseVariation = rng.range(
+        -tuning::launch::controlSteeringResponseVariance,
+        tuning::launch::controlSteeringResponseVariance) * launch.controlChaos;
+    launch.controlKickCount = static_cast<int>(launch.controlKickDirections.size());
+    for (int index = 0; index < launch.controlKickCount; ++index) {
+        launch.controlKickDirections[static_cast<std::size_t>(index)] =
+            rng.chance(0.5) ? -1.0 : 1.0;
     }
-    const bool openingMoonTransfer = destination.id == content::destination::moon
-        && launch.config.frontierTransfer
-        && currentDestination(state, catalog).id == content::destination::earthOrbit;
-    if (openingMoonTransfer) {
-        launch.objectiveConfidence = launch_balance::openingMoonTransferConfidence(
-            performance,
-            launch.overpreparedData,
-            attempts,
-            successes);
-        const bool arrivalCorridorReachable = launch.objectiveConfidence >= 1.0 || rng.chance(launch.objectiveConfidence);
-        launch.crashMultiplier = arrivalCorridorReachable
-            ? std::max(launch.crashMultiplier, destination.targetMultiplier + tuning::mission::openingMoonArrivalMargin)
-            : std::min(launch.crashMultiplier, destination.targetMultiplier - tuning::mission::openingMoonArrivalMargin);
-    }
-    launch.sensorQuality = launch_balance::sensorQuality(launch.stats);
-    const double transferHeatLoad = launch_balance::transferHeatLoad(destination, launch.config.frontierTransfer);
-    launch.heatRate = launch_balance::heatRate(destination, launch.stats, transferHeatLoad);
-    launch.pressureModifier = launch_balance::pressureModifier(missionPressure, launch.stats);
-    launch.throttleFactor = 1.0;
-    launch.cutHeatRelief = 0.0;
-    launch.cutVibrationRelief = 0.0;
-    launch.cutGuidancePenalty = 0.0;
-    launch.pressureRelief = 0.0;
-    launch.pressureReliefFailure = 0.0;
-    launch.reliefGuidancePenalty = 0.0;
-    launch.cargoFuelRelief = 0.0;
-    launch.cargoGuidancePenalty = 0.0;
-    launch.cargoVibrationPenalty = 0.0;
-    launch.cargoReturnPenalty = 0.0;
-    if (const Astronaut* astronaut = activeAstronaut(state)) {
-        launch.crewStressSteps = crewStressStepCount(astronaut->stress);
-        launch.crewGuidancePenalty = crewNavigationPenaltyFromStress(astronaut->stress);
-        launch.crewAbortMultiplier = crewAbortRiskMultiplierFromStress(astronaut->stress);
-    }
-    launch.incidentCount = launch_balance::incidentCount(destination, launch.config.frontierTransfer, static_cast<int>(launch.incidents.size()));
+    launch.existingShipDamage = std::clamp(
+        state.run.shipDamage,
+        0,
+        tuning::damage::destroyedShipDamage);
 
-    const double profileEnd = std::max(launch.config.burnGoalMultiplier, destination.targetMultiplier);
-    const double profileSpan = launch_balance::incidentProfileSpan(profileEnd);
-    const double incidentSeverity = launch_balance::incidentSeverity(destination, launch.stats, state.run.shipDamage, missionPressure);
+    const int requiredReadiness = frontierReadinessRequired(state, catalog);
+    launch.overpreparedData = requiredReadiness <= 0
+        ? 0
+        : std::max(0, state.run.frontierReadiness - requiredReadiness);
+    launch.provingPayoutBonus = launch.config.frontierTransfer
+        ? 0.0
+        : std::min(
+              tuning::rewards::provingPayoutBonusMaximum,
+              static_cast<double>(launch.overpreparedData) * tuning::rewards::provingPayoutPerExtraData);
 
-    for (int i = 0; i < launch.incidentCount; ++i) {
-        TelemetryIncident incident;
-        const double lane = launch_balance::incidentLane(
-            i,
-            launch.incidentCount,
-            rng.range(tuning::launch::incidentLaneJitterMinimum, tuning::launch::incidentLaneJitterMaximum));
-        incident.centerMultiplier = launch_balance::incidentCenterMultiplier(profileSpan, lane, launch.crashMultiplier);
-        incident.width = launch_balance::incidentWidth(
-            destination,
-            rng.range(tuning::launch::incidentWidthMinimum, tuning::launch::incidentWidthMaximum));
-
-        const double amount = launch_balance::incidentAmount(
-            incidentSeverity,
-            rng.range(tuning::launch::incidentAmountMinimum, tuning::launch::incidentAmountMaximum));
-        switch (rng.rangeInt(0, tuning::launch::incidentVariantCount - 1)) {
-        case 0:
-            incident.heat = dampened(amount + tuning::launch::incidentHeatOffset, launch.stats.cooling * tuning::launch::incidentHeatCoolingMitigation);
-            incident.pressure = dampened(amount * tuning::launch::incidentHeatPressureScale, launch.stats.pressure * tuning::launch::incidentHeatPressureMitigation);
-            break;
-        case 1:
-            incident.pressure = dampened(
-                amount + tuning::launch::incidentPressureOffset,
-                launch.stats.pressure * tuning::launch::incidentPressureControlMitigation +
-                    launch.stats.fuel * tuning::launch::incidentPressureFuelMitigation);
-            incident.fuelMix = dampened(amount * tuning::launch::incidentPressureFuelMixScale, launch.stats.fuel * tuning::launch::incidentPressureFuelMixMitigation);
-            break;
-        case 2:
-            incident.vibration = dampened(amount + tuning::launch::incidentVibrationOffset, launch.stats.hull * tuning::launch::incidentVibrationHullMitigation);
-            incident.guidance = dampened(amount * tuning::launch::incidentVibrationGuidanceScale, launch.stats.sensors * tuning::launch::incidentVibrationGuidanceMitigation);
-            break;
-        case 3:
-            incident.fuelMix = dampened(amount + tuning::launch::incidentFuelMixOffset, launch.stats.fuel * tuning::launch::incidentFuelMixFuelMitigation);
-            incident.pressure = dampened(amount * tuning::launch::incidentFuelMixPressureScale, launch.stats.pressure * tuning::launch::incidentFuelMixPressureMitigation);
-            break;
-        case 4:
-            incident.guidance = dampened(amount + tuning::launch::incidentGuidanceOffset, launch.stats.sensors * tuning::launch::incidentGuidanceSensorMitigation);
-            incident.vibration = dampened(amount * tuning::launch::incidentGuidanceVibrationScale, launch.stats.hull * tuning::launch::incidentGuidanceVibrationMitigation);
-            break;
-        default:
-            incident.abortRisk = dampened(
-                amount + tuning::launch::incidentAbortOffset,
-                launch.stats.escape * tuning::launch::incidentAbortEscapeMitigation +
-                    launch.stats.sensors * tuning::launch::incidentAbortSensorMitigation);
-            incident.guidance = dampened(amount * tuning::launch::incidentAbortGuidanceScale, launch.stats.sensors * tuning::launch::incidentAbortGuidanceMitigation);
-            break;
-        }
-
-        launch.incidents[static_cast<std::size_t>(i)] = incident;
-    }
-
+    // Kept only for old result records. No live update or resolution path
+    // compares player progress with this value.
+    launch.crashMultiplier = destination.targetMultiplier + 1.0;
+    populateAsteroidField(launch, destination, rng);
     return launch;
-}
-
-PreparedLaunch withCutEngines(const PreparedLaunch& launch)
-{
-    PreparedLaunch throttled = launch;
-    throttled.throttleFactor = tuning::launch::cutEngineThrottleFactor;
-    throttled.cutHeatRelief = tuning::launch::cutEngineHeatRelief;
-    throttled.cutVibrationRelief = tuning::launch::cutEngineVibrationRelief;
-    throttled.cutGuidancePenalty = tuning::launch::cutEngineGuidancePenalty;
-    return throttled;
-}
-
-PreparedLaunch withPressureRelief(const PreparedLaunch& launch, bool failed)
-{
-    PreparedLaunch relieved = launch;
-    relieved.pressureRelief = failed ? tuning::launch::pressureReliefFailedAmount : tuning::launch::pressureReliefSuccessAmount;
-    relieved.pressureReliefFailure = failed ? tuning::launch::pressureReliefFailurePenalty : 0.0;
-    relieved.reliefGuidancePenalty = failed ? tuning::launch::pressureReliefFailedGuidancePenalty : tuning::launch::pressureReliefGuidancePenalty;
-    return relieved;
-}
-
-PreparedLaunch withJettisonedCargo(const PreparedLaunch& launch)
-{
-    PreparedLaunch lightened = launch;
-    lightened.cargoFuelRelief = tuning::launch::cargoFuelRelief;
-    lightened.cargoGuidancePenalty = tuning::launch::cargoGuidancePenalty;
-    lightened.cargoVibrationPenalty = tuning::launch::cargoVibrationPenalty;
-    lightened.cargoReturnPenalty = tuning::launch::cargoReturnPenalty;
-    return lightened;
-}
-
-PreparedLaunch applyFlightActions(const PreparedLaunch& launch, const FlightActionState& actions)
-{
-    PreparedLaunch modified = launch;
-    if (actions.pressureReliefOpen || actions.pressureReliefFailed) {
-        modified = withPressureRelief(modified, actions.pressureReliefFailed);
-    }
-    if (actions.cargoJettisoned) {
-        modified = withJettisonedCargo(modified);
-    }
-    if (actions.cutEnginesActive && !actions.returningHome) {
-        modified = withCutEngines(modified);
-    }
-    return modified;
 }
 
 LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination&)
@@ -417,46 +430,42 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
     LaunchFlightState flight;
     flight.active = true;
     flight.selectedThrottle = tuning::launch::pilotingInitialThrottle;
-    flight.fuelCapacity = std::max(
-        0.55,
-        1.0 + (launch.stats.fuel - 1.0) * tuning::launch::pilotingFuelStatCapacityScale);
-    flight.fuelRemaining = flight.fuelCapacity;
-    flight.heat = tuning::launch::pilotingHeatInitial;
-    flight.pressure = tuning::launch::pilotingPressureInitial;
+    flight.throttleAtLastKick = flight.selectedThrottle;
+    if (launch.manualControlsEnabled && launch.controlChaos > 0.0 &&
+        launch.controlKickCount > 0) {
+        flight.courseVelocity =
+            launch.controlKickDirections[0] * tuning::launch::controlStartupDrift *
+            launch.controlChaos;
+        flight.nextControlKickIndex = 1;
+        flight.throttleKickCooldownSeconds = tuning::launch::controlThrottleKickCooldown;
+    }
+    flight.fuelCapacity = launch.fuelCapacity;
+    flight.fuelRemaining = launch.fuelCapacity;
+    flight.projectedFuelRequired = launch.config.frontierTransfer
+        ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle) +
+            launch.arrivalReserveFuel
+        : 0.0;
+    flight.projectedFuelReserve = flight.fuelRemaining - flight.projectedFuelRequired;
+    flight.heat = launch.heatEnabled ? tuning::launch::pilotingHeatInitial : 0.0;
+    flight.hullMaximum = tuning::launch::hullBaseIntegrity +
+        static_cast<double>(launch.hullRank) * tuning::launch::hullIntegrityPerRank;
+    flight.hullRemaining = flight.hullMaximum *
+        (1.0 - static_cast<double>(launch.existingShipDamage) /
+            static_cast<double>(tuning::damage::destroyedShipDamage));
     return flight;
 }
 
 void beginLaunchReturn(LaunchFlightState& flight)
 {
-    if (!flight.active || flight.returningHome) {
-        return;
+    if (flight.active && !flight.returningHome) {
+        flight.returningHome = true;
+        flight.asteroidHit.fill(false);
     }
-    flight.returningHome = true;
 }
 
-double launchPressureGraceSeconds(const PreparedLaunch& launch)
+double launchCourseLimit(const PreparedLaunch&)
 {
-    return std::clamp(
-        tuning::launch::pilotingPressureGraceBaseSeconds +
-            std::max(0.0, launch.stats.hull) * tuning::launch::pilotingPressureGraceHullSeconds,
-        tuning::launch::pilotingPressureGraceBaseSeconds,
-        tuning::launch::pilotingPressureGraceMaximumSeconds);
-}
-
-double launchCourseLimit(const PreparedLaunch& launch)
-{
-    const double sensorBonus = std::min(
-        tuning::launch::pilotingCourseMaximumSensorTolerance,
-        std::max(0.0, launch.stats.sensors) * tuning::launch::pilotingCourseSensorToleranceScale);
-    return tuning::launch::pilotingCourseLost * (1.0 + sensorBonus);
-}
-
-double launchIncidentWarningLeadSeconds(const PreparedLaunch& launch)
-{
-    return std::min(
-        tuning::launch::pilotingIncidentWarningMaximumSeconds,
-        tuning::launch::pilotingIncidentWarningBaseSeconds +
-            std::max(0.0, launch.stats.sensors) * tuning::launch::pilotingIncidentWarningSensorSeconds);
+    return tuning::launch::pilotingCourseLost;
 }
 
 LaunchFlightStep updateLaunchFlight(
@@ -470,186 +479,275 @@ LaunchFlightStep updateLaunchFlight(
     if (!flight.active || flight.failureCause != LaunchFailureCause::None) {
         result.failed = flight.failureCause != LaunchFailureCause::None;
         result.failureCause = flight.failureCause;
+        result.trainingRescue = flight.failureCause == LaunchFailureCause::TrainingRescue;
         return result;
     }
 
     const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-    flight.valveToggleCooldown = std::max(0.0, flight.valveToggleCooldown - dt);
-    flight.selectedThrottle = std::clamp(
-        flight.selectedThrottle +
-            std::clamp(input.throttle, -1.0, 1.0) * tuning::launch::pilotingThrottleChangePerSecond * dt,
-        tuning::launch::pilotingMinimumPoweredThrottle,
-        1.0);
+    flight.asteroidInvulnerabilitySeconds = std::max(
+        0.0,
+        flight.asteroidInvulnerabilitySeconds - dt);
+    flight.throttleKickCooldownSeconds = std::max(
+        0.0,
+        flight.throttleKickCooldownSeconds - dt);
 
-    const double targetSpan = std::max(tuning::session::minTravelDenominator, destination.targetMultiplier - 1.0);
-    const double thrustFactor = 0.55 +
-        std::max(tuning::launch::minimumEffectiveThrust, launch.stats.thrust) * tuning::launch::pilotingThrustProgressScale;
-    const double tierFactor = 1.0 + static_cast<double>(std::max(0, destination.tier)) * tuning::launch::pilotingTierDurationScale;
-    const double poweredDrive = tuning::launch::pilotingPoweredSteeringBase + flight.selectedThrottle;
-    const double drive = input.enginesCut ? tuning::launch::pilotingCoastProgressScale : poweredDrive;
-    const double progressRate = tuning::launch::pilotingBaseProgressRate * thrustFactor * drive / tierFactor;
-    flight.burnRatePerSecond = progressRate * targetSpan;
-
-    if (!input.enginesCut) {
-        const double fuelRate = tuning::launch::pilotingFuelIdleRate +
-            tuning::launch::pilotingFuelThrottleRate * flight.selectedThrottle * flight.selectedThrottle;
-        flight.fuelRemaining = std::max(0.0, flight.fuelRemaining - fuelRate * dt);
+    const bool enginesCut = launch.heatEnabled && input.enginesCut;
+    if (launch.manualControlsEnabled) {
+        flight.selectedThrottle = std::clamp(
+            flight.selectedThrottle +
+                std::clamp(input.throttle, -1.0, 1.0) *
+                    tuning::launch::pilotingThrottleChangePerSecond * dt,
+            tuning::launch::pilotingMinimumPoweredThrottle,
+            1.0);
+    } else {
+        flight.selectedThrottle = tuning::launch::calibratedThrottle;
     }
 
+    const double targetSpan = std::max(
+        tuning::session::minTravelDenominator,
+        destination.targetMultiplier - 1.0);
+    const double tierFactor = 1.0 +
+        static_cast<double>(std::max(0, destination.tier)) * tuning::launch::pilotingTierDurationScale;
+    const double poweredDrive = tuning::launch::pilotingPoweredSteeringBase +
+        flight.selectedThrottle;
+    const double targetVelocity =
+        tuning::launch::pilotingBaseProgressRate * poweredDrive / tierFactor *
+        std::max(0.25, 1.0 + launch.slingshotSpeedBoost);
+
+    if (enginesCut) {
+        flight.travelVelocity = std::max(
+            0.0,
+            flight.travelVelocity - tuning::launch::coastDecelerationPerSecond * dt);
+        if (flight.travelVelocity < tuning::launch::coastStopSpeed) {
+            flight.travelVelocity = 0.0;
+        }
+    } else {
+        const double response = std::clamp(
+            tuning::launch::poweredVelocityResponse * dt,
+            0.0,
+            1.0);
+        flight.travelVelocity += (targetVelocity - flight.travelVelocity) * response;
+    }
+    flight.burnRatePerSecond = flight.travelVelocity * targetSpan;
+
+    flight.previousTravelProgress = flight.travelProgress;
+    const double previousCourseOffset = flight.courseOffset;
     const double direction = flight.returningHome ? -1.0 : 1.0;
+    const double requestedProgressDelta = direction * flight.travelVelocity * dt;
+    const double maximumTravelProgress = !flight.returningHome && launch.config.frontierTransfer
+        ? 1.0
+        : tuning::launch::pilotingMaximumTravelProgress;
     flight.travelProgress = std::clamp(
-        flight.travelProgress + direction * progressRate * dt,
+        flight.travelProgress + requestedProgressDelta,
         0.0,
-        tuning::launch::pilotingMaximumTravelProgress);
+        maximumTravelProgress);
+    const double traveledDistance = std::abs(flight.travelProgress - flight.previousTravelProgress);
+    if (!enginesCut && traveledDistance > 0.0) {
+        flight.fuelRemaining = std::max(
+            0.0,
+            flight.fuelRemaining -
+                traveledDistance * launch.cruiseFuelCost *
+                    launchFuelUseMultiplier(flight.selectedThrottle));
+    }
     flight.currentMultiplier = 1.0 + targetSpan * flight.travelProgress;
     flight.peakMultiplier = std::max(flight.peakMultiplier, flight.currentMultiplier);
+    const double projectedDistance = flight.returningHome
+        ? flight.travelProgress
+        : (launch.config.frontierTransfer ? 1.0 - flight.travelProgress : flight.travelProgress);
+    flight.projectedFuelRequired = std::max(0.0, projectedDistance) *
+        launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle) +
+        (!flight.returningHome && launch.config.frontierTransfer
+                ? launch.arrivalReserveFuel
+                : 0.0);
+    flight.projectedFuelReserve = flight.fuelRemaining - flight.projectedFuelRequired;
 
-    double incidentHeat = 0.0;
-    double incidentPressure = 0.0;
-    double incidentGuidance = 0.0;
-    flight.incidentStrength = 0.0;
-    flight.forecastIncidentIndex = -1;
-    flight.incidentWarningSeconds = 0.0;
-    const double warningLead = launchIncidentWarningLeadSeconds(launch);
-    double nearestWarning = warningLead + 1.0;
-    for (int index = 0; index < launch.incidentCount; ++index) {
-        const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(index)];
-        const double pulse = incidentPulse(incident, flight.currentMultiplier);
-        incidentHeat += incident.heat * pulse;
-        incidentPressure += incident.pressure * pulse;
-        const double signedGuidance = incident.guidance * pulse * (index % 2 == 0 ? 1.0 : -1.0);
-        incidentGuidance += signedGuidance;
-        flight.incidentStrength = std::max(
-            flight.incidentStrength,
-            pulse * std::max({incident.heat, incident.pressure, incident.guidance, incident.vibration}));
-
-        const double ahead = flight.returningHome
-            ? flight.currentMultiplier - incident.centerMultiplier
-            : incident.centerMultiplier - flight.currentMultiplier;
-        if (ahead <= 0.0 || flight.burnRatePerSecond <= 0.0001) {
-            continue;
+    if (launch.heatEnabled) {
+        double heatDelta = 0.0;
+        if (enginesCut) {
+            heatDelta = -launchEngineOffCoolingForRank(launch.coolingRank);
+        } else {
+            const double throttleSquared = flight.selectedThrottle * flight.selectedThrottle;
+            const double heatInput = tuning::launch::poweredHeatIdleInput +
+                (tuning::launch::poweredHeatThrottleInput +
+                    destination.hazard * tuning::launch::poweredHeatHazardInput) * throttleSquared;
+            heatDelta = heatInput * launchPoweredHeatMultiplierForRank(launch.coolingRank) -
+                tuning::launch::poweredHeatCoolingBase;
         }
-        const double seconds = ahead / flight.burnRatePerSecond;
-        if (seconds <= warningLead && seconds < nearestWarning) {
-            nearestWarning = seconds;
-            flight.forecastIncidentIndex = index;
-            flight.incidentWarningSeconds = seconds;
+        flight.heat = std::clamp(
+            flight.heat + heatDelta * dt,
+            0.0,
+            tuning::telemetry::heatMaximum);
+    } else {
+        flight.heat = 0.0;
+    }
+
+    if (launch.manualControlsEnabled) {
+        const double steer = std::clamp(input.steer, -1.0, 1.0);
+        const double directionalGain = std::max(
+            0.05,
+            1.0 +
+                (steer > 0.0 ? tuning::launch::controlRightOvershoot * launch.controlChaos : 0.0) +
+                launch.controlSteeringResponseVariation);
+        const double steeringAuthority = tuning::launch::pilotingSteeringBase *
+            (enginesCut ? tuning::launch::pilotingCutSteeringScale : 1.0);
+
+        const bool throttleIncreasing = !enginesCut && input.throttle > 0.10;
+        if (flight.selectedThrottle < flight.throttleAtLastKick) {
+            flight.throttleAtLastKick = flight.selectedThrottle;
+        }
+        if (throttleIncreasing &&
+            flight.selectedThrottle - flight.throttleAtLastKick >=
+                tuning::launch::controlThrottleKickThreshold &&
+            flight.throttleKickCooldownSeconds <= 0.0 &&
+            flight.nextControlKickIndex < launch.controlKickCount) {
+            flight.courseVelocity +=
+                launch.controlKickDirections[static_cast<std::size_t>(flight.nextControlKickIndex)] *
+                tuning::launch::controlThrottleKick * launch.controlChaos;
+            ++flight.nextControlKickIndex;
+            flight.throttleAtLastKick = flight.selectedThrottle;
+            flight.throttleKickCooldownSeconds = tuning::launch::controlThrottleKickCooldown;
+        }
+        flight.throttleInputActive = throttleIncreasing;
+
+        const double damping = tuning::launch::controlDampingMinimum +
+            (1.0 - launch.controlChaos) * tuning::launch::controlDampingChaosRelief;
+        const double autoTrim = tuning::launch::controlAutoTrimMinimum +
+            (1.0 - launch.controlChaos) * tuning::launch::controlAutoTrimChaosRelief;
+        flight.courseVelocity += (
+            steer * directionalGain * steeringAuthority -
+            flight.courseOffset * autoTrim -
+            flight.courseVelocity * damping) * dt;
+        flight.courseOffset += flight.courseVelocity * dt;
+    } else {
+        flight.courseOffset = 0.0;
+        flight.courseVelocity = 0.0;
+        flight.throttleInputActive = false;
+    }
+
+    if (launch.asteroidsEnabled && flight.asteroidInvulnerabilitySeconds <= 0.0) {
+        const double startX = flight.previousTravelProgress * tuning::launch::asteroidRouteAxisScale;
+        const double endX = flight.travelProgress * tuning::launch::asteroidRouteAxisScale;
+        for (int index = 0; index < launch.asteroidCount; ++index) {
+            const std::size_t asteroidIndex = static_cast<std::size_t>(index);
+            if (flight.asteroidHit[asteroidIndex]) {
+                continue;
+            }
+            const LaunchAsteroid& asteroid = launch.asteroids[asteroidIndex];
+            const double collisionDistance = pointToSegmentDistance(
+                asteroid.routeProgress * tuning::launch::asteroidRouteAxisScale,
+                asteroid.courseOffset,
+                startX,
+                previousCourseOffset,
+                endX,
+                flight.courseOffset);
+            if (collisionDistance > asteroid.radius + tuning::launch::asteroidShipRadius) {
+                continue;
+            }
+
+            flight.asteroidHit[asteroidIndex] = true;
+            flight.asteroidInvulnerabilitySeconds = tuning::launch::asteroidInvulnerabilitySeconds;
+            const double damage = launchAsteroidImpactDamage(
+                launch.hullRank,
+                asteroid.scale);
+            flight.hullRemaining = std::max(0.0, flight.hullRemaining - damage);
+            const int campaignDamage = std::max(
+                1,
+                static_cast<int>(std::round(
+                    damage / std::max(1.0, flight.hullMaximum) *
+                    static_cast<double>(tuning::damage::destroyedShipDamage))));
+            flight.hullDamageTaken = std::min(
+                tuning::damage::destroyedShipDamage,
+                flight.hullDamageTaken + campaignDamage);
+            const double impactSeparation = flight.courseOffset - asteroid.courseOffset;
+            const double impactDirection = std::abs(impactSeparation) > 0.0001
+                ? (impactSeparation < 0.0 ? -1.0 : 1.0)
+                : (asteroid.courseOffset < 0.0
+                        ? 1.0
+                        : (asteroid.courseOffset > 0.0
+                                ? -1.0
+                                : (index % 2 == 0 ? -1.0 : 1.0)));
+            flight.courseVelocity += impactDirection * asteroidCourseImpulse * asteroid.scale;
+            result.asteroidHit = true;
+            result.hullDamageTaken = campaignDamage;
+            break;
         }
     }
 
-    const double disturbanceMultiplier = std::max(
-        0.50,
-        1.0 + launch.stats.volatility * tuning::launch::pilotingVolatilityIncidentScale);
-    incidentHeat *= disturbanceMultiplier;
-    incidentPressure *= disturbanceMultiplier;
-    incidentGuidance *= disturbanceMultiplier;
-    flight.incidentStrength *= disturbanceMultiplier;
+    result.reachedHome = flight.returningHome && flight.travelProgress <= 0.000001;
+    if (result.reachedHome) {
+        flight.active = false;
+        return result;
+    }
 
-    const double volatility = std::max(0.0, launch.stats.volatility);
-    const double cooling = tuning::launch::pilotingCoolingBase +
-        std::max(0.0, launch.stats.cooling) * tuning::launch::pilotingCoolingStatScale +
-        (input.enginesCut ? tuning::launch::pilotingCutCoolingBonus : 0.0);
-    const double throttleSquared = input.enginesCut ? 0.0 : flight.selectedThrottle * flight.selectedThrottle;
-    const double heatInput = input.enginesCut
-        ? 0.0
-        : tuning::launch::pilotingHeatIdleInput +
-            (tuning::launch::pilotingHeatThrottleInput +
-                destination.hazard * tuning::launch::pilotingHeatHazardInput +
-                volatility * tuning::launch::pilotingHeatVolatilityInput) * throttleSquared;
-    flight.heat = std::clamp(
-        flight.heat +
-            (heatInput - cooling + incidentHeat * tuning::launch::pilotingIncidentHeatRate) * dt,
-        0.0,
-        tuning::telemetry::heatMaximum);
-
-    const double pressureControl = std::max(0.0, launch.stats.pressure);
-    const double pressureInput = tuning::launch::pilotingPressureIdleInput +
-        (tuning::launch::pilotingPressureThrottleInput +
-            destination.hazard * tuning::launch::pilotingPressureHazardInput +
-            launch.pressureModifier * tuning::launch::pilotingPressureMissionInput) * throttleSquared +
-        flight.heat * tuning::launch::pilotingPressureHeatInput;
-    const double valveRelief = input.pressureReliefOpen
-        ? tuning::launch::pilotingValveReliefBase +
-            pressureControl * tuning::launch::pilotingValveReliefStatScale
-        : 0.0;
-    flight.pressure = std::clamp(
-        flight.pressure +
-            (pressureInput -
-                tuning::launch::pilotingPressureNaturalRelief -
-                pressureControl * tuning::launch::pilotingPressureStatRelief -
-                valveRelief +
-                incidentPressure * tuning::launch::pilotingIncidentPressureRate) * dt,
-        0.0,
-        1.20);
-
-    const double steeringAuthority =
-        (tuning::launch::pilotingSteeringBase +
-            std::max(0.0, launch.stats.thrust) * tuning::launch::pilotingSteeringThrustScale +
-            std::max(0.0, launch.stats.sensors) * tuning::launch::pilotingSteeringSensorScale) *
-        (input.enginesCut
-                ? tuning::launch::pilotingCutSteeringScale
-                : tuning::launch::pilotingPoweredSteeringBase +
-                    flight.selectedThrottle * tuning::launch::pilotingPoweredSteeringThrottleScale);
-    const double autoTrim = tuning::launch::pilotingAutoTrimBase +
-        std::max(0.0, launch.stats.sensors) * tuning::launch::pilotingAutoTrimSensorScale;
-    const double valveDirection = std::sin(launch.crashMultiplier * 17.0) >= 0.0 ? 1.0 : -1.0;
-    const double valveDrift = input.pressureReliefOpen
-        ? valveDirection * std::max(
-              0.18,
-              tuning::launch::pilotingValveDriftBase -
-                  pressureControl * tuning::launch::pilotingValveDriftControlScale)
-        : 0.0;
-    flight.courseVelocity += (
-        std::clamp(input.steer, -1.0, 1.0) * steeringAuthority +
-        incidentGuidance * tuning::launch::pilotingIncidentGuidanceRate +
-        valveDrift -
-        flight.courseOffset * autoTrim -
-        flight.courseVelocity * tuning::launch::pilotingLateralDamping) * dt;
-    flight.courseOffset += flight.courseVelocity * dt;
+    if (!flight.returningHome && flight.travelProgress >= 1.0) {
+        if (launch.config.missionKind == LaunchMissionKind::FlightControlsCalibration &&
+            !launch.config.frontierTransfer) {
+            // The calibration line is the end of the safe test flight. The
+            // Moon is deliberately visible beyond it, but landing guidance is
+            // not installed until Flight Controls I is earned and fitted.
+            flight.failureCause = LaunchFailureCause::LunarImpact;
+        } else if (launch.config.frontierTransfer && launch.arrivalReserveFuel > 0.0) {
+            const double minimumInsertionFuel = std::max(
+                0.0,
+                launch.arrivalReserveFuel - tuning::launch::arrivalReserveGraceFuel);
+            if (flight.fuelRemaining + 0.000001 < minimumInsertionFuel) {
+                flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
+            } else {
+                flight.fuelRemaining = std::max(
+                    0.0,
+                    flight.fuelRemaining - launch.arrivalReserveFuel);
+                flight.projectedFuelRequired = 0.0;
+                flight.projectedFuelReserve = flight.fuelRemaining;
+                result.reachedDestination = true;
+            }
+        } else {
+            result.reachedDestination = true;
+        }
+    }
 
     const double courseLimit = launchCourseLimit(launch);
-    flight.heatFailureSeconds = flight.heat >= tuning::launch::pilotingFailureThreshold
+    flight.heatFailureSeconds = launch.heatEnabled &&
+            flight.heat >= tuning::launch::pilotingFailureThreshold
         ? flight.heatFailureSeconds + dt
         : 0.0;
-    flight.pressureFailureSeconds = flight.pressure >= tuning::launch::pilotingFailureThreshold
-        ? flight.pressureFailureSeconds + dt
-        : 0.0;
-    flight.courseFailureSeconds = std::abs(flight.courseOffset) >= courseLimit
+    flight.courseFailureSeconds = launch.manualControlsEnabled &&
+            std::abs(flight.courseOffset) >= courseLimit
         ? flight.courseFailureSeconds + dt
         : 0.0;
     flight.fuelFailureSeconds = flight.fuelRemaining <= 0.0
         ? flight.fuelFailureSeconds + dt
         : 0.0;
 
-    const double heatMargin = 1.0 - flight.heat;
-    const double pressureMargin = 1.0 - flight.pressure;
-    const double courseMargin = 1.0 - std::abs(flight.courseOffset) / std::max(0.01, courseLimit);
+    const double heatMargin = launch.heatEnabled ? 1.0 - flight.heat : 1.0;
+    const double courseMargin = launch.manualControlsEnabled
+        ? 1.0 - std::abs(flight.courseOffset) / std::max(0.01, courseLimit)
+        : 1.0;
     const double fuelMargin = flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
+    const double hullMargin = launch.asteroidsEnabled
+        ? flight.hullRemaining / std::max(1.0, flight.hullMaximum)
+        : 1.0;
     flight.minimumSafetyMargin = std::min(
         flight.minimumSafetyMargin,
-        std::min({heatMargin, pressureMargin, courseMargin, fuelMargin}));
+        std::min({heatMargin, courseMargin, fuelMargin, hullMargin}));
 
-    if (flight.heatFailureSeconds >= tuning::launch::pilotingHeatFailureSeconds) {
-        flight.failureCause = LaunchFailureCause::ThermalRunaway;
-    } else if (flight.pressureFailureSeconds >= launchPressureGraceSeconds(launch)) {
-        flight.failureCause = LaunchFailureCause::PressureRupture;
-    } else if (flight.courseFailureSeconds >= tuning::launch::pilotingCourseFailureSeconds) {
-        flight.failureCause = LaunchFailureCause::CourseLost;
-    } else if (flight.fuelFailureSeconds >= tuning::launch::pilotingFuelFailureSeconds) {
-        flight.failureCause = LaunchFailureCause::FuelExhausted;
+    if (flight.failureCause == LaunchFailureCause::None && flight.hullRemaining <= 0.0) {
+        flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::HullBreach);
+    } else if (flight.failureCause == LaunchFailureCause::None &&
+        flight.heatFailureSeconds >= tuning::launch::pilotingHeatFailureSeconds) {
+        flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::ThermalRunaway);
+    } else if (flight.failureCause == LaunchFailureCause::None &&
+        flight.courseFailureSeconds >= tuning::launch::pilotingCourseFailureSeconds) {
+        flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::CourseLost);
+    } else if (flight.failureCause == LaunchFailureCause::None &&
+        flight.fuelFailureSeconds >= tuning::launch::pilotingFuelFailureSeconds) {
+        flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
     }
 
     if (flight.failureCause != LaunchFailureCause::None) {
         flight.active = false;
         result.failed = true;
         result.failureCause = flight.failureCause;
-        return result;
-    }
-
-    result.reachedHome = flight.returningHome && flight.travelProgress <= 0.000001;
-    result.reachedDestination = !flight.returningHome && flight.travelProgress >= 1.0;
-    if (result.reachedHome) {
-        flight.active = false;
+        result.trainingRescue = flight.failureCause == LaunchFailureCause::TrainingRescue;
     }
     return result;
 }
@@ -658,117 +756,36 @@ TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const LaunchFligh
 {
     TelemetryEvent event;
     event.multiplier = flight.currentMultiplier;
-    event.heat = flight.heat;
-    event.pressure = flight.pressure;
-    const double disturbanceMultiplier = std::max(
-        0.50,
-        1.0 + launch.stats.volatility * tuning::launch::pilotingVolatilityIncidentScale);
-    for (int index = 0; index < launch.incidentCount; ++index) {
-        const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(index)];
-        const double pulse = incidentPulse(incident, flight.currentMultiplier) * disturbanceMultiplier;
-        event.vibration = std::max(event.vibration, incident.vibration * pulse);
-    }
-    event.guidance = std::clamp(
-        std::abs(flight.courseOffset) / std::max(0.01, launchCourseLimit(launch)),
-        0.0,
-        1.0);
-    event.fuelMix = std::clamp(
-        1.0 - flight.fuelRemaining / std::max(0.01, flight.fuelCapacity),
-        0.0,
-        1.0);
+    event.heat = launch.heatEnabled ? flight.heat : 0.0;
+    event.guidance = launch.manualControlsEnabled
+        ? std::clamp(
+              std::abs(flight.courseOffset) /
+                  std::max(0.01, launchCourseLimit(launch)),
+              0.0,
+              1.0)
+        : 0.0;
+    // Retained for version-9 record compatibility only. Fuel is now reported
+    // directly in absolute units instead of masquerading as a telemetry fault.
+    event.fuelMix = 0.0;
     event.instability = std::clamp(
-        flight.courseFailureSeconds / tuning::launch::pilotingCourseFailureSeconds,
+        flight.courseFailureSeconds /
+            std::max(0.01, tuning::launch::pilotingCourseFailureSeconds),
         0.0,
         1.0);
-    event.abortRisk = std::max({
-        std::clamp(flight.heatFailureSeconds / tuning::launch::pilotingHeatFailureSeconds, 0.0, 1.0),
-        std::clamp(flight.pressureFailureSeconds / launchPressureGraceSeconds(launch), 0.0, 1.0),
-        event.instability});
+    // Retained for version-9 record compatibility only. Live launch survival
+    // is decided by the visible heat, course, fuel, and hull mechanics.
+    event.abortRisk = 0.0;
     event.warning = std::clamp(
-        std::max({event.heat, event.pressure, event.guidance, event.fuelMix, event.abortRisk, event.instability}),
+        std::max(event.heat, event.guidance),
         0.0,
         1.0);
     event.stress = std::clamp(
         event.heat * tuning::telemetry::stressHeatScale +
-            event.pressure * tuning::telemetry::stressPressureScale +
-            event.guidance * tuning::telemetry::stressGuidanceScale +
-            event.abortRisk * tuning::telemetry::stressAbortScale,
+            event.guidance * tuning::telemetry::stressGuidanceScale,
         0.0,
         1.0);
     event.message = warningMessage(event);
     return event;
-}
-
-double burnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
-{
-    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-    const double thrust = std::max(tuning::launch::minimumEffectiveThrust, launch.stats.thrust);
-    const double cruiseRate =
-        tuning::launch::cruiseBaseRate +
-        thrust * tuning::launch::cruiseThrustScale +
-        static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
-    const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
-    const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    const double speedMultiplier = std::max(0.0, tuning::launch::baseTravelSpeedMultiplier + launch.slingshotSpeedBoost);
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration) * speedMultiplier;
-}
-
-double returnTelemetryMultiplier(double commitMultiplier, double crashMultiplier, double returnElapsed, double returnDuration)
-{
-    const double progress = std::clamp(returnElapsed / std::max(tuning::session::returnTelemetryProgressDenominator, returnDuration), 0.0, 1.0);
-    const double shaped = math::smoothStep(progress);
-    const double headroom = std::max(tuning::session::returnTelemetryHeadroomMinimum, crashMultiplier - commitMultiplier);
-    const double overshoot = std::min(
-        headroom * tuning::session::returnTelemetryOvershootHeadroomScale,
-        tuning::session::returnTelemetryOvershootBase + headroom * tuning::session::returnTelemetryOvershootExtraHeadroomScale);
-    const double bump = std::sin(shaped * math::pi) * overshoot;
-    const double settle = shaped * std::min(headroom * tuning::session::returnTelemetrySettleHeadroomScale, tuning::session::returnTelemetrySettleMaximum);
-    return std::min(crashMultiplier - tuning::session::returnTelemetryCrashMargin, commitMultiplier + bump - settle);
-}
-
-double returnHomeRisk(const PreparedLaunch& launch, const ContentCatalog& catalog, const GameState& state, double burnMultiplier)
-{
-    const Destination* destination = catalog.findDestination(launch.config.destinationId);
-    if (destination == nullptr) {
-        return 1.0;
-    }
-
-    const bool openingEarthObjective = destination->id == content::destination::earthOrbit
-        && !launch.config.frontierTransfer
-        && state.run.frontierReadiness < frontierReadinessRequired(state, catalog)
-        && launch.config.burnGoalMultiplier <= defaultProvingTarget(*destination) + 0.001
-        && burnMultiplier >= launch.config.burnGoalMultiplier
-        && burnMultiplier <= launch.config.burnGoalMultiplier + tuning::mission::openingProvingGoalMargin;
-    if (openingEarthObjective) {
-        return 0.0;
-    }
-
-    const TelemetryEvent event = telemetryAt(launch, burnMultiplier);
-    const double profileDepth = std::clamp(
-        (burnMultiplier - 1.0) / std::max(tuning::session::minTravelDenominator, destination->targetMultiplier - 1.0),
-        0.0,
-        tuning::outcomes::returnProfileDepthMaximum);
-    const double systemsRelief =
-        std::max(0.0, launch.stats.hull) * tuning::outcomes::returnSystemsHullRelief +
-        std::max(0.0, launch.stats.cooling) * tuning::outcomes::returnSystemsCoolingRelief +
-        std::max(0.0, launch.stats.fuel) * tuning::outcomes::returnSystemsFuelRelief +
-        std::max(0.0, launch.stats.sensors) * tuning::outcomes::returnSystemsSensorsRelief;
-    const double transferPenalty = launch.config.frontierTransfer
-        ? tuning::outcomes::returnTransferBasePenalty + static_cast<double>(destination->tier) * tuning::outcomes::returnTransferTierPenalty
-        : 0.0;
-
-    const double risk =
-        tuning::outcomes::returnRiskBase +
-        destination->hazard * tuning::outcomes::returnRiskHazardScale +
-        profileDepth * tuning::outcomes::returnRiskProfileDepthScale +
-        event.warning * tuning::outcomes::returnRiskWarningScale +
-        event.heat * tuning::outcomes::returnRiskHeatScale +
-        static_cast<double>(state.run.shipDamage) * tuning::outcomes::returnRiskDamageScale +
-        transferPenalty -
-        systemsRelief +
-        launch.cargoReturnPenalty;
-
-    return std::clamp(risk, tuning::outcomes::returnRiskMinimum, tuning::outcomes::returnRiskMaximum);
 }
 
 LaunchOutcome resolveLaunch(
@@ -790,12 +807,6 @@ LaunchOutcome resolveLaunch(
     outcome.pilotedFlight = resolution.pilotedFlight;
     outcome.failureCause = resolution.failureCause;
     outcome.minimumSafetyMargin = resolution.minimumSafetyMargin;
-    if (!resolution.pilotedFlight) {
-        outcome.telemetry = buildTelemetry(launch);
-        const TelemetryEvent peak = peakTelemetryThrough(launch, outcome.ejectMultiplier);
-        outcome.peakWarning = peak.warning;
-        outcome.peakAbortRisk = peak.abortRisk;
-    }
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {
@@ -804,334 +815,171 @@ LaunchOutcome resolveLaunch(
         return outcome;
     }
 
-    if (method == RecoveryMethod::None || resolution.failureCause != LaunchFailureCause::None ||
-        (!resolution.pilotedFlight && outcome.ejectMultiplier >= launch.crashMultiplier)) {
-        markDestroyed(outcome, launch, catalog, *destination, state, rng);
-        return outcome;
-    }
-
-    const double payoutMultiplier = 1.0 + std::max(0.0, launch.stats.payout) * tuning::outcomes::payoutStatScale + launch.provingPayoutBonus;
-    const bool reachedDestination = outcome.ejectMultiplier >= destination->targetMultiplier;
-    const TelemetryEvent event = telemetryAt(launch, outcome.ejectMultiplier);
-
-    if (!resolution.pilotedFlight && method == RecoveryMethod::ReturnHome &&
-        rng.chance(returnHomeRisk(launch, catalog, state, outcome.ejectMultiplier))) {
-        markDestroyed(outcome, launch, catalog, *destination, state, rng);
-        return outcome;
-    }
-
-    if (method == RecoveryMethod::ManualEject) {
+    if (resolution.failureCause == LaunchFailureCause::TrainingRescue) {
         outcome.type = LaunchResultType::SafeEject;
-        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::manualEjectPayoutFactor;
-        outcome.recoveryCost = std::clamp(
-            tuning::outcomes::manualEjectRecoveryBase +
-                static_cast<double>(destination->tier) * tuning::outcomes::manualEjectRecoveryTierScale +
-                outcome.ejectMultiplier * tuning::outcomes::manualEjectRecoveryBurnScale -
-                launch.stats.escape * tuning::outcomes::manualEjectRecoveryEscapeRelief,
-            tuning::outcomes::manualEjectRecoveryMinimum,
-            tuning::outcomes::manualEjectRecoveryMaximum);
-        const double ejectDamage =
-            destination->hazard * tuning::outcomes::manualEjectDamageHazardScale +
-            outcome.ejectMultiplier * tuning::outcomes::manualEjectDamageBurnScale +
-            event.abortRisk * tuning::outcomes::manualEjectDamageAbortScale -
-            launch.stats.escape * tuning::outcomes::manualEjectDamageEscapeRelief;
+        outcome.recoveryMethod = RecoveryMethod::ReturnHome;
         outcome.shipDamage = std::clamp(
-            static_cast<int>(std::round(ejectDamage)),
-            tuning::outcomes::manualEjectDamageMinimum,
-            tuning::outcomes::manualEjectDamageMaximum);
-        const double injuryChance = std::clamp(
-            tuning::outcomes::manualEjectCrewInjuryBase +
-                event.abortRisk * tuning::outcomes::manualEjectCrewInjuryAbortScale +
-                static_cast<double>(state.run.shipDamage) * tuning::outcomes::manualEjectCrewInjuryDamageScale -
-                launch.stats.escape * tuning::outcomes::manualEjectCrewInjuryEscapeRelief,
-            tuning::outcomes::manualEjectCrewInjuryMinimum,
-            tuning::outcomes::manualEjectCrewInjuryMaximum);
-        outcome.crewInjured = rng.chance(injuryChance);
-        outcome.blueprintGain = outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::manualEjectBlueprintTargetShare ? 1 : 0;
-        if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
-            outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
-            outcome.payout = std::min(outcome.payout, outcome.recoveryCost);
+            resolution.hullDamageTaken,
+            0,
+            tuning::damage::destroyedShipDamage - 1);
+        return outcome;
+    }
+    if (resolution.failureCause != LaunchFailureCause::None || method == RecoveryMethod::None) {
+        markDestroyed(outcome, catalog, *destination, state, rng);
+        if (launch.trainingMission) {
+            outcome.blueprintGain = 0;
         }
         return outcome;
     }
 
+    // Unknown legacy recovery requests resolve as deterministic rescue rather
+    // than reviving any hidden survival roll.
+    if (method != RecoveryMethod::ReturnHome && method != RecoveryMethod::TransferArrival) {
+        outcome.type = LaunchResultType::SafeEject;
+        outcome.recoveryMethod = RecoveryMethod::ReturnHome;
+        outcome.shipDamage = std::clamp(
+            resolution.hullDamageTaken,
+            0,
+            tuning::damage::destroyedShipDamage - 1);
+        return outcome;
+    }
+
+    const double payoutMultiplier = 1.0 + launch.provingPayoutBonus;
+    const bool reachedDestination = outcome.ejectMultiplier >= destination->targetMultiplier;
+    const TelemetryEvent event = telemetryAt(launch, outcome.ejectMultiplier);
+
     if (method == RecoveryMethod::TransferArrival) {
         outcome.type = LaunchResultType::MissionComplete;
-        outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier * tuning::rewards::transferArrivalPayoutFactor;
-        const double arrivalDamage =
-            destination->hazard * tuning::outcomes::transferArrivalDamageHazardScale +
-            outcome.ejectMultiplier * tuning::outcomes::transferArrivalDamageBurnScale +
-            event.stress * tuning::outcomes::transferArrivalDamageStressScale -
-            launch.stats.hull * tuning::outcomes::transferArrivalDamageHullRelief -
-            launch.stats.cooling * tuning::outcomes::transferArrivalDamageCoolingRelief;
-        outcome.shipDamage = std::clamp(
-            static_cast<int>(std::round(arrivalDamage)),
-            tuning::outcomes::transferArrivalDamageMinimum,
-            tuning::outcomes::transferArrivalDamageMaximum);
+        outcome.payout = destination->baseReward * outcome.ejectMultiplier *
+            payoutMultiplier * tuning::rewards::transferArrivalPayoutFactor;
+        if (resolution.pilotedFlight) {
+            outcome.shipDamage = std::clamp(
+                resolution.hullDamageTaken,
+                0,
+                tuning::damage::destroyedShipDamage - 1);
+        } else {
+            const double arrivalDamage =
+                destination->hazard * tuning::outcomes::transferArrivalDamageHazardScale +
+                outcome.ejectMultiplier * tuning::outcomes::transferArrivalDamageBurnScale +
+                event.stress * tuning::outcomes::transferArrivalDamageStressScale;
+            outcome.shipDamage = std::clamp(
+                static_cast<int>(std::round(arrivalDamage)) + resolution.hullDamageTaken,
+                tuning::outcomes::transferArrivalDamageMinimum,
+                tuning::damage::destroyedShipDamage - 1);
+        }
         outcome.blueprintGain = 1 + destination->tier / 2;
         return outcome;
     }
 
-    outcome.type = reachedDestination ? LaunchResultType::MissionComplete : LaunchResultType::SafeEject;
-    const double jackpotMultiplier = reachedDestination ? overburnJackpotMultiplier(*destination, outcome.ejectMultiplier) : 1.0;
+    outcome.type = reachedDestination
+        ? LaunchResultType::MissionComplete
+        : LaunchResultType::SafeEject;
+    const double jackpotMultiplier = reachedDestination
+        ? overburnJackpotMultiplier(*destination, outcome.ejectMultiplier)
+        : 1.0;
     outcome.payout = destination->baseReward * outcome.ejectMultiplier * payoutMultiplier *
-        (reachedDestination ? tuning::rewards::returnHomeReachedGoalFactor * jackpotMultiplier : tuning::rewards::returnHomeBasePayoutFactor);
+        (reachedDestination
+                ? tuning::rewards::returnHomeReachedGoalFactor * jackpotMultiplier
+                : tuning::rewards::returnHomeBasePayoutFactor);
     outcome.recoveryCost = std::clamp(
         tuning::outcomes::returnHomeRecoveryBase +
             static_cast<double>(destination->tier) * tuning::outcomes::returnHomeRecoveryTierScale +
             outcome.ejectMultiplier * tuning::outcomes::returnHomeRecoveryBurnScale,
         tuning::outcomes::returnHomeRecoveryMinimum,
         tuning::outcomes::returnHomeRecoveryMaximum);
-    if (isShallowRecovery(*destination, outcome.ejectMultiplier)) {
+    const double lessonSpan = std::max(
+        0.000001,
+        launch.config.burnGoalMultiplier - 1.0);
+    const double fuelSurveyShare = std::clamp(
+        (outcome.ejectMultiplier - 1.0) / lessonSpan,
+        0.0,
+        1.0);
+    const bool partialFuelSurvey =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration &&
+        !launch.config.frontierTransfer &&
+        fuelSurveyShare > 0.0 &&
+        outcome.ejectMultiplier + 0.000001 < launch.config.burnGoalMultiplier;
+    if (isShallowRecovery(*destination, outcome.ejectMultiplier) && !partialFuelSurvey) {
         outcome.recoveryCost += shallowRecoveryPenalty(state.run.shallowRecoveryStreak);
         outcome.payout = std::min(outcome.payout, outcome.recoveryCost);
     }
-    const double netRewardFloor = isShallowRecovery(*destination, outcome.ejectMultiplier)
-        ? 0.0
-        : returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
-    if (netRewardFloor > 0.0) {
-        outcome.payout = std::max(outcome.payout, outcome.recoveryCost + netRewardFloor);
+    if (partialFuelSurvey) {
+        outcome.payout = outcome.recoveryCost +
+            tuning::launchProgression::lessonReward * fuelSurveyShare;
+    } else {
+        const double netRewardFloor = isShallowRecovery(*destination, outcome.ejectMultiplier)
+            ? 0.0
+            : returnHomeNetRewardFloor(launch, *destination, outcome.ejectMultiplier);
+        if (netRewardFloor > 0.0) {
+            outcome.payout = std::max(outcome.payout, outcome.recoveryCost + netRewardFloor);
+        }
     }
 
-    const double stressDamage =
-        destination->hazard * tuning::outcomes::returnHomeDamageHazardScale +
-        outcome.ejectMultiplier * tuning::outcomes::returnHomeDamageBurnScale +
-        event.stress * tuning::outcomes::returnHomeDamageStressScale -
-        launch.stats.hull * tuning::outcomes::returnHomeDamageHullRelief -
-        launch.stats.cooling * tuning::outcomes::returnHomeDamageCoolingRelief;
-    outcome.shipDamage = std::clamp(
-        static_cast<int>(std::round(stressDamage)),
-        tuning::outcomes::returnHomeDamageMinimum,
-        reachedDestination ? tuning::outcomes::returnHomeDamageCompleteMaximum : tuning::outcomes::returnHomeDamageEarlyMaximum);
+    if (resolution.pilotedFlight) {
+        outcome.shipDamage = std::clamp(
+            resolution.hullDamageTaken,
+            0,
+            tuning::damage::destroyedShipDamage - 1);
+    } else {
+        const double stressDamage =
+            destination->hazard * tuning::outcomes::returnHomeDamageHazardScale +
+            outcome.ejectMultiplier * tuning::outcomes::returnHomeDamageBurnScale +
+            event.stress * tuning::outcomes::returnHomeDamageStressScale;
+        outcome.shipDamage = std::clamp(
+            static_cast<int>(std::round(stressDamage)) + resolution.hullDamageTaken,
+            tuning::outcomes::returnHomeDamageMinimum,
+            tuning::damage::destroyedShipDamage - 1);
+    }
     outcome.blueprintGain = reachedDestination
         ? 1 + destination->tier / 2
-        : (outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::returnHomeBlueprintTargetShare ? 1 : 0);
-
+        : (outcome.ejectMultiplier >=
+                  destination->targetMultiplier * tuning::outcomes::returnHomeBlueprintTargetShare
+              ? 1
+              : 0);
     return outcome;
 }
 
-LaunchOutcome simulateLaunchToTarget(const GameState& state, const ContentCatalog& catalog, Random& rng)
+LaunchOutcome simulateLaunchToTarget(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    Random& rng)
 {
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    return resolveLaunch(launch, catalog, state, state.launchConfig.burnGoalMultiplier, RecoveryMethod::ReturnHome, rng);
+    return resolveLaunch(
+        launch,
+        catalog,
+        state,
+        state.launchConfig.burnGoalMultiplier,
+        RecoveryMethod::ReturnHome,
+        rng,
+        {true, LaunchFailureCause::None, 1.0, 0});
 }
 
 TelemetryEvent telemetryAt(const PreparedLaunch& launch, double multiplier)
 {
     TelemetryEvent event;
     event.multiplier = multiplier;
-
-    const double progressToCrash = std::clamp(
-        (multiplier - 1.0) / std::max(tuning::telemetry::progressDenominator, launch.crashMultiplier - 1.0),
+    const double burnSpan = std::max(
+        tuning::session::minTravelDenominator,
+        launch.config.burnGoalMultiplier - 1.0);
+    const double progress = std::clamp(
+        (multiplier - 1.0) / burnSpan,
         0.0,
-        tuning::telemetry::progressMaximum);
-    const double burnLoad = std::clamp(
-        (multiplier - 1.0) / std::max(tuning::telemetry::burnLoadDenominator, launch.config.burnGoalMultiplier - 1.0),
-        0.0,
-        tuning::telemetry::burnLoadMaximum);
-    const double lateFlight = std::clamp(
-        (progressToCrash - tuning::telemetry::lateFlightStart) / tuning::telemetry::lateFlightRange,
-        0.0,
-        1.0);
-    const double shipDamage = std::max(0.0, -std::min(0.0, launch.stats.hull)) * tuning::telemetry::damagedHullScale;
-    const double volatility = std::max(0.0, launch.stats.volatility);
-    const double thrustLoad = std::max(0.0, launch.stats.thrust - launch.stats.fuel * tuning::telemetry::thrustFuelOffset);
-    const double coolingRelief = std::max(0.0, launch.stats.cooling) * tuning::telemetry::coolingReliefScale;
-    const double hullRelief = std::max(0.0, launch.stats.hull) * tuning::telemetry::hullReliefScale;
-    const double fuelRelief = std::max(0.0, launch.stats.fuel) * tuning::telemetry::fuelReliefScale;
-    const double sensorRelief = std::max(0.0, launch.stats.sensors) * tuning::telemetry::sensorReliefScale;
-    const double escapeRelief = std::max(0.0, launch.stats.escape) * tuning::telemetry::escapeReliefScale;
-    const double pressurePulse = telemetryPulse(tuning::telemetry::pressurePulse, multiplier, launch.crashMultiplier);
-    const double vibrationPulse = telemetryPulse(tuning::telemetry::vibrationPulse, multiplier, launch.crashMultiplier);
-    const double mixPulse = telemetryPulse(tuning::telemetry::fuelMixPulse, multiplier, launch.crashMultiplier);
-    const double guidancePulse = telemetryPulse(tuning::telemetry::guidancePulse, multiplier, launch.crashMultiplier);
-    const double pressureLoad = 1.0 + launch.pressureModifier;
-    const double earlyPressure =
-        burnLoad *
-            (tuning::telemetry::earlyPressureBase +
-                thrustLoad * tuning::telemetry::earlyPressureThrustScale +
-                volatility * tuning::telemetry::earlyPressureVolatilityScale) *
-            pressurePulse -
-        fuelRelief * tuning::telemetry::earlyPressureFuelRelief -
-        coolingRelief * tuning::telemetry::earlyPressureCoolingRelief;
-    const double earlyVibration =
-        burnLoad *
-            (tuning::telemetry::earlyVibrationBase +
-                std::max(0.0, launch.stats.thrust) * tuning::telemetry::earlyVibrationThrustScale +
-                volatility * tuning::telemetry::earlyVibrationVolatilityScale) *
-            vibrationPulse +
-        shipDamage * tuning::telemetry::earlyVibrationDamageScale -
-        hullRelief * tuning::telemetry::earlyVibrationHullRelief -
-        sensorRelief * tuning::telemetry::earlyVibrationSensorRelief;
-    const double earlyFuelMix =
-        burnLoad *
-            (tuning::telemetry::earlyFuelMixBase +
-                std::max(0.0, std::abs(launch.stats.thrust - launch.stats.fuel)) * tuning::telemetry::earlyFuelMixImbalanceScale +
-                volatility * tuning::telemetry::earlyFuelMixVolatilityScale) *
-            mixPulse -
-        fuelRelief * tuning::telemetry::earlyFuelMixFuelRelief -
-        sensorRelief * tuning::telemetry::earlyFuelMixSensorRelief;
-
-    event.heat = std::clamp(progressToCrash * launch.heatRate - launch.cutHeatRelief, 0.0, tuning::telemetry::heatMaximum);
-    event.pressure = std::clamp(
-        (earlyPressure +
-            lateFlight *
-                (tuning::telemetry::pressureLateBase +
-                    thrustLoad * tuning::telemetry::pressureLateThrustScale +
-                    volatility * tuning::telemetry::pressureLateVolatilityScale) +
-            event.heat * tuning::telemetry::pressureHeatScale -
-            fuelRelief * tuning::telemetry::pressureFuelRelief -
-            coolingRelief * tuning::telemetry::pressureCoolingRelief) *
-                pressureLoad -
-            launch.pressureRelief +
-            launch.pressureReliefFailure,
-        0.0,
-        1.0);
-    event.vibration = std::clamp(
-        earlyVibration +
-            lateFlight *
-                (tuning::telemetry::vibrationLateBase +
-                    volatility * tuning::telemetry::vibrationLateVolatilityScale +
-                    std::max(0.0, launch.stats.thrust) * tuning::telemetry::vibrationLateThrustScale) +
-            shipDamage * tuning::telemetry::vibrationDamageScale -
-            hullRelief * tuning::telemetry::vibrationHullRelief -
-            sensorRelief * tuning::telemetry::vibrationSensorRelief -
-            launch.cutVibrationRelief +
-            launch.cargoVibrationPenalty,
-        0.0,
-        1.0);
-    event.fuelMix = std::clamp(
-        earlyFuelMix +
-            lateFlight *
-                (tuning::telemetry::fuelMixLateBase +
-                    std::max(0.0, launch.stats.thrust - launch.stats.fuel) * tuning::telemetry::fuelMixLateThrustOverFuelScale +
-                    volatility * tuning::telemetry::fuelMixLateVolatilityScale) +
-            event.pressure * tuning::telemetry::fuelMixPressureScale -
-            fuelRelief * tuning::telemetry::fuelMixFuelRelief -
-            launch.cargoFuelRelief,
-        0.0,
-        1.0);
-    const double crewNavLoad = launch.crewGuidancePenalty * (tuning::telemetry::crewNavBase + burnLoad * tuning::telemetry::crewNavBurnScale);
-    event.guidance = std::clamp(
-        burnLoad *
-            (tuning::telemetry::guidanceBase +
-                event.vibration * tuning::telemetry::guidanceVibrationLoadScale +
-                event.pressure * tuning::telemetry::guidancePressureLoadScale) *
-            guidancePulse +
-            lateFlight * (tuning::telemetry::guidanceLateBase + volatility * tuning::telemetry::guidanceLateVolatilityScale) +
-            event.vibration * tuning::telemetry::guidanceVibrationScale +
-            event.pressure * tuning::telemetry::guidancePressureScale -
-            sensorRelief * tuning::telemetry::guidanceSensorRelief +
-            launch.cutGuidancePenalty +
-            launch.reliefGuidancePenalty +
-            launch.cargoGuidancePenalty +
-            crewNavLoad,
-        0.0,
-        1.0);
-
-    const double readableLoad = burnLoad * (tuning::telemetry::readableLoadBase + volatility * tuning::telemetry::readableLoadVolatilityScale);
-    event.pressure = std::max(event.pressure, std::clamp(
-        (readableLoad * (tuning::telemetry::readablePressureBase + pressurePulse * tuning::telemetry::readablePressurePulseScale) -
-            fuelRelief * tuning::telemetry::readablePressureFuelRelief -
-            coolingRelief * tuning::telemetry::readablePressureCoolingRelief) *
-                pressureLoad -
-            launch.pressureRelief +
-            launch.pressureReliefFailure,
-        0.0,
-        tuning::telemetry::readablePressureMaximum));
-    event.vibration = std::max(event.vibration, std::clamp(
-        readableLoad * (tuning::telemetry::readableVibrationBase + vibrationPulse * tuning::telemetry::readableVibrationPulseScale) -
-            hullRelief * tuning::telemetry::readableVibrationHullRelief -
-            sensorRelief * tuning::telemetry::readableVibrationSensorRelief +
-            launch.cargoVibrationPenalty * tuning::telemetry::readableVibrationCargoScale,
-        0.0,
-        tuning::telemetry::readableVibrationMaximum));
-    event.fuelMix = std::max(event.fuelMix, std::clamp(
-        readableLoad * (tuning::telemetry::readableFuelMixBase + mixPulse * tuning::telemetry::readableFuelMixPulseScale) -
-            fuelRelief * tuning::telemetry::readableFuelMixFuelRelief -
-            sensorRelief * tuning::telemetry::readableFuelMixSensorRelief -
-            launch.cargoFuelRelief * tuning::telemetry::readableFuelMixCargoRelief,
-        0.0,
-        tuning::telemetry::readableFuelMixMaximum));
-    event.guidance = std::max(event.guidance, std::clamp(
-        readableLoad * (tuning::telemetry::readableGuidanceBase + guidancePulse * tuning::telemetry::readableGuidancePulseScale) +
-            event.vibration * tuning::telemetry::readableGuidanceVibrationScale -
-            sensorRelief * tuning::telemetry::readableGuidanceSensorRelief +
-            launch.cutGuidancePenalty * tuning::telemetry::readableGuidanceCutPenaltyScale +
-            launch.reliefGuidancePenalty * tuning::telemetry::readableGuidanceReliefPenaltyScale +
-            launch.cargoGuidancePenalty * tuning::telemetry::readableGuidanceCargoPenaltyScale +
-            crewNavLoad * tuning::telemetry::readableGuidanceCrewNavScale,
-        0.0,
-        tuning::telemetry::readableGuidanceMaximum));
-
-    double incidentAbortRisk = 0.0;
-    for (int i = 0; i < launch.incidentCount; ++i) {
-        const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(i)];
-        const double pulse = incidentPulse(incident, multiplier);
-        event.heat = std::clamp(event.heat + incident.heat * pulse, 0.0, tuning::telemetry::heatMaximum);
-        event.pressure = std::clamp(event.pressure + incident.pressure * pulse, 0.0, 1.0);
-        event.vibration = std::clamp(event.vibration + incident.vibration * pulse, 0.0, 1.0);
-        event.fuelMix = std::clamp(event.fuelMix + incident.fuelMix * pulse, 0.0, 1.0);
-        event.guidance = std::clamp(event.guidance + incident.guidance * pulse, 0.0, 1.0);
-        incidentAbortRisk = std::max(incidentAbortRisk, incident.abortRisk * pulse);
-    }
-
-    const double earlyThermal = std::clamp(
-        (event.heat - tuning::telemetry::earlyThermalStart) / tuning::telemetry::earlyThermalRange,
-        0.0,
-        1.0) * tuning::telemetry::earlyThermalScale;
-    const double warningStart = tuning::telemetry::warningStartBase - launch.sensorQuality * tuning::telemetry::warningStartSensorScale;
-    const double certaintyWindow = std::clamp(
-        (progressToCrash - warningStart) / std::max(tuning::telemetry::certaintyWindowMinimumRange, 1.0 - warningStart),
-        0.0,
-        1.0);
-    const double earlyAbortLoad =
-        burnLoad *
-            (tuning::telemetry::earlyAbortBase +
-                event.guidance * tuning::telemetry::earlyAbortGuidanceScale +
-                event.vibration * tuning::telemetry::earlyAbortVibrationScale) +
-        progressToCrash * tuning::telemetry::earlyAbortProgressScale -
-        escapeRelief * tuning::telemetry::earlyAbortEscapeRelief;
-    const double rawAbortRisk =
-        earlyAbortLoad +
-        certaintyWindow *
-            (tuning::telemetry::certaintyAbortBase +
-                event.guidance * tuning::telemetry::certaintyAbortGuidanceScale +
-                event.vibration * tuning::telemetry::certaintyAbortVibrationScale) +
-        event.heat * tuning::telemetry::abortHeatScale +
-        incidentAbortRisk -
-        escapeRelief * tuning::telemetry::abortEscapeRelief;
-    event.abortRisk = std::clamp(rawAbortRisk * launch.crewAbortMultiplier, 0.0, 1.0);
-    if (progressToCrash <= tuning::telemetry::instabilityStart) {
-        event.instability = 0.0;
-    } else if (progressToCrash <= tuning::telemetry::instabilityHighProximity) {
-        event.instability = tuning::telemetry::instabilityHighWarning
-            * (progressToCrash - tuning::telemetry::instabilityStart)
-            / (tuning::telemetry::instabilityHighProximity - tuning::telemetry::instabilityStart);
-    } else if (progressToCrash <= tuning::telemetry::instabilityCriticalProximity) {
-        event.instability = tuning::telemetry::instabilityHighWarning
-            + (tuning::telemetry::instabilityCriticalWarning - tuning::telemetry::instabilityHighWarning)
-                * (progressToCrash - tuning::telemetry::instabilityHighProximity)
-                / (tuning::telemetry::instabilityCriticalProximity - tuning::telemetry::instabilityHighProximity);
-    } else {
-        event.instability = tuning::telemetry::instabilityCriticalWarning
-            + (1.0 - tuning::telemetry::instabilityCriticalWarning)
-                * (progressToCrash - tuning::telemetry::instabilityCriticalProximity)
-                / (1.0 - tuning::telemetry::instabilityCriticalProximity);
-    }
-    event.instability = std::clamp(event.instability, 0.0, 1.0);
-    event.warning = std::clamp(std::max({earlyThermal, event.pressure, event.vibration, event.fuelMix, event.guidance, event.abortRisk, event.instability}), 0.0, 1.0);
+        tuning::launch::pilotingMaximumTravelProgress);
+    event.heat = launch.heatEnabled
+        ? std::clamp(
+              tuning::launch::pilotingHeatInitial + progress * 0.55,
+              0.0,
+              tuning::telemetry::heatMaximum)
+        : 0.0;
+    event.fuelMix = 0.0;
+    event.abortRisk = 0.0;
+    event.warning = event.heat;
     event.stress = std::clamp(
-        event.heat * tuning::telemetry::stressHeatScale +
-            event.pressure * tuning::telemetry::stressPressureScale +
-            event.vibration * tuning::telemetry::stressVibrationScale +
-            event.guidance * tuning::telemetry::stressGuidanceScale +
-            event.abortRisk * tuning::telemetry::stressAbortScale +
-            progressToCrash * tuning::telemetry::stressProgressScale,
+        event.heat * tuning::telemetry::stressHeatScale,
         0.0,
         1.0);
     event.message = warningMessage(event);
-
     return event;
 }
 

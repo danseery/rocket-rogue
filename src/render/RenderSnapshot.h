@@ -52,6 +52,16 @@ struct PoiGuidanceTarget {
     PoiGuidanceDirection direction = PoiGuidanceDirection::WorldTarget;
 };
 
+struct LaunchAsteroidSnapshot {
+    double routeProgress = 0.0;
+    double courseOffset = 0.0;
+    double radius = 0.10;
+    double scale = 1.0;
+    double rotation = 0.0;
+    double spin = 0.0;
+    bool hit = false;
+};
+
 inline PoiGuidanceTarget miningPoiGuidanceTarget(
     const MiningRunState& mining,
     double oxygenCapacity,
@@ -136,22 +146,35 @@ struct RenderSnapshot {
     Screen screen = Screen::Hangar;
     bool titleScreen = false;
     LaunchResultType lastResult = LaunchResultType::None;
+    LaunchFailureCause lastLaunchFailureCause = LaunchFailureCause::None;
     double currentMultiplier = 1.0;
     double targetMultiplier = 1.5;
     double travelProgress = 0.0;
     double heat = 0.0;
     double warning = 0.0;
-    double launchPressure = 0.0;
     double launchThrottle = 0.60;
     double launchFuel = 1.0;
+    double launchFuelCapacity = 10.0;
+    double launchFuelRemaining = 10.0;
+    double launchProjectedFuelReserve = 0.0;
+    double launchInsertionReserve = 0.0;
     double launchCourseOffset = 0.0;
     double launchCourseVelocity = 0.0;
     double launchCourseLimit = 1.0;
-    double launchIncidentWarningSeconds = 0.0;
-    double launchIncidentDirection = 0.0;
+    double launchMissionTargetProgress = 1.0;
+    double launchHullRemaining = 100.0;
+    double launchHullMaximum = 100.0;
     double launchHeatFailureProgress = 0.0;
-    double launchPressureFailureProgress = 0.0;
     double launchCourseFailureProgress = 0.0;
+    double launchFuelFailureProgress = 0.0;
+    bool launchManualControlsEnabled = true;
+    bool launchHeatEnabled = false;
+    bool launchAsteroidsEnabled = false;
+    std::array<LaunchAsteroidSnapshot, 24> launchAsteroids {};
+    int launchAsteroidCount = 0;
+    double launchImpactFlash = 0.0;
+    bool launchLunarImpactActive = false;
+    double launchLunarImpactElapsed = 0.0;
     double shipDamage = 0.0;
     int destinationTier = 0;
     int debugActOneCheckpoint = -1;

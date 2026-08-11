@@ -11,13 +11,9 @@ inline constexpr std::string_view newGame = "new_game";
 inline constexpr std::string_view continueGame = "continue_game";
 inline constexpr std::string_view prepareLaunch = "prepare_launch";
 inline constexpr std::string_view startLaunch = "start_launch";
-inline constexpr std::string_view ejectNow = "eject_now";
 inline constexpr std::string_view returnHome = "return_home";
 inline constexpr std::string_view arrivalOps = "arrival_ops";
 inline constexpr std::string_view cutEngines = "cut_engines";
-inline constexpr std::string_view pressureRelief = "pressure_relief";
-inline constexpr std::string_view closeReliefValve = "close_relief_valve";
-inline constexpr std::string_view jettisonCargo = "jettison_cargo";
 inline constexpr std::string_view next = "next";
 inline constexpr std::string_view attemptFrontier = "attempt_frontier";
 inline constexpr std::string_view openNavigation = "open_navigation";
@@ -42,6 +38,7 @@ inline constexpr std::string_view restCrew = "rest_crew";
 inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
+inline constexpr std::string_view installLaunchUpgradePrefix = "install_launch_upgrade:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
@@ -88,6 +85,11 @@ inline std::string buyOffer(int index)
 inline std::string selectRefitOffer(int index)
 {
     return std::string(selectRefitOfferPrefix) + std::to_string(index);
+}
+
+inline std::string installLaunchUpgrade(int kind)
+{
+    return std::string(installLaunchUpgradePrefix) + std::to_string(kind);
 }
 
 inline std::string researchProject(int index)
@@ -160,6 +162,7 @@ inline constexpr std::string_view miningFailure = "mining_failure";
 inline constexpr std::string_view launchOutcome = "launch_outcome";
 inline constexpr std::string_view flightReport = "flight_report";
 inline constexpr std::string_view launchIntroduction = "launch_introduction";
+inline constexpr std::string_view flightControlsIntroduction = "flight_controls_introduction";
 inline constexpr std::string_view approachIntroduction = "approach_introduction";
 inline constexpr std::string_view flybyIntroduction = "flyby_introduction";
 inline constexpr std::string_view orbitIntroduction = "orbit_introduction";
@@ -178,6 +181,7 @@ inline constexpr std::string_view saturnSlingshotFailure = "saturn_slingshot_fai
 
 namespace briefings {
 inline constexpr std::string_view launch = "launch_controls";
+inline constexpr std::string_view flightControlsCalibration = "flight_controls_calibration";
 inline constexpr std::string_view approach = "approach_overview";
 inline constexpr std::string_view flyby = "flyby_blueprints";
 inline constexpr std::string_view orbit = "orbit_blueprints";

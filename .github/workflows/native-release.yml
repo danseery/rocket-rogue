@@ -124,8 +124,9 @@ jobs:
           if ($listing -notmatch 'RocketRogue\.exe' -or $listing -notmatch 'assets\\scene-atlas' -or $listing -notmatch 'assets\\fonts' -or $listing -notmatch 'assets\\ui' -or $listing -notmatch 'licenses') {
             throw "Native archive is missing the executable, scene atlas, fonts, RmlUi resources, or licenses."
           }
-          $required = @(
-            'scene-atlas-0.png', 'scene-atlas-1.png', 'scene-atlas.json',
+          $atlasMetadata = Get-Content -Raw -LiteralPath 'assets/scene-atlas/scene-atlas.json' | ConvertFrom-Json
+          $atlasFiles = @('scene-atlas.json') + @($atlasMetadata.pages | ForEach-Object { Split-Path -Leaf $_.path })
+          $required = @($atlasFiles) + @(
             'SourceCodePro-Regular.ttf', 'SourceCodePro-Semibold.ttf', 'SourceCodePro-It.ttf', 'SourceCodePro.md',
             'assets\ui\panel.rml',
             'assets\ui\styles\all.rcss', 'assets\ui\styles\tokens.rcss', 'assets\ui\styles\primitives.rcss',
@@ -316,8 +317,9 @@ jobs:
           printf '%s\n' "$listing" | grep -Eq '(^|/)assets/fonts/'
           printf '%s\n' "$listing" | grep -Eq '(^|/)assets/ui/'
           printf '%s\n' "$listing" | grep -Eq '(^|/)licenses/'
+          atlas_pages="$(python3 -c 'import json; from pathlib import Path; data=json.loads(Path("assets/scene-atlas/scene-atlas.json").read_text()); print(" ".join(Path(page["path"]).name for page in data["pages"]))')"
           for required in \
-            scene-atlas-0.png scene-atlas-1.png scene-atlas.json \
+            scene-atlas.json $atlas_pages \
             SourceCodePro-Regular.ttf SourceCodePro-Semibold.ttf SourceCodePro-It.ttf SourceCodePro.md \
             assets/ui/panel.rml \
             assets/ui/styles/all.rcss assets/ui/styles/tokens.rcss assets/ui/styles/primitives.rcss \

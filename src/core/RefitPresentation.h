@@ -5,6 +5,7 @@
 #include "core/GameState.h"
 #include "core/GameText.h"
 #include "core/GameUi.h"
+#include "core/LaunchSimulation.h"
 #include "core/PanelPresentation.h"
 #include "core/Tuning.h"
 
@@ -43,7 +44,8 @@ struct RefitPresentation {
 
 enum class RefitOfferPresentationKind {
     ShipModule,
-    CrewUpgrade
+    CrewUpgrade,
+    LaunchUpgrade
 };
 
 struct RefitOfferPresentation {
@@ -104,13 +106,13 @@ inline std::string refitTrackClass(RefitTrack track, SlotType fallback)
 inline std::array<ModuleStatDisplay, 17> moduleStatDisplays(const ModuleStats& stats)
 {
     return {{
-        {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail},
-        {stats.fuel, text::moduleStats::fuel, text::moduleStats::fuelChip, text::moduleStats::fuel},
-        {stats.hull, text::moduleStats::hull, text::moduleStats::hullChip, text::moduleStats::hull},
-        {stats.cooling, text::moduleStats::tempControl, text::moduleStats::tempChip, text::moduleStats::tempControl},
-        {stats.sensors, text::moduleStats::sensors, text::moduleStats::sensorsChip, text::moduleStats::sensors},
-        {stats.escape, text::moduleStats::escape, text::moduleStats::escapeChip, text::moduleStats::escape},
-        {stats.pressure, text::moduleStats::pressureControl, text::moduleStats::pressureChip, text::moduleStats::pressureControl},
+        {stats.thrust, text::moduleStats::speed, text::moduleStats::speedChip, text::moduleStats::thrustDetail, false},
+        {stats.fuel, text::moduleStats::fuel, text::moduleStats::fuelChip, text::moduleStats::fuel, false},
+        {stats.hull, text::moduleStats::hull, text::moduleStats::hullChip, text::moduleStats::hull, false},
+        {stats.cooling, text::moduleStats::tempControl, text::moduleStats::tempChip, text::moduleStats::tempControl, false},
+        {stats.sensors, text::moduleStats::sensors, text::moduleStats::sensorsChip, text::moduleStats::sensors, false},
+        {stats.escape, text::moduleStats::escape, text::moduleStats::escapeChip, text::moduleStats::escape, false},
+        {stats.pressure, text::moduleStats::pressureControl, text::moduleStats::pressureChip, text::moduleStats::pressureControl, false},
         {stats.volatility, text::moduleStats::volatility, text::moduleStats::volatilityChip, text::moduleStats::volatility, false},
         {stats.payout, text::moduleStats::dataPayout, text::moduleStats::payoutChip, text::moduleStats::dataPayout, false},
         {stats.miningPower, text::moduleStats::miningPower, text::moduleStats::miningPowerChip, text::moduleStats::miningPower},
@@ -124,8 +126,37 @@ inline std::array<ModuleStatDisplay, 17> moduleStatDisplays(const ModuleStats& s
     }};
 }
 
+inline std::string launchUpgradeDetail(const ShipModule& module)
+{
+    switch (module.launchUpgradeKind) {
+    case LaunchUpgradeKind::FuelTanks:
+        return "Adds 5 fuel. More fuel extends range and protects the return margin.";
+    case LaunchUpgradeKind::FlightControls:
+        return "Control chaos falls to " +
+            display::percent(launchControlChaosForRank(module.launchUpgradeRank)) +
+            ". Steering drift, oversteer, and throttle kicks all settle down.";
+    case LaunchUpgradeKind::Cooling:
+        return "Engines-off cooling reaches " +
+            display::fixed(launchEngineOffCoolingForRank(module.launchUpgradeRank) * 100.0, 0) +
+            "%/s. Powered heat falls to " +
+            display::percent(launchPoweredHeatMultiplierForRank(module.launchUpgradeRank)) + ".";
+    case LaunchUpgradeKind::Hull:
+        return "Hull reaches " + display::fixed(
+            tuning::launch::hullBaseIntegrity +
+                static_cast<double>(module.launchUpgradeRank) * tuning::launch::hullIntegrityPerRank,
+            0) + " HP. A standard asteroid hit falls to " +
+            display::fixed(launchAsteroidImpactDamage(module.launchUpgradeRank, 1.0), 0) + " damage.";
+    case LaunchUpgradeKind::None:
+        break;
+    }
+    return {};
+}
+
 inline std::string moduleThreat(const ShipModule& module)
 {
+    if (module.launchUpgradeKind != LaunchUpgradeKind::None) {
+        return launchUpgradeDetail(module);
+    }
     if (module.stats.miningPower > 0.0) {
         return std::string(text::moduleThreats::cutsTougherRock);
     }
@@ -153,45 +184,36 @@ inline std::string moduleThreat(const ShipModule& module)
 
     switch (module.slot) {
     case SlotType::Engine:
-        return "Powered correction " + display::signedFixed(
-            module.stats.thrust * tuning::launch::pilotingSteeringThrustScale,
-            2) + "; route speed changes with thrust";
+        return "Legacy engine package retained for existing saves.";
     case SlotType::Fuel:
-        if (module.stats.pressure > 0.0) {
-            return "Valve venting " + display::signedFixed(
-                module.stats.pressure * tuning::launch::pilotingValveReliefStatScale * 100.0,
-                1) + "%/s";
-        }
-        return "Fuel capacity " + display::signedFixed(
-            module.stats.fuel * tuning::launch::pilotingFuelStatCapacityScale * 100.0,
-            0) + "%";
+        return "Legacy fuel package retained for existing saves.";
     case SlotType::Hull:
-        return "Pressure reaction window " + display::signedFixed(
-            module.stats.hull * tuning::launch::pilotingPressureGraceHullSeconds,
-            2) + "s; also protects against impacts";
+        return "Legacy hull package retained for existing saves.";
     case SlotType::Cooling:
-        return "Engine-off cooling " + display::signedFixed(
-            module.stats.cooling * tuning::launch::pilotingCoolingStatScale * 100.0,
-            1) + "%/s";
+        return "Legacy cooling package retained for existing saves.";
     case SlotType::Sensors:
-        if (module.stats.pressure > 0.0) {
-            return "Valve venting " + display::signedFixed(
-                module.stats.pressure * tuning::launch::pilotingValveReliefStatScale * 100.0,
-                1) + "%/s";
-        }
-        return "Incident warning " + display::signedFixed(
-            module.stats.sensors * tuning::launch::pilotingIncidentWarningSensorSeconds,
-            2) + "s; course tolerance " + display::signedFixed(
-            module.stats.sensors * tuning::launch::pilotingCourseSensorToleranceScale * 100.0,
-            0) + "%";
+        return "Legacy sensor package retained for existing saves.";
     case SlotType::Escape:
-        return std::string(text::moduleThreats::improvesCrewSurvival);
+        return "Legacy recovery package retained for existing saves.";
     }
     return std::string(text::moduleThreats::improvesMissionOdds);
 }
 
 inline std::string modulePrimaryImpact(const ShipModule& module)
 {
+    switch (module.launchUpgradeKind) {
+    case LaunchUpgradeKind::FuelTanks:
+        return "+5 fuel";
+    case LaunchUpgradeKind::FlightControls:
+        return "Chaos \xE2\x86\x92 " + display::percent(launchControlChaosForRank(module.launchUpgradeRank));
+    case LaunchUpgradeKind::Cooling:
+        return "Cooling \xE2\x86\x92 " +
+            display::fixed(launchEngineOffCoolingForRank(module.launchUpgradeRank) * 100.0, 0) + "%/s";
+    case LaunchUpgradeKind::Hull:
+        return "+" + display::fixed(tuning::launch::hullIntegrityPerRank, 0) + " HP";
+    case LaunchUpgradeKind::None:
+        break;
+    }
     const auto displays = moduleStatDisplays(module.stats);
     const ModuleStatDisplay* best = &displays.front();
     for (const ModuleStatDisplay& display : displays) {
@@ -226,6 +248,21 @@ inline void addBeneficialReductionChip(std::vector<RefitStatChip>& chips, std::s
 
 inline std::vector<RefitStatChip> moduleStatChips(const ShipModule& module)
 {
+    switch (module.launchUpgradeKind) {
+    case LaunchUpgradeKind::FuelTanks:
+        return {{"FUEL", "+5", true}};
+    case LaunchUpgradeKind::FlightControls:
+        return {{"CHAOS", display::percent(launchControlChaosForRank(module.launchUpgradeRank)), true}};
+    case LaunchUpgradeKind::Cooling:
+        return {{"COOL", display::fixed(launchEngineOffCoolingForRank(module.launchUpgradeRank) * 100.0, 0) + "%/s", true}};
+    case LaunchUpgradeKind::Hull:
+        return {
+            {"HULL", "+" + display::fixed(tuning::launch::hullIntegrityPerRank, 0) + " HP", true},
+            {"IMPACT", display::percent(launchHullImpactMultiplierForRank(module.launchUpgradeRank)), true}
+        };
+    case LaunchUpgradeKind::None:
+        break;
+    }
     std::vector<RefitStatChip> chips;
     for (const ModuleStatDisplay& display : moduleStatDisplays(module.stats)) {
         addStatChip(chips, display.chipLabel, display.value);
@@ -394,6 +431,31 @@ inline RefitOfferPresentation moduleOfferPresentation(const ShipModule& module, 
     };
 }
 
+inline RefitOfferPresentation launchUpgradeOfferPresentation(
+    const ShipModule& module,
+    int index,
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const int cost = static_cast<int>(tuning::launchProgression::upgradeCost);
+    const bool affordable = canInstallLaunchUpgrade(state, catalog, module.launchUpgradeKind);
+    return {
+        RefitOfferPresentationKind::LaunchUpgrade,
+        index,
+        cost,
+        display::credits(cost),
+        display::credits(cost),
+        affordable,
+        moduleRefitPresentation(module),
+        affordable
+            ? panelActionButton(
+                text::buttons::install,
+                ui::actions::installLaunchUpgrade(static_cast<int>(module.launchUpgradeKind)),
+                "ok")
+            : disabledPanelButton(text::needCredits(cost))
+    };
+}
+
 inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& upgrade, int index, double credits)
 {
     const int cost = crewUpgradeCost(upgrade);
@@ -417,22 +479,63 @@ inline RefitWindowPresentation refitWindowPresentation(const GameState& state, c
     RefitWindowPresentation presentation;
     presentation.resourceChips = refitResourceChips(state);
     presentation.recoveryDetail = refitRecoveryDetail(state, !presentation.resourceChips.empty());
-    presentation.offers.reserve(state.run.offerModuleIds.size());
+    presentation.offers.reserve(state.run.offerModuleIds.size() + 4);
 
-    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
-        const int index = static_cast<int>(i);
-        if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
-            presentation.offers.push_back(moduleOfferPresentation(*module, index, state));
-            continue;
+    LaunchUpgradeKind lessonUpgrade = LaunchUpgradeKind::None;
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FlightControlsCalibration:
+        lessonUpgrade = LaunchUpgradeKind::FuelTanks;
+        break;
+    case LaunchTrainingStage::MoonTransfer:
+        lessonUpgrade = LaunchUpgradeKind::FlightControls;
+        break;
+    case LaunchTrainingStage::MarsTransfer:
+        lessonUpgrade = LaunchUpgradeKind::Cooling;
+        break;
+    case LaunchTrainingStage::JupiterTransfer:
+        lessonUpgrade = LaunchUpgradeKind::Hull;
+        break;
+    case LaunchTrainingStage::FuelCalibration:
+    case LaunchTrainingStage::ThermalManagement:
+    case LaunchTrainingStage::HullIntegrity:
+    case LaunchTrainingStage::Complete:
+        break;
+    }
+    if (lessonUpgrade != LaunchUpgradeKind::None && launchUpgradeRank(state, lessonUpgrade) == 0) {
+        const ShipModule* module = nextLaunchUpgrade(state, catalog, lessonUpgrade);
+        if (module != nullptr && launchUpgradeUnlocked(state, lessonUpgrade, module->launchUpgradeRank)) {
+            presentation.offers.push_back(launchUpgradeOfferPresentation(
+                *module,
+                static_cast<int>(presentation.offers.size()),
+                state,
+                catalog));
         }
+    }
 
-        if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[i])) {
-            presentation.offers.push_back(crewUpgradeOfferPresentation(*upgrade, index, state.run.credits));
+    // Lesson rewards are deliberately a single, taught Launch upgrade. Normal
+    // refit entitlements earned between lessons still expose the existing
+    // non-Launch module and crew choices instead of opening an empty board.
+    if (!curatedProvingRefitsActive(state)) {
+        for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
+            const int index = static_cast<int>(i);
+            if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
+                if (module->launchUpgradeKind != LaunchUpgradeKind::None ||
+                    module->compatibilityOnly) {
+                    continue;
+                }
+                presentation.offers.push_back(moduleOfferPresentation(*module, index, state));
+                continue;
+            }
+
+            if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[i])) {
+                presentation.offers.push_back(crewUpgradeOfferPresentation(*upgrade, index, state.run.credits));
+            }
         }
     }
 
     presentation.rerollCost = offerRerollCost(state);
-    presentation.showReroll = !curatedProvingRefitsActive(state);
+    presentation.showReroll = state.meta.launchLessons.stage == LaunchTrainingStage::Complete &&
+        !curatedProvingRefitsActive(state);
     presentation.rerollAction = state.run.credits >= presentation.rerollCost
         ? panelActionButton(text::panel::rerollOffers(display::money(presentation.rerollCost)), ui::actions::rerollOffers, "warn")
         : disabledPanelButton(display::needCredits(presentation.rerollCost));

@@ -63,7 +63,8 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
     "launch left/right keys must preserve the screen-space steering sign",
   );
   assert.match(keyDown, /key === "c"[\s\S]*rr_cut_engines/);
-  assert.match(keyDown, /key === "v"[\s\S]*rr_pressure_relief/);
+  assert.doesNotMatch(keyDown, /rr_pressure_relief|rr_jettison|rr_eject/,
+    "launch keyboard routing must not retain pressure, jettison, or manual-eject shortcuts");
   assert.match(keyDown, /if \(isFlybyActive\(\)\)/);
   assert.match(keyDown, /if \(isOrbitActive\(\)\)/);
   assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);
@@ -111,5 +112,23 @@ test("web shell leaves semantic scenario controls inside the shared RmlUi docume
     shell,
     /rr\.uiActivateFocused\(\)/,
     "web keyboard and controller confirmation must activate the focused RmlUi element",
+  );
+});
+
+test("web console exposes launch-lesson visual verification hooks", () => {
+  assert.match(
+    shell,
+    /debugLaunchLesson:\s*\(lessonIndex\)\s*=>\s*rrCall\(\s*"rr_debug_launch_lesson"/,
+    "debugLaunchLesson must call the exported launch-lesson scene hook",
+  );
+  assert.match(
+    shell,
+    /debugExit:\s*\(\)\s*=>\s*rrCall\("rr_debug_exit"\)/,
+    "debugExit must leave the forced verification scene through its exported hook",
+  );
+  assert.match(
+    shell,
+    /get\("debug_launch_lesson"\)[\s\S]*?\^\[0-3\]\$[\s\S]*?window\.rr\.debugLaunchLesson\(lessonIndex\)/,
+    "debug_launch_lesson must safely select one of the four save-isolated launch scenes",
   );
 });

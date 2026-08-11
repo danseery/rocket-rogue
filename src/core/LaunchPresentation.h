@@ -1,15 +1,14 @@
 #pragma once
 
-#include "core/FlightProgress.h"
 #include "core/GameFormat.h"
 #include "core/GameState.h"
-#include "core/GameText.h"
 #include "core/GameUi.h"
 #include "core/LaunchSimulation.h"
 #include "core/PanelPresentation.h"
-#include "core/Telemetry.h"
 #include "core/Tuning.h"
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -22,17 +21,20 @@ using FlightActionButtonPresentation = PanelButtonPresentation;
 struct LaunchPanelPresentation {
     std::string sectionTitle;
     std::string destinationName;
+    std::string objectiveTitle;
+    std::string objectiveCopy;
     std::vector<PanelMetricPresentation> metrics;
-    std::vector<TelemetryChannelSample> telemetry;
     std::string telemetryMessage;
     std::vector<FlightActionButtonPresentation> primaryActions;
     std::vector<FlightActionButtonPresentation> systemActions;
     double displayedMultiplier = 1.0;
     double returnProgress = 0.0;
-    double recoveryRisk = 0.0;
 };
 
-inline FlightActionButtonPresentation flightActionButton(std::string_view label, std::string_view actionId, std::string cssClass = "")
+inline FlightActionButtonPresentation flightActionButton(
+    std::string_view label,
+    std::string_view actionId,
+    std::string cssClass = {})
 {
     return panelActionButton(label, actionId, std::move(cssClass));
 }
@@ -42,54 +44,30 @@ inline FlightActionButtonPresentation disabledFlightActionButton(std::string_vie
     return disabledPanelButton(label);
 }
 
-inline std::string launchSectionTitle(const FlightActionState& actions, bool frontierTransfer)
+inline std::vector<FlightActionButtonPresentation> primaryFlightActions(const FlightActionState& actions)
 {
-    if (actions.returningHome) {
-        return std::string(text::panel::sections::returnBurn);
-    }
-    return std::string(frontierTransfer ? text::panel::sections::transferAttempt : text::panel::sections::provingFlight);
+    return {actions.returningHome
+        ? disabledFlightActionButton("Returning")
+        : flightActionButton("Turn Around", ui::actions::returnHome, "ok")};
 }
 
-inline std::vector<FlightActionButtonPresentation> primaryFlightActions(
-    const FlightActionState& actions,
-    bool arkKnown,
-    bool outerExpedition = false)
+inline std::vector<FlightActionButtonPresentation> systemFlightActions(
+    const PreparedLaunch& launch,
+    const FlightActionState& actions)
 {
-    std::vector<FlightActionButtonPresentation> buttons;
-    if (actions.returningHome) {
-        buttons.push_back(disabledFlightActionButton(
-            text::buttons::returningHomeLabel(arkKnown, outerExpedition)));
-    } else {
-        buttons.push_back(flightActionButton(
-            text::buttons::returnHomeLabel(arkKnown, outerExpedition),
-            ui::actions::returnHome,
-            "ok"));
+    if (!launch.heatEnabled) {
+        return {};
     }
-    buttons.push_back(flightActionButton(text::buttons::eject, ui::actions::ejectNow, "danger"));
-    return buttons;
-}
-
-inline std::vector<FlightActionButtonPresentation> systemFlightActions(const FlightActionState& actions, bool)
-{
-    std::vector<FlightActionButtonPresentation> buttons;
-    buttons.push_back(flightActionButton(
-        actions.cutEnginesActive ? text::buttons::restoreThrust : text::buttons::cutEngines,
+    return {flightActionButton(
+        actions.cutEnginesActive ? "Engines On" : "Engines Off",
         ui::actions::cutEngines,
-        "warn"));
-
-    if (actions.pressureReliefOpen) {
-        buttons.push_back(flightActionButton(text::buttons::closeValve, ui::actions::closeReliefValve, "warn"));
-    } else {
-        buttons.push_back(flightActionButton(text::buttons::reliefValve, ui::actions::pressureRelief, "warn"));
-    }
-
-    buttons.push_back(actions.cargoJettisoned
-        ? disabledFlightActionButton(text::buttons::cargoGone)
-        : flightActionButton(text::buttons::jettisonCargo, ui::actions::jettisonCargo, "warn"));
-    return buttons;
+        actions.cutEnginesActive ? "ok" : "warn")};
 }
 
-inline const Destination& launchDisplayDestination(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& launch)
+inline const Destination& launchDisplayDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const PreparedLaunch& launch)
 {
     if (const Destination* destination = catalog.findDestination(launch.config.destinationId)) {
         return *destination;
@@ -97,19 +75,113 @@ inline const Destination& launchDisplayDestination(const GameState& state, const
     return currentDestination(state, catalog);
 }
 
-inline bool launchUsesOuterExpeditionRecovery(
-    const ContentCatalog&,
+inline void addLaunchLessonCopy(
+    LaunchPanelPresentation& presentation,
+    const PreparedLaunch& launch,
     const Destination& destination)
 {
-    return destination.oneWayExpedition;
+    switch (launch.config.missionKind) {
+    case LaunchMissionKind::FuelCalibration:
+        presentation.objectiveTitle = "TURN AROUND ON LOW FUEL";
+        presentation.objectiveCopy =
+            "The Moon is out of range. Fly until FUEL warns, then Turn Around and bring the route data home.";
+        break;
+    case LaunchMissionKind::FlightControlsCalibration:
+        presentation.objectiveTitle = "CALIBRATE FLIGHT CONTROLS";
+        presentation.objectiveCopy =
+            "Navigation is not cleared for a lunar landing. Reach the yellow test line, correct the drift, then Turn Around; continuing to the Moon will cause an impact.";
+        break;
+    case LaunchMissionKind::ThermalManagement:
+        presentation.objectiveTitle = "REACH " + destination.name;
+        presentation.objectiveCopy =
+            "Manage heat with Engines Off. Reaching " + destination.name + " completes the flight and lands the ship.";
+        break;
+    case LaunchMissionKind::AsteroidBelt:
+        presentation.objectiveTitle = "REACH " + destination.name;
+        presentation.objectiveCopy =
+            "Steer through the asteroid gaps. Reaching " + destination.name + " completes the flight and lands the ship.";
+        break;
+    case LaunchMissionKind::Standard:
+        presentation.objectiveTitle = "REACH " + destination.name;
+        if (launch.asteroidsEnabled) {
+            presentation.objectiveCopy = "Manage fuel, temperature, course, and hull damage through the asteroid belt.";
+        } else if (launch.heatEnabled) {
+            presentation.objectiveCopy = "Manage fuel and temperature. Turn Engines Off before heat reaches critical.";
+        } else if (launch.manualControlsEnabled) {
+            if (launch.config.frontierTransfer && launch.arrivalReserveFuel > 0.0) {
+                presentation.objectiveCopy =
+                    "Reach " + destination.name + ". Higher throttle uses more fuel.";
+            } else {
+                presentation.objectiveCopy = "Manage fuel, throttle, and course through the full route.";
+            }
+        } else {
+            presentation.objectiveCopy = "Watch FUEL and preserve enough for the return leg.";
+        }
+        break;
+    }
 }
 
-inline bool advancedFlightControlsUnlocked(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& flightModel)
+inline std::string launchStatusMessage(
+    const PreparedLaunch& launch,
+    const LaunchFlightState& flight,
+    const FlightActionState& actions)
 {
-    static_cast<void>(state);
-    static_cast<void>(catalog);
-    static_cast<void>(flightModel);
-    return true;
+    if (flight.fuelFailureSeconds > 0.0) {
+        return "OUT OF FUEL \xE2\x80\x94 rescue in " + display::fixed(
+            std::max(0.0, tuning::launch::pilotingFuelFailureSeconds - flight.fuelFailureSeconds),
+            1) + "s";
+    }
+    if (launch.heatEnabled && flight.heatFailureSeconds > 0.0) {
+        return "TEMPERATURE CRITICAL \xE2\x80\x94 Engines Off \xE2\x80\x94 " + display::fixed(
+            std::max(0.0, tuning::launch::pilotingHeatFailureSeconds - flight.heatFailureSeconds),
+            1) + "s";
+    }
+    if (launch.manualControlsEnabled && flight.courseFailureSeconds > 0.0) {
+        return "COURSE LOST \xE2\x80\x94 correct now \xE2\x80\x94 " + display::fixed(
+            std::max(0.0, tuning::launch::pilotingCourseFailureSeconds - flight.courseFailureSeconds),
+            1) + "s";
+    }
+    if (launch.asteroidsEnabled && flight.hullRemaining <= flight.hullMaximum * 0.25) {
+        return "HULL CRITICAL \xE2\x80\x94 avoid the next asteroid band";
+    }
+    if (!actions.returningHome && !launch.config.frontierTransfer &&
+        flight.projectedFuelReserve <= 0.0) {
+        return "FUEL LOW \xE2\x80\x94 Turn Around now";
+    }
+    if (!actions.returningHome && launch.config.frontierTransfer &&
+        flight.projectedFuelReserve < -tuning::launch::arrivalReserveGraceFuel - 0.05) {
+        return "FUEL LOW \xE2\x80\x94 reduce throttle";
+    }
+    if (launch.heatEnabled && flight.heat >= tuning::launch::pilotingCriticalThreshold) {
+        return "TEMPERATURE CRITICAL \xE2\x80\x94 turn Engines Off";
+    }
+    if (launch.heatEnabled && flight.heat >= tuning::launch::pilotingWarningThreshold) {
+        return "Temperature rising \xE2\x80\x94 prepare to turn Engines Off";
+    }
+    if (launch.manualControlsEnabled &&
+        std::abs(flight.courseOffset) >= tuning::launch::pilotingCourseCaution) {
+        return "COURSE CRITICAL \xE2\x80\x94 steer toward center";
+    }
+    if (launch.manualControlsEnabled &&
+        std::abs(flight.courseOffset) >= tuning::launch::pilotingCourseSafe) {
+        return "Course drifting \xE2\x80\x94 correct toward center";
+    }
+    if (actions.returningHome) {
+        return "RETURN LEG \xE2\x80\x94 bring the ship home";
+    }
+    switch (launch.config.missionKind) {
+    case LaunchMissionKind::FuelCalibration:
+        return "Watch FUEL. Turn Around when the warning appears.";
+    case LaunchMissionKind::FlightControlsCalibration:
+        return "UNCALIBRATED LANDING — turn at the yellow test line. The Moon will cause an impact.";
+    case LaunchMissionKind::ThermalManagement:
+        return "Watch TEMPERATURE. Engines Off always cools the ship.";
+    case LaunchMissionKind::AsteroidBelt:
+        return "Steer through the gaps. Protect the HULL.";
+    case LaunchMissionKind::Standard:
+        return "Keep the ship inside its visible limits.";
+    }
+    return {};
 }
 
 inline LaunchPanelPresentation launchPanelPresentation(
@@ -117,121 +189,68 @@ inline LaunchPanelPresentation launchPanelPresentation(
     const ContentCatalog& catalog,
     const PreparedLaunch& flightModel,
     double currentMultiplier,
-    double returnBurnMultiplier,
-    double returnElapsed,
-    double returnDuration,
+    double,
+    double,
+    double,
     const FlightActionState& actions,
-    bool pressureReliefUsed,
     const LaunchFlightState* launchFlight = nullptr)
 {
     LaunchPanelPresentation presentation;
     const Destination& destination = launchDisplayDestination(state, catalog, flightModel);
     presentation.destinationName = destination.name;
     presentation.sectionTitle = launchFlight != nullptr
-        ? (actions.returningHome ? "Return leg \xE2\x80\xA2 " : "Outbound leg \xE2\x80\xA2 ") + destination.name
-        : launchSectionTitle(actions, flightModel.config.frontierTransfer);
+        ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Outbound \xE2\x80\xA2 ") + destination.name
+        : "Launch \xE2\x80\xA2 " + destination.name;
+    addLaunchLessonCopy(presentation, flightModel, destination);
 
-    if (launchFlight != nullptr) {
-        const LaunchFlightState& flight = *launchFlight;
-        presentation.displayedMultiplier = flight.currentMultiplier;
-        presentation.returnProgress = flight.returningHome
-            ? std::clamp(1.0 - flight.travelProgress, 0.0, 1.0)
-            : std::clamp(flight.travelProgress, 0.0, 1.0);
-        presentation.recoveryRisk = 0.0;
-        presentation.metrics.push_back(panelMetric(
-            "Route",
-            std::string(flight.returningHome ? "RETURN " : "OUTBOUND ") + display::percent(presentation.returnProgress)));
-        presentation.metrics.push_back(panelMetric(
-            "Throttle",
-            actions.cutEnginesActive
-                ? "CUT \xE2\x80\xA2 " + display::percent(flight.selectedThrottle) + " set"
-                : display::percent(flight.selectedThrottle)));
-        presentation.metrics.push_back(panelMetric(
-            "Fuel",
-            display::percent(flight.fuelRemaining / std::max(0.01, flight.fuelCapacity))));
-        presentation.metrics.push_back(panelMetric(
-            "Course",
-            std::abs(flight.courseOffset) < tuning::launch::pilotingCourseSafe
-                ? "CENTERED"
-                : display::signedFixed(flight.courseOffset, 2)));
-        presentation.metrics.push_back(panelMetric("Temperature", display::percent(flight.heat)));
-        presentation.metrics.push_back(panelMetric("Pressure", display::percent(flight.pressure)));
-
-        const TelemetryEvent event = launchTelemetryAt(flightModel, flight);
-        const auto samples = telemetrySamples(event);
-        presentation.telemetry.assign(samples.begin(), samples.end());
-        if (flight.heatFailureSeconds > 0.0) {
-            presentation.telemetryMessage = "THERMAL FAILURE IN " +
-                display::fixed(std::max(0.0, tuning::launch::pilotingHeatFailureSeconds - flight.heatFailureSeconds), 1) +
-                "s \xE2\x80\x94 cut engines now";
-        } else if (flight.pressureFailureSeconds > 0.0) {
-            presentation.telemetryMessage = "PRESSURE RUPTURE IN " +
-                display::fixed(std::max(0.0, launchPressureGraceSeconds(flightModel) - flight.pressureFailureSeconds), 1) +
-                "s \xE2\x80\x94 open the relief valve";
-        } else if (flight.courseFailureSeconds > 0.0) {
-            presentation.telemetryMessage = "COURSE LOST IN " +
-                display::fixed(std::max(0.0, tuning::launch::pilotingCourseFailureSeconds - flight.courseFailureSeconds), 1) +
-                "s \xE2\x80\x94 steer toward center";
-        } else if (flight.heat >= tuning::launch::pilotingCriticalThreshold) {
-            presentation.telemetryMessage = "TEMPERATURE CRITICAL \xE2\x80\x94 reduce throttle or cut engines";
-        } else if (flight.pressure >= tuning::launch::pilotingCriticalThreshold) {
-            presentation.telemetryMessage = "PRESSURE CRITICAL \xE2\x80\x94 open the relief valve";
-        } else if (flight.heat >= tuning::launch::pilotingWarningThreshold) {
-            presentation.telemetryMessage = "Temperature caution \xE2\x80\x94 reduce throttle to cool";
-        } else if (flight.pressure >= tuning::launch::pilotingWarningThreshold) {
-            presentation.telemetryMessage = "Pressure caution \xE2\x80\x94 prepare the relief valve";
-        } else if (flight.forecastIncidentIndex >= 0) {
-            const TelemetryIncident& incident = flightModel.incidents[static_cast<std::size_t>(flight.forecastIncidentIndex)];
-            const std::string incidentType = incident.heat >= incident.pressure && incident.heat >= incident.guidance
-                ? "thermal pulse"
-                : (incident.pressure >= incident.guidance ? "pressure pulse" : "course disturbance");
-            presentation.telemetryMessage = "INCOMING " + incidentType + " IN " +
-                display::fixed(flight.incidentWarningSeconds, 1) + "s";
-        } else if (std::abs(flight.courseOffset) >= tuning::launch::pilotingCourseCaution) {
-            presentation.telemetryMessage = "COURSE CRITICAL \xE2\x80\x94 steer toward the corridor center";
-        } else if (std::abs(flight.courseOffset) >= tuning::launch::pilotingCourseSafe) {
-            presentation.telemetryMessage = "Course caution \xE2\x80\x94 correct toward center";
-        } else {
-            presentation.telemetryMessage = event.message;
+    if (launchFlight == nullptr) {
+        presentation.displayedMultiplier = currentMultiplier;
+        std::string fuelValue = display::fixed(flightModel.fuelCapacity, 0) + " fuel";
+        presentation.metrics.push_back(panelMetric("Fuel", std::move(fuelValue)));
+        if (flightModel.manualControlsEnabled) {
+            presentation.metrics.push_back(panelMetric("Throttle", display::percent(tuning::launch::pilotingInitialThrottle)));
         }
-        presentation.primaryActions = primaryFlightActions(
-            actions,
-            arkDiscovered(state),
-            launchUsesOuterExpeditionRecovery(catalog, destination));
-        if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
-            presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
+        if (flightModel.heatEnabled) {
+            presentation.metrics.push_back(panelMetric("Temperature", "READY"));
         }
+        if (flightModel.asteroidsEnabled) {
+            presentation.metrics.push_back(panelMetric("Hull", "READY"));
+        }
+        presentation.telemetryMessage = presentation.objectiveCopy;
         return presentation;
     }
 
-    presentation.displayedMultiplier = actions.returningHome
-        ? returnTelemetryMultiplier(returnBurnMultiplier, flightModel.crashMultiplier, returnElapsed, returnDuration)
-        : currentMultiplier;
-    presentation.returnProgress = flight_progress::returnCompletion(returnElapsed, returnDuration);
-    presentation.recoveryRisk = returnHomeRisk(flightModel, catalog, state, presentation.displayedMultiplier);
-
-    presentation.metrics.push_back(panelMetric(text::labels::burnDepth, display::multiplier(presentation.displayedMultiplier)));
-    presentation.metrics.push_back(panelMetric(
-        actions.returningHome ? text::labels::returnProgress :
-            (flightModel.config.frontierTransfer ? text::labels::requiredBurn : text::labels::dataGoal),
-        actions.returningHome ? display::percent(presentation.returnProgress) :
-            display::multiplier(flightModel.config.frontierTransfer ? destination.targetMultiplier : flightModel.config.burnGoalMultiplier)));
-    presentation.metrics.push_back(panelMetric(text::labels::returnRisk, display::percent(presentation.recoveryRisk)));
-    if (flightModel.objectiveConfidence > 0.0) {
-        presentation.metrics.push_back(panelMetric("Confidence", display::percent(flightModel.objectiveConfidence)));
+    const LaunchFlightState& flight = *launchFlight;
+    presentation.displayedMultiplier = flight.currentMultiplier;
+    presentation.returnProgress = flight.returningHome
+        ? std::clamp(1.0 - flight.travelProgress, 0.0, 1.0)
+        : std::clamp(flight.travelProgress, 0.0, 1.0);
+    std::string fuelValue = !actions.returningHome && !flightModel.config.frontierTransfer &&
+            flight.projectedFuelReserve <= 0.0
+        ? std::string("TURN AROUND")
+        : display::fixed(std::max(0.0, flight.fuelRemaining), 0) + " / " +
+            display::fixed(flight.fuelCapacity, 0);
+    presentation.metrics.push_back(panelMetric("Fuel", std::move(fuelValue)));
+    if (flightModel.manualControlsEnabled) {
+        presentation.metrics.push_back(panelMetric(
+            "Throttle",
+            actions.cutEnginesActive
+                ? "OFF \xE2\x80\xA2 " + display::percent(flight.selectedThrottle) + " set"
+                : display::percent(flight.selectedThrottle)));
+    }
+    if (flightModel.heatEnabled) {
+        presentation.metrics.push_back(panelMetric("Temperature", display::percent(flight.heat)));
+    }
+    if (flightModel.asteroidsEnabled) {
+        presentation.metrics.push_back(panelMetric(
+            "Hull",
+            display::fixed(std::max(0.0, flight.hullRemaining), 0) + " / " +
+                display::fixed(flight.hullMaximum, 0) + " HP"));
     }
 
-    const TelemetryEvent event = telemetryAt(flightModel, presentation.displayedMultiplier);
-    const auto samples = telemetrySamples(event);
-    presentation.telemetry.assign(samples.begin(), samples.end());
-    presentation.telemetryMessage = event.message;
-    presentation.primaryActions = primaryFlightActions(
-        actions,
-        arkDiscovered(state),
-        launchUsesOuterExpeditionRecovery(catalog, destination));
-    if (advancedFlightControlsUnlocked(state, catalog, flightModel)) {
-        presentation.systemActions = systemFlightActions(actions, pressureReliefUsed);
-    }
+    presentation.telemetryMessage = launchStatusMessage(flightModel, flight, actions);
+    presentation.primaryActions = primaryFlightActions(actions);
+    presentation.systemActions = systemFlightActions(flightModel, actions);
     return presentation;
 }
 

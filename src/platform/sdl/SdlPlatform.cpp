@@ -594,9 +594,7 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
             if (event.key == SDLK_SPACE) launchOutcomeConfirmReleaseGuard_ = true;
             app.returnHome();
         }
-        else if (event.key == SDLK_E) app.ejectNow();
         else if (event.key == SDLK_C) app.cutEngines();
-        else if (event.key == SDLK_V) app.pressureReliefValve();
         break;
     case InputContext::FlybyActive:
         if (event.key == SDLK_ESCAPE) app.flybyAbort();

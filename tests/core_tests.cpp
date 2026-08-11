@@ -7,10 +7,8 @@
 #include "core/GameState.h"
 #include "core/HangarPresentation.h"
 #include "core/InventoryPresentation.h"
-#include "core/LaunchBalance.h"
 #include "core/LaunchPresentation.h"
 #include "core/LaunchReadinessPresentation.h"
-#include "core/LaunchStatus.h"
 #include "core/LaunchSimulation.h"
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
@@ -25,7 +23,6 @@
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
-#include "core/Telemetry.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 #include "game/GamePanel.h"
@@ -39,6 +36,7 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace rocket;
@@ -54,6 +52,11 @@ void require(bool condition, const char* message)
         // native and WebAssembly runs.
         std::exit(3);
     }
+}
+
+void require(bool condition, const std::string& message)
+{
+    require(condition, message.c_str());
 }
 
 const HangarOperationCardPresentation* findHangarOperationCard(const std::vector<HangarOperationCardPresentation>& cards, std::string_view title);
@@ -178,146 +181,9 @@ GameState configuredState(const ContentCatalog& catalog, int destinationIndex, d
     return state;
 }
 
-void deterministicLaunchesMatch()
+bool nearlyEqual(double lhs, double rhs, double tolerance = 0.000001)
 {
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 2, catalog.destinations[2].targetMultiplier);
-
-    Random rngA(991);
-    Random rngB(991);
-    const LaunchOutcome a = simulateLaunchToTarget(state, catalog, rngA);
-    const LaunchOutcome b = simulateLaunchToTarget(state, catalog, rngB);
-
-    require(a.type == b.type, "same seed should produce same outcome type");
-    require(std::abs(a.crashMultiplier - b.crashMultiplier) < 0.000001, "same seed should produce same hidden crash");
-    require(std::abs(a.payout - b.payout) < 0.000001, "same seed should produce same payout");
-}
-
-void safeAndDestroyedOutcomesResolve()
-{
-    const ContentCatalog catalog = createDefaultContent();
-
-    const double safeBurn = catalog.destinations[0].minCrashMultiplier - 0.01;
-    GameState safeState = configuredState(catalog, 0, safeBurn);
-    Random safeRng(7);
-    const PreparedLaunch safeLaunch = prepareLaunch(safeState, catalog, safeRng);
-    const LaunchOutcome safe = resolveLaunch(safeLaunch, catalog, safeState, safeBurn, RecoveryMethod::ManualEject, safeRng);
-    require(safe.type == LaunchResultType::SafeEject, "low target should safely eject before the minimum crash");
-    require(safe.recoveryMethod == RecoveryMethod::ManualEject, "safe outcome should record manual eject");
-    require(safe.payout > 0.0, "safe eject should pay fictional credits");
-    require(safe.recoveryCost > 0.0, "manual eject should have rescue cost");
-
-    GameState doomedState = configuredState(catalog, 0, 99.0);
-    Random doomedRng(7);
-    const LaunchOutcome doomed = simulateLaunchToTarget(doomedState, catalog, doomedRng);
-    require(doomed.type == LaunchResultType::Destroyed, "extreme target should exceed hidden crash");
-    require(doomed.shipDamage == tuning::damage::destroyedShipDamage, "destroyed launch should total the ship");
-}
-
-void shallowRecoveryHasBoundedCostAndNoProgress()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    const double shallowBurn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.20;
-
-    Random firstRng(77);
-    const PreparedLaunch firstLaunch = prepareLaunch(state, catalog, firstRng);
-    const LaunchOutcome first = resolveLaunch(firstLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, firstRng);
-    require(first.type != LaunchResultType::Destroyed, "first shallow clean return should survive");
-    require(first.recoveryCost >= tuning::rewards::shallowRecoveryPenaltyBase - 0.001, "first shallow return should include base penalty");
-    applyLaunchOutcome(state, catalog, first);
-    require(state.run.shallowRecoveryStreak == 1, "first shallow return should start shallow recovery streak");
-    require(state.run.cleanShallowRecoveryStreak == 1, "clean shallow return should start clean streak");
-    require(state.run.frontierReadiness == 0, "shallow returns should not bank Flight Data");
-    require(first.payout <= first.recoveryCost, "shallow returns should never create profit");
-
-    Random secondRng(78);
-    const PreparedLaunch secondLaunch = prepareLaunch(state, catalog, secondRng);
-    const LaunchOutcome second = resolveLaunch(secondLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, secondRng);
-    require(second.type != LaunchResultType::Destroyed, "second shallow clean return should still survive");
-    require(second.recoveryCost >= first.recoveryCost, "repeat shallow returns should not get cheaper");
-    require(second.payout <= second.recoveryCost, "repeat shallow returns should never create profit");
-    applyLaunchOutcome(state, catalog, second);
-    require(state.run.cleanShallowRecoveryStreak == 2, "second clean shallow return should retain the recovery streak");
-
-    Random thirdRng(79);
-    const PreparedLaunch thirdLaunch = prepareLaunch(state, catalog, thirdRng);
-    const LaunchOutcome third = resolveLaunch(thirdLaunch, catalog, state, shallowBurn, RecoveryMethod::ReturnHome, thirdRng);
-    require(third.type != LaunchResultType::Destroyed, "repeat shallow returns should never trigger scripted destruction");
-    require(third.recoveryCost <= tuning::outcomes::returnHomeRecoveryMaximum + tuning::rewards::shallowRecoveryPenaltyMaximum + 0.001,
-        "repeat shallow return costs should remain bounded");
-    applyLaunchOutcome(state, catalog, third);
-    require(state.run.frontierReadiness == 0, "repeat shallow returns should still produce no Flight Data");
-    require(state.run.shallowRecoveryStreak == 3 && state.run.cleanShallowRecoveryStreak == 3, "surviving shallow returns should retain their bounded-cost streak");
-}
-
-void moduleAggregationIncludesFrameAndDamage()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 1);
-    const ModuleStats clean = aggregateShipStats(state, catalog);
-    state.run.shipDamage = 50;
-    const ModuleStats damaged = aggregateShipStats(state, catalog);
-
-    require(clean.thrust > 0.0, "starter ship should have thrust");
-    require(clean.escape > 0.0, "starter ship should have escape capability");
-    require(damaged.hull < clean.hull, "damage should reduce effective hull");
-    require(damaged.cooling < clean.cooling, "damage should reduce effective cooling");
-}
-
-void earlyTelemetryShowsSystemLoad()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(42);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    const double burn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.78;
-    const TelemetryEvent event = telemetryAt(launch, burn);
-
-    int activeChannels = 0;
-    for (const TelemetryChannelSample& sample : telemetrySamples(event)) {
-        activeChannels += sample.value > 0.015 ? 1 : 0;
-    }
-
-    require(activeChannels >= 4, "early telemetry should show multiple non-zero system channels near the data goal");
-    require(event.warning > 0.02, "early telemetry warning should not be completely flat near the data goal");
-}
-
-double telemetryLoad(const TelemetryEvent& event)
-{
-    return telemetryChannelLoad(event);
-}
-
-double unscaledBurnMultiplierDelta(const PreparedLaunch& launch, const Destination& destination, double elapsedSeconds, double deltaSeconds)
-{
-    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-    const double thrust = std::max(tuning::launch::minimumEffectiveThrust, launch.stats.thrust);
-    const double cruiseRate =
-        tuning::launch::cruiseBaseRate +
-        thrust * tuning::launch::cruiseThrustScale +
-        static_cast<double>(destination.tier) * tuning::launch::cruiseTierScale;
-    const double acceleration = (tuning::launch::accelerationBaseRate + destination.hazard * tuning::launch::accelerationHazardScale) * launch.throttleFactor;
-    const double startRate = cruiseRate * launch.throttleFactor + std::max(0.0, elapsedSeconds) * acceleration;
-    return std::max(0.0, dt * startRate + 0.5 * dt * dt * acceleration);
-}
-
-bool firstRecoveredReturnAtBurn(const GameState& state, const ContentCatalog& catalog, double burnMultiplier, std::uint64_t seed, LaunchOutcome& recovered)
-{
-    for (int i = 0; i < 5000; ++i) {
-        Random rng(seed + static_cast<std::uint64_t>(i));
-        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-        if (burnMultiplier >= launch.crashMultiplier) {
-            continue;
-        }
-
-        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, burnMultiplier, RecoveryMethod::ReturnHome, rng);
-        if (outcome.type != LaunchResultType::Destroyed) {
-            recovered = outcome;
-            return true;
-        }
-    }
-
-    return false;
+    return std::abs(lhs - rhs) <= tolerance;
 }
 
 std::string offerKeyAt(const GameState& state, std::size_t index)
@@ -331,237 +197,1365 @@ std::string offerKeyAt(const GameState& state, std::size_t index)
     return "";
 }
 
-void launchIncidentsAreChunkyAndRecoverable()
+const Destination& launchDestination(
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    const Destination* destination = catalog.findDestination(destinationId);
+    require(destination != nullptr, "launch curriculum test destination must exist");
+    return *destination;
+}
+
+PreparedLaunch preparedCurriculumLaunch(
+    const ContentCatalog& catalog,
+    std::string_view destinationId,
+    LaunchMissionKind missionKind,
+    bool frontierTransfer,
+    int fuelRank,
+    int controlRank,
+    int coolingRank,
+    int hullRank,
+    std::uint64_t seed)
+{
+    GameState state = createNewGame(catalog, seed);
+    state.launchConfig.destinationId = std::string(destinationId);
+    state.launchConfig.missionKind = missionKind;
+    state.launchConfig.frontierTransfer = frontierTransfer;
+    const Destination& destination = launchDestination(catalog, destinationId);
+    state.launchConfig.burnGoalMultiplier = frontierTransfer || missionKind == LaunchMissionKind::Standard
+        ? destination.targetMultiplier
+        : 1.0 + (destination.targetMultiplier - 1.0) *
+            tuning::launchProgression::calibrationTargetShare;
+    state.meta.launchUpgrades = {fuelRank, controlRank, coolingRank, hullRank};
+    Random rng(seed);
+    return prepareLaunch(state, catalog, rng);
+}
+
+int openAsteroidLane(const PreparedLaunch& launch, int row)
+{
+    std::array<bool, tuning::launch::asteroidLaneCount> blocked {};
+    const int firstIndex = row * (tuning::launch::asteroidLaneCount - 1);
+    const int endIndex = std::min(
+        launch.asteroidCount,
+        firstIndex + tuning::launch::asteroidLaneCount - 1);
+    for (int index = firstIndex; index < endIndex; ++index) {
+        const LaunchAsteroid& asteroid = launch.asteroids[static_cast<std::size_t>(index)];
+        int closestLane = 0;
+        double closestDistance = std::abs(
+            asteroid.courseOffset - launchAsteroidLaneOffset(0));
+        for (int lane = 0; lane < tuning::launch::asteroidLaneCount; ++lane) {
+            const double distance = std::abs(
+                asteroid.courseOffset - launchAsteroidLaneOffset(lane));
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestLane = lane;
+            }
+        }
+        blocked[static_cast<std::size_t>(closestLane)] = true;
+    }
+    for (int lane = 0; lane < tuning::launch::asteroidLaneCount; ++lane) {
+        if (!blocked[static_cast<std::size_t>(lane)]) {
+            return lane;
+        }
+    }
+    return -1;
+}
+
+LaunchFlightStep flyCompetentPolicy(
+    LaunchFlightState& flight,
+    const PreparedLaunch& launch,
+    const Destination& destination,
+    bool avoidAsteroids,
+    int maximumSteps = 12000)
+{
+    bool cooling = false;
+    LaunchFlightStep step;
+    for (int index = 0; index < maximumSteps && flight.active; ++index) {
+        if (launch.heatEnabled) {
+            if (flight.heat >= 0.68) {
+                cooling = true;
+            } else if (flight.heat <= 0.44) {
+                cooling = false;
+            }
+        }
+
+        double targetCourse = 0.0;
+        if (avoidAsteroids && launch.asteroidsEnabled && !flight.returningHome) {
+            for (int row = 0; row < tuning::launch::asteroidRowCount; ++row) {
+                const int firstIndex = row * (tuning::launch::asteroidLaneCount - 1);
+                const int endIndex = std::min(
+                    launch.asteroidCount,
+                    firstIndex + tuning::launch::asteroidLaneCount - 1);
+                double rowClearProgress = 0.0;
+                for (int asteroidIndex = firstIndex; asteroidIndex < endIndex; ++asteroidIndex) {
+                    const LaunchAsteroid& asteroid =
+                        launch.asteroids[static_cast<std::size_t>(asteroidIndex)];
+                    rowClearProgress = std::max(
+                        rowClearProgress,
+                        asteroid.routeProgress +
+                            (asteroid.radius + tuning::launch::asteroidShipRadius) /
+                                tuning::launch::asteroidRouteAxisScale);
+                }
+                if (rowClearProgress < flight.travelProgress) {
+                    continue;
+                }
+                const int lane = openAsteroidLane(launch, row);
+                require(lane >= 0, "every asteroid row must expose an open lane");
+                targetCourse = launchAsteroidLaneOffset(lane);
+                break;
+            }
+        }
+
+        LaunchControlInput input;
+        input.steer = std::clamp(
+            (targetCourse - flight.courseOffset) * 5.5 -
+                flight.courseVelocity * 2.4,
+            -1.0,
+            1.0);
+        input.enginesCut = cooling;
+        step = updateLaunchFlight(
+            flight,
+            launch,
+            destination,
+            input,
+            0.04);
+        if (step.failed || step.reachedDestination || step.reachedHome) {
+            return step;
+        }
+    }
+    return step;
+}
+
+void launchCurriculumFuelMathAndRange()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(4242);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const Destination& moon = launchDestination(catalog, content::destination::moon);
 
-    require(launch.incidentCount >= 2, "launches should seed multiple transient telemetry incidents");
+    GameState fresh = createNewGame(catalog, 1101);
+    require(fresh.run.credits == 0.0, "fresh launch curriculum should start at zero credits");
+    require(fresh.run.destinationIndex == 0, "Earth remains only the hidden compatibility origin");
+    require(catalog.destinations[0].hiddenFromProgression,
+        "the internal Earth origin must never be presented as a mission");
+    require(fresh.launchConfig.destinationId == content::destination::moon,
+        "a new campaign must immediately target the Moon");
+    require(fresh.launchConfig.missionKind == LaunchMissionKind::FuelCalibration,
+        "the first launch should be the fuel survey");
+    require(launchMissionReady(fresh) && !canCommitToNextFrontier(fresh, catalog),
+        "the fuel lesson should be ready while the Moon transfer remains locked");
 
-    bool foundRecoverableSpike = false;
-    for (int i = 0; i < launch.incidentCount; ++i) {
-        const TelemetryIncident& incident = launch.incidents[static_cast<std::size_t>(i)];
-        TelemetryEvent incidentEvent;
-        incidentEvent.heat = incident.heat;
-        incidentEvent.pressure = incident.pressure;
-        incidentEvent.vibration = incident.vibration;
-        incidentEvent.fuelMix = incident.fuelMix;
-        incidentEvent.guidance = incident.guidance;
-        incidentEvent.abortRisk = incident.abortRisk;
+    Random rng(1101);
+    const PreparedLaunch survey = prepareLaunch(fresh, catalog, rng);
+    require(nearlyEqual(survey.fuelCapacity, 10.0), "base launch tank should hold 10 fuel");
+    require(nearlyEqual(survey.cruiseFuelCost, 10.0), "Moon transit should cost 10 fuel");
+    require(nearlyEqual(
+                0.5 * survey.cruiseFuelCost *
+                    launchFuelUseMultiplier(tuning::launch::calibratedThrottle),
+                5.0),
+        "the survey marker must consume exactly five fuel at calibrated throttle");
+    require(!survey.manualControlsEnabled && !survey.heatEnabled && !survey.asteroidsEnabled,
+        "the first lesson must hide steering, temperature, and hull mechanics");
 
-        int activeChannels = 0;
-        for (const TelemetryChannelSample& sample : telemetrySamples(incidentEvent)) {
-            activeChannels += sample.value > 0.01 ? 1 : 0;
+    LaunchFlightState surveyFlight = beginLaunchFlight(survey, moon);
+    LaunchFlightStep surveyStep;
+    for (int index = 0; index < 30000 && surveyFlight.travelProgress < 0.5; ++index) {
+        surveyStep = updateLaunchFlight(
+            surveyFlight,
+            survey,
+            moon,
+            {1.0, 1.0, true},
+            0.001);
+        require(!surveyStep.failed, "the fixed first-flight policy must reach its survey marker");
+        require(nearlyEqual(surveyFlight.courseOffset, 0.0),
+            "first-flight movement input must be ignored");
+    }
+    require(nearlyEqual(surveyFlight.fuelRemaining, 5.0, 0.002),
+        "the halfway warning should leave exactly the five fuel needed to return");
+    beginLaunchReturn(surveyFlight);
+    for (int index = 0; index < 30000 && surveyFlight.active; ++index) {
+        surveyStep = updateLaunchFlight(surveyFlight, survey, moon, {}, 0.001);
+    }
+    require(surveyStep.reachedHome && !surveyStep.failed,
+        "the exact five-out/five-back survey must resolve home before fuel failure");
+    require(nearlyEqual(surveyFlight.fuelRemaining, 0.0, 0.002),
+        "the calibrated survey should arrive home on the displayed reserve");
+
+    GameState partialState = createNewGame(catalog, 1103);
+    Random partialPrepareRng(1103);
+    const PreparedLaunch partialSurvey = prepareLaunch(
+        partialState,
+        catalog,
+        partialPrepareRng);
+    const double partialMarker = 1.0 +
+        (partialSurvey.config.burnGoalMultiplier - 1.0) * 0.40;
+    Random partialResolveRng(1104);
+    const LaunchOutcome partialReturn = resolveLaunch(
+        partialSurvey,
+        catalog,
+        partialState,
+        partialMarker,
+        RecoveryMethod::ReturnHome,
+        partialResolveRng,
+        {true, LaunchFailureCause::None, 1.0, 0});
+    const double partialNet = partialReturn.payout - partialReturn.recoveryCost;
+    require(partialNet > 0.0 &&
+            partialNet < tuning::launchProgression::lessonReward,
+        "a positive pre-marker Fuel Survey return must pay partial data credits, never the full 22-credit lesson reward");
+    require(partialReturn.blueprintGain == 0,
+        "an incomplete Fuel Survey must not leak blueprint progress");
+    applyLaunchOutcome(partialState, catalog, partialReturn);
+    require(nearlyEqual(partialState.run.credits, partialNet) &&
+            partialState.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration &&
+            !partialState.run.refitEntitled,
+        "a paid pre-marker return must leave the Fuel lesson incomplete with no upgrade entitlement");
+
+    const PreparedLaunch moonTransfer = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::Standard,
+        true,
+        1,
+        1,
+        0,
+        0,
+        1102);
+    require(nearlyEqual(moonTransfer.fuelCapacity, 15.0) &&
+            nearlyEqual(moonTransfer.arrivalReserveFuel, 5.0),
+        "Fuel Tanks I must expose 15 fuel including a five-unit lunar insertion reserve");
+    LaunchFlightState arrivalFlight = beginLaunchFlight(moonTransfer, moon);
+    const LaunchFlightStep arrival = flyCompetentPolicy(
+        arrivalFlight,
+        moonTransfer,
+        moon,
+        false);
+    if (!arrival.reachedDestination || arrival.failed) {
+        std::cerr << "Moon transfer diagnostic: cause=" << static_cast<int>(arrival.failureCause)
+                  << " progress=" << arrivalFlight.travelProgress
+                  << " fuel=" << arrivalFlight.fuelRemaining
+                  << " course=" << arrivalFlight.courseOffset << "\n";
+    }
+    require(arrival.reachedDestination && !arrival.failed,
+        "15 fuel must complete the calibrated Moon transit and insertion");
+    require(nearlyEqual(arrivalFlight.fuelRemaining, 0.0, 0.0001),
+        "lunar insertion must visibly consume the final five fuel");
+
+    LaunchFlightState tolerantArrival = beginLaunchFlight(moonTransfer, moon);
+    tolerantArrival.travelProgress = 1.0;
+    tolerantArrival.previousTravelProgress = 1.0;
+    tolerantArrival.fuelRemaining = 4.3;
+    const LaunchFlightStep tolerantArrivalStep = updateLaunchFlight(
+        tolerantArrival,
+        moonTransfer,
+        moon,
+        {},
+        0.04);
+    require(tolerantArrivalStep.reachedDestination && !tolerantArrivalStep.failed &&
+            nearlyEqual(tolerantArrival.fuelRemaining, 0.0),
+        "a Moon transfer arriving slightly below the five-fuel target must use the visible insertion tolerance and succeed");
+
+    LaunchFlightState insufficientArrival = beginLaunchFlight(moonTransfer, moon);
+    insufficientArrival.travelProgress = 1.0;
+    insufficientArrival.previousTravelProgress = 1.0;
+    insufficientArrival.fuelRemaining = 3.9;
+    const LaunchFlightStep insufficientArrivalStep = updateLaunchFlight(
+        insufficientArrival,
+        moonTransfer,
+        moon,
+        {},
+        0.04);
+    require(insufficientArrivalStep.failed && !insufficientArrivalStep.reachedDestination &&
+            insufficientArrivalStep.failureCause == LaunchFailureCause::FuelExhausted,
+        "a Moon transfer below the communicated four-fuel insertion minimum must still fail explicitly");
+
+    FlightActionState outboundActions;
+    tolerantArrival.fuelRemaining = 4.3;
+    tolerantArrival.fuelFailureSeconds = 0.0;
+    tolerantArrival.projectedFuelReserve = -0.7;
+    require(
+        launchStatusMessage(moonTransfer, tolerantArrival, outboundActions).find(
+            "FUEL LOW") == std::string::npos,
+        "a tolerant arrival should be treated as enough fuel instead of exposing an internal reserve target");
+    insufficientArrival.fuelRemaining = 3.9;
+    insufficientArrival.fuelFailureSeconds = 0.0;
+    insufficientArrival.projectedFuelReserve = -1.1;
+    require(
+        launchStatusMessage(moonTransfer, insufficientArrival, outboundActions).find(
+            "FUEL LOW") != std::string::npos,
+        "the HUD must plainly tell the player to reduce throttle when the route is short on fuel");
+
+    require(nearlyEqual(launchFuelUseMultiplier(0.60), 1.0),
+        "60 percent throttle must be the calibrated fuel baseline");
+    require(launchFuelUseMultiplier(0.18) < 1.0 &&
+            launchFuelUseMultiplier(1.0) > 1.5,
+        "low throttle must extend range while full throttle spends fuel nonlinearly");
+
+    PreparedLaunch strandedLaunch = moonTransfer;
+    LaunchFlightState stranded = beginLaunchFlight(strandedLaunch, moon);
+    stranded.selectedThrottle = 1.0;
+    LaunchFlightStep strandedStep;
+    for (int index = 0; index < 12000 && stranded.active; ++index) {
+        strandedStep = updateLaunchFlight(stranded, strandedLaunch, moon, {}, 0.04);
+        if (strandedStep.reachedDestination) {
+            break;
         }
-        require(activeChannels >= 1 && activeChannels <= 2, "incidents should affect one or two systems, not every dial");
+    }
+    require(strandedStep.failed &&
+            strandedStep.failureCause == LaunchFailureCause::FuelExhausted,
+        "prolonged full throttle must strand an exactly provisioned early ship");
+}
 
-        const double before = std::max(1.0, incident.centerMultiplier - incident.width * 1.25);
-        const double after = incident.centerMultiplier + incident.width * 1.25;
-        const double centerLoad = telemetryLoad(telemetryAt(launch, incident.centerMultiplier));
-        const double sideLoad = std::min(telemetryLoad(telemetryAt(launch, before)), telemetryLoad(telemetryAt(launch, after)));
-        if (centerLoad > sideLoad + 0.035) {
-            foundRecoverableSpike = true;
+void launchControlsAreSeededCorrectableAndImproveByRank()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const Destination& moon = launchDestination(catalog, content::destination::moon);
+    const PreparedLaunch first = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
+        false,
+        1,
+        0,
+        0,
+        0,
+        2201);
+    const PreparedLaunch repeated = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
+        false,
+        1,
+        0,
+        0,
+        0,
+        2201);
+    require(nearlyEqual(
+                first.controlSteeringResponseVariation,
+                repeated.controlSteeringResponseVariation),
+        "control response variation must repeat for the same launch seed");
+    require(std::abs(first.controlSteeringResponseVariation) <=
+            tuning::launch::controlSteeringResponseVariance * first.controlChaos + 0.000001,
+        "seeded steering-response variance must remain inside the documented +/-20 percent chaos band");
+    for (int index = 0; index < first.controlKickCount; ++index) {
+        require(nearlyEqual(
+                    first.controlKickDirections[static_cast<std::size_t>(index)],
+                    repeated.controlKickDirections[static_cast<std::size_t>(index)]),
+            "seeded throttle kicks must repeat exactly");
+    }
+
+    LaunchFlightState unmanaged = beginLaunchFlight(first, moon);
+    LaunchFlightStep unmanagedStep;
+    for (int index = 0; index < 4000 && unmanaged.active &&
+         unmanaged.travelProgress < tuning::launchProgression::calibrationTargetShare; ++index) {
+        unmanagedStep = updateLaunchFlight(unmanaged, first, moon, {}, 0.04);
+    }
+    require(unmanagedStep.failed &&
+            unmanagedStep.failureCause == LaunchFailureCause::TrainingRescue &&
+            unmanaged.travelProgress < tuning::launchProgression::calibrationTargetShare,
+        "ignoring the seeded startup drift at base controls must lose course before the calibration marker");
+
+    LaunchFlightState corrected = beginLaunchFlight(first, moon);
+    LaunchFlightStep correctedStep;
+    for (int index = 0; index < 4000 && corrected.active &&
+         corrected.travelProgress < tuning::launchProgression::calibrationTargetShare; ++index) {
+        const double steer = std::clamp(
+            -corrected.courseOffset * 5.5 - corrected.courseVelocity * 2.4,
+            -1.0,
+            1.0);
+        correctedStep = updateLaunchFlight(corrected, first, moon, {steer, 0.0, false}, 0.04);
+    }
+    require(corrected.active && !correctedStep.failed,
+        "active correction must recover the same seeded Rank-0 flight to its calibration marker");
+    beginLaunchReturn(corrected);
+    for (int index = 0; index < 4000 && corrected.active; ++index) {
+        const double steer = std::clamp(
+            -corrected.courseOffset * 5.5 - corrected.courseVelocity * 2.4,
+            -1.0,
+            1.0);
+        correctedStep = updateLaunchFlight(corrected, first, moon, {steer, 0.0, false}, 0.04);
+    }
+    require(correctedStep.reachedHome && !correctedStep.failed,
+        "a pilot who corrects the startup drift must be able to bank the controls calibration safely");
+
+    PreparedLaunch neutral = first;
+    neutral.controlSteeringResponseVariation = 0.0;
+    neutral.controlKickCount = 0;
+    LaunchFlightState left = beginLaunchFlight(neutral, moon);
+    LaunchFlightState right = beginLaunchFlight(neutral, moon);
+    updateLaunchFlight(left, neutral, moon, {-1.0, 0.0, false}, 0.08);
+    updateLaunchFlight(right, neutral, moon, {1.0, 0.0, false}, 0.08);
+    require(left.courseVelocity < 0.0 && right.courseVelocity > 0.0,
+        "left and right steering must always honor the player's requested direction");
+    require(right.courseVelocity > std::abs(left.courseVelocity),
+        "base controls should teach visible right-side overshoot without reversing input");
+    require(nearlyEqual(
+                right.courseVelocity / std::abs(left.courseVelocity),
+                1.0 + tuning::launch::controlRightOvershoot,
+                0.000001),
+        "base right steering must use the documented 1 + 0.45c oversteer gain");
+
+    const std::array<double, 4> expectedChaos {1.00, 0.55, 0.20, 0.00};
+    double previousKick = 100.0;
+    for (int rank = 0; rank <= 3; ++rank) {
+        require(nearlyEqual(launchControlChaosForRank(rank), expectedChaos[static_cast<std::size_t>(rank)]),
+            "control chaos ranks must use the documented monotonic values");
+        PreparedLaunch ranked = first;
+        ranked.flightControlRank = rank;
+        ranked.controlChaos = launchControlChaosForRank(rank);
+        ranked.controlSteeringResponseVariation = 0.0;
+        ranked.controlKickDirections[0] = 1.0;
+        ranked.controlKickCount = 1;
+        LaunchFlightState flight = beginLaunchFlight(ranked, moon);
+        require(nearlyEqual(
+                    std::abs(flight.courseVelocity),
+                    tuning::launch::controlStartupDrift * ranked.controlChaos),
+            "startup drift must scale exactly with the current control-chaos rank");
+        updateLaunchFlight(flight, ranked, moon, {0.0, 1.0, false}, 0.08);
+        const double kick = std::abs(flight.courseVelocity);
+        require(kick <= previousKick + 0.000001,
+            "each Flight Controls rank must reduce acceleration kick");
+        previousKick = kick;
+        if (rank == 3) {
+            require(nearlyEqual(kick, 0.0), "Rank III controls should be calm and stable");
         }
     }
 
-    require(foundRecoverableSpike, "at least one incident should produce a visible spike that can settle back down");
+    PreparedLaunch exactKickLaunch = first;
+    exactKickLaunch.controlSteeringResponseVariation = 0.0;
+    exactKickLaunch.controlKickDirections[0] = 1.0;
+    LaunchFlightState exactKick = beginLaunchFlight(exactKickLaunch, moon);
+    exactKick.courseOffset = 0.0;
+    exactKick.courseVelocity = 0.0;
+    exactKick.nextControlKickIndex = 0;
+    exactKick.throttleKickCooldownSeconds = 0.0;
+    exactKick.throttleAtLastKick = exactKick.selectedThrottle -
+        tuning::launch::controlThrottleKickThreshold;
+    updateLaunchFlight(exactKick, exactKickLaunch, moon, {0.0, 1.0, false}, 0.08);
+    const double expectedKick = tuning::launch::controlThrottleKick *
+        (1.0 - tuning::launch::controlDampingMinimum * 0.08);
+    require(nearlyEqual(exactKick.courseVelocity, expectedKick, 0.000001),
+        "a seeded acceleration pulse must apply the documented +/-0.35c kick before damping");
+
+    PreparedLaunch cooldownLaunch = first;
+    cooldownLaunch.controlSteeringResponseVariation = 0.0;
+    LaunchFlightState cooldown = beginLaunchFlight(cooldownLaunch, moon);
+    updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 1.0, false}, 0.04);
+    require(cooldown.nextControlKickIndex == 1, "a throttle rise should consume one seeded kick");
+    updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 0.0, false}, 0.04);
+    updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 1.0, false}, 0.04);
+    require(cooldown.nextControlKickIndex == 1,
+        "re-pressing throttle inside 0.35 seconds must not create frame-noise kicks");
+    for (int index = 0; index < 9; ++index) {
+        updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 0.0, false}, 0.04);
+    }
+    updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 1.0, false}, 0.04);
+    updateLaunchFlight(cooldown, cooldownLaunch, moon, {0.0, 1.0, false}, 0.04);
+    require(cooldown.nextControlKickIndex == 2,
+        "a new throttle rise after the cooldown should consume the next seeded kick");
+
+    PreparedLaunch recoveryLaunch = first;
+    recoveryLaunch.controlSteeringResponseVariation = 0.0;
+    recoveryLaunch.controlKickCount = 0;
+    LaunchFlightState recovery = beginLaunchFlight(recoveryLaunch, moon);
+    recovery.courseOffset = tuning::launch::pilotingCourseCaution;
+    recovery.courseVelocity = 0.25;
+    LaunchFlightStep recoveryStep;
+    for (int index = 0; index < 100 && std::abs(recovery.courseOffset) >=
+            tuning::launch::pilotingCourseSafe; ++index) {
+        const double steer = recovery.courseOffset > 0.0 ? -1.0 : 1.0;
+        recoveryStep = updateLaunchFlight(
+            recovery,
+            recoveryLaunch,
+            moon,
+            {steer, 0.0, false},
+            0.04);
+    }
+    require(!recoveryStep.failed &&
+            std::abs(recovery.courseOffset) < tuning::launch::pilotingCourseSafe,
+        "a caution-level overshoot must be correctable before the course-loss timer expires");
 }
 
-void crewStressUsesDiscreteStepsForPilotRisk()
+void launchThermalManagementIsPlayerDriven()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState calm = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Astronaut* calmPilot = activeAstronaut(calm);
-    require(calmPilot != nullptr, "stress test needs a pilot");
-    calmPilot->training = 3;
-    calmPilot->stress = 0;
+    const Destination& mars = launchDestination(catalog, content::destination::mars);
+    const std::array<double, 4> heatMultipliers {1.00, 0.88, 0.76, 0.64};
+    const std::array<double, 4> coolingRates {0.10, 0.14, 0.18, 0.22};
+    for (int rank = 0; rank <= 3; ++rank) {
+        require(nearlyEqual(
+                    launchPoweredHeatMultiplierForRank(rank),
+                    heatMultipliers[static_cast<std::size_t>(rank)]) &&
+                nearlyEqual(
+                    launchEngineOffCoolingForRank(rank),
+                    coolingRates[static_cast<std::size_t>(rank)]),
+            "Cooling ranks must match the published powered-heat and engine-off values");
+    }
 
-    GameState tense = calm;
-    Astronaut* tensePilot = activeAstronaut(tense);
-    require(tensePilot != nullptr, "stress test needs a tense pilot");
-    tensePilot->stress = tuning::crew::maxStress;
+    PreparedLaunch launch = preparedCurriculumLaunch(
+        catalog,
+        content::destination::mars,
+        LaunchMissionKind::ThermalManagement,
+        true,
+        2,
+        2,
+        0,
+        0,
+        3301);
+    LaunchFlightState cooling = beginLaunchFlight(launch, mars);
+    cooling.heat = 0.90;
+    const double before = cooling.heat;
+    updateLaunchFlight(cooling, launch, mars, {0.0, 0.0, true}, 0.08);
+    require(cooling.heat < before &&
+            nearlyEqual(before - cooling.heat, 0.10 * 0.08, 0.000001),
+        "base engines-off cooling must be deterministic and never overpowered");
 
-    require(crewStressStepCount(tuning::crew::stressPerStep - 1) == 0, "stress below one step should not create a stress step");
-    require(crewStressStepCount(tuning::crew::stressPerStep) == 1, "each stress step threshold should create one stress step");
-    require(crewStressStepCount(tuning::crew::maxStress) == tuning::crew::maxStressSteps, "max stress should create the tuned max stress steps");
-    require(effectiveTrainingLevel(*tensePilot) == -4, "stress steps should cancel effective training in discrete chunks");
-    require(crewAbortRiskMultiplierFromStress(tuning::crew::maxStress) >= 1.99, "max stress should effectively double ABORT growth");
+    LaunchFlightState coast = beginLaunchFlight(launch, mars);
+    for (int index = 0; index < 60; ++index) {
+        updateLaunchFlight(coast, launch, mars, {}, 0.04);
+    }
+    const double coastStart = coast.travelProgress;
+    for (int index = 0; index < 50; ++index) {
+        updateLaunchFlight(coast, launch, mars, {0.0, 0.0, true}, 0.04);
+    }
+    require(coast.travelVelocity == 0.0,
+        "cut engines should coast to a full stop in roughly 1.5 seconds");
+    const double stoppedProgress = coast.travelProgress;
+    for (int index = 0; index < 50; ++index) {
+        updateLaunchFlight(coast, launch, mars, {0.0, 0.0, true}, 0.04);
+    }
+    require(nearlyEqual(coast.travelProgress, stoppedProgress),
+        "engine-off coasting must not complete the route for free");
+    require(stoppedProgress > coastStart, "engine cuts should preserve a brief, visible coast");
 
-    Random calmRng(616);
-    Random tenseRng(616);
-    const PreparedLaunch calmLaunch = prepareLaunch(calm, catalog, calmRng);
-    const PreparedLaunch tenseLaunch = prepareLaunch(tense, catalog, tenseRng);
-    require(calmLaunch.crewStressSteps == 0, "calm launch should have no crew stress steps");
-    require(tenseLaunch.crewStressSteps == 7, "tense launch should carry max crew stress steps");
-    require(tenseLaunch.crewGuidancePenalty > calmLaunch.crewGuidancePenalty, "crew stress should add NAV penalty during prep");
-    require(tenseLaunch.crewAbortMultiplier > calmLaunch.crewAbortMultiplier, "crew stress should add ABORT multiplier during prep");
+    LaunchFlightState managed = beginLaunchFlight(launch, mars);
+    const LaunchFlightStep managedResult = flyCompetentPolicy(managed, launch, mars, false);
+    require(managedResult.reachedDestination && !managedResult.failed,
+        "a skilled pilot must be able to reach Mars with base cooling");
 
-    PreparedLaunch isolatedStress = calmLaunch;
-    isolatedStress.crewStressSteps = tenseLaunch.crewStressSteps;
-    isolatedStress.crewGuidancePenalty = tenseLaunch.crewGuidancePenalty;
-    isolatedStress.crewAbortMultiplier = tenseLaunch.crewAbortMultiplier;
+    LaunchFlightState reckless = beginLaunchFlight(launch, mars);
+    reckless.selectedThrottle = 1.0;
+    LaunchFlightStep recklessResult;
+    for (int index = 0; index < 12000 && reckless.active; ++index) {
+        recklessResult = updateLaunchFlight(reckless, launch, mars, {}, 0.04);
+        if (recklessResult.reachedDestination) {
+            break;
+        }
+    }
+    require(recklessResult.failed &&
+            recklessResult.failureCause == LaunchFailureCause::ThermalRunaway,
+        "sustained full throttle through temperature warnings must fail before Mars");
 
-    const double burn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.92;
-    const TelemetryEvent calmTelemetry = telemetryAt(calmLaunch, burn);
-    const TelemetryEvent tenseTelemetry = telemetryAt(isolatedStress, burn);
-    require(tenseTelemetry.guidance > calmTelemetry.guidance + 0.08, "crew stress should visibly increase NAV drift");
-    require(tenseTelemetry.abortRisk > calmTelemetry.abortRisk + 0.04, "crew stress should visibly increase ABORT pressure");
+    PreparedLaunch qualification = launch;
+    qualification.config.frontierTransfer = false;
+    qualification.trainingMission = true;
+    qualification.manualControlsEnabled = false;
+    LaunchFlightState ignoredQualification = beginLaunchFlight(qualification, mars);
+    ignoredQualification.heat = 1.0;
+    LaunchFlightStep qualificationFailure;
+    for (int index = 0; index < 100 && ignoredQualification.active; ++index) {
+        qualificationFailure = updateLaunchFlight(
+            ignoredQualification,
+            qualification,
+            mars,
+            {},
+            0.04);
+    }
+    require(qualificationFailure.failed &&
+            qualificationFailure.failureCause == LaunchFailureCause::ThermalRunaway,
+        "ignoring heat during the Mars qualification must retain the explicit Thermal Runaway cause");
 }
 
-void cutEnginesTradeHeatForNavigation()
+void launchCurriculumResolutionHasNoHiddenDamageOrBlueprintLeaks()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(44);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    const PreparedLaunch throttled = withCutEngines(launch);
-    const double burn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.80;
 
-    const TelemetryEvent powered = telemetryAt(launch, burn);
-    const TelemetryEvent cut = telemetryAt(throttled, burn);
-    require(cut.heat < powered.heat, "cut engines should lower heat");
-    require(cut.vibration < powered.vibration, "cut engines should lower vibration");
-    require(cut.guidance > powered.guidance, "cut engines should increase navigation drift");
+    const auto requireDamageFreeSuccess = [&](PreparedLaunch launch,
+                                              RecoveryMethod method,
+                                              std::uint64_t seed,
+                                              std::string_view label) {
+        GameState state = createNewGame(catalog, seed);
+        state.launchConfig = launch.config;
+        Random resolveRng(seed + 10000);
+        const LaunchOutcome outcome = resolveLaunch(
+            launch,
+            catalog,
+            state,
+            launch.config.burnGoalMultiplier,
+            method,
+            resolveRng,
+            {true, LaunchFailureCause::None, 1.0, 0});
+        require(outcome.type != LaunchResultType::Destroyed &&
+                outcome.shipDamage == 0,
+            std::string(label) + " must resolve with zero hidden ship damage when no asteroid was hit");
+        applyLaunchOutcome(state, catalog, outcome);
+        require(state.run.shipDamage == 0,
+            std::string(label) + " must apply without adding hidden ship damage");
+    };
 
-    const double poweredDelta = burnMultiplierDelta(launch, catalog.destinations[0], 4.0, 1.0 / 60.0);
-    const double cutDelta = burnMultiplierDelta(throttled, catalog.destinations[0], 4.0, 1.0 / 60.0);
-    require(cutDelta > 0.0, "cut engines should reduce thrust without stopping flight progression");
-    require(cutDelta < poweredDelta, "cut engines should slow burn progression");
+    requireDamageFreeSuccess(
+        preparedCurriculumLaunch(
+            catalog,
+            content::destination::moon,
+            LaunchMissionKind::FuelCalibration,
+            false,
+            0,
+            0,
+            0,
+            0,
+            3310),
+        RecoveryMethod::ReturnHome,
+        3310,
+        "Fuel Survey");
+    requireDamageFreeSuccess(
+        preparedCurriculumLaunch(
+            catalog,
+            content::destination::moon,
+            LaunchMissionKind::FlightControlsCalibration,
+            false,
+            1,
+            0,
+            0,
+            0,
+            3311),
+        RecoveryMethod::ReturnHome,
+        3311,
+        "Flight Controls calibration");
+    requireDamageFreeSuccess(
+        preparedCurriculumLaunch(
+            catalog,
+            content::destination::moon,
+            LaunchMissionKind::Standard,
+            true,
+            1,
+            1,
+            0,
+            0,
+            3312),
+        RecoveryMethod::TransferArrival,
+        3312,
+        "Moon transfer");
+    requireDamageFreeSuccess(
+        preparedCurriculumLaunch(
+            catalog,
+            content::destination::mars,
+            LaunchMissionKind::ThermalManagement,
+            false,
+            2,
+            2,
+            0,
+            0,
+            3313),
+        RecoveryMethod::ReturnHome,
+        3313,
+        "thermal qualification");
+    requireDamageFreeSuccess(
+        preparedCurriculumLaunch(
+            catalog,
+            content::destination::mars,
+            LaunchMissionKind::ThermalManagement,
+            true,
+            2,
+            2,
+            0,
+            0,
+            3314),
+        RecoveryMethod::TransferArrival,
+        3314,
+        "Mars transfer");
+
+    const std::array<std::pair<PreparedLaunch, LaunchFailureCause>, 4> failedQualifications {{
+        {preparedCurriculumLaunch(
+             catalog,
+             content::destination::moon,
+             LaunchMissionKind::FuelCalibration,
+             false,
+             0,
+             0,
+             0,
+             0,
+             3320),
+         LaunchFailureCause::TrainingRescue},
+        {preparedCurriculumLaunch(
+             catalog,
+             content::destination::moon,
+             LaunchMissionKind::FlightControlsCalibration,
+             false,
+             1,
+             0,
+             0,
+             0,
+             3321),
+         LaunchFailureCause::TrainingRescue},
+        {preparedCurriculumLaunch(
+             catalog,
+             content::destination::mars,
+             LaunchMissionKind::ThermalManagement,
+             false,
+             2,
+             2,
+             0,
+             0,
+             3322),
+         LaunchFailureCause::ThermalRunaway},
+        {preparedCurriculumLaunch(
+             catalog,
+             content::destination::jupiter,
+             LaunchMissionKind::AsteroidBelt,
+             false,
+             3,
+             3,
+             0,
+             0,
+             3323),
+         LaunchFailureCause::HullBreach},
+    }};
+    for (std::size_t index = 0; index < failedQualifications.size(); ++index) {
+        const PreparedLaunch& launch = failedQualifications[index].first;
+        const LaunchFailureCause cause = failedQualifications[index].second;
+        GameState state = createNewGame(catalog, 3330 + index);
+        Random resolveRng(3340 + index);
+        const LaunchOutcome failure = resolveLaunch(
+            launch,
+            catalog,
+            state,
+            1.0,
+            RecoveryMethod::ReturnHome,
+            resolveRng,
+            {true, cause, 0.0, 0});
+        require(failure.blueprintGain == 0,
+            "failed launch qualifications must never grant blueprint progress");
+    }
 }
 
-void shipTravelIsFasterWithoutRetuningTelemetry()
+void launchAsteroidsAreDeterministicFairAndHullScaled()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(444);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    const Destination& destination = catalog.destinations[0];
-    const double elapsed = 5.25;
-    const double delta = 1.0 / 60.0;
+    const Destination& jupiter = launchDestination(catalog, content::destination::jupiter);
+    const PreparedLaunch first = preparedCurriculumLaunch(
+        catalog,
+        content::destination::jupiter,
+        LaunchMissionKind::AsteroidBelt,
+        true,
+        3,
+        3,
+        0,
+        0,
+        4401);
+    const PreparedLaunch repeated = preparedCurriculumLaunch(
+        catalog,
+        content::destination::jupiter,
+        LaunchMissionKind::AsteroidBelt,
+        true,
+        3,
+        3,
+        0,
+        0,
+        4401);
+    const PreparedLaunch varied = preparedCurriculumLaunch(
+        catalog,
+        content::destination::jupiter,
+        LaunchMissionKind::AsteroidBelt,
+        true,
+        3,
+        3,
+        0,
+        0,
+        4402);
+    require(first.asteroidCount == 10 && repeated.asteroidCount == 10,
+        "the Jupiter belt should contain ten asteroids in five rows");
 
-    const double boostedDelta = burnMultiplierDelta(launch, destination, elapsed, delta);
-    const double unscaledDelta = unscaledBurnMultiplierDelta(launch, destination, elapsed, delta);
-    require(std::abs(boostedDelta - unscaledDelta * tuning::launch::baseTravelSpeedMultiplier) < 0.000001, "ship travel should apply the tuned base travel speed multiplier");
+    bool anyVariation = false;
+    for (int index = 0; index < first.asteroidCount; ++index) {
+        const LaunchAsteroid& lhs = first.asteroids[static_cast<std::size_t>(index)];
+        const LaunchAsteroid& rhs = repeated.asteroids[static_cast<std::size_t>(index)];
+        require(nearlyEqual(lhs.routeProgress, rhs.routeProgress) &&
+                nearlyEqual(lhs.courseOffset, rhs.courseOffset) &&
+                nearlyEqual(lhs.scale, rhs.scale),
+            "asteroid layouts must repeat exactly for the same launch seed");
+        const LaunchAsteroid& other = varied.asteroids[static_cast<std::size_t>(index)];
+        anyVariation = anyVariation ||
+            !nearlyEqual(lhs.courseOffset, other.courseOffset) ||
+            !nearlyEqual(lhs.scale, other.scale);
+        require(lhs.scale >= 0.75 && lhs.scale <= 1.25,
+            "asteroid scale must stay within the collision-tested range");
+    }
+    require(anyVariation, "different launch seeds should vary the belt");
 
-    const double burn = 1.0 + (destination.targetMultiplier - 1.0) * 0.88;
-    const TelemetryEvent telemetry = telemetryAt(launch, burn);
-    require(telemetry.multiplier == burn, "telemetry should still be sampled by burn depth, not wall-clock travel speed");
+    int previousOpenLane = -1;
+    for (int row = 0; row < tuning::launch::asteroidRowCount; ++row) {
+        const int lane = openAsteroidLane(first, row);
+        require(lane >= 0, "each row must leave exactly one open lane");
+        if (previousOpenLane >= 0) {
+            require(std::abs(lane - previousOpenLane) <= 1,
+                "adjacent asteroid openings must form a steerable path");
+        }
+        previousOpenLane = lane;
+    }
+
+    require(nearlyEqual(launchAsteroidImpactDamage(0, 1.0), 40.0) &&
+            nearlyEqual(launchAsteroidImpactDamage(1, 1.0), 32.0) &&
+            nearlyEqual(launchAsteroidImpactDamage(2, 1.0), 26.0) &&
+            nearlyEqual(launchAsteroidImpactDamage(3, 1.0), 20.0),
+        "Hull Plating must reduce the same standard impact to 100, 80, 65, and 50 percent");
+
+    PreparedLaunch collision = first;
+    collision.trainingMission = false;
+    collision.manualControlsEnabled = false;
+    collision.heatEnabled = false;
+    collision.asteroidCount = 2;
+    collision.asteroids[0] = {0.50, 0.0, 0.10, 1.25};
+    collision.asteroids[1] = {0.54, 0.0, 0.10, 1.00};
+    LaunchFlightState struck = beginLaunchFlight(collision, jupiter);
+    struck.travelProgress = 0.45;
+    struck.travelVelocity = 1.50;
+    const LaunchFlightStep firstHit = updateLaunchFlight(
+        struck,
+        collision,
+        jupiter,
+        {},
+        0.08);
+    require(firstHit.asteroidHit && nearlyEqual(struck.hullRemaining, 50.0),
+        "swept collision must catch a large asteroid crossed between frames and base hull must survive");
+    require(struck.active && !firstHit.failed,
+        "a clean base Hull must survive one maximum-scale legal asteroid impact");
+    GameState collisionState = createNewGame(catalog, 4403);
+    Random collisionResolveRng(4403);
+    const LaunchOutcome collisionOutcome = resolveLaunch(
+        collision,
+        catalog,
+        collisionState,
+        struck.currentMultiplier,
+        RecoveryMethod::ReturnHome,
+        collisionResolveRng,
+        {true, LaunchFailureCause::None, struck.minimumSafetyMargin, struck.hullDamageTaken});
+    require(collisionOutcome.shipDamage == struck.hullDamageTaken,
+        "a piloted asteroid return must apply only the explicit collision damage, with no hidden stress damage");
+    require(nearlyEqual(
+                struck.asteroidInvulnerabilitySeconds,
+                tuning::launch::asteroidInvulnerabilitySeconds),
+        "an impact must grant exactly 0.75 seconds of invulnerability");
+    const int damageAfterFirst = struck.hullDamageTaken;
+    updateLaunchFlight(struck, collision, jupiter, {}, 0.08);
+    require(struck.hullDamageTaken == damageAfterFirst,
+        "nearby asteroids must not multi-hit during post-impact invulnerability");
+
+    beginLaunchReturn(struck);
+    require(!struck.asteroidHit[0] && !struck.asteroidHit[1],
+        "returning home should preserve the field while resetting per-leg impact markers");
+
+    PreparedLaunch beltQualification = collision;
+    beltQualification.config.frontierTransfer = false;
+    beltQualification.trainingMission = true;
+    beltQualification.asteroidCount = 1;
+    beltQualification.asteroids[0] = {0.05, 0.0, 0.10, 1.25};
+    LaunchFlightState breached = beginLaunchFlight(beltQualification, jupiter);
+    breached.hullRemaining = 1.0;
+    breached.travelVelocity = 1.50;
+    LaunchFlightStep breach;
+    for (int index = 0; index < 10 && breached.active; ++index) {
+        breach = updateLaunchFlight(breached, beltQualification, jupiter, {}, 0.08);
+    }
+    require(breach.failed && breach.failureCause == LaunchFailureCause::HullBreach,
+        "accumulated asteroid damage during the belt survey must remain an explicit Hull Breach");
+
+    for (int rank = 0; rank <= 3; ++rank) {
+        PreparedLaunch ranked = first;
+        ranked.hullRank = rank;
+        LaunchFlightState integrity = beginLaunchFlight(ranked, jupiter);
+        require(nearlyEqual(
+                    integrity.hullMaximum,
+                    100.0 + static_cast<double>(rank) * 25.0),
+            "Hull ranks must expose 100, 125, 150, and 175 HP");
+    }
+
+    LaunchFlightState noHit = beginLaunchFlight(first, jupiter);
+    noHit.selectedThrottle = tuning::launch::pilotingMinimumPoweredThrottle;
+    const LaunchFlightStep completion = flyCompetentPolicy(
+        noHit,
+        first,
+        jupiter,
+        true);
+    require(completion.reachedDestination && !completion.failed &&
+            noHit.hullRemaining == noHit.hullMaximum,
+        "a no-hit pilot must complete Jupiter without Hull Plating");
 }
 
-void emergencyActionsTradeOneRiskForAnother()
+void launchCurriculumEconomyGatesAndVersionTenMigration()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(66);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    const double burn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.82;
+    GameState state = createNewGame(catalog, 5501);
+    require(tuning::launchProgression::upgradeCost == 22.0 &&
+            tuning::launchProgression::lessonReward == 22.0,
+        "every direct rank and every qualified lesson return must use 22 credits");
 
-    const TelemetryEvent baseline = telemetryAt(launch, burn);
-    const PreparedLaunch relieved = withPressureRelief(launch, false);
-    const TelemetryEvent relief = telemetryAt(relieved, burn);
-    require(relief.pressure < baseline.pressure, "pressure relief valve should lower physical pressure");
-    require(relief.guidance > baseline.guidance, "pressure relief valve should worsen navigation");
+    GameState flightModes = createNewGame(catalog, 5500);
+    require(!flightModes.launchConfig.frontierTransfer,
+        "the Fuel Survey must remain a return flight");
+    flightModes.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    flightModes.meta.launchUpgrades.fuelTanks = 1;
+    syncLaunchConfig(flightModes, catalog);
+    require(!flightModes.launchConfig.frontierTransfer,
+        "the Flight Controls calibration must remain a return flight");
+    flightModes.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
+    flightModes.meta.launchUpgrades.flightControls = 1;
+    syncLaunchConfig(flightModes, catalog);
+    require(flightModes.launchConfig.frontierTransfer,
+        "the Moon transfer and every later curriculum flight must use arrival mode");
 
-    const PreparedLaunch failedRelief = withPressureRelief(launch, true);
-    const TelemetryEvent failed = telemetryAt(failedRelief, burn);
-    require(failed.pressure > relief.pressure, "failed relief valve should leave more pressure than a clean vent");
-    require(failed.guidance > baseline.guidance, "failed relief valve should still degrade navigation");
+    GameState thermalArrival = createNewGame(catalog, 5506);
+    thermalArrival.run.destinationIndex = 1;
+    thermalArrival.meta.furthestTier = 1;
+    thermalArrival.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+    thermalArrival.meta.launchUpgrades.fuelTanks = 2;
+    thermalArrival.meta.launchUpgrades.flightControls = 1;
+    thermalArrival.meta.unlockKeys.push_back(content::unlock::routeMars);
+    syncLaunchConfig(thermalArrival, catalog);
+    require(thermalArrival.launchConfig.frontierTransfer &&
+            thermalArrival.launchConfig.destinationId == content::destination::mars &&
+            thermalArrival.launchConfig.missionKind == LaunchMissionKind::ThermalManagement,
+        "the first thermal lesson must be a real Mars arrival, not a proving return");
+    LaunchOutcome thermalLanding;
+    thermalLanding.type = LaunchResultType::MissionComplete;
+    thermalLanding.recoveryMethod = RecoveryMethod::TransferArrival;
+    thermalLanding.destinationId = content::destination::mars;
+    thermalLanding.frontierTransfer = true;
+    thermalLanding.pilotedFlight = true;
+    thermalLanding.minimumSafetyMargin = 0.5;
+    applyLaunchOutcome(thermalArrival, catalog, thermalLanding);
+    require(thermalArrival.run.destinationIndex == 2 &&
+            thermalArrival.meta.furthestTier == 2 &&
+            thermalArrival.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity,
+        "landing on Mars during the thermal lesson must advance the frontier and curriculum together");
+    require(thermalArrival.run.credits == tuning::launchProgression::lessonReward,
+        "the successful Mars lesson arrival must retain the direct-upgrade reward");
 
-    const PreparedLaunch jettisoned = withJettisonedCargo(launch);
-    const TelemetryEvent cargo = telemetryAt(jettisoned, burn);
-    require(cargo.fuelMix < baseline.fuelMix, "cargo jettison should stabilize fuel mix");
-    require(cargo.guidance > baseline.guidance, "cargo jettison should worsen navigation");
-    require(cargo.vibration > baseline.vibration, "cargo jettison should increase vibration");
-    require(returnHomeRisk(jettisoned, catalog, state, burn) > returnHomeRisk(launch, catalog, state, burn), "cargo jettison should make return home riskier");
+    thermalArrival.meta.launchUpgrades.fuelTanks = 3;
+    thermalArrival.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    syncLaunchConfig(thermalArrival, catalog);
+    require(thermalArrival.launchConfig.frontierTransfer &&
+            thermalArrival.launchConfig.destinationId == content::destination::jupiter &&
+            thermalArrival.launchConfig.missionKind == LaunchMissionKind::AsteroidBelt,
+        "the first asteroid lesson must be a real Jupiter arrival, not a proving return");
+    LaunchOutcome beltLanding;
+    beltLanding.type = LaunchResultType::MissionComplete;
+    beltLanding.recoveryMethod = RecoveryMethod::TransferArrival;
+    beltLanding.destinationId = content::destination::jupiter;
+    beltLanding.frontierTransfer = true;
+    beltLanding.pilotedFlight = true;
+    beltLanding.minimumSafetyMargin = 0.5;
+    applyLaunchOutcome(thermalArrival, catalog, beltLanding);
+    require(thermalArrival.run.destinationIndex == 3 &&
+            thermalArrival.meta.furthestTier == 3 &&
+            thermalArrival.meta.launchLessons.stage == LaunchTrainingStage::Complete,
+        "landing on Jupiter during the asteroid lesson must advance the frontier and finish the curriculum");
+
+    GameState repeatedFailures = state;
+    repeatedFailures.meta.destinationAttempts.assign(catalog.destinations.size(), 99);
+    Random baselineRng(55010);
+    Random retryRng(55010);
+    const PreparedLaunch baselineLaunch = prepareLaunch(state, catalog, baselineRng);
+    const PreparedLaunch retriedLaunch = prepareLaunch(repeatedFailures, catalog, retryRng);
+    require(nearlyEqual(baselineLaunch.fuelCapacity, retriedLaunch.fuelCapacity) &&
+            nearlyEqual(baselineLaunch.controlChaos, retriedLaunch.controlChaos) &&
+            baselineLaunch.coolingRank == retriedLaunch.coolingRank &&
+            baselineLaunch.hullRank == retriedLaunch.hullRank &&
+            nearlyEqual(
+                baselineLaunch.controlSteeringResponseVariation,
+                retriedLaunch.controlSteeringResponseVariation),
+        "repeated failures alone must never add hidden pity to live launch survival");
+
+    LaunchOutcome lesson;
+    lesson.type = LaunchResultType::MissionComplete;
+    lesson.recoveryMethod = RecoveryMethod::ReturnHome;
+    lesson.destinationId = content::destination::moon;
+    lesson.ejectMultiplier = state.launchConfig.burnGoalMultiplier;
+    lesson.pilotedFlight = true;
+    lesson.minimumSafetyMargin = 0.5;
+    applyLaunchOutcome(state, catalog, lesson);
+    require(state.run.credits == 22.0 &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration,
+        "a qualified fuel-survey return should net exactly 22 and unlock only Fuel Tanks I");
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 1) &&
+            !launchUpgradeUnlocked(state, LaunchUpgradeKind::FlightControls, 1),
+        "lesson offers must appear one at a time");
+    require(installLaunchUpgrade(state, catalog, LaunchUpgradeKind::FuelTanks) &&
+            state.run.credits == 0.0 &&
+            state.meta.launchUpgrades.fuelTanks == 1,
+        "installing Fuel Tanks I should spend the full lesson reward");
+    require(state.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration &&
+            !canCommitToNextFrontier(state, catalog),
+        "Flight Controls calibration should remain incomplete until its return");
+
+    GameState rescued = createNewGame(catalog, 5507);
+    LaunchOutcome rescue;
+    rescue.type = LaunchResultType::SafeEject;
+    rescue.recoveryMethod = RecoveryMethod::ReturnHome;
+    rescue.destinationId = content::destination::moon;
+    rescue.pilotedFlight = true;
+    rescue.failureCause = LaunchFailureCause::TrainingRescue;
+    applyLaunchOutcome(rescued, catalog, rescue);
+    require(rescued.run.credits == 0.0 &&
+            rescued.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration &&
+            rescued.meta.shipsLost == 0 &&
+            !rescued.run.refitEntitled,
+        "Training Rescue must grant no credits, no upgrade progress, and no recovery-floor exploit");
+
+    state.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
+    state.meta.launchUpgrades.flightControls = 1;
+    require(launchMissionReady(state),
+        "Fuel I and Controls I should make the Moon transfer ready");
+
+    state.meta.furthestTier = 1;
+    state.meta.launchLessons.stage = LaunchTrainingStage::MarsTransfer;
+    state.meta.launchUpgrades.fuelTanks = 1;
+    state.meta.launchUpgrades.cooling = 0;
+    require(!launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 2) &&
+            !launchMissionReady(state),
+        "Fuel II and the Mars transfer must remain hidden until the Prospector contract reveals the route");
+    state.meta.launchUpgrades.fuelTanks = 2;
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 2) &&
+            !launchMissionReady(state),
+        "an installed or migrated Fuel II rank must remain recognized without bypassing the Mars story gate");
+    state.meta.unlockKeys.push_back(content::unlock::routeMars);
+    require(launchMissionReady(state),
+        "the Mars transfer must allow skilled play without optional Cooling I");
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 2) &&
+            launchUpgradeUnlocked(state, LaunchUpgradeKind::FlightControls, 2),
+        "Moon arrival must unlock Fuel II and Flight Controls II");
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::Cooling, 1),
+        "completing the thermal qualification must unlock optional Cooling I");
+    state.meta.launchUpgrades.flightControls = 2;
+    state.meta.launchUpgrades.cooling = 1;
+
+    state.meta.furthestTier = 2;
+    state.meta.launchLessons.stage = LaunchTrainingStage::JupiterTransfer;
+    state.meta.launchUpgrades.fuelTanks = 2;
+    state.meta.launchUpgrades.hull = 0;
+    require(!launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 3) &&
+            !launchMissionReady(state),
+        "Fuel III and the Jupiter transfer must remain hidden until the Mars bay contract reveals the route");
+    state.meta.launchUpgrades.fuelTanks = 3;
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::FuelTanks, 3) &&
+            !launchMissionReady(state),
+        "an installed or migrated Fuel III rank must remain recognized without bypassing the Jupiter story gate");
+    state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    require(launchMissionReady(state),
+        "the Jupiter transfer must allow a no-hit pilot without optional Hull I");
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::FlightControls, 3) &&
+            launchUpgradeUnlocked(state, LaunchUpgradeKind::Cooling, 2),
+        "Mars arrival must unlock Controls III and Cooling II");
+
+    state.meta.furthestTier = 3;
+    state.meta.launchUpgrades.cooling = 2;
+    state.meta.launchUpgrades.hull = 1;
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::Cooling, 3) &&
+            launchUpgradeUnlocked(state, LaunchUpgradeKind::Hull, 2),
+        "Jupiter arrival must unlock Cooling III and Hull II");
+    state.meta.furthestTier = 4;
+    state.meta.launchUpgrades.hull = 2;
+    require(launchUpgradeUnlocked(state, LaunchUpgradeKind::Hull, 3),
+        "Saturn arrival must unlock Hull III");
+
+    const SaveData captured = captureSaveData(state);
+    require(captured.version == 10, "new saves must use schema version 10");
+    const std::optional<SaveData> decoded = deserializeSaveData(serializeSaveData(captured));
+    require(decoded && decoded->version == 10 &&
+            decoded->launchUpgrades.fuelTanks == state.meta.launchUpgrades.fuelTanks &&
+            decoded->launchLessons.stage == state.meta.launchLessons.stage,
+        "version-10 launch ranks and lesson state must round-trip");
+
+    SaveData pristineV9;
+    pristineV9.version = 9;
+    pristineV9.credits = 100.0;
+    pristineV9.destinationIndex = 0;
+    pristineV9.furthestTier = 0;
+    GameState migratedPristine = createNewGame(catalog, 5502);
+    restoreSaveData(migratedPristine, catalog, pristineV9);
+    require(migratedPristine.run.credits == 0.0 &&
+            migratedPristine.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration,
+        "a truly pristine version-nine campaign must migrate into the zero-credit fuel lesson");
+
+    for (const int legacyFlightData : {1, 2}) {
+        SaveData partialV9 = pristineV9;
+        partialV9.credits = 91.0;
+        partialV9.frontierReadiness = legacyFlightData;
+        GameState migratedPartial = createNewGame(catalog, 5502 + legacyFlightData);
+        restoreSaveData(migratedPartial, catalog, partialV9);
+        require(migratedPartial.run.credits == 91.0 &&
+                migratedPartial.meta.launchUpgrades.fuelTanks == 1 &&
+                migratedPartial.meta.launchUpgrades.flightControls == 0 &&
+                migratedPartial.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration,
+            "one or two legacy Earth Flight Data points must conservatively complete only the fuel lesson");
+    }
+
+    SaveData progressedV9 = pristineV9;
+    progressedV9.credits = 91.0;
+    progressedV9.frontierReadiness = 3;
+    progressedV9.ownedModuleIds = {
+        content::module::reserveFeedManifold,
+        content::module::sparrowInjectorTune};
+    progressedV9.defaultEquippedModuleIds = progressedV9.ownedModuleIds;
+    progressedV9.inventoryModuleIds = progressedV9.ownedModuleIds;
+    progressedV9.equippedModuleIds = progressedV9.ownedModuleIds;
+    GameState migratedProgress = createNewGame(catalog, 5503);
+    restoreSaveData(migratedProgress, catalog, progressedV9);
+    require(migratedProgress.run.credits == 91.0,
+        "progressed version-nine campaigns must retain their credits");
+    require(migratedProgress.meta.launchUpgrades.fuelTanks >= 1 &&
+            migratedProgress.meta.launchUpgrades.flightControls >= 1 &&
+            migratedProgress.meta.launchLessons.stage == LaunchTrainingStage::MoonTransfer,
+        "full legacy Moon readiness must become Fuel I plus Controls I");
+    require(std::find(
+                migratedProgress.meta.ownedModuleIds.begin(),
+                migratedProgress.meta.ownedModuleIds.end(),
+                content::module::reserveFeedManifold) ==
+            migratedProgress.meta.ownedModuleIds.end(),
+        "retired proving-card IDs must be removed after rank conversion");
+
+    SaveData marsV9;
+    marsV9.version = 9;
+    marsV9.credits = 37.0;
+    marsV9.destinationIndex = 2;
+    marsV9.furthestTier = 2;
+    GameState migratedMars = createNewGame(catalog, 5504);
+    restoreSaveData(migratedMars, catalog, marsV9);
+    require(migratedMars.meta.launchUpgrades.fuelTanks >= 2 &&
+            migratedMars.meta.launchUpgrades.flightControls >= 1 &&
+            migratedMars.meta.launchUpgrades.cooling == 0 &&
+            migratedMars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity,
+        "Mars-era saves must skip completed lessons without silently granting optional cooling");
+
+    SaveData jupiterV9 = marsV9;
+    jupiterV9.credits = 58.0;
+    jupiterV9.destinationIndex = 3;
+    jupiterV9.furthestTier = 3;
+    GameState migratedJupiter = createNewGame(catalog, 5505);
+    restoreSaveData(migratedJupiter, catalog, jupiterV9);
+    require(migratedJupiter.meta.launchUpgrades.fuelTanks == 3 &&
+            migratedJupiter.meta.launchUpgrades.flightControls >= 1 &&
+            migratedJupiter.meta.launchUpgrades.cooling == 0 &&
+            migratedJupiter.meta.launchUpgrades.hull == 0 &&
+            migratedJupiter.meta.launchLessons.stage == LaunchTrainingStage::Complete,
+        "Jupiter-era saves must skip the belt lesson while keeping Cooling and Hull optional");
+
+    SaveData convertedV9 = progressedV9;
+    convertedV9.ownedModuleIds = {
+        content::module::deepReservoir,
+        content::module::pressureBalanceBaffles,
+        content::module::sacrificialSink,
+        content::module::recoveryCradle};
+    convertedV9.defaultEquippedModuleIds = convertedV9.ownedModuleIds;
+    convertedV9.inventoryModuleIds = convertedV9.ownedModuleIds;
+    convertedV9.equippedModuleIds = convertedV9.ownedModuleIds;
+    GameState converted = createNewGame(catalog, 5506);
+    restoreSaveData(converted, catalog, convertedV9);
+    require(converted.meta.launchUpgrades.fuelTanks == 3 &&
+            converted.meta.launchUpgrades.flightControls == 3 &&
+            converted.meta.launchUpgrades.cooling == 3 &&
+            converted.meta.launchUpgrades.hull == 3,
+        "version-nine modules must convert to the highest equivalent rank on each direct launch track");
+    require(std::find(
+                converted.meta.ownedModuleIds.begin(),
+                converted.meta.ownedModuleIds.end(),
+                content::module::pressureBalanceBaffles) == converted.meta.ownedModuleIds.end() &&
+            std::find(
+                converted.meta.ownedModuleIds.begin(),
+                converted.meta.ownedModuleIds.end(),
+                content::module::recoveryCradle) == converted.meta.ownedModuleIds.end(),
+        "converted version-nine proving IDs must be retired from permanent inventory");
 }
 
-void flightActionsComposeThroughOneCoreHelper()
+void launchCompetentPoliciesSurviveFiveThousandSeeds()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(67);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const Destination& moon = launchDestination(catalog, content::destination::moon);
+    const Destination& mars = launchDestination(catalog, content::destination::mars);
+    const Destination& jupiter = launchDestination(catalog, content::destination::jupiter);
 
-    FlightActionState actions;
-    actions.cutEnginesActive = true;
-    actions.pressureReliefOpen = true;
-    actions.cargoJettisoned = true;
-    const PreparedLaunch combined = applyFlightActions(launch, actions);
-    require(combined.throttleFactor == tuning::launch::cutEngineThrottleFactor, "action composition should apply cut-engine throttle");
-    require(combined.pressureRelief == tuning::launch::pressureReliefSuccessAmount, "action composition should apply relief valve pressure effect");
-    require(combined.cargoReturnPenalty == tuning::launch::cargoReturnPenalty, "action composition should apply cargo return penalty");
+    for (std::uint64_t seed = 1; seed <= 5000; ++seed) {
+        const PreparedLaunch moonLaunch = preparedCurriculumLaunch(
+            catalog,
+            content::destination::moon,
+            LaunchMissionKind::Standard,
+            true,
+            1,
+            1,
+            0,
+            0,
+            seed);
+        LaunchFlightState moonFlight = beginLaunchFlight(moonLaunch, moon);
+        const LaunchFlightStep moonResult = flyCompetentPolicy(
+            moonFlight,
+            moonLaunch,
+            moon,
+            false);
+        require(moonResult.reachedDestination && !moonResult.failed,
+            "competent Moon policy must have zero incident-only deaths across 5,000 seeds");
 
-    actions.returningHome = true;
-    const PreparedLaunch returning = applyFlightActions(launch, actions);
-    require(returning.throttleFactor == launch.throttleFactor, "return-home action composition should not keep cut-engine throttle");
-    require(returning.pressureRelief == tuning::launch::pressureReliefSuccessAmount, "return-home composition should preserve open relief valve effects");
-    require(returning.cargoReturnPenalty == tuning::launch::cargoReturnPenalty, "return-home composition should preserve cargo return penalty");
+        const PreparedLaunch marsLaunch = preparedCurriculumLaunch(
+            catalog,
+            content::destination::mars,
+            LaunchMissionKind::ThermalManagement,
+            true,
+            2,
+            1,
+            0,
+            0,
+            seed);
+        LaunchFlightState marsFlight = beginLaunchFlight(marsLaunch, mars);
+        const LaunchFlightStep marsResult = flyCompetentPolicy(
+            marsFlight,
+            marsLaunch,
+            mars,
+            false);
+        require(marsResult.reachedDestination && !marsResult.failed,
+            "competent cooling policy must have zero random Mars deaths across 5,000 seeds");
+
+        const PreparedLaunch jupiterLaunch = preparedCurriculumLaunch(
+            catalog,
+            content::destination::jupiter,
+            LaunchMissionKind::AsteroidBelt,
+            true,
+            3,
+            3,
+            1,
+            0,
+            seed);
+        for (int row = 0; row < tuning::launch::asteroidRowCount; ++row) {
+            const int lane = openAsteroidLane(jupiterLaunch, row);
+            require(lane >= 0, "every seeded belt must retain an open lane");
+            if (row > 0) {
+                require(std::abs(lane - openAsteroidLane(jupiterLaunch, row - 1)) <= 1,
+                    "all 5,000 belts must retain a steerable connected path");
+            }
+        }
+        LaunchFlightState jupiterFlight = beginLaunchFlight(jupiterLaunch, jupiter);
+        jupiterFlight.selectedThrottle = tuning::launch::pilotingMinimumPoweredThrottle;
+        const LaunchFlightStep jupiterResult = flyCompetentPolicy(
+            jupiterFlight,
+            jupiterLaunch,
+            jupiter,
+            true);
+        if (!jupiterResult.reachedDestination || jupiterResult.failed ||
+            jupiterFlight.hullRemaining != jupiterFlight.hullMaximum) {
+            std::cerr << "Jupiter policy diagnostic: seed=" << seed
+                      << " cause=" << static_cast<int>(jupiterResult.failureCause)
+                      << " progress=" << jupiterFlight.travelProgress
+                      << " course=" << jupiterFlight.courseOffset
+                      << " velocity=" << jupiterFlight.courseVelocity
+                      << " hull=" << jupiterFlight.hullRemaining
+                      << "/" << jupiterFlight.hullMaximum << " lanes=";
+            for (int row = 0; row < tuning::launch::asteroidRowCount; ++row) {
+                std::cerr << openAsteroidLane(jupiterLaunch, row);
+            }
+            std::cerr << " hits=";
+            for (int asteroid = 0; asteroid < jupiterLaunch.asteroidCount; ++asteroid) {
+                if (jupiterFlight.asteroidHit[static_cast<std::size_t>(asteroid)]) {
+                    const LaunchAsteroid& hit =
+                        jupiterLaunch.asteroids[static_cast<std::size_t>(asteroid)];
+                    std::cerr << asteroid << "@" << hit.routeProgress
+                              << "/" << hit.courseOffset << "/" << hit.scale << ",";
+                }
+            }
+            std::cerr << "\n";
+        }
+        require(jupiterResult.reachedDestination && !jupiterResult.failed &&
+                jupiterFlight.hullRemaining == jupiterFlight.hullMaximum,
+            "competent open-lane policy must have zero impossible Jupiter deaths across 5,000 seeds");
+    }
 }
 
-void launchStatusLinesComeFromSharedSelector()
+void launchSkillFailuresRemainVisibleAndNonRandom()
 {
-    TelemetryEvent nominal;
-    nominal.message = "Tracking system margins below limits";
+    const ContentCatalog catalog = createDefaultContent();
+    const Destination& moon = launchDestination(catalog, content::destination::moon);
 
-    LaunchStatusContext context;
-    context.event = nominal;
-    require(launchStatusLine(context) == std::string(text::status::provingBurnStable), "nominal proving flight should use shared proving status");
+    PreparedLaunch calibration = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
+        false,
+        1,
+        0,
+        0,
+        0,
+        6601);
+    calibration.controlSteeringResponseVariation = 0.20;
+    calibration.controlKickCount = static_cast<int>(calibration.controlKickDirections.size());
+    std::fill(
+        calibration.controlKickDirections.begin(),
+        calibration.controlKickDirections.end(),
+        1.0);
+    LaunchFlightState ignored = beginLaunchFlight(calibration, moon);
+    LaunchFlightStep ignoredResult;
+    for (int index = 0; index < 12000 && ignored.active; ++index) {
+        const int pulse = index % 24;
+        const double throttle = pulse < 5 ? 1.0 : (pulse < 12 ? -1.0 : 0.0);
+        ignoredResult = updateLaunchFlight(
+            ignored,
+            calibration,
+            moon,
+            {0.0, throttle, false},
+            0.04);
+    }
+    require(ignoredResult.failed &&
+            ignoredResult.failureCause == LaunchFailureCause::TrainingRescue,
+        "ignoring unstable base controls must eventually trigger a non-destructive training rescue");
 
-    context.pastDataGoal = true;
-    require(launchStatusLine(context) == std::string(text::status::dataGoalReached), "past-goal proving flight should use shared goal status");
+    PreparedLaunch fuelLesson = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FuelCalibration,
+        false,
+        0,
+        0,
+        0,
+        0,
+        6602);
+    LaunchFlightState missedTurn = beginLaunchFlight(fuelLesson, moon);
+    LaunchFlightStep fuelResult;
+    for (int index = 0; index < 12000 && missedTurn.active; ++index) {
+        fuelResult = updateLaunchFlight(missedTurn, fuelLesson, moon, {}, 0.04);
+    }
+    require(fuelResult.failed &&
+            fuelResult.failureCause == LaunchFailureCause::TrainingRescue,
+        "ignoring the fuel light must rescue the tutorial pilot without destroying campaign assets");
 
-    context.actions.cutEnginesActive = true;
-    require(launchStatusLine(context) == std::string(text::status::enginesCutAfterGoal), "cut engines after goal should use shared cut-engine status");
-
-    context = {};
-    context.event = nominal;
-    context.frontierTransfer = true;
-    require(launchStatusLine(context) == std::string(text::status::transferBurnStable), "nominal transfer should use shared transfer status");
-
-    context = {};
-    context.event = nominal;
-    context.actions.returningHome = true;
-    context.returnProgress = tuning::session::returnEarlyProgressThreshold - 0.01;
-    require(launchStatusLine(context) == std::string(text::status::returnBurnRotating), "early return burn should use shared rotation status");
-
-    context.returnProgress = tuning::session::returnEarlyProgressThreshold + 0.01;
-    require(launchStatusLine(context) == std::string(text::status::returnBurnUnderway), "later return burn should use shared return status");
-
-    context.returnDriftHome = true;
-    require(launchStatusLine(context) == std::string(text::status::coastingHome), "drift return should use shared coast status");
-
-    context.arkKnown = true;
-    require(launchStatusLine(context).find("Ark") != std::string::npos, "Ark drift return should name the Ark as the return destination");
-
-    context.arkKnown = false;
-    context.outerExpedition = true;
-    const std::string outerDriftStatus = launchStatusLine(context);
-    require(
-        outerDriftStatus.find("expedition staging") != std::string::npos &&
-            outerDriftStatus.find("Earth") == std::string::npos,
-        "outer-expedition drift recovery should name expedition staging instead of promising an Earth return");
-
-    context.actions.returningHome = false;
-    context.returnDriftHome = false;
-    context.pastDataGoal = true;
-    const std::string outerGoalStatus = launchStatusLine(context);
-    require(
-        outerGoalStatus.find("expedition staging") != std::string::npos &&
-            outerGoalStatus.find("Earth") == std::string::npos,
-        "outer-expedition proving status should keep the one-way campaign framing after the data goal");
-
-    TelemetryEvent critical = nominal;
-    critical.message = "TEMP: cooling runaway";
-    critical.warning = tuning::launch::warningCriticalThreshold + 0.01;
-    context = {};
-    context.event = critical;
-    require(launchStatusLine(context) == text::telemetryDecision(critical.message), "critical outbound warning should ask for a decision");
-
-    context.actions.returningHome = true;
-    context.returnDriftHome = true;
-    require(launchStatusLine(context) == text::returnDriftWarning(critical.message), "critical drift return should use return warning copy");
+    // The controls sortie has enough fuel to touch the Moon, but it is a
+    // navigation test rather than a cleared lunar transfer. Reaching the Moon
+    // must visibly collide instead of quietly completing the test mission.
+    PreparedLaunch landingTest = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
+        false,
+        1,
+        3,
+        0,
+        0,
+        6603);
+    landingTest.controlChaos = 0.0;
+    landingTest.controlSteeringResponseVariation = 0.0;
+    LaunchFlightState lunarImpact = beginLaunchFlight(landingTest, moon);
+    LaunchFlightStep lunarImpactStep;
+    for (int index = 0; index < 12000 && lunarImpact.active; ++index) {
+        lunarImpactStep = updateLaunchFlight(lunarImpact, landingTest, moon, {}, 0.04);
+    }
+    require(lunarImpactStep.failed &&
+            lunarImpactStep.failureCause == LaunchFailureCause::LunarImpact &&
+            !lunarImpactStep.reachedDestination,
+        "continuing a controls-calibration sortie into the Moon must cause a visible Lunar Impact, not a landing or generic rescue");
+    GameState impactState = createNewGame(catalog, 6603);
+    Random impactRng(6603);
+    const LaunchOutcome impactOutcome = resolveLaunch(
+        landingTest,
+        catalog,
+        impactState,
+        lunarImpact.currentMultiplier,
+        RecoveryMethod::None,
+        impactRng,
+        {true, lunarImpactStep.failureCause, lunarImpact.minimumSafetyMargin, lunarImpact.hullDamageTaken});
+    require(impactOutcome.type == LaunchResultType::Destroyed &&
+            impactOutcome.failureCause == LaunchFailureCause::LunarImpact,
+        "the uncalibrated lunar collision must retain its explicit destructive terminal cause");
 }
 
 void emergencyRecruitmentPreventsDeadRosterSoftLock()
@@ -610,6 +1604,7 @@ void moduleOffersAreOneChoiceRefits()
     GameState state = createNewGame(catalog, 202);
     state.run.credits = 200.0;
     state.meta.unlockKeys.push_back(content::unlock::thermal);
+    state.meta.unlockKeys.push_back(content::unlock::surfaceDrills);
 
     Random rng(909);
     generateModuleOffers(state, catalog, rng);
@@ -617,6 +1612,10 @@ void moduleOffersAreOneChoiceRefits()
     for (const std::string& moduleId : state.run.offerModuleIds) {
         require(moduleId.empty() || std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), moduleId) == state.meta.ownedModuleIds.end(),
             "refit offers should never sell an already-owned starter module");
+        if (const ShipModule* module = catalog.findModule(moduleId)) {
+            require(!module->compatibilityOnly,
+                "new Refit rolls must never offer a legacy compatibility module");
+        }
     }
 
     require(!offerKeyAt(state, 0).empty(), "reward screen should receive offer one");
@@ -644,120 +1643,74 @@ void openingRefitTracksAreCuratedAndEntitled()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 212);
-    state.run.credits = 500.0;
-    const ModuleStats baseline = aggregateShipStats(state, catalog);
-
-    LaunchOutcome useful;
-    useful.type = LaunchResultType::MissionComplete;
-    useful.recoveryMethod = RecoveryMethod::ReturnHome;
-    useful.destinationId = content::destination::earthOrbit;
-    useful.ejectMultiplier = catalog.destinations.front().targetMultiplier;
-    applyLaunchOutcome(state, catalog, useful);
-    require(state.run.refitEntitled, "a useful proving flight should earn one refit entitlement");
-
     Random rng(2120);
+
+    LaunchOutcome fuelLesson;
+    fuelLesson.type = LaunchResultType::MissionComplete;
+    fuelLesson.recoveryMethod = RecoveryMethod::ReturnHome;
+    fuelLesson.destinationId = content::destination::moon;
+    fuelLesson.pilotedFlight = true;
+    fuelLesson.ejectMultiplier = state.launchConfig.burnGoalMultiplier;
+    fuelLesson.minimumSafetyMargin = 0.5;
+    fuelLesson.payout = tuning::launchProgression::lessonReward;
+    applyLaunchOutcome(state, catalog, fuelLesson);
+    require(state.run.refitEntitled &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration &&
+            state.run.credits == 22.0,
+        "the qualified fuel return should grant one direct upgrade entitlement and exactly its 22-credit price");
+
     generateModuleOffers(state, catalog, rng);
-    require(state.run.offerModuleIds[0] == content::module::sparrowInjectorTune, "first proving board should offer Reach I");
-    require(state.run.offerModuleIds[1] == content::module::radiatorVaneExtension, "first proving board should offer Control I");
-    require(state.run.offerModuleIds[2] == content::module::patchworkCrossBracing, "first proving board should offer Recovery I");
-    require(!rerollOffers(state, catalog, rng), "curated proving boards should not reroll");
-    require(buyOffer(state, catalog, 0), "Reach I should install from the curated board");
-    require(!state.run.refitEntitled, "installing a refit should consume its entitlement");
-    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::sparrowInjectorTune) != state.meta.ownedModuleIds.end(), "installed proving refit should be permanently owned");
-    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::sparrowEngine) != state.run.equippedModuleIds.end(), "permanent refits should not replace built-in hardware");
-    require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::sparrowInjectorTune) != state.run.equippedModuleIds.end(), "permanent refits should stack with built-in hardware");
-    require(std::abs(aggregateShipStats(state, catalog).thrust - baseline.thrust - 0.8) < 0.0001, "Reach I should add its tuned thrust exactly once");
+    require(state.run.offerModuleIds[0] == content::module::fuelTanks1 &&
+            state.run.offerModuleIds[1].empty() &&
+            state.run.offerModuleIds[2].empty() &&
+            std::all_of(
+                state.run.offerCrewUpgradeIds.begin(),
+                state.run.offerCrewUpgradeIds.end(),
+                [](const std::string& id) { return id.empty(); }),
+        "the first lesson result should show only Fuel Tanks I, never a randomized three-card board");
+    require(!rerollOffers(state, catalog, rng),
+        "direct launch lessons must not expose rerolls");
+    require(buyOffer(state, catalog, 0) &&
+            state.meta.launchUpgrades.fuelTanks == 1 &&
+            state.run.credits == 0.0 &&
+            !state.run.refitEntitled,
+        "installing the one fuel offer should consume the lesson reward and entitlement");
 
-    applyLaunchOutcome(state, catalog, useful);
+    LaunchOutcome controlsLesson = fuelLesson;
+    controlsLesson.ejectMultiplier = state.launchConfig.burnGoalMultiplier;
+    controlsLesson.payout = tuning::launchProgression::lessonReward;
+    applyLaunchOutcome(state, catalog, controlsLesson);
+    require(state.run.refitEntitled &&
+            state.meta.launchLessons.stage == LaunchTrainingStage::MoonTransfer &&
+            state.run.credits == 22.0,
+        "the controls calibration should unlock its one plainly named rank");
     generateModuleOffers(state, catalog, rng);
-    require(state.run.offerModuleIds[0] == content::module::reserveFeedManifold, "specializing in Reach should advance that track to Rank II");
-    require(state.run.offerModuleIds[1] == content::module::radiatorVaneExtension, "unchosen Control I should remain available");
-    require(state.run.offerModuleIds[2] == content::module::patchworkCrossBracing, "unchosen Recovery I should remain available");
+    require(state.run.offerModuleIds[0] == content::module::flightControls1 &&
+            state.run.offerModuleIds[1].empty() &&
+            state.run.offerModuleIds[2].empty(),
+        "the second lesson result should show only Flight Controls I");
+    require(buyOffer(state, catalog, 0) &&
+            state.meta.launchUpgrades.flightControls == 1 &&
+            state.run.credits == 0.0,
+        "Flight Controls I should cost the same exact 22-credit lesson reward");
 
-    const auto installCuratedSequence = [&](const std::array<const char*, 9>& sequence, std::uint64_t seed) {
-        GameState ladder = createNewGame(catalog, seed);
-        ladder.run.credits = 500.0;
-        Random ladderRng(seed + 1000);
-        for (const char* expectedId : sequence) {
-            ladder.run.refitEntitled = true;
-            generateModuleOffers(ladder, catalog, ladderRng);
-            int expectedIndex = -1;
-            std::vector<std::string> visibleIds;
-            for (std::size_t i = 0; i < ladder.run.offerModuleIds.size(); ++i) {
-                const std::string& offeredId = ladder.run.offerModuleIds[i];
-                if (!offeredId.empty()) {
-                    require(std::find(visibleIds.begin(), visibleIds.end(), offeredId) == visibleIds.end(),
-                        "curated proving boards should never duplicate a visible card");
-                    visibleIds.push_back(offeredId);
-                }
-                if (offeredId == expectedId) {
-                    expectedIndex = static_cast<int>(i);
-                }
-            }
-            require(expectedIndex >= 0, "the next prerequisite-satisfied proving rank should remain actionable");
-            require(buyOffer(ladder, catalog, expectedIndex), "every proving rank should install exactly once");
-        }
-        ladder.run.refitEntitled = true;
-        generateModuleOffers(ladder, catalog, ladderRng);
-        require(std::all_of(ladder.run.offerModuleIds.begin(), ladder.run.offerModuleIds.end(), [](const std::string& id) { return id.empty(); }),
-            "an exhausted proving pool should render no duplicate filler cards");
-    };
-
-    installCuratedSequence({
-        content::module::sparrowInjectorTune,
-        content::module::reserveFeedManifold,
-        content::module::sustainedBurnPackage,
-        content::module::radiatorVaneExtension,
-        content::module::telemetryNoiseFilter,
-        content::module::pressureBalanceBaffles,
-        content::module::patchworkCrossBracing,
-        content::module::springCapsuleRetropack,
-        content::module::recoveryCradle}, 216);
-    installCuratedSequence({
-        content::module::sparrowInjectorTune,
-        content::module::radiatorVaneExtension,
-        content::module::patchworkCrossBracing,
-        content::module::reserveFeedManifold,
-        content::module::telemetryNoiseFilter,
-        content::module::springCapsuleRetropack,
-        content::module::sustainedBurnPackage,
-        content::module::pressureBalanceBaffles,
-        content::module::recoveryCradle}, 217);
-
-    GameState shallow = createNewGame(catalog, 213);
-    LaunchOutcome recalled;
-    recalled.type = LaunchResultType::SafeEject;
-    recalled.recoveryMethod = RecoveryMethod::ReturnHome;
-    recalled.destinationId = content::destination::earthOrbit;
-    recalled.ejectMultiplier = 1.05;
-    applyLaunchOutcome(shallow, catalog, recalled);
-    require(!shallow.run.refitEntitled, "a shallow return should not earn a permanent refit");
-
-    GameState crashed = createNewGame(catalog, 218);
-    LaunchOutcome destroyed;
-    destroyed.type = LaunchResultType::Destroyed;
-    destroyed.destinationId = content::destination::earthOrbit;
-    applyLaunchOutcome(crashed, catalog, destroyed);
-    require(!crashed.run.refitEntitled, "a destroyed proving flight should not earn a permanent refit");
-
-    GameState capped = createNewGame(catalog, 214);
-    capped.run.frontierReadiness = frontierReadinessCap(capped, catalog);
-    recalled.ejectMultiplier = catalog.destinations.front().targetMultiplier;
-    applyLaunchOutcome(capped, catalog, recalled);
-    require(!capped.run.refitEntitled, "a flight at the Flight Data cap should not create another refit entitlement");
-
-    GameState arrived = createNewGame(catalog, 215);
-    arrived.run.frontierReadiness = frontierReadinessRequired(arrived, catalog);
-    LaunchOutcome moonArrival;
-    moonArrival.type = LaunchResultType::MissionComplete;
-    moonArrival.recoveryMethod = RecoveryMethod::TransferArrival;
-    moonArrival.destinationId = content::destination::moon;
-    moonArrival.frontierTransfer = true;
-    moonArrival.ejectMultiplier = catalog.destinations[1].targetMultiplier;
-    applyLaunchOutcome(arrived, catalog, moonArrival);
-    require(arrived.run.refitEntitled, "a successful destination arrival should earn one delayed refit entitlement");
+    for (const std::string_view retired : {
+             std::string_view(content::module::sparrowInjectorTune),
+             std::string_view(content::module::reserveFeedManifold),
+             std::string_view(content::module::sustainedBurnPackage),
+             std::string_view(content::module::radiatorVaneExtension),
+             std::string_view(content::module::telemetryNoiseFilter),
+             std::string_view(content::module::pressureBalanceBaffles),
+             std::string_view(content::module::patchworkCrossBracing),
+             std::string_view(content::module::springCapsuleRetropack),
+             std::string_view(content::module::recoveryCradle)}) {
+        require(std::find(
+                    state.meta.ownedModuleIds.begin(),
+                    state.meta.ownedModuleIds.end(),
+                    retired) == state.meta.ownedModuleIds.end(),
+            "retired proving-card IDs must never be awarded by the live curriculum");
+    }
 }
-
 void refitRerollsSpendAndEscalate()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -793,12 +1746,12 @@ void specialShipComponentsRequireRecoveredMaterials()
     state.meta.unlockKeys.push_back(content::unlock::deepSpace);
     state.run.credits = 200.0;
     state.meta.materials = {.common = 2};
-    state.run.offerModuleIds = {content::module::deepReservoir, "", ""};
+    state.run.offerModuleIds = {content::module::deepBoreFrame, "", ""};
     state.run.offerCrewUpgradeIds = {};
 
-    const ShipModule* module = catalog.findModule(content::module::deepReservoir);
-    require(module != nullptr, "special component test needs deep reservoir module");
-    require(module->materialCost.common == 2 && module->materialCost.rare == 1, "deep reservoir should require recovered materials");
+    const ShipModule* module = catalog.findModule(content::module::deepBoreFrame);
+    require(module != nullptr, "special component test needs a material-gated Surface module");
+    require(module->materialCost.common == 2 && module->materialCost.rare == 1, "deep-bore frame should require recovered materials");
     require(!canAffordModuleOffer(state, *module), "special ship components should check material affordability");
     require(!buyOffer(state, catalog, 0), "buying without required materials should fail");
     require(state.run.credits == 200.0, "failed material-gated refit should not spend credits");
@@ -813,8 +1766,8 @@ void specialShipComponentsRequireRecoveredMaterials()
     require(canAffordModuleOffer(state, *module), "adding recovered materials should satisfy special component cost");
     require(buyOffer(state, catalog, 0), "buying with credits and materials should succeed");
     require(state.meta.materials.common == 0 && state.meta.materials.rare == 0, "buying special component should spend recovered materials");
-    require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::deepReservoir) != state.run.inventoryModuleIds.end(), "bought special component should enter inventory");
-    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::deepReservoir) != state.meta.ownedModuleIds.end(), "bought special component should enter permanent shipyard inventory");
+    require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::deepBoreFrame) != state.run.inventoryModuleIds.end(), "bought special component should enter inventory");
+    require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::deepBoreFrame) != state.meta.ownedModuleIds.end(), "bought special component should enter permanent shipyard inventory");
 }
 
 void preMiningRefitOffersAvoidMaterialCosts()
@@ -923,53 +1876,6 @@ void shipModuleProgressSurvivesDestroyedVehicles()
     require(std::find(state.meta.ownedModuleIds.begin(), state.meta.ownedModuleIds.end(), content::module::cryoLoop) != state.meta.ownedModuleIds.end(), "ship destruction should not erase permanent shipyard tech");
     require(std::find(state.run.inventoryModuleIds.begin(), state.run.inventoryModuleIds.end(), content::module::cryoLoop) != state.run.inventoryModuleIds.end(), "replacement ships should inherit permanent shipyard inventory");
     require(std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), content::module::cryoLoop) != state.run.equippedModuleIds.end(), "replacement ships should keep the improved default loadout");
-}
-
-void destroyedLaunchesPreserveProvingFlights()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState earthFlight = createNewGame(catalog, 468);
-
-    LaunchOutcome successfulEarthFlight;
-    successfulEarthFlight.type = LaunchResultType::MissionComplete;
-    successfulEarthFlight.destinationId = content::destination::earthOrbit;
-    successfulEarthFlight.ejectMultiplier = defaultProvingTarget(catalog.destinations.front());
-    successfulEarthFlight.crashMultiplier = successfulEarthFlight.ejectMultiplier + 0.2;
-    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
-    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
-    require(earthFlight.run.frontierReadiness == 2, "two successful proving flights should bank two Flight Data");
-
-    LaunchOutcome destroyedEarthFlight;
-    destroyedEarthFlight.type = LaunchResultType::Destroyed;
-    destroyedEarthFlight.destinationId = content::destination::earthOrbit;
-    destroyedEarthFlight.shipDamage = tuning::damage::destroyedShipDamage;
-    destroyedEarthFlight.crewKilled = true;
-
-    applyLaunchOutcome(earthFlight, catalog, destroyedEarthFlight);
-
-    require(earthFlight.run.frontierReadiness == 2, "destroyed proving flights should preserve all previously banked Flight Data");
-    const LaunchOutcomeSummaryPresentation earthSummary = launchOutcomeSummaryPresentation(earthFlight, catalog);
-    require(earthSummary.progression.find("Flight Data held at 2/3") != std::string::npos,
-        "destroyed proving-flight summaries should say that existing route progress was preserved");
-
-    applyLaunchOutcome(earthFlight, catalog, successfulEarthFlight);
-    require(earthFlight.run.frontierReadiness == frontierReadinessRequired(earthFlight, catalog),
-        "the third successful proving flight should chart the Moon route even when a crash occurred between successes");
-
-    GameState moonTransfer = createNewGame(catalog, 469);
-    moonTransfer.run.frontierReadiness = frontierReadinessRequired(moonTransfer, catalog);
-    const Destination* next = nextDestination(moonTransfer, catalog);
-    require(next != nullptr, "starter route should have a transfer target");
-
-    LaunchOutcome destroyedMoonTransfer;
-    destroyedMoonTransfer.type = LaunchResultType::Destroyed;
-    destroyedMoonTransfer.destinationId = next->id;
-    destroyedMoonTransfer.frontierTransfer = true;
-    destroyedMoonTransfer.shipDamage = tuning::damage::destroyedShipDamage;
-
-    applyLaunchOutcome(moonTransfer, catalog, destroyedMoonTransfer);
-
-    require(moonTransfer.run.frontierReadiness == frontierReadinessRequired(moonTransfer, catalog), "destroyed Moon transfer attempts should preserve all banked Flight Data");
 }
 
 void deadCrewLosesTraining()
@@ -1088,7 +1994,11 @@ void crewUpgradeOffersInstallAndModifyCrewOps()
     Random upgradedRng(7070);
     const PreparedLaunch baselineLaunch = prepareLaunch(baseline, catalog, baselineRng);
     const PreparedLaunch upgradedLaunch = prepareLaunch(upgraded, catalog, upgradedRng);
-    require(upgradedLaunch.crashMultiplier > baselineLaunch.crashMultiplier, "trait facility upgrades should improve trait-driven launch performance");
+    require(nearlyEqual(upgradedLaunch.fuelCapacity, baselineLaunch.fuelCapacity) &&
+            nearlyEqual(upgradedLaunch.controlChaos, baselineLaunch.controlChaos) &&
+            upgradedLaunch.coolingRank == baselineLaunch.coolingRank &&
+            upgradedLaunch.hullRank == baselineLaunch.hullRank,
+        "unrelated crew facilities must not secretly improve the four direct launch systems");
 }
 
 void hangarOpsStartCheapAndEscalate()
@@ -1210,6 +2120,7 @@ void hangarOperationCardsComeFromSharedPreview()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 819);
+    state.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
     state.run.credits = 120.0;
     state.run.shipDamage = 24;
     Astronaut* pilot = activeAstronaut(state);
@@ -1257,6 +2168,7 @@ void totaledShipCanAlwaysReachSalvageRepair()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 820);
+    state.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
     state.run.shipDamage = tuning::damage::destroyedShipDamage;
     state.run.credits = 5.0;
 
@@ -1304,425 +2216,6 @@ void lowCreditRefitWindowIncludesAffordableOffer()
         }
         require(affordable, "a clean starter return should see at least one affordable early refit");
     }
-}
-
-void pressureTracksFrontierExperience()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 303);
-    const Destination& earthOrbit = catalog.destinations[0];
-
-    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.50) < 0.000001, "unattempted frontier should start at +50 pressure");
-
-    LaunchOutcome failed;
-    failed.type = LaunchResultType::SafeEject;
-    failed.recoveryMethod = RecoveryMethod::ManualEject;
-    failed.destinationId = earthOrbit.id;
-    failed.ejectMultiplier = 1.10;
-    applyLaunchOutcome(state, catalog, failed);
-    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.50) < 0.000001, "a failed attempt must not secretly reduce frontier pressure");
-
-    applyLaunchOutcome(state, catalog, failed);
-    require(std::abs(missionPressureModifier(state, catalog, earthOrbit) - 0.50) < 0.000001, "repeated failures must not create hidden pity assistance");
-
-    LaunchOutcome succeeded;
-    succeeded.type = LaunchResultType::MissionComplete;
-    succeeded.recoveryMethod = RecoveryMethod::ReturnHome;
-    succeeded.destinationId = earthOrbit.id;
-    succeeded.ejectMultiplier = earthOrbit.targetMultiplier;
-    applyLaunchOutcome(state, catalog, succeeded);
-    require(missionPressureModifier(state, catalog, earthOrbit) < 0.25, "successful proving runs should reduce pressure below failed-attempt pressure");
-    require(missionPressureModifier(state, catalog, earthOrbit) >= 0.05, "successful proving pressure should keep a nonzero floor");
-}
-
-void skillBasedLaunchFlightIsStatefulRecoverableAndFair()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    const auto runPolicy = [&](const PreparedLaunch& launch, const Destination& destination, bool steer) {
-        LaunchFlightState flight = beginLaunchFlight(launch, destination);
-        bool enginesCut = false;
-        bool valveOpen = false;
-        bool turnedHome = false;
-        LaunchFlightStep step;
-        for (int frame = 0; frame < 2500; ++frame) {
-            if (flight.heat >= tuning::launch::pilotingWarningThreshold) enginesCut = true;
-            if (flight.heat <= 0.52) enginesCut = false;
-            if (flight.pressure >= tuning::launch::pilotingWarningThreshold) valveOpen = true;
-            if (flight.pressure <= 0.46) valveOpen = false;
-            const double correction = steer
-                ? std::clamp(-flight.courseOffset * 2.8 - flight.courseVelocity * 1.4, -1.0, 1.0)
-                : 0.0;
-            step = updateLaunchFlight(
-                flight,
-                launch,
-                destination,
-                {correction, 0.0, enginesCut, valveOpen},
-                tuning::launch::maxFrameStepSeconds);
-            if (step.failed || step.reachedHome) break;
-            if (step.reachedDestination && !turnedHome) {
-                beginLaunchReturn(flight);
-                turnedHome = true;
-            }
-        }
-        return std::pair {flight, step};
-    };
-
-    for (int destinationIndex = 0; destinationIndex <= 3; ++destinationIndex) {
-        GameState state = createNewGame(catalog, 0x5100 + destinationIndex);
-        state.run.destinationIndex = destinationIndex;
-        syncLaunchConfig(state, catalog);
-        const Destination& destination = catalog.destinations[static_cast<std::size_t>(destinationIndex)];
-        for (int seed = 0; seed < 5000; ++seed) {
-            Random rng(0xA1100000ULL + static_cast<std::uint64_t>(destinationIndex) * 5000ULL + static_cast<std::uint64_t>(seed));
-            const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-            const auto [flight, step] = runPolicy(launch, destination, true);
-            require(!step.failed && step.reachedHome && flight.failureCause == LaunchFailureCause::None,
-                "reasonable cruise/steer/cool/vent policy must survive 5,000 seeds at every early destination");
-        }
-    }
-
-    GameState jupiterState = createNewGame(catalog, 0x5151);
-    jupiterState.run.destinationIndex = 3;
-    syncLaunchConfig(jupiterState, catalog);
-    Random jupiterRng(0x5151);
-    PreparedLaunch jupiterLaunch = prepareLaunch(jupiterState, catalog, jupiterRng);
-    const Destination& jupiter = catalog.destinations[3];
-
-    PreparedLaunch ignoredLaunch = jupiterLaunch;
-    ignoredLaunch.incidentCount = 0;
-    LaunchFlightState ignoredSteering = beginLaunchFlight(ignoredLaunch, jupiter);
-    LaunchFlightStep ignoredStep;
-    for (int frame = 0; frame < 1200 && !ignoredStep.failed; ++frame) {
-        ignoredStep = updateLaunchFlight(
-            ignoredSteering,
-            ignoredLaunch,
-            jupiter,
-            {0.0, 0.0, false, true},
-            tuning::launch::maxFrameStepSeconds);
-    }
-    require(ignoredStep.failed && ignoredStep.failureCause == LaunchFailureCause::CourseLost,
-        "venting without steering correction should lose a later early-game route");
-
-    LaunchFlightState fullThrottle = beginLaunchFlight(jupiterLaunch, jupiter);
-    LaunchFlightStep fullThrottleStep;
-    bool fullThrottleTurned = false;
-    for (int frame = 0; frame < 2500 && !fullThrottleStep.failed && !fullThrottleStep.reachedHome; ++frame) {
-        fullThrottleStep = updateLaunchFlight(
-            fullThrottle,
-            jupiterLaunch,
-            jupiter,
-            {std::clamp(-fullThrottle.courseOffset * 2.8, -1.0, 1.0), 1.0, false, false},
-            tuning::launch::maxFrameStepSeconds);
-        if (fullThrottleStep.reachedDestination && !fullThrottleTurned) {
-            beginLaunchReturn(fullThrottle);
-            fullThrottleTurned = true;
-        }
-    }
-    require(fullThrottleStep.failed &&
-            (fullThrottleStep.failureCause == LaunchFailureCause::ThermalRunaway ||
-                fullThrottleStep.failureCause == LaunchFailureCause::FuelExhausted),
-        "sustained full throttle through visible warnings should reliably destroy or strand an early Jupiter ship");
-
-    PreparedLaunch controlled = jupiterLaunch;
-    controlled.incidentCount = 0;
-    LaunchFlightState cooling = beginLaunchFlight(controlled, jupiter);
-    cooling.heat = 0.82;
-    const double hotStart = cooling.heat;
-    for (int frame = 0; frame < 12; ++frame) {
-        updateLaunchFlight(cooling, controlled, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
-    }
-    require(cooling.heat < hotStart, "cut engines should produce net cooling without an overpowering external thermal incident");
-    require(cooling.selectedThrottle == tuning::launch::pilotingInitialThrottle,
-        "cut engines should preserve the selected throttle for restoration");
-
-    LaunchFlightState steerLeft = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState steerRight = beginLaunchFlight(controlled, jupiter);
-    for (int frame = 0; frame < 12; ++frame) {
-        updateLaunchFlight(steerLeft, controlled, jupiter, {-1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-        updateLaunchFlight(steerRight, controlled, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    }
-    require(steerLeft.courseOffset < 0.0 && steerRight.courseOffset > 0.0,
-        "negative launch steering should move left and positive launch steering should move right");
-
-    LaunchFlightState vented = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState sealed = vented;
-    vented.pressure = sealed.pressure = 0.82;
-    for (int frame = 0; frame < 20; ++frame) {
-        updateLaunchFlight(vented, controlled, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
-        updateLaunchFlight(sealed, controlled, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    }
-    require(vented.pressure + 0.10 < sealed.pressure, "an open relief valve should deterministically drain pressure");
-    require(std::abs(vented.courseOffset) > std::abs(sealed.courseOffset) + 0.10,
-        "pressure relief should impose a strong visible directional drift tradeoff");
-    vented.courseOffset = (vented.courseOffset >= 0.0 ? 1.0 : -1.0) * 0.72;
-    vented.courseVelocity = 0.0;
-    const double ventDirection = vented.courseOffset > 0.0 ? -1.0 : 1.0;
-    for (int frame = 0; frame < 80 && std::abs(vented.courseOffset) >= tuning::launch::pilotingCourseSafe; ++frame) {
-        updateLaunchFlight(vented, controlled, jupiter, {ventDirection, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    }
-    require(vented.failureCause == LaunchFailureCause::None &&
-            std::abs(vented.courseOffset) < tuning::launch::pilotingCourseSafe,
-        "steering against valve drift should recover a caution-level excursion before course failure");
-
-    LaunchFlightState returnContinuity = beginLaunchFlight(controlled, jupiter);
-    returnContinuity.travelProgress = 0.72;
-    returnContinuity.fuelRemaining = 0.63;
-    returnContinuity.heat = 0.58;
-    returnContinuity.pressure = 0.61;
-    beginLaunchReturn(returnContinuity);
-    require(returnContinuity.returningHome && returnContinuity.travelProgress == 0.72 &&
-            returnContinuity.fuelRemaining == 0.63 && returnContinuity.heat == 0.58 && returnContinuity.pressure == 0.61,
-        "starting the return leg should preserve route, fuel, heat, and pressure state");
-
-    PreparedLaunch weakHull = controlled;
-    PreparedLaunch strongHull = controlled;
-    weakHull.stats.hull = 0.0;
-    strongHull.stats.hull = 5.0;
-    require(std::abs(launchPressureGraceSeconds(weakHull) - 1.25) < 0.000001 &&
-            std::abs(launchPressureGraceSeconds(strongHull) - 3.0) < 0.000001,
-        "hull should add exactly 0.35 seconds of visible pressure grace per point");
-
-    PreparedLaunch upgraded = controlled;
-    upgraded.stats.thrust += 2.0;
-    upgraded.stats.fuel += 2.0;
-    upgraded.stats.cooling += 2.0;
-    upgraded.stats.sensors += 2.0;
-    upgraded.stats.pressure += 2.0;
-    LaunchFlightState baseFlight = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState upgradedFlight = beginLaunchFlight(upgraded, jupiter);
-    updateLaunchFlight(baseFlight, controlled, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    updateLaunchFlight(upgradedFlight, upgraded, jupiter, {1.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    require(upgradedFlight.travelProgress > baseFlight.travelProgress &&
-            upgradedFlight.courseVelocity > baseFlight.courseVelocity,
-        "thrust should directly improve travel speed and powered correction");
-    require(upgradedFlight.fuelCapacity > baseFlight.fuelCapacity, "fuel upgrades should add measurable usable range");
-    require(launchCourseLimit(upgraded) > launchCourseLimit(controlled) &&
-            launchIncidentWarningLeadSeconds(upgraded) > launchIncidentWarningLeadSeconds(controlled),
-        "sensors should increase course tolerance and incident warning lead time");
-
-    PreparedLaunch fuelUpgrade = controlled;
-    fuelUpgrade.stats.fuel += 2.0;
-    const auto [baseRangeFlight, baseRangeStep] = runPolicy(controlled, jupiter, true);
-    const auto [upgradedRangeFlight, upgradedRangeStep] = runPolicy(fuelUpgrade, jupiter, true);
-    require(baseRangeStep.reachedHome && upgradedRangeStep.reachedHome &&
-            upgradedRangeFlight.fuelRemaining > baseRangeFlight.fuelRemaining + 0.20,
-        "fuel upgrades should leave a measurable Jupiter return reserve under the same cruise policy");
-
-    PreparedLaunch coolingUpgrade = controlled;
-    coolingUpgrade.stats.cooling += 2.0;
-    LaunchFlightState baseCooling = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState upgradedCooling = beginLaunchFlight(coolingUpgrade, jupiter);
-    baseCooling.heat = upgradedCooling.heat = 0.80;
-    updateLaunchFlight(baseCooling, controlled, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
-    updateLaunchFlight(upgradedCooling, coolingUpgrade, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
-    require(upgradedCooling.heat < baseCooling.heat, "cooling upgrades should directly improve engine-off heat recovery");
-
-    PreparedLaunch pressureUpgrade = controlled;
-    pressureUpgrade.stats.pressure += 2.0;
-    LaunchFlightState basePressure = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState upgradedPressure = beginLaunchFlight(pressureUpgrade, jupiter);
-    basePressure.pressure = upgradedPressure.pressure = 0.80;
-    updateLaunchFlight(basePressure, controlled, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
-    updateLaunchFlight(upgradedPressure, pressureUpgrade, jupiter, {0.0, 0.0, false, true}, tuning::launch::maxFrameStepSeconds);
-    require(upgradedPressure.pressure < basePressure.pressure &&
-            std::abs(upgradedPressure.courseVelocity) < std::abs(basePressure.courseVelocity),
-        "pressure control should improve venting and reduce valve-induced course drift");
-
-    PreparedLaunch sensorUpgrade = controlled;
-    sensorUpgrade.stats.sensors += 2.0;
-    LaunchFlightState baseTrim = beginLaunchFlight(controlled, jupiter);
-    LaunchFlightState upgradedTrim = beginLaunchFlight(sensorUpgrade, jupiter);
-    baseTrim.courseOffset = upgradedTrim.courseOffset = 0.50;
-    updateLaunchFlight(baseTrim, controlled, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    updateLaunchFlight(upgradedTrim, sensorUpgrade, jupiter, {0.0, 0.0, false, false}, tuning::launch::maxFrameStepSeconds);
-    require(upgradedTrim.courseVelocity < baseTrim.courseVelocity,
-        "sensors should directly strengthen automatic course trim");
-
-    PreparedLaunch stableIncident = controlled;
-    stableIncident.stats.volatility = 0.0;
-    stableIncident.incidentCount = 1;
-    stableIncident.incidents[0] = {};
-    stableIncident.incidents[0].centerMultiplier = 1.0;
-    stableIncident.incidents[0].width = 0.50;
-    stableIncident.incidents[0].heat = 0.60;
-    PreparedLaunch volatileIncident = stableIncident;
-    volatileIncident.stats.volatility = 2.0;
-    LaunchFlightState stablePulse = beginLaunchFlight(stableIncident, jupiter);
-    LaunchFlightState volatilePulse = beginLaunchFlight(volatileIncident, jupiter);
-    updateLaunchFlight(stablePulse, stableIncident, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
-    updateLaunchFlight(volatilePulse, volatileIncident, jupiter, {0.0, 0.0, true, false}, tuning::launch::maxFrameStepSeconds);
-    require(volatilePulse.heat > stablePulse.heat,
-        "volatility should directly amplify seeded flight disturbances");
-}
-
-void crewStressTracksPeakTelemetryDanger()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState calm = createNewGame(catalog, 909);
-    GameState tense = createNewGame(catalog, 909);
-
-    Astronaut* calmPilot = activeAstronaut(calm);
-    Astronaut* tensePilot = activeAstronaut(tense);
-    require(calmPilot != nullptr && tensePilot != nullptr, "peak danger stress test needs pilots");
-
-    calmPilot->stress = 0;
-    tensePilot->stress = 0;
-
-    LaunchOutcome calmOutcome;
-    calmOutcome.type = LaunchResultType::SafeEject;
-    calmOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
-    calmOutcome.destinationId = catalog.destinations[0].id;
-    calmOutcome.ejectMultiplier = 1.20;
-    calmOutcome.peakWarning = 0.20;
-    calmOutcome.peakAbortRisk = 0.05;
-
-    LaunchOutcome tenseOutcome = calmOutcome;
-    tenseOutcome.peakWarning = 0.92;
-    tenseOutcome.peakAbortRisk = 0.78;
-
-    const PostLaunchCrewStress calmStress = postLaunchCrewStress(calmOutcome, {});
-    const PostLaunchCrewStress tenseStress = postLaunchCrewStress(tenseOutcome, {});
-    require(calmStress.baseStress == tuning::stress::survivedLaunchStress, "survived launch stress should expose the tuned base value");
-    require(calmStress.warningStress == 0 && calmStress.abortStress == 0, "calm telemetry should not add danger stress");
-    require(calmStress.total == tuning::stress::survivedLaunchStress, "calm stress helper should match baseline stress");
-    require(tenseStress.warningStress > 0 && tenseStress.abortStress > 0, "high WARN and ABORT should both contribute stress");
-    require(tenseStress.total > calmStress.total, "near-failure telemetry should increase helper stress");
-
-    CrewUpgradeStats debriefSupport;
-    debriefSupport.launchStressRelief = 999;
-    require(postLaunchCrewStressGain(tenseOutcome, debriefSupport) == 0, "stress relief should clamp launch stress at zero");
-
-    applyLaunchOutcome(calm, catalog, calmOutcome);
-    applyLaunchOutcome(tense, catalog, tenseOutcome);
-
-    require(calmPilot->stress == calmStress.total, "applied calm outcome should use shared stress helper");
-    require(tensePilot->stress > calmPilot->stress, "near-failure telemetry should add crew stress");
-    require(tensePilot->stress == tenseStress.total, "applied tense outcome should use shared stress helper");
-}
-
-void pressureControlModulesReducePressureTelemetry()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState bare = createNewGame(catalog, 404);
-    bare.run.equippedModuleIds = {
-        content::module::sparrowEngine,
-        content::module::patchworkHull,
-        content::module::radiatorVanes,
-        content::module::springCapsule
-    };
-    syncLaunchConfig(bare, catalog);
-
-    GameState controlled = bare;
-    controlled.run.equippedModuleIds.push_back(content::module::stableTank);
-    controlled.run.equippedModuleIds.push_back(content::module::analogTelemetry);
-    syncLaunchConfig(controlled, catalog);
-
-    Random bareRng(505);
-    Random controlledRng(505);
-    const PreparedLaunch bareLaunch = prepareLaunch(bare, catalog, bareRng);
-    const PreparedLaunch controlledLaunch = prepareLaunch(controlled, catalog, controlledRng);
-    const double burn = 1.0 + (catalog.destinations[0].targetMultiplier - 1.0) * 0.78;
-
-    require(controlledLaunch.pressureModifier < bareLaunch.pressureModifier, "pressure-control modules should lower mission pressure modifier");
-    require(telemetryAt(controlledLaunch, burn).pressure < telemetryAt(bareLaunch, burn).pressure, "pressure-control modules should lower PRESS telemetry");
-}
-
-void starterEarthOrbitIsProvingFirst()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    constexpr int samples = 900;
-    int firstAttemptFullProfileSuccesses = 0;
-    int secondAttemptFullProfileSuccesses = 0;
-    int thirdAttemptFullProfileSuccesses = 0;
-    int provingLosses = 0;
-
-    for (int i = 0; i < samples; ++i) {
-        {
-            GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-            Random rng(88000 + static_cast<std::uint64_t>(i));
-            const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-            const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[0].targetMultiplier, RecoveryMethod::ReturnHome, rng);
-            firstAttemptFullProfileSuccesses += outcome.type == LaunchResultType::MissionComplete ? 1 : 0;
-        }
-        {
-            GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-            state.meta.destinationAttempts[0] = 1;
-            Random rng(89000 + static_cast<std::uint64_t>(i));
-            const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-            const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[0].targetMultiplier, RecoveryMethod::ReturnHome, rng);
-            secondAttemptFullProfileSuccesses += outcome.type == LaunchResultType::MissionComplete ? 1 : 0;
-        }
-        {
-            GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-            state.meta.destinationAttempts[0] = 2;
-            Random rng(90000 + static_cast<std::uint64_t>(i));
-            const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-            const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[0].targetMultiplier, RecoveryMethod::ReturnHome, rng);
-            thirdAttemptFullProfileSuccesses += outcome.type == LaunchResultType::MissionComplete ? 1 : 0;
-        }
-        {
-            GameState state = createNewGame(catalog, 99000 + static_cast<std::uint64_t>(i));
-            Random rng(99000 + static_cast<std::uint64_t>(i));
-            const LaunchOutcome outcome = simulateLaunchToTarget(state, catalog, rng);
-            provingLosses += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
-        }
-    }
-
-    require(firstAttemptFullProfileSuccesses < samples * 12 / 100, "first Earth Orbit full profile should be a long-shot, not the default opening move");
-    require(secondAttemptFullProfileSuccesses < samples * 40 / 100, "second Earth Orbit full profile should still be risky without upgrades");
-    require(thirdAttemptFullProfileSuccesses < samples * 60 / 100, "third Earth Orbit full profile should still be far from guaranteed without upgrades");
-    require(provingLosses < samples * 42 / 100, "first Earth Orbit proving runs should still be relatively survivable");
-}
-
-void starterProvingEconomyFundsEarlyRefits()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    constexpr int samples = 700;
-    int recovered = 0;
-    double netCredits = 0.0;
-
-    for (int i = 0; i < samples; ++i) {
-        GameState state = createNewGame(catalog, 120000 + static_cast<std::uint64_t>(i));
-        Random rng(120000 + static_cast<std::uint64_t>(i));
-        const LaunchOutcome outcome = simulateLaunchToTarget(state, catalog, rng);
-        if (outcome.type != LaunchResultType::Destroyed) {
-            recovered += 1;
-            netCredits += outcome.payout - outcome.recoveryCost;
-        }
-    }
-
-    require(recovered > samples / 2, "most starter proving flights should return enough data to keep playing");
-    require(netCredits / static_cast<double>(std::max(1, recovered)) > 5.0, "starter proving returns should average enough credits to fund early refits");
-    require(moduleOfferCost(catalog.modules[1]) <= 35, "early uncommon refits should be reachable after a clean starter return");
-}
-
-void returnHomeRewardShelvesMatchRefitCosts()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 515);
-    const Destination& destination = currentDestination(state, catalog);
-    const double dataGoal = state.launchConfig.burnGoalMultiplier;
-    const double uncommonGoal = dataGoal + (destination.targetMultiplier - dataGoal) * 0.45;
-
-    LaunchOutcome commonReturn;
-    require(firstRecoveredReturnAtBurn(state, catalog, dataGoal, 150000, commonReturn), "test should find a recovered data-goal return");
-    require(commonReturn.payout - commonReturn.recoveryCost >= static_cast<double>(moduleOfferCost(Rarity::Common)) - 0.001, "returning at data goal should guarantee a common refit");
-
-    LaunchOutcome uncommonReturn;
-    require(firstRecoveredReturnAtBurn(state, catalog, uncommonGoal, 160000, uncommonReturn), "test should find a recovered pushed return");
-    require(uncommonReturn.payout - uncommonReturn.recoveryCost >= static_cast<double>(moduleOfferCost(Rarity::Uncommon)) - 0.001, "pushing past data goal should guarantee an uncommon refit when recovered");
-
-    GameState proven = state;
-    proven.meta.destinationAttempts[0] = 5;
-    proven.meta.destinationSuccesses[0] = 1;
-    if (Astronaut* pilot = activeAstronaut(proven)) {
-        pilot->training = 8;
-        pilot->stress = 0;
-    }
-
-    LaunchOutcome rareReturn;
-    require(firstRecoveredReturnAtBurn(proven, catalog, destination.targetMultiplier, 170000, rareReturn), "test should find a recovered full-profile return");
-    require(rareReturn.payout - rareReturn.recoveryCost >= static_cast<double>(moduleOfferCost(Rarity::Rare)) - 0.001, "surviving the full target should guarantee a rare refit");
 }
 
 void researchPhasesUnlockOnlyAfterMarsArrival()
@@ -1777,9 +2270,8 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
     completeArrivalOrbit(state, catalog);
     startArrivalOps(state, moonArrival);
     require(canAttemptArrivalLanding(state, catalog), "Moon landing should unlock after flyby and orbit");
-    require(state.run.frontierReadiness == 0, "Moon frontier should start with no Mars flight data");
-    require(bankArrivalLandingFlightData(state, catalog), "first cleared Moon landing should bank one flight-data rep");
-    require(state.run.frontierReadiness == 1, "Moon landing should count as flight data toward Mars");
+    require(!hasUnlock(state.meta, content::unlock::routeMars),
+        "Moon landing alone must not silently chart Mars; the explicit Prospector contract owns that route unlock");
 
     LaunchOutcome marsArrival = moonArrival;
     marsArrival.destinationId = content::destination::mars;
@@ -1804,17 +2296,19 @@ void activityIntroductionsAreFirstUseAndUnlockAware()
     std::string html = buildGamePanelHtml(hangarContext);
     require(html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos
             && html.find("FIRST FLIGHT BRIEF") != std::string::npos,
-        "a fresh campaign should introduce the first proving launch from its launch button");
-    require(html.find("Left/right corrects drift; up/down changes persistent throttle.") != std::string::npos
-            && html.find("Warnings are real reaction windows") != std::string::npos
+        "a fresh campaign should introduce the Moon fuel survey from its launch button");
+    require(html.find("ship carries 10 fuel") != std::string::npos
+            && html.find("lunar route needs 15") != std::string::npos
+            && html.find("Turn Around") != std::string::npos
+            && html.find("Fuel Tanks and Flight Controls") != std::string::npos
             && html.find("data-rr-action=\"prepare_launch\"") != std::string::npos,
-        "the launch introduction should teach piloting and visible system reactions before preflight");
+        "the launch introduction should teach the exact first fuel constraint without premature systems");
 
     hangarContext.firstTimeIntroductionsEnabled = false;
     html = buildGamePanelHtml(hangarContext);
     require(html.find("launch_introduction") == std::string::npos
             && html.find("data-rr-action=\"prepare_launch\"") != std::string::npos,
-        "disabled introductions should leave a direct proving-launch action");
+        "disabled introductions should leave a direct Moon-launch action");
 
     ui::briefings::acknowledge(hangar.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
     hangarContext.firstTimeIntroductionsEnabled = true;
@@ -3214,6 +3708,8 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     GameState state = createNewGame(catalog, 0x10A7);
     state.run.destinationIndex = 1;
     state.meta.furthestTier = 1;
+    state.meta.launchLessons.stage = LaunchTrainingStage::MarsTransfer;
+    state.meta.launchUpgrades.fuelTanks = 2;
 
     FrontierGateStatus gate = frontierGateStatus(state, catalog);
     require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
@@ -3407,7 +3903,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
     require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
         "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 9 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == 10 && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
     require(parsed.has_value(), "current campaign state should deserialize");
@@ -3445,9 +3941,12 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && migratedMars.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
             && migratedMars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
         "the v6 Mars repair should preserve one Prospector and leave the inherited second slot empty");
-    require(migratedMarsGate.kind == FrontierGateKind::ScenarioRequirement
-            && migratedMarsGate.satisfied,
-        "the repaired v6 Mars save should satisfy the Jupiter frontier gate");
+    require(hasUnlock(migratedMars.meta, content::unlock::routeJupiter) &&
+            migratedMars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity &&
+            migratedMars.meta.launchUpgrades.fuelTanks >= 2 &&
+            migratedMarsGate.kind == FrontierGateKind::FlightData &&
+            !migratedMarsGate.satisfied,
+        "the repaired v6 Mars save should retain the Jupiter story route while entering the new Hull lesson and Fuel III gate");
 
     SaveData inconsistentV7Mars = legacyMars;
     inconsistentV7Mars.version = 7;
@@ -3465,9 +3964,11 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && repairedV7Mars.meta.marsCommonOreRecovered == tuning::research::marsBayCommonOreGoal
             && repairedV7Mars.meta.droneBaySlots == 2
             && repairedV7Mars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone}
-            && repairedV7MarsGate.kind == FrontierGateKind::ScenarioRequirement
-            && repairedV7MarsGate.satisfied,
-        "an already-v7 Mars save with inherited Slot 2 should self-heal instead of remaining route-locked");
+            && hasUnlock(repairedV7Mars.meta, content::unlock::routeJupiter)
+            && repairedV7Mars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity
+            && repairedV7MarsGate.kind == FrontierGateKind::FlightData
+            && !repairedV7MarsGate.satisfied,
+        "an already-v7 Mars save with inherited Slot 2 should self-heal its story route while entering the new Hull curriculum gate");
 
     SaveData legacy = captureSaveData(createNewGame(catalog, 0x6006));
     legacy.version = 6;
@@ -3857,10 +4358,10 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     state.screen = Screen::Mining;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 9, "new saves should use schema version nine");
+    require(captured.version == 10, "new saves should use schema version ten");
     const std::optional<SaveData> parsed =
         deserializeSaveData(serializeSaveData(captured));
-    require(parsed.has_value(), "v9 scenario and cocoon state should deserialize");
+    require(parsed.has_value(), "v10 scenario and cocoon state should deserialize");
 
     GameState restored = createNewGame(catalog, 0x900A);
     restoreSaveData(restored, catalog, *parsed);
@@ -9176,14 +9677,14 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 9, "new saves should use version nine");
+    require(captured.version == 10, "new saves should use version ten");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
     require(serialized.find("miningGravity=") != std::string::npos, "version-six saves should write vector gravity");
     require(serialized.find("miningLooseChunks=") != std::string::npos, "version-six saves should write loose chunks");
     const std::optional<SaveData> parsed = deserializeSaveData(serialized);
-    require(parsed.has_value(), "version-nine EVA save should deserialize");
+    require(parsed.has_value(), "version-ten EVA save should deserialize");
 
     GameState restored = createNewGame(catalog, 0xE6B);
     restoreSaveData(restored, catalog, *parsed);
@@ -10536,24 +11037,27 @@ void surfacePresentationComesFromSharedHelper()
         return chip.label == std::string(text::labels::commonMaterials) && !chip.value.empty() && chip.value.front() == '+';
     }) != surface.actions[0].payoffChips.end(), "surface survey preview should expose material payoff chips");
     require(surface.actions[0].action.actionId == std::string(ui::actions::surveySurface), "surface survey should use shared action id");
-    require(surface.actions[1].action.enabled, "fresh surface mine should be available when shared fuel is available");
-    require(
-        surface.actions[1].detail.find("Mining Rig") != std::string::npos &&
-            surface.actions[1].detail.find("mining drone") == std::string::npos,
-        "surface mining copy should identify the player-controlled vehicle as the Mining Rig");
-    require(surface.actions[1].cost == "1 " + std::string(text::fuel::reserveLabel(false)), "surface mine preview should expose fuel-only cost");
+    require(surface.actions[0].action.cssClass == "ok", "Survey should use green ready styling");
+    require(surface.actions[1].action.label == std::string(text::buttons::pushDeeper), "Dig should follow Survey and use the shared action label");
+    require(surface.actions[1].action.cssClass == "warn", "Dig should use yellow caution styling");
     require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::oxygen);
-    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose oxygen runtime");
-    require(std::find_if(surface.actions[1].payoffChips.begin(), surface.actions[1].payoffChips.end(), [](const PanelMetricPresentation& chip) {
-        return chip.label == std::string(text::labels::sharedFuel) && chip.value == "-1 deploy";
-    }) != surface.actions[1].payoffChips.end(), "surface mine preview should expose deployment fuel spend");
-    require(surface.actions[2].action.label == std::string(text::buttons::pushDeeper), "Push Deeper should use the shared action label");
-    require(surface.actions[2].action.cssClass == "warn", "Push Deeper should expose gold caution styling");
-    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::depth) && chip.value == "+1";
-    }) != surface.actions[2].payoffChips.end(), "Push Deeper preview should expose depth payoff");
+    }) != surface.actions[1].payoffChips.end(), "Dig preview should expose its deeper Mining Rig start point");
+    require(surface.actions[2].action.enabled, "fresh surface mine should be available when shared fuel is available");
+    require(surface.actions[2].action.cssClass == "risk", "Mine should use orange risk styling");
+    require(
+        surface.actions[2].detail.find("Control the Mining Rig drone") != std::string::npos &&
+            surface.actions[2].detail.find("ore and artifacts") != std::string::npos,
+        "surface mining copy should explain direct drone control and its extraction goal");
+    require(surface.actions[2].cost == "1 " + std::string(text::fuel::reserveLabel(false)), "surface mine preview should expose fuel-only cost");
+    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::oxygen);
+    }) != surface.actions[2].payoffChips.end(), "surface mine preview should expose oxygen runtime");
+    require(std::find_if(surface.actions[2].payoffChips.begin(), surface.actions[2].payoffChips.end(), [](const PanelMetricPresentation& chip) {
+        return chip.label == std::string(text::labels::sharedFuel) && chip.value == "-1 deploy";
+    }) != surface.actions[2].payoffChips.end(), "surface mine preview should expose deployment fuel spend");
     require(surface.actions[3].action.actionId == std::string(ui::actions::extractSurface), "surface extraction should use shared action id");
+    require(surface.actions[3].action.cssClass == "ghost", "Return should use blue navigation styling");
     require(surface.actions[3].riskLabel.empty(), "surface extraction should not show a hidden recovery-risk percentage");
     require(std::find_if(surface.actions[3].payoffChips.begin(), surface.actions[3].payoffChips.end(), [](const PanelMetricPresentation& chip) {
         return chip.label == std::string(text::labels::artifacts) && chip.value == "+1";
@@ -10580,28 +11084,28 @@ void surfacePresentationComesFromSharedHelper()
         "Saturn surface extraction should recover to the outward expedition without promising an Earth return");
 
     surface = surfaceExpeditionPresentation(state);
-    require(surface.actions[1].action.actionId == std::string(ui::actions::mineSurface), "fresh surface mine should use shared action id");
-    require(surface.actions[1].availability == text::fuel::availability(false), "fresh surface mine should report fuel readiness");
+    require(surface.actions[2].action.actionId == std::string(ui::actions::mineSurface), "fresh surface mine should use shared action id");
+    require(surface.actions[2].availability == text::fuel::availability(false), "fresh surface mine should report fuel readiness");
     state.run.surfaceExpedition.supply = 0;
     surface = surfaceExpeditionPresentation(state);
     require(!surface.actions[0].action.enabled && surface.actions[0].availability == text::panel::messages::needSupply(tuning::research::surveySupplyCost), "blocked surface survey should keep the detailed action-kit reason in status text");
     require(surface.actions[0].action.label == std::string(text::buttons::unavailable), "blocked surface survey button should stay compact for card footers");
-    require(!surface.actions[2].action.enabled && surface.actions[2].availability == text::panel::messages::needSupply(tuning::research::pushSupplyCost), "blocked Push Deeper should keep the detailed action-kit reason in status text");
-    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "blocked Push Deeper button should stay compact for card footers");
+    require(!surface.actions[1].action.enabled && surface.actions[1].availability == text::panel::messages::needSupply(tuning::research::pushSupplyCost), "blocked Dig should keep the detailed action-kit reason in status text");
+    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "blocked Dig button should stay compact for card footers");
     state.run.surfaceExpedition.supply = 8;
     state.run.surfaceExpedition.sharedFuel = 0;
     surface = surfaceExpeditionPresentation(state);
-    require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "fuel-starved mine should report the unified offline state");
-    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "fuel-starved mine button should use the neutral unavailable label");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::fuel::offline), "fuel-starved mine should report the unified offline state");
+    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "fuel-starved mine button should use the neutral unavailable label");
     state.run.surfaceExpedition.sharedFuel = 1;
     state.run.surfaceExpedition.miningRunUsed = true;
     surface = surfaceExpeditionPresentation(state);
-    require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::fuel::offline), "used mining run should disable the mine action with the unified offline state");
+    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::fuel::offline), "used mining run should disable the mine action with the unified offline state");
     require(!surface.actions[0].action.enabled && surface.actions[0].availability == std::string(text::panel::messages::surfaceFieldworkClosed), "used mining run should disable surveying with extraction-focused copy");
-    require(!surface.actions[2].action.enabled && surface.actions[2].availability == std::string(text::panel::messages::surfaceFieldworkClosed), "used mining run should disable pushing deeper with extraction-focused copy");
-    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "used mining run mine button should use the neutral unavailable label");
+    require(!surface.actions[1].action.enabled && surface.actions[1].availability == std::string(text::panel::messages::surfaceFieldworkClosed), "used mining run should disable digging with extraction-focused copy");
+    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "used mining run mine button should use the neutral unavailable label");
     require(surface.actions[0].action.label == std::string(text::buttons::unavailable), "post-mining survey button should use the neutral unavailable label");
-    require(surface.actions[2].action.label == std::string(text::buttons::unavailable), "post-mining push button should use the neutral unavailable label");
+    require(surface.actions[1].action.label == std::string(text::buttons::unavailable), "post-mining Dig button should use the neutral unavailable label");
 
     state.run.surfaceExpedition.supply = 0;
     surface = surfaceExpeditionPresentation(state);
@@ -10614,7 +11118,7 @@ void surfacePresentationComesFromSharedHelper()
     empty.run.destinationIndex = 2;
     startSurfaceExpedition(empty, catalog);
     const SurfaceExpeditionPresentation emptySurface = surfaceExpeditionPresentation(empty);
-    require(emptySurface.postureTitle == "Recommended: mine deposit", "empty fueled surface payload should recommend the drone mining choice");
+    require(emptySurface.postureTitle == "Recommended: survey, dig, then mine", "empty fueled surface payload should teach the Surface Ops sequence");
     require(emptySurface.postureClass == "neutral", "empty surface posture should use neutral styling");
 
     GameState risky = state;
@@ -10703,55 +11207,6 @@ void scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract()
         "Surface details should use the generic delivery progress instead of a named campaign projection");
 }
 
-void overburnRewardsBeatLinearScalingAfterGoal()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 909);
-    state.meta.destinationAttempts[0] = 5;
-    state.meta.destinationSuccesses[0] = 1;
-    if (Astronaut* pilot = activeAstronaut(state)) {
-        pilot->training = 8;
-        pilot->stress = 0;
-    }
-    syncLaunchConfig(state, catalog);
-
-    Random launchRng(909);
-    PreparedLaunch launch = prepareLaunch(state, catalog, launchRng);
-    launch.stats.hull += 20.0;
-    launch.stats.cooling += 20.0;
-    launch.stats.fuel += 20.0;
-    launch.stats.sensors += 20.0;
-
-    const Destination& destination = catalog.destinations[0];
-    const double atGoalBurn = destination.targetMultiplier;
-    const double overGoalBurn = destination.targetMultiplier + 0.30;
-    launch.crashMultiplier = overGoalBurn + 0.40;
-
-    LaunchOutcome atGoal;
-    LaunchOutcome overGoal;
-    for (int i = 0; i < 5000; ++i) {
-        Random resolveRng(180000 + static_cast<std::uint64_t>(i));
-        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, atGoalBurn, RecoveryMethod::ReturnHome, resolveRng);
-        if (outcome.type != LaunchResultType::Destroyed) {
-            atGoal = outcome;
-            break;
-        }
-    }
-    for (int i = 0; i < 5000; ++i) {
-        Random resolveRng(185000 + static_cast<std::uint64_t>(i));
-        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, overGoalBurn, RecoveryMethod::ReturnHome, resolveRng);
-        if (outcome.type != LaunchResultType::Destroyed) {
-            overGoal = outcome;
-            break;
-        }
-    }
-
-    require(atGoal.type != LaunchResultType::Destroyed, "test should find a recovered target return");
-    require(overGoal.type != LaunchResultType::Destroyed, "test should find a recovered overburn return");
-    const double linearRatio = overGoalBurn / atGoalBurn;
-    require(overGoal.payout > atGoal.payout * linearRatio * 1.25, "overburn payout should beat linear reward scaling after the goal");
-}
-
 void saveRoundTripPreservesProgress()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -10760,7 +11215,8 @@ void saveRoundTripPreservesProgress()
     state.run.destinationIndex = 2;
     state.run.frontierReadiness = 3;
     state.run.refitEntitled = true;
-    state.run.offerModuleIds = {content::module::sparrowInjectorTune, content::module::radiatorVaneExtension, content::module::patchworkCrossBracing};
+    state.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    state.run.offerModuleIds = {content::module::fuelTanks1, "", ""};
     state.run.shipDamage = 17;
     state.run.offerRerollsThisExpedition = 2;
     state.run.repairOpsThisExpedition = 1;
@@ -10810,7 +11266,9 @@ void saveRoundTripPreservesProgress()
     require(restored.run.destinationIndex == 2, "destination index should round trip");
     require(restored.run.frontierReadiness == 3, "frontier readiness should round trip");
     require(restored.run.refitEntitled, "saved refit entitlement should round trip");
-    require(restored.run.offerModuleIds[0] == content::module::sparrowInjectorTune, "saved refit board should round trip");
+    require(restored.run.offerModuleIds[0] == content::module::fuelTanks1 &&
+            restored.run.offerModuleIds[1].empty() && restored.run.offerModuleIds[2].empty(),
+        "saved one-card launch lesson offer should round trip");
     require(restored.run.shipDamage == 17, "ship damage should round trip");
     require(restored.run.offerRerollsThisExpedition == 2, "refit reroll count should round trip");
     require(restored.run.repairOpsThisExpedition == 1, "repair escalation should round trip");
@@ -10930,6 +11388,8 @@ void legacyRecordsTrackAchievementStats()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 909);
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    syncLaunchConfig(state, catalog);
 
     LaunchOutcome first;
     first.type = LaunchResultType::MissionComplete;
@@ -10972,73 +11432,72 @@ void launchOutcomePresentationIsShared()
     LaunchOutcome destroyed;
     destroyed.type = LaunchResultType::Destroyed;
     destroyed.recoveryMethod = RecoveryMethod::ReturnHome;
+    destroyed.pilotedFlight = true;
+    destroyed.failureCause = LaunchFailureCause::HullBreach;
+    destroyed.minimumSafetyMargin = -0.02;
+    destroyed.shipDamage = 1.0;
     destroyed.moduleDestroyedId = content::module::sparrowEngine;
     destroyed.crewKilled = true;
 
     LaunchOutcomePresentation presentation = launchOutcomePresentation(destroyed);
     require(presentation.label == text::panel::outcomes::returnFailure, "return-home destruction should share return-failure label");
     require(presentation.nextActionLabel == text::buttons::startReplacementRefit, "destroyed outcomes should share replacement action label");
-    require(presentation.metricGroups.size() == 3, "result presentation should group post-flight metrics");
+    require(presentation.metricGroups.size() == 2, "piloted results should group mission and visible flight-system metrics");
     require(presentation.metricGroups[0].title == text::panel::sections::missionResult, "mission result group should lead the result summary");
     require(presentation.metricGroups[0].metrics.size() == 3, "mission result group should show outcome, recovery, and credits");
-    require(presentation.metricGroups[1].title == text::panel::sections::burnProfile, "burn profile group should be explicit");
-    require(presentation.metricGroups[2].title == text::panel::sections::peakTelemetry, "peak telemetry group should be explicit");
-    require(presentation.notes.size() == 3, "destroyed outcomes should compare burn and failure point before module and crew notes");
-    require(presentation.notes[0].find("revealed failure point") != std::string::npos, "debrief should explain the revealed failure point");
+    require(presentation.metricGroups[1].title == "Flight systems" &&
+            presentation.metricGroups[1].metrics[0].label == "Safety margin" &&
+            presentation.metricGroups[1].metrics[1].label == "Hull damage" &&
+            presentation.metricGroups[1].metrics[2].value ==
+                std::string(toString(LaunchFailureCause::HullBreach)),
+        "piloted debriefs should report only the visible launch systems and explicit terminal cause");
+    require(presentation.notes.size() == 3, "destroyed outcomes should report the visible cause before module and crew notes");
+    require(presentation.notes[0].find(toString(LaunchFailureCause::HullBreach)) != std::string::npos &&
+            presentation.notes[0].find("visible safety countdown") != std::string::npos &&
+            presentation.notes[0].find("failure point") == std::string::npos,
+        "debrief should explain the visible terminal cause without hidden crash-roll language");
     require(presentation.notes[1] == text::panel::lostModule(content::module::sparrowEngine), "lost module note should be shared");
     require(presentation.notes[2] == std::string(text::panel::messages::crewLossRecorded), "crew death note should be shared");
     require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("lost"), "crew death should create a major memorial result beat");
     require(presentation.crewFate.title == text::panel::crewFate::lostTitle, "crew death result beat should use memorial copy");
 
-    LaunchOutcome recoveredFailure;
-    recoveredFailure.type = LaunchResultType::Destroyed;
-    recoveredFailure.recoveryMethod = RecoveryMethod::ManualEject;
-    presentation = launchOutcomePresentation(recoveredFailure);
-    require(presentation.crewFate.active && presentation.crewFate.cssClass == std::string_view("recovered"), "surviving a vehicle loss should create a major rescue result beat");
-    require(presentation.crewFate.title == text::panel::crewFate::recoveredTitle, "survived failure result beat should use rescue copy");
-
-    LaunchOutcome pilotedFailure = recoveredFailure;
-    pilotedFailure.pilotedFlight = true;
-    pilotedFailure.failureCause = LaunchFailureCause::PressureRupture;
-    pilotedFailure.minimumSafetyMargin = -0.02;
-    presentation = launchOutcomePresentation(pilotedFailure);
-    require(!presentation.notes.empty() && presentation.notes[0].find("Pressure rupture") != std::string::npos &&
-            presentation.notes[0].find("visible safety countdown") != std::string::npos,
-        "piloted failures should report the explicit visible terminal cause");
-    require(presentation.notes[0].find("failure point") == std::string::npos &&
-            presentation.metricGroups[1].metrics[1].label == "Safety margin",
-        "piloted results should remove legacy hidden-failure-point copy");
+    LaunchOutcome trainingRescue;
+    trainingRescue.type = LaunchResultType::SafeEject;
+    trainingRescue.recoveryMethod = RecoveryMethod::ReturnHome;
+    trainingRescue.pilotedFlight = true;
+    trainingRescue.failureCause = LaunchFailureCause::TrainingRescue;
+    presentation = launchOutcomePresentation(trainingRescue);
+    require(presentation.label == "Training Rescue" &&
+            presentation.notes.size() == 1 &&
+            presentation.notes.front().find("No calibration data") != std::string::npos,
+        "tutorial mistakes should receive a plainly named non-destructive rescue result");
 
     LaunchOutcome transfer;
     transfer.type = LaunchResultType::MissionComplete;
     transfer.recoveryMethod = RecoveryMethod::TransferArrival;
     transfer.frontierTransfer = true;
+    transfer.pilotedFlight = true;
+    transfer.minimumSafetyMargin = 0.31;
     presentation = launchOutcomePresentation(transfer);
     require(presentation.label == text::panel::outcomes::transferComplete, "successful transfer should share transfer label");
     require(presentation.nextActionLabel == text::buttons::reviewRefitOptions, "survived outcomes should share refit review action label");
-    require(presentation.notes.size() == 1 && presentation.notes[0].find("revealed failure point") != std::string::npos,
-        "clean transfer should compare burn depth with the revealed failure point");
+    require(presentation.notes.size() == 1 &&
+            presentation.notes[0].find("Minimum visible safety margin") != std::string::npos &&
+            presentation.notes[0].find("failure point") == std::string::npos,
+        "clean transfers should summarize their visible safety margin");
 
     presentation = launchOutcomePresentation(transfer, true);
     require(presentation.nextActionLabel == text::buttons::arrivalOps, "post-arrival outcomes should route toward the approach choice");
     require(presentation.notes.size() == 2 && presentation.notes[1] == std::string(text::panel::messages::postArrivalResearchReady), "post-arrival outcomes should explain the research handoff after the burn comparison");
 
-    LaunchOutcome injuredEject;
-    injuredEject.type = LaunchResultType::SafeEject;
-    injuredEject.recoveryMethod = RecoveryMethod::ManualEject;
-    injuredEject.crewInjured = true;
-    presentation = launchOutcomePresentation(injuredEject);
-    require(presentation.label == text::panel::outcomes::emergencyEject, "manual ejection should share emergency eject label");
-    require(presentation.notes.size() == 2 && presentation.notes[1] == std::string(text::panel::messages::crewInjured), "crew injury note should follow the burn comparison");
-
     LaunchOutcome closeCall;
     closeCall.type = LaunchResultType::MissionComplete;
     closeCall.recoveryMethod = RecoveryMethod::ReturnHome;
-    closeCall.ejectMultiplier = 2.78;
-    closeCall.crashMultiplier = 2.82;
+    closeCall.pilotedFlight = true;
+    closeCall.minimumSafetyMargin = 0.04;
     presentation = launchOutcomePresentation(closeCall);
-    require(presentation.notes.size() == 1 && presentation.notes[0].find("revealed failure point") != std::string::npos,
-        "close recoveries should still explain the revealed failure margin");
+    require(presentation.notes.size() == 1 && presentation.notes[0].find("Minimum visible safety margin") != std::string::npos,
+        "close recoveries should explain the visible survival margin");
     require(presentation.achievements.size() == 1, "close recoveries should unlock a close-call achievement");
     require(presentation.achievements[0].id == content::achievement::skinOfYourTeeth, "close-call achievement should use a stable content id");
     require(presentation.achievements[0].title == text::panel::achievements::skinOfYourTeethTitle, "close-call achievement should expose a clear title");
@@ -11131,15 +11590,17 @@ void refitPresentationComesFromSharedHelper()
     require(engineCard.category == std::string(text::enums::slot::engine), "module presentation should expose shared slot label");
     require(engineCard.rarity == std::string(text::enums::rarity::common), "module presentation should expose shared rarity label");
     require(engineCard.glyph == "E", "module presentation should expose a stable card glyph");
-    require(engineCard.detail.find("Powered correction +0.24") != std::string::npos &&
-            engineCard.detail.find("route speed") != std::string::npos,
-        "engine presentation should quantify its launch correction and route-speed effects");
+    require(engineCard.detail.find("Legacy engine package") != std::string::npos &&
+            engineCard.detail.find("Powered correction") == std::string::npos &&
+            engineCard.detail.find("route speed") == std::string::npos,
+        "legacy engine modules must not imply a hidden influence on the launch curriculum");
     require(engineCard.primaryImpact == "+2.0 Speed", "module presentation should expose strongest stat impact");
     require(hasRefitChip(engineCard, text::moduleStats::speedChip, "+2.0", true), "module presentation should expose speed stat chip");
 
     RefitPresentation tankCard = moduleRefitPresentation(*tank);
-    require(tankCard.detail.find("Valve venting +1.6%/s") != std::string::npos,
-        "fuel pressure modules should quantify their valve-venting effect");
+    require(tankCard.detail.find("Legacy fuel package") != std::string::npos &&
+            tankCard.detail.find("Valve venting") == std::string::npos,
+        "legacy fuel modules must not revive removed launch valve mechanics");
     require(hasRefitChip(tankCard, text::moduleStats::pressureChip, "+0.4", true), "module presentation should expose pressure stat chip");
 
     RefitPresentation crewCard = crewUpgradeRefitPresentation(*simBay);
@@ -11153,13 +11614,13 @@ void refitPresentationComesFromSharedHelper()
 void refitWindowPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
-    const ShipModule* engine = catalog.findModule(content::module::sparrowEngine);
+    const ShipModule* engine = catalog.findModule(content::module::regolithAuger);
     const CrewUpgrade* simBay = catalog.findCrewUpgrade(content::crewUpgrade::analogSimBay);
     require(engine != nullptr && simBay != nullptr, "refit window presentation test needs default offers");
 
     GameState state = createNewGame(catalog, 448);
     state.run.credits = 100.0;
-    state.run.offerModuleIds = {content::module::sparrowEngine, "", ""};
+    state.run.offerModuleIds = {content::module::regolithAuger, "", ""};
     state.run.offerCrewUpgradeIds = {"", content::crewUpgrade::analogSimBay, ""};
 
     const RefitWindowPresentation window = refitWindowPresentation(state, catalog);
@@ -11178,6 +11639,15 @@ void refitWindowPresentationComesFromSharedHelper()
     require(moduleOffer.action.label == std::string(text::buttons::installPermanently), "module offer should use the concise install label");
     require(moduleOffer.action.actionId == ui::actions::buyOffer(0), "module offer should use shared indexed buy action");
     require(moduleOffer.action.cssClass == "ok", "module offer should expose install button style");
+
+    state.run.offerModuleIds = {content::module::slushTank, "", ""};
+    state.run.offerCrewUpgradeIds = {};
+    const RefitWindowPresentation staleLegacyWindow =
+        refitWindowPresentation(state, catalog);
+    require(staleLegacyWindow.offers.empty(),
+        "a persisted legacy compatibility offer must not render as a purchasable Refit card");
+    state.run.offerModuleIds = {content::module::regolithAuger, "", ""};
+    state.run.offerCrewUpgradeIds = {"", content::crewUpgrade::analogSimBay, ""};
 
     const RefitOfferPresentation& crewOffer = window.offers[1];
     require(crewOffer.kind == RefitOfferPresentationKind::CrewUpgrade, "crew offers should be typed for future render variants");
@@ -11269,24 +11739,56 @@ void shipDetailsPresentationComesFromSharedHelper()
     GameState state = createNewGame(catalog, 442);
 
     const std::vector<DetailPresentationRow> rows = shipDetailsPresentation(state, catalog);
-    const DetailPresentationRow* thrust = findDetailPresentationRow(rows, text::moduleStats::thrustDetail);
     const DetailPresentationRow* damage = findDetailPresentationRow(rows, text::moduleStats::damage);
     const DetailPresentationRow* engine = findDetailPresentationRow(rows, "Built in");
-    const DetailPresentationRow* correction = findDetailPresentationRow(rows, "Powered correction");
-    const DetailPresentationRow* fuelCapacity = findDetailPresentationRow(rows, "Fuel capacity");
-    const DetailPresentationRow* cooling = findDetailPresentationRow(rows, "Engine-off cooling");
-    const DetailPresentationRow* pressureGrace = findDetailPresentationRow(rows, "Pressure grace");
-    const DetailPresentationRow* venting = findDetailPresentationRow(rows, "Valve venting");
-    const DetailPresentationRow* corridor = findDetailPresentationRow(rows, "Course corridor");
-    const DetailPresentationRow* warning = findDetailPresentationRow(rows, "Incident warning");
 
-    require(thrust != nullptr && !thrust->value.empty(), "ship presentation should expose formatted ship stats");
     require(damage != nullptr && damage->value == display::wholePercent(state.run.shipDamage), "ship presentation should expose damage row");
     require(hasDetailPresentationHeader(rows, "Installed ship systems"), "ship presentation should include permanent systems section");
     require(engine != nullptr && engine->value.find("Sparrow Engine") != std::string::npos, "ship presentation should summarize built-in modules");
-    require(correction != nullptr && fuelCapacity != nullptr && cooling != nullptr && pressureGrace != nullptr &&
-            venting != nullptr && corridor != nullptr && warning != nullptr,
-        "Ship Details should numerically expose every practical early-launch upgrade effect");
+    require(findDetailPresentationRow(rows, "Powered correction") == nullptr &&
+            findDetailPresentationRow(rows, "Pressure grace") == nullptr &&
+            findDetailPresentationRow(rows, "Valve venting") == nullptr &&
+            findDetailPresentationRow(rows, "Incident warning") == nullptr,
+        "Ship Details must not advertise retired launch stats or controls");
+
+    const auto findUpgrade = [](const std::vector<LaunchUpgradeInstallPresentation>& upgrades, LaunchUpgradeKind kind) {
+        const auto found = std::find_if(upgrades.begin(), upgrades.end(), [&](const LaunchUpgradeInstallPresentation& upgrade) {
+            return upgrade.kind == kind;
+        });
+        return found == upgrades.end() ? static_cast<const LaunchUpgradeInstallPresentation*>(nullptr) : &(*found);
+    };
+    std::vector<LaunchUpgradeInstallPresentation> upgrades = launchUpgradeInstallPresentation(state, catalog);
+    require(upgrades.size() == 4,
+        "Ship Details should expose exactly the four direct launch upgrade tracks");
+    const LaunchUpgradeInstallPresentation* fuel = findUpgrade(upgrades, LaunchUpgradeKind::FuelTanks);
+    const LaunchUpgradeInstallPresentation* controls = findUpgrade(upgrades, LaunchUpgradeKind::FlightControls);
+    const LaunchUpgradeInstallPresentation* cooling = findUpgrade(upgrades, LaunchUpgradeKind::Cooling);
+    const LaunchUpgradeInstallPresentation* hull = findUpgrade(upgrades, LaunchUpgradeKind::Hull);
+    require(fuel != nullptr && controls != nullptr && cooling != nullptr && hull != nullptr,
+        "Fuel Tanks, Flight Controls, Engine Cooling, and Hull Plating must be the only launch rows");
+    require(fuel->title == "Fuel Tanks" && fuel->currentRank == 0 && fuel->nextRank == 1 &&
+            fuel->currentEffect == "10 fuel" && fuel->nextEffect == "15 fuel" && fuel->cost == 22 &&
+            !fuel->action.enabled && fuel->action.label == "Complete fuel test",
+        "the opening Fuel row should plainly show current capacity, next capacity, price, and lesson gate");
+    require(controls->currentEffect == "100% control chaos" && controls->nextEffect == "55% control chaos" &&
+            !controls->action.enabled && controls->action.label == "Complete controls test",
+        "the controls row should numerically explain its chaos reduction and lesson gate");
+    require(cooling->currentEffect == "100% powered heat / 10%/s off cooling" &&
+            cooling->nextEffect == "88% powered heat / 14%/s off cooling" &&
+            !cooling->action.enabled && cooling->action.label == "Complete heat test",
+        "the cooling row should numerically explain powered heat, engine-off recovery, and its lesson gate");
+    require(hull->currentEffect == "100 HP / 100% impact" &&
+            hull->nextEffect == "125 HP / 80% impact" &&
+            !hull->action.enabled && hull->action.label == "Complete asteroid test",
+        "the hull row should numerically explain HP and impact reduction");
+
+    state.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    state.run.credits = 22.0;
+    upgrades = launchUpgradeInstallPresentation(state, catalog);
+    fuel = findUpgrade(upgrades, LaunchUpgradeKind::FuelTanks);
+    require(fuel != nullptr && fuel->action.enabled && fuel->action.label == text::buttons::install &&
+            fuel->action.actionId == ui::actions::installLaunchUpgrade(static_cast<int>(LaunchUpgradeKind::FuelTanks)),
+        "a completed lesson should expose a simple Install action for its one unlocked rank");
 
     const ShipModule* spareModule = catalog.findModule(content::module::cryoLoop);
     require(spareModule != nullptr, "ship presentation test needs a non-starter spare module");
@@ -11302,8 +11804,6 @@ void programDetailsPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 443);
-    const int required = frontierReadinessRequired(state, catalog);
-    state.run.frontierReadiness = 2;
     state.meta.blueprintProgress = 9;
     state.meta.materials = {.common = 3, .rare = 2, .exotic = 1};
     state.meta.artifacts = {
@@ -11315,17 +11815,14 @@ void programDetailsPresentationComesFromSharedHelper()
     state.meta.furthestTier = 1;
 
     const std::vector<DetailPresentationRow> frontierRows = frontierDetailsPresentation(state, catalog);
-    const DetailPresentationRow* current = findDetailPresentationRow(frontierRows, text::panel::details::current);
-    const DetailPresentationRow* flightData = findDetailPresentationRow(frontierRows, text::labels::flightData);
-    const DetailPresentationRow* difficulty = findDetailPresentationRow(frontierRows, text::labels::missionDifficulty);
-    const DetailPresentationRow* next = findDetailPresentationRow(frontierRows, text::panel::details::next);
-    const DetailPresentationRow* transferBurn = findDetailPresentationRow(frontierRows, text::panel::details::transferBurn);
-
-    require(current != nullptr && current->value == catalog.destinations[0].name, "frontier presentation should expose current frontier");
-    require(flightData != nullptr && flightData->value == display::fraction(state.run.frontierReadiness, required), "frontier presentation should share readiness display format");
-    require(difficulty != nullptr && difficulty->value == display::signedPercent(missionPressureModifier(state, catalog, catalog.destinations[0])), "frontier presentation should share mission difficulty format");
-    require(next != nullptr && next->value == catalog.destinations[1].name, "frontier presentation should expose next frontier");
-    require(transferBurn != nullptr && transferBurn->value == display::multiplier(catalog.destinations[1].targetMultiplier), "frontier presentation should expose next transfer burn");
+    require(std::any_of(frontierRows.begin(), frontierRows.end(), [](const DetailPresentationRow& row) {
+        return !row.heading && row.value.find("Moon") != std::string::npos;
+    }), "fresh Program Details should identify the Moon as the visible launch destination");
+    require(std::none_of(frontierRows.begin(), frontierRows.end(), [](const DetailPresentationRow& row) {
+        return row.label == text::labels::flightData ||
+            row.label == text::labels::missionDifficulty ||
+            row.value.find("Earth Orbit") != std::string::npos;
+    }), "Program Details must not expose hidden Earth proving, Flight Data, or random launch difficulty");
 
     const std::vector<DetailPresentationRow> legacyRows = legacyDetailsPresentation(state);
     const DetailPresentationRow* blueprints = findDetailPresentationRow(legacyRows, text::panel::details::blueprints);
@@ -11349,9 +11846,8 @@ void programDetailsPresentationComesFromSharedHelper()
     require(astronautsLost != nullptr && astronautsLost->value == "2", "legacy presentation should expose astronaut losses");
     require(furthestTier != nullptr && furthestTier->value == "1", "legacy presentation should expose furthest tier");
     require(closestSurvival != nullptr, "legacy presentation should expose closest survival record");
-    require(maxBurnDepth != nullptr, "legacy presentation should expose max burn record");
-    require(maxPeakWarning != nullptr, "legacy presentation should expose peak warning record");
-    require(maxPeakAbort != nullptr, "legacy presentation should expose peak abort record");
+    require(maxBurnDepth == nullptr && maxPeakWarning == nullptr && maxPeakAbort == nullptr,
+        "Program Details must not expose retired burn-depth, warning, or abort telemetry records");
 
     const std::vector<DetailPresentationRow> archiveRows = artifactArchivePresentation(state, catalog);
     require(hasDetailPresentationHeader(archiveRows, text::panel::details::artifactArchive), "artifact archive should include a section header when artifacts exist");
@@ -11391,188 +11887,172 @@ void launchPanelPresentationComesFromSharedHelper()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 907);
-    Random rng(907);
-    PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const Destination& moon = launchDestination(catalog, content::destination::moon);
+    const Destination& mars = launchDestination(catalog, content::destination::mars);
+    const Destination& jupiter = launchDestination(catalog, content::destination::jupiter);
 
-    const double currentMultiplier = 1.24;
-    LaunchFlightState liveFlight = beginLaunchFlight(launch, catalog.destinations[0]);
-    liveFlight.currentMultiplier = currentMultiplier;
-    liveFlight.travelProgress = 0.40;
-    liveFlight.fuelRemaining = liveFlight.fuelCapacity * 0.82;
-    liveFlight.heat = 0.43;
-    liveFlight.pressure = 0.51;
-    LaunchPanelPresentation panel = launchPanelPresentation(
+    PreparedLaunch fuelLesson = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FuelCalibration,
+        false,
+        0,
+        0,
+        0,
+        0,
+        907);
+    LaunchFlightState fuelFlight = beginLaunchFlight(fuelLesson, moon);
+    fuelFlight.travelProgress = 0.50;
+    fuelFlight.fuelRemaining = 5.0;
+    LaunchPanelPresentation fuelPanel = launchPanelPresentation(
         state,
         catalog,
-        launch,
-        currentMultiplier,
+        fuelLesson,
+        fuelFlight.currentMultiplier,
         1.0,
         0.0,
         tuning::session::returnDefaultDuration,
         {},
+        &fuelFlight);
+    require(findPanelMetric(fuelPanel.metrics, "Fuel") != nullptr,
+        "Fuel Survey must expose the only first-flight gauge");
+    require(findPanelMetric(fuelPanel.metrics, "Throttle") == nullptr &&
+            findPanelMetric(fuelPanel.metrics, "Course") == nullptr &&
+            findPanelMetric(fuelPanel.metrics, "Temperature") == nullptr &&
+            findPanelMetric(fuelPanel.metrics, "Hull") == nullptr,
+        "Fuel Survey must hide every mechanic that has not been taught");
+    require(fuelPanel.primaryActions.size() == 1 &&
+            fuelPanel.primaryActions.front().label == "Turn Around" &&
+            fuelPanel.systemActions.empty(),
+        "Fuel Survey should offer only the plainly named Turn Around action");
+    require(fuelPanel.telemetryMessage.find("FUEL") != std::string::npos,
+        "the halfway survey warning must plainly tell the player about fuel");
+    state.screen = Screen::Launch;
+    PanelRenderContext activeFuelContext {state, catalog, fuelLesson, fuelLesson};
+    activeFuelContext.flightArmed = true;
+    activeFuelContext.launchFlight = &fuelFlight;
+    const PanelDocumentPresentation activeFuelDocument =
+        buildGamePanelPresentation(activeFuelContext);
+    require(activeFuelDocument.metadata.overlay == PanelOverlayKind::None,
+        "active launch lessons must not retain the obsolete warning/heat/caution legend");
+
+    PreparedLaunch controlsLesson = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
         false,
-        &liveFlight);
-
-    const PanelMetricPresentation* route = findPanelMetric(panel.metrics, "Route");
-    const PanelMetricPresentation* throttle = findPanelMetric(panel.metrics, "Throttle");
-    const PanelMetricPresentation* fuel = findPanelMetric(panel.metrics, "Fuel");
-    const PanelMetricPresentation* course = findPanelMetric(panel.metrics, "Course");
-    const PanelMetricPresentation* temperature = findPanelMetric(panel.metrics, "Temperature");
-    const PanelMetricPresentation* pressure = findPanelMetric(panel.metrics, "Pressure");
-    const PanelMetricPresentation* returnRisk = findPanelMetric(panel.metrics, text::labels::returnRisk);
-    require(panel.sectionTitle.find("Outbound leg") != std::string::npos && panel.sectionTitle.find("Earth Orbit") != std::string::npos,
-        "launch presentation should name the active route leg and destination");
-    require(route != nullptr && throttle != nullptr && fuel != nullptr && course != nullptr && temperature != nullptr && pressure != nullptr,
-        "live launch presentation should expose route, throttle, fuel, course, temperature, and pressure");
-    require(returnRisk == nullptr, "live piloting HUD must not expose random Return Risk copy");
-    require(panel.telemetry.size() == telemetrySamples(launchTelemetryAt(launch, liveFlight)).size(), "launch presentation should expose all stateful telemetry channel samples");
-
-    const FlightActionButtonPresentation* returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returnHome);
-    const FlightActionButtonPresentation* eject = findFlightActionButton(panel.primaryActions, text::buttons::eject);
-    require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "launch presentation should expose return-home action");
-    require(eject != nullptr && eject->enabled && eject->cssClass == "danger", "launch presentation should expose eject danger action");
-    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "launch presentation should not expose a manual approach button");
-    require(!panel.systemActions.empty(), "first Earth Orbit proving flights should expose engine and pressure controls from the start");
-
-    GameState moonState = createNewGame(catalog, 908);
-    moonState.run.destinationIndex = 1;
-    syncLaunchConfig(moonState, catalog);
-    Random moonRng(908);
-    PreparedLaunch moonLaunch = prepareLaunch(moonState, catalog, moonRng);
-    panel = launchPanelPresentation(
-        moonState,
+        1,
+        0,
+        0,
+        0,
+        908);
+    LaunchFlightState controlsFlight = beginLaunchFlight(controlsLesson, moon);
+    LaunchPanelPresentation controlsPanel = launchPanelPresentation(
+        state,
         catalog,
-        moonLaunch,
-        currentMultiplier,
+        controlsLesson,
+        controlsFlight.currentMultiplier,
         1.0,
         0.0,
         tuning::session::returnDefaultDuration,
         {},
-        false);
-    const FlightActionButtonPresentation* cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
-    const FlightActionButtonPresentation* reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
-    const FlightActionButtonPresentation* jettisonCargo = findFlightActionButton(panel.systemActions, text::buttons::jettisonCargo);
-    require(cutEngines != nullptr && cutEngines->enabled && cutEngines->actionId == ui::actions::cutEngines, "Moon-tier launch presentation should expose cut-engines action");
-    require(reliefValve != nullptr && reliefValve->enabled && reliefValve->actionId == ui::actions::pressureRelief, "Moon-tier launch presentation should expose relief-valve action");
-    require(jettisonCargo != nullptr && jettisonCargo->enabled && jettisonCargo->actionId == ui::actions::jettisonCargo, "Moon-tier launch presentation should expose jettison-cargo action");
+        &controlsFlight);
+    require(findPanelMetric(controlsPanel.metrics, "Fuel") != nullptr &&
+            findPanelMetric(controlsPanel.metrics, "Throttle") != nullptr &&
+            findPanelMetric(controlsPanel.metrics, "Course") == nullptr &&
+            controlsLesson.manualControlsEnabled,
+        "Controls lesson must add compact throttle and the visual piloting corridor without another gauge");
+    const double controlsTargetProgress =
+        (controlsLesson.config.burnGoalMultiplier - 1.0) /
+        (moon.targetMultiplier - 1.0);
+    require(nearlyEqual(
+                controlsTargetProgress,
+                tuning::launchProgression::calibrationTargetShare) &&
+            controlsTargetProgress < tuning::launch::pilotingMaximumTravelProgress,
+        "the yellow calibration target must share the same normalized route space as the corridor bounds");
+    require(findPanelMetric(controlsPanel.metrics, "Temperature") == nullptr &&
+            findPanelMetric(controlsPanel.metrics, "Hull") == nullptr &&
+            controlsPanel.systemActions.empty(),
+        "Controls lesson must not reveal temperature, hull, or system controls");
 
-    FlightActionState returning;
-    returning.returningHome = true;
-    const double returnBurnMultiplier = 1.32;
-    const double returnElapsed = 1.2;
-    const double returnDuration = tuning::session::returnDefaultDuration;
-    panel = launchPanelPresentation(
-        moonState,
+    PreparedLaunch thermalLesson = preparedCurriculumLaunch(
         catalog,
-        moonLaunch,
-        currentMultiplier,
-        returnBurnMultiplier,
-        returnElapsed,
-        returnDuration,
-        returning,
-        false);
-
-    const PanelMetricPresentation* burn = findPanelMetric(panel.metrics, text::labels::burnDepth);
-    const PanelMetricPresentation* returnProgress = findPanelMetric(panel.metrics, text::labels::returnProgress);
-    returnHome = findFlightActionButton(panel.primaryActions, text::buttons::returningHome);
-    cutEngines = findFlightActionButton(panel.systemActions, text::buttons::cutEngines);
-    require(panel.sectionTitle == text::panel::sections::returnBurn, "launch presentation should select return section title");
-    require(burn != nullptr && burn->value == display::multiplier(returnTelemetryMultiplier(returnBurnMultiplier, moonLaunch.crashMultiplier, returnElapsed, returnDuration)), "launch presentation should share return telemetry multiplier");
-    require(returnProgress != nullptr && returnProgress->value == display::percent(flight_progress::returnCompletion(returnElapsed, returnDuration)), "launch presentation should share return progress math");
-    require(returnHome != nullptr && !returnHome->enabled, "returning-home action should be disabled once committed");
-    require(cutEngines != nullptr && cutEngines->enabled, "system actions should stay live during return home");
-
-    GameState arkState = createNewGame(catalog, 909);
-    discoverArk(arkState, catalog);
-    Random arkRng(909);
-    PreparedLaunch arkLaunch = prepareLaunch(arkState, catalog, arkRng);
-    panel = launchPanelPresentation(
-        arkState,
+        content::destination::mars,
+        LaunchMissionKind::ThermalManagement,
+        false,
+        2,
+        2,
+        0,
+        0,
+        909);
+    LaunchFlightState thermalFlight = beginLaunchFlight(thermalLesson, mars);
+    thermalFlight.heat = 0.91;
+    FlightActionState thermalActions;
+    LaunchPanelPresentation thermalPanel = launchPanelPresentation(
+        state,
         catalog,
-        arkLaunch,
-        currentMultiplier,
+        thermalLesson,
+        thermalFlight.currentMultiplier,
         1.0,
         0.0,
-        returnDuration,
+        tuning::session::returnDefaultDuration,
+        thermalActions,
+        &thermalFlight);
+    require(findPanelMetric(thermalPanel.metrics, "Temperature") != nullptr &&
+            findPanelMetric(thermalPanel.metrics, "Hull") == nullptr,
+        "Mars lesson must add Temperature without revealing Hull");
+    require(thermalPanel.systemActions.size() == 1 &&
+            thermalPanel.systemActions.front().label == "Engines Off" &&
+            thermalPanel.systemActions.front().actionId == ui::actions::cutEngines,
+        "Temperature must reveal the only launch system action: Engines Off");
+    require(thermalPanel.telemetryMessage.find("CRITICAL") != std::string::npos,
+        "critical heat must have a visible, actionable warning");
+
+    thermalActions.cutEnginesActive = true;
+    thermalPanel = launchPanelPresentation(
+        state,
+        catalog,
+        thermalLesson,
+        thermalFlight.currentMultiplier,
+        1.0,
+        0.0,
+        tuning::session::returnDefaultDuration,
+        thermalActions,
+        &thermalFlight);
+    require(thermalPanel.systemActions.size() == 1 &&
+            thermalPanel.systemActions.front().label == "Engines On",
+        "the same thermal button should plainly restore engines");
+
+    PreparedLaunch beltLesson = preparedCurriculumLaunch(
+        catalog,
+        content::destination::jupiter,
+        LaunchMissionKind::AsteroidBelt,
+        false,
+        3,
+        3,
+        1,
+        0,
+        910);
+    LaunchFlightState beltFlight = beginLaunchFlight(beltLesson, jupiter);
+    LaunchPanelPresentation beltPanel = launchPanelPresentation(
+        state,
+        catalog,
+        beltLesson,
+        beltFlight.currentMultiplier,
+        1.0,
+        0.0,
+        tuning::session::returnDefaultDuration,
         {},
-        false);
-    returnHome = findFlightActionButton(panel.primaryActions, "Return to Ark");
-    require(returnHome != nullptr && returnHome->enabled && returnHome->actionId == ui::actions::returnHome, "Ark launch presentation should relabel the return action without changing its action id");
-
-    const Destination* saturn = catalog.findDestination(content::destination::saturn);
-    require(saturn != nullptr, "outer-expedition launch copy test requires Saturn content");
-    GameState saturnState = createNewGame(catalog, 910);
-    saturnState.run.destinationIndex = static_cast<int>(
-        saturn - catalog.destinations.data());
-    syncLaunchConfig(saturnState, catalog);
-    Random saturnRng(910);
-    PreparedLaunch saturnLaunch = prepareLaunch(saturnState, catalog, saturnRng);
-    panel = launchPanelPresentation(
-        saturnState,
-        catalog,
-        saturnLaunch,
-        currentMultiplier,
-        1.0,
-        0.0,
-        returnDuration,
-        {},
-        false);
-    const FlightActionButtonPresentation* recoverToExpedition =
-        findFlightActionButton(panel.primaryActions, "Recover to Expedition");
-    require(
-        recoverToExpedition != nullptr &&
-            recoverToExpedition->enabled &&
-            recoverToExpedition->actionId == ui::actions::returnHome &&
-            findFlightActionButton(panel.primaryActions, "Return to Earth") == nullptr,
-        "Saturn launch controls should preserve the recovery action while framing the one-way outer expedition");
-
-    panel = launchPanelPresentation(
-        saturnState,
-        catalog,
-        saturnLaunch,
-        currentMultiplier,
-        1.0,
-        0.0,
-        returnDuration,
-        returning,
-        false);
-    require(
-        findFlightActionButton(panel.primaryActions, "Recovering to Expedition") != nullptr,
-        "committed Saturn recovery should retain outward-expedition wording");
-
-    FlightActionState reliefOpen;
-    reliefOpen.pressureReliefOpen = true;
-    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
-    const FlightActionButtonPresentation* closeValve = findFlightActionButton(panel.systemActions, text::buttons::closeValve);
-    require(closeValve != nullptr && closeValve->enabled && closeValve->actionId == ui::actions::closeReliefValve, "open relief valve should expose close-valve action");
-
-    reliefOpen.pressureReliefFailed = true;
-    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
-    closeValve = findFlightActionButton(panel.systemActions, text::buttons::closeValve);
-    require(closeValve != nullptr && closeValve->enabled,
-        "legacy failed-valve state must not disable the deterministic reusable live valve");
-    reliefOpen.pressureReliefOpen = false;
-    panel = launchPanelPresentation(moonState, catalog, moonLaunch, currentMultiplier, 1.0, 0.0, returnDuration, reliefOpen, true);
-    reliefValve = findFlightActionButton(panel.systemActions, text::buttons::reliefValve);
-    require(reliefValve != nullptr && reliefValve->enabled,
-        "a closed valve should be reusable even after it was previously opened");
-
-    GameState marsState = createNewGame(catalog, 911);
-    marsState.run.destinationIndex = 2;
-    syncLaunchConfig(marsState, catalog);
-    Random marsRng(911);
-    PreparedLaunch marsLaunch = prepareLaunch(marsState, catalog, marsRng);
-    panel = launchPanelPresentation(
-        marsState,
-        catalog,
-        marsLaunch,
-        catalog.destinations[2].targetMultiplier,
-        1.0,
-        0.0,
-        returnDuration,
-        {},
-        false);
-    require(findFlightActionButton(panel.primaryActions, text::buttons::arrivalOps) == nullptr, "Mars proving flights should auto-open approach instead of exposing an approach button");
+        &beltFlight);
+    require(findPanelMetric(beltPanel.metrics, "Fuel") != nullptr &&
+            findPanelMetric(beltPanel.metrics, "Throttle") != nullptr &&
+            findPanelMetric(beltPanel.metrics, "Course") == nullptr &&
+            findPanelMetric(beltPanel.metrics, "Temperature") != nullptr &&
+            findPanelMetric(beltPanel.metrics, "Hull") != nullptr,
+        "Jupiter lesson must expose all four taught launch systems");
+    require(beltPanel.systemActions.size() == 1 &&
+            beltPanel.systemActions.front().actionId == ui::actions::cutEngines,
+        "asteroid flight must not revive pressure, jettison, or eject actions");
 }
 
 void launchReadinessPresentationComesFromSharedHelper()
@@ -11665,41 +12145,43 @@ void panelChromePresentationComesFromSharedHelper()
     GameState state = createNewGame(catalog, 909);
     state.run.credits = 123.0;
     state.run.shipDamage = 11;
-    state.run.frontierReadiness = 2;
     Astronaut* pilot = activeAstronaut(state);
     require(pilot != nullptr, "panel chrome test needs an active astronaut");
     pilot->stress = 28;
 
-    PreparedLaunch launch;
+    Random rng(909);
+    PreparedLaunch launch = prepareLaunch(state, catalog, rng);
     std::vector<PanelMetricPresentation> metrics = panelHeaderMetrics(state, catalog, launch, launch);
     const PanelMetricPresentation* credits = findPanelMetric(metrics, text::labels::missionCredits);
     const PanelMetricPresentation* chapter = findPanelMetric(metrics, text::labels::chapter);
     const PanelMetricPresentation* hullDamage = findPanelMetric(metrics, text::labels::hullDamage);
     const PanelMetricPresentation* currentFrontier = findPanelMetric(metrics, text::labels::currentFrontier);
-    const PanelMetricPresentation* flightData = findPanelMetric(metrics, text::labels::flightData);
-    const PanelMetricPresentation* difficulty = findPanelMetric(metrics, text::labels::missionDifficulty);
     const PanelMetricPresentation* crewStress = findPanelMetric(metrics, text::labels::crewStress);
 
-    require(metrics.size() == 7, "panel chrome should expose seven top-level metrics");
     require(credits != nullptr && credits->value == display::money(state.run.credits), "panel chrome should format mission credits");
     require(chapter != nullptr && chapter->value == "Chapter 1: Proving Ground", "panel chrome should expose the current chapter");
     require(hullDamage != nullptr && hullDamage->value == display::wholePercent(state.run.shipDamage), "panel chrome should format hull damage");
-    require(currentFrontier != nullptr && currentFrontier->value == catalog.destinations[0].name, "panel chrome should show current frontier off launch");
-    require(flightData != nullptr && flightData->value == display::fraction(state.run.frontierReadiness, frontierReadinessRequired(state, catalog)), "panel chrome should show readiness off launch");
-    require(difficulty != nullptr && difficulty->value == display::signedPercent(missionPressureModifier(state, catalog, catalog.destinations[0])), "panel chrome should show mission difficulty off launch");
+    require(currentFrontier != nullptr && currentFrontier->value == "Moon",
+        "panel chrome should show the Moon instead of the hidden Earth compatibility origin");
+    require(findPanelMetric(metrics, text::labels::flightData) == nullptr &&
+            findPanelMetric(metrics, text::labels::missionDifficulty) == nullptr,
+        "panel chrome must remove the retired Flight Data and random launch-difficulty readouts");
     require(crewStress != nullptr && crewStress->value == display::wholePercent(pilot->stress), "panel chrome should show active crew stress");
 
     state.screen = Screen::Launch;
-    launch.config.frontierTransfer = true;
-    launch.config.destinationId = catalog.destinations[1].id;
-    launch.pressureModifier = 0.37;
+    syncLaunchConfig(state, catalog);
+    Random launchRng(910);
+    launch = prepareLaunch(state, catalog, launchRng);
     metrics = panelHeaderMetrics(state, catalog, launch, launch);
-    const PanelMetricPresentation* transferTarget = findPanelMetric(metrics, text::labels::transferTarget);
-    const PanelMetricPresentation* requiredBurn = findPanelMetric(metrics, text::labels::requiredBurn);
-    difficulty = findPanelMetric(metrics, text::labels::missionDifficulty);
-    require(transferTarget != nullptr && transferTarget->value == catalog.destinations[1].name, "panel chrome should show active transfer target on launch");
-    require(requiredBurn != nullptr && requiredBurn->value == display::multiplier(catalog.destinations[1].targetMultiplier), "panel chrome should show transfer burn on launch");
-    require(difficulty != nullptr && difficulty->value == display::signedPercent(launch.pressureModifier), "panel chrome should use prepared launch difficulty while flying");
+    const PanelMetricPresentation* launchTarget = findPanelMetric(metrics, text::labels::currentFrontier);
+    const PanelMetricPresentation* launchLesson = findPanelMetric(metrics, "Launch lesson");
+    require(launchTarget != nullptr && launchTarget->value == "Moon",
+        "first-flight chrome should name the visible Moon target");
+    require(findPanelMetric(metrics, text::labels::flightData) == nullptr &&
+            findPanelMetric(metrics, text::labels::requiredBurn) == nullptr,
+        "first-flight chrome should not revive Flight Data or an abstract burn multiplier");
+    require(launchLesson != nullptr && launchLesson->value == std::string(toString(launch.config.missionKind)),
+        "launch chrome should show the current taught lesson instead of a hidden difficulty score");
 
     for (Astronaut& astronaut : state.run.crew) {
         astronaut.status = CrewStatus::Dead;
@@ -11895,13 +12377,16 @@ void titleScreenPresentationIsPortable()
             && briefingHtml.find("Controller") != std::string::npos,
         "the introduction guide should identify its keyboard and controller references");
     require(briefingHtml.find("WASD / Arrows steer and change throttle") != std::string::npos
-            && briefingHtml.find("C cuts or restores engines") != std::string::npos
-            && briefingHtml.find("V opens or closes pressure relief") != std::string::npos
+            && briefingHtml.find("C turns engines off or on") != std::string::npos
             && briefingHtml.find("Space or left click drills") != std::string::npos
             && briefingHtml.find("Left click fires") != std::string::npos
             && briefingHtml.find("data-controller-rt") != std::string::npos
             && briefingHtml.find("data-controller-lt") != std::string::npos,
         "the introduction guide should cover menus, launch, flight, rig, and EVA controls");
+    require(briefingHtml.find("pressure relief") == std::string::npos &&
+            briefingHtml.find("jettison") == std::string::npos &&
+            briefingHtml.find("Eject") == std::string::npos,
+        "the shared launch guide must not advertise removed pressure, cargo, or eject controls");
     require(briefingHtml.find("&middot;") == std::string::npos,
         "the guide should not rely on unsupported named HTML entities");
 }
@@ -11909,200 +12394,178 @@ void titleScreenPresentationIsPortable()
 void earlyGameProgressionAndOutcomeModalAreClear()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 1911);
-    Random rng(1911);
-    PreparedLaunch launch = prepareLaunch(state, catalog, rng);
 
-    std::string html = buildGamePanelHtml({state, catalog, launch, launch});
-    require(html.find("Chart the route to the Moon") != std::string::npos, "opening Hangar should state the lunar-route objective");
-    require(html.find("Flight Data 0/3") != std::string::npos, "opening Hangar should tie Flight Data to Moon progression");
+    GameState fresh = createNewGame(catalog, 1911);
+    fresh.screen = Screen::Hangar;
+    Random freshRng(1911);
+    const PreparedLaunch freshLaunch = prepareLaunch(fresh, catalog, freshRng);
+    PanelRenderContext freshContext {fresh, catalog, freshLaunch, freshLaunch};
+    freshContext.firstTimeIntroductionsEnabled = false;
+    const std::string freshHtml = buildGamePanelHtml(freshContext);
+    require(freshHtml.find("Prepare for launch: Moon") != std::string::npos &&
+            freshHtml.find("Map the Moon route") != std::string::npos &&
+            freshHtml.find("low-fuel warning") != std::string::npos &&
+            freshHtml.find("Turn Around") != std::string::npos,
+        "the opening Hangar should plainly target the Moon and state the first fuel-survey objective");
+    require(freshHtml.find("Earth Orbit") == std::string::npos &&
+            freshHtml.find("Flight Data") == std::string::npos &&
+            freshHtml.find("mission difficulty") == std::string::npos,
+        "the hidden compatibility origin and retired proving ladder must never appear in the opening UI");
 
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-    syncLaunchConfig(state, catalog);
-    launch = prepareLaunch(state, catalog, rng);
-    html = buildGamePanelHtml({state, catalog, launch, launch});
-    require(html.find("Lunar route charted") != std::string::npos && html.find("Prepare the transfer") != std::string::npos,
-        "ready Hangar should replace collection instructions with the transfer objective");
+    GameState controlsBriefState = fresh;
+    controlsBriefState.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    controlsBriefState.meta.launchUpgrades.fuelTanks = 1;
+    syncLaunchConfig(controlsBriefState, catalog);
+    Random controlsBriefRng(19121);
+    const PreparedLaunch controlsBriefLaunch = prepareLaunch(controlsBriefState, catalog, controlsBriefRng);
+    PanelRenderContext controlsBriefContext {controlsBriefState, catalog, controlsBriefLaunch, controlsBriefLaunch};
+    controlsBriefContext.firstTimeIntroductionsEnabled = true;
+    const std::string controlsBriefHtml = buildGamePanelHtml(controlsBriefContext);
+    require(controlsBriefHtml.find("FLIGHT CONTROLS TEST") != std::string::npos &&
+            controlsBriefHtml.find("yellow test line") != std::string::npos &&
+            controlsBriefHtml.find("will impact the surface") != std::string::npos,
+        "the second Moon sortie must explicitly frame the yellow line as a test-flight turn point and warn that uncalibrated landing impacts the Moon");
 
-    state.screen = Screen::Launch;
-    state.launchConfig.frontierTransfer = true;
-    state.launchConfig.destinationId = content::destination::moon;
-    state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
-    launch = prepareLaunch(state, catalog, rng);
-    LaunchFlightState moonFlight = beginLaunchFlight(launch, catalog.destinations[1]);
-    PanelRenderContext moonContext {state, catalog, launch, launch};
-    moonContext.launchFlight = &moonFlight;
-    html = buildGamePanelHtml(moonContext);
-    require(html.find(">Confidence</span>") == std::string::npos &&
-            html.find(">Throttle</span>") != std::string::npos &&
-            html.find(">Fuel</span>") != std::string::npos &&
-            html.find(">Course</span>") != std::string::npos &&
-            html.find(">Temperature</span>") != std::string::npos &&
-            html.find(">Pressure</span>") != std::string::npos,
-        "Moon preflight should show skill-based flight gauges without adaptive confidence copy");
+    GameState fuelState = fresh;
+    fuelState.screen = Screen::Launch;
+    Random fuelRng(1912);
+    const PreparedLaunch fuelLaunch = prepareLaunch(fuelState, catalog, fuelRng);
+    LaunchFlightState fuelFlight = beginLaunchFlight(
+        fuelLaunch,
+        launchDestination(catalog, content::destination::moon));
+    PanelRenderContext fuelContext {fuelState, catalog, fuelLaunch, fuelLaunch};
+    fuelContext.firstTimeIntroductionsEnabled = false;
+    fuelContext.launchFlight = &fuelFlight;
+    const std::string fuelHtml = buildGamePanelHtml(fuelContext);
+    require(fuelHtml.find(">Fuel</span>") != std::string::npos &&
+            fuelHtml.find(">Throttle</span>") == std::string::npos &&
+            fuelHtml.find(">Course</span>") == std::string::npos &&
+            fuelHtml.find(">Temperature</span>") == std::string::npos &&
+            fuelHtml.find(">Hull</span>") == std::string::npos,
+        "the first flight should render Fuel as its only launch-system gauge");
+    require(fuelHtml.find("Turn Around") != std::string::npos &&
+            fuelHtml.find("Engines Off") == std::string::npos,
+        "the fuel lesson should expose Turn Around without premature system controls");
 
-    GameState fundingBrief = createNewGame(catalog, 1911);
-    fundingBrief.screen = Screen::Launch;
-    Random fundingBriefRng(1911);
-    const PreparedLaunch fundingBriefLaunch = prepareLaunch(fundingBrief, catalog, fundingBriefRng);
-    const std::string fundingBriefHtml = buildGamePanelHtml({fundingBrief, catalog, fundingBriefLaunch, fundingBriefLaunch});
-    require(fundingBriefHtml.find("Pilot to the yellow brief") != std::string::npos &&
-            fundingBriefHtml.find("fly the return leg") != std::string::npos,
-        "opening launch instructions should explain that outbound and return legs are actively piloted");
+    GameState controlsState = fresh;
+    controlsState.screen = Screen::Launch;
+    controlsState.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    controlsState.meta.launchUpgrades.fuelTanks = 1;
+    syncLaunchConfig(controlsState, catalog);
+    Random controlsRng(1913);
+    const PreparedLaunch controlsLaunch = prepareLaunch(controlsState, catalog, controlsRng);
+    LaunchFlightState controlsFlight = beginLaunchFlight(
+        controlsLaunch,
+        launchDestination(catalog, content::destination::moon));
+    PanelRenderContext controlsContext {controlsState, catalog, controlsLaunch, controlsLaunch};
+    controlsContext.firstTimeIntroductionsEnabled = false;
+    controlsContext.launchFlight = &controlsFlight;
+    const std::string controlsHtml = buildGamePanelHtml(controlsContext);
+    require(controlsHtml.find(">Fuel</span>") != std::string::npos &&
+            controlsHtml.find(">Throttle</span>") != std::string::npos &&
+            controlsHtml.find(">Course</span>") == std::string::npos &&
+            controlsHtml.find(">Temperature</span>") == std::string::npos &&
+            controlsHtml.find(">Hull</span>") == std::string::npos &&
+            controlsLaunch.manualControlsEnabled,
+        "the second launch should add compact throttle and the visual corridor without another Course gauge");
 
-    GameState recovered = createNewGame(catalog, 1912);
-    LaunchOutcome usefulReturn;
-    usefulReturn.type = LaunchResultType::SafeEject;
-    usefulReturn.recoveryMethod = RecoveryMethod::ReturnHome;
-    usefulReturn.destinationId = content::destination::earthOrbit;
-    usefulReturn.ejectMultiplier = defaultProvingTarget(catalog.destinations[0]);
-    usefulReturn.crashMultiplier = usefulReturn.ejectMultiplier + 0.20;
-    usefulReturn.payout = 32.0;
-    usefulReturn.recoveryCost = 10.0;
-    applyLaunchOutcome(recovered, catalog, usefulReturn);
-    recovered.screen = Screen::Results;
-    Random recoveredRng(1912);
-    const PreparedLaunch recoveredLaunch = prepareLaunch(recovered, catalog, recoveredRng);
-    const std::string recoveredHtml = buildGamePanelHtml({recovered, catalog, recoveredLaunch, recoveredLaunch});
-    require(countOccurrences(recoveredHtml, "data-panel-mode=\"results\"") == 1
-            && recoveredHtml.find("class=\"results-panel phase-board-results\"") != std::string::npos,
-        "launch results should select one dedicated fullscreen Results panel mode");
-    require(recoveredHtml.find("data-panel-mode=\"phase-board\"") == std::string::npos
-            && recoveredHtml.find("class=\"phase-board phase-board-results\"") == std::string::npos,
-        "launch results should never inherit the persistent phase-board rail classification");
-    require(recoveredHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos,
-        "launch results should auto-open the compact outcome modal");
-    require(recoveredHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\" data-modal-dismissible=\"0\"") != std::string::npos,
-        "launch outcomes should require an explicit acknowledgement rather than expose generic dismissal");
-    require(recoveredHtml.find("data-modal-close-action=\"next\"") == std::string::npos,
-        "launch outcomes should not advance through a generic modal close action");
-    require(recoveredHtml.find("USEFUL DATA HOME") != std::string::npos
-            && recoveredHtml.find("enough backing to keep the program moving") != std::string::npos
-            && recoveredHtml.find("Flight Data 1/3") != std::string::npos
-            && recoveredHtml.find("Funding +22") != std::string::npos,
-        "useful early returns should explain both route progress and recovered funding");
-    require(recoveredHtml.find("data-ui-modal=\"flight_report\"") != std::string::npos
-            && recoveredHtml.find("data-modal=\"flight_report\"") != std::string::npos,
-        "the compact outcome should keep detailed telemetry behind Flight Report");
-    const std::size_t flightReportAction = recoveredHtml.find("data-ui-focus-id=\"modal:flight_report\"");
-    const std::size_t continueAction = recoveredHtml.find(
-        "data-ui-focus-id=\"action:next\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Continue</span>");
-    require(flightReportAction != std::string::npos
-            && continueAction != std::string::npos
-            && flightReportAction < continueAction,
-        "launch outcomes should preserve Flight Report then Continue visual order while making Continue the explicit default focus");
+    GameState thermalState = fresh;
+    thermalState.screen = Screen::Launch;
+    thermalState.run.destinationIndex = 1;
+    thermalState.meta.furthestTier = 1;
+    thermalState.meta.unlockKeys.push_back(content::unlock::routeMars);
+    thermalState.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+    thermalState.meta.launchUpgrades = {2, 2, 0, 0};
+    syncLaunchConfig(thermalState, catalog);
+    Random thermalRng(1914);
+    const PreparedLaunch thermalLaunch = prepareLaunch(thermalState, catalog, thermalRng);
+    LaunchFlightState thermalFlight = beginLaunchFlight(
+        thermalLaunch,
+        launchDestination(catalog, content::destination::mars));
+    PanelRenderContext thermalContext {thermalState, catalog, thermalLaunch, thermalLaunch};
+    thermalContext.firstTimeIntroductionsEnabled = false;
+    thermalContext.launchFlight = &thermalFlight;
+    const std::string thermalHtml = buildGamePanelHtml(thermalContext);
+    require(thermalHtml.find(">Temperature</span>") != std::string::npos &&
+            thermalHtml.find("Engines Off") != std::string::npos &&
+            thermalHtml.find(">Hull</span>") == std::string::npos,
+        "the Mars lesson should introduce Temperature and its single Engines Off action");
 
-    GameState earlyUnlock = createNewGame(catalog, 1915);
-    LaunchOutcome unlockFlight = usefulReturn;
-    unlockFlight.blueprintGain = 2;
-    applyLaunchOutcome(earlyUnlock, catalog, unlockFlight);
-    require(hasUnlock(earlyUnlock.meta, content::unlock::thermal),
-        "two useful opening profiles should unlock meaningful thermal refits before the Moon");
+    GameState beltState = fresh;
+    beltState.screen = Screen::Launch;
+    beltState.run.destinationIndex = 2;
+    beltState.meta.furthestTier = 2;
+    beltState.meta.unlockKeys.push_back(content::unlock::routeMars);
+    beltState.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    beltState.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    beltState.meta.launchUpgrades = {3, 3, 1, 0};
+    syncLaunchConfig(beltState, catalog);
+    Random beltRng(1915);
+    const PreparedLaunch beltLaunch = prepareLaunch(beltState, catalog, beltRng);
+    LaunchFlightState beltFlight = beginLaunchFlight(
+        beltLaunch,
+        launchDestination(catalog, content::destination::jupiter));
+    PanelRenderContext beltContext {beltState, catalog, beltLaunch, beltLaunch};
+    beltContext.firstTimeIntroductionsEnabled = false;
+    beltContext.launchFlight = &beltFlight;
+    const std::string beltHtml = buildGamePanelHtml(beltContext);
+    require(beltHtml.find(">Hull</span>") != std::string::npos &&
+            beltHtml.find("REACH Jupiter") != std::string::npos,
+        "the Jupiter lesson should introduce the Hull gauge and asteroid objective");
+    for (const std::string_view removed : {
+             std::string_view("Pressure"),
+             std::string_view("Relief Valve"),
+             std::string_view("Jettison"),
+             std::string_view("Emergency Eject")}) {
+        require(beltHtml.find(removed) == std::string::npos,
+            "no staged launch UI may revive a removed system or action");
+    }
 
-    GameState recalled = createNewGame(catalog, 1913);
-    recalled.run.frontierReadiness = 2;
-    recalled.lastOutcome = usefulReturn;
-    recalled.lastOutcome.ejectMultiplier = 1.05;
-    recalled.lastOutcome.payout = 12.0;
-    recalled.lastOutcome.recoveryCost = 12.0;
-    recalled.screen = Screen::Results;
-    Random recalledRng(1913);
-    const PreparedLaunch recalledLaunch = prepareLaunch(recalled, catalog, recalledRng);
-    const std::string recalledHtml = buildGamePanelHtml({recalled, catalog, recalledLaunch, recalledLaunch});
-    const LaunchOutcomeSummaryPresentation recalledSummary = launchOutcomeSummaryPresentation(recalled, catalog);
-    require(recalledSummary.title == "FLIGHT RECALLED", "too-early returns should keep the recalled-flight title");
-    require(recalledSummary.consequence.find("brief fell short") != std::string::npos,
-        "too-early returns should explain why the route brief was missed");
-    require(recalledSummary.progression.find("Funding +0") != std::string::npos,
-        "too-early returns should state that they produced no new backing");
-    require(recalledHtml.find("FLIGHT RECALLED") != std::string::npos,
-        "the compact modal should render the recalled-flight summary");
+    GameState rescue = fresh;
+    rescue.screen = Screen::Results;
+    rescue.lastOutcome.type = LaunchResultType::SafeEject;
+    rescue.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    rescue.lastOutcome.destinationId = content::destination::moon;
+    rescue.lastOutcome.pilotedFlight = true;
+    rescue.lastOutcome.failureCause = LaunchFailureCause::TrainingRescue;
+    Random rescueRng(1916);
+    const PreparedLaunch rescueLaunch = prepareLaunch(rescue, catalog, rescueRng);
+    const std::string rescueHtml = buildGamePanelHtml({rescue, catalog, rescueLaunch, rescueLaunch});
+    require(rescueHtml.find("TRAINING RESCUE") != std::string::npos &&
+            rescueHtml.find("No upgrade unlocked") != std::string::npos &&
+            rescueHtml.find("data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos,
+        "ignored tutorial warnings should produce a mandatory, explicit Training Rescue summary");
 
-    GameState outperformed = createNewGame(catalog, 1916);
-    LaunchOutcome richProfile = usefulReturn;
-    richProfile.type = LaunchResultType::MissionComplete;
-    richProfile.ejectMultiplier = catalog.destinations[0].targetMultiplier + 0.25;
-    richProfile.crashMultiplier = richProfile.ejectMultiplier + 0.20;
-    richProfile.payout = 74.0;
-    richProfile.recoveryCost = 10.0;
-    applyLaunchOutcome(outperformed, catalog, richProfile);
-    const LaunchOutcomeSummaryPresentation richSummary = launchOutcomeSummaryPresentation(outperformed, catalog);
-    require(richSummary.title == "ROUTE OUTPERFORMED"
-            && richSummary.consequence.find("extra distance brought back richer findings") != std::string::npos
-            && richSummary.progression.find("Funding +64") != std::string::npos,
-        "a recovered over-target profile should connect extra distance to stronger funding");
-
-    GameState lunarRoute = createNewGame(catalog, 1918);
-    lunarRoute.run.frontierReadiness = 2;
-    applyLaunchOutcome(lunarRoute, catalog, richProfile);
-    lunarRoute.screen = Screen::Results;
-    const LaunchOutcomeSummaryPresentation lunarRouteSummary = launchOutcomeSummaryPresentation(lunarRoute, catalog);
-    require(lunarRouteSummary.title == "LUNAR ROUTE CHARTED"
-            && lunarRouteSummary.consequence.find("cleared the next launch for the Moon") != std::string::npos
-            && lunarRouteSummary.progression == "Flight Data 3/3  •  Funding +64",
-        "the third proving profile should explicitly announce that the Moon transfer is available");
-    Random lunarRouteRng(1918);
-    const PreparedLaunch lunarRouteLaunch = prepareLaunch(lunarRoute, catalog, lunarRouteRng);
-    const std::string lunarRouteHtml = buildGamePanelHtml({lunarRoute, catalog, lunarRouteLaunch, lunarRouteLaunch});
-    require(lunarRouteHtml.find("LUNAR ROUTE CHARTED") != std::string::npos
-            && lunarRouteHtml.find("Mission Control has cleared the next launch for the Moon") != std::string::npos,
-        "the compact outcome modal should render the Moon unlock beat before the Hangar button changes");
-
-    GameState capsule = createNewGame(catalog, 1917);
-    LaunchOutcome recoveredCapsule = usefulReturn;
-    recoveredCapsule.recoveryMethod = RecoveryMethod::ManualEject;
-    recoveredCapsule.ejectMultiplier = catalog.destinations[0].targetMultiplier * tuning::outcomes::manualEjectUsefulDataTargetShare;
-    recoveredCapsule.payout = 5.0;
-    recoveredCapsule.recoveryCost = 20.0;
-    applyLaunchOutcome(capsule, catalog, recoveredCapsule);
-    const LaunchOutcomeSummaryPresentation capsuleSummary = launchOutcomeSummaryPresentation(capsule, catalog);
-    require(capsuleSummary.title == "CAPSULE RECOVERED"
-            && capsuleSummary.consequence.find("crew and usable telemetry made it home") != std::string::npos
-            && capsuleSummary.progression.find("Flight Data 1/3") != std::string::npos
-            && capsuleSummary.progression.find("Funding -15") != std::string::npos,
-        "emergency recovery should distinguish saved crew and data from lost funding");
-
-    GameState failedMoon = createNewGame(catalog, 1914);
-    failedMoon.run.frontierReadiness = frontierReadinessRequired(failedMoon, catalog);
-    LaunchOutcome lostTransfer;
-    lostTransfer.type = LaunchResultType::Destroyed;
-    lostTransfer.recoveryMethod = RecoveryMethod::TransferArrival;
-    lostTransfer.destinationId = content::destination::moon;
-    lostTransfer.frontierTransfer = true;
-    lostTransfer.ejectMultiplier = 1.82;
-    lostTransfer.crashMultiplier = 1.82;
-    lostTransfer.crewKilled = true;
-    applyLaunchOutcome(failedMoon, catalog, lostTransfer);
-    failedMoon.screen = Screen::Results;
-    require(failedMoon.run.frontierReadiness == 3, "failed Moon transfer fixture should retain all Flight Data");
-    Random failedMoonRng(1914);
-    const PreparedLaunch failedMoonLaunch = prepareLaunch(failedMoon, catalog, failedMoonRng);
-    const std::string failedMoonHtml = buildGamePanelHtml({failedMoon, catalog, failedMoonLaunch, failedMoonLaunch});
-    require(failedMoonHtml.find("TRANSFER LOST") != std::string::npos
-            && failedMoonHtml.find("vehicle and crew were lost") != std::string::npos
-            && failedMoonHtml.find("Flight Data 3/3") != std::string::npos
-            && failedMoonHtml.find("Funding lost") != std::string::npos
-            && failedMoonHtml.find("Retry 100%") != std::string::npos,
-        "failed Moon modal should distinguish crew and funding loss from preserved route data");
+    GameState success = fresh;
+    success.screen = Screen::Results;
+    success.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
+    success.lastOutcome.type = LaunchResultType::MissionComplete;
+    success.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
+    success.lastOutcome.destinationId = content::destination::moon;
+    success.lastOutcome.pilotedFlight = true;
+    success.lastOutcome.payout = 22.0;
+    success.lastOutcome.minimumSafetyMargin = 0.4;
+    const LaunchOutcomeSummaryPresentation summary =
+        launchOutcomeSummaryPresentation(success, catalog);
+    require(summary.title == "CALIBRATION DATA BANKED" &&
+            summary.progression.find("Funding +22") != std::string::npos &&
+            summary.progression.find("Install Fuel Tanks I") != std::string::npos,
+        "successful lesson returns should clearly connect the earned 22 credits to the newly taught upgrade");
 }
-
 void hangarLaunchButtonsNameCurrentAndNextDestinations()
 {
     const ContentCatalog catalog = createDefaultContent();
-    for (int destinationIndex = 0; destinationIndex <= 3; ++destinationIndex) {
-        GameState state = createNewGame(catalog, 0xB077 + destinationIndex);
-        state.run.destinationIndex = destinationIndex;
-        state.meta.furthestTier = destinationIndex;
-        state.screen = Screen::Hangar;
-        syncLaunchConfig(state, catalog);
-        Random rng(0xB077 + destinationIndex);
-        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-        PanelRenderContext context {state, catalog, launch, launch};
-        context.firstTimeIntroductionsEnabled = false;
-        const std::string html = buildGamePanelHtml(context);
-        require(html.find("Prepare for launch: " + catalog.destinations[static_cast<std::size_t>(destinationIndex)].name) != std::string::npos,
-            "every early Hangar should name the green proving-flight destination");
-    }
+    GameState fresh = createNewGame(catalog, 0xB077);
+    fresh.screen = Screen::Hangar;
+    Random freshRng(0xB077);
+    const PreparedLaunch freshLaunch = prepareLaunch(fresh, catalog, freshRng);
+    PanelRenderContext freshContext {fresh, catalog, freshLaunch, freshLaunch};
+    freshContext.firstTimeIntroductionsEnabled = false;
+    const std::string freshHtml = buildGamePanelHtml(freshContext);
+    require(freshHtml.find("Prepare for launch: Moon") != std::string::npos &&
+            freshHtml.find("Earth Orbit") == std::string::npos &&
+            freshHtml.find("Attempt Mars") == std::string::npos,
+        "a fresh Hangar should show only the green Moon launch action and never Earth Orbit");
 
     GameState state = createNewGame(catalog, 0xB0A1);
     state.run.destinationIndex = 1;
@@ -12116,7 +12579,9 @@ void hangarLaunchButtonsNameCurrentAndNextDestinations()
         "button-label fixture should complete the lunar contract");
     state.meta.materials.common = 20;
     require(equipMiniDrone(state, catalog, 0), "button-label fixture should fabricate Prospector Mk I");
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    state.meta.launchLessons.stage = LaunchTrainingStage::MarsTransfer;
+    state.meta.launchUpgrades.fuelTanks = 2;
+    state.meta.launchUpgrades.flightControls = 1;
     state.screen = Screen::Hangar;
     syncLaunchConfig(state, catalog);
     require(canCommitToNextFrontier(state, catalog),
@@ -12142,7 +12607,8 @@ void hangarLaunchButtonsNameCurrentAndNextDestinations()
             == tuning::research::marsBayCommonOreGoal &&
             claimMarsBayExpansion(state, catalog),
         "button-label fixture should complete the Mars contract");
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
+    state.meta.launchLessons.stage = LaunchTrainingStage::JupiterTransfer;
+    state.meta.launchUpgrades.fuelTanks = 3;
     syncLaunchConfig(state, catalog);
     Random marsRng(0xB0A2);
     launch = prepareLaunch(state, catalog, marsRng);
@@ -12230,10 +12696,15 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     arkLaunchState.screen = Screen::Launch;
     Random arkLaunchRng(714);
     const PreparedLaunch arkLaunch = prepareLaunch(arkLaunchState, catalog, arkLaunchRng);
+    LaunchFlightState arkFlight = beginLaunchFlight(
+        arkLaunch,
+        launchDestination(catalog, arkLaunch.config.destinationId));
     PanelRenderContext arkLaunchContext {arkLaunchState, catalog, arkLaunch, arkLaunch};
     arkLaunchContext.currentMultiplier = 1.12;
+    arkLaunchContext.launchFlight = &arkFlight;
     const std::string arkLaunchHtml = buildGamePanelHtml(arkLaunchContext);
-    require(arkLaunchHtml.find("rr-button-label\">Return to Ark</span>") != std::string::npos, "Ark launch controls should show the Ark return label");
+    require(arkLaunchHtml.find("rr-button-label\">Turn Around</span>") != std::string::npos,
+        "launch controls should use the same concise Turn Around action from the Ark");
 
     launchContext.flightArmed = false;
     launchContext.preflightReady = false;
@@ -12603,6 +13074,69 @@ void panelHtmlKeepsTutorialsOutOfOperationalSurfaces()
     require(droneHtml.find("Targeting Grid") != std::string::npos, "Drone Ops HTML should name active loadout synergies");
 }
 
+void surfaceDigWarnsAboutReturnEndurance()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xD16);
+    state.meta.chapter = GameChapter::LunarProgram;
+    state.run.destinationIndex = 1;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.sharedFuel = 10;
+
+    const SurfaceReturnSafetyPresentation depthTwo =
+        surfaceReturnSafetyPresentation(state, catalog, 2);
+    const SurfaceReturnSafetyPresentation depthThree =
+        surfaceReturnSafetyPresentation(state, catalog, 3);
+    const SurfaceReturnSafetyPresentation depthFour =
+        surfaceReturnSafetyPresentation(state, catalog, 4);
+    require(depthTwo.severity == SurfaceReturnSafetySeverity::Safe,
+        "a shallow Moon route should not show a false endurance warning");
+    require(depthThree.severity == SurfaceReturnSafetySeverity::Caution,
+        "depth three should warn that the baseline oxygen return margin is low");
+    require(depthFour.severity == SurfaceReturnSafetySeverity::Critical,
+        "depth four should show a critical baseline oxygen return warning");
+    require(depthFour.estimatedReturnSeconds > depthFour.oxygenSeconds,
+        "the critical warning should expose a direct-return estimate beyond available oxygen");
+
+    state.screen = Screen::SurfacePush;
+    state.run.surfacePush.active = true;
+    state.run.surfacePush.destinationId = catalog.destinations[1].id;
+    state.run.surfacePush.steps = 2;
+    state.run.surfacePush.depthGain = 2;
+    state.run.surfacePush.maxSteps = 4;
+    Random rng(0xD16);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    const std::string cautionHtml = buildGamePanelHtml({state, catalog, launch, launch});
+    require(
+        cautionHtml.find("NEXT DIG: RETURN MARGIN LOW") != std::string::npos &&
+            cautionHtml.find("caution dig-endurance-warning") != std::string::npos,
+        "Dig should warn in yellow before the next depth leaves a narrow return margin");
+
+    state.run.surfacePush.steps = 4;
+    state.run.surfacePush.depthGain = 4;
+    state.run.surfacePush.completed = true;
+    const std::string criticalHtml = buildGamePanelHtml({state, catalog, launch, launch});
+    require(
+            criticalHtml.find("RETURN RANGE CRITICAL") != std::string::npos &&
+            criticalHtml.find("danger dig-endurance-warning") != std::string::npos &&
+            criticalHtml.find("DEPTH +4 RETURN: ~") != std::string::npos &&
+            criticalHtml.find("OXYGEN: " + std::to_string(depthFour.oxygenSeconds) + "s") != std::string::npos &&
+            criticalHtml.find("DO NOT MINE HERE.") != std::string::npos,
+        "a bankable depth-four Moon route should show the red return warning with concrete O2 math");
+
+    state.run.surfacePush.steps = 1;
+    state.run.surfacePush.depthGain = 1;
+    state.run.surfacePush.completed = false;
+    state.run.surfaceExpedition.sharedFuel = 1;
+    const SurfaceReturnSafetyPresentation fuelCritical =
+        surfaceReturnSafetyPresentation(state, catalog, 1);
+    require(
+        fuelCritical.severity == SurfaceReturnSafetySeverity::Critical &&
+            fuelCritical.fuelAvailableAfterDeployment == 0 &&
+            fuelCritical.fuelNeededAfterDeployment > 0,
+        "Dig should also warn red when deployment leaves too little shared fuel to return");
+}
+
 void surfaceHtmlPromotesMiningAction()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -12635,18 +13169,24 @@ void surfaceHtmlPromotesMiningAction()
             && choiceHtml.find("card-copy") == std::string::npos
             && choiceHtml.find("stat-grid") == std::string::npos,
         "surface choices should not retain legacy tall cards, paragraphs, or payoff chip grids");
-    require(choiceHtml.find("surface-choice-row featured-action") != std::string::npos,
-        "surface panel should promote mining inside the sticky primary-action lane");
-    require(html.find("Mine deposit") != std::string::npos, "surface panel should keep mining obvious");
-    require(html.find("Mine deposit") < html.find("Survey site"), "surface panel should put the mining action before secondary field actions");
+    require(choiceHtml.find("surface-choice-row risk-action") != std::string::npos &&
+            choiceHtml.find("class=\"risk rr-text-button\"") != std::string::npos,
+        "surface panel should use an orange risk treatment for Mine");
+    const std::size_t surveyPosition = html.find(">Survey<");
+    const std::size_t digPosition = html.find(">Dig<");
+    const std::size_t minePosition = html.find(">Mine<");
+    require(surveyPosition != std::string::npos && digPosition != std::string::npos && minePosition != std::string::npos,
+        "surface panel should keep Survey, Dig, and Mine obvious");
+    require(surveyPosition < digPosition && digPosition < minePosition,
+        "surface panel should teach the stable Survey, Dig, Mine sequence");
 
     state.run.surfaceExpedition.miningRunUsed = true;
     const std::string usedHtml = buildGamePanelHtml({state, catalog, launch, launch});
-    const std::size_t usedMine = usedHtml.find("Mine deposit");
-    const std::size_t surveyAction = usedHtml.find("Survey site");
+    const std::size_t usedMine = usedHtml.find(">Mine<");
+    const std::size_t surveyAction = usedHtml.find(">Survey<");
     require(usedMine != std::string::npos, "used mining action should still be visible in the compact surface actions");
     require(surveyAction != std::string::npos, "surface panel should keep field actions in the compact action grid");
-    require(usedMine < surveyAction, "disabled mining action should stay first in the compact action grid");
+    require(surveyAction < usedMine, "disabled mining action should retain the Survey, Dig, Mine sequence");
     require(usedHtml.find("class=\"disabled rr-text-button\" disabled><span class=\"rr-button-label\">Unavailable</span></button>") != std::string::npos,
         "disabled unavailable buttons should carry the muted disabled style hook");
 
@@ -12670,7 +13210,7 @@ void surfaceHtmlPromotesMiningAction()
         buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
     require(
         scenarioSiteHtml.find("Begin Volcanic Recovery") != std::string::npos &&
-            scenarioSiteHtml.find("Mine deposit") == std::string::npos,
+            scenarioSiteHtml.find(">Mine<") == std::string::npos,
         "an active authored mining site should replace the generic deposit action with its scenario launch");
 
     require(
@@ -12686,9 +13226,9 @@ void surfaceHtmlPromotesMiningAction()
     const std::string spentScenarioSiteHtml =
         buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
     require(
-        spentScenarioSiteHtml.find("Begin Volcanic Recovery") == std::string::npos &&
+            spentScenarioSiteHtml.find("Begin Volcanic Recovery") == std::string::npos &&
             spentScenarioSiteHtml.find("Mining Rig deployment is spent") != std::string::npos &&
-            spentScenarioSiteHtml.find("Mine deposit") == std::string::npos,
+            spentScenarioSiteHtml.find(">Mine<") == std::string::npos,
         "a spent scenario deployment should show a return-and-retry instruction without a dead launch button");
 
     scenarioSiteState.run.surfaceExpedition.miningRunUsed = false;
@@ -12696,7 +13236,7 @@ void surfaceHtmlPromotesMiningAction()
         buildGamePanelHtml({scenarioSiteState, catalog, scenarioSiteLaunch, scenarioSiteLaunch});
     require(
         retryScenarioSiteHtml.find("Retry Volcanic Recovery") != std::string::npos &&
-            retryScenarioSiteHtml.find("Mine deposit") == std::string::npos,
+            retryScenarioSiteHtml.find(">Mine<") == std::string::npos,
         "a fresh Surface Ops loop should label an incomplete authored site as a retry without restoring the generic deposit action");
 }
 
@@ -12780,7 +13320,7 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
         "surface ops should cap its persistent quickbar at supply, fuel, cargo, and extraction risk");
     require(surfaceHtml.find("surface-arena-forecast") == std::string::npos,
         "surface ops should move the arena forecast into Details");
-    require(surfaceHtml.find("surface-choice-row featured-action") != std::string::npos, "surface ops should promote mining inside the compact choice list");
+    require(surfaceHtml.find("surface-choice-row risk-action") != std::string::npos, "surface ops should identify Mine as the orange risk action");
     require(surfaceHtml.find("resource-bank rr-fixed-lane-card surface-choice-row") != std::string::npos
             && surfaceHtml.find("surface-action-card") == std::string::npos,
         "surface ops should render compact rows instead of legacy action cards");
@@ -13022,64 +13562,56 @@ void postArrivalPhaseHtmlUsesPolishedBoardStructure()
     require(contextHtml.find("Site Basin") != std::string::npos, "surface upgrade context should use compact site chip text");
     require(contextHtml.find("Survey Basin") == std::string::npos, "surface upgrade context should avoid clipped long site labels");
 
-    GameState refitState = createNewGame(catalog, 722);
-    refitState.run.credits = 1000.0;
+GameState refitState = createNewGame(catalog, 722);
+    refitState.run.credits = 22.0;
     refitState.screen = Screen::Upgrade;
     refitState.run.refitEntitled = true;
+    refitState.meta.launchLessons.stage = LaunchTrainingStage::FlightControlsCalibration;
     Random refitOfferRng(722);
     generateModuleOffers(refitState, catalog, refitOfferRng);
     Random refitLaunchRng(723);
     const PreparedLaunch refitLaunch = prepareLaunch(refitState, catalog, refitLaunchRng);
     PanelRenderContext refitContext{refitState, catalog, refitLaunch, refitLaunch};
-    refitContext.selectedRefitOfferIndex = 1;
     const std::string refitHtml = buildGamePanelHtml(refitContext);
-    require(refitHtml.find("phase-board-refit") != std::string::npos, "refit should render inside the dedicated draft board");
-    require(countOccurrences(refitHtml, "upgrade-draft-card") == 3, "refit should expose three controller-cycle choices");
-    require(refitHtml.find("draft-card-grid controller-choice-row") != std::string::npos,
-        "refit choices should use the shared controller choice row");
-    require(countOccurrences(refitHtml, "compact-draft-selector") == 3
-            && refitHtml.find("data-modal=\"refit_compare\"") != std::string::npos,
-        "refit should show three compact selectors with a full comparison modal");
-    require(countOccurrences(refitHtml, "refit-offer-card") == 3
-            && refitHtml.find("class=\"refit-offer-selector\"") == std::string::npos,
-        "refit should render three direct-install cards without transparent whole-card selectors");
-    require(countOccurrences(refitHtml, "refit-offer-detail") == 3
-            && countOccurrences(refitHtml, "refit-comparison-divider") == 2,
-        "refit cards should include their concise operational detail and visually separate comparison entries");
-    require(countOccurrences(refitHtml, "class=\"refit-offer-cost\"") == 3,
-        "affordable refit offers should expose a dedicated cost label for the compact card layout");
+    require(refitHtml.find("phase-board-refit") != std::string::npos,
+        "lesson refits should render inside the dedicated draft board");
+    require(countOccurrences(refitHtml, "upgrade-draft-card") == 1 &&
+            countOccurrences(refitHtml, "launch-upgrade-row") == 1,
+        "a launch lesson should show exactly its one newly taught upgrade card");
+    require(refitHtml.find("LAUNCH UPGRADE") != std::string::npos &&
+            refitHtml.find("Fuel Tanks I") != std::string::npos &&
+            refitHtml.find("Adds 5 fuel") != std::string::npos &&
+            refitHtml.find("22 credits") != std::string::npos,
+        "the direct fuel card should use simple copy and show its exact numerical effect and price");
+    require(refitHtml.find(ui::actions::installLaunchUpgrade(
+                static_cast<int>(LaunchUpgradeKind::FuelTanks))) != std::string::npos &&
+            countOccurrences(refitHtml, "rr-button-label\">Install</span>") == 1,
+        "the only lesson card should expose one direct Install action");
+    const std::size_t launchCardStart = refitHtml.find("launch-upgrade-row");
+    const std::size_t launchCardEnd = refitHtml.find("</article>", launchCardStart);
+    const std::string launchCard = launchCardStart == std::string::npos || launchCardEnd == std::string::npos
+        ? std::string {}
+        : refitHtml.substr(launchCardStart, launchCardEnd - launchCardStart);
+    require(refitHtml.find("Keep Credits") != std::string::npos &&
+            refitHtml.find("reroll_offers") == std::string::npos &&
+            !launchCard.empty() &&
+            launchCard.find("rarity-") == std::string::npos &&
+            launchCard.find(" permanent") == std::string::npos,
+        "lesson refits should keep the credits exit while hiding rerolls and rarity clutter");
+
     GameState unaffordableRefitState = refitState;
     unaffordableRefitState.run.credits = 0.0;
-    PanelRenderContext unaffordableRefitContext{unaffordableRefitState, catalog, refitLaunch, refitLaunch};
-    const std::string unaffordableRefitHtml = buildGamePanelHtml(unaffordableRefitContext);
-    require(countOccurrences(unaffordableRefitHtml, "refit-offer-cost unaffordable") == 3,
-        "unaffordable refit costs should expose the warning styling hook");
-    require(refitHtml.find("CHOOSE ONE PERMANENT REFIT") != std::string::npos,
-        "refit board should frame the reward as a permanent installation");
-    require(refitHtml.find("REACH I") != std::string::npos && refitHtml.find("CONTROL I") != std::string::npos && refitHtml.find("RECOVERY I") != std::string::npos,
-        "first proving board should label all three track ranks explicitly");
-    require(refitHtml.find("buy_offer:0") != std::string::npos
-            && refitHtml.find("buy_offer:1") != std::string::npos
-            && refitHtml.find("buy_offer:2") != std::string::npos
-            && refitHtml.find("data-ui-focus-id=\"action:buy_offer:0\"") != std::string::npos
-            && refitHtml.find("data-ui-focus-id=\"action:buy_offer:1\"") != std::string::npos
-            && refitHtml.find("data-ui-focus-id=\"action:buy_offer:2\"") != std::string::npos,
-        "refit should expose each install action directly with stable controller focus ids");
-    require(refitHtml.find("rr-button-label\">Select</span>") == std::string::npos
-            && refitHtml.find("rr-button-label\">Selected</span>") == std::string::npos,
-        "refit offer cards should not contain redundant Select or Selected buttons");
-    require(countOccurrences(refitHtml, "rr-button-label\">Install</span>") == 3,
-        "each affordable refit card should expose its install action directly");
-    require(refitHtml.find("selected-refit-detail") == std::string::npos
-            && refitHtml.find("SELECTED OFFER") == std::string::npos,
-        "refit should not repeat the chosen card in a redundant selected-offer section");
-    require(refitHtml.find("Keep credits") != std::string::npos,
-        "refit decline action should explain that the player keeps the credits");
-    require(refitHtml.find("draft-actions controller-action-row") != std::string::npos,
-        "refit keep-credits action should use the shared controller action row");
-    require(refitHtml.find("reroll_offers") == std::string::npos, "curated proving refits should hide rerolls");
+    PanelRenderContext unaffordableRefitContext{
+        unaffordableRefitState,
+        catalog,
+        refitLaunch,
+        refitLaunch};
+    const std::string unaffordableRefitHtml =
+        buildGamePanelHtml(unaffordableRefitContext);
+    require(unaffordableRefitHtml.find(text::needCredits(22)) != std::string::npos &&
+            unaffordableRefitHtml.find("reroll_offers") == std::string::npos,
+        "an unaffordable lesson card should state the exact missing 22 credits without offering a reroll");
 }
-
 void hangarHtmlShowsPilotIntakeModal()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -13121,222 +13653,6 @@ void hangarHtmlShowsPilotIntakeModal()
     require(html.find("recruit_candidate:1") != std::string::npos, "pilot intake should expose indexed candidate action one");
     require(html.find("recruit_candidate:2") != std::string::npos, "pilot intake should expose indexed candidate action two");
     require(html.find("Choose pilot") != std::string::npos, "dead roster hangar card should open the pilot chooser instead of instant-hiring");
-}
-
-void launchBalanceHelpersDrivePreparedLaunch()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 818);
-    const Destination& moon = catalog.destinations[1];
-    const int required = frontierReadinessRequired(state, catalog);
-    state.run.frontierReadiness = required + 2;
-    state.run.shipDamage = 12;
-    state.launchConfig.frontierTransfer = true;
-    state.launchConfig.destinationId = moon.id;
-    state.launchConfig.burnGoalMultiplier = moon.targetMultiplier;
-
-    const ModuleStats stats = aggregateShipStats(state, catalog);
-    const double pressure = missionPressureModifier(state, catalog, moon);
-    Random rng(818);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-
-    const int expectedOverprepared = launch_balance::overpreparedData(state.run.frontierReadiness, required);
-    require(launch.overpreparedData == expectedOverprepared, "prepared launch should use shared overprepared-data math");
-    require(std::abs(launch.provingPayoutBonus - launch_balance::provingPayoutBonus(expectedOverprepared, true)) < 0.000001, "transfer launch should use shared proving-payout helper");
-    require(std::abs(launch.sensorQuality - launch_balance::sensorQuality(stats)) < 0.000001, "prepared launch should use shared sensor quality helper");
-    require(std::abs(launch.heatRate - launch_balance::heatRate(moon, stats, launch_balance::transferHeatLoad(moon, true))) < 0.000001, "prepared launch should use shared heat-rate helper");
-    require(std::abs(launch.pressureModifier - launch_balance::pressureModifier(pressure, stats)) < 0.000001, "prepared launch should use shared pressure modifier helper");
-    require(launch.incidentCount == launch_balance::incidentCount(moon, true, static_cast<int>(launch.incidents.size())), "prepared launch should use shared incident-count helper");
-
-    const double ratio = launch_balance::readinessRatio(state.run.frontierReadiness, required);
-    const double transferPrep = launch_balance::transferPreparation(ratio, expectedOverprepared, true);
-    const double transferRisk = launch_balance::transferHazard(moon, transferPrep, true);
-    const double unprovenRisk = launch_balance::unprovenHazard(0, 0);
-    const double hazard = launch_balance::launchHazard(moon, stats, state.run.shipDamage, transferRisk, unprovenRisk);
-    require(hazard > 0.0, "shared launch hazard helper should expose a usable risk value");
-    require(launch_balance::launchSafety(0.0, hazard) >= tuning::launch::safetyMinimum, "shared launch safety should honor tuned lower bound");
-}
-
-void destinationRiskEscalates()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    int earthDestroyed = 0;
-    int galaxyDestroyed = 0;
-    constexpr int samples = 2000;
-
-    for (int i = 0; i < samples; ++i) {
-        {
-            GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-            state.meta.destinationAttempts[0] = 4;
-            state.meta.destinationSuccesses[0] = 1;
-            Random rng(1000 + static_cast<std::uint64_t>(i));
-            const LaunchOutcome outcome = simulateLaunchToTarget(state, catalog, rng);
-            earthDestroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
-        }
-        {
-            const int riftIndex = static_cast<int>(catalog.findDestination(content::destination::nearbyGalaxy) - catalog.destinations.data());
-            GameState state = configuredState(catalog, riftIndex, catalog.destinations[static_cast<std::size_t>(riftIndex)].targetMultiplier);
-            state.meta.destinationAttempts[static_cast<std::size_t>(riftIndex)] = 4;
-            state.meta.destinationSuccesses[static_cast<std::size_t>(riftIndex)] = 1;
-            Random rng(1000 + static_cast<std::uint64_t>(i));
-            const LaunchOutcome outcome = simulateLaunchToTarget(state, catalog, rng);
-            galaxyDestroyed += outcome.type == LaunchResultType::Destroyed ? 1 : 0;
-        }
-    }
-
-    require(galaxyDestroyed > earthDestroyed, "farther destination should be more dangerous at target multiplier");
-}
-
-void starterMoonTransferConfidenceDoesNotAddPity()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    int completed = 0;
-    double reportedConfidenceTotal = 0.0;
-    constexpr int samples = 1000;
-
-    for (int i = 0; i < samples; ++i) {
-        GameState state = createNewGame(catalog, 333);
-        state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-        state.launchConfig.frontierTransfer = true;
-        state.launchConfig.destinationId = catalog.destinations[1].id;
-        state.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
-        Random rng(5000 + static_cast<std::uint64_t>(i));
-        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-        reportedConfidenceTotal += launch.objectiveConfidence;
-        const LaunchOutcome outcome = resolveLaunch(launch, catalog, state, catalog.destinations[1].targetMultiplier, RecoveryMethod::TransferArrival, rng);
-        completed += outcome.type == LaunchResultType::MissionComplete ? 1 : 0;
-    }
-
-    const double averageConfidence = reportedConfidenceTotal / static_cast<double>(samples);
-    require(averageConfidence >= 0.85 && averageConfidence < 0.87, "starter Moon transfer should report approximately 85% confidence");
-    require(completed >= samples * 82 / 100 && completed <= samples * 89 / 100, "starter Moon transfer outcomes should match the displayed confidence");
-
-    const std::array<std::array<const char*, 3>, 3> provingTracks {{
-        {content::module::sparrowInjectorTune, content::module::reserveFeedManifold, content::module::sustainedBurnPackage},
-        {content::module::radiatorVaneExtension, content::module::telemetryNoiseFilter, content::module::pressureBalanceBaffles},
-        {content::module::patchworkCrossBracing, content::module::springCapsuleRetropack, content::module::recoveryCradle}
-    }};
-    for (int reach = 0; reach <= 3; ++reach) {
-        for (int control = 0; control <= 3 - reach; ++control) {
-            const int recovery = 3 - reach - control;
-            if (recovery > 3) {
-                continue;
-            }
-            GameState build = createNewGame(catalog, 334);
-            const std::array<int, 3> ranks {reach, control, recovery};
-            for (std::size_t track = 0; track < provingTracks.size(); ++track) {
-                for (int rank = 0; rank < ranks[track]; ++rank) {
-                    build.run.equippedModuleIds.push_back(provingTracks[track][static_cast<std::size_t>(rank)]);
-                }
-            }
-            build.run.frontierReadiness = frontierReadinessRequired(build, catalog);
-            build.launchConfig.frontierTransfer = true;
-            build.launchConfig.destinationId = content::destination::moon;
-            build.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
-            Random buildRng(6000 + static_cast<std::uint64_t>(reach * 10 + control));
-            const PreparedLaunch prepared = prepareLaunch(build, catalog, buildRng);
-            require(prepared.objectiveConfidence >= 0.85 && prepared.objectiveConfidence < 0.87, "every legal three-refit opening build should keep Moon confidence in the 85-87% target band");
-        }
-    }
-
-    GameState retry = createNewGame(catalog, 333);
-    retry.run.frontierReadiness = frontierReadinessRequired(retry, catalog);
-    retry.meta.destinationAttempts[1] = 1;
-    retry.launchConfig.frontierTransfer = true;
-    retry.launchConfig.destinationId = catalog.destinations[1].id;
-    retry.launchConfig.burnGoalMultiplier = catalog.destinations[1].targetMultiplier;
-    Random retryRng(9876);
-    const PreparedLaunch retryLaunch = prepareLaunch(retry, catalog, retryRng);
-    require(retryLaunch.objectiveConfidence >= 0.85 && retryLaunch.objectiveConfidence < 0.87,
-        "an unsuccessful Moon attempt must not add hidden retry confidence");
-}
-
-void frontierReadinessGatesProgression()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 77);
-    require(state.run.destinationIndex == 0, "new program should start at Earth Orbit frontier");
-    require(!canCommitToNextFrontier(state, catalog), "new program should not immediately commit to Moon");
-
-    LaunchOutcome outcome;
-    outcome.type = LaunchResultType::MissionComplete;
-    outcome.destinationId = catalog.destinations[0].id;
-    outcome.ejectMultiplier = catalog.destinations[0].targetMultiplier;
-    outcome.payout = 10.0;
-
-    applyLaunchOutcome(state, catalog, outcome);
-    require(state.run.destinationIndex == 0, "mission complete should not auto-cycle destination");
-    require(state.run.frontierReadiness == 1, "mission complete should bank frontier readiness");
-
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-    require(canCommitToNextFrontier(state, catalog), "enough readiness should unlock next frontier commit");
-    require(commitToNextFrontier(state, catalog), "commit should advance exactly one frontier");
-    require(state.run.destinationIndex == 1, "commit should move from Earth Orbit to Moon");
-    require(state.run.frontierReadiness == 0, "commit should reset readiness for the new frontier");
-    const FrontierGateStatus moonToMars = frontierGateStatus(state, catalog);
-    require(
-        moonToMars.kind == FrontierGateKind::ScenarioRequirement && !moonToMars.satisfied &&
-            moonToMars.current == 0 && moonToMars.required == tuning::research::prospectorCommonOreGoal,
-        "Moon-to-Mars transfer should be gated by the authored Mars scenario rather than another Flight Data grind");
-}
-
-void transferAttemptAdvancesOnlyOnSuccess()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 88);
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-
-    LaunchOutcome aborted;
-    aborted.type = LaunchResultType::SafeEject;
-    aborted.recoveryMethod = RecoveryMethod::ReturnHome;
-    aborted.destinationId = catalog.destinations[1].id;
-    aborted.frontierTransfer = true;
-    aborted.ejectMultiplier = 1.2;
-    aborted.payout = 12.0;
-    applyLaunchOutcome(state, catalog, aborted);
-    require(state.run.destinationIndex == 0, "aborted transfer should not advance frontier");
-    require(state.meta.furthestTier == 0, "aborted transfer should not count as reaching next frontier");
-
-    state.run.frontierReadiness = frontierReadinessRequired(state, catalog);
-    LaunchOutcome transfer;
-    transfer.type = LaunchResultType::MissionComplete;
-    transfer.recoveryMethod = RecoveryMethod::TransferArrival;
-    transfer.destinationId = catalog.destinations[1].id;
-    transfer.frontierTransfer = true;
-    transfer.ejectMultiplier = catalog.destinations[1].targetMultiplier;
-    transfer.payout = 20.0;
-    applyLaunchOutcome(state, catalog, transfer);
-
-    require(state.run.destinationIndex == 1, "successful transfer should advance to next frontier");
-    require(state.run.frontierReadiness == 0, "successful transfer should reset readiness");
-    require(state.launchConfig.burnGoalMultiplier < catalog.destinations[1].targetMultiplier, "new frontier should default back to a proving return target");
-}
-
-void overpreparedReadinessRaisesProvingStakes()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState baseline = createNewGame(catalog, 919);
-    GameState overprepared = baseline;
-    const int required = frontierReadinessRequired(baseline, catalog);
-    const int cap = frontierReadinessCap(baseline, catalog);
-    require(cap > required, "frontier readiness should allow over-preparation past the transfer gate");
-
-    baseline.run.frontierReadiness = required;
-    overprepared.run.frontierReadiness = cap;
-    baseline.meta.destinationAttempts[0] = 4;
-    baseline.meta.destinationSuccesses[0] = 2;
-    overprepared.meta.destinationAttempts[0] = 4;
-    overprepared.meta.destinationSuccesses[0] = 2;
-
-    Random baselineRng(2222);
-    Random overpreparedRng(2222);
-    const PreparedLaunch baselineLaunch = prepareLaunch(baseline, catalog, baselineRng);
-    const PreparedLaunch overpreparedLaunch = prepareLaunch(overprepared, catalog, overpreparedRng);
-
-    require(baselineLaunch.overpreparedData == 0, "required data should not count as over-prepared");
-    require(overpreparedLaunch.overpreparedData == cap - required, "extra data should feed the proving-flight bonus");
-    require(overpreparedLaunch.crashMultiplier > baselineLaunch.crashMultiplier, "extra data should raise the hidden failure curve");
-    require(overpreparedLaunch.provingPayoutBonus > baselineLaunch.provingPayoutBonus, "extra data should increase proving flight reward");
 }
 
 void arkDiscoveryAndScriptedJumpProgression()
@@ -13408,6 +13724,7 @@ void numberedChaptersAdvanceMonotonically()
     require(state.meta.chapter == GameChapter::ProvingGround, "new game should start at Chapter 1");
     require(chapterLabel(state.meta.chapter) == "Chapter 1: Proving Ground", "chapter label should include stable number and provisional title");
     require(chapterGate(GameChapter::Straylight) == std::string_view("Leave the peaceful relay system with the Ark jump."), "Straylight gate should describe the calm-before-storm beat");
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
 
     auto completeTransfer = [&](std::string_view destinationId, double multiplier) {
         LaunchOutcome outcome;
@@ -13473,6 +13790,7 @@ void hostileNavigationSelectsShuttleSortie()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 62002);
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
     discoverArk(state, catalog);
     performArkJump(state, catalog);
     performArkJump(state, catalog);
@@ -13635,6 +13953,7 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
 
     GameState hangar = createNewGame(catalog, 0xA110);
     hangar.screen = Screen::Hangar;
+    hangar.meta.launchLessons.stage = LaunchTrainingStage::Complete;
     const PanelDocumentPresentation hangarPresentation = presentationFor(hangar, 0xA110);
     require(
         hangarPresentation.templateKind == PanelTemplateKind::Workspace
@@ -13960,6 +14279,7 @@ void outerPlanetCampaignSequenceIsExplicitAndUnskippable()
 
     GameState state = createNewGame(catalog, 0x5511);
     state.run.destinationIndex = 2;
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
     syncLaunchConfig(state, catalog);
     LaunchOutcome skipped;
     skipped.type = LaunchResultType::MissionComplete;
@@ -14035,23 +14355,6 @@ void storyBriefingsTakeOverAndPersist()
     require(acknowledgeStoryBriefing(restored, catalog), "the saved takeover should acknowledge once");
     require(arkDiscovered(restored) && restored.meta.straylightDiscoveryAcknowledged && restored.screen == Screen::ArrivalOps,
         "approach should atomically discover the Ark and resume Neptune Arrival Ops");
-}
-
-void launchInstabilityMeetsLateFailureWarningFloor()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = configuredState(catalog, 0, catalog.destinations[0].targetMultiplier);
-    Random rng(0x5533);
-    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-    const auto atProximity = [&](double proximity) {
-        return telemetryAt(launch, 1.0 + (launch.crashMultiplier - 1.0) * proximity);
-    };
-    const TelemetryEvent high = atProximity(0.94);
-    const TelemetryEvent critical = atProximity(0.985);
-    require(high.instability >= 0.65 - 0.000001 && high.warning >= 0.65 - 0.000001,
-        "instability warning should reach 65% by 94% failure proximity");
-    require(critical.instability >= 0.90 - 0.000001 && critical.warning >= 0.90 - 0.000001,
-        "instability warning should reach 90% by 98.5% failure proximity");
 }
 
 void miningThermalCutoffAndGuidanceAreExplicit()
@@ -14188,18 +14491,14 @@ void legacyOuterPlanetSavesMigrateByStableId()
 int main()
 {
     proceduralScenarioTemplatesStayDormantUntilInstanced();
-    deterministicLaunchesMatch();
-    safeAndDestroyedOutcomesResolve();
-    shallowRecoveryHasBoundedCostAndNoProgress();
-    moduleAggregationIncludesFrameAndDamage();
-    earlyTelemetryShowsSystemLoad();
-    launchIncidentsAreChunkyAndRecoverable();
-    crewStressUsesDiscreteStepsForPilotRisk();
-    cutEnginesTradeHeatForNavigation();
-    shipTravelIsFasterWithoutRetuningTelemetry();
-    emergencyActionsTradeOneRiskForAnother();
-    flightActionsComposeThroughOneCoreHelper();
-    launchStatusLinesComeFromSharedSelector();
+    launchControlsAreSeededCorrectableAndImproveByRank();
+    launchThermalManagementIsPlayerDriven();
+    launchCurriculumResolutionHasNoHiddenDamageOrBlueprintLeaks();
+    launchAsteroidsAreDeterministicFairAndHullScaled();
+    launchCurriculumEconomyGatesAndVersionTenMigration();
+    launchCompetentPoliciesSurviveFiveThousandSeeds();
+    launchSkillFailuresRemainVisibleAndNonRandom();
+    launchCurriculumFuelMathAndRange();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     emergencyRecruitmentOffersAnimalCandidateChoice();
     moduleOffersAreOneChoiceRefits();
@@ -14217,14 +14516,6 @@ int main()
     hangarOperationCardsComeFromSharedPreview();
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
-    destroyedLaunchesPreserveProvingFlights();
-    pressureTracksFrontierExperience();
-    skillBasedLaunchFlightIsStatefulRecoverableAndFair();
-    crewStressTracksPeakTelemetryDanger();
-    pressureControlModulesReducePressureTelemetry();
-    starterEarthOrbitIsProvingFirst();
-    starterProvingEconomyFundsEarlyRefits();
-    returnHomeRewardShelvesMatchRefitCosts();
     researchPhasesUnlockOnlyAfterMarsArrival();
     arrivalOperationsGateMoonButAllowMarsRisk();
     activityIntroductionsAreFirstUseAndUnlockAware();
@@ -14336,7 +14627,6 @@ int main()
     researchPresentationComesFromSharedHelper();
     surfacePresentationComesFromSharedHelper();
     scenarioDrivenSurfaceDeliveryPresentationUsesConfiguredContract();
-    overburnRewardsBeatLinearScalingAfterGoal();
     saveRoundTripPreservesProgress();
     progressedSavesSkipTheFirstLaunchIntroduction();
     versionTwoStoredModulesMigrateToInstalledSystems();
@@ -14361,14 +14651,9 @@ int main()
     solarMapModalTracksCampaignDiscovery();
     panelHtmlKeepsTutorialsOutOfOperationalSurfaces();
     surfaceHtmlPromotesMiningAction();
+    surfaceDigWarnsAboutReturnEndurance();
     postArrivalPhaseHtmlUsesPolishedBoardStructure();
     hangarHtmlShowsPilotIntakeModal();
-    launchBalanceHelpersDrivePreparedLaunch();
-    destinationRiskEscalates();
-    starterMoonTransferConfidenceDoesNotAddPity();
-    frontierReadinessGatesProgression();
-    transferAttemptAdvancesOnlyOnSuccess();
-    overpreparedReadinessRaisesProvingStakes();
     arkDiscoveryAndScriptedJumpProgression();
     numberedChaptersAdvanceMonotonically();
     hostileNavigationSelectsShuttleSortie();
@@ -14382,7 +14667,6 @@ int main()
     displayFormatAndMathHelpersAreShared();
     outerPlanetCampaignSequenceIsExplicitAndUnskippable();
     storyBriefingsTakeOverAndPersist();
-    launchInstabilityMeetsLateFailureWarningFloor();
     miningThermalCutoffAndGuidanceAreExplicit();
     marsMiningPressureFitsOxygenWindow();
     legacyOuterPlanetSavesMigrateByStableId();

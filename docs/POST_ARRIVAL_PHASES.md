@@ -6,7 +6,7 @@ This note extends the current launch/refit prototype with the next two layers: r
 
 ## Phase Structure
 
-Earth Orbit stays focused on proving the agency can travel and return safely. The Moon preserves that story framing while adding the first explicit surface objective: safely deliver 30 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
+The launch curriculum begins Moon-bound: Fuel Survey, Flight Controls Calibration, and the first true transfer all happen before surface play. Earth Orbit is only a hidden save-compatibility origin. After arrival, the Moon adds the first explicit surface objective: safely deliver 30 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
 
 Mars is the first research frontier. After a successful Mars arrival, the game opens a post-arrival sequence:
 
@@ -28,14 +28,14 @@ Research is a strategic menu phase, not an action scene. It should be quick, rea
 
 Research inputs:
 
-- Blueprints from launch milestones and overburn gambles.
+- Blueprints from launch milestones and later press-your-luck transfers.
 - Common, rare, and exotic materials from surface expeditions.
 - Identified artifacts from deeper exploration.
 - Frontier tier, so advanced projects appear only after the agency reaches the right scale.
 
 Research outputs:
 
-- Module families: thermal control, pressure control, recovery systems, guidance AI, deep-range power.
+- Module families beyond the direct Fuel Tanks, Flight Controls, Engine Cooling, and Hull Plating launch curriculum.
 - Crew facilities: better simulators, medical bays, psychology/coaching rooms, mission analysis labs.
 - Surface tools: better drills, cargo harnesses, suit supplies, probes, hazard scanners.
 - Support Drone systems: Drone Bay, role frames and paid duplicate capacity, Arkfall's emergency Attack/Defense kit, and post-Arkfall Perimeter Coordination research.
@@ -85,7 +85,7 @@ Mars site profiles currently provide low-cost run variety:
 - Ore Shelf: stronger mining yield and rare-material odds, with slightly higher site strain.
 - Fracture Field: better artifact odds, but higher hazard and extraction pressure.
 
-Solar-system rule: no enemies in Earth Orbit, Moon, or Mars content. Mars can have environmental hazards, limited action kits, shared fuel pressure, and extraction pressure, but not combat. Enemies start only after the agency reaches another star system.
+Solar-system rule: no enemies in Moon or Mars content. Mars can have environmental hazards, limited action kits, shared fuel pressure, and extraction pressure, but not combat. Earth Orbit has no visible mission content; enemies start only after the agency reaches another star system.
 
 Implemented Mars hazards are environmental setbacks attached to surface actions:
 
@@ -124,7 +124,7 @@ Current POC implementation: post-solar-system expeditions can trigger hostile co
 Bring forward:
 
 - Tool-forward exploration: jetpack, grappling, Support Drones, mining tools, and special equipment all fit the fantasy of a small expedition crew improvising under pressure.
-- Equipment inventory: unique permanent ship systems and bounded Reach, Control, and Recovery tracks fit Rocket Rogue's refit philosophy; Support Drone loadouts use explicit equipment slots, owned frames, and paid duplicates when a repeated specialist role is worth the capacity.
+- Equipment inventory: four explicit Launch Upgrade rows sit alongside unique permanent ship systems; Support Drone loadouts use explicit equipment slots, owned frames, and paid duplicates when a repeated specialist role is worth the capacity.
 - Procedural chambers: generated corridors, rooms, vaults, and deposits are a strong fit for repeatable surface expeditions.
 - Passive defense upgrades: Support Drones, shields, and area control can make combat strategic without requiring twitch-shooter controls.
 - Artifact goals: the prototype's artifact collection idea fits the research/story loop cleanly.

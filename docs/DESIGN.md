@@ -4,7 +4,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 
 ## Pillars
 
-- Hidden-risk launch tension with no real-money gambling mechanics.
+- Skill-based launch tension with visible fuel, control, temperature, and hull tradeoffs and no real-money gambling mechanics.
 - Ship-first management through readable permanent systems, expedition damage, and meaningful upgrade tracks.
 - Light but painful crew consequences.
 - Roguelite persistence through unlock variety, records, memorials, and blueprints.
@@ -12,18 +12,18 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 
 ## Core loop
 
-1. Configure the ship in the hangar.
-2. Launch a proving flight on the current frontier.
-3. Pilot the route corridor while managing persistent throttle, fuel, temperature, pressure, and telegraphed incidents.
-4. Turn home and actively fly the return leg to bank data, cut engines to cool at the cost of thrust and steering authority, vent pressure while correcting the resulting drift, or eject for an expensive rescue. Recovery is `Return to Earth` before Saturn, `Recover to Expedition` on the one-way outer route, and `Return to Ark` after the Straylight discovery.
-5. A flight that banks new Flight Data or reaches a destination earns one saved refit opportunity. Buy one permanent ship system or keep the credits; crashes, shallow returns, and capped proving data go directly to the next phase.
-6. Return to hangar operations: repair damage, recruit crew, train, rest, and plan the next flight.
-7. Repeat proving flights until enough frontier readiness is banked.
-8. Commit the agency to the next frontier, then repeat the loop farther from home.
+1. Begin with the Moon fuel survey: fixed 60% throttle, a 10-unit tank, and only the Fuel gauge.
+2. Turn around at the halfway light, return on the exact five-unit reserve, and spend the 22-credit survey reward on Fuel Tanks I.
+3. Complete a second out-and-back calibration with visible corridor steering, persistent throttle, and deliberately loose controls; install Flight Controls I.
+4. Reach the Moon using 10 transit fuel plus the displayed 5-unit insertion reserve, then complete its existing surface contract.
+5. Add Temperature and `Engines Off` for the Mars thermal qualification. Engine cuts always cool and coasting cannot finish the route for free.
+6. Add Hull and a guaranteed-steerable asteroid belt for Jupiter. Skilled no-hit play can bypass Hull Plating, while collisions make the upgrade valuable.
+7. Use `Turn Around` to fly the same stateful ship home from surveys. Training failures are non-destructive rescues; frontier-transfer failures retain normal consequences.
+8. Continue through the authored surface, Flyby, Orbit, and outer-system progression without changing those minigames.
 
 ## Post-arrival research loop
 
-Surface expeditions start at the Moon with a narrow mining lesson; broader research still starts at Mars. Earth Orbit proves the rocket program, the Moon teaches inert regolith versus gray Common Ore and explicit contract delivery, and Mars turns that lesson into the second Drone Bay slot and wider long-term capability.
+Surface expeditions start at the Moon with a narrow mining lesson; broader research still starts at Mars. The launch curriculum reaches for the Moon immediately, while Earth Orbit remains only as a hidden compatibility origin. The Moon teaches inert regolith versus gray Common Ore and explicit contract delivery, and Mars turns that lesson into the second Drone Bay slot and wider long-term capability.
 
 See `docs/POST_ARRIVAL_PHASES.md` for the detailed phase breakdown and Unity prototype takeaways.
 See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay / Support Drone layer.
@@ -61,20 +61,15 @@ Research rewards should primarily widen the roguelite possibility space: module 
 
 ## Skill-based launch model
 
-Active launches are deterministic stateful flights. A session-only `LaunchFlightState` carries route leg/progress, selected throttle, fuel, heat, pressure, course offset/velocity, incident forecast, safety timers, and an explicit terminal cause. The version-9 hidden-crash fields remain readable for older records, but they do not decide live piloted survival or rewards.
+Active launches are deterministic stateful flights. A session-only `LaunchFlightState` carries mission kind, route leg/progress, absolute fuel and reserve, selected throttle, course dynamics, heat, hull, asteroid state, warning timers, and an explicit terminal cause. Version-9 hidden-crash fields remain readable for old saves and records but never decide live survival or rewards.
 
-- Launch starts at 60% throttle. Up/down changes the persistent setting at 35 percentage points per second; left/right steers. Higher throttle increases route speed while fuel consumption, heat, and pressure rise nonlinearly.
-- Cutting engines sets thrust and fuel use to zero, preserves the selected throttle for restoration, reduces steering authority, and produces net cooling on early routes unless an active external thermal pulse overwhelms it.
-- Temperature and pressure caution at 70%, become critical at 90%, and fail only after staying at 100%. Thermal failure takes 1.5 seconds. Pressure rupture takes `1.25 + 0.35 x Hull` seconds, capped at 4 seconds.
-- The corridor uses safe, caution, and lost-course boundaries at +/-0.35, +/-0.65, and the sensor-adjusted outer limit beginning at +/-1.0. Remaining outside the outer boundary for two seconds loses the route; ordinary caution excursions are recoverable.
-- The reusable relief valve deterministically drains pressure after a short toggle cooldown. Opening it produces strong directional drift until closed; Pressure Control improves vent rate and reduces that drift.
-- `Return Home` changes the route target and preserves fuel, heat, pressure, course, and control state. It does not resolve the launch; the player flies home.
-- Seeded incidents remain for telegraphed variety only. They create thermal, pressure, vibration, or directional pulses with sensor-dependent warning lead time. No incident or hidden roll can directly destroy a competent early-route pilot.
-- Failure count never changes live difficulty. Successful profiles, crew skill, installed upgrades, and player input may improve the result; repeated losses alone do not.
-
-Launch upgrades map directly onto the active mechanics: Thrust increases powered correction and route speed; Fuel adds range; Cooling improves engine-off recovery; Hull extends pressure grace and remains the future impact-damage stat; Sensors add incident warning, course tolerance, and auto-trim; Pressure Control slows pressure growth, improves venting, and reduces valve drift; Volatility amplifies disturbances.
-
-`Jettison cargo` remains a separate mass/fuel-mix tradeoff. Manual eject remains the explicit emergency exit.
+- Fuel Survey hides the corridor and ignores steering/throttle input. At fixed 60% throttle, Moon transit costs 10 fuel and insertion costs 5. The base 10-unit tank can complete the exact 5-out/5-back survey but cannot arrive.
+- Controls Calibration reveals persistent throttle and steering. Input direction is always honored. With chaos `c`, right gain is `1 + 0.45c`, throttle increases kick laterally by up to `0.35c`, steering response varies by `0.20c`, damping rises from `0.55` to `1.10`, and auto-trim rises from `0.05` to `0.25`. Kicks are seeded, event-based, and cooldown-limited rather than random every frame.
+- Mars reveals Temperature and the sole system action, `Engines Off` / `Engines On`. Engine-off thrust and fuel use are zero, selected throttle is preserved, heat always decreases, steering remains reduced, and coasting decays to zero in about 1.5 seconds. Heat cautions at 70%, becomes critical at 90%, and fails only after 1.5 seconds at 100%.
+- Jupiter reveals Hull and ten session-only asteroids in five rows. Each row blocks two of three lanes, adjacent openings move by at most one lane, and seeded jitter/scale/rotation varies the belt without creating an impossible route. Swept impacts occur once per asteroid per leg with 0.75 seconds of invulnerability.
+- `Turn Around` preserves fuel, course, heat, hull, and the asteroid layout across the leg change. Reaching home is resolved before exact-zero fuel failure so the taught reserve succeeds.
+- Pressure, relief valves, valve drift, cargo jettison, manual eject, live telemetry incidents, and hidden launch odds are not part of the live launch model.
+- Failure count never changes live difficulty. Installed ranks and player execution are the improvement path.
 
 Crew stress is a separate human-performance modifier:
 
@@ -84,26 +79,18 @@ Crew stress is a separate human-performance modifier:
 - `ABORT` scales by stress steps from x1.00 at calm to x2.00 at maximum stress.
 - Simulator burns add training and stress; rest removes enough stress to erase at least one step in most practical cases.
 
-## Permanent refit tracks
+## Direct Launch upgrades
 
-Ship modules are unique permanent installations, not replacement parts or a persistent hangar shop. An earned refit opportunity survives Results and Arrival Ops until the player buys one system or chooses `Keep credits`. Buying a module adds its deltas once to the Pathfinder's installed systems; it never evicts another module. Expedition damage can take a system offline for the current ship, but ownership survives and the next replacement ship restores every permanent installation.
+The launch curriculum has four permanent, predictable tracks. Every rank costs 22 credits and Ship Details shows its current rank, next numerical effect, `Install`, and `Keep Credits`:
 
-The opening proving phase is a bounded, curated ladder. Every useful Earth flight presents the next unowned upgrade from each actionable track, and the board is allowed to show fewer than three cards when a track is exhausted:
+- Fuel Tanks: capacity `10 / 15 / 20 / 25`.
+- Flight Controls: chaos `1.00 / 0.55 / 0.20 / 0.00`.
+- Engine Cooling: powered heat `100% / 88% / 76% / 64%`, with engine-off recovery `10% / 14% / 18% / 22%` per second.
+- Hull Plating: `100 / 125 / 150 / 175 HP` and impact multipliers `1.00 / 0.80 / 0.65 / 0.50`.
 
-- Reach improves propulsion, fuel, drilling depth, and hauling power.
-- Control improves cooling, sensors, pressure stability, simulator systems, and telemetry.
-- Recovery improves hull, escape, medical, storage, and extraction systems.
+Lesson results expose only the newly taught Rank I card. Later ranks unlock at named route milestones rather than through rerolls: Fuel II at Mars and III at Jupiter; Controls II after Moon and III after Mars; Cooling II after Mars and III after Jupiter; Hull II after Jupiter and III after Saturn. Cooling and Hull add margin but never replace skill.
 
-The three opening ranks in each track are pure benefits with explicit prerequisites. They have no reroll action and use practical general-flight wording; the shared preflight Confidence value communicates their combined result without Moon-specific sales copy. After the Moon, unlocked refits return to randomized boards drawn without replacement. Those boards prefer one Reach, one Control, and one Recovery candidate whenever their pools allow it, and rerolls become available again.
-
-Later cards should explain the practical threat they mitigate, the strongest numeric impact, and any visible tradeoff:
-
-- Engine modules shorten exposure time but can raise volatility, fuel pressure, or heat load.
-- Fuel modules improve long-burn, return margin, and pressure stability.
-- Hull modules absorb structural failures and reduce damage consequences.
-- Cooling modules directly mitigate temperature runaway.
-- Sensor modules improve warning luck, navigation confidence, and pressure uncertainty.
-- Escape modules improve ejection and crew-survival outcomes.
+The retired Reach/Control/Recovery proving cards remain recognizable only during version-9 migration. Generic thrust, sensors, escape, pressure, volatility, payout, and unrelated modules continue serving Flyby, Orbit, Mining, crew, and other systems but do not alter live launch survival.
 
 Crew facilities are refit rewards too. They should sit in Crew Details and improve actual crew math, not just presentation:
 
@@ -111,7 +98,7 @@ Crew facilities are refit rewards too. They should sit in Crew Details and impro
 - Medical facilities improve rest and injury recovery.
 - Psychology/coaching facilities reduce post-launch stress and improve astronaut trait modifiers.
 
-Hangar operations should keep pressure visible next to readiness and transfer planning. Training, rest, repair, and recruitment are not pressure-control systems by themselves, but they should help the player understand whether the next launch is a first attempt, a retry, or a lower-pressure proving run. Ship Details and Inventory should show permanent systems as `Built in`, `Installed`, or `Offline this expedition`; Crew Details should show installed crew facilities and aggregate effects.
+Paid repair, training, rest, and rerolls are hidden during the Fuel and Controls lessons so the taught 22-credit loop cannot be bypassed or buried in clutter. The normal 45-credit recovery floor resumes after Moon arrival. Ship Details exposes the four Launch rows separately from other permanent systems; Crew Details continues to show crew facilities and aggregate effects.
 
 Refit economy should reward recovered risk in discrete shelves:
 
@@ -138,7 +125,7 @@ See `docs/CONTROLLER_SUPPORT.md` for the controller layout, spatial-focus contra
 
 Keep new gameplay mechanics in core when they affect odds, telemetry, rewards, or progression. Keep app-layer code focused on when a player chooses a mechanic and how that state is presented.
 
-Flight controls flow through `LaunchControlInput`, `LaunchFlightState`, and `FlightActionState` in `src/core/LaunchSimulation.*`. `RocketGameApp` owns session input and action availability, while core owns stateful heat, pressure, fuel, course, incidents, pacing, warning timers, and terminal causes.
+Flight controls flow through `LaunchControlInput`, `LaunchFlightState`, and `FlightActionState` in `src/core/LaunchSimulation.*`. `RocketGameApp` owns session input and staged action availability, while core owns absolute fuel, selected throttle, course momentum, stateful heat, hull impacts, asteroid layouts, warning timers, and terminal causes. Pressure, generic telemetry incidents, and manual launch ejection remain outside the live curriculum.
 
 Hangar operation cards should be driven by `HangarOperationPreview` from `src/core/GameState.*`. The preview is the shared source for repair amount/cost, simulator gain/stress/cost, rest recovery/cost, recruit cost, and availability so UI cards do not drift from the action functions.
 
@@ -150,7 +137,7 @@ Research and surface-expedition rules should flow through `src/core/ResearchSyst
 
 Author a reusable progression beat by adding a versioned `ScenarioDefinition`, unique local step IDs, prerequisite edges, player-facing presentation, a typed `ScenarioEventKind`, the explicit `ScenarioActionKind`, and typed rewards. Reward kinds can grant unlock keys, destination route access, Support Drones, bay capacity, upgrade credits, or banked Common/Rare/Exotic materials. A fixed mining activity references a versioned `MiningSiteDefinition`; a Flyby step uses `FlybyFinished` plus `requiredGrade`. Route gates are content data: a destination requires unlock keys, while a `RouteAccess` reward resolves that destination's configured keys without route evaluation recognizing a story destination. `validateScenarioCatalog()` rejects duplicate IDs, cyclic prerequisites, invalid rewards, unknown mining sites, invalid cocoons, and procedural factories whose template would instantiate by default.
 
-Save version 9 persists authored and procedural `ScenarioInstance` identity, definition/factory versions, seed, resolved parameters, step state, first-failure acknowledgement, and the awarded-reward ledger. It also persists staged and active mining scenario/site context, generic `MiningSiteProgress`, cocoon definition and protected-objective identity, per-layer progress, reveal policy, and cell-layer tags across cached depths. Version 8 and older saves synthesize instances from the legacy Moon/Mars/Io/slingshot fields, preserve partial and ready-to-claim progress, mark older site records as migrated, and convert the fixed Io shell without replaying rewards. Optional fields were appended: a missing scenario definition ID defaults to the runtime ID, and a site record without provenance is treated as legacy.
+Save version 10 retains version 9's authored and procedural `ScenarioInstance` identity, mining-site provenance, protected-objective state, and reward ledger while adding four launch-upgrade ranks and four lesson-completion flags. Version 8 and older saves still synthesize scenario instances before the v10 launch migration runs. A pristine v9 campaign starts the zero-credit Moon tutorial; progressed saves retain credits and receive conservative lesson/rank credit based on their old readiness, location, and retired launch modules.
 
 Shared game constants and player-facing copy should have one owner:
 
@@ -159,15 +146,14 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/GameFormat.h` owns reusable numeric display formatting such as credits, signed deltas, multipliers, percentages, readiness fractions, damage summaries, and crew stress/training summaries.
 - `src/core/GameMath.h` owns reusable equation helpers such as clamped `smoothStep` shaping. Do not duplicate easing or shaping formulas inside app, panel, or simulation code.
 - `src/core/FlightProgress.h` owns shared travel/return progress equations: burn-depth-to-route progress, return completion, return visual travel, and return duration. App, panel, and renderer-facing snapshots should use these helpers instead of retyping the same progress math.
-- `src/core/LaunchBalance.h` owns launch-preparation equations and version-9 legacy record compatibility: ship performance score, readiness/overprepared math, legacy hidden-crash fields, sensor quality, heat/pressure prep, and seeded incident setup. `LaunchSimulation` owns live piloted survival and should orchestrate these helpers instead of carrying raw balance coefficients inline.
+- `src/core/SaveData.*` and legacy record fields retain only the data needed to read version-9 launch history. The retired hidden-crash and generic telemetry helper code is removed; `LaunchSimulation` owns the deterministic Fuel, Controls, Temperature, and Hull curriculum.
 - `src/core/DetailPresentation.h` owns reusable detail-row/header data for modal detail screens. Core presenters should return these rows, and `GamePanel` should only render them to HTML.
 - `src/core/PanelPresentation.h` owns small reusable panel primitives such as metric and button presentation data. Screen-specific presenters should reuse these data shapes instead of inventing local copies.
 - `src/core/PanelChromePresentation.h` owns shared panel chrome data: top-level mission metrics, active display destination, crew stress summary, and settings modal rows/actions. `GamePanel` should render this data instead of recomputing always-visible metrics.
-- `src/core/LaunchPresentation.h` owns launch-screen presentation: active burn metrics, telemetry detail rows, and flight-control button labels/actions/states. `GamePanel` should render this prepared data rather than recomputing launch telemetry or branching on flight-control state.
+- `src/core/LaunchPresentation.h` owns the staged launch-screen presentation: lesson objective, absolute fuel and insertion reserve, optional throttle/corridor, optional Temperature and engine toggle, optional Hull and asteroid state, and Turn Around availability. `GamePanel` should render this prepared data rather than recomputing lesson visibility or flight-control state.
 - `src/core/LaunchReadinessPresentation.h` owns launch-hold presentation and readiness gating display: hull/crew blocked state, hold messages, required action detail, and repair/recruit actions. Panels should consume this object instead of recomputing launch-block rules inline.
-- `src/core/LaunchStatus.h` owns launch/return status-line selection. App code should pass the current telemetry/action context into it instead of branching directly on warning thresholds for player-facing copy.
 - `src/core/OutcomePresentation.h` owns result-screen labels, follow-up action labels, and outcome note copy derived from `LaunchOutcome`. Panels should render this presentation data instead of duplicating outcome/recovery branching.
-- `src/core/RefitPresentation.h` owns refit-window presentation: resolved module and crew-facility offers, track/rank classes, glyphs, practical copy, primary impact, correctly signed stat chips, prices, affordability, permanent-install actions, conditional reroll action, and keep-credits action. Panels should render this returned data instead of rebuilding offer rules inline.
+- `src/core/RefitPresentation.h` owns refit-window presentation. Launch lessons expose one direct upgrade card, while Ship Details exposes the four compact deterministic Launch Upgrade rows with current rank, next numerical effect, flat cost, install state, and Keep Credits. Non-launch module and crew-facility presentation retains its existing typed offer rules.
 - `src/core/ResearchPresentation.h` owns research and surface-expedition presentation: blueprint/material metrics, research project cards, surface supply/cargo/risk metrics, and field action availability. Panels should render this returned data instead of rebuilding research/resource rules inline.
 - `src/core/MiningPresentation.h` owns mining HUD and detail presentation: mode, gravity, oxygen, shared fuel, rig health, suit integrity, drill heat, tether burden, loose-chunk count, `Suit carry: 0`, Support Drone anchor status, scanner/fuel cadence, hostile tunnel summaries, action buttons, and controls copy.
 - `src/core/CrewPresentation.h` owns Crew Details rows and facility-effect value wording. Panels should render detail rows and headers from this helper instead of recomputing training, stress, facility, and trait modifier strings.
@@ -177,7 +163,6 @@ Shared game constants and player-facing copy should have one owner:
 - `src/core/HangarPresentation.h` owns Hangar Ops card presentation: operation titles, details, costs, action IDs, availability, and card classes derived from `HangarOperationPreview`. Panels should render these cards instead of branching on repair/training/rest/recruit state.
 - `src/core/ContentIds.h` owns persistent content IDs and unlock keys for modules, crew facilities, frames, astronauts, and destinations. Content definitions, save migrations, tests, and scripted rewards should use these shared IDs instead of raw strings.
 - `src/core/SaveSchema.h` owns the current save header, field keys, and line-format delimiters. Serializer, parser, and migration tests should use these shared constants instead of duplicating save strings.
-- `src/core/Telemetry.h` owns telemetry channel metadata and helpers. Simulation, UI, and tests should iterate the shared channel list instead of hand-listing `TEMP`, `PRESS`, `VIB`, `NAV`, `MIX`, and `ABORT`.
 - `src/core/GameUi.h` owns stable cross-platform panel action IDs and modal IDs. `GamePanel` emits these data-like IDs, and both native and web dispatch them through the shared app. Avoid embedding JavaScript snippets such as `rr.someAction()` in generated markup.
 
 Telemetry equation constants live under `tuning::telemetry`: pulse profiles, early/late channel buildup, readable minimums, abort certainty, and telemetry-driven stress. Balance the feel of warning dials there before changing formula structure.
@@ -190,6 +175,6 @@ When adding a new mechanic, prefer adding the math knobs to `Tuning.h`, the visi
 
 ## Persistence
 
-The campaign save format is versioned and line-based. Version 3 introduced the saved refit entitlement and generated offer IDs. Version 4 added acknowledged activity briefs and Prospector progress. Version 5 added active mining and Support Drone simulation. Version 6 persists independent operator/rig state, vector gravity, loose chunks, disabled-rig state, artifact tether state, and each Support Drone's anchor/formation simulation. Version 7 adds explicit Moon/Mars contract claims, Io/Hazard/artifact progression, layered lava-seal state, Drone Upgrade Credits, and the permanent Saturn slingshot gate. Version 8 adds purchased duplicate Support Drone frames. Version 9 replaces authoritative campaign-specific progress with saved generic scenario instances, mining-site provenance, layered cocoon/protected-objective state, and idempotent rewards while migrating all earlier progression without replaying it. Migration preserves existing Support Drones and upgrades, de-duplicates only legacy repeated loadout references, backfills unreachable earlier gates, and never rolls Saturn-or-later saves backward. `SaveSchema.h` remains authoritative for field names, defaults, and migrations.
+The campaign save format is versioned and line-based. Version 3 introduced the saved refit entitlement and generated offer IDs. Version 4 added acknowledged activity briefs and Prospector progress. Version 5 added active mining and Support Drone simulation. Version 6 persists independent operator/rig state, vector gravity, loose chunks, disabled-rig state, artifact tether state, and each Support Drone's anchor/formation simulation. Version 7 adds explicit Moon/Mars contract claims, Io/Hazard/artifact progression, layered lava-seal state, Drone Upgrade Credits, and the permanent Saturn slingshot gate. Version 8 adds purchased duplicate Support Drone frames. Version 9 replaces authoritative campaign-specific progress with saved generic scenario instances, mining-site provenance, layered cocoon/protected-objective state, and idempotent rewards. Version 10 adds the four launch-upgrade ranks and lesson milestones, hides Earth Orbit without shifting destination indices, and converts retired launch modules before unknown IDs are pruned. Migration preserves progressed credits, existing Support Drones and upgrades, de-duplicates only legacy repeated loadout references, backfills unreachable earlier gates, and never rolls later saves backward. `SaveSchema.h` remains authoritative for field names, defaults, and migrations.
 
 Display, accessibility, debug, fullscreen, and controller settings are separate from campaign data behind `IPreferenceStore`. The web adapter persists browser-local preferences; native builds use `preferences_v1.txt` beside the native save.

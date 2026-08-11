@@ -15,6 +15,7 @@
 #include <RmlUi/Core/RenderInterface.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -24,6 +25,7 @@
 #include <functional>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(_MSC_VER)
@@ -142,6 +144,18 @@ public:
         miningHeat = snapshot.miningHeat;
         flybyInputY = snapshot.flybyInputY;
         launchCourseOffset = snapshot.launchCourseOffset;
+        launchCourseVelocity = snapshot.launchCourseVelocity;
+        launchManualControlsEnabled = snapshot.launchManualControlsEnabled;
+        launchHeatEnabled = snapshot.launchHeatEnabled;
+        launchAsteroidsEnabled = snapshot.launchAsteroidsEnabled;
+        launchFrontierTransfer = snapshot.frontierTransfer;
+        launchFuelCapacity = snapshot.launchFuelCapacity;
+        launchAsteroidCount = snapshot.launchAsteroidCount;
+        launchDestinationTier = snapshot.destinationTier;
+        launchTravelProgress = snapshot.travelProgress;
+        launchLunarImpactActive = snapshot.launchLunarImpactActive;
+        launchLunarImpactElapsed = snapshot.launchLunarImpactElapsed;
+        lastLaunchFailureCause = snapshot.lastLaunchFailureCause;
         surfacePushSteps = snapshot.surfacePushSteps;
         surfacePushMaterials = snapshot.surfacePushMaterials;
         surfacePushRewardMarkers = snapshot.surfacePushRewardMarkers;
@@ -203,7 +217,13 @@ public:
     double miningHeat = 0.0;
     double flybyInputY = 0.0;
     double launchCourseOffset = 0.0;
+    double launchCourseVelocity = 0.0;
+    double launchFuelCapacity = 0.0;
+    double launchTravelProgress = 0.0;
+    double launchLunarImpactElapsed = 0.0;
     double miningViewChecksum = 0.0;
+    int launchAsteroidCount = 0;
+    int launchDestinationTier = 0;
     int surfacePushSteps = 0;
     rocket::MaterialInventory surfacePushMaterials;
     std::vector<rocket::MiningCellMaterial> surfacePushRewardMarkers;
@@ -212,6 +232,12 @@ public:
     std::vector<int> surfacePushForecastDepthOffsets;
     rocket::Screen screen = rocket::Screen::Hangar;
     bool titleScreen = false;
+    bool launchManualControlsEnabled = false;
+    bool launchHeatEnabled = false;
+    bool launchAsteroidsEnabled = false;
+    bool launchFrontierTransfer = false;
+    bool launchLunarImpactActive = false;
+    rocket::LaunchFailureCause lastLaunchFailureCause = rocket::LaunchFailureCause::None;
     bool miningViewsObserved = false;
     bool miningViewsValid = false;
 };
@@ -990,13 +1016,13 @@ int main()
         assert(surfaceHtml.find("data-ui-focus-id=\"action:drone_ops\"") != std::string::npos);
         ui.setPanelPresentation(surfacePresentation);
         ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
-        ui.requestFocus("action:mine_surface");
+        ui.requestFocus("action:survey_surface");
         ui.refresh();
 
         constexpr std::array<std::string_view, 4> focusPath {
-            "action:mine_surface",
             "action:survey_surface",
             "action:push_surface",
+            "action:mine_surface",
             "action:extract_surface",
         };
         assert(ui.focusedId() == focusPath.front());
@@ -1154,10 +1180,7 @@ int main()
         assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "modal:crew");
         assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() != "modal:crew");
-        assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "action:prepare_launch");
-        assert(ui.navigate(rocket::UiDirection::Up));
         assert(ui.navigate(rocket::UiDirection::Up));
         assert(ui.focusedId().starts_with("modal:"));
         assert(ui.navigate(rocket::UiDirection::Up));
@@ -1433,6 +1456,92 @@ int main()
         assert(std::abs(fixture.renderer.miningHeat - 0.78) < 0.0001);
         assert(fixture.saves.storeCount == 0);
         assert(fixture.saves.value == originalSave);
+        fixture.runner.shutdown();
+    }
+
+    // Launch lesson previews are deterministic, immediately playable debug
+    // sandboxes. Moving between all four lessons and back to the real campaign
+    // must never write or replace the player's persisted save.
+    {
+        AppFixture fixture;
+        fixture.saves.value = activeMiningSave(0.37);
+        const std::string originalSave = fixture.saves.value;
+        assert(fixture.runner.initialize());
+        const int originalStoreCount = fixture.saves.storeCount;
+
+        struct ExpectedLaunchLesson {
+            bool manualControls;
+            bool heat;
+            bool asteroids;
+            bool arrival;
+            double fuelCapacity;
+            int asteroidCount;
+            std::string_view objective;
+        };
+        static constexpr std::array<ExpectedLaunchLesson, 4> expected {{
+            {false, false, false, false, 10.0, 0, "TURN AROUND ON LOW FUEL"},
+            {true, false, false, false, 15.0, 0, "CALIBRATE FLIGHT CONTROLS"},
+            {true, true, false, true, 20.0, 0, "REACH Mars"},
+            {true, true, true, true, 25.0, 10, "REACH Jupiter"}
+        }};
+
+        for (int lessonIndex = 0; lessonIndex < static_cast<int>(expected.size()); ++lessonIndex) {
+            fixture.runner.app().debugStartLaunchLesson(lessonIndex);
+            assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+            assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
+            fixture.host.now += 1.0 / 120.0;
+            fixture.runner.frame();
+
+            const ExpectedLaunchLesson& lesson = expected[static_cast<std::size_t>(lessonIndex)];
+            assert(fixture.renderer.launchManualControlsEnabled == lesson.manualControls);
+            assert(fixture.renderer.launchHeatEnabled == lesson.heat);
+            assert(fixture.renderer.launchAsteroidsEnabled == lesson.asteroids);
+            assert(fixture.renderer.launchFrontierTransfer == lesson.arrival);
+            assert(std::abs(fixture.renderer.launchFuelCapacity - lesson.fuelCapacity) < 0.0001);
+            assert(fixture.renderer.launchAsteroidCount == lesson.asteroidCount);
+            assert(fixture.ui.html.find(lesson.objective) != std::string::npos);
+            assert(fixture.saves.storeCount == originalStoreCount);
+            assert(fixture.saves.value == originalSave);
+        }
+
+        fixture.runner.app().debugExit();
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.saves.storeCount == originalStoreCount);
+        assert(fixture.saves.value == originalSave);
+
+        const std::uint64_t stateBeforeInvalidLesson = fixture.runner.app().deterministicStateHash();
+        fixture.runner.app().debugStartLaunchLesson(4);
+        assert(fixture.runner.app().deterministicStateHash() == stateBeforeInvalidLesson);
+        assert(fixture.saves.value == originalSave);
+        fixture.runner.shutdown();
+    }
+
+    // Once Fuel and Flight Controls are calibrated, even the green current-
+    // destination launch is an arrival flight. It must not silently fall back
+    // to the retired proving-return mode.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState moonState = rocket::createNewGame(catalog, 0xA221);
+        moonState.run.destinationIndex = 1;
+        moonState.meta.furthestTier = 1;
+        moonState.meta.launchLessons.stage = rocket::LaunchTrainingStage::ThermalManagement;
+        moonState.meta.launchUpgrades.fuelTanks = 2;
+        moonState.meta.launchUpgrades.flightControls = 1;
+        moonState.screen = rocket::Screen::Hangar;
+        rocket::syncLaunchConfig(moonState, catalog);
+
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(moonState));
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        fixture.runner.app().prepareForLaunch();
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.renderer.launchFrontierTransfer);
+        assert(fixture.renderer.launchDestinationTier == 1);
         fixture.runner.shutdown();
     }
 
@@ -1790,27 +1899,20 @@ int main()
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("new_game");
-        fixture.ui.dispatchAction("acknowledge_story_briefing");
-        fixture.runner.app().prepareForLaunch();
-        fixture.runner.app().startLaunch();
-        for (int frame = 0;
-             frame < 600 && fixture.runner.app().inputContext() != rocket::InputContext::Launch;
-             ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
+        fixture.runner.app().debugStartLaunchLesson(1);
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
         assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
 
         fixture.controllers.frame.connected = true;
         fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
         fixture.controllers.frame.meaningfulInput = true;
         fixture.controllers.frame.leftX = -0.80;
-        for (int frame = 0; frame < 12; ++frame) {
+        for (int frame = 0; frame < 60; ++frame) {
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.renderer.launchCourseOffset < 0.0);
+        assert(fixture.renderer.launchCourseVelocity < 0.0);
         fixture.runner.shutdown();
     }
 
@@ -1870,6 +1972,80 @@ int main()
         assert(fixture.ui.focusedIdValue == "action:next");
         assert(std::abs(fixture.renderer.animationTime - resultAnimationBeforeNavigation) < 0.000001);
         assert(fixture.runner.app().deterministicStateHash() == stateBeforeNavigation);
+        fixture.runner.shutdown();
+    }
+
+    // Reaching the Moon during the uncalibrated controls lesson freezes the
+    // flight into a visible impact cinematic before the existing red result
+    // modal resolves the destructive collision.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugStartLaunchLesson(1);
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+
+        for (int frame = 0;
+             frame < 1500 && !fixture.renderer.launchLunarImpactActive;
+             ++frame) {
+            const double steer = std::clamp(
+                -fixture.renderer.launchCourseOffset * 5.5 -
+                    fixture.renderer.launchCourseVelocity * 2.4,
+                -1.0,
+                1.0);
+            fixture.controllers.frame.leftX = steer;
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.renderer.launchLunarImpactActive);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
+        assert(fixture.host.hapticCount > 0);
+        const double collisionProgress = fixture.renderer.launchTravelProgress;
+        const double collisionCourse = fixture.renderer.launchCourseOffset;
+
+        fixture.runner.app().launchMove(-1.0, 1.0);
+        fixture.runner.app().returnHome();
+        fixture.runner.app().cutEngines();
+        for (int frame = 0; frame < 20; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.renderer.launchLunarImpactActive);
+        assert(fixture.renderer.launchLunarImpactElapsed > rocket::tuning::session::lunarImpactHoldSeconds);
+        assert(std::abs(fixture.renderer.launchTravelProgress - collisionProgress) < 0.000001);
+        assert(std::abs(fixture.renderer.launchCourseOffset - collisionCourse) < 0.000001);
+
+        for (int frame = 0;
+             frame < 120 &&
+             fixture.renderer.launchLunarImpactElapsed <
+                 rocket::tuning::session::lunarImpactSequenceSeconds - 2.0 / 60.0;
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.renderer.launchLunarImpactActive);
+        for (int frame = 0;
+             frame < 5 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch);
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
+        assert(!fixture.renderer.launchLunarImpactActive);
+        assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::LunarImpact);
+        assert(fixture.ui.html.find("LUNAR IMPACT") != std::string::npos);
+        const auto lunarImpactModal = std::find_if(
+            fixture.ui.presentation.modals.begin(),
+            fixture.ui.presentation.modals.end(),
+            [](const rocket::ModalPresentation& modal) {
+                return modal.id == rocket::ui::modals::launchOutcome;
+            });
+        assert(lunarImpactModal != fixture.ui.presentation.modals.end());
+        assert(lunarImpactModal->tone == rocket::ModalTone::Negative);
         fixture.runner.shutdown();
     }
 

@@ -17,10 +17,7 @@ enum class GameInputAction : std::size_t {
     OpenInventory,
     StartOrContinue,
     ReturnHome,
-    Eject,
     ToggleEngines,
-    TogglePressureRelief,
-    JettisonCargo,
     Abort,
     PrimarySurfaceAction,
     BankSurfaceAction,
@@ -158,17 +155,8 @@ public:
             if (frame.wasPressed(ControllerButton::South)) {
                 add(GameInputAction::ReturnHome);
             }
-            if (holdCrossed(frame, ControllerButton::East, 0.75)) {
-                add(GameInputAction::Eject);
-            }
             if (frame.wasPressed(ControllerButton::West)) {
                 add(GameInputAction::ToggleEngines);
-            }
-            if (frame.wasPressed(ControllerButton::North)) {
-                add(GameInputAction::TogglePressureRelief);
-            }
-            if (holdCrossed(frame, ControllerButton::RightBumper, 0.45)) {
-                add(GameInputAction::JettisonCargo);
             }
             break;
 

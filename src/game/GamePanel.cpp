@@ -71,31 +71,35 @@ std::string metricClass(std::string_view label, std::string_view cssClass = {})
     return result;
 }
 
-std::string launchMetricSeverity(const PanelRenderContext& context, std::size_t index)
+std::string launchMetricSeverity(const PanelRenderContext& context, std::string_view label)
 {
     if (context.launchFlight == nullptr) return {};
     const LaunchFlightState& flight = *context.launchFlight;
     double caution = tuning::launch::pilotingWarningThreshold;
     double critical = tuning::launch::pilotingCriticalThreshold;
     double value = 0.0;
-    switch (index) {
-    case 2:
+    if (label == "Fuel") {
+        if (flight.fuelFailureSeconds > 0.0) {
+            return "critical";
+        }
+        if (!flight.returningHome && !context.flightModel.config.frontierTransfer &&
+            flight.projectedFuelReserve <= 0.0) {
+            return "caution";
+        }
         value = 1.0 - flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
         caution = 0.75;
         critical = 0.90;
-        break;
-    case 3:
+    } else if (label == "Course") {
         value = std::abs(flight.courseOffset);
         caution = tuning::launch::pilotingCourseSafe;
         critical = tuning::launch::pilotingCourseCaution;
-        break;
-    case 4:
+    } else if (label == "Temperature") {
         value = flight.heat;
-        break;
-    case 5:
-        value = flight.pressure;
-        break;
-    default:
+    } else if (label == "Hull") {
+        value = 1.0 - flight.hullRemaining / std::max(1.0, flight.hullMaximum);
+        caution = 0.50;
+        critical = 0.75;
+    } else {
         return {};
     }
     return value >= critical ? "critical" : (value >= caution ? "caution" : std::string {});
@@ -136,7 +140,7 @@ std::string expeditionControlsMarkup()
 <article class="opening-control-card opening-keyboard-controls">
 <span class="opening-control-title">Keyboard + mouse</span>
 <div class="opening-control-row"><strong>Menus</strong><p>Mouse or WASD / Arrows navigate. Enter / Space selects. Esc goes back or pauses.</p></div>
-<div class="opening-control-row"><strong>Launch</strong><p>Space launches. WASD / Arrows steer and change throttle. R turns home. C cuts or restores engines. V opens or closes pressure relief. E ejects.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p>Space launches. WASD / Arrows steer and change throttle. R turns around. C turns engines off or on.</p></div>
 <div class="opening-control-row"><strong>Flight</strong><p>WASD / Arrows steer approaches. Esc aborts.</p></div>
 <div class="opening-control-row"><strong>Mining rig</strong><p>WASD / Arrows move. Space or left click drills. E scans. T tethers. F exits the rig. R banks payload at the ship.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>WASD / Arrows thrust. Mouse aims. Left click fires. Right click drills. E scans. T tethers. F enters the rig.</p></div>
@@ -145,7 +149,7 @@ std::string expeditionControlsMarkup()
 <span class="opening-control-title">Controller</span>
 <div class="opening-control-row"><strong>Menus</strong><p>L-stick / D-pad navigate. <strong data-controller-south>{{controller_south}}</strong> selects. <strong data-controller-east>{{controller_east}}</strong> goes back. R-stick scrolls.</p></div>
 <div class="opening-control-row"><strong>Shortcuts</strong><p><strong data-controller-menu>{{controller_menu}}</strong> pauses. <strong data-controller-view>{{controller_view}}</strong> opens Map. <strong data-controller-north>{{controller_north}}</strong> opens Inventory.</p></div>
-<div class="opening-control-row"><strong>Launch</strong><p>L-stick steers and changes throttle. <strong data-controller-south>{{controller_south}}</strong> launches or turns home. Hold <strong data-controller-east>{{controller_east}}</strong> to eject. <strong data-controller-west>{{controller_west}}</strong> engines. <strong data-controller-north>{{controller_north}}</strong> pressure.</p></div>
+<div class="opening-control-row"><strong>Launch</strong><p>L-stick steers and changes throttle. <strong data-controller-south>{{controller_south}}</strong> launches or turns around. <strong data-controller-west>{{controller_west}}</strong> turns engines off or on.</p></div>
 <div class="opening-control-row"><strong>Flight / Mining rig</strong><p>L-stick steers or moves. Hold <strong data-controller-east>{{controller_east}}</strong> to abort. <strong data-controller-rt>{{controller_rt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Tap <strong data-controller-south>{{controller_south}}</strong> to bank or leave; hold it to exit the rig.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>L-stick thrusts. R-stick aims. <strong data-controller-rt>{{controller_rt}}</strong> fires. <strong data-controller-lt>{{controller_lt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Hold <strong data-controller-south>{{controller_south}}</strong> to enter the rig.</p></div>
 </article>
@@ -352,7 +356,8 @@ void collectSharedUtilityModals()
         "<div class=\"detail-stack rr-detail-stack modal-body controller-controls\">"
         "<div><strong>Menus</strong><span>Left stick or D-pad navigates. South selects. East goes back. Right stick scrolls.</span></div>"
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
-        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort. Context prompts show Return, Eject, engine, and pressure controls.</span></div>"
+        "<div><strong>Launch</strong><span>Left stick steers and changes throttle. South turns around. West turns engines off or on.</span></div>"
+        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort Flyby or Orbit.</span></div>"
         "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to bank or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
@@ -757,9 +762,11 @@ PanelButtonPresentation surfaceActionFooterButton(const SurfaceActionPreviewPres
 {
     PanelButtonPresentation buttonPresentation = action.action;
     if (isSurfaceMiningAction(action) && buttonPresentation.enabled) {
-        buttonPresentation.cssClass = buttonPresentation.cssClass.empty()
-            ? "rare"
-            : buttonPresentation.cssClass + " rare";
+        if (buttonPresentation.cssClass.empty()) {
+            buttonPresentation.cssClass = "risk";
+        } else if (buttonPresentation.cssClass.find("risk") == std::string::npos) {
+            buttonPresentation.cssClass += " risk";
+        }
     }
     if (!buttonPresentation.enabled && (buttonPresentation.label.rfind("Need ", 0) == 0 || buttonPresentation.label.size() > 14)) {
         buttonPresentation.label = std::string(text::buttons::unavailable);
@@ -1723,6 +1730,18 @@ std::string refitOfferCard(const RefitOfferPresentation& offer, bool defaultFocu
 {
     const RefitPresentation& presentation = offer.card;
     std::ostringstream out;
+    if (offer.kind == RefitOfferPresentationKind::LaunchUpgrade) {
+        out << "<article class=\"pilot-card upgrade-draft-card compact-draft-selector refit-offer-card launch-upgrade-row slot-"
+            << htmlEscape(presentation.slotClass) << "\">";
+        out << "<div class=\"pilot-card-top\"><span>LAUNCH UPGRADE</span><strong>"
+            << htmlEscape(offer.footerCostSummary) << "</strong></div>";
+        out << "<h3 class=\"card-title\">" << htmlEscape(presentation.title) << "</h3>";
+        out << "<p class=\"card-copy refit-offer-detail\">" << htmlEscape(presentation.detail) << "</p>";
+        out << "<div class=\"draft-card-footer action-row\"><strong class=\"module-impact\">"
+            << htmlEscape(presentation.primaryImpact) << "</strong>"
+            << panelButton(offer.action, defaultFocus) << "</div></article>";
+        return out.str();
+    }
     out << "<article class=\"pilot-card upgrade-draft-card compact-draft-selector refit-offer-card refit-choice-card slot-"
         << htmlEscape(presentation.slotClass) << " " << rarityCardClass(presentation.rarity) << "\">";
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(presentation.category) << "</span><strong>"
@@ -1764,10 +1783,11 @@ std::string surfaceActionCard(
 {
     std::ostringstream out;
     const bool isMining = isSurfaceMiningAction(action);
-    const bool featured = (isMining && action.action.enabled)
-        || (isSurfaceExtractionAction(action)
-            && (action.title == "Extract Mars Payload" || action.title.rfind("Deliver ", 0) == 0));
-    out << "<article class=\"resource-bank rr-fixed-lane-card surface-choice-row" << (featured ? " featured-action" : "") << "\">";
+    const bool featured = isSurfaceExtractionAction(action)
+            && (action.title == "Extract Mars Payload" || action.title.rfind("Deliver ", 0) == 0);
+    out << "<article class=\"resource-bank rr-fixed-lane-card surface-choice-row"
+        << (featured ? " featured-action" : "")
+        << (isMining && action.action.enabled ? " risk-action" : "") << "\">";
     out << "<div class=\"surface-choice-summary\"><h3 class=\"card-title\">" << htmlEscape(action.title) << "</h3>";
     out << "<div class=\"card-topline surface-choice-cues\"><span class=\"surface-choice-cost\">" << htmlEscape(action.cost)
         << "</span><span class=\"surface-choice-outcome\">" << htmlEscape(surfaceActionRiskRewardCue(action)) << "</span></div></div>";
@@ -1987,6 +2007,35 @@ std::string detailStack(const std::vector<DetailPresentationRow>& rows)
     return body;
 }
 
+std::string launchUpgradeInstallStack(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const std::vector<LaunchUpgradeInstallPresentation> upgrades =
+        launchUpgradeInstallPresentation(state, catalog);
+    std::ostringstream out;
+    out << "<section class=\"detail-stack rr-detail-stack modal-body launch-upgrade-install-list\">"
+        << "<div class=\"detail-section\">Available launch upgrades</div>";
+    for (const LaunchUpgradeInstallPresentation& upgrade : upgrades) {
+        out << "<article class=\"comparison-card launch-upgrade-install-row\"><div class=\"card-topline\"><span>"
+            << htmlEscape(upgrade.title) << "</span><strong>RANK "
+            << upgrade.currentRank << "/" << tuning::launchProgression::maximumUpgradeRank
+            << "</strong></div><div><p class=\"card-copy\"><strong>Current:</strong> "
+            << htmlEscape(upgrade.currentEffect) << "</p><p class=\"card-copy\"><strong>Next:</strong> "
+            << htmlEscape(upgrade.nextEffect) << "</p></div><div class=\"card-footer action-row\"><span>"
+            << (upgrade.currentRank >= tuning::launchProgression::maximumUpgradeRank
+                    ? std::string("MAX")
+                    : htmlEscape(display::credits(upgrade.cost)))
+            << "</span>"
+            << panelButton(upgrade.action) << "</div></article>";
+    }
+    out << "<div class=\"modal-actions action-row\">"
+        << "<button type=\"button\" class=\"ghost rr-text-button\" data-ui-close-modal=\"1\" "
+           "data-ui-focus-id=\"launch-upgrades:keep\"><span class=\"rr-button-label\">Keep Credits</span></button>"
+        << "</div></section>";
+    return out.str();
+}
+
 std::string missionLog(const std::vector<std::string>& entries)
 {
     std::string body = "<div class=\"detail-stack rr-detail-stack modal-body\">";
@@ -2184,13 +2233,81 @@ std::vector<PanelMetricPresentation> compactHeaderMetrics(
     }
 }
 
+const Destination& hangarLaunchTargetDestination(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const Destination& current = currentDestination(state, catalog);
+    if (current.hiddenFromProgression) {
+        if (const Destination* target = catalog.findDestination(state.launchConfig.destinationId)) {
+            if (!target->hiddenFromProgression) {
+                return *target;
+            }
+        }
+        if (const Destination* next = nextDestination(state, catalog)) {
+            return *next;
+        }
+    }
+    return current;
+}
+
+std::pair<std::string, std::string> launchLessonHangarObjective(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const Destination& target = hangarLaunchTargetDestination(state, catalog);
+    switch (state.meta.launchLessons.stage) {
+    case LaunchTrainingStage::FuelCalibration:
+        return {"Map the Moon route", "Fly to the low-fuel warning, Turn Around, and bank the route data."};
+    case LaunchTrainingStage::FlightControlsCalibration:
+        return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 1
+            ? std::pair<std::string, std::string>{"Install Fuel Tanks I", "Open Ship Details and install the unlocked fuel upgrade."}
+            : std::pair<std::string, std::string>{"Calibrate Flight Controls", "Lunar landing guidance is uncalibrated. Reach the yellow test line, then return before the Moon."};
+    case LaunchTrainingStage::MoonTransfer:
+        return launchMissionReady(state)
+            ? std::pair<std::string, std::string>{"Reach the Moon", "Fuel and controls are ready for the lunar transfer."}
+            : std::pair<std::string, std::string>{"Install Flight Controls I", "Open Ship Details and install the required control upgrade."};
+    case LaunchTrainingStage::ThermalManagement:
+        if (!hasUnlock(state.meta, content::unlock::routeMars)) {
+            return {"Complete Lunar Prospector", "Finish the Moon contract to reveal the Mars route."};
+        }
+        if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2) {
+            return {"Install Fuel Tanks II", "The Mars route needs 20 fuel. Engine Cooling remains optional."};
+        }
+        return {"Reach Mars", "Use Engines Off to manage heat. Reaching Mars completes the flight."};
+    case LaunchTrainingStage::MarsTransfer:
+        return launchMissionReady(state)
+            ? std::pair<std::string, std::string>{"Reach Mars", "Fuel Tanks II is ready. Engine Cooling remains optional."}
+            : std::pair<std::string, std::string>{"Install Fuel Tanks II", "Engine Cooling is optional safety margin."};
+    case LaunchTrainingStage::HullIntegrity:
+        if (!hasUnlock(state.meta, content::unlock::routeJupiter)) {
+            return {"Complete Mars Bay Expansion", "Finish the Mars contract to reveal the Jupiter route."};
+        }
+        if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 3) {
+            return {"Install Fuel Tanks III", "The Jupiter route needs 25 fuel. Hull Plating remains optional."};
+        }
+        return {"Reach Jupiter", "Steer through the asteroid gaps. Reaching Jupiter completes the flight."};
+    case LaunchTrainingStage::JupiterTransfer:
+        return launchMissionReady(state)
+            ? std::pair<std::string, std::string>{"Reach Jupiter", "Fuel Tanks III is ready. Hull Plating remains optional."}
+            : std::pair<std::string, std::string>{"Install Fuel Tanks III", "Hull Plating is optional safety margin."};
+    case LaunchTrainingStage::Complete:
+        return {"Prepare the next flight", "Current destination: " + target.name};
+    }
+    return {"Prepare the next flight", target.name};
+}
+
 std::string compactHeaderObjective(
     const GameState& state,
     const ContentCatalog& catalog)
 {
     switch (state.screen) {
     case Screen::Hangar: {
-        const Destination& current = currentDestination(state, catalog);
+        if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+            const auto [title, detail] = launchLessonHangarObjective(state, catalog);
+            return title + " // " + detail;
+        }
+        const Destination& current = hangarLaunchTargetDestination(state, catalog);
         const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(state, catalog, current.id);
         if (objective.available && objective.state != ScenarioStepState::Complete) {
             return scenarioObjectiveStateLabel(objective.state) + " // " + objective.title;
@@ -2517,11 +2634,18 @@ std::string solarMapBody(const PanelRenderContext& context)
         + (saturnExplored ? 1 : 0)
         + (uranusExplored ? 1 : 0)
         + (neptuneExplored ? 1 : 0);
+    const Destination& savedMapFrontier = currentDestination(state, catalog);
+    const Destination* visibleMapFrontier = &savedMapFrontier;
+    if (savedMapFrontier.hiddenFromProgression) {
+        if (const Destination* next = nextDestination(state, catalog)) {
+            visibleMapFrontier = next;
+        }
+    }
 
     std::ostringstream out;
     out << "<div class=\"solar-map\">"
         << "<div class=\"solar-map-summary\">"
-        << "<div><span>Current frontier</span><strong>" << htmlEscape(currentDestination(state, catalog).name) << "</strong></div>"
+        << "<div><span>Current frontier</span><strong>" << htmlEscape(visibleMapFrontier->name) << "</strong></div>"
         << "<div><span>Explored worlds</span><strong>" << exploredWorlds << " / 7</strong></div>"
         << "<div" << routeScenarioAttributes << "><span>" << htmlEscape(nextRoute.label) << "</span><strong>"
         << htmlEscape(nextRoute.detail) << "</strong></div></div>"
@@ -2592,6 +2716,7 @@ std::string buildGamePanelMarkup(
     const GameState& state = context.state;
     const ContentCatalog& catalog = context.catalog;
     const Destination& currentFrontier = currentDestination(state, catalog);
+    const Destination& launchTarget = hangarLaunchTargetDestination(state, catalog);
 
     const Astronaut* astronaut = activeAstronaut(state);
     const Destination* next = nextDestination(state, catalog);
@@ -2872,7 +2997,7 @@ std::string buildGamePanelMarkup(
             "Mission stamp",
             "Arrival confirmed",
             destinationName + " approach window open",
-            "Flight data secured",
+            "Approach data secured",
             "Approach window open",
             closeCall ? "Close call bonus" : "",
             ui::actions::skipArrivalFanfare);
@@ -3070,31 +3195,21 @@ std::string buildGamePanelMarkup(
             context.returnElapsed,
             context.returnDuration,
             context.flightActions,
-            context.pressureReliefUsed,
             context.launchFlight);
         if (!context.flightArmed) {
             out << "<div data-preflight-launch=\"1\" data-preflight-ready=\""
                 << (context.preflightReady ? "1" : "0") << "\" data-preflight-queued=\""
                 << (context.launchQueued ? "1" : "0") << "\" hidden></div>";
         }
+        out << "<div data-launch-manual-controls=\""
+            << (context.flightModel.manualControlsEnabled ? "1" : "0")
+            << "\" hidden></div>";
 
         out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(launchPanel.sectionTitle)
-            << "</h2><p>Steer the corridor, manage throttle, and react to visible warnings.</p></div>"
-            << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
-        const bool openingEarthFlight = currentDestination(state, catalog).id == content::destination::earthOrbit
-            && !context.flightModel.config.frontierTransfer;
-        const bool openingMoonTransfer = context.flightModel.config.frontierTransfer
-            && context.flightModel.config.destinationId == content::destination::moon;
-        if (openingEarthFlight) {
-            const int required = frontierReadinessRequired(state, catalog);
-            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Chart the route to the Moon</strong><p>Pilot to the yellow brief, then turn home and fly the return leg. Flight Data "
-                << state.run.frontierReadiness << "/" << required << ".</p></section>";
-        } else if (openingMoonTransfer) {
-            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Reach the Moon</strong><p>Commit to the lunar transfer.</p></section>";
-        } else {
-            out << "<section class=\"objective-strip rr-objective-strip\"><span>Objective</span><strong>Fly the route and keep the ship inside its safety limits.</strong>"
-                << "<p>Use steering and throttle continuously. Cut engines for cooling; vent pressure, then correct the valve drift.</p></section>";
-        }
+            << "</h2></div></section>";
+        out << "<section class=\"objective-strip rr-objective-strip\"><span>Lesson</span><strong>"
+            << htmlEscape(launchPanel.objectiveTitle) << "</strong><p>"
+            << htmlEscape(launchPanel.objectiveCopy) << "</p></section>";
         out << "<div class=\"metric-grid rr-metric-strip flight-readout launch-readout\">";
         const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
             ? std::min<std::size_t>(3, launchPanel.metrics.size())
@@ -3105,7 +3220,7 @@ std::string buildGamePanelMarkup(
                 "rr-hud-launch-metric-" + std::to_string(index),
                 metricItem.label,
                 metricItem.value,
-                launchMetricSeverity(context, index));
+                launchMetricSeverity(context, metricItem.label));
         }
         out << "</div>";
 
@@ -3143,15 +3258,6 @@ std::string buildGamePanelMarkup(
             }
         }
         out << "</section>";
-        std::vector<DetailPresentationRow> flightDetails;
-        flightDetails.reserve(launchPanel.metrics.size() + launchPanel.telemetry.size());
-        for (const PanelMetricPresentation& item : launchPanel.metrics) {
-            flightDetails.push_back(detailPresentationRow(item.label, item.value));
-        }
-        for (const TelemetryChannelSample& sample : launchPanel.telemetry) {
-            flightDetails.push_back(detailPresentationRow(sample.label, display::percent(sample.value)));
-        }
-        out << modalTemplate("flight_details", "Flight Details", detailStack(flightDetails));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -3164,7 +3270,12 @@ std::string buildGamePanelMarkup(
             catalog,
             opensPostArrival);
         const LaunchOutcomeSummaryPresentation summary = launchOutcomeSummaryPresentation(state, catalog);
-        const ModalTone outcomeTone = state.lastOutcome.type == LaunchResultType::MissionComplete
+        const bool successfulReturn = state.lastOutcome.type != LaunchResultType::Destroyed
+            && state.lastOutcome.failureCause == LaunchFailureCause::None
+            && (state.lastOutcome.type == LaunchResultType::MissionComplete
+                || rewardedLaunchLessonReturn(state.lastOutcome)
+                || state.lastOutcome.recoveryMethod == RecoveryMethod::TransferArrival);
+        const ModalTone outcomeTone = successfulReturn
             ? ModalTone::Positive
             : (state.lastOutcome.type == LaunchResultType::None
                 ? ModalTone::Neutral
@@ -3768,6 +3879,26 @@ std::string buildGamePanelMarkup(
                     ? "SAFE FIRST LAYER"
                     : display::percent(push.collapseRisk) + (nextLayerScanned ? " / mapped" : " / blind"))
         };
+        const int selectedDepth =
+            state.run.surfaceExpedition.depth + push.depthGain;
+        const int possibleNextDepth =
+            state.run.surfaceExpedition.depth + std::max(push.depthGain, push.steps + 1);
+        SurfaceReturnSafetyPresentation returnSafety =
+            surfaceReturnSafetyPresentation(state, catalog, selectedDepth);
+        if (returnSafety.severity == SurfaceReturnSafetySeverity::Safe &&
+            !push.completed && !push.busted) {
+            SurfaceReturnSafetyPresentation nextSafety =
+                surfaceReturnSafetyPresentation(state, catalog, possibleNextDepth);
+            if (nextSafety.severity != SurfaceReturnSafetySeverity::Safe) {
+                const SurfaceReturnSafetySeverity nextSeverity = nextSafety.severity;
+                returnSafety = std::move(nextSafety);
+                returnSafety.title = nextSeverity == SurfaceReturnSafetySeverity::Critical
+                    ? "NEXT DIG: RETURN RANGE CRITICAL"
+                    : "NEXT DIG: RETURN MARGIN LOW";
+                returnSafety.detail +=
+                    "\n\nRETURN NOW to bank the shallower start point.";
+            }
+        }
         std::vector<PanelButtonPresentation> actions;
         if (push.busted) {
             actions.push_back(panelActionButton("Return", ui::actions::surfacePushBank, "ok"));
@@ -3780,12 +3911,19 @@ std::string buildGamePanelMarkup(
         out << surfaceMiniGamePanel(
             "push-minigame",
             text::buttons::pushDeeper,
-            "Layer +1 is guaranteed. Bank it, or risk the route by pushing farther.",
+            "Tunnel to a deeper Mining Rig start point. Level +1 is guaranteed; digging farther risks collapse.",
             pushMetrics,
             materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
             push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
-            push.message.empty() ? "Push the safe first layer, then choose whether to bank or gamble deeper." : push.message,
+            push.message.empty() ? "Dig the safe first level, then secure that start depth or gamble on a deeper tunnel." : push.message,
             actions);
+        if (returnSafety.severity != SurfaceReturnSafetySeverity::Safe) {
+            out << phaseAdvisory({
+                returnSafety.title,
+                returnSafety.detail,
+                returnSafety.cssClass
+            });
+        }
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
@@ -3868,34 +4006,10 @@ std::string buildGamePanelMarkup(
                 << "</section>";
         }
         out << "</div>";
-        const auto mineAction = std::find_if(surfacePanel.actions.begin(), surfacePanel.actions.end(), [](const SurfaceActionPreviewPresentation& action) {
-            return isSurfaceMiningAction(action);
-        });
-        const auto extractionAction = std::find_if(
-            surfacePanel.actions.begin(),
-            surfacePanel.actions.end(),
-            [](const SurfaceActionPreviewPresentation& action) {
-                return isSurfaceExtractionAction(action);
-            });
-        const bool promoteExtraction =
-            expedition.cargo > 0
-            || expedition.temporaryMaterials.common > 0
-            || expedition.temporaryMaterials.rare > 0
-            || expedition.temporaryMaterials.exotic > 0
-            || !expedition.temporaryArtifacts.empty();
         std::vector<const SurfaceActionPreviewPresentation*> orderedActions;
         orderedActions.reserve(surfacePanel.actions.size());
-        if (promoteExtraction && extractionAction != surfacePanel.actions.end()) {
-            orderedActions.push_back(&*extractionAction);
-        }
-        if (mineAction != surfacePanel.actions.end()) {
-            if (!scenarioMiningSiteActive) {
-                orderedActions.push_back(&*mineAction);
-            }
-        }
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
-            if (isSurfaceMiningAction(action)
-                || (promoteExtraction && isSurfaceExtractionAction(action))) {
+            if (scenarioMiningSiteActive && isSurfaceMiningAction(action)) {
                 continue;
             }
             orderedActions.push_back(&action);
@@ -4002,18 +4116,24 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::Upgrade) {
         const RefitWindowPresentation refitWindow = refitWindowPresentation(state, catalog);
+        const bool singleLaunchLessonOffer = refitWindow.offers.size() == 1 &&
+            refitWindow.offers.front().kind == RefitOfferPresentationKind::LaunchUpgrade;
         out << phaseBoardOpen("phase-board-refit phase-board-draft-room", state.statusLine);
         out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Shipyard refit")
-            << "</span><h2>" << htmlEscape("Choose one permanent refit") << "</h2><p>"
-            << htmlEscape("Useful flight data earned one shipyard upgrade. Choose a track or keep your credits.") << "</p></div>";
+            << "</span><h2>" << htmlEscape("Install one upgrade") << "</h2><p>"
+            << htmlEscape("Choose an unlocked system or keep your credits.") << "</p></div>";
         out << "<div class=\"stat-grid chip-strip draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
         if (!refitWindow.recoveryDetail.empty()) {
             out << "<p class=\"draft-recovery-note\">" << htmlEscape(refitWindow.recoveryDetail) << "</p>";
         }
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
-            << htmlEscape("CHOOSE ONE PERMANENT REFIT") << "</h2><p>"
-            << htmlEscape("Install one track or keep the credits.") << "</p></div><div class=\"utility-row compact-tools utility-actions\">"
-            << modalButton("Compare details", "refit_compare", "ghost") << "</div></div><div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
+            << htmlEscape("AVAILABLE UPGRADES") << "</h2><p>"
+            << htmlEscape("Install one system or keep the credits.") << "</p></div>";
+        if (!singleLaunchLessonOffer) {
+            out << "<div class=\"utility-row compact-tools utility-actions\">"
+                << modalButton("Compare", "refit_compare", "ghost") << "</div>";
+        }
+        out << "</div><div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
         const auto defaultRefit = std::find_if(
             refitWindow.offers.begin(),
             refitWindow.offers.end(),
@@ -4032,37 +4152,48 @@ std::string buildGamePanelMarkup(
         out << panelButton(refitWindow.skipAction);
         out << "</div></section>";
         out << phaseBoardClose();
-        std::ostringstream refitComparison;
-        refitComparison << "<div class=\"comparison-list\">";
-        for (std::size_t index = 0; index < refitWindow.offers.size(); ++index) {
-            if (index > 0) {
-                refitComparison << "<div class=\"refit-comparison-divider\" aria-hidden=\"true\"></div>";
+        if (!singleLaunchLessonOffer) {
+            std::ostringstream refitComparison;
+            refitComparison << "<div class=\"comparison-list\">";
+            for (std::size_t index = 0; index < refitWindow.offers.size(); ++index) {
+                if (index > 0) {
+                    refitComparison << "<div class=\"refit-comparison-divider\" aria-hidden=\"true\"></div>";
+                }
+                const RefitOfferPresentation& offer = refitWindow.offers[index];
+                const RefitPresentation& refit = offer.card;
+                refitComparison << "<article class=\"comparison-card refit-comparison-card\"><div class=\"card-topline\"><span>"
+                    << htmlEscape(refit.category) << "</span><span>" << htmlEscape(refit.rarity)
+                    << "</span></div><h3>" << htmlEscape(refit.title) << "</h3><p>"
+                    << htmlEscape(refit.detail) << "</p><strong class=\"module-impact\">"
+                    << htmlEscape(refit.primaryImpact) << "</strong><div class=\"stat-grid chip-strip\">"
+                    << statChipGrid(refit.statChips) << "</div><span class=\"comparison-cost\">"
+                    << htmlEscape(offer.footerCostSummary) << "</span></article>";
             }
-            const RefitOfferPresentation& offer = refitWindow.offers[index];
-            const RefitPresentation& refit = offer.card;
-            refitComparison << "<article class=\"comparison-card refit-comparison-card\"><div class=\"card-topline\"><span>"
-                << htmlEscape(refit.category) << "</span><span>" << htmlEscape(refit.rarity)
-                << "</span></div><h3>" << htmlEscape(refit.title) << "</h3><p>"
-                << htmlEscape(refit.detail) << "</p><strong class=\"module-impact\">"
-                << htmlEscape(refit.primaryImpact) << "</strong><div class=\"stat-grid chip-strip\">"
-                << statChipGrid(refit.statChips) << "</div><span class=\"comparison-cost\">"
-                << htmlEscape(offer.footerCostSummary) << "</span></article>";
+            refitComparison << "</div>";
+            out << modalTemplate("refit_compare", "Compare Permanent Refits", refitComparison.str());
         }
-        refitComparison << "</div>";
-        out << modalTemplate("refit_compare", "Compare Permanent Refits", refitComparison.str());
         out << scenarioObjectiveModalForDestination(state, catalog, currentDestination(state, catalog).id);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
     }
 
-    const std::string shipBody = detailStack(shipDetailsPresentation(state, catalog));
+    const std::string shipBody = detailStack(shipDetailsPresentation(state, catalog)) +
+        launchUpgradeInstallStack(state, catalog);
     const std::string crewBody = detailStack(crewDetailsPresentation(state, catalog));
     const std::string frontierBody = detailStack(frontierDetailsPresentation(state, catalog));
 
     std::ostringstream launchBlockedBody;
     for (const std::string& message : launchReadiness.messages) {
         launchBlockedBody << "<p class=\"status\">" << htmlEscape(message) << "</p>";
+    }
+    const bool launchHardwareBlocked =
+        state.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
+        !launchMissionReady(state, catalog);
+    if (launchHardwareBlocked) {
+        const auto [title, detail] = launchLessonHangarObjective(state, catalog);
+        launchBlockedBody << "<p class=\"status\"><strong>" << htmlEscape(title)
+            << "</strong><br>" << htmlEscape(detail) << "</p>";
     }
     launchBlockedBody << detailStack(launchReadiness.details);
     launchBlockedBody << "<div class=\"modal-actions actions action-row\">";
@@ -4087,17 +4218,10 @@ std::string buildGamePanelMarkup(
 
     out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
-    if (currentFrontier.id == content::destination::earthOrbit
-        && next != nullptr
-        && next->id == content::destination::moon) {
-        const int required = frontierReadinessRequired(state, catalog);
+    if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+        const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         out << "<section class=\"objective-strip rr-objective-strip phase-lane\"><span>Objective</span><strong>"
-            << htmlEscape(state.run.frontierReadiness >= required ? "Lunar route charted" : "Chart the route to the Moon")
-            << "</strong><p>"
-            << htmlEscape(state.run.frontierReadiness >= required
-                ? "Prepare the transfer"
-                : "Flight Data " + std::to_string(state.run.frontierReadiness) + "/" + std::to_string(required))
-            << "</p></section>";
+            << htmlEscape(title) << "</strong><p>" << htmlEscape(detail) << "</p></section>";
     } else {
         out << scenarioObjectiveMarkup(
             scenarioObjectiveForDestination(state, catalog, currentFrontier.id));
@@ -4121,9 +4245,16 @@ std::string buildGamePanelMarkup(
     out << "</div>";
 
     const bool showLaunchIntroduction = context.firstTimeIntroductionsEnabled
-        && currentFrontier.id == content::destination::earthOrbit
+        && launchTarget.id == content::destination::moon
+        && state.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration
         && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
-    const std::string prepareLaunchLabel = "Prepare for launch: " + currentFrontier.name;
+    const bool showFlightControlsIntroduction = context.firstTimeIntroductionsEnabled
+        && state.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration
+        && launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 1
+        && !ui::briefings::acknowledged(
+            state.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::flightControlsCalibration);
+    const std::string prepareLaunchLabel = "Prepare for launch: " + launchTarget.name;
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
@@ -4135,9 +4266,15 @@ std::string buildGamePanelMarkup(
         ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok")
         : (showLaunchIntroduction
             ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok")
-            : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok")));
-    if (next != nullptr && !navigationAvailable(state)) {
-        if (canCommitToNextFrontier(state, catalog)) {
+            : (showFlightControlsIntroduction
+                ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok")
+                : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok"))));
+    if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression) {
+        if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+            out << (launchHardwareBlocked
+                ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
+                : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger"));
+        } else if (canCommitToNextFrontier(state, catalog)) {
             const bool oneWayCommit = next->oneWayExpedition;
             out << (launchReadiness.blocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
@@ -4177,13 +4314,25 @@ std::string buildGamePanelMarkup(
         out << activityIntroductionModal(
             ui::modals::launchIntroduction,
             "FIRST FLIGHT BRIEF",
-            "Pilot inside the course corridor. Left/right corrects drift; up/down changes persistent throttle. Faster burns cost more fuel and build heat and pressure faster.",
-            "Warnings are real reaction windows: cut engines to cool, vent pressure and correct its drift, then choose Return Home and fly the same ship back.",
-            "Begin preflight",
+            "The Moon is out of range. This ship carries 10 fuel; the lunar route needs 15.",
+            "Fly until the FUEL warning appears, then Turn Around and bring the route data home. Fuel Tanks and Flight Controls are the two upgrades needed before the Moon transfer.",
+            "Begin fuel test",
             ui::actions::prepareLaunch,
             "ok");
     }
-    out << scenarioObjectiveModalForDestination(state, catalog, currentFrontier.id);
+    if (showFlightControlsIntroduction && !launchReadiness.blocked) {
+        out << activityIntroductionModal(
+            ui::modals::flightControlsIntroduction,
+            "FLIGHT CONTROLS TEST",
+            "The Moon is reachable, but the landing navigation system has not been calibrated.",
+            "Fly to the yellow test line, correct the unstable steering, then Turn Around. Do not continue to the Moon: without Flight Controls I, the ship will impact the surface.",
+            "Begin test flight",
+            ui::actions::prepareLaunch,
+            "ok");
+    }
+    if (!currentFrontier.hiddenFromProgression) {
+        out << scenarioObjectiveModalForDestination(state, catalog, currentFrontier.id);
+    }
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
     out << inventoryTemplate(state, catalog);
@@ -4291,7 +4440,7 @@ PanelOverlayKind overlayKindForContext(const PanelRenderContext& context)
 {
     if (context.state.screen == Screen::Launch) {
         return context.flightArmed
-            ? PanelOverlayKind::TelemetryLegend
+            ? PanelOverlayKind::None
             : PanelOverlayKind::PreflightLaunch;
     }
     if (context.state.screen == Screen::Results) {
@@ -4474,7 +4623,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             context.returnElapsed,
             context.returnDuration,
             context.flightActions,
-            context.pressureReliefUsed,
             context.launchFlight);
         const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
             ? std::min<std::size_t>(3, launchPanel.metrics.size())
@@ -4487,7 +4635,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                 "rr-hud-launch-metric-" + std::to_string(index),
                 item.label,
                 item.value,
-                launchMetricSeverity(context, index));
+                launchMetricSeverity(context, item.label));
         }
         appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
         return;
@@ -4658,7 +4806,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
             context.returnElapsed,
             context.returnDuration,
             context.flightActions,
-            context.pressureReliefUsed);
+            context.launchFlight);
         key << context.flightArmed << '|' << context.launchQueued << '|' << context.preflightReady << '|';
         for (const FlightActionButtonPresentation& action : panel.primaryActions) {
             key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';

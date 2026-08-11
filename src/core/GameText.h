@@ -20,7 +20,7 @@ inline constexpr std::string_view noRecruitProfiles = "Mission control has no re
 inline constexpr std::string_view recruitUnaffordable = "Not enough mission credits to recruit new crew.";
 inline constexpr std::string_view noFartherFrontier = "No farther frontier is charted in this proof of concept.";
 inline constexpr std::string_view transferLedgerRejected = "Transfer data accepted, but the route ledger rejected the destination.";
-inline constexpr std::string_view refitWindowOpened = "Useful flight data earned one permanent shipyard refit.";
+inline constexpr std::string_view refitWindowOpened = "Useful mission data earned one permanent shipyard refit.";
 inline constexpr std::string_view refitWindowClosed = "Refit window closed. Handle repairs, crew, and the next flight plan.";
 inline constexpr std::string_view refitRerollUnaffordable = "Not enough mission credits to reroll the refit board.";
 inline constexpr std::string_view arrivalFanfare = "Arrival confirmed. Approach window ready.";
@@ -62,10 +62,10 @@ inline constexpr std::string_view droneStowing = "Mining Rig transfer in progres
 inline constexpr std::string_view launchQueued = "Launch queued. The burn will begin as soon as the Mining Rig is secured and the bay seals.";
 inline constexpr std::string_view preflightReady = "Mining Rig secured. Bay sealed and launch control online.";
 inline constexpr std::string_view preflightReadyWithoutDrone = "Flight systems checked. Bay sealed and launch control online.";
-inline constexpr std::string_view provingBurnStarted = "Proving burn underway. Return to Earth to bank data; eject only when the vehicle leaves you no choice.";
-inline constexpr std::string_view transferBurnStarted = "Transfer attempt committed. Survive to the required burn, or abort before the ship decides for you.";
-inline constexpr std::string_view fuelReserveGone = "Fuel reserve is gone. Coasting back to Earth on gravity and uncomfortable math.";
-inline constexpr std::string_view returnBurnRotating = "Return burn committed. Rotating ship for retrograde flight.";
+inline constexpr std::string_view provingBurnStarted = "Launch underway. Watch the active gauge and turn around before the return margin is gone.";
+inline constexpr std::string_view transferBurnStarted = "Transfer underway. Reach the destination with enough fuel for arrival.";
+inline constexpr std::string_view fuelReserveGone = "Fuel reserve is gone. Rescue is responding.";
+inline constexpr std::string_view returnBurnRotating = "Turnaround confirmed. Fly the return leg home.";
 inline constexpr std::string_view coastingHome = "Coasting back to Earth. No thrust, less control, plenty of silence.";
 inline constexpr std::string_view returnBurnUnderway = "Return burn underway. Systems are easing, but this is not free.";
 inline constexpr std::string_view enginesCutAfterGoal = "Engines cut. Thermal load is dropping, but nav drift is growing.";
@@ -76,10 +76,10 @@ inline constexpr std::string_view provingBurnStable = "Proving burn stable. Push
 inline std::string provingBurnStartedForHome(bool arkKnown, bool outerExpedition = false)
 {
     if (arkKnown) {
-        return "Proving burn underway. Return to Ark to bank data; eject only when the vehicle leaves you no choice.";
+        return "Launch underway. Watch the active gauge and turn around before the return margin to the Ark is gone.";
     }
     if (outerExpedition) {
-        return "Proving burn underway. Recover to expedition staging to bank data; eject only when the vehicle leaves you no choice.";
+        return "Launch underway. Watch the active gauge and preserve the return margin to expedition staging.";
     }
     return std::string(provingBurnStarted);
 }
@@ -123,45 +123,24 @@ inline std::string provingBurnStableForHome(bool arkKnown, bool outerExpedition 
     }
     return std::string(provingBurnStable);
 }
-inline constexpr std::string_view engineCutConfirmed = "Engine cut confirmed. Ship is running cooler, but guidance drift is widening.";
-inline constexpr std::string_view thrustRestored = "Thrust restored. Burn is climbing again, and so are the hot systems.";
-inline constexpr std::string_view pressureReliefStuck = "Pressure relief valve stuck. PRESS is worse and nav authority is degraded.";
-inline constexpr std::string_view pressureReliefOpened = "Pressure relief valve opened. PRESS dropped, but the vent shoved the ship off-track.";
+inline constexpr std::string_view engineCutConfirmed = "Engines off. Temperature is falling.";
+inline constexpr std::string_view thrustRestored = "Engines on. Temperature will climb under power.";
 inline constexpr std::string_view returnVehicleLost = "Return trajectory failed. Vehicle lost during recovery.";
 inline constexpr std::string_view transferVehicleLost = "Transfer vehicle lost. New crew, new vehicle, same frontier ledger.";
 inline constexpr std::string_view vehicleLost = "Vehicle lost. The agency recovered fragments and uncomfortable lessons.";
 inline constexpr std::string_view extraProvingData = "Extra proving data banked. The curve is opening up, and so is the temptation.";
 inline constexpr std::string_view missionDataBanked = "Mission data banked. Keep testing, upgrading, and deciding how bold the next burn should be.";
-inline constexpr std::string_view transferAbortedEject = "Transfer aborted by ejection. Rescue was expensive, but the data record survived.";
 inline constexpr std::string_view transferAbortedReturn = "Transfer aborted. Vehicle returned with valuable long-burn data.";
-inline constexpr std::string_view transferEjectEarly = "Transfer ejection was early. Crew survived, but rescue ate the budget.";
 inline constexpr std::string_view transferReturnEarly = "Transfer return was early. Crew survived, but the frontier remains unproven.";
-inline constexpr std::string_view emergencyEjectUseful = "Emergency eject confirmed. Rescue recovered enough telemetry to matter.";
-inline constexpr std::string_view earlyReturnUseful = "Early return confirmed. Useful flight data recovered from the proving route.";
-inline constexpr std::string_view emergencyEjectShallow = "Emergency eject confirmed. Crew survived, budget bruised, little data banked.";
+inline constexpr std::string_view earlyReturnUseful = "Early return confirmed. Useful approach data recovered from the proving route.";
 inline constexpr std::string_view earlyReturnShallow = "Early return confirmed. Safe, but the burn was too shallow to teach much.";
 inline constexpr std::string_view shallowRecoveryPenalty = "Mission control flagged repeated shallow recoveries and cut the credit award.";
 inline constexpr std::string_view cleanShallowRecoveryDestroyed = "Mission control caught the pattern. The next clean panic recovery was denied, and the vehicle was lost.";
-inline constexpr std::string_view rapidDecompression = "Rapid decompression after relief-valve actuation. Vehicle lost.";
-inline constexpr std::string_view pressureReliefClosed = "Pressure relief valve closed. PRESS is building normally again, and the vent drift is fading.";
-inline constexpr std::string_view cargoJettisoned = "Cargo jettisoned. Fuel mix stabilized, but debris and mass shift hurt NAV, VIB, and return margin.";
 inline constexpr std::string_view moreProvingDataBeforeTransfer = "More proving data is needed before the transfer attempt.";
 } // namespace status
 
 namespace telemetry {
-struct WarningCopy {
-    std::string_view critical;
-    std::string_view caution;
-};
-
 inline constexpr std::string_view nominal = "Tracking system margins below limits";
-inline constexpr WarningCopy heat {"TEMP: cooling runaway", "TEMP: heat margin narrowing"};
-inline constexpr WarningCopy pressure {"PRESS: chamber overpressure", "PRESS: injector pressure unstable"};
-inline constexpr WarningCopy vibration {"VIB: structural oscillation", "VIB: frame resonance building"};
-inline constexpr WarningCopy guidance {"NAV: guidance divergence", "NAV: tracking solution drifting"};
-inline constexpr WarningCopy fuelMix {"MIX: fuel ratio out of range", "MIX: combustion efficiency falling"};
-inline constexpr WarningCopy abortRisk {"ABORT: escape window collapsing", "ABORT: capsule margin thinning"};
-inline constexpr WarningCopy instability {"COURSE: loss countdown active", "COURSE: outer corridor approaching"};
 } // namespace telemetry
 
 namespace labels {
@@ -177,12 +156,10 @@ inline constexpr std::string_view burnDepth = "Burn depth";
 inline constexpr std::string_view returnProgress = "Return progress";
 inline constexpr std::string_view requiredBurn = "Required burn";
 inline constexpr std::string_view dataGoal = "Data goal";
-inline constexpr std::string_view returnRisk = "Return risk";
 inline constexpr std::string_view outcome = "Outcome";
 inline constexpr std::string_view recovery = "Recovery";
 inline constexpr std::string_view failurePoint = "Failure point";
 inline constexpr std::string_view peakWarning = "Peak warning";
-inline constexpr std::string_view peakAbort = "Peak abort";
 inline constexpr std::string_view creditDelta = "Credit delta";
 inline constexpr std::string_view blueprints = "Blueprints";
 inline constexpr std::string_view artifactInsight = "Artifact insight";
@@ -430,24 +407,17 @@ inline std::string returningHomeLabel(bool arkKnown, bool outerExpedition = fals
     return outerExpedition ? "Recovering to Expedition" : std::string(returningHome);
 }
 inline constexpr std::string_view arrivalOps = "Approach";
-inline constexpr std::string_view eject = "Eject";
-inline constexpr std::string_view cutEngines = "Cut engines";
-inline constexpr std::string_view restoreThrust = "Restore thrust";
-inline constexpr std::string_view reliefValve = "Relief valve";
-inline constexpr std::string_view closeValve = "Close valve";
-inline constexpr std::string_view reliefValveFailed = "Valve failed";
-inline constexpr std::string_view valveClosed = "Valve closed";
-inline constexpr std::string_view jettisonCargo = "Jettison cargo";
-inline constexpr std::string_view cargoGone = "Cargo gone";
+inline constexpr std::string_view cutEngines = "Engines Off";
+inline constexpr std::string_view restoreThrust = "Engines On";
 inline constexpr std::string_view install = "Install";
 inline constexpr std::string_view installPermanently = "Install";
 inline constexpr std::string_view assign = "Assign";
 inline constexpr std::string_view unavailable = "Unavailable";
 inline constexpr std::string_view skipRefit = "Skip refit";
-inline constexpr std::string_view keepCredits = "Keep credits";
+inline constexpr std::string_view keepCredits = "Keep Credits";
 inline constexpr std::string_view launchProvingFlight = "Prepare for launch";
 inline constexpr std::string_view launch = "Launch";
-inline constexpr std::string_view needFlightData = "Need flight data";
+inline constexpr std::string_view needFlightData = "Complete launch preparation";
 inline constexpr std::string_view settings = "Settings";
 inline constexpr std::string_view details = "Details";
 inline constexpr std::string_view resetSave = "Reset save";
@@ -461,9 +431,9 @@ inline constexpr std::string_view enterOrbit = "Enter orbit";
 inline constexpr std::string_view attemptLanding = "Attempt landing";
 inline constexpr std::string_view conductResearch = "Conduct research";
 inline constexpr std::string_view skipResearch = "Skip research";
-inline constexpr std::string_view surveySite = "Survey site";
-inline constexpr std::string_view mineDeposit = "Mine deposit";
-inline constexpr std::string_view pushDeeper = "Push Deeper";
+inline constexpr std::string_view surveySite = "Survey";
+inline constexpr std::string_view mineDeposit = "Mine";
+inline constexpr std::string_view pushDeeper = "Dig";
 inline constexpr std::string_view pulseScanner = "Pulse scanner";
 inline constexpr std::string_view tetherArtifact = "Tether artifact";
 inline constexpr std::string_view stowPayload = "Load all ore & leave mine";
@@ -649,7 +619,6 @@ namespace outcomes {
 inline constexpr std::string_view returnFailure = "Return Failure";
 inline constexpr std::string_view transferLost = "Transfer Lost";
 inline constexpr std::string_view vehicleLost = "Vehicle Lost";
-inline constexpr std::string_view emergencyEject = "Emergency Eject";
 inline constexpr std::string_view profileReturned = "Profile Returned";
 inline constexpr std::string_view earlyReturn = "Early Return";
 inline constexpr std::string_view transferComplete = "Transfer Complete";
@@ -686,7 +655,7 @@ inline constexpr std::string_view researchAdvisoryMaterialsDetail = "Current pro
 inline constexpr std::string_view researchAdvisoryEmpty = "No active projects";
 inline constexpr std::string_view researchAdvisoryEmptyDetail = "The lab has no viable project queued for this arrival. Send the field team down and keep the expedition moving.";
 inline constexpr std::string_view surfacePostureScout = "Recommended: gather data";
-inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Scan layers, push if the read looks good, or mine now and gamble.";
+inline constexpr std::string_view surfacePostureScoutDetail = "No payload is loaded yet. Survey the layers, dig to the level you want, then deploy the Mining Rig.";
 inline constexpr std::string_view surfacePostureStable = "Recommended: one more action is reasonable";
 inline constexpr std::string_view surfacePostureStableDetail = "You have recoverable cargo and enough action-kit margin to keep working.";
 inline constexpr std::string_view surfacePostureNarrowing = "Recommended: extract soon";
@@ -696,9 +665,9 @@ inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is v
 inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
 inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
-inline constexpr std::string_view surfaceSurveyDetail = "Map the current mining layer first; extra pulses preview layers available through Push Deeper.";
-inline constexpr std::string_view surfaceMineDetail = "Deploy the Mining Rig once for this surface loop; mining spends fuel, not action kits.";
-inline constexpr std::string_view surfacePushDetail = "Commit a deeper layer and reveal the actual marked finds; scanned layers reduce the gamble.";
+inline constexpr std::string_view surfaceSurveyDetail = "Reveal the ore and artifact forecast at each scanned level before choosing where to dig.";
+inline constexpr std::string_view surfaceMineDetail = "Control the Mining Rig drone at the selected start depth to extract ore and artifacts, then bank them at the ship.";
+inline constexpr std::string_view surfacePushDetail = "Tunnel one level deeper and make it the Mining Rig's new starting depth. Surveyed levels show what waits there.";
 inline constexpr std::string_view surfaceExtractDetail = "Return every material and artifact loaded onto the Ship to Earth.";
 inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
@@ -914,7 +883,7 @@ inline std::string nextGenerationName(std::string_view templateName)
 
 inline std::string moreFlightDataNeeded(std::string_view destinationName)
 {
-    return "More flight data is needed before committing to " + std::string(destinationName) + ".";
+    return "Complete launch preparation before committing to " + std::string(destinationName) + ".";
 }
 
 inline std::string transferAchieved(std::string_view destinationName)
