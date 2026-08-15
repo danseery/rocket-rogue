@@ -1602,7 +1602,7 @@ void RocketGameApp::prepareForLaunch()
     syncLaunchConfig(state_, catalog_);
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const bool hiddenStarterOrigin = currentFrontier.hiddenFromProgression;
-    if (hiddenStarterOrigin && !launchMissionReady(state_, catalog_)) {
+    if (!currentDestinationLaunchReady(state_, catalog_)) {
         state_.statusLine = "Install the required launch upgrade before this mission.";
         refreshPanel();
         return;

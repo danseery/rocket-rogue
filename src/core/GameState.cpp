@@ -521,6 +521,17 @@ bool launchMissionReady(const GameState& state, const ContentCatalog& catalog)
     return canCommitToNextFrontier(state, catalog);
 }
 
+bool currentDestinationLaunchReady(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    // Once the player has reached a frontier, replaying that destination is a
+    // valid recovery path and must not inherit the next route's curriculum
+    // hardware gate. The hidden starter origin still uses lesson readiness.
+    return !currentDestination(state, catalog).hiddenFromProgression ||
+        launchMissionReady(state, catalog);
+}
+
 LaunchMissionKind currentLaunchMissionKind(const GameState& state, const ContentCatalog& catalog)
 {
     static_cast<void>(catalog);
@@ -595,6 +606,24 @@ void syncLaunchTrainingProgress(GameState& state, const ContentCatalog& catalog)
             addUniqueId(state.run.inventoryModuleIds, id);
             addUniqueId(state.run.equippedModuleIds, id);
         }
+    }
+
+    // Older Moon and Mars curriculum transfers paid 20 credits even though
+    // the required next fuel rank costs 22. Preserve the earned refit
+    // entitlement by repairing that funding gap on load/synchronization.
+    const int requiredFuelRank =
+        state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
+            state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer
+        ? 2
+        : state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
+                state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer
+            ? 3
+            : 0;
+    if (state.run.refitEntitled &&
+        requiredFuelRank > 0 &&
+        launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < requiredFuelRank &&
+        state.run.credits < tuning::launchProgression::upgradeCost) {
+        state.run.credits = tuning::launchProgression::upgradeCost;
     }
 }
 
@@ -1879,7 +1908,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         // empty refit entitlement from partial route distance.
         outcome.blueprintGain = 0;
     }
-    if (lessonReturnSucceeded || lessonArrivalSucceeded) {
+    if (lessonReturnSucceeded || lessonArrivalSucceeded || curriculumTransferSucceeded) {
         const double fuelSurveyBonus =
             outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Timely
             ? tuning::launchProgression::fuelSurveySafetyBonus

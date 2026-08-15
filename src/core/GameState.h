@@ -46,6 +46,7 @@ bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, Launc
 bool launchTutorialComplete(const GameState& state);
 bool launchMissionReady(const GameState& state);
 bool launchMissionReady(const GameState& state, const ContentCatalog& catalog);
+bool currentDestinationLaunchReady(const GameState& state, const ContentCatalog& catalog);
 bool launchStageUsesArrival(LaunchTrainingStage stage);
 LaunchMissionKind currentLaunchMissionKind(const GameState& state, const ContentCatalog& catalog);
 void syncLaunchTrainingProgress(GameState& state, const ContentCatalog& catalog);

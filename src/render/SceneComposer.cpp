@@ -738,6 +738,21 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         miningOperatorTogglePulseStartedAt_ = -1.0;
     }
 
+    if (snapshot.screen == Screen::SurfacePush) {
+        if (previousSurfacePushSteps_ < 0) {
+            previousSurfacePushSteps_ = snapshot.surfacePushSteps;
+        } else if (snapshot.surfacePushSteps > previousSurfacePushSteps_) {
+            surfacePushStepEffectStartedAt_ = snapshot.animationTime;
+            previousSurfacePushSteps_ = snapshot.surfacePushSteps;
+        } else if (snapshot.surfacePushSteps < previousSurfacePushSteps_) {
+            previousSurfacePushSteps_ = snapshot.surfacePushSteps;
+            surfacePushStepEffectStartedAt_ = -1.0;
+        }
+    } else {
+        previousSurfacePushSteps_ = -1;
+        surfacePushStepEffectStartedAt_ = -1.0;
+    }
+
     beginFrame(snapshot);
     if (snapshot.titleScreen) {
         drawTitleBackdrop(snapshot);
@@ -881,6 +896,14 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
             scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 89.0F) * shake * 4.2F;
             scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 73.0F) * shake * 3.0F;
         }
+    }
+    if (cameraShakeEnabled && snapshot.screen == Screen::SurfacePush &&
+        surfacePushStepEffectStartedAt_ >= 0.0) {
+        const float age = static_cast<float>(snapshot.animationTime - surfacePushStepEffectStartedAt_);
+        const float envelope = 1.0F - std::clamp(age / 0.58F, 0.0F, 1.0F);
+        const float shake = envelope * envelope;
+        scenePixelCenterX_ += std::sin(age * 112.0F) * shake * 4.8F;
+        scenePixelCenterY_ += std::cos(age * 96.0F) * shake * 3.4F;
     }
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
@@ -1266,7 +1289,7 @@ void SceneComposer::drawMiningCombatText(float cx, float cy, float unitSize, int
     submitLines(textVertices, critical ? 2.5F : 2.0F);
 }
 
-void SceneComposer::drawMiningBankedText(float cx, float cy, float unitSize, float age)
+void SceneComposer::drawMiningStowedText(float cx, float cy, float unitSize, float age)
 {
     if (age < 0.0F || age > 1.05F) {
         return;
@@ -1317,6 +1340,27 @@ void SceneComposer::drawMiningBankedText(float cx, float cy, float unitSize, flo
             add(0.18F, 0.10F, 0.18F, 0.90F);
             add(0.18F, 0.90F, 0.82F, 0.10F);
             add(0.82F, 0.10F, 0.82F, 0.90F);
+        } else if (ch == 'O') {
+            add(0.26F, 0.90F, 0.74F, 0.90F);
+            add(0.78F, 0.84F, 0.84F, 0.50F);
+            add(0.78F, 0.16F, 0.84F, 0.50F);
+            add(0.26F, 0.10F, 0.74F, 0.10F);
+            add(0.18F, 0.50F, 0.26F, 0.90F);
+            add(0.18F, 0.50F, 0.26F, 0.10F);
+        } else if (ch == 'S') {
+            add(0.82F, 0.88F, 0.24F, 0.88F);
+            add(0.18F, 0.82F, 0.18F, 0.56F);
+            add(0.22F, 0.52F, 0.78F, 0.52F);
+            add(0.82F, 0.46F, 0.82F, 0.18F);
+            add(0.76F, 0.12F, 0.18F, 0.12F);
+        } else if (ch == 'T') {
+            add(0.16F, 0.90F, 0.84F, 0.90F);
+            add(0.50F, 0.88F, 0.50F, 0.10F);
+        } else if (ch == 'W') {
+            add(0.12F, 0.90F, 0.26F, 0.10F);
+            add(0.26F, 0.10F, 0.50F, 0.46F);
+            add(0.50F, 0.46F, 0.74F, 0.10F);
+            add(0.74F, 0.10F, 0.88F, 0.90F);
         }
     };
 
@@ -2466,7 +2510,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     for (const MiningPickupBurst& burst : miningPickupBurstScratch_) {
         const float age = static_cast<float>(snapshot.animationTime - burst.startedAt);
         if (burst.burstKind == MiningPickupBurstKind::Banked) {
-            drawMiningBankedText(burst.x, burst.y, cellSize, age);
+            drawMiningStowedText(burst.x, burst.y, cellSize, age);
         } else if (burst.burstKind == MiningPickupBurstKind::Pickup) {
             drawMiningPickupText(burst.x + burst.textOffsetX, burst.y, cellSize, burst.kind, burst.amount, age);
         }
@@ -4054,37 +4098,161 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
 {
-    drawBackdrop(snapshot);
-    const Vec2 destination = routePoint(snapshot, 1.0F);
+    const float time = static_cast<float>(snapshot.animationTime);
     const float pressure = static_cast<float>(std::clamp(snapshot.surfacePushPressure, 0.0, 1.0));
     const float risk = static_cast<float>(std::clamp(snapshot.surfacePushCollapseRisk, 0.0, 1.0));
-    const float baseRadius = 0.16F + static_cast<float>(snapshot.destinationTier) * 0.012F;
-    const float shaftTop = destination.y - baseRadius * 1.25F;
+    const float shaftTop = 0.72F;
     const float shaftBottom = -0.82F;
-    const float shaftX = std::clamp(destination.x - 0.10F, -0.45F, 0.45F);
+    constexpr float shaftX = 0.0F;
+    constexpr float shaftWidth = 0.34F;
+    constexpr float shaftHalfWidth = shaftWidth * 0.5F;
 
-    drawRadialGlow(destination.x, destination.y, baseRadius * 2.35F, {0.05F, 0.26F, 0.42F, 0.045F}, 64);
-    drawEllipseLine(destination.x, destination.y, baseRadius * 1.6F, baseRadius * 1.6F, {0.18F, 0.78F, 0.94F, 0.30F}, 72, 0.0F, 2.0F * kPi);
-    drawRect(shaftX, (shaftTop + shaftBottom) * 0.5F, 0.26F, std::abs(shaftTop - shaftBottom), {0.015F, 0.022F, 0.026F, 0.72F});
+    const auto planetPalette = [&](float depth, float variation) {
+        Color surface {0.30F, 0.31F, 0.32F, 1.0F};
+        Color deep {0.12F, 0.13F, 0.15F, 1.0F};
+        if (snapshot.destinationTier == 0) {
+            surface = {0.30F, 0.35F, 0.19F, 1.0F};
+            deep = {0.14F, 0.18F, 0.10F, 1.0F};
+        } else if (snapshot.destinationTier == 1) {
+            surface = {0.42F, 0.43F, 0.45F, 1.0F};
+            deep = {0.14F, 0.15F, 0.18F, 1.0F};
+        } else if (snapshot.destinationTier == 2) {
+            surface = {0.53F, 0.25F, 0.13F, 1.0F};
+            deep = {0.20F, 0.075F, 0.045F, 1.0F};
+        } else if (snapshot.destinationTier == 3) {
+            surface = {0.50F, 0.38F, 0.22F, 1.0F};
+            deep = {0.20F, 0.13F, 0.075F, 1.0F};
+        } else if (snapshot.destinationTier == 4) {
+            surface = {0.56F, 0.41F, 0.18F, 1.0F};
+            deep = {0.21F, 0.14F, 0.055F, 1.0F};
+        } else if (snapshot.destinationTier == 5) {
+            surface = {0.20F, 0.48F, 0.48F, 1.0F};
+            deep = {0.065F, 0.20F, 0.24F, 1.0F};
+        } else if (snapshot.destinationTier == 6) {
+            surface = {0.14F, 0.34F, 0.62F, 1.0F};
+            deep = {0.035F, 0.12F, 0.28F, 1.0F};
+        } else if (snapshot.destinationTier >= 7) {
+            surface = {0.42F, 0.22F, 0.49F, 1.0F};
+            deep = {0.13F, 0.055F, 0.20F, 1.0F};
+        }
+        Color color = mix(surface, deep, std::clamp(depth, 0.0F, 1.0F) * 0.78F);
+        const float shade = 0.82F + variation * 0.30F;
+        color.r *= shade;
+        color.g *= shade;
+        color.b *= shade;
+        return color;
+    };
+
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, planetPalette(0.68F, 0.0F), false);
+
+    constexpr float tileHeight = 0.105F;
+    constexpr float tileWidth = 0.112F;
+    const int terrainRows = static_cast<int>(std::ceil((shaftTop - shaftBottom + 0.24F) / tileHeight));
+    const int terrainColumns = static_cast<int>(std::ceil((sceneAspect_ * 2.0F + 0.24F) / tileWidth));
+    std::vector<SceneVertex>& terrain = scratchVertices(
+        static_cast<std::size_t>(terrainRows * terrainColumns) * 48U);
+    for (int row = 0; row < terrainRows; ++row) {
+        const float y = shaftTop + 0.08F - (static_cast<float>(row) + 0.5F) * tileHeight;
+        const float depth = std::clamp((shaftTop - y) / (shaftTop - shaftBottom), 0.0F, 1.0F);
+        for (int column = 0; column < terrainColumns; ++column) {
+            const float x = -sceneAspect_ - 0.06F + (static_cast<float>(column) + 0.5F) * tileWidth;
+            const float noise = miningCellNoise(column, row + snapshot.destinationTier * 17, 211);
+            Color tile = planetPalette(depth, noise);
+            if ((row + column * 3 + snapshot.destinationTier) % 13 == 0) {
+                tile = mix(tile, {0.82F, 0.58F, 0.20F, 1.0F}, 0.14F);
+            }
+            appendRect(terrain, x, y, tileWidth * 0.94F, tileHeight * 0.92F, tile);
+        }
+    }
+    submit(terrain);
+
+    for (int band = 0; band < 5; ++band) {
+        const float bandY = shaftTop - 0.19F - static_cast<float>(band) * 0.31F;
+        const float wave = std::sin(static_cast<float>(band) * 1.73F + static_cast<float>(snapshot.destinationTier)) * 0.035F;
+        drawLine(
+            -sceneAspect_, bandY,
+            sceneAspect_, bandY + wave,
+            {0.92F, 0.78F, 0.50F, 0.065F},
+            1.25F);
+    }
 
     const int safeSteps = std::max(1, snapshot.surfacePushMaxSteps);
+    float animatedSteps = static_cast<float>(snapshot.surfacePushSteps);
+    float digBurst = 0.0F;
+    if (surfacePushStepEffectStartedAt_ >= 0.0) {
+        const float age = std::max(0.0F, time - static_cast<float>(surfacePushStepEffectStartedAt_));
+        const float cut = std::clamp(age / 0.52F, 0.0F, 1.0F);
+        const float easedCut = 1.0F - std::pow(1.0F - cut, 3.0F);
+        animatedSteps = static_cast<float>(std::max(0, snapshot.surfacePushSteps - 1)) + easedCut;
+        digBurst = 1.0F - std::clamp(age / 0.88F, 0.0F, 1.0F);
+    }
+    const float progress = std::clamp(animatedSteps / static_cast<float>(safeSteps), 0.0F, 1.0F);
+    const float probeY = shaftTop + (shaftBottom - shaftTop) * progress;
+
+    const float excavatedHeight = std::max(0.035F, shaftTop - probeY + 0.035F);
+    drawRect(
+        shaftX,
+        shaftTop - excavatedHeight * 0.5F,
+        shaftWidth,
+        excavatedHeight,
+        {0.003F, 0.006F, 0.008F, 0.98F});
+    for (int notch = 0; notch < snapshot.surfacePushSteps * 3 + 2; ++notch) {
+        const float seed = miningCellNoise(notch, snapshot.destinationTier * 9, 227);
+        const float notchProgress = std::clamp(
+            (static_cast<float>(notch) + 0.65F) /
+                static_cast<float>(std::max(2, snapshot.surfacePushSteps * 3 + 2)),
+            0.0F,
+            progress);
+        const float y = shaftTop + (shaftBottom - shaftTop) * notchProgress;
+        const float side = notch % 2 == 0 ? -1.0F : 1.0F;
+        drawRect(
+            shaftX + side * (shaftHalfWidth + 0.010F + seed * 0.014F),
+            y,
+            0.030F + seed * 0.025F,
+            0.045F + seed * 0.040F,
+            {0.003F, 0.006F, 0.008F, 0.96F});
+    }
+    drawLine(shaftX - shaftHalfWidth, shaftTop, shaftX - shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
+    drawLine(shaftX + shaftHalfWidth, shaftTop, shaftX + shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
+    drawLine(shaftX, shaftTop + 0.07F, shaftX, shaftBottom, {1.0F, 0.72F, 0.20F, 0.64F}, 1.8F);
+
     for (int i = 0; i <= safeSteps; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(safeSteps);
         const float y = shaftTop + (shaftBottom - shaftTop) * t;
         const Color line = i <= snapshot.surfacePushSteps
             ? Color{1.0F, 0.72F, 0.22F, 0.58F}
             : Color{0.28F, 0.76F, 0.95F, 0.22F};
-        drawLine(shaftX - 0.16F, y, shaftX + 0.16F, y, line, 1.5F);
+        drawLine(shaftX - 0.22F, y, shaftX + 0.22F, y, line, 1.5F);
     }
 
-    const float progress = static_cast<float>(std::clamp(
-        static_cast<double>(snapshot.surfacePushSteps) / static_cast<double>(safeSteps),
-        0.0,
-        1.0));
-    const float probeY = shaftTop + (shaftBottom - shaftTop) * progress;
-    drawLine(shaftX, shaftTop, shaftX, probeY, {0.90F, 0.62F, 0.22F, 0.70F}, 2.0F);
-    drawCircle(shaftX, probeY, 0.042F, {0.08F, 0.30F, 0.42F, 0.90F}, 22);
-    drawCircle(shaftX, probeY, 0.022F, {1.0F, 0.72F, 0.24F, 0.85F}, 18);
+    drawRadialGlow(shaftX, probeY, 0.11F + digBurst * 0.10F, {1.0F, 0.48F, 0.08F, 0.12F + digBurst * 0.15F}, 36);
+    if (digBurst > 0.0F) {
+        const float burstTravel = (1.0F - digBurst) * 0.16F;
+        for (int piece = 0; piece < 16; ++piece) {
+            const float seed = miningCellNoise(piece, snapshot.surfacePushSteps + snapshot.destinationTier * 19, 239);
+            const float angle = -0.10F * kPi + (static_cast<float>(piece) / 15.0F) * 1.20F * kPi;
+            const float distance = 0.035F + burstTravel * (0.48F + seed * 0.72F);
+            const float x = shaftX + std::cos(angle) * distance;
+            const float y = probeY - std::abs(std::sin(angle)) * distance * 0.58F + digBurst * 0.025F;
+            const Color debris = planetPalette(progress, seed);
+            drawRect(x, y, 0.010F + seed * 0.013F, 0.009F + seed * 0.010F, {debris.r, debris.g, debris.b, digBurst * 0.90F});
+        }
+        const float ring = 0.05F + (1.0F - digBurst) * 0.15F;
+        drawEllipseLine(shaftX, probeY, ring, ring * 0.58F, {1.0F, 0.68F, 0.18F, digBurst * 0.72F}, 36, 0.0F, 2.0F * kPi);
+        drawLine(shaftX - 0.12F, probeY, shaftX + 0.12F, probeY, {1.0F, 0.86F, 0.38F, digBurst * 0.52F}, 2.2F);
+    }
+
+    drawRadialGlow(shaftX, probeY, 0.072F, {0.18F, 0.78F, 1.0F, 0.13F}, 28);
+    if (textureReady(RocketClosedAsset)) {
+        drawSpriteRotated(shaftX, probeY, 0.105F, 0.105F, 0.0F, -1.0F, {1.0F, 1.0F, 1.0F, 1.0F}, RocketClosedAsset);
+    } else {
+        drawTriangle(
+            shaftX, probeY - 0.052F,
+            shaftX - 0.036F, probeY + 0.038F,
+            shaftX + 0.036F, probeY + 0.038F,
+            {0.86F, 0.94F, 0.98F, 1.0F});
+    }
+    drawLine(shaftX - 0.048F, shaftTop + 0.018F, shaftX + 0.048F, shaftTop + 0.018F, {0.30F, 0.92F, 1.0F, 0.78F}, 2.0F);
 
     std::vector<MiningCellMaterial> pockets = snapshot.surfacePushRewardMarkers;
     if (pockets.empty()) {
@@ -4183,7 +4351,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
             ? snapshot.surfacePushForecastDepthOffsets[static_cast<std::size_t>(i)]
             : i % safeSteps;
         const MiningCellMaterial material = snapshot.surfacePushForecastMarkers[static_cast<std::size_t>(i)];
-        const Vec2 position = markerPosition(i, depthOffset, 0.145F);
+        const Vec2 position = markerPosition(i, depthOffset, shaftHalfWidth + 0.115F);
         drawRouteMarker(position, material, false, static_cast<float>(i) * 0.271F + pressure * 0.19F);
     }
 
@@ -4195,7 +4363,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         const int depthOffset = i < static_cast<int>(snapshot.surfacePushRewardDepthOffsets.size())
             ? snapshot.surfacePushRewardDepthOffsets[static_cast<std::size_t>(i)]
             : std::max(1, snapshot.surfacePushSteps);
-        const Vec2 position = markerPosition(i, depthOffset, 0.10F);
+        const Vec2 position = markerPosition(i, depthOffset, shaftHalfWidth + 0.075F);
         const float x = position.x;
         const float y = position.y;
         const MiningCellMaterial material = pockets[static_cast<std::size_t>(i)];
@@ -5386,6 +5554,8 @@ void SceneComposer::reset()
     miningOperatorModeInitialized_ = false;
     previousMiningOperatorActive_ = false;
     miningOperatorTogglePulseStartedAt_ = -1.0;
+    previousSurfacePushSteps_ = -1;
+    surfacePushStepEffectStartedAt_ = -1.0;
     miningVisualHeadingTime_ = -1.0;
     presentationTimeSeconds_ = -1.0;
     miningVisualRecoilX_ = 0.0F;

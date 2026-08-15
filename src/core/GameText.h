@@ -631,8 +631,8 @@ namespace messages {
 inline constexpr std::string_view crewLossRecorded = "Crew loss recorded in the memorial ledger.";
 inline constexpr std::string_view crewInjured = "Crew injured. Rest before you ask for another miracle.";
 inline constexpr std::string_view postArrivalResearchReady = "Arrival opens a research window and surface expedition before refit.";
-inline constexpr std::string_view flybyDetail = "Safe science pass. Banks credits and blueprint progress, then returns to refit.";
-inline constexpr std::string_view orbitDetail = "Riskier orbital work. Banks stronger science and opens research where facilities exist.";
+inline constexpr std::string_view flybyDetail = "Safe telemetry pass. Validates flight telemetry for credits and blueprint progress, then returns to refit.";
+inline constexpr std::string_view orbitDetail = "Riskier orbital work. Validates higher-value science and opens research where facilities exist.";
 inline constexpr std::string_view landingDetail = "Highest-value operation. Opens surface exploration, material recovery, and artifacts.";
 inline constexpr std::string_view recoveredResourcesDetail = "Recovered samples, blueprints, and artifacts feed research and material-gated ship parts.";
 inline constexpr std::string_view totalHullBlocked = "Mission control will not clear a vehicle at total hull damage.";

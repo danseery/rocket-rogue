@@ -4319,7 +4319,15 @@ std::string buildGamePanelMarkup(
             << modalButton("Ship details", ui::modals::ship, "ok")
             << "</div>";
     }
-    launchBlockedBody << detailStack(launchReadiness.details);
+    std::vector<DetailPresentationRow> launchBlockedDetails = launchReadiness.details;
+    if (launchHardwareBlocked && !launchReadiness.blocked && !launchBlockedDetails.empty()) {
+        const auto [title, detail] = launchLessonHangarObjective(state, catalog);
+        static_cast<void>(detail);
+        launchBlockedDetails.back() = detailPresentationRow(
+            text::panel::details::requiredAction,
+            title);
+    }
+    launchBlockedBody << detailStack(launchBlockedDetails);
     launchBlockedBody << "<div class=\"modal-actions actions action-row\">";
     for (const PanelButtonPresentation& action : launchReadiness.actions) {
         if (astronaut == nullptr && action.actionId == ui::actions::recruitCrew) {
@@ -4379,7 +4387,8 @@ std::string buildGamePanelMarkup(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
     const std::string prepareLaunchLabel = "Prepare for launch: " + launchTarget.name;
-    const bool prepareLaunchBlocked = launchReadiness.blocked || launchHardwareBlocked;
+    const bool prepareLaunchBlocked =
+        launchReadiness.blocked || !currentDestinationLaunchReady(state, catalog);
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");

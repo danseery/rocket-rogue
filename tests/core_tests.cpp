@@ -1126,6 +1126,34 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
     require(flightModes.launchConfig.frontierTransfer,
         "the Moon transfer and every later curriculum flight must use arrival mode");
 
+    GameState moonArrival = createNewGame(catalog, 5505);
+    moonArrival.meta.launchLessons.stage = LaunchTrainingStage::MoonTransfer;
+    moonArrival.meta.launchUpgrades.fuelTanks = 1;
+    moonArrival.meta.launchUpgrades.flightControls = 1;
+    syncLaunchConfig(moonArrival, catalog);
+    LaunchOutcome moonLanding;
+    moonLanding.type = LaunchResultType::MissionComplete;
+    moonLanding.recoveryMethod = RecoveryMethod::TransferArrival;
+    moonLanding.destinationId = content::destination::moon;
+    moonLanding.frontierTransfer = true;
+    moonLanding.pilotedFlight = true;
+    moonLanding.minimumSafetyMargin = 0.5;
+    moonLanding.payout = 20.0;
+    applyLaunchOutcome(moonArrival, catalog, moonLanding);
+    require(moonArrival.run.destinationIndex == 1 &&
+            moonArrival.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement &&
+            moonArrival.run.refitEntitled &&
+            nearlyEqual(moonArrival.run.credits, tuning::launchProgression::upgradeCost),
+        "the successful Moon transfer must fund the mandatory Fuel Tanks II refit");
+
+    moonArrival.run.credits = 20.0;
+    syncLaunchConfig(moonArrival, catalog);
+    require(nearlyEqual(moonArrival.run.credits, tuning::launchProgression::upgradeCost),
+        "a legacy post-Moon refit entitlement must repair the two-credit Fuel Tanks II shortfall");
+    require(currentDestinationLaunchReady(moonArrival, catalog) &&
+            !launchMissionReady(moonArrival, catalog),
+        "the reached Moon must remain launchable while the next Mars route still needs Fuel Tanks II");
+
     GameState thermalArrival = createNewGame(catalog, 5506);
     thermalArrival.run.destinationIndex = 1;
     thermalArrival.meta.furthestTier = 1;

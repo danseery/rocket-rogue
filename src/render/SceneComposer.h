@@ -44,7 +44,7 @@ private:
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age);
     void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);
-    void drawMiningBankedText(float cx, float cy, float unitSize, float age);
+    void drawMiningStowedText(float cx, float cy, float unitSize, float age);
     void drawPoiLabel(float cx, float cy, float pixelSize, std::string_view label, PoiGuidanceKind kind);
     void drawPoiGuidance(float cx, float cy, float directionX, float directionY, float size, std::string_view label, PoiGuidanceKind kind, double animationTime);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
@@ -192,6 +192,8 @@ private:
     bool miningOperatorModeInitialized_ = false;
     bool previousMiningOperatorActive_ = false;
     double miningOperatorTogglePulseStartedAt_ = -1.0;
+    int previousSurfacePushSteps_ = -1;
+    double surfacePushStepEffectStartedAt_ = -1.0;
     float sceneCssWidth_ = 1280.0F;
     float sceneCssHeight_ = 720.0F;
     float scenePixelLeft_ = 0.0F;
