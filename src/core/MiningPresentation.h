@@ -140,6 +140,13 @@ inline int activeMiningEnemyCount(const MiningRunState& mining)
     }));
 }
 
+inline int activeMiningSwarmEnemyCount(const MiningRunState& mining)
+{
+    return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active && enemy.swarmAssociated;
+    }));
+}
+
 inline int activeMiningProjectileCount(const MiningRunState& mining, MiningCombatTeam team)
 {
     return static_cast<int>(std::count_if(mining.combatProjectiles.begin(), mining.combatProjectiles.end(), [team](const MiningProjectileVisual& projectile) {
@@ -592,6 +599,24 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     } else {
         presentation.objective += "SHIP \xE2\x86\x91 " + std::to_string(currentDepth);
     }
+    if (mining.swarm.enabled) {
+        if (mining.depthZone != mining.swarm.depthZone) {
+            presentation.objective = "SWARM SIGNAL \xE2\x80\xA2 DEPTH +" +
+                std::to_string(mining.swarm.depthZone) + " \xE2\x80\xA2 ARTIFACT " +
+                display::percent(mining.swarm.artifactChance);
+        } else if (mining.swarm.cacheExposed) {
+            presentation.objective = mining.swarm.cacheClaimed
+                ? "SWARM CACHE SECURED \xE2\x80\xA2 RETURN TO SHIP"
+                : (mining.swarm.bonusArtifactRolled
+                    ? "SWARM BROKEN \xE2\x80\xA2 CACHE + ARTIFACT SIGNAL"
+                    : "SWARM BROKEN \xE2\x80\xA2 CACHE EXPOSED");
+        } else if (mining.swarm.alerted && mining.swarm.alertSeconds > 0.0) {
+            presentation.objective = "SWARM NEST DETECTED \xE2\x80\xA2 ASCEND TO DISENGAGE";
+        } else if (mining.swarm.wave > 0) {
+            presentation.objective = "SWARM " + std::to_string(mining.swarm.wave) + "/3 \xE2\x80\xA2 " +
+                std::to_string(activeMiningSwarmEnemyCount(mining)) + " HOSTILES";
+        }
+    }
     presentation.atShip = mining.active && miningAtReturnZone(mining);
     presentation.failurePending = run.failurePending;
     presentation.failureTitle = run.failureTitle;
@@ -620,7 +645,7 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
             std::to_string(droneOre(&MaterialInventory::exotic)) + " / " + std::to_string(std::max(0, mining.stowedMaterials.exotic)), "exotic", {}, {}}
     }};
     presentation.payload = {{
-        {"SHIP", payloadValue("Ship cargo"), "banked", {}, {}},
+        {"SHIP", payloadValue("Ship cargo"), "stowed", {}, {}},
         {"ARTIFACT", mining.artifact.present ? metricValue("Artifact integrity", "0%") : "--", mining.artifact.present ? "artifact active" : "artifact", {}, {}}
     }};
 
@@ -655,7 +680,7 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
             presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
         }
         if (const PanelButtonPresentation* stow = findAction(ui::actions::miningStow)) {
-            presentation.actions.push_back(copyAction(*stow, "BANK / LEAVE", "mining-bank-action"));
+            presentation.actions.push_back(copyAction(*stow, "STOW / LEAVE", "mining-bank-action"));
         }
         return presentation;
     }

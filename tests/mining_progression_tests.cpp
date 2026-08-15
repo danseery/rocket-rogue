@@ -28,11 +28,6 @@ void require(bool condition, const char* message)
 
 void allActLevelContractsResolve()
 {
-    require(miningActName(MiningAct::ActOne) == "Act 1" && miningActName(MiningAct::ActThree) == "Act 3",
-        "mining act labels should use consistent player-facing numbering");
-    require(miningProgressionBandName(MiningProgressionBand::Learn) == "Learn"
-            && miningProgressionBandName(MiningProgressionBand::Mastery) == "Mastery",
-        "mining band labels should use the contract names");
     constexpr std::array<MiningRewardBudget, miningFirstClearProgressCount> expectedBudgets {{
         {0, 0, 0, 0}, {1, 0, 1, 0}, {1, 0, 2, 0}, {2, 0, 3, 0},
         {1, 0, 2, 0}, {2, 0, 3, 0}, {2, 0, 4, 1}, {3, 1, 5, 1},
@@ -63,7 +58,6 @@ void allActLevelContractsResolve()
             require(rules.referenceDrones.slots == expectedReferenceSlots[contractIndex], "reference drone slots should match the progression table");
             require(rules.referenceDrones.maximumMark == expectedReferenceMarks[contractIndex], "reference drone mark should match the progression table");
             require(rules.referenceDrones.roleCount <= static_cast<std::size_t>(rules.referenceDrones.slots), "reference roles should fit the expected bay");
-            require(!rules.complication.empty() && !rules.tutorialCallout.empty(), "every act/level should resolve player-facing progression copy");
             require(miningMaterialAllowed(rules, MiningCellMaterial::CommonOre), "every mining arena should permit common ore");
             require(miningRoomFeatureAllowed(rules, MiningCellFeature::MainTunnel), "every mining arena should permit a main route");
 

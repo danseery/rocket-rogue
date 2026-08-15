@@ -124,6 +124,7 @@ inline constexpr std::string_view miningMiniDrones = "miningMiniDrones";
 inline constexpr std::string_view miningLooseChunks = "miningLooseChunks";
 inline constexpr std::string_view miningCombat = "miningCombat";
 inline constexpr std::string_view miningArtifact = "miningArtifact";
+inline constexpr std::string_view miningSwarm = "miningSwarm";
 inline constexpr std::string_view miningTerrainSize = "miningTerrainSize";
 inline constexpr std::string_view miningTerrainCells = "miningTerrainCells";
 inline constexpr std::string_view miningScenarioContext = "miningScenarioContext";

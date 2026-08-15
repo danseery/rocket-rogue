@@ -321,6 +321,8 @@ int miningCellFeatureToInt(MiningCellFeature feature)
         return 7;
     case MiningCellFeature::BossChamber:
         return 8;
+    case MiningCellFeature::SwarmArena:
+        return 9;
     }
     return 0;
 }
@@ -344,6 +346,8 @@ MiningCellFeature miningCellFeatureFromInt(int value)
         return MiningCellFeature::OrganicBurrow;
     case 8:
         return MiningCellFeature::BossChamber;
+    case 9:
+        return MiningCellFeature::SwarmArena;
     default:
         return MiningCellFeature::None;
     }
@@ -1256,7 +1260,10 @@ std::string serializeDepthProspects(const std::vector<SurfaceDepthProspect>& pro
             << save_schema::crewFieldDelimiter << prospect.possibleMaterials.common
             << save_schema::crewFieldDelimiter << prospect.possibleMaterials.rare
             << save_schema::crewFieldDelimiter << prospect.possibleMaterials.exotic
-            << save_schema::crewFieldDelimiter << prospect.possibleArtifacts;
+            << save_schema::crewFieldDelimiter << prospect.possibleArtifacts
+            << save_schema::crewFieldDelimiter << (prospect.swarmNest ? 1 : 0)
+            << save_schema::crewFieldDelimiter << prospect.swarmArtifactChance
+            << save_schema::crewFieldDelimiter << std::clamp(prospect.informationPercent, 0, 100);
     }
     return out.str();
 }
@@ -1283,6 +1290,15 @@ std::vector<SurfaceDepthProspect> parseDepthProspects(std::string_view text)
         }
         if (fields.size() > 5) {
             prospect.possibleArtifacts = std::max(0, parseInt(fields[5], 0));
+        }
+        if (fields.size() > 6) {
+            prospect.swarmNest = parseInt(fields[6], 0) != 0;
+        }
+        if (fields.size() > 7) {
+            prospect.swarmArtifactChance = std::clamp(parseDouble(fields[7], 0.0), 0.0, 1.0);
+        }
+        if (fields.size() > 8) {
+            prospect.informationPercent = std::clamp(parseInt(fields[8], 100), 0, 100);
         }
         prospects.push_back(prospect);
     }
@@ -1582,7 +1598,9 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.spawn.spawned
             << save_schema::crewFieldDelimiter << enemy.spawn.intervalSeconds
             << save_schema::crewFieldDelimiter << enemy.spawn.cooldownSeconds
-            << save_schema::crewFieldDelimiter << (enemy.gateAssociated ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (enemy.gateAssociated ? 1 : 0)
+            << save_schema::crewFieldDelimiter << (enemy.swarmAssociated ? 1 : 0)
+            << save_schema::crewFieldDelimiter << (enemy.elite ? 1 : 0);
     }
     return out.str();
 }
@@ -1662,6 +1680,12 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         }
         if (fields.size() > 21) {
             enemy.gateAssociated = parseInt(fields[21], 0) != 0;
+        }
+        if (fields.size() > 22) {
+            enemy.swarmAssociated = parseInt(fields[22], 0) != 0;
+        }
+        if (fields.size() > 23) {
+            enemy.elite = parseInt(fields[23], 0) != 0;
         }
         enemies.push_back(enemy);
     }
@@ -1887,6 +1911,83 @@ std::vector<ArtifactRecord> parseArtifacts(std::string_view text)
         artifacts.push_back(artifact);
     }
     return artifacts;
+}
+
+std::string serializeMiningSwarm(const MiningSwarmState& swarm)
+{
+    std::vector<ArtifactRecord> artifact;
+    if (swarm.bonusArtifactRolled) {
+        artifact.push_back(swarm.bonusArtifact);
+    }
+    std::ostringstream out;
+    out << (swarm.enabled ? 1 : 0)
+        << '^' << swarm.depthZone
+        << '^' << swarm.seed
+        << '^' << swarm.chamberX
+        << '^' << swarm.chamberY
+        << '^' << swarm.triggerX
+        << '^' << (swarm.alerted ? 1 : 0)
+        << '^' << swarm.alertSeconds
+        << '^' << swarm.wave
+        << '^' << swarm.spawnedInWave
+        << '^' << swarm.waveSize
+        << '^' << swarm.spawnCooldownSeconds
+        << '^' << swarm.intermissionSeconds
+        << '^' << (swarm.cacheExposed ? 1 : 0)
+        << '^' << (swarm.cacheClaimed ? 1 : 0)
+        << '^' << (swarm.cacheBanked ? 1 : 0)
+        << '^' << swarm.cacheX
+        << '^' << swarm.cacheY
+        << '^' << swarm.cacheMaterials.common
+        << '^' << swarm.cacheMaterials.rare
+        << '^' << swarm.cacheMaterials.exotic
+        << '^' << swarm.blueprintInsight
+        << '^' << (swarm.bonusArtifactRolled ? 1 : 0)
+        << '^' << swarm.artifactChance
+        << '^' << encodeSaveBlob(serializeArtifacts(artifact));
+    return out.str();
+}
+
+MiningSwarmState parseMiningSwarm(std::string_view text)
+{
+    MiningSwarmState swarm;
+    const std::vector<std::string> fields = split(text, '^');
+    if (fields.empty() || parseInt(fields[0], 0) == 0) {
+        return swarm;
+    }
+    swarm.enabled = true;
+    if (fields.size() > 1) swarm.depthZone = parseInt(fields[1], -1);
+    if (fields.size() > 2) swarm.seed = parseU64(fields[2], 0);
+    if (fields.size() > 3) swarm.chamberX = parseInt(fields[3], 0);
+    if (fields.size() > 4) swarm.chamberY = parseInt(fields[4], 0);
+    if (fields.size() > 5) swarm.triggerX = parseInt(fields[5], 0);
+    if (fields.size() > 6) swarm.alerted = parseInt(fields[6], 0) != 0;
+    if (fields.size() > 7) swarm.alertSeconds = std::max(0.0, parseDouble(fields[7], 0.0));
+    if (fields.size() > 8) swarm.wave = std::clamp(parseInt(fields[8], 0), 0, 3);
+    if (fields.size() > 9) swarm.spawnedInWave = std::max(0, parseInt(fields[9], 0));
+    if (fields.size() > 10) swarm.waveSize = std::max(0, parseInt(fields[10], 0));
+    if (fields.size() > 11) swarm.spawnCooldownSeconds = std::max(0.0, parseDouble(fields[11], 0.0));
+    if (fields.size() > 12) swarm.intermissionSeconds = std::max(0.0, parseDouble(fields[12], 0.0));
+    if (fields.size() > 13) swarm.cacheExposed = parseInt(fields[13], 0) != 0;
+    if (fields.size() > 14) swarm.cacheClaimed = parseInt(fields[14], 0) != 0;
+    if (fields.size() > 15) swarm.cacheBanked = parseInt(fields[15], 0) != 0;
+    if (fields.size() > 16) swarm.cacheX = parseDouble(fields[16], 0.0);
+    if (fields.size() > 17) swarm.cacheY = parseDouble(fields[17], 0.0);
+    if (fields.size() > 18) swarm.cacheMaterials.common = std::max(0, parseInt(fields[18], 0));
+    if (fields.size() > 19) swarm.cacheMaterials.rare = std::max(0, parseInt(fields[19], 0));
+    if (fields.size() > 20) swarm.cacheMaterials.exotic = std::max(0, parseInt(fields[20], 0));
+    if (fields.size() > 21) swarm.blueprintInsight = std::max(0, parseInt(fields[21], 0));
+    if (fields.size() > 22) swarm.bonusArtifactRolled = parseInt(fields[22], 0) != 0;
+    if (fields.size() > 23) swarm.artifactChance = std::clamp(parseDouble(fields[23], 0.0), 0.0, 0.35);
+    if (fields.size() > 24 && swarm.bonusArtifactRolled) {
+        const std::vector<ArtifactRecord> artifacts = parseArtifacts(decodeSaveBlob(fields[24]));
+        if (!artifacts.empty()) {
+            swarm.bonusArtifact = artifacts.front();
+        } else {
+            swarm.bonusArtifactRolled = false;
+        }
+    }
+    return swarm;
 }
 
 std::string serializeMiningArtifact(const MiningArtifactObject& artifact)
@@ -3899,6 +4000,7 @@ std::string serializeSaveData(const SaveData& save)
             std::to_string(save.mining.movementSlowSeconds) + std::string(1, save_schema::crewFieldDelimiter) +
             std::to_string(save.mining.movementSlowScale));
     writeField(out, save_schema::field::miningArtifact, serializeMiningArtifact(save.mining.artifact));
+    writeField(out, save_schema::field::miningSwarm, serializeMiningSwarm(save.mining.swarm));
     writeField(out, save_schema::field::miningTerrainSize, serializeMiningTerrainSize(save.mining.terrain));
     writeField(out, save_schema::field::miningTerrainCells, serializeMiningCells(save.mining.terrain));
     writeField(out, save_schema::field::unlocks, join(save.unlockKeys, save_schema::listDelimiter));
@@ -4259,6 +4361,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             }
         } else if (key == save_schema::field::miningArtifact) {
             save.mining.artifact = parseMiningArtifact(value);
+        } else if (key == save_schema::field::miningSwarm) {
+            save.mining.swarm = parseMiningSwarm(value);
         } else if (key == save_schema::field::miningTerrainSize) {
             parseMiningTerrainSize(value, save.mining.terrain);
         } else if (key == save_schema::field::miningTerrainCells) {

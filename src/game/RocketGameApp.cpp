@@ -401,16 +401,36 @@ void RocketGameApp::finishArrivalFanfare()
 void RocketGameApp::beginSurfaceExpeditionOrRefit()
 {
     startSurfaceExpedition(state_, catalog_, &rng_);
-    state_.screen = state_.run.surfaceExpedition.active
-        ? Screen::SurfaceExpedition
-        : (state_.run.refitEntitled ? Screen::Upgrade : (navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar));
-    state_.statusLine = state_.run.surfaceExpedition.active
-        ? std::string(text::status::surfaceExpeditionStarted)
-        : (state_.run.refitEntitled ? std::string(text::status::refitWindowOpened) : std::string(text::status::refitWindowClosed));
-    if (state_.screen == Screen::Upgrade) {
-        generateModuleOffers(state_, catalog_, rng_);
-        selectedRefitOfferIndex_ = 0;
+    if (state_.run.surfaceExpedition.active) {
+        state_.screen = Screen::SurfaceExpedition;
+        state_.statusLine = std::string(text::status::surfaceExpeditionStarted);
+    } else if (openRefitIfAvailable()) {
+        state_.statusLine = std::string(text::status::refitWindowOpened);
+    } else {
+        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        state_.statusLine = std::string(text::status::refitWindowClosed);
     }
+}
+
+bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
+{
+    if (!state_.run.refitEntitled) {
+        return false;
+    }
+
+    if (regenerateOffers || refitWindowPresentation(state_, catalog_).offers.empty()) {
+        generateModuleOffers(state_, catalog_, rng_);
+    }
+    if (refitWindowPresentation(state_, catalog_).offers.empty()) {
+        state_.run.refitEntitled = false;
+        state_.run.offerModuleIds = {};
+        state_.run.offerCrewUpgradeIds = {};
+        return false;
+    }
+
+    selectedRefitOfferIndex_ = 0;
+    state_.screen = Screen::Upgrade;
+    return true;
 }
 
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
@@ -473,6 +493,9 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
             });
         if (staleCompatibilityOffer && state_.run.refitEntitled) {
             generateModuleOffers(state_, catalog_, rng_);
+        }
+        if (state_.screen == Screen::Upgrade && !openRefitIfAvailable(false)) {
+            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         }
         state_.statusLine = std::string(text::status::saveRestored);
         hasSavedGame_ = true;
@@ -1512,7 +1535,7 @@ void RocketGameApp::tick(double deltaSeconds)
                 break;
             case OrbitGrade::Miss:
             default:
-                state_.statusLine = "Orbit window missed. Fuel and time spent, no research banked.";
+                state_.statusLine = "Orbit window missed. Fuel and time spent, no telemetry validated.";
                 break;
             }
             save();
@@ -1520,6 +1543,16 @@ void RocketGameApp::tick(double deltaSeconds)
         } else {
             realtimeHudDirty_ = true;
         }
+    } else if (state_.screen == Screen::SurfaceScan) {
+        const double clampedDelta = std::clamp(
+            deltaSeconds,
+            0.0,
+            tuning::launch::maxFrameStepSeconds);
+        state_.run.surfaceScan.elapsedSeconds += clampedDelta;
+        state_.run.surfaceScan.successFanfareSeconds = std::max(
+            0.0,
+            state_.run.surfaceScan.successFanfareSeconds - clampedDelta);
+        realtimeHudDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
     } else if (state_.screen == Screen::ArrivalFanfare) {
@@ -1731,10 +1764,7 @@ void RocketGameApp::next()
             panelDirty_ = true;
             return;
         }
-        if (state_.run.refitEntitled) {
-            generateModuleOffers(state_, catalog_, rng_);
-            selectedRefitOfferIndex_ = 0;
-            state_.screen = Screen::Upgrade;
+        if (openRefitIfAvailable()) {
             state_.statusLine = std::string(text::status::refitWindowOpened);
         } else {
             state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
@@ -1749,6 +1779,11 @@ void RocketGameApp::next()
         state_.statusLine = "Field upgrade skipped. Keep digging or extract while the window holds.";
         save();
     } else if (state_.screen == Screen::Upgrade) {
+        if (curatedProvingRefitsActive(state_)) {
+            state_.statusLine = "Install the required launch upgrade to continue.";
+            panelDirty_ = true;
+            return;
+        }
         state_.run.offerModuleIds = {};
         state_.run.offerCrewUpgradeIds = {};
         state_.run.refitEntitled = false;
@@ -1884,10 +1919,10 @@ void RocketGameApp::flybyContinue()
     completeFlybyRun(state_, catalog_);
     switch (grade) {
     case FlybyGrade::Perfect:
-        state_.statusLine = "Perfect slingshot banked. Choose the next approach.";
+        state_.statusLine = "Perfect slingshot telemetry validated. Choose the next approach.";
         break;
     case FlybyGrade::Good:
-        state_.statusLine = "Flyby data banked. Choose the next approach.";
+        state_.statusLine = "Flyby telemetry validated. Choose the next approach.";
         break;
     case FlybyGrade::Miss:
     default:
@@ -1946,10 +1981,10 @@ void RocketGameApp::orbitContinue()
     completeOrbitRun(state_, catalog_);
     switch (grade) {
     case OrbitGrade::Perfect:
-        state_.statusLine = "Perfect orbit research banked. Choose the next approach.";
+        state_.statusLine = "Perfect orbit telemetry validated. Choose the next approach.";
         break;
     case OrbitGrade::Good:
-        state_.statusLine = "Orbit research banked. Choose the next approach.";
+        state_.statusLine = "Orbit telemetry validated. Choose the next approach.";
         break;
     case OrbitGrade::Miss:
     default:
@@ -2016,6 +2051,11 @@ void RocketGameApp::surveySurface()
     }
 
     const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
+    if (outcome.applied) {
+        ui::briefings::acknowledge(
+            state_.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::surfaceSurveyIntroduction);
+    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -2024,6 +2064,11 @@ void RocketGameApp::surveySurface()
 void RocketGameApp::mineSurface()
 {
     if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
+    if (!surfaceOpsTutorialMiningUnlocked(state_)) {
+        state_.statusLine = "Set a start depth before deploying the Mining Rig.";
+        panelDirty_ = true;
         return;
     }
     SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
@@ -2100,8 +2145,18 @@ void RocketGameApp::pushSurface()
     if (state_.screen != Screen::SurfaceExpedition) {
         return;
     }
+    if (!surfaceOpsTutorialDigUnlocked(state_)) {
+        state_.statusLine = "Log a Survey before digging a tunnel.";
+        panelDirty_ = true;
+        return;
+    }
 
     const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
+    if (outcome.applied) {
+        ui::briefings::acknowledge(
+            state_.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::surfaceDigIntroduction);
+    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -2120,11 +2175,7 @@ void RocketGameApp::extractSurface()
     }
 
     state_.statusLine = surfaceActionSummary(outcome);
-    if (state_.run.refitEntitled) {
-        generateModuleOffers(state_, catalog_, rng_);
-        selectedRefitOfferIndex_ = 0;
-        state_.screen = Screen::Upgrade;
-    } else {
+    if (!openRefitIfAvailable()) {
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
     }
     save();
@@ -2403,7 +2454,7 @@ void RocketGameApp::miningRepairDrill()
     } else if (cost <= 0) {
         state_.statusLine = "Drill bit integrity is already full.";
     } else if (mining.stowedMaterials.common < cost) {
-        state_.statusLine = "Need " + std::to_string(cost) + " banked common materials to repair the drill bit.";
+        state_.statusLine = "Need " + std::to_string(cost) + " stowed common materials to repair the drill bit.";
     } else if (repairMiningDrill(state_)) {
         state_.statusLine = "Drill bit repaired for " + std::to_string(cost) + " common materials.";
         save();
@@ -2436,7 +2487,7 @@ void RocketGameApp::miningRepairDrone()
     } else if (mining.stowedMaterials.common < cost) {
         state_.statusLine =
             "Need " + std::to_string(cost) +
-            " banked common materials to repair the " +
+            " stowed common materials to repair the " +
             (evaActive ? "EVA suit." : "Mining Rig.");
     } else if (evaActive
                    ? repairMiningOperator(state_)
@@ -2879,7 +2930,7 @@ void RocketGameApp::debugStartSurfaceScan()
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.05;
     const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
     state_.statusLine = outcome.applied
-        ? "Debug scanner sandbox. Pulse, bank, or bust without touching your save."
+        ? "Debug scanner sandbox. Pulse, log, or bust without touching your save."
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
@@ -3582,7 +3633,11 @@ void RocketGameApp::completeLaunch(
         burnMultiplier,
         method,
         rng_,
-        {true, failureCause, session_.flight.minimumSafetyMargin, session_.flight.hullDamageTaken});
+        {true,
+            failureCause,
+            session_.flight.minimumSafetyMargin,
+            session_.flight.hullDamageTaken,
+            session_.flight.fuelSurveyReturnTiming});
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
     outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, wasReturningHome);
     if (!outcome.telemetry.empty()) {
@@ -4027,7 +4082,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     } else if (state_.screen == Screen::Orbit) {
         result.animationTime = state_.run.orbit.elapsedSeconds;
     } else if (state_.screen == Screen::SurfaceScan) {
-        result.animationTime = visualTimeSeconds_;
+        result.animationTime = state_.run.surfaceScan.elapsedSeconds;
     } else if (state_.screen == Screen::SurfacePush) {
         result.animationTime = visualTimeSeconds_;
     } else if (state_.screen == Screen::ArrivalFanfare) {
@@ -4179,6 +4234,18 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningStowedCargo = mining.stowedCargo;
         result.miningMaterials = mining.temporaryMaterials;
         result.miningStowedMaterials = mining.stowedMaterials;
+        result.miningSwarmActive = mining.swarm.enabled && mining.depthZone == mining.swarm.depthZone;
+        result.miningSwarmAlert = result.miningSwarmActive && mining.swarm.alerted;
+        result.miningSwarmWave = result.miningSwarmActive ? mining.swarm.wave : 0;
+        result.miningSwarmDepth = mining.swarm.depthZone;
+        result.miningSwarmAlertProgress = result.miningSwarmAlert
+            ? std::clamp(1.0 - mining.swarm.alertSeconds / 2.5, 0.0, 1.0)
+            : 0.0;
+        result.miningSwarmCacheExposed = result.miningSwarmActive && mining.swarm.cacheExposed;
+        result.miningSwarmCacheClaimed = mining.swarm.cacheClaimed;
+        result.miningSwarmArtifact = mining.swarm.bonusArtifactRolled;
+        result.miningSwarmCacheX = mining.swarm.cacheX;
+        result.miningSwarmCacheY = mining.swarm.cacheY;
         if (mining.artifact.present) {
             result.miningArtifact = {
                 true,
@@ -4242,6 +4309,14 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfaceScanSignal = scan.signal;
         result.surfaceScanInterference = scan.interference;
         result.surfaceScanBustRisk = scan.bustRisk;
+        const double fanfareDuration = scan.lastPulseGrade == SurfaceScanPulseGrade::Perfect
+            ? tuning::research::scanPerfectSuccessFanfareSeconds
+            : tuning::research::scanGoodSuccessFanfareSeconds;
+        result.surfaceScanSuccessFanfare = std::clamp(
+            scan.successFanfareSeconds / fanfareDuration,
+            0.0,
+            1.0);
+        result.surfaceScanLastPulseGrade = scan.lastPulseGrade;
         result.surfaceScanMaterials = scan.temporaryMaterials;
         result.surfaceScanArtifacts = static_cast<int>(scan.temporaryArtifacts.size());
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {

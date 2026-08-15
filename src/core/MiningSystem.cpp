@@ -541,6 +541,8 @@ int featurePriority(MiningCellFeature feature)
         return 7;
     case MiningCellFeature::BossChamber:
         return 8;
+    case MiningCellFeature::SwarmArena:
+        return 9;
     }
     return 0;
 }
@@ -4559,6 +4561,254 @@ void carveMiningReturnShaft(MiningTerrain& terrain)
     }
 }
 
+int swarmWaveSize(const MiningArenaRules& rules, int wave)
+{
+    const int base = 3 + (rules.request.act >= MiningAct::ActThree ? 1 : 0) +
+        std::max(0, (rules.request.difficulty - 5) / 2);
+    return base + (wave <= 1 ? 0 : (wave == 2 ? 2 : 3));
+}
+
+int activeSwarmEnemyCount(const MiningRunState& mining)
+{
+    return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active && enemy.swarmAssociated;
+    }));
+}
+
+int activeMiningEnemyCountForSpawn(const MiningRunState& mining)
+{
+    return static_cast<int>(std::count_if(mining.enemies.begin(), mining.enemies.end(), [](const MiningEnemy& enemy) {
+        return enemy.active;
+    }));
+}
+
+void carveMiningSwarmArena(MiningRunState& mining)
+{
+    MiningSwarmState& swarm = mining.swarm;
+    if (!swarm.enabled || mining.depthZone != swarm.depthZone || swarm.chamberX > 0) {
+        return;
+    }
+    const bool right = unitHash(swarm.seed, mining.depthZone, mining.terrain.width, mining.terrain.height, 0xA11EULL) >= 0.5;
+    const int side = right ? 1 : -1;
+    const int entranceX = std::clamp(mining.terrain.width / 2, 4, mining.terrain.width - 5);
+    const int entranceY = std::clamp(mining.terrain.height / 4, 6, mining.terrain.height - 8);
+    swarm.chamberX = std::clamp(
+        entranceX + side * std::max(8, mining.terrain.width / 5),
+        6,
+        mining.terrain.width - 7);
+    swarm.chamberY = std::clamp(
+        entranceY + static_cast<int>(unitHash(swarm.seed, mining.depthZone, 0, 0, 0xA12EULL) * 5.0) - 2,
+        7,
+        mining.terrain.height - 7);
+    swarm.triggerX = std::clamp(swarm.chamberX - side * 4, 3, mining.terrain.width - 4);
+    carveLine(
+        mining.terrain,
+        entranceX,
+        entranceY,
+        swarm.chamberX,
+        swarm.chamberY,
+        1,
+        mining.depthZone,
+        MiningCellFeature::BranchTunnel);
+    carveRoom(
+        mining.terrain,
+        swarm.chamberX,
+        swarm.chamberY,
+        4,
+        3,
+        mining.depthZone,
+        MiningCellFeature::SwarmArena,
+        MiningEnemyType::None,
+        MiningCellMaterial::Empty);
+    swarm.cacheX = static_cast<double>(swarm.chamberX) + 0.5;
+    swarm.cacheY = static_cast<double>(swarm.chamberY) + 0.5;
+}
+
+void configureMiningSwarm(
+    GameState& state,
+    const ContentCatalog& catalog,
+    MiningRunState& mining,
+    const Destination& destination,
+    const MiningArenaRules& rules,
+    bool authoredSite)
+{
+    const MiningSwarmPreview preview = miningSwarmPreview(
+        state,
+        catalog,
+        rules,
+        mining.entryDepthZone,
+        authoredSite);
+    if (!preview.available) {
+        return;
+    }
+    MiningSwarmState& swarm = mining.swarm;
+    swarm.enabled = true;
+    swarm.depthZone = preview.depthZone;
+    swarm.seed = preview.seed;
+    swarm.artifactChance = preview.artifactChance;
+    swarm.cacheMaterials.common = rules.request.act >= MiningAct::ActThree ? 5 : 4;
+    swarm.cacheMaterials.rare = 2 + static_cast<int>(rules.band);
+    if (miningMaterialAllowed(rules, MiningCellMaterial::ExoticVein)) {
+        swarm.cacheMaterials.exotic =
+            rules.request.act >= MiningAct::ActThree &&
+                (rules.band == MiningProgressionBand::Pressure || rules.band == MiningProgressionBand::Mastery)
+                ? 2
+                : 1;
+    }
+    swarm.blueprintInsight = 1;
+    swarm.bonusArtifactRolled = unitHash(
+        swarm.seed,
+        swarm.depthZone,
+        rules.request.difficulty,
+        0,
+        0xA471ULL) < swarm.artifactChance;
+    if (swarm.bonusArtifactRolled) {
+        swarm.bonusArtifact.id = destination.id + "_swarm_artifact_" + std::to_string(swarm.seed);
+        swarm.bonusArtifact.originDestinationId = destination.id;
+        swarm.bonusArtifact.identified = false;
+        swarm.bonusArtifact.kind = ArtifactKind::Boost;
+        swarm.bonusArtifact.rewardType = rollMiningArtifactReward(
+            state,
+            destination,
+            ArtifactKind::Boost,
+            swarm.depthZone);
+        swarm.bonusArtifact.condition = 1.0;
+        swarm.bonusArtifact.rewardApplied = false;
+    }
+}
+
+MiningEnemyType swarmEnemyForSpawn(const MiningSwarmState& swarm)
+{
+    if (swarm.wave <= 1) {
+        return MiningEnemyType::Ant;
+    }
+    if (swarm.wave == 2) {
+        return swarm.spawnedInWave < swarm.waveSize / 2
+            ? MiningEnemyType::Ant
+            : MiningEnemyType::Flying;
+    }
+    if (swarm.spawnedInWave >= swarm.waveSize - 1 || swarm.spawnedInWave == swarm.waveSize - 2) {
+        return MiningEnemyType::Beetle;
+    }
+    switch (swarm.spawnedInWave % 3) {
+    case 0:
+        return MiningEnemyType::Ant;
+    case 1:
+        return MiningEnemyType::Flying;
+    default:
+        return MiningEnemyType::Beetle;
+    }
+}
+
+void spawnMiningSwarmEnemy(MiningRunState& mining, const MiningArenaRules& rules)
+{
+    MiningSwarmState& swarm = mining.swarm;
+    const MiningEnemyType type = swarmEnemyForSpawn(swarm);
+    const int index = swarm.spawnedInWave;
+    const double angle = unitHash(swarm.seed, swarm.wave, index, mining.depthZone, 0x5A31ULL) * 6.28318530718;
+    const double radius = 1.2 + unitHash(swarm.seed, swarm.wave, index, mining.depthZone, 0x5A32ULL) * 2.0;
+    MiningEnemy enemy = makeMiningEnemyForRules(
+        type,
+        MiningCellFeature::SwarmArena,
+        MiningElementalAffinity::None,
+        std::clamp(swarm.cacheX + std::cos(angle) * radius, 1.5, static_cast<double>(mining.terrain.width) - 1.5),
+        std::clamp(swarm.cacheY + std::sin(angle) * radius, 1.5, static_cast<double>(mining.terrain.height) - 1.5),
+        rules);
+    enemy.swarmAssociated = true;
+    enemy.elite = swarm.wave == 3 && index == swarm.waveSize - 1;
+    if (enemy.elite) {
+        enemy.maxHealth *= 1.50;
+        enemy.health = enemy.maxHealth;
+        enemy.damagePerSecond *= 1.15;
+        enemy.armor = std::min(0.65, enemy.armor + 0.10);
+    }
+    mining.enemies.push_back(std::move(enemy));
+    ++swarm.spawnedInWave;
+}
+
+void updateMiningSwarm(
+    GameState& state,
+    const MiningArenaRules& rules,
+    double dt)
+{
+    MiningRunState& mining = state.run.mining;
+    MiningSwarmState& swarm = mining.swarm;
+    if (!swarm.enabled || mining.depthZone != swarm.depthZone || swarm.cacheBanked) {
+        return;
+    }
+    carveMiningSwarmArena(mining);
+    const double actorX = controlledActorX(mining);
+    const double actorY = controlledActorY(mining);
+    if (!swarm.alerted) {
+        const double dx = actorX - static_cast<double>(swarm.triggerX);
+        const double dy = actorY - static_cast<double>(swarm.chamberY);
+        if (dx * dx + dy * dy <= 8.0) {
+            swarm.alerted = true;
+            swarm.alertSeconds = 2.5;
+            state.statusLine = "SWARM NEST DETECTED — three hostile waves guard a rich cache. Ascend now to disengage.";
+        }
+        return;
+    }
+    if (swarm.alertSeconds > 0.0) {
+        swarm.alertSeconds = std::max(0.0, swarm.alertSeconds - dt);
+        if (swarm.alertSeconds > 0.0) {
+            return;
+        }
+        swarm.wave = 1;
+        swarm.waveSize = swarmWaveSize(rules, swarm.wave);
+        swarm.spawnedInWave = 0;
+        swarm.spawnCooldownSeconds = 0.0;
+        state.statusLine = "SWARM 1/3 — hold the tunnel or ascend to disengage.";
+    }
+    if (swarm.cacheExposed) {
+        if (!swarm.cacheClaimed) {
+            const double dx = actorX - swarm.cacheX;
+            const double dy = actorY - swarm.cacheY;
+            if (dx * dx + dy * dy <= 2.25) {
+                addMiningMaterials(mining.temporaryMaterials, swarm.cacheMaterials);
+                mining.cargo += materialCargo(swarm.cacheMaterials);
+                if (swarm.bonusArtifactRolled) {
+                    mining.temporaryArtifacts.push_back(swarm.bonusArtifact);
+                    mining.cargo += tuning::mining::artifactCargo;
+                }
+                swarm.cacheClaimed = true;
+                state.statusLine = swarm.bonusArtifactRolled
+                    ? "SWARM CACHE SECURED — artifact signal recovered. Stow it at the ship."
+                    : "SWARM CACHE SECURED — stow it at the ship.";
+            }
+        }
+        return;
+    }
+    if (swarm.intermissionSeconds > 0.0) {
+        swarm.intermissionSeconds = std::max(0.0, swarm.intermissionSeconds - dt);
+        if (swarm.intermissionSeconds <= 0.0) {
+            ++swarm.wave;
+            swarm.waveSize = swarmWaveSize(rules, swarm.wave);
+            swarm.spawnedInWave = 0;
+            swarm.spawnCooldownSeconds = 0.0;
+            state.statusLine = "SWARM " + std::to_string(swarm.wave) + "/3 — incoming.";
+        }
+        return;
+    }
+    swarm.spawnCooldownSeconds = std::max(0.0, swarm.spawnCooldownSeconds - dt);
+    if (swarm.spawnedInWave < swarm.waveSize && swarm.spawnCooldownSeconds <= 0.0 &&
+        activeMiningEnemyCountForSpawn(mining) < rules.maxActiveEnemies) {
+        spawnMiningSwarmEnemy(mining, rules);
+        swarm.spawnCooldownSeconds = 0.75;
+    }
+    if (swarm.spawnedInWave >= swarm.waveSize && activeSwarmEnemyCount(mining) == 0) {
+        if (swarm.wave >= 3) {
+            swarm.cacheExposed = true;
+            state.statusLine = swarm.bonusArtifactRolled
+                ? "SWARM BROKEN — CACHE EXPOSED — ARTIFACT SIGNAL IN CACHE."
+                : "SWARM BROKEN — CACHE EXPOSED.";
+        } else {
+            swarm.intermissionSeconds = 3.0;
+            state.statusLine = "WAVE CLEAR — next wave in 3s.";
+        }
+    }
+}
+
 void applySuitOnlyPassageNetwork(
     MiningTerrain& terrain,
     std::uint64_t seed,
@@ -4689,6 +4939,7 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
         mining.enemies.clear();
         spawnMiningEnemies(mining, *destination, arenaRules);
+        carveMiningSwarmArena(mining);
         mining.artifact = {};
         mining.looseChunks.clear();
         mining.gate = {};
@@ -5250,6 +5501,8 @@ std::string_view miningCellFeatureName(MiningCellFeature feature)
         return "Organic burrow";
     case MiningCellFeature::BossChamber:
         return "Boss chamber";
+    case MiningCellFeature::SwarmArena:
+        return "Swarm nest";
     }
     return "Unknown feature";
 }
@@ -5455,6 +5708,71 @@ MiningDrillStats miningOperatorDrillStats()
     stats.terrainWidth = tuning::mining::terrainWidth;
     stats.terrainHeight = tuning::mining::terrainHeight;
     return stats;
+}
+
+MiningLootLuckProfile miningLootLuckProfile(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceSiteProfile profile)
+{
+    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
+    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(profile);
+    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, catalog);
+    const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
+    const MiningDrillStats drill = miningDrillStats(state, catalog);
+
+    // The scanner/support contribution mirrors the established Survey support
+    // ceiling while avoiding a second list of equipment-specific exceptions.
+    const double scannerSupportArtifactBonus = std::clamp(
+        (std::max(0.0, upgrades.scannerRadius) + std::max(0.0, drones.scannerRadius)) * 0.010,
+        0.0,
+        0.09);
+    MiningLootLuckProfile profileResult;
+    profileResult.swarmArtifactDropBonus =
+        0.50 * std::max(0.0, crew.artifactChanceBonus) +
+        0.50 * std::max(0.0, site.artifactChanceBonus) +
+        0.50 * scannerSupportArtifactBonus +
+        0.25 * std::max(0.0, drill.rareYieldChance);
+    profileResult.swarmArtifactDropBonus = std::clamp(
+        profileResult.swarmArtifactDropBonus,
+        0.0,
+        0.27);
+    return profileResult;
+}
+
+MiningSwarmPreview miningSwarmPreview(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const MiningArenaRules& rules,
+    int startDepth,
+    bool authoredSite)
+{
+    MiningSwarmPreview preview;
+    if (authoredSite || rules.request.act < MiningAct::ActTwo || rules.request.difficulty < 5 ||
+        !miningEnemyAllowed(rules, MiningEnemyType::Ant) ||
+        !miningEnemyAllowed(rules, MiningEnemyType::Flying) ||
+        !miningEnemyAllowed(rules, MiningEnemyType::Beetle)) {
+        return preview;
+    }
+    const std::uint64_t arenaSeed = rules.request.seed == 0 ? state.seed : rules.request.seed;
+    const std::uint64_t seed = hashCombine(
+        hashCombine(arenaSeed, hashString(state.run.surfaceExpedition.destinationId)),
+        0x535741524D4E4553ULL);
+    const double encounterChance = rules.request.act >= MiningAct::ActThree ? 0.45 : 0.35;
+    if (unitHash(seed, startDepth, rules.request.difficulty, 0, 0x5A11ULL) >= encounterChance) {
+        return preview;
+    }
+    const int offset = 2 + static_cast<int>(unitHash(seed, startDepth, rules.request.difficulty, 1, 0x5A11ULL) * 3.0);
+    const MiningLootLuckProfile luck = miningLootLuckProfile(
+        state,
+        catalog,
+        state.run.surfaceExpedition.siteProfile);
+    const double baseChance = rules.request.act >= MiningAct::ActThree ? 0.12 : 0.08;
+    preview.available = true;
+    preview.depthZone = std::max(0, startDepth + std::clamp(offset, 2, 4));
+    preview.seed = seed;
+    preview.artifactChance = std::clamp(baseChance + luck.swarmArtifactDropBonus, baseChance, 0.35);
+    return preview;
 }
 
 MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog)
@@ -6121,6 +6439,13 @@ SurfaceActionOutcome startMiningRun(
     mining.depthZone = expedition.depth;
     mining.entryDepthZone = 0;
     mining.deepestDepthZone = mining.depthZone;
+    configureMiningSwarm(
+        state,
+        catalog,
+        mining,
+        *destination,
+        arenaRules,
+        siteDefinition != nullptr || !mining.miningSiteDefinitionId.empty());
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     mining.oxygenSeconds = stats.oxygenSeconds;
     mining.fuelCycleProgress = 0.0;
@@ -6157,6 +6482,7 @@ SurfaceActionOutcome startMiningRun(
     expedition.prospectArtifacts = 0;
     expedition.depthProspects.clear();
     spawnMiningEnemies(mining, *destination, arenaRules);
+    carveMiningSwarmArena(mining);
     setupMiningGate(mining, arenaRules, compatibilitySite, siteDefinition);
     if (forcedArtifact && !mining.artifact.present) {
         placeMiningArtifact(state, mining, *destination, true, true);
@@ -6689,6 +7015,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     updateMiningMiniDroneAgents(state, catalog, stats, dt);
     updateMiningOperatorSidearm(state, dt);
     applyMiningEnemyCombat(state, catalog, dt);
+    updateMiningSwarm(state, arenaRules, dt);
     if (mining.droneHealth <= 0.0 && !operatorControlled(mining)) {
         (void)emergencyEjectFromRig(state);
     }
@@ -6841,7 +7168,13 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     updateMiningGate(state, arenaRules);
     updateMiningArtifact(state, dt);
     if (bankMiningPayloadAtShip(state, catalog)) {
-        state.statusLine = std::string(text::status::miningStowed);
+        if (mining.swarm.cacheClaimed && !mining.swarm.cacheBanked) {
+            state.meta.blueprintProgress += std::max(0, mining.swarm.blueprintInsight);
+            mining.swarm.cacheBanked = true;
+            state.statusLine = "SWARM CACHE STOWED — Blueprint Insight secured.";
+        } else {
+            state.statusLine = std::string(text::status::miningStowed);
+        }
     } else if (!miningAtReturnZone(mining) && miningCarriedCargo(mining) > 0) {
         state.statusLine = std::string(text::status::miningReturnToShip);
     }
@@ -6913,6 +7246,10 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
         recallMiniDroneCargoToShip(mining);
         bankMiningPayloadAtShip(state, catalog);
         bankPhysicallyDeliveredArtifactsAtShip(mining);
+        if (mining.swarm.cacheClaimed && !mining.swarm.cacheBanked) {
+            state.meta.blueprintProgress += std::max(0, mining.swarm.blueprintInsight);
+            mining.swarm.cacheBanked = true;
+        }
     } else {
         outcome.materialLost = mining.temporaryMaterials;
         addMiningMaterials(outcome.materialLost, droneManifest);

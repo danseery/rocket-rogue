@@ -1566,8 +1566,8 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     applied = element.SetProperty("--rr-legacy-layout-144", std::to_string(responsiveCardWidth) + "px") && applied;
     // --rr-legacy-layout-145: std::to_string(nativeSceneCenterX - 34)px
     applied = element.SetProperty("--rr-legacy-layout-145", std::to_string(nativeSceneCenterX - 34) + "px") && applied;
-    // --rr-legacy-layout-146: std::to_string(std::max(hudSafeRect.y, nativeSceneCenterY - 214))px
-    applied = element.SetProperty("--rr-legacy-layout-146", std::to_string(std::max(hudSafeRect.y, nativeSceneCenterY - 214)) + "px") && applied;
+    // --rr-legacy-layout-146: std::to_string(nativeSceneCenterY + 116)px
+    applied = element.SetProperty("--rr-legacy-layout-146", std::to_string(nativeSceneCenterY + 116) + "px") && applied;
     // --rr-legacy-layout-147: std::to_string(std::max(150, miningObjectiveWidth - 20))px
     applied = element.SetProperty("--rr-legacy-layout-147", std::to_string(std::max(150, miningObjectiveWidth - 20)) + "px") && applied;
     // --rr-legacy-layout-148: std::to_string(miningPayloadWidth + 24)px
@@ -1806,7 +1806,7 @@ std::string inputPromptBar(
             }
             prompt += describedItem(presentation.runtime.miningEvaActive ? "Enter rig" : "Exit rig", "F");
             if (presentation.runtime.miningStowAvailable) {
-                prompt += describedItem("Bank / Leave", "R");
+                prompt += describedItem("Stow / Leave", "R");
             }
             if (presentation.runtime.miningAbortAvailable) {
                 prompt += describedItem("Recall", "Esc");
@@ -1853,7 +1853,7 @@ std::string inputPromptBar(
             presentation.runtime.miningEvaActive ? "Enter rig" : "Exit rig",
             std::string("Hold ") + labels.south);
         if (presentation.runtime.miningStowAvailable) {
-            prompt += describedItem("Bank / Leave", std::string("Tap ") + labels.south);
+            prompt += describedItem("Stow / Leave", std::string("Tap ") + labels.south);
         }
         if (presentation.runtime.miningAbortAvailable) {
             prompt += describedItem("Recall", labels.east);
@@ -1870,7 +1870,7 @@ std::string inputPromptBar(
             + describedItem("Abort", labels.east, "Hold to record a Miss")
             + item(labels.menu, "Pause");
     } else if (screen == Screen::SurfaceScan || screen == Screen::SurfacePush) {
-        prompt += item(labels.south, "Pulse / push") + item(labels.west, "Bank")
+        prompt += item(labels.south, "Pulse / push") + item(labels.west, screen == Screen::SurfaceScan ? "Log survey" : "Set start depth")
             + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
     } else if (screen == Screen::Launch
         && presentation.metadata.overlay != PanelOverlayKind::PreflightLaunch) {

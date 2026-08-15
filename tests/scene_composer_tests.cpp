@@ -801,6 +801,7 @@ void testOrderedBatchingAndWideLineInstancing()
     composer.setPresentationTime(0.0);
     composer.setTextureReady(TextureId::LocalSolarBackground, true);
     composer.setTextureReady(TextureId::Earth, true);
+    composer.setTextureReady(TextureId::Moon, true);
 
     RenderSnapshot snapshot;
     snapshot.titleScreen = true;
@@ -814,7 +815,7 @@ void testOrderedBatchingAndWideLineInstancing()
     // Solid lines and textured sprites share one ordered instance pipeline.
     // Coordinate space keeps the clip-space backdrop separate, while the
     // world-space orbit line merges into the surrounding instance sequence.
-    assert(packet.draws.size() == 2U);
+    assert(packet.draws.size() == 3U);
     assert(packet.draws[0].drawType == SceneDrawType::InstancedQuad);
     assert(packet.draws[0].pipeline == PipelineClass::Textured);
     assert(packet.draws[0].atlasPage
@@ -848,16 +849,32 @@ void testOrderedBatchingAndWideLineInstancing()
     assert(packet.draws[1].drawType == SceneDrawType::InstancedQuad);
     assert(packet.draws[1].pipeline == PipelineClass::Textured);
     assert(packet.draws[1].coordinateSpace == CoordinateSpace::World);
-    assert(packet.draws[1].atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Earth));
+    assert(packet.draws[1].atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Moon));
     assert(packet.draws[1].instanceCount >= 82U);
-    std::size_t texturedInstances = 0;
-    for (std::size_t index = 0; index < packet.draws[1].instanceCount; ++index) {
-        if (rocket::unpackSceneInstance(
-                packet.instances[packet.draws[1].firstInstance + index]).textured) {
-            ++texturedInstances;
+    assert(packet.draws[2].drawType == SceneDrawType::InstancedQuad);
+    assert(packet.draws[2].pipeline == PipelineClass::Textured);
+    assert(packet.draws[2].coordinateSpace == CoordinateSpace::World);
+    assert(packet.draws[2].atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Earth));
+
+    std::array<SceneInstance, 2> titleBodies {};
+    std::size_t bodyCount = 0;
+    for (std::size_t drawIndex = 1; drawIndex < packet.draws.size(); ++drawIndex) {
+        const SceneDraw& draw = packet.draws[drawIndex];
+        for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+            const SceneInstance instance = rocket::unpackSceneInstance(
+                packet.instances[draw.firstInstance + index]);
+            if (instance.textured) {
+                titleBodies[bodyCount++] = instance;
+            }
         }
     }
-    assert(texturedInstances == 1U);
+    // At t=0 the moon is on the far (upper) half of its tilted orbit. It
+    // must be submitted first so Earth occludes it, and both bodies must be
+    // fully opaque where their source pixels are opaque.
+    assert(bodyCount == titleBodies.size());
+    assert(titleBodies[0].centerY > titleBodies[1].centerY);
+    assert(titleBodies[0].color.a > 0.99F);
+    assert(titleBodies[1].color.a > 0.99F);
 
     const SceneInstance radialGlow = rocket::unpackSceneInstance(
         packet.instances[packet.draws[1].firstInstance]);
@@ -1477,6 +1494,29 @@ void testSurfaceScannerMarksUseMaterialSilhouettes()
         packet,
         rocket::MiningCellMaterial::ExoticVein,
         {0.95F, 0.28F, 0.78F, 1.0F}));
+}
+
+void testSurfaceScanSuccessFanfareRespectsCameraShake()
+{
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::SurfaceScan;
+    snapshot.animationTime = 0.35;
+    snapshot.surfaceScanSuccessFanfare = 1.0;
+    snapshot.surfaceScanLastPulseGrade = rocket::SurfaceScanPulseGrade::Perfect;
+
+    SceneComposer shakeComposer;
+    shakeComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto shakenCenter = rocket::SceneComposerTestAccess::frameCenter(shakeComposer, snapshot);
+    SceneComposer accessibleComposer;
+    accessibleComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    accessibleComposer.setCameraShakeEnabled(false);
+    const auto stableCenter = rocket::SceneComposerTestAccess::frameCenter(accessibleComposer, snapshot);
+    assert(std::hypot(
+        shakenCenter.first - stableCenter.first,
+        shakenCenter.second - stableCenter.second) > 1.0F);
+
+    const ScenePacket& packet = shakeComposer.compose(snapshot);
+    assert(packet.draws.size() > 0);
 }
 
 Color miningTerrainMaterialColor(rocket::MiningCellMaterial material)
@@ -2233,6 +2273,7 @@ int main()
     testMiningLooseChunksAreVisibleWorldEntities();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
     testSurfaceScannerMarksUseMaterialSilhouettes();
+    testSurfaceScanSuccessFanfareRespectsCameraShake();
     testMiningOrePaletteMakesCommonSilverAndRareGold();
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningRigSlerpsVerticalDuringExtraction();

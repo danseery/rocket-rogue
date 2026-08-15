@@ -242,6 +242,13 @@ bool launchTrainingTransferStage(LaunchTrainingStage stage)
     return launchStageUsesArrival(stage);
 }
 
+bool launchCurriculumTransferStage(LaunchTrainingStage stage)
+{
+    return stage == LaunchTrainingStage::MoonTransfer ||
+        stage == LaunchTrainingStage::MarsTransfer ||
+        stage == LaunchTrainingStage::JupiterTransfer;
+}
+
 bool launchLessonMissionActive(
     LaunchTrainingStage trainingStage,
     LaunchMissionKind missionKind)
@@ -672,7 +679,10 @@ PostLaunchCrewStress postLaunchCrewStress(const LaunchOutcome& outcome, const Cr
 
 int postLaunchCrewStressGain(const LaunchOutcome& outcome, const CrewUpgradeStats& upgrades)
 {
-    return postLaunchCrewStress(outcome, upgrades).total;
+    const int base = postLaunchCrewStress(outcome, upgrades).total;
+    return base + (outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Late
+            ? tuning::launchProgression::fuelSurveyLateStress
+            : 0);
 }
 
 double defaultProvingTarget(const Destination& destination)
@@ -1853,8 +1863,29 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         trainingStage,
         missionKind,
         outcome);
+    const bool curriculumTransferAttempt =
+        launchCurriculumTransferStage(trainingStage) &&
+        missionKind == LaunchMissionKind::Standard &&
+        outcome.frontierTransfer;
+    const bool curriculumTransferSucceeded = curriculumTransferAttempt &&
+        outcome.type == LaunchResultType::MissionComplete &&
+        outcome.failureCause == LaunchFailureCause::None &&
+        outcome.recoveryMethod == RecoveryMethod::TransferArrival;
+    const bool failedCurriculumTransfer =
+        curriculumTransferAttempt && !curriculumTransferSucceeded;
+    if (failedCurriculumTransfer) {
+        // These are explicit arrival missions, not the legacy proving loop.
+        // Returning early is safe, but it must not manufacture progress or an
+        // empty refit entitlement from partial route distance.
+        outcome.blueprintGain = 0;
+    }
     if (lessonReturnSucceeded || lessonArrivalSucceeded) {
-        outcome.payout = outcome.recoveryCost + tuning::launchProgression::lessonReward;
+        const double fuelSurveyBonus =
+            outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Timely
+            ? tuning::launchProgression::fuelSurveySafetyBonus
+            : 0.0;
+        outcome.payout = outcome.recoveryCost +
+            tuning::launchProgression::lessonReward + fuelSurveyBonus;
     } else if (!lessonMissionActive && isSkinOfYourTeethOutcome(outcome)) {
         outcome.payout *= 1.0 + tuning::records::skinOfYourTeethCreditBonus;
     }
@@ -1948,7 +1979,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         if (lessonMissionActive) {
             if (lessonReturnSucceeded) {
                 advanceLaunchLessonAfterReturn(state, missionKind);
-                state.statusLine = "Calibration data banked. A direct launch upgrade is ready.";
+                state.statusLine = "Calibration telemetry validated. A direct launch upgrade is ready.";
             } else if (lessonArrivalSucceeded) {
                 if (destination != nullptr && solarFrontierAdvance) {
                     state.run.destinationIndex += 1;
@@ -1983,6 +2014,8 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                 } else {
                     state.statusLine = std::string(text::status::transferLedgerRejected);
                 }
+            } else if (failedCurriculumTransfer) {
+                state.statusLine = "Arrival incomplete. Reach the destination with enough fuel to land.";
             } else {
                 if (destination != nullptr && outcome.ejectMultiplier >= destination->targetMultiplier * tuning::outcomes::transferUsefulDataTargetShare) {
                     state.run.frontierReadiness = std::min(frontierReadinessCap(state, catalog), state.run.frontierReadiness + 1);
@@ -2020,7 +2053,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     state.run.refitEntitled = state.run.refitEntitled ||
         lessonReturnSucceeded ||
         lessonArrivalSucceeded ||
-        state.run.frontierReadiness > readinessBefore ||
+        (!failedCurriculumTransfer && state.run.frontierReadiness > readinessBefore) ||
         validDestinationSuccess;
 
     if (validDestinationSuccess && outcome.frontierTransfer && outcomeDestination != nullptr) {

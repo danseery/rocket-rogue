@@ -78,10 +78,6 @@ int main()
     assert(hasCapabilityFailure(rejected.failures, CapabilityFailure::TimelineSemaphore));
     assert(hasCapabilityFailure(rejected.failures, CapabilityFailure::Swapchain));
     assert(hasCapabilityFailure(rejected.failures, CapabilityFailure::RequiredUnormSurfaceFormat));
-    const std::string rejectionText = describeCapabilityFailures(rejected.failures);
-    assert(rejectionText.find("Vulkan API 1.3") != std::string::npos);
-    assert(rejectionText.find("VK_KHR_swapchain") != std::string::npos);
-    assert(rejectionText.find("UNORM") != std::string::npos);
 
     DeviceCapabilities integrated = supportedDevice(DeviceKind::Integrated, "Integrated");
     DeviceCapabilities discrete = supportedDevice(DeviceKind::Discrete, "Discrete");

@@ -386,9 +386,9 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         tuning::launchProgression::maximumUpgradeRank);
     launch.fuelCapacity = launchFuelCapacityForRank(fuelRank, launch.slingshotFuelBoost);
     launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
-    launch.arrivalReserveFuel = launch.config.frontierTransfer
-        ? tuning::launch::arrivalReserveFuel
-        : 0.0;
+    // Frontier transfers land as soon as the ship reaches the destination.
+    // Fuel remains a range constraint, not a hidden landing-reserve check.
+    launch.arrivalReserveFuel = 0.0;
     launch.trainingMission = isTrainingMission(launch.config.missionKind) &&
         !launch.config.frontierTransfer;
     launch.manualControlsEnabled = launch.config.missionKind != LaunchMissionKind::FuelCalibration;
@@ -441,6 +441,13 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
     }
     flight.fuelCapacity = launch.fuelCapacity;
     flight.fuelRemaining = launch.fuelCapacity;
+    flight.calibrationReturnFuelProtected =
+        (launch.config.missionKind == LaunchMissionKind::FuelCalibration ||
+         launch.config.missionKind == LaunchMissionKind::FlightControlsCalibration) &&
+        !launch.config.frontierTransfer;
+    flight.fuelSurveyReturnClassifiable =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration &&
+        !launch.config.frontierTransfer;
     flight.projectedFuelRequired = launch.config.frontierTransfer
         ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle) +
             launch.arrivalReserveFuel
@@ -458,6 +465,28 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
 void beginLaunchReturn(LaunchFlightState& flight)
 {
     if (flight.active && !flight.returningHome) {
+        // The opening lesson teaches the decision to turn back, not a
+        // frame-perfect click. Any turnaround made while fuel remains gets a
+        // calibrated return burn that uses exactly that remaining fuel over
+        // the distance home.
+        if (flight.calibrationReturnFuelProtected &&
+            flight.fuelRemaining > 0.000001 &&
+            flight.travelProgress > 0.000001) {
+            if (flight.fuelSurveyReturnClassifiable &&
+                flight.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Unqualified &&
+                flight.fuelSurveyLateLatched) {
+                flight.fuelSurveyReturnTiming = FuelSurveyReturnTiming::Late;
+            }
+            if (flight.fuelSurveyReturnClassifiable &&
+                flight.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Unqualified &&
+                flight.fuelCapacity > 0.0 &&
+                flight.fuelRemaining / flight.fuelCapacity <=
+                    tuning::launchProgression::fuelSurveyTargetFuelShare + 0.000001) {
+                flight.fuelSurveyReturnTiming = FuelSurveyReturnTiming::Timely;
+            }
+            flight.fuelSurveyReturnUsePerProgress =
+                flight.fuelRemaining / flight.travelProgress;
+        }
         flight.returningHome = true;
         flight.asteroidHit.fill(false);
     }
@@ -484,6 +513,7 @@ LaunchFlightStep updateLaunchFlight(
     }
 
     const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    flight.elapsedSeconds += dt;
     flight.asteroidInvulnerabilitySeconds = std::max(
         0.0,
         flight.asteroidInvulnerabilitySeconds - dt);
@@ -510,9 +540,13 @@ LaunchFlightStep updateLaunchFlight(
         static_cast<double>(std::max(0, destination.tier)) * tuning::launch::pilotingTierDurationScale;
     const double poweredDrive = tuning::launch::pilotingPoweredSteeringBase +
         flight.selectedThrottle;
+    const double lessonSpeedScale =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration
+        ? tuning::launchProgression::fuelSurveyProgressRateScale
+        : 1.0;
     const double targetVelocity =
         tuning::launch::pilotingBaseProgressRate * poweredDrive / tierFactor *
-        std::max(0.25, 1.0 + launch.slingshotSpeedBoost);
+        std::max(0.25, 1.0 + launch.slingshotSpeedBoost) * lessonSpeedScale;
 
     if (enginesCut) {
         flight.travelVelocity = std::max(
@@ -543,11 +577,14 @@ LaunchFlightStep updateLaunchFlight(
         maximumTravelProgress);
     const double traveledDistance = std::abs(flight.travelProgress - flight.previousTravelProgress);
     if (!enginesCut && traveledDistance > 0.0) {
+        const double fuelUsePerProgress = flight.returningHome &&
+                flight.fuelSurveyReturnUsePerProgress > 0.0
+            ? flight.fuelSurveyReturnUsePerProgress
+            : launch.cruiseFuelCost *
+                launchFuelUseMultiplier(flight.selectedThrottle);
         flight.fuelRemaining = std::max(
             0.0,
-            flight.fuelRemaining -
-                traveledDistance * launch.cruiseFuelCost *
-                    launchFuelUseMultiplier(flight.selectedThrottle));
+            flight.fuelRemaining - traveledDistance * fuelUsePerProgress);
     }
     flight.currentMultiplier = 1.0 + targetSpan * flight.travelProgress;
     flight.peakMultiplier = std::max(flight.peakMultiplier, flight.currentMultiplier);
@@ -560,6 +597,11 @@ LaunchFlightStep updateLaunchFlight(
                 ? launch.arrivalReserveFuel
                 : 0.0);
     flight.projectedFuelReserve = flight.fuelRemaining - flight.projectedFuelRequired;
+    if (flight.fuelSurveyReturnClassifiable && !flight.returningHome &&
+        flight.fuelRemaining / std::max(0.01, flight.fuelCapacity) <=
+            tuning::launchProgression::fuelSurveyLateFuelShare + 0.000001) {
+        flight.fuelSurveyLateLatched = true;
+    }
 
     if (launch.heatEnabled) {
         double heatDelta = 0.0;
@@ -686,20 +728,11 @@ LaunchFlightStep updateLaunchFlight(
             // Moon is deliberately visible beyond it, but landing guidance is
             // not installed until Flight Controls I is earned and fitted.
             flight.failureCause = LaunchFailureCause::LunarImpact;
-        } else if (launch.config.frontierTransfer && launch.arrivalReserveFuel > 0.0) {
-            const double minimumInsertionFuel = std::max(
-                0.0,
-                launch.arrivalReserveFuel - tuning::launch::arrivalReserveGraceFuel);
-            if (flight.fuelRemaining + 0.000001 < minimumInsertionFuel) {
-                flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
-            } else {
-                flight.fuelRemaining = std::max(
-                    0.0,
-                    flight.fuelRemaining - launch.arrivalReserveFuel);
-                flight.projectedFuelRequired = 0.0;
-                flight.projectedFuelReserve = flight.fuelRemaining;
-                result.reachedDestination = true;
-            }
+        } else if (launch.config.frontierTransfer && flight.fuelRemaining <= 0.000001) {
+            // The only landing fuel rule is literal exhaustion. Reaching the
+            // destination with any fuel left lands normally; arriving dry is
+            // the clearly taught consequence of over-burning the route.
+            flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
         } else {
             result.reachedDestination = true;
         }
@@ -806,6 +839,7 @@ LaunchOutcome resolveLaunch(
     outcome.ejectMultiplier = std::max(1.0, burnMultiplier);
     outcome.pilotedFlight = resolution.pilotedFlight;
     outcome.failureCause = resolution.failureCause;
+    outcome.fuelSurveyReturnTiming = resolution.fuelSurveyReturnTiming;
     outcome.minimumSafetyMargin = resolution.minimumSafetyMargin;
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);

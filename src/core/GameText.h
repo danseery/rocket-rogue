@@ -25,7 +25,7 @@ inline constexpr std::string_view refitWindowClosed = "Refit window closed. Hand
 inline constexpr std::string_view refitRerollUnaffordable = "Not enough mission credits to reroll the refit board.";
 inline constexpr std::string_view arrivalFanfare = "Arrival confirmed. Approach window ready.";
 inline constexpr std::string_view arrivalOpsOpened = "Arrival confirmed. Choose how much mission risk to take before refit.";
-inline constexpr std::string_view flybyCompleted = "Flyby complete. The probe pass banked safe science and kept the vehicle moving.";
+inline constexpr std::string_view flybyCompleted = "Flyby complete. The probe pass validated safe science and kept the vehicle moving.";
 inline constexpr std::string_view orbitCompleted = "Orbital insertion complete. High-value mapping data recovered.";
 inline constexpr std::string_view moonFlybyRequired = "Moon landing requires one flyby before the agency clears orbital work.";
 inline constexpr std::string_view moonOrbitRequired = "Moon landing requires a successful orbit before descent.";
@@ -49,7 +49,7 @@ inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced 
 inline constexpr std::string_view miningStarted = "Mining Rig deployed. Mine outward; Support Drones deliver to the Ship automatically.";
 inline constexpr std::string_view miningStowed = "Ship cargo secured. Oxygen replenished.";
 inline constexpr std::string_view miningAborted = "Emergency recall fired. Ship cargo is safe; Rig and Support Drone ore was lost.";
-inline constexpr std::string_view miningDrillFailed = "Drill offline. Return, bank, tether, or recall.";
+inline constexpr std::string_view miningDrillFailed = "Drill offline. Return, stow, tether, or recall.";
 inline constexpr std::string_view miningOxygenFailed = "O2 depleted: Mining Rig integrity draining.";
 inline constexpr std::string_view miningThermalHazard = "Thermal pocket contact: rig plating is taking damage. Back away while the Hazard Drone treats it.";
 inline constexpr std::string_view miningCryoHazard = "Cryo pocket contact: rig movement is impaired. Clear the pocket or route around it.";
@@ -128,8 +128,8 @@ inline constexpr std::string_view thrustRestored = "Engines on. Temperature will
 inline constexpr std::string_view returnVehicleLost = "Return trajectory failed. Vehicle lost during recovery.";
 inline constexpr std::string_view transferVehicleLost = "Transfer vehicle lost. New crew, new vehicle, same frontier ledger.";
 inline constexpr std::string_view vehicleLost = "Vehicle lost. The agency recovered fragments and uncomfortable lessons.";
-inline constexpr std::string_view extraProvingData = "Extra proving data banked. The curve is opening up, and so is the temptation.";
-inline constexpr std::string_view missionDataBanked = "Mission data banked. Keep testing, upgrading, and deciding how bold the next burn should be.";
+inline constexpr std::string_view extraProvingData = "Extra proving telemetry validated. The curve is opening up, and so is the temptation.";
+inline constexpr std::string_view missionDataBanked = "Mission telemetry validated. Keep testing, upgrading, and deciding how bold the next burn should be.";
 inline constexpr std::string_view transferAbortedReturn = "Transfer aborted. Vehicle returned with valuable long-burn data.";
 inline constexpr std::string_view transferReturnEarly = "Transfer return was early. Crew survived, but the frontier remains unproven.";
 inline constexpr std::string_view earlyReturnUseful = "Early return confirmed. Useful approach data recovered from the proving route.";
@@ -184,7 +184,7 @@ inline constexpr std::string_view drillIntegrity = "Drill integrity";
 inline constexpr std::string_view droneHealth = "Rig health";
 inline constexpr std::string_view drillBit = "Drill bit";
 inline constexpr std::string_view carried = "Carried";
-inline constexpr std::string_view banked = "Banked";
+inline constexpr std::string_view banked = "Stowed";
 inline constexpr std::string_view load = "Load";
 inline constexpr std::string_view targetMaterial = "Target";
 inline constexpr std::string_view toughness = "Toughness";
@@ -236,9 +236,9 @@ inline std::string drawDetail(bool arkKnown)
 inline std::string miningRunTarget(bool arkKnown)
 {
     if (arkKnown) {
-        return "Bank useful payload before oxygen or Ark reserves make the next route too expensive.";
+        return "Stow useful payload before oxygen or Ark reserves make the next route too expensive.";
     }
-    return "Bank useful payload before oxygen or shared fuel makes the next route too expensive.";
+    return "Stow useful payload before oxygen or shared fuel makes the next route too expensive.";
 }
 
 inline std::string miningBlockedStatus(bool arkKnown)
@@ -666,7 +666,7 @@ inline constexpr std::string_view surfacePostureExtract = "Required: extract now
 inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
 inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
 inline constexpr std::string_view surfaceSurveyDetail = "Reveal the ore and artifact forecast at each scanned level before choosing where to dig.";
-inline constexpr std::string_view surfaceMineDetail = "Control the Mining Rig drone at the selected start depth to extract ore and artifacts, then bank them at the ship.";
+inline constexpr std::string_view surfaceMineDetail = "Control the Mining Rig drone at the selected start depth to extract ore and artifacts, then stow them at the ship.";
 inline constexpr std::string_view surfacePushDetail = "Tunnel one level deeper and make it the Mining Rig's new starting depth. Surveyed levels show what waits there.";
 inline constexpr std::string_view surfaceExtractDetail = "Return every material and artifact loaded onto the Ship to Earth.";
 inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerExpedition = false)

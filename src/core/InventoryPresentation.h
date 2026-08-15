@@ -114,7 +114,7 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
 
     InventorySectionPresentation resources {
         "Recovered resources",
-        "Banked materials available for research, Drone Bay work, and special components.",
+        "Stowed materials available for research, Drone Bay work, and special components.",
         {}
     };
     addInventoryItem(resources, "BP", text::labels::blueprints.data(), "Research and unlock progress", std::to_string(state.meta.blueprintProgress), "blueprint");

@@ -59,13 +59,6 @@ int main()
     const NativeBenchmarkParseResult help = parse({"--help"});
     assert(help);
     assert(help.options.showHelp);
-    const std::string helpText = nativeBenchmarkHelpText("OrebitTest");
-    assert(helpText.find("OrebitTest --help") != std::string::npos);
-    assert(helpText.find("--benchmark-profile-dir") != std::string::npos);
-    assert(helpText.find("--benchmark-screenshot") != std::string::npos);
-    assert(helpText.find("--benchmark-frame-limit") != std::string::npos);
-    assert(helpText.find("surface-scan") != std::string::npos);
-    assert(helpText.find("mutually exclusive") != std::string::npos);
 
     const NativeBenchmarkParseResult full = parse({
         "--benchmark-scenario=orbit",

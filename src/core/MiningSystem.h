@@ -39,6 +39,19 @@ struct MiningLoadStats {
     double fuelConsumptionMultiplier = 1.0;
 };
 
+// A single normalized source for discovery/luck effects. New Luck upgrades
+// extend this profile instead of coupling each encounter to equipment IDs.
+struct MiningLootLuckProfile {
+    double swarmArtifactDropBonus = 0.0;
+};
+
+struct MiningSwarmPreview {
+    bool available = false;
+    int depthZone = -1;
+    double artifactChance = 0.0;
+    std::uint64_t seed = 0;
+};
+
 std::string_view miningMaterialName(MiningCellMaterial material);
 std::string_view miningCellFeatureName(MiningCellFeature feature);
 std::string_view miningEnemyTypeName(MiningEnemyType enemy);
@@ -51,6 +64,16 @@ MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
 MiningDrillStats miningOperatorDrillStats();
+MiningLootLuckProfile miningLootLuckProfile(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceSiteProfile profile);
+MiningSwarmPreview miningSwarmPreview(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const MiningArenaRules& rules,
+    int startDepth,
+    bool authoredSite = false);
 MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog);
 bool miningCapabilityReadyForGate(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
 std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);

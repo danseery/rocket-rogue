@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
+#include "core/GameUi.h"
 #include "core/MiningProgression.h"
 #include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
@@ -19,6 +20,41 @@
 namespace rocket {
 
 void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
+
+bool surfaceOpsTutorialSurveyComplete(const GameState& state)
+{
+    return ui::briefings::acknowledged(
+               state.meta.acknowledgedActivityBriefingIds,
+               ui::briefings::mining) ||
+        ui::briefings::acknowledged(
+            state.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::surfaceSurveyComplete);
+}
+
+bool surfaceOpsTutorialDigComplete(const GameState& state)
+{
+    return ui::briefings::acknowledged(
+               state.meta.acknowledgedActivityBriefingIds,
+               ui::briefings::mining) ||
+        ui::briefings::acknowledged(
+            state.meta.acknowledgedActivityBriefingIds,
+            ui::briefings::surfaceDigComplete);
+}
+
+bool surfaceOpsTutorialDigUnlocked(const GameState& state)
+{
+    return surfaceOpsTutorialSurveyComplete(state);
+}
+
+bool surfaceOpsTutorialMiningUnlocked(const GameState& state)
+{
+    return surfaceOpsTutorialDigComplete(state);
+}
+
+bool surfaceOpsTutorialNeedsFirstSurveyBank(const GameState& state)
+{
+    return !surfaceOpsTutorialSurveyComplete(state);
+}
 
 namespace {
 
@@ -2136,11 +2172,11 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     orbit.thrustAcceleration = tuning::orbit::thrustAcceleration;
     applyShipAssistToOrbit(orbit, aggregateShipStats(state, catalog));
 
-    const double angle = tuning::orbit::startAngleRadians;
+    const double angle = tuning::orbit::flybyExitAngleRadians();
     orbit.shipX = std::cos(angle) * orbit.targetRadius;
     orbit.shipY = std::sin(angle) * orbit.targetRadius;
-    orbit.velocityX = -std::sin(angle) * tuning::orbit::startTangentialSpeed;
-    orbit.velocityY = std::cos(angle) * tuning::orbit::startTangentialSpeed;
+    orbit.velocityX = tuning::orbit::direction * -std::sin(angle) * tuning::orbit::startTangentialSpeed;
+    orbit.velocityY = tuning::orbit::direction * std::cos(angle) * tuning::orbit::startTangentialSpeed;
     orbit.angleRadians = std::atan2(orbit.shipY, orbit.shipX);
     orbit.currentZone = orbitZoneAt(orbit, orbit.shipX, orbit.shipY);
     orbit.worstZone = orbit.currentZone;
@@ -3478,6 +3514,7 @@ void mergeSurfaceDepthProspect(SurfaceExpeditionState& expedition, const Surface
     found->depthOffset = std::max(0, found->absoluteDepth - expedition.depth);
     found->possibleMaterials = maxMaterials(found->possibleMaterials, prospect.possibleMaterials);
     found->possibleArtifacts = std::max(found->possibleArtifacts, prospect.possibleArtifacts);
+    found->informationPercent = std::max(found->informationPercent, prospect.informationPercent);
 }
 
 SurfaceDepthProspect rollSurfaceDepthProspect(
@@ -3568,6 +3605,66 @@ std::vector<MiningCellMaterial> depthProspectMarkers(const SurfaceDepthProspect&
     return markers;
 }
 
+void addSurfaceScanMarker(SurfaceDepthProspect& prospect, MiningCellMaterial marker)
+{
+    switch (marker) {
+    case MiningCellMaterial::CommonOre:
+        prospect.possibleMaterials.common += 1;
+        break;
+    case MiningCellMaterial::RareOre:
+        prospect.possibleMaterials.rare += 1;
+        break;
+    case MiningCellMaterial::ExoticVein:
+        prospect.possibleMaterials.exotic += 1;
+        break;
+    case MiningCellMaterial::ArtifactCache:
+        prospect.possibleArtifacts += 1;
+        break;
+    default:
+        break;
+    }
+}
+
+SurfaceScanPulseGrade surfaceScanPulseGrade(const SurfaceScanRunState& scan)
+{
+    constexpr double twoPi = 6.28318530717958647692;
+    const double sweep = tuning::research::surfaceScanSweepAngleRadians(scan.elapsedSeconds);
+    const double difference = std::abs(std::remainder(
+        sweep - tuning::research::scanWindowCenterRadians,
+        twoPi));
+    if (difference <= tuning::research::scanPerfectWindowHalfAngleRadians) {
+        return SurfaceScanPulseGrade::Perfect;
+    }
+    if (difference <= tuning::research::scanGoodWindowHalfAngleRadians) {
+        return SurfaceScanPulseGrade::Good;
+    }
+    return SurfaceScanPulseGrade::Miss;
+}
+
+SurfaceDepthProspect partialSurfaceDepthProspect(const SurfaceDepthProspect& complete, Random& rng)
+{
+    SurfaceDepthProspect partial = complete;
+    partial.possibleMaterials = {};
+    partial.possibleArtifacts = 0;
+    partial.informationPercent = tuning::research::scanGoodInformationPercent;
+
+    const std::vector<MiningCellMaterial> markers = depthProspectMarkers(complete);
+    bool revealedMarker = false;
+    for (const MiningCellMaterial marker : markers) {
+        const bool revealGuaranteedCurrentLayerMarker =
+            partial.depthOffset == 0 && marker == MiningCellMaterial::CommonOre;
+        if (revealGuaranteedCurrentLayerMarker ||
+            rng.chance(static_cast<double>(tuning::research::scanGoodInformationPercent) / 100.0)) {
+            addSurfaceScanMarker(partial, marker);
+            revealedMarker = true;
+        }
+    }
+    if (!revealedMarker && !markers.empty()) {
+        addSurfaceScanMarker(partial, markers.front());
+    }
+    return partial;
+}
+
 void appendSurfacePushMarkers(SurfacePushRunState& push, const MaterialInventory& gain, bool artifactFound, int depthOffset)
 {
     for (int i = 0; i < std::max(0, gain.common); ++i) {
@@ -3617,13 +3714,15 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     scan.active = true;
     scan.destinationId = expedition.destinationId;
     scan.maxPulses = support.reachablePushSteps + 1;
+    scan.elapsedSeconds = tuning::research::scanWindowCenterRadians /
+        tuning::research::scanSweepRadiansPerSecond;
     scan.signal = std::clamp(0.12 + support.signalBonus, 0.0, 0.42);
     scan.interference = std::clamp(expedition.hazard * 0.25 - support.riskRelief * 0.35, 0.0, 0.30);
     scan.bustRisk = std::clamp(
         tuning::research::scanBaseBustRisk + expedition.hazard * tuning::research::scanBustRiskHazardScale - support.riskRelief,
         0.02,
         0.38);
-    scan.message = "Scanner lattice armed. Pulse 1 maps +0; later pulses preview deeper push layers.";
+    scan.message = "Time the sweep: green maps all data; yellow maps 80%.";
     state.run.surfaceScan = scan;
     state.screen = Screen::SurfaceScan;
     outcome.message = "Scanner lattice armed. Survey levels before deciding where to Dig.";
@@ -3640,21 +3739,9 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     }
 
     outcome.applied = true;
-    if (rng.chance(scan.bustRisk)) {
-        scan.completed = true;
-        scan.busted = true;
-        scan.active = false;
-        state.run.surfaceExpedition.hazard += tuning::research::scanBustHazardIncrease;
-        outcome.hazardTriggered = true;
-        outcome.hazardMessage = "Interference burned the survey window.";
-        outcome.hazardDelta = tuning::research::scanBustHazardIncrease;
-        outcome.message = "Scan busted. The crew pulled the array before it cooked the rig.";
-        scan.message = surfaceActionSummary(outcome);
-        appendSurfaceLog(state.run.surfaceExpedition, scan.message);
-        return outcome;
-    }
-
     scan.pulses += 1;
+    scan.lastPulseGrade = surfaceScanPulseGrade(scan);
+    scan.lastPulseDepthOffset = static_cast<int>(scan.depthProspects.size());
     const SurfaceScanSupport support = surfaceScanSupport(state);
     scan.signal = std::clamp(scan.signal + tuning::research::scanSignalPerPulse + support.signalBonus * 0.35 + rng.range(0.02, 0.09), 0.0, 1.0);
     scan.interference = std::clamp(scan.interference + std::max(0.06, 0.12 - support.riskRelief * 0.30) + rng.range(0.00, 0.05), 0.0, 1.0);
@@ -3669,8 +3756,28 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         0.02,
         0.72);
 
-    const int depthOffset = scan.pulses - 1;
-    const SurfaceDepthProspect prospect = rollSurfaceDepthProspect(state, depthOffset, scan.signal, support, rng);
+    const int depthOffset = scan.lastPulseDepthOffset;
+    if (scan.lastPulseGrade == SurfaceScanPulseGrade::Miss) {
+        scan.successFanfareSeconds = 0.0;
+        outcome.message = scan.pulses >= scan.maxPulses
+            ? "Sweep missed. The final pulse returned no data; log the survey you have."
+            : "Sweep missed. Pulse spent; no data recorded. Try level +" + std::to_string(depthOffset) + " again.";
+        scan.message = surfaceActionSummary(outcome);
+        if (scan.pulses >= scan.maxPulses) {
+            scan.completed = true;
+        }
+        return outcome;
+    }
+
+    SurfaceDepthProspect prospect = rollSurfaceDepthProspect(state, depthOffset, scan.signal, support, rng);
+    if (scan.lastPulseGrade == SurfaceScanPulseGrade::Good) {
+        prospect = partialSurfaceDepthProspect(prospect, rng);
+    } else {
+        prospect.informationPercent = tuning::research::scanPerfectInformationPercent;
+    }
+    scan.successFanfareSeconds = scan.lastPulseGrade == SurfaceScanPulseGrade::Perfect
+        ? tuning::research::scanPerfectSuccessFanfareSeconds
+        : tuning::research::scanGoodSuccessFanfareSeconds;
     scan.depthProspects.push_back(prospect);
     if (prospect.possibleArtifacts > 0 && scan.temporaryArtifacts.empty()) {
         scan.temporaryArtifacts.push_back({artifactId(state.run.surfaceExpedition), state.run.surfaceExpedition.destinationId, false});
@@ -3685,9 +3792,12 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     outcome.materialDelta = prospect.possibleMaterials;
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = scanHazardDelta;
+    const std::string quality = scan.lastPulseGrade == SurfaceScanPulseGrade::Perfect
+        ? "Perfect pulse: all data mapped"
+        : "Good pulse: 80% data mapped";
     outcome.message = scan.pulses >= scan.maxPulses
-        ? "Full spectrum scan complete. Bank the forecast before the window collapses."
-        : "Survey mapped level +" + std::to_string(depthOffset) + ". Dig to make that level the Mining Rig's start point.";
+        ? quality + ". Scan complete; log the survey."
+        : quality + " for level +" + std::to_string(depthOffset) + ".";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
         scan.completed = true;
@@ -3701,14 +3811,15 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
     if (!scan.completed && !scan.active) {
-        outcome.message = "No surface scan is ready to bank.";
+        outcome.message = "No surface survey is ready to log.";
         return outcome;
     }
 
     outcome.applied = true;
     if (scan.busted) {
-        outcome.message = "Scan window closed. No forecast banked.";
+        outcome.message = "Scan window closed. No survey logged.";
     } else {
+        const bool tutorialSurveyCompleted = scan.pulses > 0;
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
             const SurfaceDepthProspect* existing = findSurfaceDepthProspect(expedition, prospect.absoluteDepth);
             const MaterialInventory existingMaterials = existing == nullptr ? MaterialInventory{} : existing->possibleMaterials;
@@ -3721,10 +3832,15 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
         }
         expedition.hazard += scan.hazardDelta;
         expedition.miningSitePrepared = true;
+        if (tutorialSurveyCompleted) {
+            ui::briefings::acknowledge(
+                state.meta.acknowledgedActivityBriefingIds,
+                ui::briefings::surfaceSurveyComplete);
+        }
         outcome.hazardDelta = scan.hazardDelta;
         outcome.message = !scan.depthProspects.empty()
-            ? "Survey banked. Level forecasts now show what each Dig can reach."
-            : "Scan banked. The crew found a clean mining line, but no strong payload.";
+            ? "Survey logged. Level forecasts now show what each Dig can reach."
+            : "Survey logged. The crew found a clean mining line, but no strong payload.";
     }
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
     resetSurfaceScan(state);
@@ -3740,7 +3856,7 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state)
         return outcome;
     }
     outcome.applied = true;
-    outcome.message = "Surface scan recalled. No forecast banked.";
+    outcome.message = "Surface scan recalled. No survey logged.";
     appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
     resetSurfaceScan(state);
     state.screen = Screen::SurfaceExpedition;
@@ -3772,10 +3888,10 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
         tuning::research::pushBaseCollapseRisk + expedition.hazard * tuning::research::pushRiskHazardScale - support.collapseRelief,
         0.04,
         0.42);
-    push.message = "Descent lane armed. Layer +1 is guaranteed and bankable; collapse risk begins on the next push.";
+    push.message = "Descent lane armed. Layer +1 is guaranteed; collapse risk begins on the next push.";
     state.run.surfacePush = push;
     state.screen = Screen::SurfacePush;
-    outcome.message = "Deep route armed. The first layer is safe; later pushes risk the unbanked route.";
+    outcome.message = "Deep route armed. The first layer is safe; later pushes risk the unfinished tunnel.";
     return outcome;
 }
 
@@ -3852,10 +3968,10 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     outcome.message = thermalSurface
         ? "Thermal seam confirmed. Its mapped resources will require Hazard treatment in the mining layer."
         : push.steps >= push.maxSteps
-            ? "Maximum depth reached. Bank the confirmed route."
+            ? "Maximum depth reached. Set the start depth."
             : (forecast != nullptr
-                ? "Layer +" + std::to_string(push.steps) + " confirmed. Bank now or risk it on the next push."
-                : "Blind layer +" + std::to_string(push.steps) + " confirmed. Bank now or risk it on the next push.");
+                ? "Layer +" + std::to_string(push.steps) + " confirmed. Set the start depth now or risk it on the next push."
+                : "Blind layer +" + std::to_string(push.steps) + " confirmed. Set the start depth now or risk it on the next push.");
     push.message = surfaceActionSummary(outcome);
     if (push.steps >= push.maxSteps) {
         push.completed = true;
@@ -3869,14 +3985,15 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     SurfaceActionOutcome outcome;
     if (!push.completed && !push.active) {
-        outcome.message = "No deep route is ready to bank.";
+        outcome.message = "No start depth is ready to set.";
         return outcome;
     }
 
     outcome.applied = true;
     if (push.busted) {
-        outcome.message = "Deep route lost. No new payload banked.";
+        outcome.message = "Deep route lost. No new start depth set.";
     } else {
+        const bool tutorialDigCompleted = push.steps > 0 && push.depthGain > 0;
         expedition.prospectMaterials = {};
         expedition.prospectArtifacts = 0;
         addMaterials(expedition.prospectMaterials, push.temporaryMaterials);
@@ -3884,10 +4001,15 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
         expedition.depth += std::max(1, push.depthGain);
         expedition.hazard += push.hazardDelta;
         expedition.miningSitePrepared = true;
+        if (tutorialDigCompleted) {
+            ui::briefings::acknowledge(
+                state.meta.acknowledgedActivityBriefingIds,
+                ui::briefings::surfaceDigComplete);
+        }
         outcome.hazardDelta = push.hazardDelta;
         outcome.message = hasPendingSurfacePayload(push.temporaryMaterials, push.temporaryArtifacts, push.cargo)
-            ? "Deep route banked. Richer deposits are marked in the mining lane."
-            : "Deep route banked. The next mining lane is open.";
+            ? "Start depth set. Richer deposits are marked in the mining lane."
+            : "Start depth set. The next mining lane is open.";
     }
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
     resetSurfacePush(state);

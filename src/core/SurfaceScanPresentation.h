@@ -16,7 +16,7 @@ namespace rocket {
 struct SurfaceScanRailPresentation {
     std::string kicker = "OREBIT";
     std::string title = "Survey Scan";
-    std::string objective = "Read the layer, then bank";
+    std::string objective = "Time the pulse: green maps all data; yellow maps 80%.";
     std::array<PanelMetricPresentation, 3> metrics;
     std::string signal;
     int signalPercent = 0;
@@ -64,6 +64,21 @@ inline std::string surfaceScanProspectCssClass(std::string_view label)
     return "common";
 }
 
+inline std::string surfaceScanPulseGradeLabel(SurfaceScanPulseGrade grade)
+{
+    switch (grade) {
+    case SurfaceScanPulseGrade::Miss:
+        return "MISS";
+    case SurfaceScanPulseGrade::Good:
+        return "GOOD 80%";
+    case SurfaceScanPulseGrade::Perfect:
+        return "PERFECT 100%";
+    case SurfaceScanPulseGrade::None:
+    default:
+        return "STANDBY";
+    }
+}
+
 inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& state)
 {
     const SurfaceScanRunState& scan = state.run.surfaceScan;
@@ -71,7 +86,7 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
     presentation.metrics = {{
         panelMetric("PULSES", std::to_string(scan.pulses) + "/" + std::to_string(std::max(1, scan.maxPulses))),
         panelMetric("FORECAST", scan.cargo > 0 ? "+" + std::to_string(scan.cargo) : "0"),
-        panelMetric("RISK", display::percent(scan.bustRisk))
+        panelMetric("LAST", surfaceScanPulseGradeLabel(scan.lastPulseGrade))
     }};
     presentation.signalPercent = std::clamp(
         static_cast<int>(scan.signal * 100.0 + 0.5),
@@ -79,7 +94,10 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
         100);
     presentation.signal = std::to_string(presentation.signalPercent) + "%";
 
-    if (scan.depthProspects.empty()) {
+    if (scan.lastPulseGrade == SurfaceScanPulseGrade::Miss) {
+        presentation.layerReadout = "LAYER +" + std::to_string(std::max(0, scan.lastPulseDepthOffset)) + ": NO DATA — PULSE AGAIN";
+        presentation.layerCssClass = "empty";
+    } else if (scan.depthProspects.empty()) {
         presentation.layerReadout = "NO LAYER READ";
         presentation.layerCssClass = "empty";
     } else {
@@ -88,6 +106,7 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
         presentation.layerReadout = "LAYER +" + std::to_string(std::max(0, latest.depthOffset)) + ": ";
         if (dominant.amount > 0) {
             presentation.layerReadout += dominant.label + " +" + std::to_string(dominant.amount);
+            presentation.layerReadout += " // " + std::to_string(std::clamp(latest.informationPercent, 0, 100)) + "% DATA";
             presentation.layerCssClass = surfaceScanProspectCssClass(dominant.label);
         } else {
             presentation.layerReadout += "CLEAR";
@@ -107,7 +126,7 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
         ? disabledPanelButton("PULSE COMPLETE")
         : panelActionButton("PULSE SCANNER", ui::actions::surfaceScanPulse, "warn scan-pulse-action"));
     presentation.actions.push_back(panelActionButton(
-        "BANK FORECAST",
+        "LOG SURVEY",
         ui::actions::surfaceScanBank,
         "ok scan-bank-action"));
     presentation.actions.push_back(panelActionButton(

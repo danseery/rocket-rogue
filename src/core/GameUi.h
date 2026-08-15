@@ -170,6 +170,8 @@ inline constexpr std::string_view landingIntroduction = "landing_introduction";
 inline constexpr std::string_view miniDroneIntroduction = "mini_drone_introduction";
 inline constexpr std::string_view droneSynergies = "drone_synergies";
 inline constexpr std::string_view miningIntroduction = "mining_introduction";
+inline constexpr std::string_view surfaceSurveyIntroduction = "surface_survey_introduction";
+inline constexpr std::string_view surfaceDigIntroduction = "surface_dig_introduction";
 inline constexpr std::string_view prospectorCompletion = "prospector_completion";
 inline constexpr std::string_view lunarMiningBriefing = "lunar_mining_briefing";
 inline constexpr std::string_view marsMiningBriefing = "mars_mining_briefing";
@@ -188,6 +190,10 @@ inline constexpr std::string_view orbit = "orbit_blueprints";
 inline constexpr std::string_view landing = "landing_drone_upgrades";
 inline constexpr std::string_view miniDrones = "mini_drones";
 inline constexpr std::string_view mining = "mining_overview";
+inline constexpr std::string_view surfaceSurveyIntroduction = "surface_survey_introduction";
+inline constexpr std::string_view surfaceDigIntroduction = "surface_dig_introduction";
+inline constexpr std::string_view surfaceSurveyComplete = "surface_survey_complete";
+inline constexpr std::string_view surfaceDigComplete = "surface_dig_complete";
 inline constexpr std::string_view prospectorComplete = "prospector_complete";
 
 inline bool acknowledged(const std::vector<std::string>& ids, std::string_view id)

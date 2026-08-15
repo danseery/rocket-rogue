@@ -104,6 +104,14 @@ namespace launchProgression {
 inline constexpr int maximumUpgradeRank = 3;
 inline constexpr double upgradeCost = 22.0;
 inline constexpr double lessonReward = 22.0;
+// The first flight runs slowly and provides long, distinct warning windows so
+// the player can read the lesson before making the turnaround decision.
+inline constexpr double fuelSurveyPrepareFuelShare = 0.75;
+inline constexpr double fuelSurveyTargetFuelShare = 0.50;
+inline constexpr double fuelSurveyLateFuelShare = 0.30;
+inline constexpr double fuelSurveyProgressRateScale = 0.55;
+inline constexpr double fuelSurveySafetyBonus = 3.0;
+inline constexpr int fuelSurveyLateStress = 5;
 inline constexpr double baseFuelCapacity = 10.0;
 inline constexpr double fuelPerTankRank = 5.0;
 inline constexpr double moonTransitFuel = 10.0;
@@ -179,11 +187,6 @@ namespace launch {
 inline constexpr double routeFuelBase = 5.0;
 inline constexpr double routeFuelPerTier = 5.0;
 inline constexpr double routeFuelMaximum = 20.0;
-inline constexpr double arrivalReserveFuel = 5.0;
-// Insertion guidance can safely stretch the taught reserve by one unit. The
-// HUD still teaches five as the target, but a pilot experimenting with the
-// controls is not destroyed for arriving slightly under it.
-inline constexpr double arrivalReserveGraceFuel = 1.0;
 inline constexpr double calibratedThrottle = 0.60;
 inline constexpr double fuelDistanceBaseMultiplier = 0.70;
 inline constexpr double fuelDistanceThrottleMultiplier = 0.30;
@@ -375,7 +378,20 @@ inline constexpr double planetTierRadius = 0.016;
 inline constexpr double targetRadiusScale = 2.95;
 inline constexpr double goodBandScale = 0.55;
 inline constexpr double perfectBandScale = 0.24;
-inline constexpr double startAngleRadians = -2.70;
+// Orbit insertion begins at the Flyby endpoint, measured from the destination
+// center with the standard atan2(y, x) mathematical angle. With the authored
+// path this is approximately 0.797 radians; calculating it here keeps both
+// activities aligned when that path is retuned.
+inline double flybyExitAngleRadians() noexcept
+{
+    return std::atan2(
+        flyby::endY - flyby::destinationY,
+        flyby::endX - flyby::destinationX);
+}
+
+// Negative math-space angular travel keeps the same clockwise screen-space
+// motion as the preceding pass.
+inline constexpr double direction = -1.0;
 inline constexpr double startTangentialSpeed = 0.36;
 inline constexpr double thrustAcceleration = 0.075;
 inline constexpr double sensorGoodBandScale = 0.012;
@@ -489,6 +505,19 @@ inline constexpr int artifactInsightBlueprintMaximum = 3;
 inline constexpr int surfaceLogEntryLimit = 5;
 inline constexpr int pushMaxSteps = 4;
 inline constexpr int scanMaxPulses = pushMaxSteps + 1;
+inline constexpr double scanSweepRadiansPerSecond = 2.70;
+inline constexpr double scanWindowCenterRadians = 1.57079632679489661923;
+inline constexpr double scanGoodWindowHalfAngleRadians = 0.42;
+inline constexpr double scanPerfectWindowHalfAngleRadians = 0.13;
+inline constexpr int scanGoodInformationPercent = 80;
+inline constexpr int scanPerfectInformationPercent = 100;
+inline constexpr double scanGoodSuccessFanfareSeconds = 0.70;
+inline constexpr double scanPerfectSuccessFanfareSeconds = 1.05;
+inline double surfaceScanSweepAngleRadians(double elapsedSeconds) noexcept
+{
+    constexpr double twoPi = 6.28318530717958647692;
+    return std::fmod(std::max(0.0, elapsedSeconds) * scanSweepRadiansPerSecond, twoPi);
+}
 inline constexpr double scanBaseBustRisk = 0.04;
 inline constexpr double scanBustRiskPerPulse = 0.055;
 inline constexpr double scanBustRiskHazardScale = 0.16;

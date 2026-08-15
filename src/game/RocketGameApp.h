@@ -244,6 +244,7 @@ private:
     void clearFlightControls();
     void clearResultView();
     void beginSurfaceExpeditionOrRefit();
+    bool openRefitIfAvailable(bool regenerateOffers = true);
     double liveBurnMultiplier() const;
     void applyRealtimeInputs();
     void releaseRealtimeInputs(bool releaseKeyboard);

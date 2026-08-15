@@ -46,6 +46,7 @@ enum class PanelOverlayKind {
 enum class ModalTone {
     Neutral,
     Positive,
+    Warning,
     Negative
 };
 
@@ -53,6 +54,7 @@ constexpr std::string_view modalToneCssClass(ModalTone tone) noexcept
 {
     switch (tone) {
     case ModalTone::Positive: return "modal-tone-positive";
+    case ModalTone::Warning: return "modal-tone-warning";
     case ModalTone::Negative: return "modal-tone-negative";
     case ModalTone::Neutral:
     default: return {};

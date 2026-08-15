@@ -66,6 +66,7 @@ struct RefitWindowPresentation {
     double rerollCost = 0.0;
     bool showReroll = true;
     PanelButtonPresentation rerollAction;
+    bool showSkip = true;
     PanelButtonPresentation skipAction;
 };
 
@@ -132,7 +133,7 @@ inline std::string launchUpgradeDetail(const ShipModule& module)
     case LaunchUpgradeKind::FuelTanks:
         return "Adds 5 fuel. More fuel extends range and protects the return margin.";
     case LaunchUpgradeKind::FlightControls:
-        return "Control chaos falls to " +
+        return "Flight instability falls to " +
             display::percent(launchControlChaosForRank(module.launchUpgradeRank)) +
             ". Steering drift, oversteer, and throttle kicks all settle down.";
     case LaunchUpgradeKind::Cooling:
@@ -205,7 +206,7 @@ inline std::string modulePrimaryImpact(const ShipModule& module)
     case LaunchUpgradeKind::FuelTanks:
         return "+5 fuel";
     case LaunchUpgradeKind::FlightControls:
-        return "Chaos \xE2\x86\x92 " + display::percent(launchControlChaosForRank(module.launchUpgradeRank));
+        return "Instability \xE2\x86\x92 " + display::percent(launchControlChaosForRank(module.launchUpgradeRank));
     case LaunchUpgradeKind::Cooling:
         return "Cooling \xE2\x86\x92 " +
             display::fixed(launchEngineOffCoolingForRank(module.launchUpgradeRank) * 100.0, 0) + "%/s";
@@ -252,7 +253,7 @@ inline std::vector<RefitStatChip> moduleStatChips(const ShipModule& module)
     case LaunchUpgradeKind::FuelTanks:
         return {{"FUEL", "+5", true}};
     case LaunchUpgradeKind::FlightControls:
-        return {{"CHAOS", display::percent(launchControlChaosForRank(module.launchUpgradeRank)), true}};
+        return {{"INSTABILITY", display::percent(launchControlChaosForRank(module.launchUpgradeRank)), true}};
     case LaunchUpgradeKind::Cooling:
         return {{"COOL", display::fixed(launchEngineOffCoolingForRank(module.launchUpgradeRank) * 100.0, 0) + "%/s", true}};
     case LaunchUpgradeKind::Hull:
@@ -539,6 +540,9 @@ inline RefitWindowPresentation refitWindowPresentation(const GameState& state, c
     presentation.rerollAction = state.run.credits >= presentation.rerollCost
         ? panelActionButton(text::panel::rerollOffers(display::money(presentation.rerollCost)), ui::actions::rerollOffers, "warn")
         : disabledPanelButton(display::needCredits(presentation.rerollCost));
+    // Training refits teach a required capability.  They are not a choice
+    // window: leaving without the upgrade only produces a blocked launch.
+    presentation.showSkip = !curatedProvingRefitsActive(state);
     presentation.skipAction = panelActionButton(text::buttons::keepCredits, ui::actions::next);
     return presentation;
 }

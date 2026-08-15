@@ -84,7 +84,7 @@ inline void addLaunchLessonCopy(
     case LaunchMissionKind::FuelCalibration:
         presentation.objectiveTitle = "TURN AROUND ON LOW FUEL";
         presentation.objectiveCopy =
-            "The Moon is out of range. Fly until FUEL warns, then Turn Around and bring the route data home.";
+            "The Moon is out of range. When FUEL warns, Turn Around any time before the tank reaches 0. The return burn is protected.";
         break;
     case LaunchMissionKind::FlightControlsCalibration:
         presentation.objectiveTitle = "CALIBRATE FLIGHT CONTROLS";
@@ -108,12 +108,7 @@ inline void addLaunchLessonCopy(
         } else if (launch.heatEnabled) {
             presentation.objectiveCopy = "Manage fuel and temperature. Turn Engines Off before heat reaches critical.";
         } else if (launch.manualControlsEnabled) {
-            if (launch.config.frontierTransfer && launch.arrivalReserveFuel > 0.0) {
-                presentation.objectiveCopy =
-                    "Reach " + destination.name + ". Higher throttle uses more fuel.";
-            } else {
-                presentation.objectiveCopy = "Manage fuel, throttle, and course through the full route.";
-            }
+            presentation.objectiveCopy = "Reach " + destination.name + ". Higher throttle uses more fuel.";
         } else {
             presentation.objectiveCopy = "Watch FUEL and preserve enough for the return leg.";
         }
@@ -126,6 +121,17 @@ inline std::string launchStatusMessage(
     const LaunchFlightState& flight,
     const FlightActionState& actions)
 {
+    if (launch.config.missionKind == LaunchMissionKind::FuelCalibration &&
+        actions.returningHome) {
+        switch (flight.fuelSurveyReturnTiming) {
+        case FuelSurveyReturnTiming::Timely:
+            return "RETURN COMMITTED \xE2\x80\x94 Safety bonus secured";
+        case FuelSurveyReturnTiming::Late:
+            return "RETURN COMMITTED \xE2\x80\x94 Late-return penalty recorded";
+        case FuelSurveyReturnTiming::Unqualified:
+            return "RETURN COMMITTED \xE2\x80\x94 Route data incomplete";
+        }
+    }
     if (flight.fuelFailureSeconds > 0.0) {
         return "OUT OF FUEL \xE2\x80\x94 rescue in " + display::fixed(
             std::max(0.0, tuning::launch::pilotingFuelFailureSeconds - flight.fuelFailureSeconds),
@@ -144,12 +150,27 @@ inline std::string launchStatusMessage(
     if (launch.asteroidsEnabled && flight.hullRemaining <= flight.hullMaximum * 0.25) {
         return "HULL CRITICAL \xE2\x80\x94 avoid the next asteroid band";
     }
+    if (!actions.returningHome &&
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration) {
+        const double fuelShare = flight.fuelRemaining /
+            std::max(0.01, flight.fuelCapacity);
+        if (fuelShare <= tuning::launchProgression::fuelSurveyLateFuelShare) {
+            return "LATE RETURN \xE2\x80\x94 Turn Around Now \xE2\x80\xA2 -3 credits \xE2\x80\xA2 +5 stress";
+        }
+        if (fuelShare <= tuning::launchProgression::fuelSurveyTargetFuelShare) {
+            return "TURN AROUND NOW \xE2\x80\x94 +3 credit safety bonus";
+        }
+        if (fuelShare <= tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+            return "TURNAROUND APPROACHING \xE2\x80\x94 Prepare to Turn Around";
+        }
+        return "COLLECTING ROUTE DATA";
+    }
     if (!actions.returningHome && !launch.config.frontierTransfer &&
         flight.projectedFuelReserve <= 0.0) {
         return "FUEL LOW \xE2\x80\x94 Turn Around now";
     }
     if (!actions.returningHome && launch.config.frontierTransfer &&
-        flight.projectedFuelReserve < -tuning::launch::arrivalReserveGraceFuel - 0.05) {
+        flight.projectedFuelReserve < -0.05) {
         return "FUEL LOW \xE2\x80\x94 reduce throttle";
     }
     if (launch.heatEnabled && flight.heat >= tuning::launch::pilotingCriticalThreshold) {
@@ -171,7 +192,7 @@ inline std::string launchStatusMessage(
     }
     switch (launch.config.missionKind) {
     case LaunchMissionKind::FuelCalibration:
-        return "Watch FUEL. Turn Around when the warning appears.";
+        return "COLLECTING ROUTE DATA";
     case LaunchMissionKind::FlightControlsCalibration:
         return "UNCALIBRATED LANDING — turn at the yellow test line. The Moon will cause an impact.";
     case LaunchMissionKind::ThermalManagement:

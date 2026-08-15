@@ -72,7 +72,10 @@ inline bool rewardedLaunchLessonReturn(const LaunchOutcome& outcome)
     return !outcome.frontierTransfer &&
         outcome.recoveryMethod == RecoveryMethod::ReturnHome &&
         outcome.failureCause == LaunchFailureCause::None &&
-        std::abs(netFunding - tuning::launchProgression::lessonReward) < 0.5;
+        (std::abs(netFunding - tuning::launchProgression::lessonReward) < 0.5 ||
+            std::abs(netFunding -
+                (tuning::launchProgression::lessonReward +
+                    tuning::launchProgression::fuelSurveySafetyBonus)) < 0.5);
 }
 
 inline std::string launchLessonUpgradeName(LaunchTrainingStage nextStage)
@@ -103,29 +106,28 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
         return {
             "LUNAR IMPACT",
             "The uncalibrated landing solution carried the ship into the Moon. Flight Controls I is required before attempting a lunar transfer.",
-            "No calibration data banked | Rebuild and complete the test flight"
+            "No calibration telemetry validated | Rebuild and complete the test flight"
+        };
+    }
+    if (outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Late) {
+        return {
+            "LATE RETURN",
+            "The route data was recovered, but the ship passed the safe turnaround window before committing home.",
+            "Fuel Tanks I unlocked | Safety bonus -3 | Pilot stress +5"
         };
     }
     if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
         return {
             "TRAINING RESCUE",
-            "Mission Control recovered the crew after a visible flight limit was ignored. No calibration data was banked.",
+            "Mission Control recovered the crew after the ship exhausted its fuel before safe completion. No calibration telemetry was validated.",
             "No upgrade unlocked | Review the warning and retry"
-        };
-    }
-    if (outcome.failureCause == LaunchFailureCause::FuelExhausted &&
-        outcome.frontierTransfer) {
-        return {
-            "INSERTION FUEL SHORT",
-            "The ship reached the destination approach without the minimum fuel needed to complete insertion.",
-            "Reduce throttle earlier | Keep at least 4 fuel for landing"
         };
     }
     if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
         rewardedLaunchLessonReturn(outcome)) {
         const std::string upgrade = launchLessonUpgradeName(state.meta.launchLessons.stage);
         return {
-            "CALIBRATION DATA BANKED",
+            "CALIBRATION TELEMETRY VALIDATED",
             "The crew completed the lesson and returned the test ship safely.",
             funding + " | Install " + upgrade
         };
@@ -203,7 +205,7 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
     }
     return {
         "SAFE RETURN",
-        "The crew and ship are home. Any completed lesson data has been banked.",
+        "The crew and ship are home. Any completed lesson telemetry has been validated.",
         funding + "  •  Prepare the next launch"
     };
 }
@@ -215,10 +217,6 @@ inline std::string_view launchOutcomeLabel(const LaunchOutcome& outcome)
     }
     if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
         return "Training Rescue";
-    }
-    if (outcome.failureCause == LaunchFailureCause::FuelExhausted &&
-        outcome.frontierTransfer) {
-        return "Insertion Fuel Short";
     }
     if (outcome.type == LaunchResultType::Destroyed) {
         if (outcome.recoveryMethod == RecoveryMethod::ReturnHome) {
@@ -259,12 +257,17 @@ inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome,
         if (outcome.failureCause == LaunchFailureCause::LunarImpact) {
             notes.emplace_back("The ship collided with the Moon because lunar landing guidance has not been calibrated.");
         } else if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
-            notes.emplace_back("Mission Control recovered the crew. No calibration data was banked.");
+            notes.emplace_back("Mission Control recovered the crew after the ship exhausted its fuel before safe completion. No calibration telemetry was validated.");
         } else if (outcome.failureCause != LaunchFailureCause::None) {
             notes.push_back("Flight ended by " + std::string(toString(outcome.failureCause)) +
                 " after its visible safety countdown expired.");
         } else {
             notes.push_back("Minimum visible safety margin: " + display::percent(outcome.minimumSafetyMargin) + ".");
+            if (outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Timely) {
+                notes.emplace_back("Fuel Survey safety bonus: +3 credits.");
+            } else if (outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Late) {
+                notes.emplace_back("Late Fuel Survey return: safety bonus -3 credits; pilot stress +5.");
+            }
         }
     } else {
         notes.emplace_back("Legacy launch record preserved for save compatibility.");

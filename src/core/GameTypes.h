@@ -123,6 +123,12 @@ enum class LaunchMissionKind {
     AsteroidBelt
 };
 
+enum class FuelSurveyReturnTiming {
+    Unqualified,
+    Timely,
+    Late
+};
+
 enum class Rarity {
     Common,
     Uncommon,
@@ -223,7 +229,9 @@ enum class MiningCellFeature {
     MinibossLair,
     HiveNest,
     OrganicBurrow,
-    BossChamber
+    BossChamber,
+    // Appended so existing serialized feature values remain stable.
+    SwarmArena
 };
 
 enum class MiningEnemyType {
@@ -732,6 +740,9 @@ struct SurfaceDepthProspect {
     int absoluteDepth = 0;
     MaterialInventory possibleMaterials;
     int possibleArtifacts = 0;
+    bool swarmNest = false;
+    double swarmArtifactChance = 0.0;
+    int informationPercent = 100;
 };
 
 struct ShipModule {
@@ -1054,6 +1065,7 @@ struct LaunchOutcome {
     double peakAbortRisk = 0.0;
     bool pilotedFlight = false;
     LaunchFailureCause failureCause = LaunchFailureCause::None;
+    FuelSurveyReturnTiming fuelSurveyReturnTiming = FuelSurveyReturnTiming::Unqualified;
     double minimumSafetyMargin = 1.0;
     std::vector<TelemetryEvent> telemetry;
 };
@@ -1261,6 +1273,13 @@ struct SurfaceExpeditionState {
     int surfaceUpgradeOffersSeen = 0;
 };
 
+enum class SurfaceScanPulseGrade {
+    None,
+    Miss,
+    Good,
+    Perfect
+};
+
 struct SurfaceScanRunState {
     bool active = false;
     bool completed = false;
@@ -1268,6 +1287,10 @@ struct SurfaceScanRunState {
     std::string destinationId;
     int pulses = 0;
     int maxPulses = 5;
+    double elapsedSeconds = 0.0;
+    SurfaceScanPulseGrade lastPulseGrade = SurfaceScanPulseGrade::None;
+    int lastPulseDepthOffset = 0;
+    double successFanfareSeconds = 0.0;
     double signal = 0.0;
     double interference = 0.0;
     double bustRisk = 0.0;
@@ -1348,6 +1371,37 @@ struct MiningEnemy {
     double attackCooldownSeconds = 0.0;
     MiningEnemySpawnSpec spawn;
     bool gateAssociated = false;
+    bool swarmAssociated = false;
+    bool elite = false;
+};
+
+// One optional Swarm Nest is seeded for an eligible expedition. Its enemies
+// live in the normal per-depth vectors, while this record tracks the wave and
+// cache across depth transitions and save/load.
+struct MiningSwarmState {
+    bool enabled = false;
+    int depthZone = -1;
+    std::uint64_t seed = 0;
+    int chamberX = 0;
+    int chamberY = 0;
+    int triggerX = 0;
+    bool alerted = false;
+    double alertSeconds = 0.0;
+    int wave = 0;
+    int spawnedInWave = 0;
+    int waveSize = 0;
+    double spawnCooldownSeconds = 0.0;
+    double intermissionSeconds = 0.0;
+    bool cacheExposed = false;
+    bool cacheClaimed = false;
+    bool cacheBanked = false;
+    double cacheX = 0.0;
+    double cacheY = 0.0;
+    MaterialInventory cacheMaterials;
+    int blueprintInsight = 0;
+    bool bonusArtifactRolled = false;
+    double artifactChance = 0.0;
+    ArtifactRecord bonusArtifact;
 };
 
 enum class MiningCombatTeam {
@@ -1596,6 +1650,7 @@ struct MiningRunState {
     MiningArtifactObject artifact;
     MiningGateRuntime gate;
     std::vector<MiningDepthLayerState> depthLayers;
+    MiningSwarmState swarm;
 };
 
 struct RunState {

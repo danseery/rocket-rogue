@@ -76,6 +76,16 @@ struct LaunchFlightState {
     double travelVelocity = 0.0;
     double fuelCapacity = 10.0;
     double fuelRemaining = 10.0;
+    // Early calibration returns stretch whatever fuel remains across the
+    // home leg. Fuel Survey uses this for its explicit timing result; the
+    // controls lesson uses it to keep experimentation from becoming a hidden
+    // fuel trap while course handling remains the taught skill.
+    bool calibrationReturnFuelProtected = false;
+    bool fuelSurveyReturnClassifiable = false;
+    bool fuelSurveyLateLatched = false;
+    FuelSurveyReturnTiming fuelSurveyReturnTiming = FuelSurveyReturnTiming::Unqualified;
+    double fuelSurveyReturnUsePerProgress = 0.0;
+    double elapsedSeconds = 0.0;
     double projectedFuelRequired = 0.0;
     double projectedFuelReserve = 10.0;
     double heat = 0.0;
@@ -112,6 +122,7 @@ struct LaunchResolutionContext {
     LaunchFailureCause failureCause = LaunchFailureCause::None;
     double minimumSafetyMargin = 1.0;
     int hullDamageTaken = 0;
+    FuelSurveyReturnTiming fuelSurveyReturnTiming = FuelSurveyReturnTiming::Unqualified;
 };
 
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng);

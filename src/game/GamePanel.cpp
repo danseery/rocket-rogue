@@ -82,9 +82,30 @@ std::string launchMetricSeverity(const PanelRenderContext& context, std::string_
         if (flight.fuelFailureSeconds > 0.0) {
             return "critical";
         }
-        if (!flight.returningHome && !context.flightModel.config.frontierTransfer &&
-            flight.projectedFuelReserve <= 0.0) {
-            return "caution";
+        if (flight.returningHome &&
+            context.flightModel.config.missionKind == LaunchMissionKind::FuelCalibration) {
+            return {};
+        }
+        if (!flight.returningHome &&
+            context.flightModel.config.missionKind == LaunchMissionKind::FuelCalibration) {
+            const double fuelShare = flight.fuelRemaining /
+                std::max(0.01, flight.fuelCapacity);
+            const bool late = fuelShare <=
+                tuning::launchProgression::fuelSurveyLateFuelShare;
+            const int pulse = static_cast<int>(std::floor(
+                flight.elapsedSeconds * (late ? 8.0 : 4.0))) % 4;
+            if (late) {
+                return "critical fuel-survey-alert fuel-survey-late fuel-survey-pulse-" +
+                    std::to_string(pulse);
+            }
+            if (fuelShare <= tuning::launchProgression::fuelSurveyTargetFuelShare) {
+                return "caution fuel-survey-alert fuel-survey-action fuel-survey-pulse-" +
+                    std::to_string(pulse);
+            }
+            if (fuelShare <= tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+                return "caution fuel-survey-alert fuel-survey-prepare fuel-survey-pulse-" +
+                    std::to_string(pulse);
+            }
         }
         value = 1.0 - flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
         caution = 0.75;
@@ -103,6 +124,26 @@ std::string launchMetricSeverity(const PanelRenderContext& context, std::string_
         return {};
     }
     return value >= critical ? "critical" : (value >= caution ? "caution" : std::string {});
+}
+
+std::string launchStatusSeverity(const PanelRenderContext& context)
+{
+    if (context.launchFlight == nullptr ||
+        context.flightModel.config.missionKind != LaunchMissionKind::FuelCalibration ||
+        context.launchFlight->returningHome) {
+        return "status telemetry-status";
+    }
+    const LaunchFlightState& flight = *context.launchFlight;
+    const double fuelShare = flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
+    if (fuelShare > tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+        return "status telemetry-status";
+    }
+    const bool late = fuelShare <= tuning::launchProgression::fuelSurveyLateFuelShare;
+    const int pulse = static_cast<int>(std::floor(
+        flight.elapsedSeconds * (late ? 8.0 : 4.0))) % 4;
+    return std::string("status telemetry-status fuel-survey-status ") +
+        (late ? "critical fuel-survey-late " : "caution ") +
+        "fuel-survey-pulse-" + std::to_string(pulse);
 }
 
 void appendHudText(RealtimeHudState& state, std::string_view id, std::string value)
@@ -150,7 +191,7 @@ std::string expeditionControlsMarkup()
 <div class="opening-control-row"><strong>Menus</strong><p>L-stick / D-pad navigate. <strong data-controller-south>{{controller_south}}</strong> selects. <strong data-controller-east>{{controller_east}}</strong> goes back. R-stick scrolls.</p></div>
 <div class="opening-control-row"><strong>Shortcuts</strong><p><strong data-controller-menu>{{controller_menu}}</strong> pauses. <strong data-controller-view>{{controller_view}}</strong> opens Map. <strong data-controller-north>{{controller_north}}</strong> opens Inventory.</p></div>
 <div class="opening-control-row"><strong>Launch</strong><p>L-stick steers and changes throttle. <strong data-controller-south>{{controller_south}}</strong> launches or turns around. <strong data-controller-west>{{controller_west}}</strong> turns engines off or on.</p></div>
-<div class="opening-control-row"><strong>Flight / Mining rig</strong><p>L-stick steers or moves. Hold <strong data-controller-east>{{controller_east}}</strong> to abort. <strong data-controller-rt>{{controller_rt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Tap <strong data-controller-south>{{controller_south}}</strong> to bank or leave; hold it to exit the rig.</p></div>
+<div class="opening-control-row"><strong>Flight / Mining rig</strong><p>L-stick steers or moves. Hold <strong data-controller-east>{{controller_east}}</strong> to abort. <strong data-controller-rt>{{controller_rt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Tap <strong data-controller-south>{{controller_south}}</strong> to stow cargo or leave; hold it to exit the rig.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>L-stick thrusts. R-stick aims. <strong data-controller-rt>{{controller_rt}}</strong> fires. <strong data-controller-lt>{{controller_lt}}</strong> drills. <strong data-controller-west>{{controller_west}}</strong> scans. <strong data-controller-north>{{controller_north}}</strong> tethers. Hold <strong data-controller-south>{{controller_south}}</strong> to enter the rig.</p></div>
 </article>
 </div>
@@ -358,7 +399,7 @@ void collectSharedUtilityModals()
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
         "<div><strong>Launch</strong><span>Left stick steers and changes throttle. South turns around. West turns engines off or on.</span></div>"
         "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort Flyby or Orbit.</span></div>"
-        "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to bank or leave; hold South for 0.6 seconds to exit.</span></div>"
+        "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
     const std::string systemMenuBody =
@@ -750,6 +791,9 @@ bool isSurfaceExtractionAction(const SurfaceActionPreviewPresentation& action)
 
 std::string surfaceActionRiskRewardCue(const SurfaceActionPreviewPresentation& action)
 {
+    if (!action.summary.empty()) {
+        return action.summary;
+    }
     std::string cue = action.risk + " " + surfaceActionChipLabel(action.riskLabel);
     if (!action.payoffChips.empty()) {
         const PanelMetricPresentation& payoff = action.payoffChips.front();
@@ -1672,7 +1716,7 @@ std::string orbitResultBody(OrbitGrade grade)
     case OrbitGrade::Good:
         return "Full loop completed inside the orbital research band. Science and funding secured.";
     case OrbitGrade::Miss:
-        return "The orbital track fell outside the research band before a loop was completed. No orbit data banked.";
+        return "The orbital track fell outside the research band before a loop was completed. No orbit telemetry validated.";
     case OrbitGrade::Active:
     default:
         return "Complete one full loop before the insertion timer expires.";
@@ -1687,7 +1731,7 @@ std::string flybyResultBody(FlybyGrade grade)
     case FlybyGrade::Good:
         return "Recon data secured. Approach options update now.";
     case FlybyGrade::Miss:
-        return "No flyby data banked. Try again or choose another unlocked approach.";
+        return "No flyby telemetry validated. Try again or choose another unlocked approach.";
     case FlybyGrade::Active:
     default:
         return "Hold the corridor until the timer expires.";
@@ -2029,9 +2073,11 @@ std::string launchUpgradeInstallStack(
             << "</span>"
             << panelButton(upgrade.action) << "</div></article>";
     }
+    const bool trainingRefit = curatedProvingRefitsActive(state);
     out << "<div class=\"modal-actions action-row\">"
         << "<button type=\"button\" class=\"ghost rr-text-button\" data-ui-close-modal=\"1\" "
-           "data-ui-focus-id=\"launch-upgrades:keep\"><span class=\"rr-button-label\">Keep Credits</span></button>"
+           "data-ui-focus-id=\"launch-upgrades:close\"><span class=\"rr-button-label\">"
+        << (trainingRefit ? "Close" : "Keep Credits") << "</span></button>"
         << "</div></section>";
     return out.str();
 }
@@ -2258,7 +2304,7 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
     const Destination& target = hangarLaunchTargetDestination(state, catalog);
     switch (state.meta.launchLessons.stage) {
     case LaunchTrainingStage::FuelCalibration:
-        return {"Map the Moon route", "Fly to the low-fuel warning, Turn Around, and bank the route data."};
+        return {"Map the Moon route", "Fly to the low-fuel warning. Turn Around any time before FUEL reaches 0."};
     case LaunchTrainingStage::FlightControlsCalibration:
         return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 1
             ? std::pair<std::string, std::string>{"Install Fuel Tanks I", "Open Ship Details and install the unlocked fuel upgrade."}
@@ -3224,7 +3270,7 @@ std::string buildGamePanelMarkup(
         }
         out << "</div>";
 
-        out << "<p id=\"rr-hud-launch-status\" class=\"status telemetry-status\">"
+        out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
             << htmlEscape(launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
 
@@ -3275,11 +3321,14 @@ std::string buildGamePanelMarkup(
             && (state.lastOutcome.type == LaunchResultType::MissionComplete
                 || rewardedLaunchLessonReturn(state.lastOutcome)
                 || state.lastOutcome.recoveryMethod == RecoveryMethod::TransferArrival);
-        const ModalTone outcomeTone = successfulReturn
+        const ModalTone outcomeTone = state.lastOutcome.fuelSurveyReturnTiming ==
+                FuelSurveyReturnTiming::Late
+            ? ModalTone::Warning
+            : (successfulReturn
             ? ModalTone::Positive
             : (state.lastOutcome.type == LaunchResultType::None
                 ? ModalTone::Neutral
-                : ModalTone::Negative);
+                : ModalTone::Negative));
         std::ostringstream report;
         report << crewFateCard(presentation.crewFate) << "<div class=\"result-grid rr-card-grid\">";
         for (const LaunchOutcomeMetricGroupPresentation& group : presentation.metricGroups) {
@@ -3824,6 +3873,12 @@ std::string buildGamePanelMarkup(
     if (state.screen == Screen::SurfaceScan) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfaceScanRailPresentation scanPanel = surfaceScanRailPresentation(state);
+        const MiningSwarmPreview swarmPreview = miningSwarmPreview(
+            state,
+            catalog,
+            upcomingMiningArenaRules(state, catalog),
+            0,
+            !state.run.surfaceExpedition.pendingMiningSiteDefinitionId.empty());
         out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-scan", state.statusLine);
         out << "<section class=\"surface-scan-rail scan-minigame\">";
         out << "<header class=\"ui-screen-header rr-screen-header scan-header\"><div class=\"scan-heading\"><span class=\"ui-kicker\">"
@@ -3844,6 +3899,15 @@ std::string buildGamePanelMarkup(
             << "\"></i><b class=\"scan-signal-risk-marker\"></b></div></section>";
         out << "<article class=\"scan-layer-readout " << htmlEscape(scanPanel.layerCssClass) << "\"><strong>"
             << htmlEscape(scanPanel.layerReadout) << "</strong></article>";
+        if (swarmPreview.available) {
+            out << phaseAdvisory({
+                "DANGER: SWARM NEST",
+                "Melee, ranged, and armored contacts detected at Depth +" +
+                    std::to_string(swarmPreview.depthZone) + ".\n\nSwarm cache \xE2\x80\xA2 Bonus artifact chance: " +
+                    display::percent(swarmPreview.artifactChance),
+                "danger"
+            });
+        }
         out << "<div class=\"scan-actions ui-action-bar rr-action-footer\">";
         for (std::size_t index = 0; index < scanPanel.actions.size(); ++index) {
             out << panelButton(scanPanel.actions[index], index == 0);
@@ -3862,6 +3926,12 @@ std::string buildGamePanelMarkup(
     if (state.screen == Screen::SurfacePush) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
         const SurfacePushRunState& push = state.run.surfacePush;
+        const MiningSwarmPreview swarmPreview = miningSwarmPreview(
+            state,
+            catalog,
+            upcomingMiningArenaRules(state, catalog),
+            0,
+            !state.run.surfaceExpedition.pendingMiningSiteDefinitionId.empty());
         out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-push", state.statusLine);
         const int nextDepthOffset = push.steps + 1;
         const bool nextLayerScanned = std::any_of(
@@ -3896,7 +3966,7 @@ std::string buildGamePanelMarkup(
                     ? "NEXT DIG: RETURN RANGE CRITICAL"
                     : "NEXT DIG: RETURN MARGIN LOW";
                 returnSafety.detail +=
-                    "\n\nRETURN NOW to bank the shallower start point.";
+                    "\n\nRETURN NOW to set the shallower start depth.";
             }
         }
         std::vector<PanelButtonPresentation> actions;
@@ -3922,6 +3992,15 @@ std::string buildGamePanelMarkup(
                 returnSafety.title,
                 returnSafety.detail,
                 returnSafety.cssClass
+            });
+        }
+        if (swarmPreview.available) {
+            out << phaseAdvisory({
+                "DANGER BELOW: SWARM NEST",
+                "This tunnel opens beside a hostile nest at Depth +" +
+                    std::to_string(swarmPreview.depthZone) + ". Mining there is optional; ascend to disengage.\n\nBonus artifact chance: " +
+                    display::percent(swarmPreview.artifactChance),
+                "danger"
             });
         }
         out << phaseBoardClose();
@@ -3955,9 +4034,19 @@ std::string buildGamePanelMarkup(
         const bool showMiniDroneIntroduction = context.firstTimeIntroductionsEnabled
             && surfacePanel.droneOpsAction.enabled
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
-        const bool showMiningIntroduction = context.firstTimeIntroductionsEnabled
-            && !scenarioSurface
-            && expedition.active
+        const bool showSurveyIntroduction = expedition.active
+            && !surfaceOpsTutorialSurveyComplete(state)
+            && !ui::briefings::acknowledged(
+                state.meta.acknowledgedActivityBriefingIds,
+                ui::briefings::surfaceSurveyIntroduction);
+        const bool showDigIntroduction = expedition.active
+            && surfaceOpsTutorialDigUnlocked(state)
+            && !surfaceOpsTutorialDigComplete(state)
+            && !ui::briefings::acknowledged(
+                state.meta.acknowledgedActivityBriefingIds,
+                ui::briefings::surfaceDigIntroduction);
+        const bool showMiningIntroduction = expedition.active
+            && surfaceOpsTutorialMiningUnlocked(state)
             && !expedition.miningRunUsed
             && expedition.sharedFuel > 0
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
@@ -4018,9 +4107,14 @@ std::string buildGamePanelMarkup(
         out << "<div class=\"surface-choice-list controller-action-row surface-controller-action-row rr-card-grid\">";
         for (const SurfaceActionPreviewPresentation* actionPointer : orderedActions) {
             const SurfaceActionPreviewPresentation& action = *actionPointer;
-            const std::string_view introductionModal = showMiningIntroduction && isSurfaceMiningAction(action)
-                ? ui::modals::miningIntroduction
-                : std::string_view {};
+            const std::string_view introductionModal =
+                showSurveyIntroduction && action.action.actionId == ui::actions::surveySurface
+                    ? ui::modals::surfaceSurveyIntroduction
+                    : (showDigIntroduction && action.action.actionId == ui::actions::pushSurface
+                           ? ui::modals::surfaceDigIntroduction
+                           : (showMiningIntroduction && isSurfaceMiningAction(action)
+                                  ? ui::modals::miningIntroduction
+                                  : std::string_view {}));
             out << surfaceActionCard(action, introductionModal);
         }
         out << "</div></section>";
@@ -4036,23 +4130,44 @@ std::string buildGamePanelMarkup(
                 ui::actions::droneOps,
                 "warn");
         }
+        if (showSurveyIntroduction) {
+            out << activityIntroductionModal(
+                ui::modals::surfaceSurveyIntroduction,
+                "SURVEY THE SITE",
+                "Survey scans each reachable level for resources and artifacts before you commit to digging.",
+                "Pulse the scanner to reveal what may be waiting below. Log at least one survey to unlock Dig.",
+                "Begin Survey",
+                ui::actions::surveySurface,
+                "ok");
+        }
+        if (showDigIntroduction) {
+            out << activityIntroductionModal(
+                ui::modals::surfaceDigIntroduction,
+                "DIG THE TUNNEL",
+                "Dig opens a tunnel to the depth you choose. Your Mining Rig begins at the deepest start depth you set.",
+                "The first layer is stable. Pushing farther can collapse the unfinished tunnel, and deeper starts may leave too little oxygen or fuel to return to the ship. Check the return-range warning before setting your start depth.",
+                "Begin Dig",
+                ui::actions::pushSurface,
+                "warn");
+        }
         if (showMiningIntroduction) {
             if (!hasUnlock(state.meta, content::unlock::droneBay)) {
                 out << activityIntroductionModal(
                     ui::modals::miningIntroduction,
-                    "THE PROSPECTOR CONTRACT",
-                    "Mission Control needs " + std::to_string(tuning::research::prospectorCommonOreGoal)
-                        + " gray-seamed Common Ore to build Prospector Mk I, your first autonomous Support Drone. Drill marked deposits, bank the ore at the shuttle, and extract it safely home.",
-                    "Deployment spends 1 Shared Fuel and opens this surface loop's only mining run. Scan for resources, mind drill heat and oxygen, and leave with the ore aboard.",
-                    "Begin the contract",
+                    "MINE THE DEPOSIT",
+                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and recover artifacts from the tunnel you prepared. Bring back " +
+                        std::to_string(tuning::research::prospectorCommonOreGoal) +
+                        " Common Ore to build Prospector Mk I.",
+                    "Mining starts at your selected start depth. Watch oxygen and drill heat, stow cargo at the ship, and leave before the rig can no longer make it home.",
+                    "Deploy Mining Rig",
                     ui::actions::mineSurface,
                     "rare");
             } else {
                 out << activityIntroductionModal(
                     ui::modals::miningIntroduction,
-                    "MINING OPERATIONS",
-                    "Deployment spends 1 Shared Fuel and opens this surface loop's single mining run. Drill marked deposits, bank cargo at the shuttle, and leave before oxygen runs out.",
-                    "Use the scanner to reveal nearby resources and the tether to pull back toward the ship. Heat shuts down the drill until it cools.",
+                    "MINE THE DEPOSIT",
+                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and recover artifacts from the tunnel you prepared.",
+                    "Mining starts at your selected start depth. Watch oxygen and drill heat, stow cargo at the ship, and leave before the rig can no longer make it home.",
                     "Deploy Mining Rig",
                     ui::actions::mineSurface,
                     "rare");
@@ -4121,14 +4236,18 @@ std::string buildGamePanelMarkup(
         out << phaseBoardOpen("phase-board-refit phase-board-draft-room", state.statusLine);
         out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Shipyard refit")
             << "</span><h2>" << htmlEscape("Install one upgrade") << "</h2><p>"
-            << htmlEscape("Choose an unlocked system or keep your credits.") << "</p></div>";
+            << htmlEscape(singleLaunchLessonOffer
+                    ? "Install this required launch upgrade to continue."
+                    : "Choose an unlocked system or keep your credits.") << "</p></div>";
         out << "<div class=\"stat-grid chip-strip draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
         if (!refitWindow.recoveryDetail.empty()) {
             out << "<p class=\"draft-recovery-note\">" << htmlEscape(refitWindow.recoveryDetail) << "</p>";
         }
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
             << htmlEscape("AVAILABLE UPGRADES") << "</h2><p>"
-            << htmlEscape("Install one system or keep the credits.") << "</p></div>";
+            << htmlEscape(singleLaunchLessonOffer
+                    ? "Install the required system to continue."
+                    : "Install one system or keep the credits.") << "</p></div>";
         if (!singleLaunchLessonOffer) {
             out << "<div class=\"utility-row compact-tools utility-actions\">"
                 << modalButton("Compare", "refit_compare", "ghost") << "</div>";
@@ -4149,7 +4268,9 @@ std::string buildGamePanelMarkup(
         if (refitWindow.showReroll) {
             out << panelButton(refitWindow.rerollAction);
         }
-        out << panelButton(refitWindow.skipAction);
+        if (refitWindow.showSkip) {
+            out << panelButton(refitWindow.skipAction);
+        }
         out << "</div></section>";
         out << phaseBoardClose();
         if (!singleLaunchLessonOffer) {
@@ -4194,6 +4315,9 @@ std::string buildGamePanelMarkup(
         const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         launchBlockedBody << "<p class=\"status\"><strong>" << htmlEscape(title)
             << "</strong><br>" << htmlEscape(detail) << "</p>";
+        launchBlockedBody << "<div class=\"modal-actions actions action-row\">"
+            << modalButton("Ship details", ui::modals::ship, "ok")
+            << "</div>";
     }
     launchBlockedBody << detailStack(launchReadiness.details);
     launchBlockedBody << "<div class=\"modal-actions actions action-row\">";
@@ -4255,6 +4379,7 @@ std::string buildGamePanelMarkup(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
     const std::string prepareLaunchLabel = "Prepare for launch: " + launchTarget.name;
+    const bool prepareLaunchBlocked = launchReadiness.blocked || launchHardwareBlocked;
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
@@ -4262,7 +4387,7 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
-    out << (launchReadiness.blocked
+    out << (prepareLaunchBlocked
         ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok")
         : (showLaunchIntroduction
             ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok")
@@ -4315,7 +4440,7 @@ std::string buildGamePanelMarkup(
             ui::modals::launchIntroduction,
             "FIRST FLIGHT BRIEF",
             "The Moon is out of range. This ship carries 10 fuel; the lunar route needs 15.",
-            "Fly until the FUEL warning appears, then Turn Around and bring the route data home. Fuel Tanks and Flight Controls are the two upgrades needed before the Moon transfer.",
+            "Fly until the FUEL warning appears. Turn Around any time before the tank reaches 0; the return burn is protected. Fuel Tanks and Flight Controls are the two upgrades needed before the Moon transfer.",
             "Begin fuel test",
             ui::actions::prepareLaunch,
             "ok");
@@ -4638,6 +4763,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                 launchMetricSeverity(context, item.label));
         }
         appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
+        appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
         return;
     }
 

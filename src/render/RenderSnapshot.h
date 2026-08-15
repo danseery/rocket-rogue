@@ -247,6 +247,16 @@ struct RenderSnapshot {
     double miningExtractionProgress = 0.0;
     MaterialInventory miningMaterials;
     MaterialInventory miningStowedMaterials;
+    bool miningSwarmActive = false;
+    bool miningSwarmAlert = false;
+    int miningSwarmWave = 0;
+    int miningSwarmDepth = -1;
+    double miningSwarmAlertProgress = 0.0;
+    bool miningSwarmCacheExposed = false;
+    bool miningSwarmCacheClaimed = false;
+    bool miningSwarmArtifact = false;
+    double miningSwarmCacheX = 0.0;
+    double miningSwarmCacheY = 0.0;
     MiningArtifactSnapshot miningArtifact;
     PoiGuidanceTarget miningPoiGuidance;
     std::span<const MiningGateMarker> miningGateMarkers;
@@ -292,6 +302,8 @@ struct RenderSnapshot {
     double surfaceScanSignal = 0.0;
     double surfaceScanInterference = 0.0;
     double surfaceScanBustRisk = 0.0;
+    double surfaceScanSuccessFanfare = 0.0;
+    SurfaceScanPulseGrade surfaceScanLastPulseGrade = SurfaceScanPulseGrade::None;
     MaterialInventory surfaceScanMaterials;
     int surfaceScanArtifacts = 0;
     std::vector<MiningCellMaterial> surfaceScanPreviewMarkers;

@@ -42,7 +42,7 @@ inline std::string launchUpgradeEffect(LaunchUpgradeKind kind, int rank)
     case LaunchUpgradeKind::FuelTanks:
         return display::fixed(launchFuelCapacityForRank(rank), 0) + " fuel";
     case LaunchUpgradeKind::FlightControls:
-        return display::percent(launchControlChaosForRank(rank)) + " control chaos";
+        return display::percent(launchControlChaosForRank(rank)) + " flight instability";
     case LaunchUpgradeKind::Cooling:
         return display::percent(launchPoweredHeatMultiplierForRank(rank)) +
             " powered heat / " +

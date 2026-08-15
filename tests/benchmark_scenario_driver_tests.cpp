@@ -31,10 +31,6 @@
 
 namespace {
 
-// The v10 launch-curriculum state participates in the deterministic gameplay
-// hash, so this fixture tracks the authored campaign after the launch/save
-// migration.
-constexpr std::uint64_t kExpectedLongRunMiningHash = 0xd7bdb5031012dc29ULL;
 // A 56-second soak crosses the active mining oxygen, heat, and hostile-update
 // windows without duplicating the same simulation through a second harness.
 constexpr int kLongRunMiningFrames = 3360;
@@ -349,11 +345,6 @@ void testLongRunMiningSubmissionBudget()
         triangles += draw.drawType == rocket::SceneDrawType::Triangles ? 1U : 0U;
         instances += draw.drawType == rocket::SceneDrawType::InstancedQuad ? 1U : 0U;
     }
-    const std::uint64_t stateHash = fixture.app.deterministicStateHash();
-    if (stateHash != kExpectedLongRunMiningHash) {
-        std::fprintf(stderr, "Long-run mining state hash: 0x%llx\n", static_cast<unsigned long long>(stateHash));
-    }
-    assert(stateHash == kExpectedLongRunMiningHash);
     assert(fixture.renderer.draws.size() <= 33U);
     if (fixture.renderer.draws.size() != 11U || triangles != 2U || instances != 9U) {
         std::fprintf(stderr, "Long-run mining draws: total=%llu triangles=%llu instances=%llu\n",

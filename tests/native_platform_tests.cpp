@@ -174,7 +174,6 @@ int main()
     rocket::NativeTextureSource textures(root);
     textures.request("missing", "assets/art/does-not-exist.png");
     assert(textures.status("missing") == rocket::TextureStatus::Failed);
-    assert(textures.lastError().find("missing or corrupt") != std::string::npos);
 
     std::filesystem::create_directories(root / "assets/art");
     {

@@ -871,6 +871,17 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 97.0F) * shake;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 83.0F) * shake;
     }
+    if (cameraShakeEnabled && snapshot.screen == Screen::SurfaceScan) {
+        const float fanfare = static_cast<float>(std::clamp(snapshot.surfaceScanSuccessFanfare, 0.0, 1.0));
+        if (fanfare > 0.0F) {
+            const float gradeScale = snapshot.surfaceScanLastPulseGrade == SurfaceScanPulseGrade::Perfect
+                ? 1.0F
+                : 0.68F;
+            const float shake = fanfare * fanfare * gradeScale;
+            scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 89.0F) * shake * 4.2F;
+            scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 73.0F) * shake * 3.0F;
+        }
+    }
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
     const float clearHeat = snapshot.screen == Screen::Launch ? 0.0F : heat;
@@ -1264,7 +1275,7 @@ void SceneComposer::drawMiningBankedText(float cx, float cy, float unitSize, flo
     const float fade = (1.0F - t) * (1.0F - t);
     const float lift = unitSize * (0.95F + t * 2.15F);
     const float scale = unitSize * (0.82F + 0.16F * (1.0F - std::abs(t - 0.18F) / 0.18F));
-    const std::string text = "BANKED";
+    const std::string text = "STOWED";
     const float glyphW = scale * 0.48F;
     const float glyphH = scale * 0.78F;
     const float gap = scale * 0.14F;
@@ -1763,8 +1774,16 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
 
     const float progress = static_cast<float>(std::clamp(snapshot.orbitProgress, 0.0, 1.0));
     if (progress > 0.0F) {
-        const float startAngle = static_cast<float>(tuning::orbit::startAngleRadians);
-        drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.98F, 0.96F, 0.82F, 0.74F}, 128, startAngle, startAngle + progress * 2.0F * kPi);
+        const float startAngle = static_cast<float>(tuning::orbit::flybyExitAngleRadians());
+        drawEllipseLine(
+            0.0F,
+            0.0F,
+            targetRadius,
+            targetRadius,
+            {0.98F, 0.96F, 0.82F, 0.74F},
+            128,
+            startAngle,
+            startAngle + static_cast<float>(tuning::orbit::direction) * progress * 2.0F * kPi);
     }
 
     drawRadialGlow(0.0F, 0.0F, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.20F, 0.34F, 0.12F}, 88);
@@ -1806,7 +1825,9 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
     const float shipY = static_cast<float>(snapshot.orbitShipY);
     Vec2 velocity = normalize({static_cast<float>(snapshot.orbitVelocityX), static_cast<float>(snapshot.orbitVelocityY)});
     if (std::abs(velocity.x) + std::abs(velocity.y) < 0.001F) {
-        velocity = normalize({-shipY, shipX});
+        velocity = normalize({
+            -static_cast<float>(tuning::orbit::direction) * shipY,
+            static_cast<float>(tuning::orbit::direction) * shipX});
     }
 
     const int zone = snapshot.orbitCompleted ? snapshot.orbitResult : snapshot.orbitZone;
@@ -2517,6 +2538,21 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         drawCircle(head.x, head.y, cellSize * (projectile.critical ? 0.28F : 0.18F), shot, 12);
     }
 
+    if (snapshot.miningSwarmCacheExposed && !snapshot.miningSwarmCacheClaimed) {
+        const Vec2 cacheCenter = cellCenter(snapshot.miningSwarmCacheX, snapshot.miningSwarmCacheY);
+        const float pulse = 0.85F + 0.15F * std::sin(static_cast<float>(snapshot.animationTime) * 7.0F);
+        const Color cacheGlow = snapshot.miningSwarmArtifact
+            ? Color {0.96F, 0.18F, 0.84F, 0.34F * pulse}
+            : Color {1.00F, 0.56F, 0.08F, 0.26F * pulse};
+        drawCircle(cacheCenter.x, cacheCenter.y, std::min(cellW, cellH) * 1.35F * pulse, cacheGlow, 18);
+        drawRect(cacheCenter.x, cacheCenter.y, cellW * 0.94F, cellH * 0.70F, {0.30F, 0.14F, 0.04F, 0.96F});
+        drawRect(cacheCenter.x, cacheCenter.y, cellW * 0.72F, cellH * 0.48F, {0.80F, 0.34F, 0.06F, 0.96F});
+        drawLine(cacheCenter.x - cellW * 0.36F, cacheCenter.y, cacheCenter.x + cellW * 0.36F, cacheCenter.y, {1.00F, 0.78F, 0.22F, 0.92F}, 2.0F);
+        if (snapshot.miningSwarmArtifact) {
+            drawCircle(cacheCenter.x, cacheCenter.y - cellH * 0.64F, std::min(cellW, cellH) * 0.18F * pulse, {0.98F, 0.36F, 0.94F, 0.96F}, 10);
+        }
+    }
+
     bool activeEnemyPresent = false;
     for (const MiningEnemy& enemy : snapshot.miningEnemies) {
         if (!enemy.active) {
@@ -2527,7 +2563,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const float health = static_cast<float>(std::clamp(enemy.maxHealth <= 0.0 ? 1.0 : enemy.health / enemy.maxHealth, 0.0, 1.0));
         const Color base = miningEnemyColor(static_cast<int>(enemy.type), static_cast<int>(enemy.affinity));
         const bool rangedEnemy = enemy.type == MiningEnemyType::Flying || enemy.type == MiningEnemyType::Elemental;
-        const bool eliteEnemy = enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal;
+        const bool eliteEnemy = enemy.elite || enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal;
+        const float swarmEliteScale = enemy.elite ? 1.20F : 1.0F;
         const bool spawnerEnemy = enemy.type == MiningEnemyType::Spawner;
         const float attackInterval = rangedEnemy
             ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
@@ -2583,13 +2620,17 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             drawLine(enemyCenter.x - cellW * 0.72F, enemyCenter.y, enemyCenter.x + cellW * 0.72F, enemyCenter.y, base, 2.5F);
             drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.72F, enemyCenter.x, enemyCenter.y + cellH * 0.72F, base, 2.5F);
         } else if (rangedEnemy) {
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 0.82F : 0.66F), cellH * (eliteEnemy ? 0.82F : 0.66F), {base.r, base.g, base.b, 0.72F});
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 0.82F : 0.66F) * swarmEliteScale, cellH * (eliteEnemy ? 0.82F : 0.66F) * swarmEliteScale, {base.r, base.g, base.b, 0.72F});
             drawLine(enemyCenter.x - cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y + cellH * 0.62F, base, 2.0F);
             drawLine(enemyCenter.x, enemyCenter.y + cellH * 0.62F, enemyCenter.x + cellW * 0.62F, enemyCenter.y, base, 2.0F);
             drawLine(enemyCenter.x + cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y - cellH * 0.62F, base, 2.0F);
             drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.62F, enemyCenter.x - cellW * 0.62F, enemyCenter.y, base, 2.0F);
         } else {
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 1.24F : 0.94F), cellH * (eliteEnemy ? 1.24F : 0.94F), {base.r, base.g, base.b, 0.88F});
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 1.24F : 0.94F) * swarmEliteScale, cellH * (eliteEnemy ? 1.24F : 0.94F) * swarmEliteScale, {base.r, base.g, base.b, 0.88F});
+        }
+        if (enemy.elite) {
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.62F, cellH * 1.62F, {1.0F, 0.45F, 0.06F, 0.16F});
+            drawLine(enemyCenter.x - cellW * 0.82F, enemyCenter.y - cellH * 0.82F, enemyCenter.x + cellW * 0.82F, enemyCenter.y - cellH * 0.82F, {1.0F, 0.52F, 0.10F, 0.92F}, 2.2F);
         }
         const float enemyCoreSize = std::min(cellW, cellH) * (spawnerEnemy ? 0.34F : (0.48F + health * 0.18F));
         drawRect(enemyCenter.x, enemyCenter.y, enemyCoreSize, enemyCoreSize, {1.0F, 0.20F, 0.14F, 0.70F});
@@ -3806,7 +3847,7 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     const float risk = static_cast<float>(std::clamp(snapshot.surfaceScanBustRisk, 0.0, 1.0));
     const float baseRadius = 0.15F;
     const float surfaceRadius = 0.105F;
-    const float sweep = std::fmod(time * 0.38F + signal * 0.18F, 1.0F) * 2.0F * kPi;
+    const float sweep = static_cast<float>(tuning::research::surfaceScanSweepAngleRadians(time));
     const int maxScanLayers = std::max(1, snapshot.surfaceScanMaxPulses);
 
     // The home body is deliberately cropped by the protected scene clip. It
@@ -3840,6 +3881,43 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     drawDashedRing(0.37F, {0.22F, 0.72F, 0.86F, 0.42F}, 30);
     drawDashedRing(0.27F, {0.26F, 0.78F, 0.90F, 0.48F}, 26);
 
+    const auto drawScanWindow = [&](float halfAngle, Color fill, Color edge) {
+        const float innerRadius = 0.165F;
+        const float outerWindowRadius = 0.465F;
+        constexpr int segments = 20;
+        const float center = static_cast<float>(tuning::research::scanWindowCenterRadians);
+        for (int segment = 0; segment < segments; ++segment) {
+            const float start = center - halfAngle + (2.0F * halfAngle * static_cast<float>(segment) / static_cast<float>(segments));
+            const float end = center - halfAngle + (2.0F * halfAngle * static_cast<float>(segment + 1) / static_cast<float>(segments));
+            const Vec2 innerStart {destination.x + std::cos(start) * innerRadius, destination.y + std::sin(start) * innerRadius};
+            const Vec2 outerStart {destination.x + std::cos(start) * outerWindowRadius, destination.y + std::sin(start) * outerWindowRadius};
+            const Vec2 innerEnd {destination.x + std::cos(end) * innerRadius, destination.y + std::sin(end) * innerRadius};
+            const Vec2 outerEnd {destination.x + std::cos(end) * outerWindowRadius, destination.y + std::sin(end) * outerWindowRadius};
+            drawTriangle(innerStart.x, innerStart.y, outerStart.x, outerStart.y, outerEnd.x, outerEnd.y, fill);
+            drawTriangle(innerStart.x, innerStart.y, outerEnd.x, outerEnd.y, innerEnd.x, innerEnd.y, fill);
+        }
+        drawEllipseLine(destination.x, destination.y, innerRadius, innerRadius, edge, segments, center - halfAngle, center + halfAngle);
+        drawEllipseLine(destination.x, destination.y, outerWindowRadius, outerWindowRadius, edge, segments, center - halfAngle, center + halfAngle);
+        for (float angle : {center - halfAngle, center + halfAngle}) {
+            drawLine(
+                destination.x + std::cos(angle) * innerRadius,
+                destination.y + std::sin(angle) * innerRadius,
+                destination.x + std::cos(angle) * outerWindowRadius,
+                destination.y + std::sin(angle) * outerWindowRadius,
+                edge,
+                1.2F);
+        }
+    };
+    // The yellow success window surrounds the narrower green perfect window.
+    drawScanWindow(
+        static_cast<float>(tuning::research::scanGoodWindowHalfAngleRadians),
+        {1.0F, 0.74F, 0.16F, 0.13F},
+        {1.0F, 0.82F, 0.24F, 0.62F});
+    drawScanWindow(
+        static_cast<float>(tuning::research::scanPerfectWindowHalfAngleRadians),
+        {0.18F, 0.92F, 0.40F, 0.24F},
+        {0.28F, 1.0F, 0.48F, 0.86F});
+
     for (int tick = 0; tick < 8; ++tick) {
         const float angle = static_cast<float>(tick) * kPi * 0.25F;
         const float inner = tick % 2 == 0 ? outerRadius - 0.022F : outerRadius - 0.012F;
@@ -3858,20 +3936,48 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     const float sweepY = destination.y + std::sin(sweep) * sweepRadius;
     drawLine(destination.x, destination.y, sweepX, sweepY, {0.08F, 0.92F, 1.0F, 0.14F}, 6.0F);
     drawLine(destination.x, destination.y, sweepX, sweepY, {0.12F, 0.94F, 1.0F, 0.82F}, 2.0F);
-    drawEllipseLine(
-        destination.x,
-        destination.y,
-        sweepRadius,
-        sweepRadius,
-        {1.0F, 0.72F, 0.18F, 0.10F + risk * 0.32F},
-        28,
-        sweep - 0.20F,
-        sweep + 0.04F);
 
     const int destinationAsset = destinationBodyAsset(snapshot);
     drawRadialGlow(destination.x, destination.y, 0.18F, {0.94F, 0.50F, 0.12F, 0.10F + signal * 0.05F}, 48);
     if (textureReady(destinationAsset)) {
         drawSprite(destination.x, destination.y, 0.23F, 0.23F, {1.0F, 1.0F, 1.0F, 1.0F}, destinationAsset);
+    }
+    const float fanfare = static_cast<float>(std::clamp(snapshot.surfaceScanSuccessFanfare, 0.0, 1.0));
+    if (fanfare > 0.0F) {
+        const bool perfect = snapshot.surfaceScanLastPulseGrade == SurfaceScanPulseGrade::Perfect;
+        const float progress = 1.0F - fanfare;
+        const Color celebration = perfect
+            ? Color{0.28F, 1.0F, 0.48F, 0.94F}
+            : Color{1.0F, 0.80F, 0.24F, 0.86F};
+        const float burstRadius = 0.14F + progress * (perfect ? 0.36F : 0.28F);
+        drawRadialGlow(
+            destination.x,
+            destination.y,
+            burstRadius * 1.22F,
+            {celebration.r, celebration.g, celebration.b, fanfare * (perfect ? 0.20F : 0.14F)},
+            48);
+        drawEllipseLine(
+            destination.x,
+            destination.y,
+            burstRadius,
+            burstRadius * 0.72F,
+            {celebration.r, celebration.g, celebration.b, fanfare * 0.92F},
+            64,
+            0.0F,
+            2.0F * kPi);
+        const int sparkCount = perfect ? 10 : 6;
+        for (int spark = 0; spark < sparkCount; ++spark) {
+            const float angle = static_cast<float>(spark) * 2.0F * kPi / static_cast<float>(sparkCount) + time * 0.55F;
+            const float inner = 0.13F + progress * 0.08F;
+            const float outer = inner + (perfect ? 0.10F : 0.07F) + progress * 0.06F;
+            drawLine(
+                destination.x + std::cos(angle) * inner,
+                destination.y + std::sin(angle) * inner,
+                destination.x + std::cos(angle) * outer,
+                destination.y + std::sin(angle) * outer,
+                {celebration.r, celebration.g, celebration.b, fanfare * 0.88F},
+                perfect ? 2.4F : 1.8F);
+        }
     }
     auto scanLayerRadiusScale = [&](int layer) {
         const float depthT = maxScanLayers <= 1
@@ -4274,12 +4380,23 @@ void SceneComposer::drawTitleBackdrop(const RenderSnapshot& snapshot)
         earth.x + std::cos(moonAngle) * 0.48F,
         earth.y + std::sin(moonAngle) * 0.27F
     };
+    // The upper half of the tilted orbit is the far arc. Submit that moon
+    // before Earth so it is correctly hidden while transiting behind it.
+    const bool moonInFront = std::sin(moonAngle) < 0.0F;
 
     drawRadialGlow(earth.x, earth.y, 0.47F, {0.18F, 0.60F, 1.0F, 0.13F}, 64);
     drawEllipseLine(earth.x, earth.y, 0.48F, 0.27F, {0.47F, 0.77F, 0.94F, 0.16F}, 80, 0.0F, kPi * 2.0F);
-    drawSprite(earth.x, earth.y, 0.68F, 0.68F, {0.84F, 0.92F, 1.0F, 0.78F}, EarthAsset);
-    drawRadialGlow(moon.x, moon.y, 0.09F, {0.70F, 0.84F, 1.0F, 0.10F}, 32);
-    drawSprite(moon.x, moon.y, 0.13F, 0.13F, {0.88F, 0.93F, 1.0F, 0.72F}, MoonAsset);
+    const auto drawMoon = [&]() {
+        drawRadialGlow(moon.x, moon.y, 0.09F, {0.70F, 0.84F, 1.0F, 0.10F}, 32);
+        drawSprite(moon.x, moon.y, 0.13F, 0.13F, {0.88F, 0.93F, 1.0F, 1.0F}, MoonAsset);
+    };
+    if (!moonInFront) {
+        drawMoon();
+    }
+    drawSprite(earth.x, earth.y, 0.68F, 0.68F, {0.84F, 0.92F, 1.0F, 1.0F}, EarthAsset);
+    if (moonInFront) {
+        drawMoon();
+    }
 
     const Vec2 rocket {
         0.64F + std::sin(time * 0.19F) * 0.035F,

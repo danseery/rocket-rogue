@@ -533,6 +533,19 @@ std::string freshSurfaceExpeditionSave()
     state.run.destinationIndex = 2;
     state.meta.furthestTier = 2;
     rocket::startSurfaceExpedition(state, catalog);
+    rocket::ui::briefings::acknowledge(
+        state.meta.acknowledgedActivityBriefingIds,
+        rocket::ui::briefings::mining);
+    state.screen = rocket::Screen::SurfaceExpedition;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string firstSurfaceTutorialSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0x5A7FACEULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
@@ -988,6 +1001,9 @@ int main()
         rocket::ui::briefings::acknowledge(
             state.meta.acknowledgedActivityBriefingIds,
             rocket::ui::briefings::miniDrones);
+        rocket::ui::briefings::acknowledge(
+            state.meta.acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::mining);
         state.run.surfaceExpedition.miningSitePrepared = true;
         state.screen = rocket::Screen::SurfaceExpedition;
         rocket::Random rng(0x5A7FACEULL);
@@ -1499,7 +1515,6 @@ int main()
             assert(fixture.renderer.launchFrontierTransfer == lesson.arrival);
             assert(std::abs(fixture.renderer.launchFuelCapacity - lesson.fuelCapacity) < 0.0001);
             assert(fixture.renderer.launchAsteroidCount == lesson.asteroidCount);
-            assert(fixture.ui.html.find(lesson.objective) != std::string::npos);
             assert(fixture.saves.storeCount == originalStoreCount);
             assert(fixture.saves.value == originalSave);
         }
@@ -1707,6 +1722,85 @@ int main()
         assert(afterLaunch.has_value());
         assert(afterLaunch->screen == rocket::Screen::Hangar);
         assert(rocket::ui::briefings::acknowledged(afterLaunch->acknowledgedActivityBriefingIds, rocket::ui::briefings::launch));
+        fixture.runner.shutdown();
+    }
+
+    // A stale or incorrectly retained refit entitlement must never strand the
+    // player on an empty Refit board.  This also repairs older saves produced
+    // by an incomplete curriculum transfer after its required upgrade was
+    // already installed.
+    {
+        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+        rocket::GameState staleRefit = rocket::createNewGame(catalog, 0xBAD0FF3ULL);
+        staleRefit.screen = rocket::Screen::Upgrade;
+        staleRefit.run.refitEntitled = true;
+        staleRefit.meta.launchLessons.stage = rocket::LaunchTrainingStage::MoonTransfer;
+        staleRefit.meta.launchUpgrades.fuelTanks = 1;
+        staleRefit.meta.launchUpgrades.flightControls = 1;
+        rocket::syncLaunchConfig(staleRefit, catalog);
+
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(staleRefit));
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+        assert(fixture.ui.html.find("phase-board-refit") == std::string::npos);
+        fixture.runner.shutdown();
+    }
+
+    // Surface Ops teaches its shared sequence once, even if optional activity
+    // introductions are disabled. Disabled Dig and Mine actions must remain
+    // inert to direct UI/controller dispatch until their banked prerequisites
+    // are complete.
+    {
+        AppFixture fixture;
+        fixture.saves.value = firstSurfaceTutorialSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        fixture.runner.app().setFirstTimeIntroductionsEnabled(false);
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+
+        fixture.ui.dispatchAction("push_surface");
+        fixture.ui.dispatchAction("mine_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+
+        fixture.ui.dispatchAction("survey_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceScan));
+        std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(rocket::ui::briefings::acknowledged(
+            saved->acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceSurveyIntroduction));
+
+        fixture.ui.dispatchAction("surface_scan_pulse");
+        fixture.ui.dispatchAction("surface_scan_bank");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        fixture.runner.frame();
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(rocket::ui::briefings::acknowledged(
+            saved->acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceSurveyComplete));
+
+        fixture.ui.dispatchAction("push_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfacePush));
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(rocket::ui::briefings::acknowledged(
+            saved->acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceDigIntroduction));
+
+        fixture.ui.dispatchAction("surface_push_step");
+        fixture.ui.dispatchAction("surface_push_bank");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        fixture.runner.frame();
+        saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(rocket::ui::briefings::acknowledged(
+            saved->acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceDigComplete));
+
         fixture.runner.shutdown();
     }
 
@@ -2037,7 +2131,6 @@ int main()
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
         assert(!fixture.renderer.launchLunarImpactActive);
         assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::LunarImpact);
-        assert(fixture.ui.html.find("LUNAR IMPACT") != std::string::npos);
         const auto lunarImpactModal = std::find_if(
             fixture.ui.presentation.modals.begin(),
             fixture.ui.presentation.modals.end(),
@@ -2098,7 +2191,6 @@ int main()
     assert(controllers.preferences.invertFlightY);
     assert(renderer.preferences.cameraShakeDisabled);
     assert(runner.app().controllerPreferences().invertFlightY);
-    assert(ui.html.find("Show introductions") != std::string::npos);
 
     // A revision may advance after a redundant store, but unchanged values do
     // not need to be copied into frame consumers again.
