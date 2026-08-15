@@ -38,7 +38,6 @@ inline constexpr std::string_view restCrew = "rest_crew";
 inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
-inline constexpr std::string_view installLaunchUpgradePrefix = "install_launch_upgrade:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
@@ -85,11 +84,6 @@ inline std::string buyOffer(int index)
 inline std::string selectRefitOffer(int index)
 {
     return std::string(selectRefitOfferPrefix) + std::to_string(index);
-}
-
-inline std::string installLaunchUpgrade(int kind)
-{
-    return std::string(installLaunchUpgradePrefix) + std::to_string(kind);
 }
 
 inline std::string researchProject(int index)

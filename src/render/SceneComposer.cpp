@@ -4103,6 +4103,10 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     const float risk = static_cast<float>(std::clamp(snapshot.surfacePushCollapseRisk, 0.0, 1.0));
     const float shaftTop = 0.72F;
     const float shaftBottom = -0.82F;
+    // The first depth marker sits just below the surface. Keep the mouth open
+    // through that surface cap so the shaft reads as excavated from ground
+    // level, rather than as a dark column that starts beneath intact tiles.
+    const float shaftMouthTop = shaftTop + 0.08F;
     constexpr float shaftX = 0.0F;
     constexpr float shaftWidth = 0.34F;
     constexpr float shaftHalfWidth = shaftWidth * 0.5F;
@@ -4189,10 +4193,10 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     const float progress = std::clamp(animatedSteps / static_cast<float>(safeSteps), 0.0F, 1.0F);
     const float probeY = shaftTop + (shaftBottom - shaftTop) * progress;
 
-    const float excavatedHeight = std::max(0.035F, shaftTop - probeY + 0.035F);
+    const float excavatedHeight = std::max(0.035F, shaftMouthTop - probeY + 0.035F);
     drawRect(
         shaftX,
-        shaftTop - excavatedHeight * 0.5F,
+        shaftMouthTop - excavatedHeight * 0.5F,
         shaftWidth,
         excavatedHeight,
         {0.003F, 0.006F, 0.008F, 0.98F});
@@ -4212,9 +4216,9 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
             0.045F + seed * 0.040F,
             {0.003F, 0.006F, 0.008F, 0.96F});
     }
-    drawLine(shaftX - shaftHalfWidth, shaftTop, shaftX - shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
-    drawLine(shaftX + shaftHalfWidth, shaftTop, shaftX + shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
-    drawLine(shaftX, shaftTop + 0.07F, shaftX, shaftBottom, {1.0F, 0.72F, 0.20F, 0.64F}, 1.8F);
+    drawLine(shaftX - shaftHalfWidth, shaftMouthTop, shaftX - shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
+    drawLine(shaftX + shaftHalfWidth, shaftMouthTop, shaftX + shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
+    drawLine(shaftX, shaftMouthTop, shaftX, shaftBottom, {1.0F, 0.72F, 0.20F, 0.64F}, 1.8F);
 
     for (int i = 0; i <= safeSteps; ++i) {
         const float t = static_cast<float>(i) / static_cast<float>(safeSteps);
@@ -4252,7 +4256,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
             shaftX + 0.036F, probeY + 0.038F,
             {0.86F, 0.94F, 0.98F, 1.0F});
     }
-    drawLine(shaftX - 0.048F, shaftTop + 0.018F, shaftX + 0.048F, shaftTop + 0.018F, {0.30F, 0.92F, 1.0F, 0.78F}, 2.0F);
+    drawLine(shaftX - 0.048F, shaftMouthTop + 0.018F, shaftX + 0.048F, shaftMouthTop + 0.018F, {0.30F, 0.92F, 1.0F, 0.78F}, 2.0F);
 
     std::vector<MiningCellMaterial> pockets = snapshot.surfacePushRewardMarkers;
     if (pockets.empty()) {

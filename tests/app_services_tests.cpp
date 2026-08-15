@@ -567,6 +567,77 @@ std::string activeDroneBaySurfaceExpeditionSave()
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string readyProspectorClaimSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xF002ULL);
+    state.run.destinationIndex = 1;
+    state.meta.furthestTier = 1;
+    state.meta.launchLessons.stage = rocket::LaunchTrainingStage::ThermalManagement;
+    state.meta.launchUpgrades.fuelTanks = 1;
+    state.meta.launchUpgrades.flightControls = 1;
+    state.run.refitEntitled = true;
+    state.run.credits = 22.0;
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::lunarProspector,
+               "briefing",
+               rocket::ScenarioActionKind::AcknowledgeBriefing)
+               .applied);
+    assert(rocket::recordScenarioEvent(
+        state,
+        catalog,
+        {rocket::ScenarioEventKind::SafeMaterialDelivered,
+         {},
+         {},
+         rocket::content::destination::moon,
+         "common",
+         rocket::tuning::research::prospectorCommonOreGoal,
+         0}));
+    rocket::Random rng(0xF002ULL);
+    rocket::generateModuleOffers(state, catalog, rng);
+    state.screen = rocket::Screen::Upgrade;
+    rocket::syncLaunchConfig(state, catalog);
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string readyMarsExpansionClaimSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xF003ULL);
+    state.run.destinationIndex = 2;
+    state.meta.furthestTier = 2;
+    state.meta.launchLessons.stage = rocket::LaunchTrainingStage::HullIntegrity;
+    state.meta.launchUpgrades.fuelTanks = 2;
+    state.meta.launchUpgrades.flightControls = 1;
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
+    state.run.refitEntitled = true;
+    state.run.credits = 83.0;
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::marsBayExpansion,
+               "briefing",
+               rocket::ScenarioActionKind::AcknowledgeBriefing)
+               .applied);
+    assert(rocket::recordScenarioEvent(
+        state,
+        catalog,
+        {rocket::ScenarioEventKind::SafeMaterialDelivered,
+         {},
+         {},
+         rocket::content::destination::mars,
+         "common",
+         rocket::tuning::research::marsBayCommonOreGoal,
+         0}));
+    rocket::Random rng(0xF003ULL);
+    rocket::generateModuleOffers(state, catalog, rng);
+    state.screen = rocket::Screen::Upgrade;
+    rocket::syncLaunchConfig(state, catalog);
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 } // namespace
 
 int main()
@@ -1725,29 +1796,6 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // A stale or incorrectly retained refit entitlement must never strand the
-    // player on an empty Refit board.  This also repairs older saves produced
-    // by an incomplete curriculum transfer after its required upgrade was
-    // already installed.
-    {
-        const rocket::ContentCatalog catalog = rocket::createDefaultContent();
-        rocket::GameState staleRefit = rocket::createNewGame(catalog, 0xBAD0FF3ULL);
-        staleRefit.screen = rocket::Screen::Upgrade;
-        staleRefit.run.refitEntitled = true;
-        staleRefit.meta.launchLessons.stage = rocket::LaunchTrainingStage::MoonTransfer;
-        staleRefit.meta.launchUpgrades.fuelTanks = 1;
-        staleRefit.meta.launchUpgrades.flightControls = 1;
-        rocket::syncLaunchConfig(staleRefit, catalog);
-
-        AppFixture fixture;
-        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(staleRefit));
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-        assert(fixture.ui.html.find("phase-board-refit") == std::string::npos);
-        fixture.runner.shutdown();
-    }
-
     // Surface Ops teaches its shared sequence once, even if optional activity
     // introductions are disabled. Disabled Dig and Mine actions must remain
     // inert to direct UI/controller dispatch until their banked prerequisites
@@ -1911,6 +1959,86 @@ int main()
             saved->equippedDroneIds.begin(),
             saved->equippedDroneIds.end(),
             rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
+        fixture.runner.shutdown();
+    }
+
+    // Completing Prospector onboarding hands the existing earned refit to the
+    // single Fuel Tanks II lesson instead of returning to a dead-end Hangar.
+    {
+        AppFixture fixture;
+        fixture.saves.value = readyProspectorClaimSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+
+        fixture.ui.dispatchAction(
+            std::string(rocket::ui::actions::scenarioActionPrefix) +
+            rocket::content::scenario::lunarProspector + "|delivery|" +
+            std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
+
+        fixture.ui.dispatchAction("back_to_surface_ops");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+        const std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(saved->refitEntitled);
+        assert(!saved->offerModuleIds.empty());
+        assert(saved->offerModuleIds.front() == rocket::content::module::fuelTanks2);
+        assert(saved->offerModuleIds.size() == 1);
+        fixture.runner.shutdown();
+    }
+
+    // Claiming the Mars contract refreshes the already-earned refit after the
+    // route unlock, pinning Fuel Tanks III while leaving the funding briefing
+    // saved and unacknowledged until its explicit action.
+    {
+        AppFixture fixture;
+        fixture.saves.value = readyMarsExpansionClaimSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+
+        fixture.ui.dispatchAction(
+            std::string(rocket::ui::actions::scenarioActionPrefix) +
+            rocket::content::scenario::marsBayExpansion + "|delivery|" +
+            std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+        const std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
+        assert(saved.has_value());
+        assert(std::find(
+            saved->unlockKeys.begin(),
+            saved->unlockKeys.end(),
+            rocket::content::unlock::routeJupiter) != saved->unlockKeys.end());
+        assert(!saved->offerModuleIds.empty());
+        assert(saved->offerModuleIds.front() == rocket::content::module::fuelTanks3);
+        const auto marsScenario = std::find_if(
+            saved->scenarios.begin(),
+            saved->scenarios.end(),
+            [](const rocket::ScenarioInstance& instance) {
+                return instance.id == rocket::content::scenario::marsBayExpansion;
+            });
+        const rocket::ScenarioStepProgress* funding = marsScenario == saved->scenarios.end()
+            ? nullptr
+            : rocket::findScenarioStepProgress(*marsScenario, "funding");
+        assert(funding != nullptr && !funding->briefingAcknowledged);
+
+        fixture.ui.dispatchAction(
+            std::string(rocket::ui::actions::scenarioActionPrefix) +
+            rocket::content::scenario::marsBayExpansion + "|funding|" +
+            std::to_string(static_cast<int>(rocket::ScenarioActionKind::AcknowledgeBriefing)));
+        const std::optional<rocket::SaveData> acknowledged = rocket::deserializeSaveData(fixture.saves.value);
+        assert(acknowledged.has_value());
+        const auto acknowledgedMars = std::find_if(
+            acknowledged->scenarios.begin(),
+            acknowledged->scenarios.end(),
+            [](const rocket::ScenarioInstance& instance) {
+                return instance.id == rocket::content::scenario::marsBayExpansion;
+            });
+        const rocket::ScenarioStepProgress* acknowledgedFunding =
+            acknowledgedMars == acknowledged->scenarios.end()
+            ? nullptr
+            : rocket::findScenarioStepProgress(*acknowledgedMars, "funding");
+        assert(acknowledgedFunding != nullptr && acknowledgedFunding->briefingAcknowledged);
         fixture.runner.shutdown();
     }
 

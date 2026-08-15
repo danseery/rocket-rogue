@@ -1108,9 +1108,13 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 5501);
-    require(tuning::launchProgression::upgradeCost == 22.0 &&
+    const ShipModule* fuelTanksTwo = catalog.findModule(content::module::fuelTanks2);
+    const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
+    require(fuelTanksTwo != nullptr && fuelTanksThree != nullptr &&
+            moduleOfferCost(*fuelTanksTwo) == 22 &&
+            moduleOfferCost(*fuelTanksThree) == 92 &&
             tuning::launchProgression::lessonReward == 22.0,
-        "every direct rank and every qualified lesson return must use 22 credits");
+        "launch refits must use their rarity price while a qualified lesson still pays 22 credits");
 
     GameState flightModes = createNewGame(catalog, 5500);
     require(!flightModes.launchConfig.frontierTransfer,
@@ -1143,13 +1147,13 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
     require(moonArrival.run.destinationIndex == 1 &&
             moonArrival.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement &&
             moonArrival.run.refitEntitled &&
-            nearlyEqual(moonArrival.run.credits, tuning::launchProgression::upgradeCost),
+            nearlyEqual(moonArrival.run.credits, static_cast<double>(moduleOfferCost(*fuelTanksTwo))),
         "the successful Moon transfer must fund the mandatory Fuel Tanks II refit");
 
     moonArrival.run.credits = 20.0;
     syncLaunchConfig(moonArrival, catalog);
-    require(nearlyEqual(moonArrival.run.credits, tuning::launchProgression::upgradeCost),
-        "a legacy post-Moon refit entitlement must repair the two-credit Fuel Tanks II shortfall");
+    require(nearlyEqual(moonArrival.run.credits, 20.0),
+        "synchronization must not grant missing refit credits to an older save");
     require(currentDestinationLaunchReady(moonArrival, catalog) &&
             !launchMissionReady(moonArrival, catalog),
         "the reached Moon must remain launchable while the next Mars route still needs Fuel Tanks II");
@@ -1876,6 +1880,114 @@ void openingRefitTracksAreCuratedAndEntitled()
             "retired proving-card IDs must never be awarded by the live curriculum");
     }
 }
+
+void fuelRefitsTeachMarsAndFundJupiter()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const ShipModule* fuelTanksTwo = catalog.findModule(content::module::fuelTanks2);
+    const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
+    require(fuelTanksTwo != nullptr && fuelTanksThree != nullptr,
+        "fuel progression requires both permanent tank refits");
+    require(moduleOfferCost(*fuelTanksTwo) == 22 &&
+            fuelTanksThree->rarity == Rarity::Prototype &&
+            moduleOfferCost(*fuelTanksThree) == 92,
+        "Fuel Tanks II must remain the taught Common purchase and Fuel Tanks III must use Prototype pricing");
+
+    GameState marsRefit = createNewGame(catalog, 0xF002);
+    marsRefit.run.destinationIndex = 1;
+    marsRefit.meta.furthestTier = 1;
+    marsRefit.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
+    marsRefit.meta.launchUpgrades.fuelTanks = 1;
+    marsRefit.meta.launchUpgrades.flightControls = 1;
+    marsRefit.meta.unlockKeys.push_back(content::unlock::routeMars);
+    marsRefit.run.refitEntitled = true;
+    marsRefit.run.credits = 22.0;
+    syncLaunchConfig(marsRefit, catalog);
+
+    Random taughtRng(0xF002);
+    generateModuleOffers(marsRefit, catalog, taughtRng);
+    require(marsRefit.run.offerModuleIds[0] == content::module::fuelTanks2 &&
+            marsRefit.run.offerModuleIds[1].empty() &&
+            marsRefit.run.offerModuleIds[2].empty(),
+        "the post-Prospector refit must teach Fuel Tanks II as a single offer");
+    const RefitWindowPresentation taughtWindow = refitWindowPresentation(marsRefit, catalog);
+    require(taughtWindow.offers.size() == 1 && taughtWindow.offers.front().cost == 22 &&
+            taughtWindow.offers.front().affordable && !taughtWindow.showSkip,
+        "an affordable taught tank refit must require the purchase before continuing");
+    require(buyOffer(marsRefit, catalog, 0) &&
+            marsRefit.meta.launchUpgrades.fuelTanks == 2 &&
+            nearlyEqual(marsRefit.run.credits, 0.0) &&
+            nearlyEqual(launchFuelCapacity(marsRefit), 20.0) &&
+            launchMissionReady(marsRefit, catalog),
+        "buying Fuel Tanks II must spend 22 credits and make the 20-fuel Mars transfer available");
+
+    GameState underfundedLegacy = marsRefit;
+    underfundedLegacy.meta.launchUpgrades.fuelTanks = 1;
+    underfundedLegacy.meta.ownedModuleIds.erase(
+        std::remove(
+            underfundedLegacy.meta.ownedModuleIds.begin(),
+            underfundedLegacy.meta.ownedModuleIds.end(),
+            std::string(content::module::fuelTanks2)),
+        underfundedLegacy.meta.ownedModuleIds.end());
+    underfundedLegacy.run.refitEntitled = true;
+    underfundedLegacy.run.credits = 20.0;
+    syncLaunchConfig(underfundedLegacy, catalog);
+    Random legacyRng(0xF003);
+    generateModuleOffers(underfundedLegacy, catalog, legacyRng);
+    const RefitWindowPresentation legacyWindow = refitWindowPresentation(underfundedLegacy, catalog);
+    require(nearlyEqual(underfundedLegacy.run.credits, 20.0) && legacyWindow.showSkip,
+        "an underfunded legacy save must keep its earned credits and be able to replay Moon instead of receiving a grant or soft lock");
+
+    GameState jupiterRefit = createNewGame(catalog, 0xF004);
+    jupiterRefit.run.destinationIndex = 2;
+    jupiterRefit.meta.furthestTier = 2;
+    jupiterRefit.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    jupiterRefit.meta.launchUpgrades.fuelTanks = 2;
+    jupiterRefit.meta.launchUpgrades.flightControls = 1;
+    jupiterRefit.meta.unlockKeys.push_back(content::unlock::routeMars);
+    jupiterRefit.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    jupiterRefit.run.refitEntitled = true;
+    jupiterRefit.run.credits = 83.0;
+    syncLaunchConfig(jupiterRefit, catalog);
+
+    const FrontierGateStatus blockedJupiter = frontierGateStatus(jupiterRefit, catalog);
+    require(!blockedJupiter.satisfied && blockedJupiter.kind == FrontierGateKind::FlightData &&
+            currentDestinationLaunchReady(jupiterRefit, catalog),
+        "insufficient Jupiter fuel must block only the next route while leaving Mars replay available");
+
+    Random jupiterRng(0xF004);
+    generateModuleOffers(jupiterRefit, catalog, jupiterRng);
+    require(jupiterRefit.run.offerModuleIds[0] == content::module::fuelTanks3,
+        "Fuel Tanks III must be pinned into the first eligible post-Mars refit slot");
+    const RefitWindowPresentation jupiterWindow = refitWindowPresentation(jupiterRefit, catalog);
+    require(jupiterWindow.offers.size() >= 2 &&
+            jupiterWindow.offers.front().cost == 92 &&
+            !jupiterWindow.offers.front().affordable &&
+            jupiterWindow.showSkip && jupiterWindow.showReroll,
+        "the Jupiter refit must remain a normal choice board when the Prototype tank is not yet affordable");
+    require(rerollOffers(jupiterRefit, catalog, jupiterRng) &&
+            jupiterRefit.run.offerModuleIds[0] == content::module::fuelTanks3,
+        "rerolling the post-Mars board must preserve the Fuel Tanks III opportunity");
+
+    const Destination* mars = catalog.findDestination(content::destination::mars);
+    require(mars != nullptr, "the fuel economy fixture requires Mars content");
+    const double conservativeFirstMarsCredits = 30.0 + tuning::launchProgression::lessonReward;
+    const double repeatMarsTransferCredits = mars->baseReward * mars->targetMultiplier *
+        tuning::rewards::transferArrivalPayoutFactor;
+    require(conservativeFirstMarsCredits < static_cast<double>(moduleOfferCost(*fuelTanksThree)) &&
+            conservativeFirstMarsCredits + repeatMarsTransferCredits >=
+                static_cast<double>(moduleOfferCost(*fuelTanksThree)),
+        "the conservative economy must put Fuel Tanks III out of reach after first Mars but fund it with one successful repeat transfer");
+
+    jupiterRefit.run.credits = 92.0;
+    require(buyOffer(jupiterRefit, catalog, 0) &&
+            jupiterRefit.meta.launchUpgrades.fuelTanks == 3 &&
+            nearlyEqual(jupiterRefit.run.credits, 0.0) &&
+            nearlyEqual(launchFuelCapacity(jupiterRefit), 25.0) &&
+            launchMissionReady(jupiterRefit, catalog),
+        "buying the pinned Prototype must spend 92 credits and make the 25-fuel Jupiter transfer available");
+}
+
 void refitRerollsSpendAndEscalate()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2673,10 +2785,112 @@ void shipUpgradesAssistFlybyAndOrbitMinigames()
     require(assisted.run.flyby.perfectBand > baselineFlyby.perfectBand, "sensor upgrades should widen the flyby perfect corridor");
     require(assisted.run.flyby.turnRateRadians > baselineFlyby.turnRateRadians, "thrust and escape upgrades should improve flyby steering response");
     require(assisted.run.flyby.impactHullDamage < baselineFlyby.impactHullDamage, "hull, cooling, and escape upgrades should reduce flyby impact damage");
-    require(assisted.run.orbit.goodBand > baselineOrbit.goodBand, "sensor upgrades should widen the orbital research band");
-    require(assisted.run.orbit.perfectBand > baselineOrbit.perfectBand, "sensor upgrades should widen the perfect orbit band");
-    require(assisted.run.orbit.thrustAcceleration > baselineOrbit.thrustAcceleration, "thrust and cooling upgrades should improve orbit trim authority");
-    require(assisted.run.orbit.durationSeconds > baselineOrbit.durationSeconds, "fuel and sensors should add a small orbit insertion buffer");
+    require(nearlyEqual(assisted.run.orbit.goodBand, baselineOrbit.goodBand), "legacy module loadouts should not secretly change the orbital research band");
+    require(nearlyEqual(assisted.run.orbit.perfectBand, baselineOrbit.perfectBand), "legacy module loadouts should not secretly change the perfect orbit band");
+    require(nearlyEqual(assisted.run.orbit.thrustAcceleration, baselineOrbit.thrustAcceleration), "legacy module loadouts should not secretly change orbit trim authority");
+    require(nearlyEqual(assisted.run.orbit.durationSeconds, baselineOrbit.durationSeconds), "legacy module loadouts should not secretly change the orbit timer");
+}
+
+GameState startOrbitForTest(const ContentCatalog& catalog, std::string_view destinationId, std::uint64_t seed)
+{
+    GameState state = createNewGame(catalog, seed);
+    LaunchOutcome arrival;
+    arrival.type = LaunchResultType::MissionComplete;
+    arrival.frontierTransfer = true;
+    arrival.destinationId = std::string(destinationId);
+    startArrivalOps(state, arrival);
+    completeArrivalFlyby(state, catalog);
+    startArrivalOps(state, arrival);
+    startArrivalOrbitRun(state, catalog);
+    require(state.screen == Screen::Orbit && state.run.orbit.active, "orbit fixture should start an active run");
+    return state;
+}
+
+void orbitControlsFollowClockwiseProgradeDirection()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = startOrbitForTest(catalog, content::destination::moon, 7191);
+    OrbitRunState& orbit = state.run.orbit;
+    orbit.gravityStrength = 0.0;
+    const double distance = std::hypot(orbit.shipX, orbit.shipY);
+    const double radialX = orbit.shipX / distance;
+    const double radialY = orbit.shipY / distance;
+    const double directedTangentX = -radialY * tuning::orbit::direction;
+    const double directedTangentY = radialX * tuning::orbit::direction;
+    const double speedBefore = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
+
+    setOrbitMove(state, 0.0, 1.0);
+    updateOrbitRun(state, 0.08);
+    const double speedAfter = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
+    require(speedAfter > speedBefore, "positive tangential orbit input should accelerate along the clockwise approach direction");
+
+    setOrbitMove(state, 0.0, -1.0);
+    updateOrbitRun(state, 0.08);
+    const double brakedSpeed = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
+    require(brakedSpeed < speedAfter, "negative tangential orbit input should brake against the clockwise approach direction");
+}
+
+void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const std::array<std::string_view, 5> destinations {{
+        content::destination::moon,
+        content::destination::mars,
+        content::destination::jupiter,
+        content::destination::saturn,
+        content::destination::neptune
+    }};
+
+    for (std::size_t index = 0; index < destinations.size(); ++index) {
+        GameState state = startOrbitForTest(catalog, destinations[index], 7200 + index);
+        const OrbitRunState& started = state.run.orbit;
+        const double expectedSpeed = std::sqrt(
+            started.gravityStrength * started.targetRadius /
+            (started.targetRadius * started.targetRadius + tuning::orbit::gravitySoftening));
+        require(
+            std::abs(std::hypot(started.velocityX, started.velocityY) - expectedSpeed) < 0.000001,
+            "each destination should begin at its circular-orbit speed");
+
+        for (int frame = 0; frame < 1200 && !state.run.orbit.completed; ++frame) {
+            updateOrbitRun(state, 1.0 / 60.0);
+        }
+        require(state.run.orbit.completed, "a baseline orbit should complete within its visible timer");
+        require(state.run.orbit.result == OrbitGrade::Perfect, "a baseline no-input orbit should remain solvable at every tested destination tier");
+    }
+}
+
+void launchUpgradeRanksProvideExplicitOrbitAssists()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState baseline = startOrbitForTest(catalog, content::destination::moon, 7211);
+    GameState upgraded = createNewGame(catalog, 7212);
+    upgraded.meta.launchUpgrades.fuelTanks = 2;
+    upgraded.meta.launchUpgrades.flightControls = 2;
+    upgraded.meta.launchUpgrades.cooling = 1;
+    upgraded.meta.launchUpgrades.hull = 3;
+    LaunchOutcome arrival;
+    arrival.type = LaunchResultType::MissionComplete;
+    arrival.frontierTransfer = true;
+    arrival.destinationId = content::destination::moon;
+    startArrivalOps(upgraded, arrival);
+    completeArrivalFlyby(upgraded, catalog);
+    startArrivalOps(upgraded, arrival);
+    startArrivalOrbitRun(upgraded, catalog);
+
+    require(
+        nearlyEqual(
+            upgraded.run.orbit.durationSeconds - baseline.run.orbit.durationSeconds,
+            2.0 * tuning::orbit::fuelDurationAssistPerRank),
+        "Fuel Tanks should add the documented orbit insertion time");
+    require(
+        nearlyEqual(
+            upgraded.run.orbit.thrustAcceleration / baseline.run.orbit.thrustAcceleration,
+            1.0 + 2.0 * tuning::orbit::flightControlsThrustAssistPerRank +
+                tuning::orbit::coolingThrustAssistPerRank),
+        "Flight Controls and Engine Cooling should add the documented orbit trim authority");
+    require(
+        upgraded.run.orbit.collisionPadding < baseline.run.orbit.collisionPadding,
+        "Hull Plating should reduce the low-orbit collision clearance");
 }
 
 void activeFlybySaveResumesAtApproach()
@@ -2732,8 +2946,7 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
         - miss.run.orbit.shipY * miss.run.orbit.velocityX;
     require(initialAngularMomentum < 0.0,
         "orbit insertion should continue Flyby's clockwise screen-space approach");
-    require(miss.run.orbit.durationSeconds >= tuning::orbit::durationSeconds, "orbit should start from the tuned insertion timer");
-    require(miss.run.orbit.durationSeconds <= tuning::orbit::durationSeconds + tuning::orbit::maxAssistDurationBonus + 0.001, "orbit assist should keep the insertion buffer bounded");
+    require(nearlyEqual(miss.run.orbit.durationSeconds, tuning::orbit::durationSeconds), "a baseline orbit should start from the tuned insertion timer");
     const int missOrbitsBefore = destinationHistoryValue(miss.meta.destinationOrbits, catalog, content::destination::moon);
     const int missBlueprintsBefore = miss.meta.blueprintProgress;
     const double missCreditsBefore = miss.run.credits;
@@ -3652,6 +3865,30 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         "the Mars claim should fabricate an empty Slot 2 without duplicating the Prospector");
     require(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
         "the Mars reward should leave the new slot empty until the player assigns or builds a Support Drone");
+    const ScenarioInstance* marsScenario =
+        findScenarioInstance(state.meta, content::scenario::marsBayExpansion);
+    const ScenarioStepProgress* funding = marsScenario == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*marsScenario, "funding");
+    require(funding != nullptr && !funding->briefingAcknowledged &&
+            scenarioStepState(
+                state,
+                catalog,
+                content::scenario::marsBayExpansion,
+                "funding") == ScenarioStepState::Active,
+        "claiming the Mars contract must reveal one saved Jupiter funding briefing without granting another reward");
+    const ScenarioActionOutcome fundingAcknowledged = performScenarioAction(
+        state,
+        catalog,
+        content::scenario::marsBayExpansion,
+        "funding",
+        ScenarioActionKind::AcknowledgeBriefing);
+    require(fundingAcknowledged.applied &&
+            scenarioHasCompletedStep(
+                state,
+                content::scenario::marsBayExpansion,
+                "funding"),
+        "the Jupiter funding briefing must acknowledge once through the existing scenario action system");
 
     state.run.destinationIndex = 3;
     state.meta.furthestTier = 3;
@@ -11531,6 +11768,7 @@ int main()
     emergencyRecruitmentOffersAnimalCandidateChoice();
     moduleOffersAreOneChoiceRefits();
     openingRefitTracksAreCuratedAndEntitled();
+    fuelRefitsTeachMarsAndFundJupiter();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
     preMiningRefitOffersAvoidMaterialCosts();
@@ -11546,6 +11784,9 @@ int main()
     arrivalOperationsGateMoonButAllowMarsRisk();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
     shipUpgradesAssistFlybyAndOrbitMinigames();
+    orbitControlsFollowClockwiseProgradeDirection();
+    orbitStartsCircularAndIsSolvableAcrossDestinationTiers();
+    launchUpgradeRanksProvideExplicitOrbitAssists();
     activeFlybySaveResumesAtApproach();
     arrivalOrbitMinigameRewardsProgressionOnlyResearch();
     activeOrbitSaveResumesAtApproach();

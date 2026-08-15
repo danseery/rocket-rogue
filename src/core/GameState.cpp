@@ -437,7 +437,7 @@ bool canInstallLaunchUpgrade(
     const ShipModule* module = nextLaunchUpgrade(state, catalog, kind);
     return module != nullptr &&
         launchUpgradeUnlocked(state, kind, module->launchUpgradeRank) &&
-        state.run.credits >= tuning::launchProgression::upgradeCost;
+        state.run.credits >= static_cast<double>(moduleOfferCost(*module));
 }
 
 bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind)
@@ -446,12 +446,13 @@ bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, Launc
     if (module == nullptr || !launchUpgradeUnlocked(state, kind, module->launchUpgradeRank)) {
         return false;
     }
-    if (state.run.credits < tuning::launchProgression::upgradeCost) {
+    const int cost = moduleOfferCost(*module);
+    if (state.run.credits < static_cast<double>(cost)) {
         state.statusLine = text::insufficientCreditsFor(module->name);
         return false;
     }
 
-    state.run.credits -= tuning::launchProgression::upgradeCost;
+    state.run.credits -= static_cast<double>(cost);
     launchUpgradeRankRef(state.meta.launchUpgrades, kind) = module->launchUpgradeRank;
     addUniqueId(state.meta.ownedModuleIds, module->id);
     addUniqueId(state.meta.defaultEquippedModuleIds, module->id);
@@ -608,23 +609,6 @@ void syncLaunchTrainingProgress(GameState& state, const ContentCatalog& catalog)
         }
     }
 
-    // Older Moon and Mars curriculum transfers paid 20 credits even though
-    // the required next fuel rank costs 22. Preserve the earned refit
-    // entitlement by repairing that funding gap on load/synchronization.
-    const int requiredFuelRank =
-        state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
-            state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer
-        ? 2
-        : state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
-                state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer
-            ? 3
-            : 0;
-    if (state.run.refitEntitled &&
-        requiredFuelRank > 0 &&
-        launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < requiredFuelRank &&
-        state.run.credits < tuning::launchProgression::upgradeCost) {
-        state.run.credits = tuning::launchProgression::upgradeCost;
-    }
 }
 
 bool canAffordMaterials(const MaterialInventory& owned, const MaterialInventory& cost)
@@ -849,10 +833,16 @@ bool curatedProvingRefitsActive(const GameState& state)
         return false;
     }
     const LaunchTrainingStage stage = state.meta.launchLessons.stage;
-    return stage == LaunchTrainingStage::FlightControlsCalibration ||
-        stage == LaunchTrainingStage::MoonTransfer ||
-        stage == LaunchTrainingStage::MarsTransfer ||
-        stage == LaunchTrainingStage::JupiterTransfer;
+    if (stage == LaunchTrainingStage::FlightControlsCalibration) {
+        return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 1;
+    }
+    if (stage == LaunchTrainingStage::MoonTransfer) {
+        return launchUpgradeRank(state, LaunchUpgradeKind::FlightControls) < 1;
+    }
+    return (stage == LaunchTrainingStage::ThermalManagement ||
+               stage == LaunchTrainingStage::MarsTransfer) &&
+        hasUnlock(state.meta, content::unlock::routeMars) &&
+        launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2;
 }
 
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
@@ -884,15 +874,13 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
         case LaunchTrainingStage::MoonTransfer:
             requiredKind = LaunchUpgradeKind::FlightControls;
             break;
+        case LaunchTrainingStage::ThermalManagement:
         case LaunchTrainingStage::MarsTransfer:
-            requiredKind = LaunchUpgradeKind::Cooling;
-            break;
-        case LaunchTrainingStage::JupiterTransfer:
-            requiredKind = LaunchUpgradeKind::Hull;
+            requiredKind = LaunchUpgradeKind::FuelTanks;
             break;
         case LaunchTrainingStage::FuelCalibration:
-        case LaunchTrainingStage::ThermalManagement:
         case LaunchTrainingStage::HullIntegrity:
+        case LaunchTrainingStage::JupiterTransfer:
         case LaunchTrainingStage::Complete:
             break;
         }
@@ -905,11 +893,15 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
 
     std::vector<RefitCandidate> candidates;
     for (const ShipModule* module : modulePool) {
-        if (module->launchUpgradeKind != LaunchUpgradeKind::None ||
-            module->compatibilityOnly) {
+        if (module->compatibilityOnly && module->launchUpgradeKind == LaunchUpgradeKind::None) {
             continue;
         }
         if (ownsModule(module->id) || !ownsModule(module->prerequisiteId)) {
+            continue;
+        }
+        if (module->launchUpgradeKind != LaunchUpgradeKind::None &&
+            (module->launchUpgradeRank != launchUpgradeRank(state, module->launchUpgradeKind) + 1 ||
+             !launchUpgradeUnlocked(state, module->launchUpgradeKind, module->launchUpgradeRank))) {
             continue;
         }
         if (!materialRefitsAvailable(state) && hasMaterialCost(module->materialCost)) {
@@ -941,6 +933,17 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     std::vector<RefitCandidate> remaining = candidates;
     std::vector<RefitCandidate> pickedIds;
     pickedIds.reserve(state.run.offerModuleIds.size());
+    const auto pinnedFuelTanksThree = std::find_if(
+        remaining.begin(),
+        remaining.end(),
+        [](const RefitCandidate& candidate) {
+            return candidate.kind == RefitOfferKind::ShipModule &&
+                candidate.id == content::module::fuelTanks3;
+        });
+    if (pinnedFuelTanksThree != remaining.end()) {
+        pickedIds.push_back(*pinnedFuelTanksThree);
+        remaining.erase(pinnedFuelTanksThree);
+    }
     const auto pickMatchingTrack = [&](RefitTrack track) {
         std::vector<std::size_t> matches;
         for (std::size_t i = 0; i < remaining.size(); ++i) {
@@ -978,7 +981,8 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
             }
             return lhs.cost < rhs.cost;
         });
-        if (cheapestAffordable != remaining.end() && candidateAffordable(*cheapestAffordable)) {
+        if (cheapestAffordable != remaining.end() && candidateAffordable(*cheapestAffordable) &&
+            pickedIds.back().id != content::module::fuelTanks3) {
             pickedIds.back() = *cheapestAffordable;
         }
     }
@@ -1029,6 +1033,10 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
     }
 
     if (module != nullptr && module->launchUpgradeKind != LaunchUpgradeKind::None) {
+        const ShipModule* next = nextLaunchUpgrade(state, catalog, module->launchUpgradeKind);
+        if (next == nullptr || next->id != module->id) {
+            return false;
+        }
         return installLaunchUpgrade(state, catalog, module->launchUpgradeKind);
     }
 
@@ -1691,7 +1699,8 @@ FrontierGateStatus frontierGateStatusForDestination(
             (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
                 state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer) &&
             status.current >= status.required;
-        status.blockerText = "Install Fuel Tanks II before the Mars transfer. Engine Cooling is optional safety margin.";
+        status.blockerText = "Mars requires 20 fuel; current capacity is " +
+            std::to_string(static_cast<int>(launchFuelCapacity(state))) + ".";
         if (!status.satisfied) {
             return status;
         }
@@ -1705,7 +1714,8 @@ FrontierGateStatus frontierGateStatusForDestination(
             (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
                 state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
             status.current >= status.required;
-        status.blockerText = "Install Fuel Tanks III before the Jupiter transfer. Hull Plating is optional safety margin.";
+        status.blockerText = "Jupiter requires 25 fuel; current capacity is " +
+            std::to_string(static_cast<int>(launchFuelCapacity(state))) + ".";
         if (!status.satisfied) {
             return status;
         }

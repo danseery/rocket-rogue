@@ -489,7 +489,8 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
             state_.run.offerModuleIds.end(),
             [&](const std::string& moduleId) {
                 const ShipModule* module = catalog_.findModule(moduleId);
-                return module != nullptr && module->compatibilityOnly;
+                return module != nullptr && module->compatibilityOnly &&
+                    module->launchUpgradeKind == LaunchUpgradeKind::None;
             });
         if (staleCompatibilityOffer && state_.run.refitEntitled) {
             generateModuleOffers(state_, catalog_, rng_);
@@ -1779,7 +1780,8 @@ void RocketGameApp::next()
         state_.statusLine = "Field upgrade skipped. Keep digging or extract while the window holds.";
         save();
     } else if (state_.screen == Screen::Upgrade) {
-        if (curatedProvingRefitsActive(state_)) {
+        if (curatedProvingRefitsActive(state_) &&
+            !refitWindowPresentation(state_, catalog_).showSkip) {
             state_.statusLine = "Install the required launch upgrade to continue.";
             panelDirty_ = true;
             return;
@@ -2217,7 +2219,13 @@ void RocketGameApp::backToSurfaceOps()
         return;
     }
 
-    state_.screen = state_.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+    if (state_.run.surfaceExpedition.active) {
+        state_.screen = Screen::SurfaceExpedition;
+    } else if (openRefitIfAvailable(true)) {
+        state_.statusLine = "Mars requires 20 fuel. Use the Moon mission credits to install Fuel Tanks II.";
+    } else {
+        state_.screen = Screen::Hangar;
+    }
     save();
     panelDirty_ = true;
 }
@@ -3378,22 +3386,6 @@ void RocketGameApp::buyOffer(int index)
     panelDirty_ = true;
 }
 
-void RocketGameApp::installLaunchUpgrade(LaunchUpgradeKind kind)
-{
-    if ((state_.screen != Screen::Hangar && state_.screen != Screen::Upgrade) ||
-        kind == LaunchUpgradeKind::None) {
-        return;
-    }
-    if (rocket::installLaunchUpgrade(state_, catalog_, kind)) {
-        selectedRefitOfferIndex_ = 0;
-        if (state_.screen == Screen::Upgrade) {
-            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
-        }
-        save();
-    }
-    panelDirty_ = true;
-}
-
 void RocketGameApp::rerollOffers()
 {
     if (state_.screen == Screen::Upgrade) {
@@ -3811,6 +3803,9 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         return true;
     }
 
+    const bool marsExpansionClaimed = address.action == ScenarioActionKind::ClaimReward &&
+        address.scenarioId == content::scenario::marsBayExpansion &&
+        address.stepId == "delivery";
     const bool supportDroneNeedsAssignment = grantsAutoAssignedSupportDrone &&
         state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore;
     if (outcome.beginsActivity && !outcome.miningSiteDefinitionId.empty()) {
@@ -3836,6 +3831,9 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         // but deliberately leaves fabrication/assignment to the player.
         state_.screen = Screen::DroneOps;
         state_.statusLine = "Drone Ops unlocked. Fabricate and assign Prospector Mk I to learn the bay.";
+    } else if (marsExpansionClaimed && state_.run.refitEntitled) {
+        (void)openRefitIfAvailable(true);
+        state_.statusLine = "Jupiter transfer planning is ready. Review the shipyard options.";
     } else if (supportDroneNeedsAssignment) {
         // The reward is owned, but no capacity was available for its
         // content-authored automatic assignment. Drone Ops provides the
@@ -3940,11 +3938,6 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectRefitOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
         buyOffer(index);
-    } else if (consumeIndexedAction(action, ui::actions::installLaunchUpgradePrefix, index)) {
-        if (index >= static_cast<int>(LaunchUpgradeKind::FuelTanks) &&
-            index <= static_cast<int>(LaunchUpgradeKind::Hull)) {
-            installLaunchUpgrade(static_cast<LaunchUpgradeKind>(index));
-        }
     } else if (consumeIndexedAction(action, ui::actions::researchProjectPrefix, index)) {
         selectResearchProject(index);
     } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {

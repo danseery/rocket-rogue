@@ -236,7 +236,7 @@ ContentCatalog createDefaultContent()
     catalog.modules = {
         module(content::module::fuelTanks1, "Fuel Tanks I", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 1, "", true, LaunchUpgradeKind::FuelTanks, 1),
         module(content::module::fuelTanks2, "Fuel Tanks II", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 2, content::module::fuelTanks1, true, LaunchUpgradeKind::FuelTanks, 2),
-        module(content::module::fuelTanks3, "Fuel Tanks III", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 3, content::module::fuelTanks2, true, LaunchUpgradeKind::FuelTanks, 3),
+        module(content::module::fuelTanks3, "Fuel Tanks III", SlotType::Fuel, Rarity::Prototype, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 3, content::module::fuelTanks2, true, LaunchUpgradeKind::FuelTanks, 3),
         module(content::module::flightControls1, "Flight Controls I", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 1, "", true, LaunchUpgradeKind::FlightControls, 1),
         module(content::module::flightControls2, "Flight Controls II", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 2, content::module::flightControls1, true, LaunchUpgradeKind::FlightControls, 2),
         module(content::module::flightControls3, "Flight Controls III", SlotType::Sensors, Rarity::Common, {}, content::unlock::starter, {"launch", "controls"}, {}, RefitTrack::Control, 3, content::module::flightControls2, true, LaunchUpgradeKind::FlightControls, 3),
@@ -453,7 +453,7 @@ ContentCatalog createDefaultContent()
         },
         {
             content::scenario::marsBayExpansion,
-            1,
+            2,
             content::unlock::routeMars,
             content::destination::mars,
             {
@@ -470,9 +470,14 @@ ContentCatalog createDefaultContent()
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
                     tuning::research::marsBayCommonOreGoal, 0, false, true, false,
                     ScenarioActionKind::ClaimReward, {},
-                    {{ScenarioRewardKind::DroneBaySlots, {}, 2, false},
-                     {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
-                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+                     {{ScenarioRewardKind::DroneBaySlots, {}, 2, false},
+                      {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
+                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
+                {"funding", {"delivery"}, "JUPITER TRANSFER", "Jupiter Transfer Window",
+                    "The Jupiter transfer requires 25 fuel. Current capacity is 20. Mission credits fund permanent refits, and successful Mars operations reopen the shipyard.",
+                    "MISSION CREDITS FUND PERMANENT REFITS", "Review Refit Options", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}}
             }
         },
         {

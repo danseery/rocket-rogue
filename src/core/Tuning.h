@@ -102,7 +102,6 @@ inline constexpr int recruitTrainingPenalty = 1;
 
 namespace launchProgression {
 inline constexpr int maximumUpgradeRank = 3;
-inline constexpr double upgradeCost = 22.0;
 inline constexpr double lessonReward = 22.0;
 // The first flight runs slowly and provides long, distinct warning windows so
 // the player can read the lesson before making the turnaround decision.
@@ -392,17 +391,7 @@ inline double flybyExitAngleRadians() noexcept
 // Negative math-space angular travel keeps the same clockwise screen-space
 // motion as the preceding pass.
 inline constexpr double direction = -1.0;
-inline constexpr double startTangentialSpeed = 0.36;
 inline constexpr double thrustAcceleration = 0.075;
-inline constexpr double sensorGoodBandScale = 0.012;
-inline constexpr double sensorPerfectBandScale = 0.0045;
-inline constexpr double escapeBandScale = 0.004;
-inline constexpr double thrustControlScale = 0.018;
-inline constexpr double coolingControlScale = 0.006;
-inline constexpr double volatilityControlPenalty = 0.006;
-inline constexpr double fuelDurationScale = 0.15;
-inline constexpr double sensorDurationScale = 0.08;
-inline constexpr double maxAssistDurationBonus = 2.0;
 inline constexpr double gravitySoftening = 0.120;
 inline constexpr double gravityScale = 0.42;
 inline constexpr double driftDrag = 0.008;
@@ -410,6 +399,13 @@ inline constexpr double minSpeed = 0.18;
 inline constexpr double maxSpeed = 0.48;
 inline constexpr double escapeRadiusScale = 2.40;
 inline constexpr double collisionPadding = 0.018;
+// Orbit support is intentionally tied to the visible launch-upgrade tracks,
+// not to hidden legacy module stats. Each track has one concrete benefit.
+inline constexpr double fuelDurationAssistPerRank = 0.60;
+inline constexpr double flightControlsThrustAssistPerRank = 0.10;
+inline constexpr double coolingThrustAssistPerRank = 0.05;
+inline constexpr double hullCollisionPaddingReliefPerRank = 0.0025;
+inline constexpr double minimumCollisionPadding = 0.006;
 inline constexpr int goodBlueprintGain = 1;
 inline constexpr int perfectBlueprintGain = 2;
 inline constexpr double goodRewardFactor = 0.55;

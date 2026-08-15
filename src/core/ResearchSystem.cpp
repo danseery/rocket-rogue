@@ -851,23 +851,21 @@ void applyShipAssistToFlyby(FlybyRunState& flyby, const ModuleStats& stats)
     flyby.impactHullDamage = std::max(6, tuning::flyby::impactHullDamage - relief);
 }
 
-void applyShipAssistToOrbit(OrbitRunState& orbit, const ModuleStats& stats)
+void applyLaunchUpgradeAssistToOrbit(const GameState& state, OrbitRunState& orbit)
 {
-    const double sensors = std::max(0.0, stats.sensors);
-    const double escape = std::max(0.0, stats.escape);
-    orbit.goodBand = orbit.planetRadius * (tuning::orbit::goodBandScale + sensors * tuning::orbit::sensorGoodBandScale + escape * tuning::orbit::escapeBandScale);
-    orbit.perfectBand = orbit.planetRadius * (tuning::orbit::perfectBandScale + sensors * tuning::orbit::sensorPerfectBandScale);
-    orbit.durationSeconds += std::clamp(
-        std::max(0.0, stats.fuel) * tuning::orbit::fuelDurationScale +
-            sensors * tuning::orbit::sensorDurationScale,
-        0.0,
-        tuning::orbit::maxAssistDurationBonus);
-    orbit.thrustAcceleration = tuning::orbit::thrustAcceleration * flightControlScale(
-        stats,
-        tuning::orbit::thrustControlScale,
-        tuning::orbit::coolingControlScale,
-        tuning::orbit::volatilityControlPenalty,
-        stats.cooling);
+    const int fuelTanks = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks);
+    const int flightControls = launchUpgradeRank(state, LaunchUpgradeKind::FlightControls);
+    const int cooling = launchUpgradeRank(state, LaunchUpgradeKind::Cooling);
+    const int hull = launchUpgradeRank(state, LaunchUpgradeKind::Hull);
+
+    orbit.durationSeconds += static_cast<double>(fuelTanks) * tuning::orbit::fuelDurationAssistPerRank;
+    orbit.thrustAcceleration *= 1.0 +
+        static_cast<double>(flightControls) * tuning::orbit::flightControlsThrustAssistPerRank +
+        static_cast<double>(cooling) * tuning::orbit::coolingThrustAssistPerRank;
+    orbit.collisionPadding = std::max(
+        tuning::orbit::minimumCollisionPadding,
+        tuning::orbit::collisionPadding -
+            static_cast<double>(hull) * tuning::orbit::hullCollisionPaddingReliefPerRank);
 }
 
 bool flybyShipIntersectsPlanet(const FlybyRunState& flyby)
@@ -969,6 +967,17 @@ double orbitPlanetRadius(const Destination& destination)
 double orbitTargetRadius(double planetRadius)
 {
     return planetRadius * tuning::orbit::targetRadiusScale;
+}
+
+double circularOrbitSpeed(const OrbitRunState& orbit)
+{
+    const double radius = std::max(0.001, orbit.targetRadius);
+    const double gravityAcceleration = orbit.gravityStrength /
+        (radius * radius + tuning::orbit::gravitySoftening);
+    return std::clamp(
+        std::sqrt(std::max(0.0, gravityAcceleration * radius)),
+        tuning::orbit::minSpeed,
+        tuning::orbit::maxSpeed);
 }
 
 int orbitZoneAt(const OrbitRunState& orbit, double x, double y)
@@ -2170,13 +2179,14 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     orbit.perfectBand = orbit.planetRadius * tuning::orbit::perfectBandScale;
     orbit.gravityStrength = orbit.targetRadius * orbit.targetRadius * tuning::orbit::gravityScale;
     orbit.thrustAcceleration = tuning::orbit::thrustAcceleration;
-    applyShipAssistToOrbit(orbit, aggregateShipStats(state, catalog));
+    applyLaunchUpgradeAssistToOrbit(state, orbit);
 
     const double angle = tuning::orbit::flybyExitAngleRadians();
     orbit.shipX = std::cos(angle) * orbit.targetRadius;
     orbit.shipY = std::sin(angle) * orbit.targetRadius;
-    orbit.velocityX = tuning::orbit::direction * -std::sin(angle) * tuning::orbit::startTangentialSpeed;
-    orbit.velocityY = tuning::orbit::direction * std::cos(angle) * tuning::orbit::startTangentialSpeed;
+    const double insertionSpeed = circularOrbitSpeed(orbit);
+    orbit.velocityX = tuning::orbit::direction * -std::sin(angle) * insertionSpeed;
+    orbit.velocityY = tuning::orbit::direction * std::cos(angle) * insertionSpeed;
     orbit.angleRadians = std::atan2(orbit.shipY, orbit.shipX);
     orbit.currentZone = orbitZoneAt(orbit, orbit.shipX, orbit.shipY);
     orbit.worstZone = orbit.currentZone;
@@ -2227,14 +2237,18 @@ void updateOrbitRun(GameState& state, double deltaSeconds)
     const double radialY = orbit.shipY / distance;
     const double tangentX = -radialY;
     const double tangentY = radialX;
+    // Positive tangential input must remain prograde even though the visible
+    // approach now travels clockwise from the Flyby endpoint.
+    const double directedTangentX = tangentX * tuning::orbit::direction;
+    const double directedTangentY = tangentY * tuning::orbit::direction;
     const double gravityAcceleration = orbit.gravityStrength / (distance * distance + tuning::orbit::gravitySoftening);
     orbit.velocityX += -radialX * gravityAcceleration * dt;
     orbit.velocityY += -radialY * gravityAcceleration * dt;
 
     const double radialInput = std::clamp(orbit.inputX, -1.0, 1.0);
     const double tangentialInput = std::clamp(orbit.inputY, -1.0, 1.0);
-    orbit.velocityX += (radialX * radialInput + tangentX * tangentialInput) * orbit.thrustAcceleration * dt;
-    orbit.velocityY += (radialY * radialInput + tangentY * tangentialInput) * orbit.thrustAcceleration * dt;
+    orbit.velocityX += (radialX * radialInput + directedTangentX * tangentialInput) * orbit.thrustAcceleration * dt;
+    orbit.velocityY += (radialY * radialInput + directedTangentY * tangentialInput) * orbit.thrustAcceleration * dt;
 
     const double drag = std::max(0.0, 1.0 - tuning::orbit::driftDrag * dt);
     orbit.velocityX *= drag;
@@ -2270,7 +2284,7 @@ void updateOrbitRun(GameState& state, double deltaSeconds)
     orbit.elapsedSeconds += dt;
     const double currentDistance = std::hypot(orbit.shipX, orbit.shipY);
     const double escapeRadius = orbit.targetRadius + orbit.goodBand * tuning::orbit::escapeRadiusScale;
-    if (currentDistance <= orbit.planetRadius + tuning::orbit::collisionPadding || currentDistance >= escapeRadius) {
+    if (currentDistance <= orbit.planetRadius + orbit.collisionPadding || currentDistance >= escapeRadius) {
         orbit.completed = true;
         orbit.result = OrbitGrade::Miss;
     } else if (orbit.orbitProgress >= 1.0) {

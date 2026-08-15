@@ -1226,6 +1226,7 @@ struct OrbitRunState {
     double inputY = 0.0;
     double gravityStrength = 0.040;
     double thrustAcceleration = 0.075;
+    double collisionPadding = 0.018;
     double orbitProgress = 0.0;
     double angleRadians = 0.0;
     int worstZone = 2;

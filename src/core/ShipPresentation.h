@@ -13,17 +13,6 @@
 
 namespace rocket {
 
-struct LaunchUpgradeInstallPresentation {
-    LaunchUpgradeKind kind = LaunchUpgradeKind::None;
-    std::string title;
-    int currentRank = 0;
-    int nextRank = 0;
-    std::string currentEffect;
-    std::string nextEffect;
-    int cost = 0;
-    PanelButtonPresentation action;
-};
-
 inline std::string launchUpgradeTrackName(LaunchUpgradeKind kind)
 {
     switch (kind) {
@@ -59,32 +48,6 @@ inline std::string launchUpgradeEffect(LaunchUpgradeKind kind, int rank)
     return {};
 }
 
-inline std::string launchUpgradeLockLabel(LaunchUpgradeKind kind, int nextRank)
-{
-    if (nextRank <= 1) {
-        switch (kind) {
-        case LaunchUpgradeKind::FuelTanks: return "Complete fuel test";
-        case LaunchUpgradeKind::FlightControls: return "Complete controls test";
-        case LaunchUpgradeKind::Cooling: return "Complete heat test";
-        case LaunchUpgradeKind::Hull: return "Complete asteroid test";
-        case LaunchUpgradeKind::None: break;
-        }
-    }
-    if (kind == LaunchUpgradeKind::FuelTanks) {
-        return nextRank == 2 ? "Reveal Mars route" : "Reveal Jupiter route";
-    }
-    const int requiredTier = kind == LaunchUpgradeKind::Hull
-        ? nextRank + 1
-        : (kind == LaunchUpgradeKind::Cooling ? nextRank : nextRank - 1);
-    switch (requiredTier) {
-    case 1: return "Reach Moon";
-    case 2: return "Reach Mars";
-    case 3: return "Reach Jupiter";
-    case 4: return "Reach Saturn";
-    default: return "Locked";
-    }
-}
-
 inline std::string shipModuleSummary(const ShipModule& module)
 {
     return module.name + " (" + std::string(toString(module.rarity)) + ")";
@@ -102,6 +65,18 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
     }
 
     rows.push_back(detailPresentationRow(text::moduleStats::damage, display::wholePercent(state.run.shipDamage)));
+    rows.push_back(detailPresentationHeader("Launch systems"));
+    for (const LaunchUpgradeKind kind : {
+             LaunchUpgradeKind::FuelTanks,
+             LaunchUpgradeKind::FlightControls,
+             LaunchUpgradeKind::Cooling,
+             LaunchUpgradeKind::Hull}) {
+        const int rank = launchUpgradeRank(state, kind);
+        rows.push_back(detailPresentationRow(
+            launchUpgradeTrackName(kind),
+            (rank > 0 ? "RANK " + std::to_string(rank) : std::string("BASE")) +
+                " / " + launchUpgradeEffect(kind, rank)));
+    }
     rows.push_back(detailPresentationHeader("Installed ship systems"));
     for (const std::string& moduleId : state.meta.ownedModuleIds) {
         if (const ShipModule* module = catalog.findModule(moduleId)) {
@@ -116,47 +91,6 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
     }
 
     return rows;
-}
-
-inline std::vector<LaunchUpgradeInstallPresentation> launchUpgradeInstallPresentation(
-    const GameState& state,
-    const ContentCatalog& catalog)
-{
-    std::vector<LaunchUpgradeInstallPresentation> upgrades;
-    for (const LaunchUpgradeKind kind : {
-             LaunchUpgradeKind::FuelTanks,
-             LaunchUpgradeKind::FlightControls,
-             LaunchUpgradeKind::Cooling,
-             LaunchUpgradeKind::Hull}) {
-        const int currentRank = launchUpgradeRank(state, kind);
-        const ShipModule* module = nextLaunchUpgrade(state, catalog, kind);
-        const int nextRank = module == nullptr ? currentRank : module->launchUpgradeRank;
-        const int cost = static_cast<int>(tuning::launchProgression::upgradeCost);
-        PanelButtonPresentation action;
-        if (module == nullptr) {
-            action = disabledPanelButton("MAX");
-        } else if (!launchUpgradeUnlocked(state, kind, nextRank)) {
-            action = disabledPanelButton(launchUpgradeLockLabel(kind, nextRank));
-        } else if (!canInstallLaunchUpgrade(state, catalog, kind)) {
-            action = disabledPanelButton(text::needCredits(cost));
-        } else {
-            action = panelActionButton(
-                text::buttons::install,
-                ui::actions::installLaunchUpgrade(static_cast<int>(kind)),
-                "ok");
-        }
-        upgrades.push_back({
-            kind,
-            launchUpgradeTrackName(kind),
-            currentRank,
-            nextRank,
-            launchUpgradeEffect(kind, currentRank),
-            module == nullptr ? std::string("Maximum rank") : launchUpgradeEffect(kind, nextRank),
-            cost,
-            std::move(action)
-        });
-    }
-    return upgrades;
 }
 
 } // namespace rocket

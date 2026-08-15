@@ -2051,37 +2051,6 @@ std::string detailStack(const std::vector<DetailPresentationRow>& rows)
     return body;
 }
 
-std::string launchUpgradeInstallStack(
-    const GameState& state,
-    const ContentCatalog& catalog)
-{
-    const std::vector<LaunchUpgradeInstallPresentation> upgrades =
-        launchUpgradeInstallPresentation(state, catalog);
-    std::ostringstream out;
-    out << "<section class=\"detail-stack rr-detail-stack modal-body launch-upgrade-install-list\">"
-        << "<div class=\"detail-section\">Available launch upgrades</div>";
-    for (const LaunchUpgradeInstallPresentation& upgrade : upgrades) {
-        out << "<article class=\"comparison-card launch-upgrade-install-row\"><div class=\"card-topline\"><span>"
-            << htmlEscape(upgrade.title) << "</span><strong>RANK "
-            << upgrade.currentRank << "/" << tuning::launchProgression::maximumUpgradeRank
-            << "</strong></div><div><p class=\"card-copy\"><strong>Current:</strong> "
-            << htmlEscape(upgrade.currentEffect) << "</p><p class=\"card-copy\"><strong>Next:</strong> "
-            << htmlEscape(upgrade.nextEffect) << "</p></div><div class=\"card-footer action-row\"><span>"
-            << (upgrade.currentRank >= tuning::launchProgression::maximumUpgradeRank
-                    ? std::string("MAX")
-                    : htmlEscape(display::credits(upgrade.cost)))
-            << "</span>"
-            << panelButton(upgrade.action) << "</div></article>";
-    }
-    const bool trainingRefit = curatedProvingRefitsActive(state);
-    out << "<div class=\"modal-actions action-row\">"
-        << "<button type=\"button\" class=\"ghost rr-text-button\" data-ui-close-modal=\"1\" "
-           "data-ui-focus-id=\"launch-upgrades:close\"><span class=\"rr-button-label\">"
-        << (trainingRefit ? "Close" : "Keep Credits") << "</span></button>"
-        << "</div></section>";
-    return out.str();
-}
-
 std::string missionLog(const std::vector<std::string>& entries)
 {
     std::string body = "<div class=\"detail-stack rr-detail-stack modal-body\">";
@@ -2307,36 +2276,36 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
         return {"Map the Moon route", "Fly to the low-fuel warning. Turn Around any time before FUEL reaches 0."};
     case LaunchTrainingStage::FlightControlsCalibration:
         return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 1
-            ? std::pair<std::string, std::string>{"Install Fuel Tanks I", "Open Ship Details and install the unlocked fuel upgrade."}
+            ? std::pair<std::string, std::string>{"Install Fuel Tanks I", "Install the taught fuel upgrade in Refit."}
             : std::pair<std::string, std::string>{"Calibrate Flight Controls", "Lunar landing guidance is uncalibrated. Reach the yellow test line, then return before the Moon."};
     case LaunchTrainingStage::MoonTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{"Reach the Moon", "Fuel and controls are ready for the lunar transfer."}
-            : std::pair<std::string, std::string>{"Install Flight Controls I", "Open Ship Details and install the required control upgrade."};
+            : std::pair<std::string, std::string>{"Install Flight Controls I", "Install the taught control upgrade in Refit."};
     case LaunchTrainingStage::ThermalManagement:
         if (!hasUnlock(state.meta, content::unlock::routeMars)) {
             return {"Complete Lunar Prospector", "Finish the Moon contract to reveal the Mars route."};
         }
         if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2) {
-            return {"Install Fuel Tanks II", "The Mars route needs 20 fuel. Engine Cooling remains optional."};
+            return {"Mars transfer requires 20 fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
         }
         return {"Reach Mars", "Use Engines Off to manage heat. Reaching Mars completes the flight."};
     case LaunchTrainingStage::MarsTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{"Reach Mars", "Fuel Tanks II is ready. Engine Cooling remains optional."}
-            : std::pair<std::string, std::string>{"Install Fuel Tanks II", "Engine Cooling is optional safety margin."};
+            : std::pair<std::string, std::string>{"Mars transfer requires 20 fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
     case LaunchTrainingStage::HullIntegrity:
         if (!hasUnlock(state.meta, content::unlock::routeJupiter)) {
             return {"Complete Mars Bay Expansion", "Finish the Mars contract to reveal the Jupiter route."};
         }
         if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 3) {
-            return {"Install Fuel Tanks III", "The Jupiter route needs 25 fuel. Hull Plating remains optional."};
+            return {"Jupiter transfer requires 25 fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
         }
         return {"Reach Jupiter", "Steer through the asteroid gaps. Reaching Jupiter completes the flight."};
     case LaunchTrainingStage::JupiterTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{"Reach Jupiter", "Fuel Tanks III is ready. Hull Plating remains optional."}
-            : std::pair<std::string, std::string>{"Install Fuel Tanks III", "Hull Plating is optional safety margin."};
+            : std::pair<std::string, std::string>{"Jupiter transfer requires 25 fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
     case LaunchTrainingStage::Complete:
         return {"Prepare the next flight", "Current destination: " + target.name};
     }
@@ -3223,7 +3192,26 @@ std::string buildGamePanelMarkup(
             detailPresentationRow("Destination", destinationName),
             detailPresentationRow("Projected reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits)),
             detailPresentationRow("Science", grade == OrbitGrade::Active ? "Pending" : "+" + std::to_string(blueprintGain)),
-            detailPresentationRow("Controls", std::string_view("Adjust the track; Abort records a Miss"))
+            detailPresentationRow("Controls", std::string_view("Up/Down adjust orbital speed; Left/Right adjust altitude")),
+            detailPresentationRow(
+                "Orbit assists",
+                "Fuel +" + display::fixed(
+                    static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks)) *
+                        tuning::orbit::fuelDurationAssistPerRank,
+                    1) +
+                    "s | Controls +" +
+                    display::fixed(
+                        static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::FlightControls)) *
+                            tuning::orbit::flightControlsThrustAssistPerRank * 100.0 +
+                            static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::Cooling)) *
+                                tuning::orbit::coolingThrustAssistPerRank * 100.0,
+                        0) +
+                    "% trim | Hull reduces low-orbit collision risk " +
+                    display::percent(
+                        std::clamp(
+                            1.0 - orbit.collisionPadding / tuning::orbit::collisionPadding,
+                            0.0,
+                            1.0)))
         };
         out << modalTemplate("flight_details", "Orbit Details", detailStack(orbitDetails));
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
@@ -4233,11 +4221,17 @@ std::string buildGamePanelMarkup(
         const RefitWindowPresentation refitWindow = refitWindowPresentation(state, catalog);
         const bool singleLaunchLessonOffer = refitWindow.offers.size() == 1 &&
             refitWindow.offers.front().kind == RefitOfferPresentationKind::LaunchUpgrade;
+        const bool marsTransferFuelLesson = singleLaunchLessonOffer &&
+            (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
+             state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer) &&
+            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2;
         out << phaseBoardOpen("phase-board-refit phase-board-draft-room", state.statusLine);
-        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Shipyard refit")
-            << "</span><h2>" << htmlEscape("Install one upgrade") << "</h2><p>"
-            << htmlEscape(singleLaunchLessonOffer
-                    ? "Install this required launch upgrade to continue."
+        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape(marsTransferFuelLesson ? "Mars transfer refit" : "Shipyard refit")
+            << "</span><h2>" << htmlEscape(marsTransferFuelLesson ? "Expand fuel capacity" : "Install one upgrade") << "</h2><p>"
+            << htmlEscape(marsTransferFuelLesson
+                    ? "Mars requires 20 fuel. Current capacity is 15. Spend 22 mission credits on Fuel Tanks II."
+                    : singleLaunchLessonOffer
+                        ? "Install this required launch upgrade to continue."
                     : "Choose an unlocked system or keep your credits.") << "</p></div>";
         out << "<div class=\"stat-grid chip-strip draft-context\">" << resourceChipGrid(refitWindow.resourceChips) << "</div></section>";
         if (!refitWindow.recoveryDetail.empty()) {
@@ -4299,8 +4293,7 @@ std::string buildGamePanelMarkup(
         return out.str();
     }
 
-    const std::string shipBody = detailStack(shipDetailsPresentation(state, catalog)) +
-        launchUpgradeInstallStack(state, catalog);
+    const std::string shipBody = detailStack(shipDetailsPresentation(state, catalog));
     const std::string crewBody = detailStack(crewDetailsPresentation(state, catalog));
     const std::string frontierBody = detailStack(frontierDetailsPresentation(state, catalog));
 
@@ -4405,9 +4398,19 @@ std::string buildGamePanelMarkup(
                 : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok"))));
     if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression) {
         if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
-            out << (launchHardwareBlocked
-                ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
-                : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger"));
+            const FrontierGateStatus nextGate = frontierGateStatusForDestination(state, catalog, next->id);
+            const int requiredFuelRank = std::clamp(next->tier, 0, tuning::launchProgression::maximumUpgradeRank);
+            const double requiredFuel = tuning::launchProgression::baseFuelCapacity +
+                static_cast<double>(requiredFuelRank) * tuning::launchProgression::fuelPerTankRank;
+            const bool fuelCapacityShortfall = nextGate.kind == FrontierGateKind::FlightData &&
+                launchFuelCapacity(state) + 0.000001 < requiredFuel;
+            out << (fuelCapacityShortfall
+                ? disabledButton(
+                    display::fixed(requiredFuel, 0) + " fuel required / " +
+                    display::fixed(launchFuelCapacity(state), 0) + " available")
+                : (launchHardwareBlocked
+                    ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
+                    : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
         } else if (canCommitToNextFrontier(state, catalog)) {
             const bool oneWayCommit = next->oneWayExpedition;
             out << (launchReadiness.blocked

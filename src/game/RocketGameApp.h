@@ -60,7 +60,6 @@ public:
     void selectNavigationDestination(int index);
     void selectRefitOffer(int index);
     void buyOffer(int index);
-    void installLaunchUpgrade(LaunchUpgradeKind kind);
     void rerollOffers();
     void acknowledgeApproachIntroduction();
     void acknowledgeProspectorCompletion();

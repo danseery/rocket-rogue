@@ -438,8 +438,10 @@ inline RefitOfferPresentation launchUpgradeOfferPresentation(
     const GameState& state,
     const ContentCatalog& catalog)
 {
-    const int cost = static_cast<int>(tuning::launchProgression::upgradeCost);
-    const bool affordable = canInstallLaunchUpgrade(state, catalog, module.launchUpgradeKind);
+    const int cost = moduleOfferCost(module);
+    const ShipModule* next = nextLaunchUpgrade(state, catalog, module.launchUpgradeKind);
+    const bool affordable = next != nullptr && next->id == module.id &&
+        canInstallLaunchUpgrade(state, catalog, module.launchUpgradeKind);
     return {
         RefitOfferPresentationKind::LaunchUpgrade,
         index,
@@ -450,8 +452,8 @@ inline RefitOfferPresentation launchUpgradeOfferPresentation(
         moduleRefitPresentation(module),
         affordable
             ? panelActionButton(
-                text::buttons::install,
-                ui::actions::installLaunchUpgrade(static_cast<int>(module.launchUpgradeKind)),
+                text::buttons::installPermanently,
+                ui::actions::buyOffer(index),
                 "ok")
             : disabledPanelButton(text::needCredits(cost))
     };
@@ -482,67 +484,38 @@ inline RefitWindowPresentation refitWindowPresentation(const GameState& state, c
     presentation.recoveryDetail = refitRecoveryDetail(state, !presentation.resourceChips.empty());
     presentation.offers.reserve(state.run.offerModuleIds.size() + 4);
 
-    LaunchUpgradeKind lessonUpgrade = LaunchUpgradeKind::None;
-    switch (state.meta.launchLessons.stage) {
-    case LaunchTrainingStage::FlightControlsCalibration:
-        lessonUpgrade = LaunchUpgradeKind::FuelTanks;
-        break;
-    case LaunchTrainingStage::MoonTransfer:
-        lessonUpgrade = LaunchUpgradeKind::FlightControls;
-        break;
-    case LaunchTrainingStage::MarsTransfer:
-        lessonUpgrade = LaunchUpgradeKind::Cooling;
-        break;
-    case LaunchTrainingStage::JupiterTransfer:
-        lessonUpgrade = LaunchUpgradeKind::Hull;
-        break;
-    case LaunchTrainingStage::FuelCalibration:
-    case LaunchTrainingStage::ThermalManagement:
-    case LaunchTrainingStage::HullIntegrity:
-    case LaunchTrainingStage::Complete:
-        break;
-    }
-    if (lessonUpgrade != LaunchUpgradeKind::None && launchUpgradeRank(state, lessonUpgrade) == 0) {
-        const ShipModule* module = nextLaunchUpgrade(state, catalog, lessonUpgrade);
-        if (module != nullptr && launchUpgradeUnlocked(state, lessonUpgrade, module->launchUpgradeRank)) {
-            presentation.offers.push_back(launchUpgradeOfferPresentation(
-                *module,
-                static_cast<int>(presentation.offers.size()),
-                state,
-                catalog));
-        }
-    }
-
-    // Lesson rewards are deliberately a single, taught Launch upgrade. Normal
-    // refit entitlements earned between lessons still expose the existing
-    // non-Launch module and crew choices instead of opening an empty board.
-    if (!curatedProvingRefitsActive(state)) {
-        for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
-            const int index = static_cast<int>(i);
-            if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
-                if (module->launchUpgradeKind != LaunchUpgradeKind::None ||
-                    module->compatibilityOnly) {
-                    continue;
-                }
+    for (std::size_t i = 0; i < state.run.offerModuleIds.size(); ++i) {
+        const int index = static_cast<int>(i);
+        if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
+            if (module->launchUpgradeKind != LaunchUpgradeKind::None) {
+                presentation.offers.push_back(launchUpgradeOfferPresentation(
+                    *module,
+                    index,
+                    state,
+                    catalog));
+            } else if (!module->compatibilityOnly) {
                 presentation.offers.push_back(moduleOfferPresentation(*module, index, state));
-                continue;
             }
+            continue;
+        }
 
-            if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[i])) {
-                presentation.offers.push_back(crewUpgradeOfferPresentation(*upgrade, index, state.run.credits));
-            }
+        if (const CrewUpgrade* upgrade = catalog.findCrewUpgrade(state.run.offerCrewUpgradeIds[i])) {
+            presentation.offers.push_back(crewUpgradeOfferPresentation(*upgrade, index, state.run.credits));
         }
     }
 
     presentation.rerollCost = offerRerollCost(state);
-    presentation.showReroll = state.meta.launchLessons.stage == LaunchTrainingStage::Complete &&
-        !curatedProvingRefitsActive(state);
+    presentation.showReroll = !curatedProvingRefitsActive(state);
     presentation.rerollAction = state.run.credits >= presentation.rerollCost
         ? panelActionButton(text::panel::rerollOffers(display::money(presentation.rerollCost)), ui::actions::rerollOffers, "warn")
         : disabledPanelButton(display::needCredits(presentation.rerollCost));
     // Training refits teach a required capability.  They are not a choice
     // window: leaving without the upgrade only produces a blocked launch.
-    presentation.showSkip = !curatedProvingRefitsActive(state);
+    const bool taughtOfferAffordable = std::any_of(
+        presentation.offers.begin(),
+        presentation.offers.end(),
+        [](const RefitOfferPresentation& offer) { return offer.affordable; });
+    presentation.showSkip = !curatedProvingRefitsActive(state) || !taughtOfferAffordable;
     presentation.skipAction = panelActionButton(text::buttons::keepCredits, ui::actions::next);
     return presentation;
 }

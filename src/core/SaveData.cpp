@@ -448,6 +448,8 @@ int screenToInt(Screen screen)
         return 8;
     case Screen::StoryBriefing:
         return 9;
+    case Screen::Upgrade:
+        return 10;
     default:
         return 0;
     }
@@ -472,6 +474,8 @@ Screen screenFromInt(int value)
         return Screen::Navigation;
     case 9:
         return Screen::StoryBriefing;
+    case 10:
+        return Screen::Upgrade;
     default:
         return Screen::Hangar;
     }
@@ -3452,9 +3456,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
         state.run.mining = {};
     }
-    if (state.screen == Screen::DroneOps && !state.run.surfaceExpedition.active) {
-        state.screen = Screen::Hangar;
-    }
+    // Drone Ops also owns the standalone Prospector onboarding that follows a
+    // completed Moon expedition. Its later unlock validation is sufficient;
+    // do not require a still-active Surface Ops loop for that saved screen.
     if (state.run.mining.active && static_cast<int>(state.run.mining.terrain.cells.size()) != state.run.mining.terrain.width * state.run.mining.terrain.height) {
         state.run.mining = {};
         if (state.screen == Screen::Mining) {
