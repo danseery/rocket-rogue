@@ -27,7 +27,7 @@ Act 1 uses at most one lock, Act 2 uses at most two, and Act 3 uses at most thre
 - `MiningCapabilityProfile` derives role marks and rig capability from equipped Support Drones, upgrades, crew, and ship. It is forecast-only and never changes arena difficulty.
 - Gate-associated cells and enemies serialize with the active arena. New authored and procedural sites are held by `ScenarioInstance` plus `MiningSiteDefinition`; `MiningSiteProgress` exists only to resume migrated pre-scenario sites and records legacy provenance.
 
-Scenario sites reuse their resolved request and protected-objective identity until the payload is delivered, banked, and survives Surface extraction. Abort, rig loss, payload destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by protected-objective identity, not by a destination or narrative tag. Imported pre-scenario sites retain their historical identity only through the compatibility migration.
+Scenario sites reuse their resolved request and protected-objective identity until the payload is physically delivered to the ship and survives Surface extraction. Abort, rig loss, payload destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by protected-objective identity, not by a destination or narrative tag. Imported pre-scenario sites retain their historical identity only through the compatibility migration.
 
 ### Generic cocoon authoring
 

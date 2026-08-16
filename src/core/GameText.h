@@ -144,6 +144,7 @@ inline constexpr std::string_view nominal = "Tracking system margins below limit
 } // namespace telemetry
 
 namespace labels {
+inline constexpr std::string_view credits = "Credits";
 inline constexpr std::string_view missionCredits = "Mission credits";
 inline constexpr std::string_view chapter = "Chapter";
 inline constexpr std::string_view hullDamage = "Hull damage";
@@ -178,7 +179,9 @@ inline constexpr std::string_view extractionRisk = "Extraction risk";
 inline constexpr std::string_view contactRisk = "Contact risk";
 inline constexpr std::string_view oxygen = "Oxygen";
 inline constexpr std::string_view arkFuel = "Ark fuel";
-inline constexpr std::string_view sharedFuel = "Shared fuel";
+inline constexpr std::string_view rigFuel = "Rig fuel";
+inline constexpr std::string_view transferFuel = "Transfer fuel";
+inline constexpr std::string_view returnStage = "Return stage";
 inline constexpr std::string_view drillHeat = "Drill heat";
 inline constexpr std::string_view drillIntegrity = "Drill integrity";
 inline constexpr std::string_view droneHealth = "Rig health";
@@ -200,69 +203,71 @@ inline constexpr std::string_view instability = "INSTABILITY";
 namespace fuel {
 inline std::string_view reserveLabel(bool arkKnown)
 {
-    return arkKnown ? labels::arkFuel : labels::sharedFuel;
+    static_cast<void>(arkKnown);
+    return labels::rigFuel;
 }
 
 inline std::string deployDetail(bool arkKnown)
 {
     if (arkKnown) {
-        return " Deploying the Mining Rig spends the same Ark reserve used for shuttle routes.";
+        return " The expedition pack is loaded from Ark reserves; transfer fuel recovered at touchdown is added to it.";
     }
-    return " Deploying the Mining Rig uses the same shared fuel supply as the shuttle.";
+    return " Transfer fuel recovered at touchdown is added to the isolated expedition rig pack.";
 }
 
 inline std::string blocked(bool arkKnown)
 {
-    return arkKnown ? "Need Ark fuel" : "Need shared fuel";
+    static_cast<void>(arkKnown);
+    return "Need rig fuel";
 }
 
 inline std::string availability(bool arkKnown)
 {
-    return arkKnown ? "Ark fuel ready" : "Shared fuel ready";
+    static_cast<void>(arkKnown);
+    return "Rig fuel ready";
 }
 
 inline constexpr std::string_view offline = "Mining Rig offline";
 
 inline std::string drawDetail(bool arkKnown)
 {
-    const std::string cadence = "1 " + std::string(reserveLabel(arkKnown)) +
-        " on deploy, then 1 whenever the fuel cycle completes while oxygen remains.";
+    const std::string cadence = "Deploying costs 1 rig fuel. The rig consumes 1 fuel whenever its 15-second operating cycle completes while oxygen remains.";
     if (arkKnown) {
-        return cadence + " Returning to the Ark replenishes the shuttle and Mining Rig from Ark reserves.";
+        return cadence + " The return stage is reserved and cannot be spent by the rig.";
     }
-    return cadence + " Returning to base replenishes the shuttle and Mining Rig.";
+    return cadence + " The return stage is reserved and cannot be spent by the rig.";
 }
 
 inline std::string miningRunTarget(bool arkKnown)
 {
     if (arkKnown) {
-        return "Stow useful payload before oxygen or Ark reserves make the next route too expensive.";
+        return "Stow useful payload before oxygen or rig fuel forces a recall.";
     }
-    return "Stow useful payload before oxygen or shared fuel makes the next route too expensive.";
+    return "Stow useful payload before oxygen or rig fuel forces a recall.";
 }
 
 inline std::string miningBlockedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Ark fuel reserve is empty. Recover fuel before deploying the Mining Rig.";
+        return "Rig fuel is empty. Recover transfer fuel or load an Ark expedition pack before deploying.";
     }
-    return "Shared fuel is empty. Return to base before deploying the Mining Rig.";
+    return "Rig fuel is empty. Return to base before deploying the Mining Rig.";
 }
 
 inline std::string miningFailedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Ark fuel reserve is dry. The Mining Rig is being recalled so the shuttle keeps a recovery route.";
+        return "Rig fuel is dry. Emergency recall engaged; the protected return stage remains ready.";
     }
-    return "Shared fuel is dry. The Mining Rig is being recalled so the shuttle keeps a recovery route.";
+    return "Rig fuel is dry. Emergency recall engaged; the protected return stage remains ready.";
 }
 
 inline std::string miningStartedStatus(bool arkKnown)
 {
     if (arkKnown) {
-        return "Mining Rig deployed from Ark reserves.";
+        return "Mining Rig deployed from the Ark expedition pack and recovered transfer fuel.";
     }
-    return "Mining Rig deployed from shared shuttle fuel.";
+    return "Mining Rig deployed from the expedition pack and recovered transfer fuel.";
 }
 
 inline std::string miningLog(bool arkKnown)

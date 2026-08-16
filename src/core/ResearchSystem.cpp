@@ -620,7 +620,7 @@ std::string surfaceDeltaSummary(const SurfaceActionOutcome& outcome)
 {
     std::vector<std::string> parts;
     addDelta(parts, outcome.supplyDelta, text::labels::supply);
-    addDelta(parts, outcome.fuelDelta, text::labels::sharedFuel);
+    addDelta(parts, outcome.fuelDelta, text::labels::rigFuel);
     addDelta(parts, outcome.materialDelta.common, text::labels::commonMaterials);
     addDelta(parts, outcome.materialDelta.rare, text::labels::rareMaterials);
     addDelta(parts, outcome.materialDelta.exotic, text::labels::exoticMaterials);
@@ -1523,15 +1523,38 @@ void clearResearchAndExpeditionState(GameState& state)
     state.run.surfaceExpedition = {};
 }
 
+namespace {
+
+void preserveArrivalFuelAtDestination(GameState& state, std::string destinationId)
+{
+    const double transferFuelRemaining = state.run.arrivalOps.transferFuelRemaining;
+    const double transferFuelCapacity = state.run.arrivalOps.transferFuelCapacity;
+    state.run.arrivalOps = {
+        true,
+        std::move(destinationId),
+        transferFuelRemaining,
+        transferFuelCapacity
+    };
+}
+
+} // namespace
+
 void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
 {
-    state.run.arrivalOps = {true, outcome.destinationId};
+    state.run.arrivalOps = {
+        true,
+        outcome.destinationId,
+        std::max(0.0, outcome.transferFuelRemaining),
+        std::max(0.0, outcome.transferFuelCapacity)
+    };
 }
 
 void completeArrivalFlyby(GameState& state, const ContentCatalog& catalog)
 {
     applyFlybyReward(state, catalog, FlybyGrade::Good);
-    state.run.arrivalOps = {};
+    if (const Destination* destination = currentResearchDestination(state, catalog)) {
+        preserveArrivalFuelAtDestination(state, destination->id);
+    }
 }
 
 void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
@@ -1559,7 +1582,7 @@ void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
     flyby.worstZone = flyby.currentZone;
     pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
     state.run.flyby = flyby;
-    state.run.arrivalOps = {true, destination->id};
+    preserveArrivalFuelAtDestination(state, destination->id);
     state.screen = Screen::Flyby;
 }
 
@@ -2042,7 +2065,9 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
             state.statusLine = "Scenario challenge complete.";
         }
     } else {
-        state.run.arrivalOps = {true, destination == nullptr ? flyby.destinationId : destination->id};
+        preserveArrivalFuelAtDestination(
+            state,
+            destination == nullptr ? flyby.destinationId : destination->id);
         state.screen = Screen::ArrivalOps;
     }
 }
@@ -2084,7 +2109,7 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
             ? step->failureExplanation
             : "Scenario challenge aborted.";
     } else {
-        state.run.arrivalOps = {true, flyby.destinationId};
+        preserveArrivalFuelAtDestination(state, flyby.destinationId);
         state.screen = Screen::ArrivalOps;
     }
 }
@@ -2094,7 +2119,7 @@ void acknowledgeFlybyResult(GameState& state)
     if (!state.run.flyby.active || !state.run.flyby.completed) {
         return;
     }
-    state.run.arrivalOps = {true, state.run.flyby.destinationId};
+    preserveArrivalFuelAtDestination(state, state.run.flyby.destinationId);
 }
 
 bool canClaimSaturnCourse(const GameState& state)
@@ -2159,7 +2184,7 @@ void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog)
     state.meta.blueprintProgress += destinationSupportsResearch(*destination) ? 2 : 1;
     state.run.credits += std::max(18.0, destination->baseReward * 0.55);
     unlockFromBlueprints(state);
-    state.run.arrivalOps = {};
+    preserveArrivalFuelAtDestination(state, destination->id);
 }
 
 void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
@@ -2193,7 +2218,7 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     pushOrbitTrailPoint(orbit, orbit.shipX, orbit.shipY);
 
     state.run.orbit = orbit;
-    state.run.arrivalOps = {true, destination->id};
+    preserveArrivalFuelAtDestination(state, destination->id);
     state.screen = Screen::Orbit;
 }
 
@@ -2336,7 +2361,9 @@ void completeOrbitRun(GameState& state, const ContentCatalog& catalog)
     const OrbitGrade grade = orbit.result == OrbitGrade::Active ? orbitGrade(orbit) : orbit.result;
     applyOrbitReward(state, catalog, grade);
     const Destination* destination = catalog.findDestination(orbit.destinationId);
-    state.run.arrivalOps = {true, destination == nullptr ? orbit.destinationId : destination->id};
+    preserveArrivalFuelAtDestination(
+        state,
+        destination == nullptr ? orbit.destinationId : destination->id);
     state.run.orbit = {};
     state.screen = Screen::ArrivalOps;
 }
@@ -2348,7 +2375,7 @@ void abortOrbitRun(GameState& state)
     }
 
     const std::string destinationId = state.run.orbit.destinationId;
-    state.run.arrivalOps = {true, destinationId};
+    preserveArrivalFuelAtDestination(state, destinationId);
     state.run.orbit = {};
     state.screen = Screen::ArrivalOps;
 }
@@ -2519,16 +2546,26 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
     return effects;
 }
 
-int surfaceSharedFuelCapacity(const GameState& state, const ContentCatalog& catalog)
+double nominalSurfaceRigFuelCapacity(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
 {
-    int fuelModules = 0;
-    for (const std::string& moduleId : state.run.equippedModuleIds) {
-        const ShipModule* module = catalog.findModule(moduleId);
-        if (module != nullptr && module->slot == SlotType::Fuel) {
-            fuelModules += 1;
-        }
-    }
-    return tuning::research::sharedFuelCapacity + fuelModules * tuning::research::sharedFuelCapacityPerFuelModule;
+    const Destination* destination = catalog.findDestination(destinationId);
+    const int tier = destination == nullptr ? 1 : std::max(1, destination->tier);
+    const double transferCapacity =
+        tuning::launchProgression::baseFuelCapacity +
+        static_cast<double>(std::clamp(
+            state.meta.launchUpgrades.fuelTanks,
+            0,
+            tuning::launchProgression::maximumUpgradeRank)) *
+            tuning::launchProgression::fuelPerTankRank;
+    const double calibratedRouteCost = std::min(
+        tuning::launch::routeFuelMaximum,
+        tuning::launch::routeFuelBase +
+            static_cast<double>(tier) * tuning::launch::routeFuelPerTier);
+    return tuning::research::expeditionRigPackFuel +
+        std::max(0.0, transferCapacity - calibratedRouteCost);
 }
 
 bool droneBayUnlocked(const GameState& state)
@@ -3126,18 +3163,29 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
     const double reconPenalty = landingReconHazardPenalty(state, catalog, *destination);
     expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
-    expedition.sharedFuelCapacity = surfaceSharedFuelCapacity(state, catalog);
-    expedition.sharedFuel = expedition.sharedFuelCapacity;
+    expedition.transferFuelRecovered = std::max(0.0, state.run.arrivalOps.transferFuelRemaining);
+    expedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
     if (arkDiscovered(state)) {
-        expedition.sharedFuel = std::min(expedition.sharedFuelCapacity, state.meta.ark.fuelReserve);
-        state.meta.ark.fuelReserve = std::max(0, state.meta.ark.fuelReserve - expedition.sharedFuel);
+        expedition.expeditionPackFuel = std::min(
+            tuning::research::expeditionRigPackFuel,
+            static_cast<double>(std::max(0, state.meta.ark.fuelReserve)));
+        state.meta.ark.fuelReserve = std::max(
+            0,
+            state.meta.ark.fuelReserve - static_cast<int>(std::round(expedition.expeditionPackFuel)));
     }
+    expedition.rigFuelCapacity = expedition.expeditionPackFuel + expedition.transferFuelRecovered;
+    expedition.rigFuel = expedition.rigFuelCapacity;
     expedition.hazard = std::max(baseHazard + reconPenalty, baseHazard + site.hazardDelta + reconPenalty - crew.hazardRelief);
     expedition.enemyEncountersEnabled = destinationAllowsEnemyEncounters(*destination);
     addDestinationHistoryValue(state.meta.destinationLandings, catalog, destination->id);
     state.run.arrivalOps = {};
     appendSurfaceLog(expedition, std::string(surfaceSiteProfileName(expedition.siteProfile)) + ": " + std::string(surfaceSiteProfileDetail(expedition.siteProfile)));
-    appendSurfaceLog(expedition, "Shared fuel loaded: " + std::to_string(expedition.sharedFuel) + "/" + std::to_string(expedition.sharedFuelCapacity) + ".");
+    appendSurfaceLog(
+        expedition,
+        "Rig fuel loaded: " + display::fixed(expedition.rigFuel, 1) +
+            " (" + display::fixed(expedition.transferFuelRecovered, 1) +
+            " transfer + " + display::fixed(expedition.expeditionPackFuel, 1) +
+            " expedition pack). Return stage reserved.");
     state.run.surfaceExpedition = expedition;
 }
 

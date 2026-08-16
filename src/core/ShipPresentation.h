@@ -29,7 +29,7 @@ inline std::string launchUpgradeEffect(LaunchUpgradeKind kind, int rank)
 {
     switch (kind) {
     case LaunchUpgradeKind::FuelTanks:
-        return display::fixed(launchFuelCapacityForRank(rank), 0) + " fuel";
+        return display::fixed(launchFuelCapacityForRank(rank), 0) + " transfer fuel";
     case LaunchUpgradeKind::FlightControls:
         return display::percent(launchControlChaosForRank(rank)) + " flight instability";
     case LaunchUpgradeKind::Cooling:
@@ -66,6 +66,13 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
 
     rows.push_back(detailPresentationRow(text::moduleStats::damage, display::wholePercent(state.run.shipDamage)));
     rows.push_back(detailPresentationHeader("Launch systems"));
+    rows.push_back(detailPresentationRow(
+        text::labels::transferFuel,
+        display::fixed(launchFuelCapacity(state), 0) + " capacity"));
+    rows.push_back(detailPresentationRow(
+        "Expedition rig pack",
+        display::fixed(tuning::research::expeditionRigPackFuel, 0) + " rig fuel"));
+    rows.push_back(detailPresentationRow(text::labels::returnStage, std::string("RESERVED")));
     for (const LaunchUpgradeKind kind : {
              LaunchUpgradeKind::FuelTanks,
              LaunchUpgradeKind::FlightControls,

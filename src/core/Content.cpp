@@ -474,7 +474,7 @@ ContentCatalog createDefaultContent()
                       {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
                       {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"funding", {"delivery"}, "JUPITER TRANSFER", "Jupiter Transfer Window",
-                    "The Jupiter transfer requires 25 fuel. Current capacity is 20. Mission credits fund permanent refits, and successful Mars operations reopen the shipyard.",
+                    "The Jupiter transfer requires 25 transfer fuel. Current capacity is 20. Mission credits fund permanent refits, and successful Mars operations reopen the shipyard.",
                     "MISSION CREDITS FUND PERMANENT REFITS", "Review Refit Options", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}}

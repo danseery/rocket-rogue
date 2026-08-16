@@ -1043,11 +1043,11 @@ bool applyMiningPocketReward(
     MiningRunState& mining = state.run.mining;
     if (material == MiningCellMaterial::FuelPocket) {
         SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-        const int before = expedition.sharedFuel;
-        expedition.sharedFuel = std::min(
-            std::max(0, expedition.sharedFuelCapacity),
-            std::max(0, expedition.sharedFuel) + 1);
-        if (expedition.sharedFuel > before) {
+        const double before = expedition.rigFuel;
+        expedition.rigFuel = std::min(
+            std::max(0.0, expedition.rigFuelCapacity),
+            std::max(0.0, expedition.rigFuel) + 1.0);
+        if (expedition.rigFuel > before) {
             recordMiningPickup(mining, MiningPickupKind::Fuel, 1, x, y);
             return true;
         }
@@ -6347,7 +6347,7 @@ SurfaceActionOutcome startMiningRun(
         return outcome;
     }
     const bool arkKnown = arkDiscovered(state);
-    if (expedition.sharedFuel <= 0) {
+    if (expedition.rigFuel < 1.0) {
         outcome.message = text::fuel::miningBlockedStatus(arkKnown);
         return outcome;
     }
@@ -6364,7 +6364,7 @@ SurfaceActionOutcome startMiningRun(
         }
     }
 
-    expedition.sharedFuel = std::max(0, expedition.sharedFuel - 1);
+    expedition.rigFuel = std::max(0.0, expedition.rigFuel - 1.0);
     expedition.miningRunUsed = true;
     outcome.applied = true;
     outcome.fuelDelta = -1;
@@ -6541,6 +6541,22 @@ SurfaceActionOutcome startMiningRun(
     state.screen = Screen::Mining;
     appendSurfaceLog(expedition, text::fuel::miningLog(arkKnown));
     return outcome;
+}
+
+bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catalog)
+{
+    MiningRunState& mining = state.run.mining;
+    if (!mining.active || !mining.swarm.enabled || mining.swarm.depthZone < mining.depthZone) {
+        return false;
+    }
+    while (mining.depthZone < mining.swarm.depthZone) {
+        const int previousDepth = mining.depthZone;
+        transitionDepthZone(state, catalog, 1);
+        if (mining.depthZone == previousDepth) {
+            return false;
+        }
+    }
+    return mining.depthZone == mining.swarm.depthZone && mining.swarm.chamberX > 0;
 }
 
 void setMiningMove(GameState& state, double xAxis, double yAxis)
@@ -7032,14 +7048,16 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds > 0.0) {
         while (mining.fuelCycleProgress >= 1.0) {
-            if (state.run.surfaceExpedition.sharedFuel <= 0) {
+            if (state.run.surfaceExpedition.rigFuel < 1.0) {
                 if (finishAtReturnZone()) {
                     return;
                 }
                 triggerMiningFailure(state, text::fuel::miningFailedStatus(arkDiscovered(state)));
                 return;
             }
-            state.run.surfaceExpedition.sharedFuel = std::max(0, state.run.surfaceExpedition.sharedFuel - 1);
+            state.run.surfaceExpedition.rigFuel = std::max(
+                0.0,
+                state.run.surfaceExpedition.rigFuel - 1.0);
             mining.fuelSpent += 1;
             mining.fuelCycleProgress -= 1.0;
         }

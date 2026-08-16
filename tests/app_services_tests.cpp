@@ -162,6 +162,8 @@ public:
         surfacePushRewardDepthOffsets = snapshot.surfacePushRewardDepthOffsets;
         surfacePushForecastMarkers = snapshot.surfacePushForecastMarkers;
         surfacePushForecastDepthOffsets = snapshot.surfacePushForecastDepthOffsets;
+        miningSwarmActive = snapshot.miningSwarmActive;
+        miningSwarmDepth = snapshot.miningSwarmDepth;
         if (snapshot.screen == rocket::Screen::Mining) {
             miningViewsObserved = true;
             const std::size_t expectedCells = static_cast<std::size_t>(
@@ -225,6 +227,7 @@ public:
     int launchAsteroidCount = 0;
     int launchDestinationTier = 0;
     int surfacePushSteps = 0;
+    int miningSwarmDepth = -1;
     rocket::MaterialInventory surfacePushMaterials;
     std::vector<rocket::MiningCellMaterial> surfacePushRewardMarkers;
     std::vector<int> surfacePushRewardDepthOffsets;
@@ -240,6 +243,7 @@ public:
     rocket::LaunchFailureCause lastLaunchFailureCause = rocket::LaunchFailureCause::None;
     bool miningViewsObserved = false;
     bool miningViewsValid = false;
+    bool miningSwarmActive = false;
 };
 
 class FakeUi final : public rocket::IGameUi {
@@ -708,6 +712,29 @@ int main()
         ui.closeModal();
         assert(!ui.modalOpen());
         assert(ui.focusedId() == "modal:system_menu");
+
+        // With an existing save, New Game opens a confirmation modal instead
+        // of dispatching the action directly. Exercise that native path with
+        // the real RmlUi binding dispatcher: opening the modal rebuilds the
+        // bindings that supplied the click, so the dispatcher must own its
+        // binding data for the duration of the callback.
+        rocket::PanelRenderContext savedTitleContext {
+            hangar,
+            catalog,
+            hangarLaunch,
+            hangarLaunch};
+        savedTitleContext.titleScreenActive = true;
+        savedTitleContext.hasSavedGame = true;
+        savedTitleContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(savedTitleContext));
+        ui.requestFocus("modal:new_game_confirm");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:new_game_confirm");
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        ui.closeModal();
+        assert(!ui.modalOpen());
+        assert(ui.focusedId() == "modal:new_game_confirm");
 
         rocket::GameState flyby = rocket::createNewGame(catalog, 0xF17B7ULL);
         rocket::LaunchOutcome moonArrival;
@@ -1193,6 +1220,39 @@ int main()
                       << " extract=" << pointerReachable[3] << '\n';
         }
         assert(allSurfaceActionsReachable);
+
+        // Long modal IDs live outside std::string's small-string buffer. A
+        // modal rebuild clears and rebinds every RmlUi button, so dispatch
+        // must own the selected binding before opening the modal. Dig is the
+        // representative Deck path because its first-use introduction opens
+        // surface_dig_introduction from the Surface Ops action card.
+        rocket::GameState digIntroductionState = state;
+        digIntroductionState.meta.acknowledgedActivityBriefingIds.erase(
+            std::remove(
+                digIntroductionState.meta.acknowledgedActivityBriefingIds.begin(),
+                digIntroductionState.meta.acknowledgedActivityBriefingIds.end(),
+                std::string(rocket::ui::briefings::mining)),
+            digIntroductionState.meta.acknowledgedActivityBriefingIds.end());
+        rocket::ui::briefings::acknowledge(
+            digIntroductionState.meta.acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceSurveyComplete);
+        rocket::Random digIntroductionRng(0xD161D161ULL);
+        const rocket::PreparedLaunch digIntroductionLaunch =
+            rocket::prepareLaunch(digIntroductionState, catalog, digIntroductionRng);
+        rocket::PanelRenderContext digIntroductionContext {
+            digIntroductionState,
+            catalog,
+            digIntroductionLaunch,
+            digIntroductionLaunch};
+        digIntroductionContext.firstTimeIntroductionsEnabled = true;
+        ui.setPanelPresentation(
+            rocket::buildGamePanelPresentation(digIntroductionContext));
+        ui.requestFocus("modal:surface_dig_introduction");
+        ui.refresh();
+        assert(ui.focusedId() == "modal:surface_dig_introduction");
+        assert(ui.activateFocused());
+        assert(ui.modalOpen());
+        ui.closeModal();
         ui.shutdown();
     }
 
@@ -2368,6 +2428,16 @@ int main()
     assert(renderer.miningViewsObserved);
     assert(renderer.miningViewsValid);
     assert(std::isfinite(renderer.miningViewChecksum));
+
+    const int savesBeforeSwarmArena = saves.storeCount;
+    runner.app().debugStartSwarmArena();
+    host.now += 1.0 / 60.0;
+    runner.frame();
+    assert(renderer.screen == rocket::Screen::Mining);
+    assert(renderer.miningSwarmActive);
+    assert(renderer.miningSwarmDepth >= 2);
+    assert(renderer.miningViewsValid);
+    assert(saves.storeCount == savesBeforeSwarmArena);
 
     assert(host.viewportMetrics().logicalWidth == 1280);
     assert(host.viewportMetrics().drawableWidth == 2560);

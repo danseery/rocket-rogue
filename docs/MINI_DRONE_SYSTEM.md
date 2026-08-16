@@ -110,6 +110,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 10 retains version 9's paid-frame, anchor, formation, position, haul, shield, recharge, cooldown, scenario, and generic-cocoon context while adding launch-curriculum progress. Older units migrate to `ControlledActor`, derive stable slots from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once.
+Save version 11 retains version 10's paid-frame, anchor, formation, position, haul, shield, recharge, cooldown, scenario, generic-cocoon, and launch-curriculum context while adding Arrival Ops transfer fuel and Surface Ops rig fuel. Older units migrate to `ControlledActor`, derive stable slots from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

@@ -54,8 +54,8 @@ The production UI bundles Source Code Pro Regular, Semibold, and Italic under `a
 | Launch | 03 | Objective/progress, three live gauges, and at most two immediate actions. Failure becomes template 07. |
 | Flyby | 03 | Active run uses the live HUD; completion becomes a compact template-07 summary. |
 | Orbit | 03 | Active run uses the live HUD; completion becomes a compact template-07 summary. |
-| Surface Scan | 04 | Pulses, mapped forecast, bust risk, signal, and the latest layer read. Pulse Scanner maps prospect data only; Bank Forecast prepares the Mining site and returns to Surface Ops. Scan never grants owned resources or progression. |
-| Surface Push | 04 | Progress, current reward, current risk, Continue, Bank/Return, and secondary Abort. Completion/failure uses 07. |
+| Surface Scan | 04 | Pulses, mapped forecast, bust risk, signal, and the latest layer read. Pulse Scanner maps prospect data only; Validate Forecast prepares the Mining site and returns to Surface Ops. Scan never grants owned resources or progression. |
+| Surface Push | 04 | Progress, current reward, current risk, Continue, Set Start Depth/Return, and secondary Abort. Completion/failure uses 07. |
 | Mining | 05 | Fuel, oxygen, cargo, and risk occupy reserved HUD rails outside the terrain and return route. Failure uses 07. |
 | Surface Upgrade | 06 | Three compact selectors plus one selected detail card; complete statistics open in Compare. |
 | Upgrade / Refit | 06 | Three compact selectors plus one selected detail card; complete statistics open in Compare. |

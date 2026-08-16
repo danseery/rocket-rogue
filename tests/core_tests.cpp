@@ -492,6 +492,33 @@ void launchCurriculumFuelMathAndRange()
             nearlyEqual(insufficientArrival.fuelRemaining, 0.1),
         "any positive fuel remaining at the destination must land without consuming an insertion reserve");
 
+    LaunchFlightState dryAtTouchdown = beginLaunchFlight(moonTransfer, moon);
+    dryAtTouchdown.travelProgress = 1.0;
+    dryAtTouchdown.previousTravelProgress = 1.0;
+    dryAtTouchdown.fuelRemaining = 0.0;
+    const LaunchFlightStep dryAtTouchdownStep = updateLaunchFlight(
+        dryAtTouchdown,
+        moonTransfer,
+        moon,
+        {},
+        0.04);
+    require(dryAtTouchdownStep.reachedDestination && !dryAtTouchdownStep.failed,
+        "transfer fuel reaching zero exactly at touchdown must still complete the arrival");
+
+    LaunchFlightState dryBeforeArrival = beginLaunchFlight(moonTransfer, moon);
+    dryBeforeArrival.travelProgress = 0.75;
+    dryBeforeArrival.previousTravelProgress = 0.75;
+    dryBeforeArrival.fuelRemaining = 0.0;
+    const LaunchFlightStep dryBeforeArrivalStep = updateLaunchFlight(
+        dryBeforeArrival,
+        moonTransfer,
+        moon,
+        {},
+        0.04);
+    require(dryBeforeArrivalStep.failed &&
+            dryBeforeArrivalStep.failureCause == LaunchFailureCause::FuelExhausted,
+        "transfer fuel exhausted before the destination must still fail the flight");
+
     FlightActionState outboundActions;
     tolerantArrival.fuelRemaining = 3.0;
     tolerantArrival.fuelFailureSeconds = 0.0;
@@ -1395,9 +1422,9 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
         "Saturn arrival must unlock Hull III");
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 10, "new saves must use schema version 10");
+    require(captured.version == 11, "new saves must use schema version 11");
     const std::optional<SaveData> decoded = deserializeSaveData(serializeSaveData(captured));
-    require(decoded && decoded->version == 10 &&
+    require(decoded && decoded->version == 11 &&
             decoded->launchUpgrades.fuelTanks == state.meta.launchUpgrades.fuelTanks &&
             decoded->launchLessons.stage == state.meta.launchLessons.stage,
         "version-10 launch ranks and lesson state must round-trip");
@@ -3528,7 +3555,7 @@ void miningDepletionAtShipGracefullyEndsRun()
 
     GameState fuel;
     startParkedAtShip(fuel, 651);
-    fuel.run.surfaceExpedition.sharedFuel = 0;
+    fuel.run.surfaceExpedition.rigFuel = 0.0;
     fuel.run.mining.oxygenSeconds = 10.0;
     fuel.run.mining.fuelCycleProgress = 1.0;
     updateMiningRun(fuel, catalog, 0.08);
@@ -4019,7 +4046,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
     require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
         "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 10 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == 11 && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
     require(parsed.has_value(), "current campaign state should deserialize");
@@ -4255,8 +4282,8 @@ void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
         std::string(content::destination::jupiter);
     bankedLegacy.surfaceExpedition.hazard = 0.0;
     bankedLegacy.surfaceExpedition.supply = 10;
-    bankedLegacy.surfaceExpedition.sharedFuelCapacity = 3;
-    bankedLegacy.surfaceExpedition.sharedFuel = 3;
+    bankedLegacy.surfaceExpedition.rigFuelCapacity = 3.0;
+    bankedLegacy.surfaceExpedition.rigFuel = 3.0;
     bankedLegacy.surfaceExpedition.bankedMiningArenaValid = true;
     bankedLegacy.surfaceExpedition.bankedMiningArenaMetadata = {
         MiningAct::ActOne,
@@ -4474,7 +4501,7 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     state.screen = Screen::Mining;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 10, "new saves should use schema version ten");
+    require(captured.version == 11, "new saves should use schema version eleven");
     const std::optional<SaveData> parsed =
         deserializeSaveData(serializeSaveData(captured));
     require(parsed.has_value(), "v10 scenario and cocoon state should deserialize");
@@ -5413,7 +5440,7 @@ void surfaceExpeditionRoundTripsThroughSave()
     state.run.destinationIndex = 2;
     state.screen = Screen::SurfaceExpedition;
     startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.sharedFuel = 2;
+    state.run.surfaceExpedition.rigFuel = 2.0;
     state.run.surfaceExpedition.prospectMaterials = {.common = 1, .rare = 2, .exotic = 1};
     state.run.surfaceExpedition.prospectArtifacts = 1;
     state.run.surfaceExpedition.depthProspects.push_back({1, 1, {.common = 0, .rare = 1, .exotic = 1}, 1});
@@ -5431,8 +5458,8 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.active, "active surface expedition state should round trip");
     require(restored.run.surfaceExpedition.destinationId == content::destination::mars, "surface destination should round trip");
     require(restored.run.surfaceExpedition.siteProfile == state.run.surfaceExpedition.siteProfile, "surface site profile should round trip");
-    require(restored.run.surfaceExpedition.sharedFuel == 2, "surface shared fuel should round trip");
-    require(restored.run.surfaceExpedition.sharedFuelCapacity == state.run.surfaceExpedition.sharedFuelCapacity, "surface shared fuel capacity should round trip");
+    require(nearlyEqual(restored.run.surfaceExpedition.rigFuel, 2.0), "surface rig fuel should round trip");
+    require(nearlyEqual(restored.run.surfaceExpedition.rigFuelCapacity, state.run.surfaceExpedition.rigFuelCapacity), "surface rig fuel capacity should round trip");
     require(restored.run.surfaceExpedition.miningSitePrepared, "surface mining preparation should round trip");
     require(!restored.run.surfaceExpedition.miningRunUsed, "unused surface mining run should round trip");
     require(restored.run.surfaceExpedition.temporaryMaterials.common == state.run.surfaceExpedition.temporaryMaterials.common, "temporary surface materials should round trip");
@@ -5445,7 +5472,7 @@ void surfaceExpeditionRoundTripsThroughSave()
     require(restored.run.surfaceExpedition.logEntries == state.run.surfaceExpedition.logEntries, "surface mission log should round trip");
 }
 
-void surfaceMiningUsesSharedFuelAndRunsOnce()
+void surfaceMiningUsesRigFuelAndRunsOnce()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 92928);
@@ -5453,11 +5480,11 @@ void surfaceMiningUsesSharedFuelAndRunsOnce()
     startSurfaceExpedition(state, catalog);
 
     const int supplyBeforeMining = state.run.surfaceExpedition.supply;
-    const int fuelBeforeMining = state.run.surfaceExpedition.sharedFuel;
+    const double fuelBeforeMining = state.run.surfaceExpedition.rigFuel;
     const SurfaceActionOutcome started = startMiningRun(state, catalog);
-    require(started.applied, "fresh surface mining should start when shared fuel is available");
+    require(started.applied, "fresh surface mining should start when rig fuel is available");
     require(state.run.surfaceExpedition.supply == supplyBeforeMining, "starting mining should not spend action kits");
-    require(state.run.surfaceExpedition.sharedFuel == fuelBeforeMining - 1, "starting mining should spend one shared fuel");
+    require(nearlyEqual(state.run.surfaceExpedition.rigFuel, fuelBeforeMining - 1.0), "starting mining should spend one rig fuel");
     require(state.run.surfaceExpedition.miningRunUsed, "starting mining should consume the one mining run for this loop");
 
     state.screen = Screen::SurfaceExpedition;
@@ -5593,7 +5620,7 @@ void miningArtifactRewardsResolveOnExtraction()
     story.run.surfaceExpedition.hazard = 0.0;
     story.run.surfaceExpedition.cargo = 0;
     story.run.surfaceExpedition.supply = 10;
-    story.run.surfaceExpedition.sharedFuel = story.run.surfaceExpedition.sharedFuelCapacity;
+    story.run.surfaceExpedition.rigFuel = story.run.surfaceExpedition.rigFuelCapacity;
     story.run.surfaceExpedition.temporaryArtifacts.push_back({"story_artifact", content::destination::nearbyStar, false, ArtifactKind::Story, ArtifactRewardType::None, 1.0, false});
     story.meta.ark.condition = ArkCondition::DamagedStranded;
     story.meta.ark.hullDamage = 72;
@@ -5610,7 +5637,7 @@ void miningArtifactRewardsResolveOnExtraction()
     boost.run.surfaceExpedition.hazard = 0.0;
     boost.run.surfaceExpedition.cargo = 0;
     boost.run.surfaceExpedition.supply = 10;
-    boost.run.surfaceExpedition.sharedFuel = boost.run.surfaceExpedition.sharedFuelCapacity;
+    boost.run.surfaceExpedition.rigFuel = boost.run.surfaceExpedition.rigFuelCapacity;
     boost.run.surfaceExpedition.temporaryArtifacts.push_back({"boost_artifact", content::destination::mars, false, ArtifactKind::Boost, ArtifactRewardType::Credits, 1.0, false});
     const double creditsBefore = boost.run.credits;
     Random boostRng(2);
@@ -6235,7 +6262,7 @@ void actBasedMiningEnemyProgressionIsEnforced()
             : (act == MiningAct::ActTwo ? GameChapter::Arkfall : GameChapter::VoidCompass);
         startSurfaceExpedition(state, catalog);
         prepareMiningSiteForTest(state);
-        state.run.surfaceExpedition.sharedFuel = std::max(1, state.run.surfaceExpedition.sharedFuel);
+        state.run.surfaceExpedition.rigFuel = std::max(1.0, state.run.surfaceExpedition.rigFuel);
         const SurfaceActionOutcome outcome = startMiningRun(state, catalog, {act, difficulty, seed}, false);
         require(outcome.applied, "explicit mining arena requests should start through the shared initializer");
         return state;
@@ -8393,13 +8420,13 @@ void miningDrillBreaksCellsAndMarksChunks()
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
     const int supplyBefore = state.run.surfaceExpedition.supply;
-    const int fuelBefore = state.run.surfaceExpedition.sharedFuel;
+    const double fuelBefore = state.run.surfaceExpedition.rigFuel;
     const SurfaceActionOutcome started = startMiningRun(state, catalog);
     require(started.applied, "mining should start when the site is prepared");
     require(state.screen == Screen::Mining, "starting mining should move to the mining screen");
     require(state.run.surfaceExpedition.supply == supplyBefore, "starting mining should not spend action kits");
-    require(started.fuelDelta == -1, "starting mining should report shared fuel spent");
-    require(state.run.surfaceExpedition.sharedFuel == fuelBefore - 1, "starting mining should spend one shared fuel");
+    require(started.fuelDelta == -1, "starting mining should report rig fuel spent");
+    require(nearlyEqual(state.run.surfaceExpedition.rigFuel, fuelBefore - 1.0), "starting mining should spend one rig fuel");
 
     MiningRunState& mining = state.run.mining;
     setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
@@ -8437,27 +8464,27 @@ void miningDrillBreaksCellsAndMarksChunks()
         "drilling should mark the changed chunk dirty");
 }
 
-void miningUsesSharedFuelReserve()
+void miningUsesRigFuelReserve()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState blocked = createNewGame(catalog, 92933);
     blocked.run.destinationIndex = 2;
     startSurfaceExpedition(blocked, catalog);
     prepareMiningSiteForTest(blocked);
-    blocked.run.surfaceExpedition.sharedFuel = 0;
+    blocked.run.surfaceExpedition.rigFuel = 0.0;
     const SurfaceActionOutcome blockedStart = startMiningRun(blocked, catalog);
-    require(!blockedStart.applied, "mining should not start without shared fuel");
+    require(!blockedStart.applied, "mining should not start without rig fuel");
 
     GameState state = createNewGame(catalog, 92934);
     state.run.destinationIndex = 2;
     state.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::emergencyWinch);
     startSurfaceExpedition(state, catalog);
     prepareMiningSiteForTest(state);
-    state.run.surfaceExpedition.sharedFuel = 1;
+    state.run.surfaceExpedition.rigFuel = 1.0;
     require(
         startMiningRun(state, catalog, {MiningAct::ActOne, 2, 92934}, true).applied,
-        "mining should start with one shared fuel at an oxygen/fuel-enabled tier");
-    require(state.run.surfaceExpedition.sharedFuel == 0, "deployment should spend the available shared fuel");
+        "mining should start with one rig fuel at an oxygen/fuel-enabled tier");
+    require(nearlyEqual(state.run.surfaceExpedition.rigFuel, 0.0), "deployment should spend the available rig fuel");
     require(
         state.run.mining.oxygenSeconds * tuning::mining::fuelCycleProgressPerSecond > 1.0,
         "oxygen upgrades should allow runs long enough to complete another fuel cycle");
@@ -8466,7 +8493,7 @@ void miningUsesSharedFuelReserve()
         updateMiningRun(state, catalog, 0.08);
     }
 
-    require(state.run.mining.failurePending, "mining should recall when upgraded oxygen outlasts shared fuel");
+    require(state.run.mining.failurePending, "mining should recall when upgraded oxygen outlasts rig fuel");
 }
 
 void miningDrillFootprintCapsWearToWorstContact()
@@ -8768,6 +8795,140 @@ void miningShipRepairsUseBankedMaterialsProportionally()
     mining.stowedMaterials.common = 1;
     require(miningDrillRepairCost(mining) == 2, "half drill damage should cost half of a full rebuild");
     require(!repairMiningDrill(state), "unfunded ship repair should be rejected by game logic");
+}
+
+void transferFuelPersistsAndBecomesRigFuel()
+{
+    const ContentCatalog catalog = createDefaultContent();
+
+    GameState arrival = createNewGame(catalog, 0xF113);
+    arrival.run.destinationIndex = 1;
+    arrival.screen = Screen::ArrivalOps;
+    LaunchOutcome outcome;
+    outcome.destinationId = content::destination::moon;
+    outcome.recoveryMethod = RecoveryMethod::TransferArrival;
+    outcome.frontierTransfer = true;
+    outcome.transferFuelRemaining = 2.7;
+    outcome.transferFuelCapacity = 15.0;
+    startArrivalOps(arrival, outcome);
+
+    const auto savedArrival = deserializeSaveData(serializeSaveData(captureSaveData(arrival)));
+    require(savedArrival.has_value(), "Arrival Ops fuel save should parse");
+    GameState restoredArrival = createNewGame(catalog, 1);
+    restoreSaveData(restoredArrival, catalog, *savedArrival);
+    require(nearlyEqual(restoredArrival.run.arrivalOps.transferFuelRemaining, 2.7) &&
+            nearlyEqual(restoredArrival.run.arrivalOps.transferFuelCapacity, 15.0),
+        "Arrival Ops must preserve transfer fuel remaining and capacity across save/load");
+
+    startArrivalFlybyRun(restoredArrival, catalog);
+    require(restoredArrival.run.flyby.active, "arrival flyby should start for fuel preservation coverage");
+    abortFlybyRun(restoredArrival, catalog);
+    require(nearlyEqual(restoredArrival.run.arrivalOps.transferFuelRemaining, 2.7) &&
+            nearlyEqual(restoredArrival.run.arrivalOps.transferFuelCapacity, 15.0),
+        "entering and leaving a flyby must not erase arrival transfer fuel");
+
+    startArrivalFlybyRun(restoredArrival, catalog);
+    restoredArrival.run.flyby.completed = true;
+    restoredArrival.run.flyby.result = FlybyGrade::Good;
+    completeFlybyRun(restoredArrival, catalog);
+    require(nearlyEqual(restoredArrival.run.arrivalOps.transferFuelRemaining, 2.7),
+        "completing a flyby must preserve arrival transfer fuel");
+
+    startArrivalOrbitRun(restoredArrival, catalog);
+    require(restoredArrival.run.orbit.active, "arrival orbit should start for fuel preservation coverage");
+    abortOrbitRun(restoredArrival);
+    require(nearlyEqual(restoredArrival.run.arrivalOps.transferFuelRemaining, 2.7) &&
+            nearlyEqual(restoredArrival.run.arrivalOps.transferFuelCapacity, 15.0),
+        "entering and leaving orbit must not erase arrival transfer fuel");
+
+    startSurfaceExpedition(restoredArrival, catalog);
+    require(nearlyEqual(restoredArrival.run.surfaceExpedition.expeditionPackFuel, 3.0) &&
+            nearlyEqual(restoredArrival.run.surfaceExpedition.transferFuelRecovered, 2.7) &&
+            nearlyEqual(restoredArrival.run.surfaceExpedition.rigFuel, 5.7),
+        "landing must combine the isolated three-unit rig pack with exact transfer fuel remaining");
+
+    for (const auto [remaining, expected] : {
+             std::pair {0.0, 3.0},
+             std::pair {2.0, 5.0},
+             std::pair {5.0, 8.0}}) {
+        GameState state = createNewGame(catalog, static_cast<std::uint64_t>(0xF200 + expected));
+        state.run.destinationIndex = 1;
+        state.run.arrivalOps = {true, content::destination::moon, remaining, 15.0};
+        startSurfaceExpedition(state, catalog);
+        require(nearlyEqual(state.run.surfaceExpedition.rigFuel, expected),
+            "surface rig fuel must equal the three-unit expedition pack plus transfer fuel remaining");
+    }
+
+    GameState upgraded = createNewGame(catalog, 0xF114);
+    upgraded.meta.launchUpgrades.fuelTanks = 2;
+    const double baseEndurance = nominalSurfaceRigFuelCapacity(arrival, catalog, content::destination::moon);
+    const double upgradedEndurance = nominalSurfaceRigFuelCapacity(upgraded, catalog, content::destination::moon);
+    require(upgradedEndurance > baseEndurance,
+        "larger transfer tanks must increase possible Mining Rig endurance through arrival surplus");
+
+    GameState ark = createNewGame(catalog, 0xF115);
+    ark.run.destinationIndex = 1;
+    ark.meta.ark.condition = ArkCondition::DerelictOperable;
+    ark.meta.ark.fuelReserve = 7;
+    ark.run.arrivalOps = {true, content::destination::moon, 2.0, 15.0};
+    startSurfaceExpedition(ark, catalog);
+    require(nearlyEqual(ark.run.surfaceExpedition.expeditionPackFuel, 3.0) &&
+            nearlyEqual(ark.run.surfaceExpedition.rigFuel, 5.0) &&
+            ark.meta.ark.fuelReserve == 4,
+        "Ark expeditions must debit at most three pack units and add recovered transfer fuel");
+
+    ark.run.surfaceExpedition.rigFuel = 0.0;
+    require(extractSurfacePayload(ark, catalog).applied,
+        "empty rig fuel must never block the protected return stage or surface extraction");
+}
+
+void versionTenSurfaceFuelMigratesToArrivalDerivedRigFuel()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    SaveData legacy = captureSaveData(createNewGame(catalog, 0xF116));
+    legacy.version = 10;
+    legacy.destinationIndex = 2;
+    legacy.launchUpgrades.fuelTanks = 2;
+    legacy.screen = Screen::SurfaceExpedition;
+    legacy.surfaceExpedition.active = true;
+    legacy.surfaceExpedition.destinationId = content::destination::mars;
+    legacy.surfaceExpedition.rigFuelCapacity = 30.0;
+    legacy.surfaceExpedition.rigFuel = 15.0;
+
+    GameState migrated = createNewGame(catalog, 1);
+    restoreSaveData(migrated, catalog, legacy);
+    require(nearlyEqual(migrated.run.surfaceExpedition.rigFuelCapacity, 8.0) &&
+            nearlyEqual(migrated.run.surfaceExpedition.rigFuel, 4.0) &&
+            nearlyEqual(migrated.run.surfaceExpedition.expeditionPackFuel, 3.0) &&
+            nearlyEqual(migrated.run.surfaceExpedition.transferFuelRecovered, 5.0),
+        "version-ten Surface Ops must derive an eight-unit nominal Mars pool and preserve the old consumed share");
+
+    GameState activeMining = createNewGame(catalog, 0xF117);
+    activeMining.run.destinationIndex = 2;
+    activeMining.meta.launchUpgrades.fuelTanks = 2;
+    startSurfaceExpedition(activeMining, catalog);
+    require(startMiningRun(activeMining, catalog).applied,
+        "legacy migration fixture must begin an active mining run");
+    SaveData legacyMining = captureSaveData(activeMining);
+    legacyMining.version = 10;
+    legacyMining.surfaceExpedition.rigFuelCapacity = 30.0;
+    legacyMining.surfaceExpedition.rigFuel = 12.0;
+
+    GameState migratedMining = createNewGame(catalog, 3);
+    restoreSaveData(migratedMining, catalog, legacyMining);
+    require(migratedMining.screen == Screen::Mining && migratedMining.run.mining.active &&
+            nearlyEqual(migratedMining.run.surfaceExpedition.rigFuelCapacity, 8.0) &&
+            nearlyEqual(migratedMining.run.surfaceExpedition.rigFuel, 3.2),
+        "version-ten mid-mining saves must stay active and preserve the old pool's remaining percentage");
+
+    legacy.screen = Screen::ArrivalOps;
+    legacy.surfaceExpedition = {};
+    legacy.arrivalOps = {true, content::destination::mars};
+    GameState migratedArrival = createNewGame(catalog, 2);
+    restoreSaveData(migratedArrival, catalog, legacy);
+    require(nearlyEqual(migratedArrival.run.arrivalOps.transferFuelRemaining, 5.0) &&
+            nearlyEqual(migratedArrival.run.arrivalOps.transferFuelCapacity, 20.0),
+        "version-ten Arrival Ops must receive the nominal calibrated transfer remainder and installed capacity");
 }
 
 void miningShipBankingLeaveAndEmergencyRecallRules()
@@ -9476,7 +9637,7 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 10, "new saves should use version ten");
+    require(captured.version == 11, "new saves should use version eleven");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
@@ -11086,11 +11247,11 @@ void hostileNavigationSelectsShuttleSortie()
     require(state.screen == Screen::Hangar, "selecting a destination should open shuttle prep in the Hangar");
     require(state.launchConfig.destinationId == content::destination::nearbyStar, "navigation should sync launch destination");
     require(state.launchConfig.frontierTransfer, "hostile navigation sorties should use transfer burn tuning");
-    require(state.meta.ark.fuelReserve == fuelBefore - expectedFuelCost, "navigation sorties should spend shared fuel");
+    require(state.meta.ark.fuelReserve == fuelBefore - expectedFuelCost, "navigation sorties should spend Ark fuel");
 
     state.screen = Screen::Navigation;
     state.meta.ark.fuelReserve = 0;
-    require(!selectNavigationDestination(state, catalog, 0), "navigation should reject destinations the shared fuel reserve cannot afford");
+    require(!selectNavigationDestination(state, catalog, 0), "navigation should reject destinations the Ark fuel reserve cannot afford");
 
     startSurfaceExpedition(state, catalog);
     require(state.run.surfaceExpedition.enemyEncountersEnabled, "hostile-system surface expeditions should enable enemy contact");
@@ -11819,7 +11980,9 @@ int main()
     enemyContactStartsBeyondSolarSystemAndCanBeMitigated();
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
-    surfaceMiningUsesSharedFuelAndRunsOnce();
+    transferFuelPersistsAndBecomesRigFuel();
+    versionTenSurfaceFuelMigratesToArrivalDerivedRigFuel();
+    surfaceMiningUsesRigFuelAndRunsOnce();
     physicalMiningArtifactsAreSingleAndDeliveryGated();
     miningArtifactTetherAndDestructionRules();
     miningArtifactRewardsResolveOnExtraction();
@@ -11859,7 +12022,7 @@ int main()
     mammalBossChambersGrantAdvancedRewards();
     enemyMovementTypesHaveDistinctBehavior();
     miningDrillBreaksCellsAndMarksChunks();
-    miningUsesSharedFuelReserve();
+    miningUsesRigFuelReserve();
     miningDrillFootprintCapsWearToWorstContact();
     miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
     miningDrillTargetsFirstSolidCellOnRay();

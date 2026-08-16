@@ -718,7 +718,7 @@ std::string surfaceActionChipLabel(std::string_view label)
     if (label == text::labels::oxygen) {
         return "O2";
     }
-    if (label == text::labels::sharedFuel || label == text::labels::arkFuel) {
+    if (label == text::labels::rigFuel || label == text::labels::arkFuel) {
         return "Fuel";
     }
     return std::string(label);
@@ -2192,7 +2192,7 @@ std::string surfaceQuickbar(const SurfaceExpeditionState& expedition)
     std::ostringstream out;
     out << "<section class=\"surface-quickbar phase-lane phase-row\">";
     out << surfaceQuickMetric(text::labels::supply, std::to_string(expedition.supply));
-    out << surfaceQuickMetric(text::labels::sharedFuel, std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)));
+    out << surfaceQuickMetric(text::labels::rigFuel, display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1));
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
     out << surfaceQuickMetric("On Ship", std::to_string(expedition.temporaryMaterials.common) + " CM", "", true);
     out << "</section>";
@@ -2287,25 +2287,25 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
             return {"Complete Lunar Prospector", "Finish the Moon contract to reveal the Mars route."};
         }
         if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2) {
-            return {"Mars transfer requires 20 fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
+            return {"Mars transfer requires 20 transfer fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
         }
         return {"Reach Mars", "Use Engines Off to manage heat. Reaching Mars completes the flight."};
     case LaunchTrainingStage::MarsTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{"Reach Mars", "Fuel Tanks II is ready. Engine Cooling remains optional."}
-            : std::pair<std::string, std::string>{"Mars transfer requires 20 fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
+            : std::pair<std::string, std::string>{"Mars transfer requires 20 transfer fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
     case LaunchTrainingStage::HullIntegrity:
         if (!hasUnlock(state.meta, content::unlock::routeJupiter)) {
             return {"Complete Mars Bay Expansion", "Finish the Mars contract to reveal the Jupiter route."};
         }
         if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 3) {
-            return {"Jupiter transfer requires 25 fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
+            return {"Jupiter transfer requires 25 transfer fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
         }
         return {"Reach Jupiter", "Steer through the asteroid gaps. Reaching Jupiter completes the flight."};
     case LaunchTrainingStage::JupiterTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{"Reach Jupiter", "Fuel Tanks III is ready. Hull Plating remains optional."}
-            : std::pair<std::string, std::string>{"Jupiter transfer requires 25 fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
+            : std::pair<std::string, std::string>{"Jupiter transfer requires 25 transfer fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
     case LaunchTrainingStage::Complete:
         return {"Prepare the next flight", "Current destination: " + target.name};
     }
@@ -3401,6 +3401,18 @@ std::string buildGamePanelMarkup(
         out << phaseBoardOpen("phase-board-arrival", "");
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
             << "</h2><p>" << htmlEscape("Optional operations are available before refit.") << "</p></div></div>";
+        const double landingPackFuel = arkDiscovered(state)
+            ? std::min(
+                  tuning::research::expeditionRigPackFuel,
+                  static_cast<double>(std::max(0, state.meta.ark.fuelReserve)))
+            : tuning::research::expeditionRigPackFuel;
+        const std::vector<PanelMetricPresentation> arrivalFuelMetrics {
+            panelMetric(text::labels::transferFuel, display::fixed(state.run.arrivalOps.transferFuelRemaining, 1)),
+            panelMetric("Rig fuel after landing", display::fixed(landingPackFuel + state.run.arrivalOps.transferFuelRemaining, 1)),
+            panelMetric(text::labels::returnStage, "READY")
+        };
+        out << "<div class=\"stat-grid chip-strip phase-lane\">"
+            << resourceChipGrid(arrivalFuelMetrics) << "</div>";
         if (arrivalDestination != nullptr) {
             out << scenarioObjectiveMarkup(
                 scenarioObjectiveForDestination(state, catalog, arrivalDestination->id),
@@ -3542,10 +3554,10 @@ std::string buildGamePanelMarkup(
         const double oxygenPressure = hudMiningStats.oxygenSeconds > 0.0
             ? std::clamp(1.0 - mining.oxygenSeconds / hudMiningStats.oxygenSeconds, 0.0, 1.0)
             : 1.0;
-        const double fuelPressure = state.run.surfaceExpedition.sharedFuelCapacity > 0
+        const double fuelPressure = state.run.surfaceExpedition.rigFuelCapacity > 0.0
             ? std::clamp(
-                  1.0 - static_cast<double>(state.run.surfaceExpedition.sharedFuel) /
-                      static_cast<double>(state.run.surfaceExpedition.sharedFuelCapacity),
+                  1.0 - state.run.surfaceExpedition.rigFuel /
+                      state.run.surfaceExpedition.rigFuelCapacity,
                   0.0,
                   1.0)
             : 1.0;
@@ -4036,7 +4048,7 @@ std::string buildGamePanelMarkup(
         const bool showMiningIntroduction = expedition.active
             && surfaceOpsTutorialMiningUnlocked(state)
             && !expedition.miningRunUsed
-            && expedition.sharedFuel > 0
+            && expedition.rigFuel >= 1.0
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
         out << phaseBoardOpen(
             std::string("phase-board-surface surface-ops-screen rr-fixed-action-stack") +
@@ -4229,7 +4241,7 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"draft-hero\"><div><span>" << htmlEscape(marsTransferFuelLesson ? "Mars transfer refit" : "Shipyard refit")
             << "</span><h2>" << htmlEscape(marsTransferFuelLesson ? "Expand fuel capacity" : "Install one upgrade") << "</h2><p>"
             << htmlEscape(marsTransferFuelLesson
-                    ? "Mars requires 20 fuel. Current capacity is 15. Spend 22 mission credits on Fuel Tanks II."
+                    ? "Mars requires 20 transfer fuel. Current capacity is 15. Spend 22 mission credits on Fuel Tanks II."
                     : singleLaunchLessonOffer
                         ? "Install this required launch upgrade to continue."
                     : "Choose an unlocked system or keep your credits.") << "</p></div>";
@@ -4343,6 +4355,13 @@ std::string buildGamePanelMarkup(
 
     out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
+    const std::vector<PanelMetricPresentation> hangarFuelMetrics {
+        panelMetric(text::labels::transferFuel, display::fixed(launchFuelCapacity(state), 0) + " capacity"),
+        panelMetric("Expedition rig pack", display::fixed(tuning::research::expeditionRigPackFuel, 0)),
+        panelMetric(text::labels::returnStage, "RESERVED")
+    };
+    out << "<div class=\"stat-grid chip-strip phase-lane\">"
+        << resourceChipGrid(hangarFuelMetrics) << "</div>";
     if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
         const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         out << "<section class=\"objective-strip rr-objective-strip phase-lane\"><span>Objective</span><strong>"
@@ -4406,7 +4425,7 @@ std::string buildGamePanelMarkup(
                 launchFuelCapacity(state) + 0.000001 < requiredFuel;
             out << (fuelCapacityShortfall
                 ? disabledButton(
-                    display::fixed(requiredFuel, 0) + " fuel required / " +
+                    display::fixed(requiredFuel, 0) + " transfer fuel required / " +
                     display::fixed(launchFuelCapacity(state), 0) + " available")
                 : (launchHardwareBlocked
                     ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
@@ -4813,10 +4832,10 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     const double oxygenPressure = miningStats.oxygenSeconds > 0.0
         ? std::clamp(1.0 - mining.oxygenSeconds / miningStats.oxygenSeconds, 0.0, 1.0)
         : 1.0;
-    const double fuelPressure = state.run.surfaceExpedition.sharedFuelCapacity > 0
+    const double fuelPressure = state.run.surfaceExpedition.rigFuelCapacity > 0.0
         ? std::clamp(
-              1.0 - static_cast<double>(state.run.surfaceExpedition.sharedFuel) /
-                  static_cast<double>(state.run.surfaceExpedition.sharedFuelCapacity),
+              1.0 - state.run.surfaceExpedition.rigFuel /
+                  state.run.surfaceExpedition.rigFuelCapacity,
               0.0,
               1.0)
         : 1.0;

@@ -18,7 +18,7 @@ OREBIT deliberately modernizes that foundation with voluntary EVA, twin-stick ai
 
 Mining is the landed version of the rocket launch loop:
 
-- The player chooses whether to spend shared fuel, how much cargo to load, and when to return and leave or abort.
+- The player chooses how much arrival-derived rig fuel to spend, how much cargo to load, and when to return and leave or abort. The return stage remains reserved.
 - Better crew, tools, Support Drones, and surface upgrades make risk more readable and controllable, but never remove it.
 - Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and visible field-action hazard chances.
 - Hostile terrain and enemies stay out of the solar system and Aaru Vale. Enemy pressure begins only after Arkfall near Khepri Prime, when the agency is stranded in a hostile system.
@@ -34,23 +34,23 @@ Current flow:
 3. Landing opens Research, then Surface Ops.
 4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked. Mine deposit remains unavailable until Survey Site or Push Deeper prepares the site.
 5. Push Deeper guarantees a bankable layer +1. Collapse risk begins on the attempt for layer +2; a scanned artifact becomes guaranteed when its mapped layer succeeds.
-6. Pressing the prepared `Mine deposit` action spends 1 shared fuel and opens the direct-control Mining Rig screen at the selected start depth. The ship remains fixed at surface depth `0`.
+6. Pressing the prepared `Mine deposit` action spends 1 rig fuel and opens the direct-control Mining Rig screen at the selected start depth. The ship remains fixed at surface depth `0`.
 
 Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining Rig offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push Deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
 
-## Shared Fuel And Oxygen
+## Rig Fuel And Oxygen
 
 Mining exists to make surface greed compete with route-home safety:
 
-- Surface expeditions start with shared fuel capacity from `tuning::research::sharedFuelCapacity`.
+- Surface expeditions start with a 3-unit isolated rig pack plus the transfer fuel remaining at touchdown. Ark-era expeditions load up to 3 pack units from the Ark reserve.
 - Mining spends 1 fuel on deployment.
 - While oxygen remains, mining advances a normalized fuel-consumption cycle and spends another fuel when that cycle completes. Load and future efficiency modifiers change the authoritative cycle rate; the HUD shows percentage remaining rather than seconds.
-- Returning rig cargo, Support Drone haul, loose chunks, or a physically delivered artifact to the shuttle banks that payload and replenishes oxygen to the current upgraded capacity. Entering the shuttle zone empty does not refill oxygen.
+- Returning rig cargo, Support Drone haul, loose chunks, or a physically delivered artifact to the shuttle stows that payload and replenishes oxygen to the current upgraded capacity. Entering the shuttle zone empty does not refill oxygen.
 - The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 30 seconds.
 - Oxygen can improve through crew class, Resource Support Drone coverage, and surface upgrades such as Emergency Winch.
-- If fuel runs dry mid-dig, the Mining Rig is recalled so the shuttle still has a route home.
+- If rig fuel runs dry mid-dig, the Mining Rig is recalled. The protected return stage remains ready and cannot be consumed by mining.
 
-Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, the same mechanic is framed as `Ark fuel`.
+UI calls the spendable pool `Rig fuel` in every chapter. Arrival Ops separately shows recovered transfer fuel, the expedition pack, and `Return stage: READY/RESERVED`.
 
 ## Rig And EVA Core Loop
 
@@ -59,7 +59,7 @@ Before Ark discovery, UI should call this `Shared fuel`. After Ark discovery, th
 1. Pilot the rig through chunked terrain, drill straight ahead, scan hidden seams, tow artifacts, and carry ore.
 2. Exit into the jetpack suit from a safe adjacent cell to enter narrow passages, hand-drill, scan, tether an artifact, or defend yourself with the sidearm.
 3. Allow autonomous Support Drones to follow, orbit, defend, mine, survey, treat hazards, and collect loose chunks around whichever actor is controlled.
-4. Manage oxygen, shared fuel, gravity, inertia, drill heat, integrity, cargo, loose chunks, tether burden, and field hazards. Normal leave recovers all Rig, intact Support Drone, and Ship manifests.
+4. Manage oxygen, rig fuel, gravity, inertia, drill heat, integrity, cargo, loose chunks, tether burden, and field hazards. Normal leave recovers all Rig, intact Support Drone, and Ship manifests.
 5. Re-enter the rig within `1.25` cells on the same layer, or return to the shuttle under the failure rules below.
 
 The HUD distinguishes `SURFACE`, `START DEPTH +N`, and `SHIP ↑ N`. A single unlabeled arrow asset accepts a runtime POI kind, label, target depth, coordinate, and direction. Revealed recoverable artifacts use `ARTIFACT`; safety pressure at the existing caution threshold overrides them with `SHIP`. Below the surface it points to ascent, while on the surface it points directly to the ship and disappears inside the service zone. The arrow uses a one-second sine bounce and keeps its runtime label upright.
@@ -95,7 +95,7 @@ Tether mass swings under gravity and transfers bounded force to the active actor
 - `E`: pulse scanner.
 - `T`: tether or release an eligible artifact.
 - `F`: immediately exit or enter the rig when the placement rules pass.
-- `R`: use the existing bank/leave action while inside the shuttle ring.
+- `R`: stow all eligible cargo or leave while inside the shuttle ring.
 - Esc: abort or back out according to the current state.
 
 ### Standard controller
@@ -106,7 +106,7 @@ Tether mass swings under gravity and transfers bounded force to the active actor
 - Left trigger (L2/LT): operator hand drill.
 - West (X/Square): pulse scanner.
 - North (Y/Triangle): tether or release an eligible artifact.
-- Hold South (A/Cross) for `0.6` seconds: exit or enter the rig. Releasing sooner performs the existing bank/leave action when valid.
+- Hold South (A/Cross) for `0.6` seconds: exit or enter the rig. Releasing sooner stows eligible cargo or leaves when valid.
 - Left/right bumper: existing ship-service repair actions while available.
 - Hold East (B/Circle) for `0.45` seconds: emergency recall.
 
@@ -130,16 +130,16 @@ The suit has zero ore capacity. Hand-drilled ore and suit-killed enemy rewards b
 
 Generation may create explicit suit-only passages and pockets. These block the rig and artifact but admit the operator and Support Drones. The operator may change depth: the parked rig remains on its layer, while the operator, a validly tethered artifact, and the complete Support Drone swarm travel together.
 
-Exit requires a safe adjacent suit position. Entry requires the same layer and a distance no greater than `1.25` cells. If the rig is destroyed, the nearest safe cell receives an emergency-ejected operator, the rig becomes disabled, and the swarm transfers to the operator before the next combat update. Rig cargo remains with the wreck; previously banked payload remains safe; a tethered artifact stays with the suit.
+Exit requires a safe adjacent suit position. Entry requires the same layer and a distance no greater than `1.25` cells. If the rig is destroyed, the nearest safe cell receives an emergency-ejected operator, the rig becomes disabled, and the swarm transfers to the operator before the next combat update. Rig cargo remains with the wreck; previously stowed ship payload remains safe; a tethered artifact stays with the suit.
 
-Normal extraction requires a functioning rig and operator in the return zone. After emergency ejection, reaching the shuttle ends the deployment safely and may bank a physically delivered artifact. Suit integrity is separate from rig health: zero integrity releases the tether, freezes swarm behavior with the failure state, and ends the run. Banked Common material repairs the suit at the shuttle.
+Normal extraction requires a functioning rig and operator in the return zone. After emergency ejection, reaching the shuttle ends the deployment safely and may secure a physically delivered artifact. Suit integrity is separate from rig health: zero integrity releases the tether, freezes swarm behavior with the failure state, and ends the run. Stowed Common material repairs the suit at the shuttle.
 
 ## Mining Resources
 
-- Shared fuel: the shuttle/Mining Rig reserve. This is the central tradeoff and must stay visible in Surface Ops and Mining.
+- Rig fuel: the 3-unit expedition pack plus transfer fuel preserved at touchdown. This is the central endurance tradeoff and must stay visible in Surface Ops and Mining; the protected return stage is shown separately.
 - Oxygen: short-run timer, currently 30 seconds before upgrades.
 - Drill integrity: durability. Low integrity raises failure pressure; zero integrity disables drilling until the bit is repaired at the ship or the run ends.
-- Ship service: while inside the shuttle ring, banked Common material can fully repair the rig drill, rig health, or suit integrity. Cost scales with missing integrity or health, and spent materials leave the recovered cargo.
+- Ship service: while inside the shuttle ring, stowed Common material can fully repair the rig drill, rig health, or suit integrity. Cost scales with missing integrity or health, and spent materials leave the recovered cargo.
 - Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
 - Cargo load: reward now; it is secure once loaded onto the Ship.
 - Loose chunks: spatial ore and salvage created by suit drilling or suit kills. They are not carried by the suit and must be collected by the rig or Mining/Resource Support Drones.
@@ -215,10 +215,10 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/MiningSystem.*` owns terrain, actor physics, destination gravity, rig/operator state, loose chunks, drills, sidearm raycasts, tether forces, oxygen/fuel cadence, scanner pulses, mining enemies, finish/abort/failure outcomes, and payload conversion.
 - `src/core/MiniDroneCoordination.*` consumes `MiniDroneAnchorFrame` for all home, orbit, task, targeting, shield, scanner, and clearance decisions. These `MiniDrone*` names are legacy internal identifiers; `resolveMiniDroneAnchor` and `transferMiniDroneSwarmAnchor` are the only authoritative binding helpers.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, mode, gravity, suit integrity, drill heat, tether burden, loose-chunk count, Support Drone anchor status, `Suit carry: 0`, metrics, and detail rows.
-- `src/core/ResearchSystem.*` owns surface expedition state, shared fuel capacity, one-run-per-loop gating, field upgrades, Drone Bay state, and deterministic return allocation.
+- `src/core/ResearchSystem.*` owns transfer-to-rig fuel conversion, surface expedition state, one-run-per-loop gating, field upgrades, Drone Bay state, and deterministic return allocation.
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
-- `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and bank/leave actions.
+- `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 10 retains version 9's rig/operator, loose-chunk, disabled-rig, purchased-frame, Support Drone anchor/formation, scenario/site, cocoon, protected-objective, layer, reveal, and cell-tag state while adding launch-curriculum progress. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize the v9 scenario/cocoon state before v10 launch migration without replaying rewards.
+- Save version 11 retains version 10's rig/operator, loose-chunk, disabled-rig, purchased-frame, Support Drone anchor/formation, scenario/site, cocoon, protected-objective, layer, reveal, cell-tag, and launch-curriculum state while adding double-precision transfer and rig fuel. Version 10 active Surface/Mining saves preserve the old pool's consumed percentage when converted to route-derived rig fuel. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize scenario/cocoon state before later migrations without replaying rewards.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

@@ -131,7 +131,7 @@ inline std::string launchUpgradeDetail(const ShipModule& module)
 {
     switch (module.launchUpgradeKind) {
     case LaunchUpgradeKind::FuelTanks:
-        return "Adds 5 fuel. More fuel extends range and protects the return margin.";
+        return "Adds 5 transfer fuel. Fuel preserved at touchdown becomes Mining Rig endurance; the return stage stays reserved.";
     case LaunchUpgradeKind::FlightControls:
         return "Flight instability falls to " +
             display::percent(launchControlChaosForRank(module.launchUpgradeRank)) +
@@ -392,6 +392,7 @@ inline void addResourceChip(std::vector<PanelMetricPresentation>& chips, std::st
 inline std::vector<PanelMetricPresentation> refitResourceChips(const GameState& state)
 {
     std::vector<PanelMetricPresentation> chips;
+    chips.push_back(panelMetric(text::labels::credits, display::money(state.run.credits)));
     addResourceChip(chips, text::labels::blueprints, state.meta.blueprintProgress);
     addResourceChip(chips, text::labels::commonMaterials, state.meta.materials.common);
     addResourceChip(chips, text::labels::rareMaterials, state.meta.materials.rare);

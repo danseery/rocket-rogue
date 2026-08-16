@@ -251,7 +251,7 @@ inline LaunchPanelPresentation launchPanelPresentation(
         ? std::string("TURN AROUND")
         : display::fixed(std::max(0.0, flight.fuelRemaining), 0) + " / " +
             display::fixed(flight.fuelCapacity, 0);
-    presentation.metrics.push_back(panelMetric("Fuel", std::move(fuelValue)));
+    presentation.metrics.push_back(panelMetric(text::labels::transferFuel, std::move(fuelValue)));
     if (flightModel.manualControlsEnabled) {
         presentation.metrics.push_back(panelMetric(
             "Throttle",

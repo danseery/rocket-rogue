@@ -3244,6 +3244,23 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         });
         return found == catalog.destinations.end() ? -1 : static_cast<int>(std::distance(catalog.destinations.begin(), found));
     };
+    const auto legacyNominalRigFuel = [&](std::string_view destinationId) {
+        const Destination* destination = catalog.findDestination(destinationId);
+        const int tier = destination == nullptr ? 1 : std::max(1, destination->tier);
+        const double transferCapacity =
+            tuning::launchProgression::baseFuelCapacity +
+            static_cast<double>(std::clamp(
+                save.launchUpgrades.fuelTanks,
+                0,
+                tuning::launchProgression::maximumUpgradeRank)) *
+                tuning::launchProgression::fuelPerTankRank;
+        const double routeCost = std::min(
+            tuning::launch::routeFuelMaximum,
+            tuning::launch::routeFuelBase +
+                static_cast<double>(tier) * tuning::launch::routeFuelPerTier);
+        return tuning::research::expeditionRigPackFuel +
+            std::max(0.0, transferCapacity - routeCost);
+    };
     const bool legacyArkDiscovered = save.ark.condition != ArkCondition::NotFound || save.campaignMilestone != CampaignMilestone::SolarTutorial;
     const bool legacyHostileSystem = save.ark.gravityWellDisaster ||
         save.ark.condition == ArkCondition::DamagedStranded ||
@@ -3416,19 +3433,52 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.run.mining.aimX = state.run.mining.droneX + state.run.mining.aimDirX * tuning::mining::drillRangeCells;
         state.run.mining.aimY = state.run.mining.droneY + state.run.mining.aimDirY * tuning::mining::drillRangeCells;
     }
+    if (state.run.arrivalOps.active && save.version < 11) {
+        const double nominalRigFuel = legacyNominalRigFuel(
+            state.run.arrivalOps.destinationId);
+        state.run.arrivalOps.transferFuelRemaining = std::max(
+            0.0,
+            nominalRigFuel - tuning::research::expeditionRigPackFuel);
+        state.run.arrivalOps.transferFuelCapacity =
+            tuning::launchProgression::baseFuelCapacity +
+            static_cast<double>(std::clamp(
+                save.launchUpgrades.fuelTanks,
+                0,
+                tuning::launchProgression::maximumUpgradeRank)) *
+                tuning::launchProgression::fuelPerTankRank;
+    }
     if (state.run.surfaceExpedition.active) {
-        const int expectedFuelCapacity = surfaceSharedFuelCapacity(state, catalog);
-        if (state.run.surfaceExpedition.sharedFuelCapacity <= 0) {
-            state.run.surfaceExpedition.sharedFuelCapacity = expectedFuelCapacity;
-            state.run.surfaceExpedition.sharedFuel = state.run.mining.active
-                ? std::max(0, state.run.surfaceExpedition.sharedFuelCapacity - std::max(0, state.run.mining.fuelSpent))
-                : state.run.surfaceExpedition.sharedFuelCapacity;
-        } else if (state.run.surfaceExpedition.sharedFuelCapacity < expectedFuelCapacity) {
-            const int capacityDelta = expectedFuelCapacity - state.run.surfaceExpedition.sharedFuelCapacity;
-            state.run.surfaceExpedition.sharedFuelCapacity = expectedFuelCapacity;
-            state.run.surfaceExpedition.sharedFuel = std::min(
-                expectedFuelCapacity,
-                std::max(0, state.run.surfaceExpedition.sharedFuel) + capacityDelta);
+        SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+        if (save.version < 11) {
+            const double legacyCapacity = expedition.rigFuelCapacity > 0.0
+                ? expedition.rigFuelCapacity
+                : tuning::research::legacySharedFuelCapacity;
+            const double legacyRemaining = expedition.rigFuelCapacity > 0.0
+                ? expedition.rigFuel
+                : std::max(
+                      0.0,
+                      legacyCapacity - static_cast<double>(std::max(0, state.run.mining.fuelSpent)));
+            const double remainingShare = std::clamp(
+                legacyRemaining / std::max(0.001, legacyCapacity),
+                0.0,
+                1.0);
+            expedition.rigFuelCapacity = legacyNominalRigFuel(
+                expedition.destinationId);
+            expedition.rigFuel = expedition.rigFuelCapacity * remainingShare;
+            expedition.expeditionPackFuel = std::min(
+                tuning::research::expeditionRigPackFuel,
+                expedition.rigFuelCapacity);
+            expedition.transferFuelRecovered = std::max(
+                0.0,
+                expedition.rigFuelCapacity - expedition.expeditionPackFuel);
+        } else {
+            expedition.rigFuelCapacity = std::max(0.0, expedition.rigFuelCapacity);
+            expedition.rigFuel = std::clamp(
+                expedition.rigFuel,
+                0.0,
+                expedition.rigFuelCapacity);
+            expedition.transferFuelRecovered = std::max(0.0, expedition.transferFuelRecovered);
+            expedition.expeditionPackFuel = std::max(0.0, expedition.expeditionPackFuel);
         }
     }
     if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
@@ -3922,12 +3972,16 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::researchProjects, join(save.researchProjectIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::arrivalActive, save.arrivalOps.active ? 1 : 0);
     writeField(out, save_schema::field::arrivalDestination, save.arrivalOps.destinationId);
+    writeField(out, save_schema::field::arrivalTransferFuelRemaining, save.arrivalOps.transferFuelRemaining);
+    writeField(out, save_schema::field::arrivalTransferFuelCapacity, save.arrivalOps.transferFuelCapacity);
     writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
     writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
     writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
     writeField(out, save_schema::field::surfaceSupply, save.surfaceExpedition.supply);
-    writeField(out, save_schema::field::surfaceSharedFuel, save.surfaceExpedition.sharedFuel);
-    writeField(out, save_schema::field::surfaceSharedFuelCapacity, save.surfaceExpedition.sharedFuelCapacity);
+    writeField(out, save_schema::field::surfaceRigFuel, save.surfaceExpedition.rigFuel);
+    writeField(out, save_schema::field::surfaceRigFuelCapacity, save.surfaceExpedition.rigFuelCapacity);
+    writeField(out, save_schema::field::surfaceTransferFuelRecovered, save.surfaceExpedition.transferFuelRecovered);
+    writeField(out, save_schema::field::surfaceExpeditionPackFuel, save.surfaceExpedition.expeditionPackFuel);
     writeField(out, save_schema::field::surfaceCargo, save.surfaceExpedition.cargo);
     writeField(out, save_schema::field::surfaceHazard, save.surfaceExpedition.hazard);
     writeField(out, save_schema::field::surfaceDepth, save.surfaceExpedition.depth);
@@ -4080,6 +4134,30 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         if (parseMiningProgressionField(save, key, value)) {
             continue;
         }
+        if (key == save_schema::field::arrivalTransferFuelRemaining) {
+            save.arrivalOps.transferFuelRemaining = parseDouble(value, save.arrivalOps.transferFuelRemaining);
+            continue;
+        }
+        if (key == save_schema::field::arrivalTransferFuelCapacity) {
+            save.arrivalOps.transferFuelCapacity = parseDouble(value, save.arrivalOps.transferFuelCapacity);
+            continue;
+        }
+        if (key == save_schema::field::surfaceRigFuel) {
+            save.surfaceExpedition.rigFuel = parseDouble(value, save.surfaceExpedition.rigFuel);
+            continue;
+        }
+        if (key == save_schema::field::surfaceRigFuelCapacity) {
+            save.surfaceExpedition.rigFuelCapacity = parseDouble(value, save.surfaceExpedition.rigFuelCapacity);
+            continue;
+        }
+        if (key == save_schema::field::surfaceTransferFuelRecovered) {
+            save.surfaceExpedition.transferFuelRecovered = parseDouble(value, save.surfaceExpedition.transferFuelRecovered);
+            continue;
+        }
+        if (key == save_schema::field::surfaceExpeditionPackFuel) {
+            save.surfaceExpedition.expeditionPackFuel = parseDouble(value, save.surfaceExpedition.expeditionPackFuel);
+            continue;
+        }
 
         if (key == save_schema::field::version) {
             save.version = parseInt(value, save.version);
@@ -4192,9 +4270,9 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         } else if (key == save_schema::field::surfaceSupply) {
             save.surfaceExpedition.supply = parseInt(value, save.surfaceExpedition.supply);
         } else if (key == save_schema::field::surfaceSharedFuel) {
-            save.surfaceExpedition.sharedFuel = parseInt(value, save.surfaceExpedition.sharedFuel);
+            save.surfaceExpedition.rigFuel = parseDouble(value, save.surfaceExpedition.rigFuel);
         } else if (key == save_schema::field::surfaceSharedFuelCapacity) {
-            save.surfaceExpedition.sharedFuelCapacity = parseInt(value, save.surfaceExpedition.sharedFuelCapacity);
+            save.surfaceExpedition.rigFuelCapacity = parseDouble(value, save.surfaceExpedition.rigFuelCapacity);
         } else if (key == save_schema::field::surfaceCargo) {
             save.surfaceExpedition.cargo = parseInt(value, save.surfaceExpedition.cargo);
         } else if (key == save_schema::field::surfaceHazard) {

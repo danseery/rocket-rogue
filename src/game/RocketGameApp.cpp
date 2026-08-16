@@ -69,6 +69,8 @@ LaunchOutcome debugTransferOutcome(std::string destinationId)
     outcome.crashMultiplier = 2.2;
     outcome.ejectMultiplier = 2.4;
     outcome.payout = 260.0;
+    outcome.transferFuelRemaining = 5.0;
+    outcome.transferFuelCapacity = 20.0;
     outcome.blueprintGain = 3;
     outcome.peakWarning = 0.38;
     outcome.peakAbortRisk = 0.0;
@@ -2222,7 +2224,7 @@ void RocketGameApp::backToSurfaceOps()
     if (state_.run.surfaceExpedition.active) {
         state_.screen = Screen::SurfaceExpedition;
     } else if (openRefitIfAvailable(true)) {
-        state_.statusLine = "Mars requires 20 fuel. Use the Moon mission credits to install Fuel Tanks II.";
+        state_.statusLine = "Mars requires 20 transfer fuel. Use the Moon mission credits to install Fuel Tanks II.";
     } else {
         state_.screen = Screen::Hangar;
     }
@@ -2736,6 +2738,28 @@ void RocketGameApp::debugStartCombatMining()
     debugStartMiningArena(2, 7, 0xC0BA7701ULL, 0);
 }
 
+void RocketGameApp::debugStartSwarmArena()
+{
+    constexpr int act = 2;
+    constexpr int difficulty = 5;
+    constexpr std::uint64_t maximumSeedAttempts = 4096;
+    for (std::uint64_t seed = 1; seed <= maximumSeedAttempts; ++seed) {
+        debugStartMiningArena(act, difficulty, seed, 0);
+        if (!state_.run.mining.swarm.enabled) {
+            continue;
+        }
+        if (enterMiningSwarmArenaForDebug(state_, catalog_)) {
+            state_.statusLine = "Swarm Arena Lab: nest layer loaded. Follow the branch tunnel to trigger the waves. Sandbox rewards are not saved.";
+        } else {
+            state_.statusLine = "Swarm Arena Lab could not enter the generated nest layer.";
+        }
+        panelDirty_ = true;
+        return;
+    }
+    state_.statusLine = "Swarm Arena Lab could not find an eligible deterministic seed.";
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode, int gateOverride)
 {
     const MiningAct miningAct = act <= 1
@@ -2789,8 +2813,10 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
         ? SurfaceSiteProfile::SurveyBasin
         : (rules.band == MiningProgressionBand::Combine ? SurfaceSiteProfile::OreShelf : SurfaceSiteProfile::FractureField);
     expedition.supply = tuning::research::baseSupply + act;
-    expedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-    expedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    expedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
+    expedition.transferFuelRecovered = 5.0;
+    expedition.rigFuelCapacity = expedition.expeditionPackFuel + expedition.transferFuelRecovered;
+    expedition.rigFuel = expedition.rigFuelCapacity;
     expedition.hazard = tuning::research::baseHazard + static_cast<double>(request.difficulty - 1) * 0.02;
     expedition.enemyEncountersEnabled = miningAct != MiningAct::ActOne;
     expedition.miningSitePrepared = true;
@@ -2933,8 +2959,10 @@ void RocketGameApp::debugStartSurfaceScan()
     state_.run.surfaceExpedition.destinationId = content::destination::moon;
     state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::FractureField;
     state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
-    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
+    state_.run.surfaceExpedition.transferFuelRecovered = 5.0;
+    state_.run.surfaceExpedition.rigFuelCapacity = 8.0;
+    state_.run.surfaceExpedition.rigFuel = 8.0;
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.05;
     const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
     state_.statusLine = outcome.applied
@@ -2953,8 +2981,10 @@ void RocketGameApp::debugStartSurfacePush()
     state_.run.surfaceExpedition.destinationId = content::destination::moon;
     state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::OreShelf;
     state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
-    state_.run.surfaceExpedition.sharedFuelCapacity = tuning::research::sharedFuelCapacity;
-    state_.run.surfaceExpedition.sharedFuel = tuning::research::sharedFuelCapacity;
+    state_.run.surfaceExpedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
+    state_.run.surfaceExpedition.transferFuelRecovered = 5.0;
+    state_.run.surfaceExpedition.rigFuelCapacity = 8.0;
+    state_.run.surfaceExpedition.rigFuel = 8.0;
     state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.08;
     SurfaceDepthProspect artifactForecast;
     artifactForecast.depthOffset = 1;
@@ -3631,6 +3661,8 @@ void RocketGameApp::completeLaunch(
             session_.flight.hullDamageTaken,
             session_.flight.fuelSurveyReturnTiming});
     outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
+    outcome.transferFuelRemaining = std::max(0.0, session_.flight.fuelRemaining);
+    outcome.transferFuelCapacity = std::max(0.0, session_.flight.fuelCapacity);
     outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, wasReturningHome);
     if (!outcome.telemetry.empty()) {
         outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);

@@ -23,7 +23,7 @@ Using the Hangar capture as the visual reference, show a compact 280-340px left 
 
 ### 02 - Arrival/Surface decision rail, 1280x800
 
-Using the Surface Ops capture as the visual reference, show a compact left decision rail and a separate complete planetary scene. Exact labels: `OREBIT`, `Surface Ops`, `MAP`, `INV`, `MENU`, `Choose one surface action`, `FUEL`, `KITS`, `CARGO`, `RISK`, `Mine deposit`, `SHARED FUEL`, `Survey site`, `READ +2`, `Push deeper`, `DEPTH +1`, `Return to Earth`, `RISK -16%`, `DRONE OPS`, and `RETURN TO EARTH`. Each choice is one compact row with title, cost or risk/reward cue, and `GO` action. No persistent briefing, log, forecast, or long description.
+Using the Surface Ops capture as the visual reference, show a compact left decision rail and a separate complete planetary scene. Exact labels: `OREBIT`, `Surface Ops`, `MAP`, `INV`, `MENU`, `Choose one surface action`, `RIG FUEL`, `KITS`, `CARGO`, `RISK`, `Mine deposit`, `Survey site`, `READ +2`, `Push deeper`, `DEPTH +1`, `Return to Earth`, `RISK -16%`, `DRONE OPS`, and `RETURN TO EARTH`. Each choice is one compact row with title, cost or risk/reward cue, and `GO` action. No persistent briefing, log, forecast, or long description.
 
 ### 03 - Launch/Flyby/Orbit live HUD, 1280x800
 
@@ -31,11 +31,11 @@ Using the Launch capture as the visual reference, show a compact left live-fligh
 
 ### 04 - Surface Scan/Push controls, 1280x800
 
-Using the existing planetary art as the visual reference, show a compact left scanner rail and a separate complete surface scene. Exact labels: `OREBIT`, `SURVEY SCAN`, `INV`, `MENU`, `Read the layer, then bank`, `PULSES`, `FORECAST`, `RISK`, `SIGNAL`, `NO LAYER READ`, `PULSE SCANNER`, `BANK FORECAST`, and `ABORT`. After a pulse, replace `NO LAYER READ` with a compact `LAYER +N: COMMON/RARE/EXOTIC/ARTIFACT +N` readout. `FORECAST` is mapped cargo value only; scanning never grants owned resources or progression. Keep Pulse Scanner and Bank Forecast immediately visible, with Abort secondary. No logs or explanatory paragraphs.
+Using the existing planetary art as the visual reference, show a compact left scanner rail and a separate complete surface scene. Exact labels: `OREBIT`, `SURVEY SCAN`, `INV`, `MENU`, `Read the layer, then validate`, `PULSES`, `FORECAST`, `RISK`, `SIGNAL`, `NO LAYER READ`, `PULSE SCANNER`, `VALIDATE FORECAST`, and `ABORT`. After a pulse, replace `NO LAYER READ` with a compact `LAYER +N: COMMON/RARE/EXOTIC/ARTIFACT +N` readout. `FORECAST` is mapped cargo value only; scanning never grants owned resources or progression. Keep Pulse Scanner and Validate Forecast immediately visible, with Abort secondary. No logs or explanatory paragraphs.
 
 ### 05 - Mining safe-playfield HUD, 1280x800
 
-Using the Mining capture as the visual reference, preserve the terrain and route art. Reserve a compact top status rail and bottom command rail entirely outside the rectangular playable terrain. Exact labels: `ACT • LEVEL`, `Scan, drill, bank, return`, `OXYGEN`, `FUEL`, `DRILL`, `LOAD`, `DETAILS`, `INV`, `MENU`, `CARGO`, `BANKED`, `ARTIFACT`, `PULSE SCANNER`, `TETHER ARTIFACT`, and `EMERGENCY RECALL`. At the shuttle, replace the away actions with the current repair and bank/stow/leave actions. Keep the return route and all terrain click targets unobstructed. The center terrain must be visibly protected from every persistent UI element.
+Using the Mining capture as the visual reference, preserve the terrain and route art. Reserve a compact top status rail and bottom command rail entirely outside the rectangular playable terrain. Exact labels: `ACT • LEVEL`, `Scan, drill, stow, return`, `OXYGEN`, `RIG FUEL`, `DRILL`, `LOAD`, `DETAILS`, `INV`, `MENU`, `CARGO`, `STOWED`, `ARTIFACT`, `PULSE SCANNER`, `TETHER ARTIFACT`, and `EMERGENCY RECALL`. At the shuttle, replace the away actions with the current repair and stow/leave actions. Keep the return route and all terrain click targets unobstructed. The center terrain must be visibly protected from every persistent UI element.
 
 ### 06 - Refit/Field Upgrade selector, 1280x800
 

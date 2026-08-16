@@ -1417,7 +1417,7 @@ inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
     if (state.run.surfaceExpedition.miningRunUsed) {
         return disabledPanelButton(text::buttons::unavailable);
     }
-    if (state.run.surfaceExpedition.sharedFuel <= 0) {
+    if (state.run.surfaceExpedition.rigFuel < 1.0) {
         return disabledPanelButton(text::buttons::unavailable);
     }
     return panelActionButton(text::buttons::mineDeposit, ui::actions::mineSurface, "risk");
@@ -1444,7 +1444,7 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
     if (state.run.surfaceExpedition.miningRunUsed) {
         return std::string(text::fuel::offline);
     }
-    if (state.run.surfaceExpedition.sharedFuel <= 0) {
+    if (state.run.surfaceExpedition.rigFuel < 1.0) {
         return std::string(text::fuel::offline);
     }
     return text::fuel::availability(arkDiscovered(state));
@@ -1581,7 +1581,7 @@ inline SurfaceExpeditionPresentation surfacePosturePresentation(
 {
     SurfaceExpeditionPresentation presentation;
     const bool payloadLoaded = hasSurfacePayload(expedition);
-    const bool miningWindowOpen = expedition.sharedFuel > 0 && !expedition.miningRunUsed;
+    const bool miningWindowOpen = expedition.rigFuel >= 1.0 && !expedition.miningRunUsed;
     if (!payloadLoaded && miningWindowOpen) {
         presentation.postureTitle = "Recommended: survey, dig, then mine";
         presentation.postureDetail = "Survey reveals each level, Dig chooses the Mining Rig's start depth, and Mine begins the hands-on extraction run.";
@@ -1728,9 +1728,9 @@ inline SurfaceReturnSafetyPresentation surfaceReturnSafetyPresentation(
         static_cast<int>(std::ceil(estimatedSeconds));
     presentation.fuelNeededAfterDeployment = static_cast<int>(std::ceil(
         estimatedSeconds * tuning::mining::fuelCycleProgressPerSecond));
-    presentation.fuelAvailableAfterDeployment = std::max(
-        0,
-        state.run.surfaceExpedition.sharedFuel - 1);
+    presentation.fuelAvailableAfterDeployment = static_cast<int>(std::floor(std::max(
+        0.0,
+        state.run.surfaceExpedition.rigFuel - 1.0)));
 
     const int oxygenMargin =
         presentation.oxygenSeconds - presentation.estimatedReturnSeconds;
@@ -1824,7 +1824,10 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow("Support Drone loadout", supportDroneLoadoutDetail()),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
         detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
-        detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity)) + " available for shuttle and Mining Rig operations"),
+        detailPresentationRow(text::fuel::reserveLabel(arkKnown), display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1) + " available for Mining Rig operations"),
+        detailPresentationRow(text::labels::transferFuel, display::fixed(expedition.transferFuelRecovered, 1) + " recovered at touchdown"),
+        detailPresentationRow("Expedition rig pack", display::fixed(expedition.expeditionPackFuel, 1)),
+        detailPresentationRow(text::labels::returnStage, std::string("RESERVED")),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationHeader(text::panel::details::fieldRules),
         detailPresentationRow(text::panel::details::surveyRisk, std::string("Survey forecasts one level per pulse: the current level first, then deeper levels. Dust can still burn extra action kits.")),
@@ -1903,7 +1906,8 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::fieldKit, surfaceFieldKitSummary(state.meta)),
         panelMetric(text::labels::hazard, display::percent(expedition.hazard)),
         panelMetric(text::labels::supply, std::to_string(expedition.supply)),
-        panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(expedition.sharedFuel) + "/" + std::to_string(std::max(1, expedition.sharedFuelCapacity))),
+        panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1)),
+        panelMetric(text::labels::returnStage, "RESERVED"),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
         panelMetric("Start depth", "+" + std::to_string(expedition.depth)),
         panelMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common)),

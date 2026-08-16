@@ -98,9 +98,9 @@ Rich-material values are `{first-clear guarantee / hard arena cap}`. All procedu
 | 3 Rare | 3/5 | 4/6 | 5/7 | 6/8 |
 | 3 Exotic | 1/1 | 1/2 | 2/3 | 3/4 |
 
-The arena reward ledger must reserve or consume from one shared budget before creating any rich reward. Once a cap is committed, additional enemy rewards become common salvage. A guarantee is credited only when that material reaches the banked surface payload. Unbanked, dropped, or lost material does not advance first-clear progress.
+The arena reward ledger must reserve or consume from one shared budget before creating any rich reward. Once a cap is committed, additional enemy rewards become common salvage. A guarantee is credited only when that material reaches the stowed surface payload. Unstowed, dropped, or lost material does not advance first-clear progress.
 
-First-clear progress is stored per act/band in `MetaProgress::miningFirstClearProgress`. Until both guarantees for the band are banked, later attempts retain the guarantee. After fulfillment, `effectiveMiningRewardBudget` removes guarantees, halves the Rare cap rounding up, and halves the Exotic cap rounding down.
+First-clear progress is stored per act/band in `MetaProgress::miningFirstClearProgress`. Until both guarantees for the band are safely delivered, later attempts retain the guarantee. After fulfillment, `effectiveMiningRewardBudget` removes guarantees, halves the Rare cap rounding up, and halves the Exotic cap rounding down.
 
 ## Campaign mapping and deterministic arenas
 
@@ -134,11 +134,11 @@ The stable shared types live in `GameTypes.h`:
 - `MiningRewardBudget { rareGuarantee, exoticGuarantee, rareCap, exoticCap }`
 - `MiningArenaRules`, including mechanic gates, material/enemy/affinity/room whitelists, encounter limits, scaling, copy, and reference Support Drones
 - `MiningArenaMetadata { act, difficulty, seed, rulesVersion }`
-- `MiningFirstClearProgress { rareBanked, exoticBanked }`
+- `MiningFirstClearProgress { rareBanked, exoticBanked }` (legacy internal field names for safely delivered first-clear rewards)
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. Save version 10 retains version 9's separate rig/operator state, destination gravity, loose chunks, disabled-rig state, artifact tether state, purchased duplicate Support Drone frames, scenario/site context, protected-objective state, and each unit's anchor target, formation, motion, haul, shield, recharge, and cooldowns while adding launch-curriculum progress. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Legacy saves restore the operator seated in the rig; their drones migrate to `ControlledActor` with slots derived from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
+Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. Save version 11 retains version 10's separate rig/operator state, destination gravity, loose chunks, disabled-rig state, artifact tether state, purchased duplicate Support Drone frames, scenario/site context, protected-objective state, launch-curriculum progress, and each unit's anchor target, formation, motion, haul, shield, recharge, and cooldowns while adding the Arrival Ops transfer-fuel and Surface Ops rig-fuel fields. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Version 10 active Mining saves keep their arena and convert the former 30-unit surface pool to route-derived rig fuel at the same remaining percentage. Older saves restore the operator seated in the rig; their drones migrate to `ControlledActor` with slots derived from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
 
 The current `miningArenaRulesVersion` is `1`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
 

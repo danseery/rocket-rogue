@@ -10,11 +10,11 @@ USG Notes remain the primary design direction. This implementation adds the firs
 - Locking the Saturn course begins the one-way outer expedition. From Saturn onward, recovery UI says `Recover to Expedition` instead of promising an Earth return; after the Straylight discovery, it says `Return to Ark`.
 - Before Neptune succeeds, no Straylight name, contact, silhouette, art, signal, or Ark-return framing may appear anywhere.
 - Successful Neptune arrival persists a blocking, full-screen discovery briefing. Its only action, `Approach the Straylight`, acknowledges the beat, discovers the derelict-but-operable Ark, saves, and resumes Neptune Arrival Ops.
-- A saved Campaign Introduction after New Game explains the four launch lessons: a 10-unit tank cannot pay the Moon's 10-unit transit plus 5-unit insertion reserve; the first sortie collects fuel data and turns around; controls, temperature, and hull are then revealed in sequence.
+- A saved Campaign Introduction after New Game explains the four launch lessons: the Moon route requires 15 units of transfer capacity; the first sortie collects fuel data and turns around; controls, temperature, and hull are then revealed in sequence.
 - The first Ark jump succeeds and teaches that the Ark is a larger version of the press-your-luck shuttle loop.
 - The second Ark jump is scripted to hit a gravity well, damaging and stranding the Ark in a hostile system.
 - After the disaster, the Navigation screen becomes the mission-selection layer.
-- Surface `Shared fuel` becomes `Ark fuel`, preserving the shuttle/Mining Rig tradeoff while changing the fiction from pre-commitment recovery reserves to Ark sortie reserves.
+- Ark fuel loads up to 3 units into the expedition rig pack before landing. Transfer fuel preserved at touchdown is added to that `Rig fuel` pool, while the return stage remains reserved.
 - Current post-Neptune destinations reuse the existing physical tuning under canonical names:
   - Khepri Prime (tier 7): first hostile-system sortie target.
   - Rift Belt (tier 8): high-risk placeholder for later deep route content.
@@ -45,7 +45,7 @@ Post-disaster loop:
 3. Prep shuttle launch from the Ark.
 4. Fly the press-your-luck transfer.
 5. Choose flyby, orbit, or landing.
-6. Mine fuel/materials and recover alien artifacts while deciding how much Ark fuel to spend on the Mining Rig versus keeping a route home.
+6. Load up to 3 Ark-fuel units into the expedition pack, add any transfer fuel preserved at touchdown, then mine materials and recover alien artifacts without exposing the reserved return stage.
 7. Extract payload and return to the Ark.
 8. Spend resources on Ark repair, fuel systems, Support Drone tech, shuttle upgrades, and artifact research.
 

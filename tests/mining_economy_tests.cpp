@@ -32,8 +32,8 @@ void prepareSurface(GameState& state, std::string destinationId)
     state.run.surfaceExpedition = {};
     state.run.surfaceExpedition.active = true;
     state.run.surfaceExpedition.destinationId = std::move(destinationId);
-    state.run.surfaceExpedition.sharedFuel = 4;
-    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.rigFuel = 4.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
     state.run.surfaceExpedition.miningSitePrepared = true;
     state.screen = Screen::SurfaceExpedition;
 }
@@ -263,8 +263,8 @@ void supplyPocketsAreDeterministicAndPayImmediately()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 708);
     prepareSurface(state, content::destination::mars);
-    state.run.surfaceExpedition.sharedFuel = 1;
-    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.rigFuel = 1.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
     require(startMiningRun(state, catalog, {MiningAct::ActOne, 4, 0xF00DULL}, false).applied,
         "Mars supply-pocket arena should start");
 
@@ -308,10 +308,10 @@ void supplyPocketsAreDeterministicAndPayImmediately()
     };
 
     const MaterialInventory materialsBefore = mining.temporaryMaterials;
-    const int fuelBefore = state.run.surfaceExpedition.sharedFuel;
+    const double fuelBefore = state.run.surfaceExpedition.rigFuel;
     drillTestCell(MiningCellMaterial::FuelPocket);
-    require(state.run.surfaceExpedition.sharedFuel == fuelBefore + 1,
-        "fuel pocket should restore one shared fuel immediately");
+    require(std::abs(state.run.surfaceExpedition.rigFuel - (fuelBefore + 1.0)) < 0.0001,
+        "fuel pocket should restore one rig fuel immediately");
     require(!mining.pickupEvents.empty()
             && mining.pickupEvents.back().kind == MiningPickupKind::Fuel
             && mining.pickupEvents.back().amount == 1,

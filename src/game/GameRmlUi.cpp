@@ -2256,7 +2256,7 @@ public:
 
 RmlSettingsEventListener g_settingsEventListener;
 
-bool dispatchButtonBinding(GameRmlUi& owner, const RmlButtonBinding& binding)
+bool dispatchButtonBinding(GameRmlUi& owner, RmlButtonBinding binding)
 {
     if (binding.close) {
         owner.closeModal();
@@ -3542,52 +3542,9 @@ bool GameRmlUi::activateButtonLabel(const std::string& label)
     if (it == buttonBindings_.end()) {
         return false;
     }
-
-    if (it->close) {
-        closeModal();
-        return true;
-    }
-    if (!it->modal.empty()) {
-        openModal(it->modal);
-        return true;
-    }
-    if (!it->action.empty()) {
-        dispatchAction(it->action);
-        return true;
-    }
-    if (it->helpToggle) {
-        rr_rml_set_help_disabled(rr_rml_help_disabled() == 0 ? 1 : 0);
-        refresh();
-        return true;
-    }
-    if (it->cameraShakeToggle) {
-        rr_rml_set_camera_shake_disabled(rr_rml_camera_shake_disabled() == 0 ? 1 : 0);
-        refresh();
-        return true;
-    }
-    if (it->desktopFullscreenToggle) {
-        rr_rml_set_desktop_fullscreen(rr_rml_desktop_fullscreen_enabled() == 0 ? 1 : 0);
-        refresh();
-        return true;
-    }
-    if (it->debugToolsToggle) {
-        rr_rml_set_debug_tools_enabled(rr_rml_debug_tools_enabled() == 0 ? 1 : 0);
-        refresh();
-        return true;
-    }
-    if (it->performanceStatsToggle) {
-        rr_rml_set_performance_stats_enabled(rr_rml_performance_stats_enabled() == 0 ? 1 : 0);
-        refresh();
-        return true;
-    }
-    if (!it->controllerSetting.empty()) {
-        const int field = it->controllerSetting == "invertFlightY" ? 0 : (it->controllerSetting == "swapConfirmCancel" ? 1 : 2);
-        const bool current = rr_rml_controller_boolean_preference(field) != 0;
-        rr_rml_set_controller_preference(it->controllerSetting.c_str(), current ? "false" : "true");
-        refresh();
-        return true;
-    }
-    return false;
+    // Dispatch owns its binding because actions and modal changes can rebuild
+    // the RmlUi hosts and invalidate both binding collections immediately.
+    return dispatchButtonBinding(*this, *it);
 }
 
 void GameRmlUi::setPerformanceStats(const PerformanceStats& stats, bool visible)

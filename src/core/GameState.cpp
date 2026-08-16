@@ -1628,7 +1628,7 @@ bool selectNavigationDestination(GameState& state, const ContentCatalog& catalog
     state.launchConfig.burnGoalMultiplier = destination.targetMultiplier;
     syncLaunchConfig(state, catalog);
     state.screen = Screen::Hangar;
-    state.statusLine = "Course plotted from the Ark to " + destination.name + ". Shared fuel spent: -" + std::to_string(fuelCost) + ". Prep the shuttle, then launch.";
+    state.statusLine = "Course plotted from the Ark to " + destination.name + ". Ark fuel spent: -" + std::to_string(fuelCost) + ". Prep the shuttle, then launch.";
     return true;
 }
 
@@ -1699,7 +1699,7 @@ FrontierGateStatus frontierGateStatusForDestination(
             (state.meta.launchLessons.stage == LaunchTrainingStage::ThermalManagement ||
                 state.meta.launchLessons.stage == LaunchTrainingStage::MarsTransfer) &&
             status.current >= status.required;
-        status.blockerText = "Mars requires 20 fuel; current capacity is " +
+        status.blockerText = "Mars requires 20 transfer fuel; current capacity is " +
             std::to_string(static_cast<int>(launchFuelCapacity(state))) + ".";
         if (!status.satisfied) {
             return status;

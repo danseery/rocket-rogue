@@ -344,8 +344,8 @@ void miningGateContractsAndRuntimeAreDeterministic()
         state.run.surfaceExpedition = {};
         state.run.surfaceExpedition.active = true;
         state.run.surfaceExpedition.destinationId = std::string(destinationId);
-        state.run.surfaceExpedition.sharedFuel = 4;
-        state.run.surfaceExpedition.sharedFuelCapacity = 4;
+        state.run.surfaceExpedition.rigFuel = 4.0;
+        state.run.surfaceExpedition.rigFuelCapacity = 4.0;
         state.run.surfaceExpedition.miningSitePrepared = true;
     };
 
@@ -527,8 +527,8 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
     GameState state = createNewGame(catalog, 0xC0C00BULL);
     state.run.surfaceExpedition.active = true;
     state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.sharedFuel = 4;
-    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.rigFuel = 4.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
     state.run.surfaceExpedition.miningSitePrepared = true;
     state.run.surfaceExpedition.pendingMiningSiteDefinitionId = site.id;
     require(startMiningRun(
@@ -603,8 +603,8 @@ void rigTetherPullsTowardShip()
     GameState state = createNewGame(catalog, 0xA11CE);
     state.run.surfaceExpedition.active = true;
     state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.sharedFuel = 4;
-    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.rigFuel = 4.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
     state.run.surfaceExpedition.miningSitePrepared = true;
     require(startMiningRun(
                 state,
@@ -674,8 +674,8 @@ void evaTetherFollowsAndRecoversAtShip()
     GameState state = createNewGame(catalog, 0x70A11E);
     state.run.surfaceExpedition.active = true;
     state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.sharedFuel = 4;
-    state.run.surfaceExpedition.sharedFuelCapacity = 4;
+    state.run.surfaceExpedition.rigFuel = 4.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
     state.run.surfaceExpedition.miningSitePrepared = true;
     require(startMiningRun(
                 state,

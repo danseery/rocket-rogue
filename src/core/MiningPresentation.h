@@ -306,7 +306,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Rig cargo", std::to_string(carriedCargo)),
         panelMetric("Ship cargo", std::to_string(bankedCargo)),
         panelMetric(text::labels::load, display::fixed(load.currentLoad, 1)),
-        panelMetric(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity))),
+        panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 1)),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelCycleProgress)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
         panelMetric("Arena", std::string(miningActName(arena.act)) + " L" + std::to_string(arena.difficulty)),
@@ -398,7 +398,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                       display::fixed(tuning::mining::operatorSidearmIntervalSeconds, 2) +
                       "s cadence")
                 : std::string("EVA equipment")),
-        detailPresentationRow(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel) + "/" + std::to_string(std::max(1, surface.sharedFuelCapacity)) + " available for this dig"),
+        detailPresentationRow(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 1) + " available for this dig"),
+        detailPresentationRow(text::labels::transferFuel, display::fixed(surface.transferFuelRecovered, 1) + " recovered at touchdown"),
+        detailPresentationRow("Expedition rig pack", display::fixed(surface.expeditionPackFuel, 1)),
+        detailPresentationRow(text::labels::returnStage, std::string("RESERVED")),
         detailPresentationRow("Fuel spent this dig", std::to_string(mining.fuelSpent)),
         detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown) + " Consumption rate " + display::fixed(load.fuelConsumptionMultiplier, 2) + "x."),
         detailPresentationRow("Load burden", display::fixed(load.currentLoad, 1) + " load; " + display::fixed(load.freeBuffer, 1) + " free carry; speed " + display::percent(load.speedMultiplier)),
@@ -624,7 +627,7 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     presentation.details = run.details;
     presentation.vitals = {{
         {"OXYGEN", metricValue(text::labels::oxygen), "oxygen", {}, {}},
-        {"FUEL", metricValue(text::fuel::reserveLabel(arkKnown), std::to_string(surface.sharedFuel)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
+        {"RIG FUEL", metricValue(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
         {"DRILL", metricValue(text::labels::drillBit), std::move(drillCssClass), "HEAT", metricValue(text::labels::drillHeat, "0%")},
         {"LOAD", display::fixed(load.currentLoad, 1), "load", {}, {}}
     }};

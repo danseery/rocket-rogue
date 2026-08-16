@@ -12,7 +12,7 @@ Mars is the first research frontier. After a successful Mars arrival, the game o
 
 1. Arrival summary: confirms the transfer succeeded and shows what the agency can investigate.
 2. Research phase: spend recovered materials and blueprints to unlock new module families, crew facilities, surface tools, and artifact analysis threads.
-3. Surface expedition: spend action kits to survey/push/extract and spend shared fuel to deploy the player-controlled Mining Rig.
+3. Surface expedition: spend action kits to survey/push/extract and spend arrival-derived rig fuel to deploy the player-controlled Mining Rig.
 4. Recovery decision: return with the payload before hazard, cargo weight, low action kits, or low fuel makes extraction too risky.
 5. Refit window: use credits, research unlocks, and recovered materials to improve the next launch cycle.
 
@@ -64,7 +64,7 @@ Core resources:
 
 - Site profile: each expedition rolls a site such as Survey Basin, Ore Shelf, or Fracture Field. The site changes action yield, hazard, extraction pressure, or artifact odds.
 - Action kits: the surface action clock. Surveying, pushing deeper, and hazard responses spend it.
-- Shared fuel: the shuttle and Mining Rig reserve. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains; before the Ark, it is labeled shared fuel, and after Ark discovery it is framed as Ark fuel.
+- Rig fuel: a protected 3-unit expedition pack plus transfer fuel preserved at touchdown. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains. The separate return stage is always reserved; Ark-era expeditions load up to 3 pack units from Ark fuel.
 - Cargo: increases reward and is guaranteed once loaded onto the Ship.
 - Hazard: destination difficulty plus depth pressure.
 - Materials: normal departure returns every material on the Rig, intact Support Drones, and the Ship; Emergency Recall and disabled-rig recovery retain only Ship cargo.
@@ -73,8 +73,8 @@ Core resources:
 Core actions:
 
 - Survey site: low-risk, low-reward; improves knowledge and finds common materials.
-- Mine deposit: opens one direct-control Mining Rig run at the selected start depth for the current surface loop. The ship remains at surface depth 0, and deployment spends shared fuel rather than action kits.
-- Push Deeper: its first layer is guaranteed and bankable. Attempting layer two or farther risks the unbanked route; successful mapped artifact layers confirm the artifact for mining. It is disabled after mining because the run commits the field team to extracting or wrapping the current site.
+- Mine deposit: opens one direct-control Mining Rig run at the selected start depth for the current surface loop. The ship remains at surface depth 0, and deployment spends rig fuel rather than action kits.
+- Push Deeper: its first layer is guaranteed and becomes a stable Mining Rig start depth. Attempting layer two or farther risks collapsing the unfinished tunnel; successful mapped artifact layers confirm the artifact for mining. It is disabled after mining because the run commits the field team to extracting or wrapping the current site.
 - Return: atomically recalls intact Support Drones, loads every remaining manifest onto the Ship, and settles the exact objective allocation plus spendable surplus.
 
 Surface actions should be presented as decision cards, not mystery buttons. Each card should show action-kit or fuel cost, current hazard/extraction risk, a short explanation of the payoff, and the action button. The player should understand why a field-kit unlock changed the odds without needing to inspect code or external notes.
@@ -85,7 +85,7 @@ Mars site profiles currently provide low-cost run variety:
 - Ore Shelf: stronger mining yield and rare-material odds, with slightly higher site strain.
 - Fracture Field: better artifact odds, but higher hazard and extraction pressure.
 
-Solar-system rule: no enemies in Moon or Mars content. Mars can have environmental hazards, limited action kits, shared fuel pressure, and extraction pressure, but not combat. Earth Orbit has no visible mission content; enemies start only after the agency reaches another star system.
+Solar-system rule: no enemies in Moon or Mars content. Mars can have environmental hazards, limited action kits, rig-fuel pressure, and extraction pressure, but not combat. Earth Orbit has no visible mission content; enemies start only after the agency reaches another star system.
 
 Implemented Mars hazards are environmental setbacks attached to surface actions:
 
@@ -105,7 +105,7 @@ These events should remain short, readable pulses attached to menu actions. They
 
 The surface screen keeps a short recent mission log. It should preserve the last few site/action/hazard/event summaries so the player can understand why action kits, fuel, cargo, hazard, or blueprints changed after several clicks. Keep it bounded and lightweight; it is a memory aid, not a full journal.
 
-The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The Mining Rig begins at the selected pushed depth, digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and ascends to the surface ship to bank, service, and leave. Safety warnings override the normal `ARTIFACT` POI pointer with `SHIP` guidance; cross-layer targets lead toward the correct depth boundary. Autonomous Mining, Resource, Survey, Hazard, Attack, and Defense units are consistently labeled Support Drones. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
+The current mining layer is a compact direct-control mini-game opened from a prepared `Mine deposit`. The Mining Rig begins at the selected pushed depth, digs through chunked terrain, scans fog-of-war, recovers common/rare/exotic ore and artifacts, and ascends to the surface ship to stow cargo, service, and leave. Safety warnings override the normal `ARTIFACT` POI pointer with `SHIP` guidance; cross-layer targets lead toward the correct depth boundary. Autonomous Mining, Resource, Survey, Hazard, Attack, and Defense units are consistently labeled Support Drones. See `docs/MINING_MINIGAME_PLAN.md` for implementation details and animal crew class hooks.
 
 ## Post-Solar Enemy Layer
 
@@ -157,8 +157,8 @@ The current shared C++ native/web application should keep this scope focused:
 - Identified artifacts provide capped blueprint insight for later research, giving recovery/decoding a mechanical reward before story content exists.
 - The Legacy archive lists recovered artifacts by origin and decoded status without inventing final story lore.
 - Surface expedition uses menu actions for survey, push, extract, Drone Ops, and the one-time mining deployment.
-- Mining uses a direct-control Mining Rig screen with a normal 30s oxygen baseline, the current authored Io site's 60s baseline, shared fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
-- Shared fuel is displayed as a shuttle/Mining Rig tradeoff; mining can become unavailable because the fuel reserve is empty or because the mining run was already used. Both cases should present as `Mining Rig offline` with disabled button copy `Unavailable`.
+- Mining uses a direct-control Mining Rig screen with a normal 30s oxygen baseline, the current authored Io site's 60s baseline, arrival-derived rig-fuel draw, scanner pulses, destructible terrain, drill integrity, return/abort decisions, and payload conversion back into the surface expedition.
+- Rig fuel is displayed separately from the protected return stage; mining can become unavailable because the rig pool is empty or because the mining run was already used. Both cases should present as `Mining Rig offline` with disabled button copy `Unavailable`.
 - Survey site and Push Deeper are unavailable after mining. The primary recommendation should move toward extraction once payload is loaded or the rig is offline.
 - Solar-system surface expeditions have environmental risk only.
 - Khepri Prime and later post-Arkfall surface expeditions can trigger hostile contact events.

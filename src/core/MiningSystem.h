@@ -92,6 +92,7 @@ SurfaceActionOutcome startMiningRun(
     const ContentCatalog& catalog,
     const MiningArenaRequest& request,
     bool progressionCreditEligible);
+bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catalog);
 void setMiningMove(GameState& state, double xAxis, double yAxis);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);

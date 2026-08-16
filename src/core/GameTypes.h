@@ -1055,6 +1055,8 @@ struct LaunchOutcome {
     double crashMultiplier = 1.0;
     double ejectMultiplier = 1.0;
     double payout = 0.0;
+    double transferFuelRemaining = 0.0;
+    double transferFuelCapacity = 0.0;
     double recoveryCost = 0.0;
     int shipDamage = 0;
     bool crewKilled = false;
@@ -1157,6 +1159,8 @@ struct StoryBriefingState {
 struct ArrivalOpsState {
     bool active = false;
     std::string destinationId;
+    double transferFuelRemaining = 0.0;
+    double transferFuelCapacity = 0.0;
 };
 
 struct FlybyTrailPoint {
@@ -1246,8 +1250,10 @@ struct SurfaceExpeditionState {
     std::string destinationId;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     int supply = 0;
-    int sharedFuel = 0;
-    int sharedFuelCapacity = 0;
+    double rigFuel = 0.0;
+    double rigFuelCapacity = 0.0;
+    double transferFuelRecovered = 0.0;
+    double expeditionPackFuel = 0.0;
     int cargo = 0;
     double hazard = 0.0;
     int depth = 0;

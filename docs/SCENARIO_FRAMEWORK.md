@@ -45,11 +45,11 @@ The valid actions are acknowledgement, claim, begin activity, retry activity, an
 
 ### Rewards and route requirements
 
-Current reward kinds grant an unlock key, Drone Bay capacity, a Support Drone, a Drone Upgrade Credit, frontier readiness, banked material inventory, or route access. Rewards are idempotent: a saved per-instance reward ledger prevents a reload or repeated event from granting the same reward twice.
+Current reward kinds grant an unlock key, Drone Bay capacity, a Support Drone, a Drone Upgrade Credit, frontier readiness, safely delivered material inventory, or route access. Rewards are idempotent: a saved per-instance reward ledger prevents a reload or repeated event from granting the same reward twice.
 
 A destination declares its travel prerequisites with `Destination::routeRequirementKeys`. `scenarioRouteRequirementStatus()` matches a missing key to the scenario step that can award it, so Navigation, Hangar, Solar Map, objective strips, modal copy, and route buttons share one blocker and next action. A reward may grant the key directly, or a `RouteAccess` reward may grant every configured key for a destination. Neither route evaluator needs to recognize a named world, tier, or story beat.
 
-Scenario keys supplement the direct Launch Upgrade route gates. Navigation evaluates the content-defined scenario requirement first, then the destination's required Fuel, Controls, Cooling, or Hull rank. Legacy `FrontierReadiness` rewards remain readable for old scenarios and saves but do not replace the four lesson milestones.
+Scenario keys supplement the permanent launch-system route gates. Navigation evaluates the content-defined scenario requirement first, then the destination's required Fuel, Controls, Cooling, or Hull rank. Legacy `FrontierReadiness` rewards remain readable for old scenarios and saves but do not replace the four lesson milestones.
 
 ## Authored and procedural scenarios
 
@@ -101,13 +101,13 @@ The Io mining-site configuration happens to use a Thermal biome, an inert Regoli
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
-## Save version 10 and migration
+## Save version 11 and migration
 
-Save version 10 retains version 9's scenario instances, definition/factory versions, procedural seed and resolved parameters, per-step progress, briefing/failure acknowledgements, claims, completion, reward ledger entries, mining-site provenance, and protected-objective state. It additionally persists the four launch-upgrade ranks and Fuel, Controls, Temperature, and Asteroids lesson completion.
+Save version 11 retains version 10's scenario instances, launch-upgrade ranks, lesson completion, mining-site provenance, and protected-objective state. It additionally persists double-precision transfer fuel remaining/capacity through Arrival Ops and the Surface expedition's rig-fuel capacity, remaining fuel, recovered transfer contribution, and expedition-pack contribution.
 
 Migration maps the old Moon/Mars/Io/slingshot fields into their authored scenario steps without losing delivered progress, ready-to-claim state, or already awarded rewards. Existing active mining terrain is retained: legacy site records keep stable site IDs/seeds and are marked as migration provenance; partial treatment and drilling survive; a discovered outer layer remains revealed; later layers and embedded payloads remain hidden until their generic prerequisites complete. A loose, tethered, delivered, or completed payload is never relocked. Saturn-or-later saves are backfilled without retroactive gates or briefings.
 
-`SaveSchema.h` and `SaveData.*` are authoritative for wire keys, defaults, and migration order. Test v10 round trips plus representative pristine/progressed v9 and v8 states whenever scenario, site, cocoon, or launch-progression fields change.
+`SaveSchema.h` and `SaveData.*` are authoritative for wire keys, defaults, and migration order. Test v11 round trips, active v10 Arrival/Surface/Mining fuel migration, and representative pristine/progressed v9 and v8 states whenever scenario, site, cocoon, launch-progression, or expedition-fuel fields change.
 
 ## Authoring checklist
 

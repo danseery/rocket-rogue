@@ -872,6 +872,16 @@ void rr_debug_combat_mining()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_swarm_arena()
+{
+    if (g_app) {
+        g_app->debugStartSwarmArena();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode, int gateOverride)
 {
     if (g_app) {

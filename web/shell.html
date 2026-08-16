@@ -383,6 +383,7 @@
         <button type="button" data-debug-action="mining-replay">Replay seed</button>
         <button type="button" data-debug-action="mining-copy">Copy arena ID</button>
         <button class="warn" type="button" data-debug-action="mining-launch">Launch arena</button>
+        <button class="danger" type="button" data-debug-action="mining-swarm">Launch swarm arena</button>
         <button type="button" data-debug-action="drone-ops">Edit saved debug loadout</button>
       </div>
     </section>
@@ -802,6 +803,7 @@
         [act, difficulty, gateOverride],
         ["number", "number", "number"],
         "string"),
+      debugSwarmArena: () => rrCall("rr_debug_swarm_arena"),
       debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
       debugSurfacePush: () => rrCall("rr_debug_surface_push"),
       debugFlyby: () => rrCall("rr_debug_flyby"),
@@ -917,6 +919,7 @@
       "mining-replay": launchDebugMiningArena,
       "mining-copy": copyDebugMiningArenaId,
       "mining-launch": launchDebugMiningArena,
+      "mining-swarm": () => rr.debugSwarmArena(),
       scan: () => rr.debugSurfaceScan(),
       push: () => rr.debugSurfacePush(),
       flyby: () => rr.debugFlyby(),

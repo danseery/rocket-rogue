@@ -728,14 +728,19 @@ LaunchFlightStep updateLaunchFlight(
             // Moon is deliberately visible beyond it, but landing guidance is
             // not installed until Flight Controls I is earned and fitted.
             flight.failureCause = LaunchFailureCause::LunarImpact;
-        } else if (launch.config.frontierTransfer && flight.fuelRemaining <= 0.000001) {
-            // The only landing fuel rule is literal exhaustion. Reaching the
-            // destination with any fuel left lands normally; arriving dry is
-            // the clearly taught consequence of over-burning the route.
-            flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
         } else {
+            // Transfer fuel may reach exactly zero on the destination frame.
+            // The isolated expedition pack and return stage are not connected
+            // to this feed, so touchdown still succeeds. Running dry before
+            // travel reaches the destination remains a terminal failure below.
             result.reachedDestination = true;
         }
+    }
+
+    if (!result.reachedDestination && !flight.returningHome &&
+        launch.config.frontierTransfer && flight.fuelRemaining <= 0.000001 &&
+        flight.travelProgress < 1.0 - 0.000001) {
+        flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
     }
 
     const double courseLimit = launchCourseLimit(launch);
@@ -772,6 +777,7 @@ LaunchFlightStep updateLaunchFlight(
         flight.courseFailureSeconds >= tuning::launch::pilotingCourseFailureSeconds) {
         flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::CourseLost);
     } else if (flight.failureCause == LaunchFailureCause::None &&
+        !(result.reachedDestination && launch.config.frontierTransfer) &&
         flight.fuelFailureSeconds >= tuning::launch::pilotingFuelFailureSeconds) {
         flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::FuelExhausted);
     }
