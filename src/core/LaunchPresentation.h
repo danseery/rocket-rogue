@@ -150,20 +150,30 @@ inline std::string launchStatusMessage(
     if (launch.asteroidsEnabled && flight.hullRemaining <= flight.hullMaximum * 0.25) {
         return "HULL CRITICAL \xE2\x80\x94 avoid the next asteroid band";
     }
-    if (!actions.returningHome &&
-        launch.config.missionKind == LaunchMissionKind::FuelCalibration) {
-        const double fuelShare = flight.fuelRemaining /
-            std::max(0.01, flight.fuelCapacity);
-        if (fuelShare <= tuning::launchProgression::fuelSurveyLateFuelShare) {
-            return "LATE RETURN \xE2\x80\x94 Turn Around Now \xE2\x80\xA2 -3 credits \xE2\x80\xA2 +5 stress";
+    const CalibrationFuelWarning calibrationWarning = calibrationFuelWarning(launch, flight);
+    if (calibrationWarning != CalibrationFuelWarning::None) {
+        if (launch.config.missionKind == LaunchMissionKind::FuelCalibration) {
+            switch (calibrationWarning) {
+            case CalibrationFuelWarning::Critical:
+                return "LATE RETURN \xE2\x80\x94 Turn Around Now \xE2\x80\xA2 -3 credits \xE2\x80\xA2 +5 stress";
+            case CalibrationFuelWarning::TurnAround:
+                return "TURN AROUND NOW \xE2\x80\x94 +3 credit safety bonus";
+            case CalibrationFuelWarning::Approaching:
+                return "TURNAROUND APPROACHING \xE2\x80\x94 Prepare to Turn Around";
+            case CalibrationFuelWarning::None:
+                break;
+            }
         }
-        if (fuelShare <= tuning::launchProgression::fuelSurveyTargetFuelShare) {
-            return "TURN AROUND NOW \xE2\x80\x94 +3 credit safety bonus";
-        }
-        if (fuelShare <= tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+        switch (calibrationWarning) {
+        case CalibrationFuelWarning::Critical:
+            return "FUEL CRITICAL \xE2\x80\x94 Turn Around Now";
+        case CalibrationFuelWarning::TurnAround:
+            return "TURN AROUND NOW \xE2\x80\x94 Return burn is protected";
+        case CalibrationFuelWarning::Approaching:
             return "TURNAROUND APPROACHING \xE2\x80\x94 Prepare to Turn Around";
+        case CalibrationFuelWarning::None:
+            break;
         }
-        return "COLLECTING ROUTE DATA";
     }
     if (!actions.returningHome && !launch.config.frontierTransfer &&
         flight.projectedFuelReserve <= 0.0) {

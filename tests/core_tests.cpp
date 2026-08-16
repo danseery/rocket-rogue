@@ -370,6 +370,8 @@ void launchCurriculumFuelMathAndRange()
     }
     require(nearlyEqual(surveyFlight.fuelRemaining, 5.0, 0.002),
         "the halfway warning should leave exactly the five fuel needed to return");
+    require(calibrationFuelWarning(survey, surveyFlight) == CalibrationFuelWarning::TurnAround,
+        "the fuel survey should enter the shared turnaround warning at its halfway marker");
     require(surveyOutboundSeconds >= 8.0,
         "the first Fuel Survey pass should move slowly enough to read and react to each warning");
     beginLaunchReturn(surveyFlight);
@@ -404,6 +406,28 @@ void launchCurriculumFuelMathAndRange()
         "turning around anywhere before the first tank is empty must safely complete the fuel lesson");
     require(nearlyEqual(lateTurnFlight.fuelRemaining, 0.0, 0.002),
         "the protected tutorial return should consume the remaining fuel across the trip home");
+
+    const PreparedLaunch controlsWarningLaunch = preparedCurriculumLaunch(
+        catalog,
+        content::destination::moon,
+        LaunchMissionKind::FlightControlsCalibration,
+        false,
+        1,
+        0,
+        0,
+        0,
+        1105);
+    LaunchFlightState controlsWarningFlight = beginLaunchFlight(controlsWarningLaunch, moon);
+    controlsWarningFlight.fuelRemaining = controlsWarningFlight.fuelCapacity *
+        tuning::launchProgression::fuelSurveyTargetFuelShare;
+    require(calibrationFuelWarning(controlsWarningLaunch, controlsWarningFlight) ==
+            CalibrationFuelWarning::TurnAround,
+        "the controls calibration must use the same turnaround fuel warning as the survey");
+    controlsWarningFlight.fuelRemaining = controlsWarningFlight.fuelCapacity *
+        tuning::launchProgression::fuelSurveyLateFuelShare;
+    require(calibrationFuelWarning(controlsWarningLaunch, controlsWarningFlight) ==
+            CalibrationFuelWarning::Critical,
+        "the controls calibration must use the survey's critical fuel warning threshold");
 
     GameState partialState = createNewGame(catalog, 1103);
     Random partialPrepareRng(1103);

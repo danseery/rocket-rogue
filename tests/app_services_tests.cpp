@@ -1197,6 +1197,8 @@ int main()
             rocket::ui::actions::extractSurface,
         };
         std::array<bool, surfaceActions.size()> pointerReachable {};
+        int digPointerX = -1;
+        int digPointerY = -1;
         for (int x = 340; x <= 1520; x += 10) {
             for (int y = 340; y <= 610; y += 10) {
                 pointerAction.clear();
@@ -1205,6 +1207,10 @@ int main()
                 for (std::size_t index = 0; index < surfaceActions.size(); ++index) {
                     pointerReachable[index] = pointerReachable[index]
                         || pointerAction == surfaceActions[index];
+                }
+                if (pointerAction == rocket::ui::actions::pushSurface) {
+                    digPointerX = x;
+                    digPointerY = y;
                 }
             }
         }
@@ -1220,12 +1226,11 @@ int main()
                       << " extract=" << pointerReachable[3] << '\n';
         }
         assert(allSurfaceActionsReachable);
+        assert(digPointerX >= 0 && digPointerY >= 0);
 
-        // Long modal IDs live outside std::string's small-string buffer. A
-        // modal rebuild clears and rebinds every RmlUi button, so dispatch
-        // must own the selected binding before opening the modal. Dig is the
-        // representative Deck path because its first-use introduction opens
-        // surface_dig_introduction from the Surface Ops action card.
+        // The first Dig click opens a modal and rebuilds its Rml document. Its
+        // raw mouse-up path must not retain a binding pointer from the old
+        // document tree; that was a native hard crash on Steam Deck.
         rocket::GameState digIntroductionState = state;
         digIntroductionState.meta.acknowledgedActivityBriefingIds.erase(
             std::remove(
@@ -1247,10 +1252,9 @@ int main()
         digIntroductionContext.firstTimeIntroductionsEnabled = true;
         ui.setPanelPresentation(
             rocket::buildGamePanelPresentation(digIntroductionContext));
-        ui.requestFocus("modal:surface_dig_introduction");
         ui.refresh();
-        assert(ui.focusedId() == "modal:surface_dig_introduction");
-        assert(ui.activateFocused());
+        ui.mouseDown(digPointerX, digPointerY, 0);
+        ui.mouseUp(digPointerX, digPointerY, 0);
         assert(ui.modalOpen());
         ui.closeModal();
         ui.shutdown();

@@ -2573,10 +2573,10 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
         return false;
     }
 
-    const auto bound = std::find_if(g_elementButtonBindings.begin(), g_elementButtonBindings.end(), [&](const ElementButtonBinding& entry) {
-        return entry.element == button;
-    });
-    if (bound != g_elementButtonBindings.end() && dispatchButtonBinding(owner, bound->binding)) {
+    // A mouse-up may arrive after a binding action has rebuilt the Rml document.
+    // Resolve the clicked element's attributes now rather than dereferencing the
+    // global pointer registry, which can belong to the previous document tree.
+    if (dispatchButtonBinding(owner, buttonBindingFromElement(*button))) {
         return true;
     }
 

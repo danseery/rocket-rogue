@@ -117,6 +117,16 @@ struct LaunchFlightStep {
     LaunchFailureCause failureCause = LaunchFailureCause::None;
 };
 
+// Both opening calibration flights teach the same readable fuel-return
+// windows. The survey adds payout consequences; the controls flight keeps the
+// warnings so its new steering lesson does not change the established fuel UI.
+enum class CalibrationFuelWarning {
+    None,
+    Approaching,
+    TurnAround,
+    Critical,
+};
+
 struct LaunchResolutionContext {
     bool pilotedFlight = false;
     LaunchFailureCause failureCause = LaunchFailureCause::None;
@@ -138,6 +148,7 @@ double launchAsteroidLaneOffset(int lane);
 double launchAsteroidImpactDamage(int hullRank, double asteroidScale);
 LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination);
 void beginLaunchReturn(LaunchFlightState& flight);
+CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const LaunchFlightState& flight);
 double launchCourseLimit(const PreparedLaunch& launch);
 LaunchFlightStep updateLaunchFlight(
     LaunchFlightState& flight,

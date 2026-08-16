@@ -82,27 +82,21 @@ std::string launchMetricSeverity(const PanelRenderContext& context, std::string_
         if (flight.fuelFailureSeconds > 0.0) {
             return "critical";
         }
-        if (flight.returningHome &&
-            context.flightModel.config.missionKind == LaunchMissionKind::FuelCalibration) {
-            return {};
-        }
-        if (!flight.returningHome &&
-            context.flightModel.config.missionKind == LaunchMissionKind::FuelCalibration) {
-            const double fuelShare = flight.fuelRemaining /
-                std::max(0.01, flight.fuelCapacity);
-            const bool late = fuelShare <=
-                tuning::launchProgression::fuelSurveyLateFuelShare;
+        const CalibrationFuelWarning calibrationWarning =
+            calibrationFuelWarning(context.flightModel, flight);
+        if (calibrationWarning != CalibrationFuelWarning::None) {
+            const bool late = calibrationWarning == CalibrationFuelWarning::Critical;
             const int pulse = static_cast<int>(std::floor(
                 flight.elapsedSeconds * (late ? 8.0 : 4.0))) % 4;
             if (late) {
                 return "critical fuel-survey-alert fuel-survey-late fuel-survey-pulse-" +
                     std::to_string(pulse);
             }
-            if (fuelShare <= tuning::launchProgression::fuelSurveyTargetFuelShare) {
+            if (calibrationWarning == CalibrationFuelWarning::TurnAround) {
                 return "caution fuel-survey-alert fuel-survey-action fuel-survey-pulse-" +
                     std::to_string(pulse);
             }
-            if (fuelShare <= tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+            if (calibrationWarning == CalibrationFuelWarning::Approaching) {
                 return "caution fuel-survey-alert fuel-survey-prepare fuel-survey-pulse-" +
                     std::to_string(pulse);
             }
@@ -128,17 +122,16 @@ std::string launchMetricSeverity(const PanelRenderContext& context, std::string_
 
 std::string launchStatusSeverity(const PanelRenderContext& context)
 {
-    if (context.launchFlight == nullptr ||
-        context.flightModel.config.missionKind != LaunchMissionKind::FuelCalibration ||
-        context.launchFlight->returningHome) {
+    if (context.launchFlight == nullptr) {
         return "status telemetry-status";
     }
     const LaunchFlightState& flight = *context.launchFlight;
-    const double fuelShare = flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
-    if (fuelShare > tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+    const CalibrationFuelWarning calibrationWarning =
+        calibrationFuelWarning(context.flightModel, flight);
+    if (calibrationWarning == CalibrationFuelWarning::None) {
         return "status telemetry-status";
     }
-    const bool late = fuelShare <= tuning::launchProgression::fuelSurveyLateFuelShare;
+    const bool late = calibrationWarning == CalibrationFuelWarning::Critical;
     const int pulse = static_cast<int>(std::floor(
         flight.elapsedSeconds * (late ? 8.0 : 4.0))) % 4;
     return std::string("status telemetry-status fuel-survey-status ") +
@@ -3407,9 +3400,9 @@ std::string buildGamePanelMarkup(
                   static_cast<double>(std::max(0, state.meta.ark.fuelReserve)))
             : tuning::research::expeditionRigPackFuel;
         const std::vector<PanelMetricPresentation> arrivalFuelMetrics {
-            panelMetric(text::labels::transferFuel, display::fixed(state.run.arrivalOps.transferFuelRemaining, 1)),
-            panelMetric("Rig fuel after landing", display::fixed(landingPackFuel + state.run.arrivalOps.transferFuelRemaining, 1)),
-            panelMetric(text::labels::returnStage, "READY")
+            panelMetric("Transfer", display::fixed(state.run.arrivalOps.transferFuelRemaining, 1)),
+            panelMetric("Rig fuel", display::fixed(landingPackFuel + state.run.arrivalOps.transferFuelRemaining, 1)),
+            panelMetric("Return", "READY")
         };
         out << "<div class=\"stat-grid chip-strip phase-lane\">"
             << resourceChipGrid(arrivalFuelMetrics) << "</div>";

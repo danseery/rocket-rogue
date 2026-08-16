@@ -492,6 +492,28 @@ void beginLaunchReturn(LaunchFlightState& flight)
     }
 }
 
+CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const LaunchFlightState& flight)
+{
+    const bool calibrationFlight =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration ||
+        launch.config.missionKind == LaunchMissionKind::FlightControlsCalibration;
+    if (!calibrationFlight || launch.config.frontierTransfer || flight.returningHome) {
+        return CalibrationFuelWarning::None;
+    }
+
+    const double fuelShare = flight.fuelRemaining / std::max(0.01, flight.fuelCapacity);
+    if (fuelShare <= tuning::launchProgression::fuelSurveyLateFuelShare) {
+        return CalibrationFuelWarning::Critical;
+    }
+    if (fuelShare <= tuning::launchProgression::fuelSurveyTargetFuelShare) {
+        return CalibrationFuelWarning::TurnAround;
+    }
+    if (fuelShare <= tuning::launchProgression::fuelSurveyPrepareFuelShare) {
+        return CalibrationFuelWarning::Approaching;
+    }
+    return CalibrationFuelWarning::None;
+}
+
 double launchCourseLimit(const PreparedLaunch&)
 {
     return tuning::launch::pilotingCourseLost;
