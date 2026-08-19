@@ -116,6 +116,7 @@ inline constexpr const char* droneBayProgram = "drone_bay_program";
 } // namespace research
 
 namespace surfaceUpgrade {
+inline constexpr const char* resonantDischarge = "resonant_discharge";
 inline constexpr const char* thermalDrillJackets = "thermal_drill_jackets";
 inline constexpr const char* widebandPulse = "wideband_pulse";
 inline constexpr const char* cargoSkids = "cargo_skids";
@@ -140,6 +141,22 @@ inline constexpr const char* legacyStabilizerDrone = "stabilizer_drone";
 inline constexpr const char* attackDrone = "attack_drone";
 inline constexpr const char* defenseDrone = "defense_drone";
 } // namespace drone
+
+namespace droneModule {
+inline constexpr const char* combatDrill = "combat_drill";
+inline constexpr const char* drillGuard = "drill_guard";
+inline constexpr const char* pulseStrike = "pulse_strike";
+inline constexpr const char* spectrumFilter = "spectrum_filter";
+inline constexpr const char* oreRelay = "ore_relay";
+inline constexpr const char* treasurePing = "treasure_ping";
+inline constexpr const char* containmentShell = "containment_shell";
+inline constexpr const char* reclamationLoop = "reclamation_loop";
+inline constexpr const char* targetedAssault = "targeted_assault";
+inline constexpr const char* penetratingImpact = "penetrating_impact";
+inline constexpr const char* retributionArc = "retribution_arc";
+inline constexpr const char* hazardScreen = "hazard_screen";
+inline constexpr const char* resonantDischarge = "resonant_discharge";
+} // namespace droneModule
 
 namespace frame {
 inline constexpr const char* pathfinder = "pathfinder";

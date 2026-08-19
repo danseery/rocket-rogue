@@ -263,6 +263,8 @@ struct RenderSnapshot {
     std::span<const MiningCell> miningCells;
     std::span<const MiningEnemy> miningEnemies;
     std::span<const MiningMiniDroneAgent> miningMiniDrones;
+    std::span<const DroneFrameModuleAssignment> miningDroneModuleAssignments;
+    std::span<const TreasureMark> miningTreasureMarks;
     std::span<const MiningLooseChunk> miningLooseChunks;
     std::span<const MiningProjectileVisual> miningProjectiles;
     std::span<const MiningDamageNumber> miningDamageNumbers;

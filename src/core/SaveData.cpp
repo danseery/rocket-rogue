@@ -1062,6 +1062,35 @@ std::vector<DroneUpgradeRecord> parseDroneUpgrades(std::string_view text);
 std::vector<ScenarioInstance> parseScenarioInstances(std::string_view text);
 std::vector<ArtifactRecord> parseArtifacts(std::string_view text);
 std::vector<int> parseInts(std::string_view text);
+std::string serializeDroneModuleAssignments(const std::vector<DroneFrameModuleAssignment>& values);
+std::vector<DroneFrameModuleAssignment> parseDroneModuleAssignments(std::string_view text);
+std::string serializeTreasureMarks(const std::vector<TreasureMark>& values);
+std::vector<TreasureMark> parseTreasureMarks(std::string_view text);
+std::string serializeDroneModuleRuntime(const std::vector<DroneModuleRuntimeState>& values);
+std::vector<DroneModuleRuntimeState> parseDroneModuleRuntime(std::string_view text);
+std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& values);
+
+bool parseDroneModuleSaveField(SaveData& save, std::string_view key, std::string_view value)
+{
+    if (key == save_schema::field::droneModuleAssignments) save.droneModuleAssignments = parseDroneModuleAssignments(value);
+    else if (key == save_schema::field::surfaceModuleOffers) save.surfaceModuleOfferIds = vectorToOfferArray(split(value, save_schema::listDelimiter));
+    else if (key == save_schema::field::pendingDroneModuleId) save.pendingDroneModuleId = std::string(value);
+    else if (key == save_schema::field::pendingDroneModuleOfferIndex) save.pendingDroneModuleOfferIndex = parseInt(value, -1);
+    else if (key == save_schema::field::pendingDroneModuleFrame) save.pendingDroneModuleFrame = parseInt(value, -1);
+    else if (key == save_schema::field::pendingDroneModuleReplacementConfirmation) save.pendingDroneModuleReplacementConfirmation = parseInt(value, 0) != 0;
+    else if (key == save_schema::field::droneModuleRuntime) save.droneModuleRuntime = parseDroneModuleRuntime(value);
+    else if (key == save_schema::field::fieldInsight) save.fieldInsight = parseInt(value, 0);
+    else if (key == save_schema::field::fieldInsightAwardKeys) save.fieldInsightAwardKeys = split(value, save_schema::listDelimiter);
+    else if (key == save_schema::field::miningDraftsEarned) save.miningDraftsEarned = parseInt(value, 0);
+    else if (key == save_schema::field::pendingFieldDraftThreshold) save.pendingFieldDraftThreshold = parseInt(value, 0);
+    else if (key == save_schema::field::fieldDraftReturnScreen) save.fieldDraftReturnScreen = static_cast<Screen>(std::clamp(parseInt(value, static_cast<int>(Screen::SurfaceExpedition)), 0, static_cast<int>(Screen::Upgrade)));
+    else if (key == save_schema::field::scannerCooldownSeconds) save.scannerCooldownSeconds = parseDouble(value, 0.0);
+    else if (key == save_schema::field::treasureMarks) save.treasureMarks = parseTreasureMarks(value);
+    else if (key == save_schema::field::reclamationOxygenUses) save.reclamationOxygenUses = parseInt(value, 0);
+    else if (key == save_schema::field::reclamationFuelRecovered) save.reclamationFuelRecovered = parseDouble(value, 0.0);
+    else return false;
+    return true;
+}
 
 bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::string_view value)
 {
@@ -1249,6 +1278,96 @@ MaterialInventory parseMaterials(std::string_view text)
         materials.exotic = parseInt(fields[2], 0);
     }
     return materials;
+}
+
+std::string serializeDroneModuleAssignments(const std::vector<DroneFrameModuleAssignment>& values)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out << save_schema::textListDelimiter;
+        out << values[i].equippedFrame << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(values[i].primaryDroneId) << save_schema::crewFieldDelimiter
+            << static_cast<int>(values[i].module);
+    }
+    return out.str();
+}
+
+std::vector<DroneFrameModuleAssignment> parseDroneModuleAssignments(std::string_view text)
+{
+    std::vector<DroneFrameModuleAssignment> result;
+    for (const std::string& record : split(text, save_schema::textListDelimiter)) {
+        if (record.empty()) continue;
+        const auto fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 3) continue;
+        DroneFrameModuleAssignment value;
+        value.equippedFrame = parseInt(fields[0], -1);
+        value.primaryDroneId = decodeSaveBlob(fields[1]);
+        value.module = static_cast<DroneModuleKind>(std::clamp(parseInt(fields[2], 0), 0, static_cast<int>(DroneModuleKind::HazardScreen)));
+        result.push_back(std::move(value));
+    }
+    return result;
+}
+
+std::string serializeTreasureMarks(const std::vector<TreasureMark>& values)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out << save_schema::textListDelimiter;
+        out << values[i].x << save_schema::crewFieldDelimiter << values[i].y
+            << save_schema::crewFieldDelimiter << values[i].multiplier;
+    }
+    return out.str();
+}
+
+std::vector<TreasureMark> parseTreasureMarks(std::string_view text)
+{
+    std::vector<TreasureMark> result;
+    for (const std::string& record : split(text, save_schema::textListDelimiter)) {
+        const auto fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 2) continue;
+        TreasureMark mark;
+        mark.x = parseInt(fields[0], -1);
+        mark.y = parseInt(fields[1], -1);
+        mark.multiplier = fields.size() > 2 ? parseInt(fields[2], 2) : 2;
+        result.push_back(mark);
+    }
+    return result;
+}
+
+std::string serializeDroneModuleRuntime(const std::vector<DroneModuleRuntimeState>& values)
+{
+    std::ostringstream out;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i) out << save_schema::textListDelimiter;
+        const auto& v = values[i];
+        out << v.equippedFrame << save_schema::crewFieldDelimiter << v.retributionCooldownSeconds
+            << save_schema::crewFieldDelimiter << v.reclamationOxygenRecovered
+            << save_schema::crewFieldDelimiter << v.reclamationFuelRecovered;
+        for (const auto& cooldown : v.combatDrillEnemyCooldowns) {
+            out << save_schema::crewFieldDelimiter << cooldown.first << ":" << cooldown.second;
+        }
+    }
+    return out.str();
+}
+
+std::vector<DroneModuleRuntimeState> parseDroneModuleRuntime(std::string_view text)
+{
+    std::vector<DroneModuleRuntimeState> result;
+    for (const auto& record : split(text, save_schema::textListDelimiter)) {
+        const auto fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 4) continue;
+        DroneModuleRuntimeState v;
+        v.equippedFrame = parseInt(fields[0], -1);
+        v.retributionCooldownSeconds = parseDouble(fields[1], 0.0);
+        v.reclamationOxygenRecovered = parseDouble(fields[2], 0.0);
+        v.reclamationFuelRecovered = parseDouble(fields[3], 0.0);
+        for (std::size_t i = 4; i < fields.size(); ++i) {
+            const auto pair = split(fields[i], ':');
+            if (pair.size() == 2) v.combatDrillEnemyCooldowns.emplace_back(parseInt(pair[0], -1), parseDouble(pair[1], 0.0));
+        }
+        result.push_back(std::move(v));
+    }
+    return result;
 }
 
 std::string serializeDepthProspects(const std::vector<SurfaceDepthProspect>& prospects)
@@ -1604,7 +1723,9 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << enemy.spawn.cooldownSeconds
             << save_schema::crewFieldDelimiter << (enemy.gateAssociated ? 1 : 0)
             << save_schema::crewFieldDelimiter << (enemy.swarmAssociated ? 1 : 0)
-            << save_schema::crewFieldDelimiter << (enemy.elite ? 1 : 0);
+            << save_schema::crewFieldDelimiter << (enemy.elite ? 1 : 0)
+            << save_schema::crewFieldDelimiter << enemy.scannedPrioritySeconds
+            << save_schema::crewFieldDelimiter << enemy.insightGroupKey;
     }
     return out.str();
 }
@@ -1666,6 +1787,12 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         }
         if (fields.size() > 15) {
             enemy.spawn.enemyType = miningEnemyTypeFromInt(parseInt(fields[15], 0));
+        }
+        if (fields.size() > 24) {
+            enemy.scannedPrioritySeconds = parseDouble(fields[24], 0.0);
+        }
+        if (fields.size() > 25) {
+            enemy.insightGroupKey = parseInt(fields[25], -1);
         }
         if (fields.size() > 16) {
             enemy.spawn.affinity = miningElementalAffinityFromInt(parseInt(fields[16], 0));
@@ -1729,7 +1856,8 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << agent.shieldImpactSeconds
             << save_schema::crewFieldDelimiter << static_cast<int>(agent.anchorTarget)
             << save_schema::crewFieldDelimiter << agent.stableFormationSlot
-            << save_schema::crewFieldDelimiter << agent.orbitPhaseRadians;
+            << save_schema::crewFieldDelimiter << agent.orbitPhaseRadians
+            << save_schema::crewFieldDelimiter << agent.equippedFrame;
     }
     return out.str();
 }
@@ -1816,6 +1944,9 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         }
         if (fields.size() > 25) {
             agent.orbitPhaseRadians = parseDouble(fields[25], agent.orbitPhaseRadians);
+        }
+        if (fields.size() > 26) {
+            agent.equippedFrame = parseInt(fields[26], -1);
         }
         agents.push_back(agent);
     }
@@ -3182,6 +3313,22 @@ SaveData captureSaveData(const GameState& state)
     save.arrivalOps = state.run.arrivalOps;
     save.surfaceExpedition = state.run.surfaceExpedition;
     save.mining = state.run.mining;
+    save.droneModuleAssignments = state.run.surfaceExpedition.droneModuleAssignments;
+    save.surfaceModuleOfferIds = state.run.surfaceExpedition.surfaceModuleOfferIds;
+    save.pendingDroneModuleId = state.run.surfaceExpedition.pendingDroneModuleId;
+    save.pendingDroneModuleOfferIndex = state.run.surfaceExpedition.pendingDroneModuleOfferIndex;
+    save.pendingDroneModuleFrame = state.run.surfaceExpedition.pendingDroneModuleFrame;
+    save.pendingDroneModuleReplacementConfirmation = state.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation;
+    save.droneModuleRuntime = state.run.surfaceExpedition.droneModuleRuntime;
+    save.fieldInsight = state.run.surfaceExpedition.fieldInsight;
+    save.fieldInsightAwardKeys = state.run.surfaceExpedition.fieldInsightAwardKeys;
+    save.miningDraftsEarned = state.run.surfaceExpedition.miningDraftsEarned;
+    save.pendingFieldDraftThreshold = state.run.surfaceExpedition.pendingFieldDraftThreshold;
+    save.fieldDraftReturnScreen = state.run.surfaceExpedition.fieldDraftReturnScreen;
+    save.scannerCooldownSeconds = state.run.surfaceExpedition.scannerCooldownSeconds;
+    save.treasureMarks = state.run.surfaceExpedition.treasureMarks;
+    save.reclamationOxygenUses = state.run.surfaceExpedition.reclamationOxygenUses;
+    save.reclamationFuelRecovered = state.run.surfaceExpedition.reclamationFuelRecovered;
     save.unlockKeys = state.meta.unlockKeys;
     save.blueprintProgress = state.meta.blueprintProgress;
     save.materials = state.meta.materials;
@@ -3266,6 +3413,22 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         save.ark.condition == ArkCondition::DamagedStranded ||
         save.ark.condition == ArkCondition::Repairing;
     state.seed = save.seed;
+    state.run.surfaceExpedition.droneModuleAssignments = save.droneModuleAssignments;
+    state.run.surfaceExpedition.surfaceModuleOfferIds = save.surfaceModuleOfferIds;
+    state.run.surfaceExpedition.pendingDroneModuleId = save.pendingDroneModuleId;
+    state.run.surfaceExpedition.pendingDroneModuleOfferIndex = save.pendingDroneModuleOfferIndex;
+    state.run.surfaceExpedition.pendingDroneModuleFrame = save.pendingDroneModuleFrame;
+    state.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation = save.pendingDroneModuleReplacementConfirmation;
+    state.run.surfaceExpedition.droneModuleRuntime = save.droneModuleRuntime;
+    state.run.surfaceExpedition.fieldInsight = save.fieldInsight;
+    state.run.surfaceExpedition.fieldInsightAwardKeys = save.fieldInsightAwardKeys;
+    state.run.surfaceExpedition.miningDraftsEarned = save.miningDraftsEarned;
+    state.run.surfaceExpedition.pendingFieldDraftThreshold = save.pendingFieldDraftThreshold;
+    state.run.surfaceExpedition.fieldDraftReturnScreen = save.fieldDraftReturnScreen;
+    state.run.surfaceExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
+    state.run.surfaceExpedition.treasureMarks = save.treasureMarks;
+    state.run.surfaceExpedition.reclamationOxygenUses = save.reclamationOxygenUses;
+    state.run.surfaceExpedition.reclamationFuelRecovered = save.reclamationFuelRecovered;
     state.run.credits = save.credits;
     if (save.version < 2) {
         if (legacyHostileSystem) {
@@ -3301,6 +3464,15 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.arrivalOps = save.arrivalOps;
     state.run.surfaceExpedition = save.surfaceExpedition;
+    state.run.surfaceExpedition.droneModuleAssignments = save.droneModuleAssignments;
+    state.run.surfaceExpedition.fieldInsight = save.fieldInsight;
+    state.run.surfaceExpedition.fieldInsightAwardKeys = save.fieldInsightAwardKeys;
+    state.run.surfaceExpedition.miningDraftsEarned = save.miningDraftsEarned;
+    state.run.surfaceExpedition.pendingFieldDraftThreshold = save.pendingFieldDraftThreshold;
+    state.run.surfaceExpedition.fieldDraftReturnScreen = save.fieldDraftReturnScreen;
+    state.run.surfaceExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
+    state.run.surfaceExpedition.treasureMarks = save.treasureMarks;
+    state.run.surfaceExpedition.droneModuleRuntime = save.droneModuleRuntime;
     state.run.mining = save.mining;
     {
         MiningRunState& mining = state.run.mining;
@@ -4002,6 +4174,22 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfaceUpgradeOffers, join(arrayToVector(save.surfaceExpedition.surfaceUpgradeOfferIds), save_schema::listDelimiter));
     writeField(out, save_schema::field::surfaceUpgradeOfferAvailable, save.surfaceExpedition.surfaceUpgradeOfferAvailable ? 1 : 0);
     writeField(out, save_schema::field::surfaceUpgradeOffersSeen, save.surfaceExpedition.surfaceUpgradeOffersSeen);
+    writeField(out, save_schema::field::droneModuleAssignments, serializeDroneModuleAssignments(save.droneModuleAssignments));
+    writeField(out, save_schema::field::surfaceModuleOffers, join(arrayToVector(save.surfaceModuleOfferIds), save_schema::listDelimiter));
+    writeField(out, save_schema::field::pendingDroneModuleId, save.pendingDroneModuleId);
+    writeField(out, save_schema::field::pendingDroneModuleOfferIndex, save.pendingDroneModuleOfferIndex);
+    writeField(out, save_schema::field::pendingDroneModuleFrame, save.pendingDroneModuleFrame);
+    writeField(out, save_schema::field::pendingDroneModuleReplacementConfirmation, save.pendingDroneModuleReplacementConfirmation ? 1 : 0);
+    writeField(out, save_schema::field::droneModuleRuntime, serializeDroneModuleRuntime(save.droneModuleRuntime));
+    writeField(out, save_schema::field::fieldInsight, save.fieldInsight);
+    writeField(out, save_schema::field::fieldInsightAwardKeys, join(save.fieldInsightAwardKeys, save_schema::listDelimiter));
+    writeField(out, save_schema::field::miningDraftsEarned, save.miningDraftsEarned);
+    writeField(out, save_schema::field::pendingFieldDraftThreshold, save.pendingFieldDraftThreshold);
+    writeField(out, save_schema::field::fieldDraftReturnScreen, static_cast<int>(save.fieldDraftReturnScreen));
+    writeField(out, save_schema::field::scannerCooldownSeconds, save.scannerCooldownSeconds);
+    writeField(out, save_schema::field::treasureMarks, serializeTreasureMarks(save.treasureMarks));
+    writeField(out, save_schema::field::reclamationOxygenUses, save.reclamationOxygenUses);
+    writeField(out, save_schema::field::reclamationFuelRecovered, save.reclamationFuelRecovered);
     writeField(out, save_schema::field::miningActive, save.mining.active ? 1 : 0);
     writeField(out, save_schema::field::miningArenaMetadata, serializeMiningArenaMetadata(save.mining.arenaMetadata));
     writeField(out, save_schema::field::miningRewardLedger, serializeMiningRewardLedger(save.mining));
@@ -4132,6 +4320,9 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         const std::string_view value = line.substr(equals + 1);
 
         if (parseMiningProgressionField(save, key, value)) {
+            continue;
+        }
+        if (parseDroneModuleSaveField(save, key, value)) {
             continue;
         }
         if (key == save_schema::field::arrivalTransferFuelRemaining) {
@@ -4311,7 +4502,42 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.surfaceUpgradeOfferAvailable = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceUpgradeOffersSeen) {
             save.surfaceExpedition.surfaceUpgradeOffersSeen = parseInt(value, save.surfaceExpedition.surfaceUpgradeOffersSeen);
+        }
+        // v12 drone-module fields are handled by parseDroneModuleSaveField above.
+        #if 0
+        } else if (key == save_schema::field::droneModuleAssignments) {
+            save.droneModuleAssignments = parseDroneModuleAssignments(value);
+        } else if (key == save_schema::field::surfaceModuleOffers) {
+            save.surfaceModuleOfferIds = vectorToOfferArray(split(value, save_schema::listDelimiter));
+        } else if (key == save_schema::field::pendingDroneModuleId) {
+            save.pendingDroneModuleId = std::string(value);
+        } else if (key == save_schema::field::pendingDroneModuleOfferIndex) {
+            save.pendingDroneModuleOfferIndex = parseInt(value, -1);
+        } else if (key == save_schema::field::pendingDroneModuleFrame) {
+            save.pendingDroneModuleFrame = parseInt(value, -1);
+        } else if (key == save_schema::field::pendingDroneModuleReplacementConfirmation) {
+            save.pendingDroneModuleReplacementConfirmation = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::droneModuleRuntime) {
+            save.droneModuleRuntime = parseDroneModuleRuntime(value);
+        } else if (key == save_schema::field::fieldInsight) {
+            save.fieldInsight = parseInt(value, 0);
+        } else if (key == save_schema::field::miningDraftsEarned) {
+            save.miningDraftsEarned = parseInt(value, 0);
+        } else if (key == save_schema::field::pendingFieldDraftThreshold) {
+            save.pendingFieldDraftThreshold = parseInt(value, 0);
+        } else if (key == save_schema::field::fieldDraftReturnScreen) {
+            save.fieldDraftReturnScreen = static_cast<Screen>(std::clamp(parseInt(value, static_cast<int>(Screen::SurfaceExpedition)), 0, static_cast<int>(Screen::Upgrade)));
+        } else if (key == save_schema::field::scannerCooldownSeconds) {
+            save.scannerCooldownSeconds = parseDouble(value, 0.0);
+        } else if (key == save_schema::field::treasureMarks) {
+            save.treasureMarks = parseTreasureMarks(value);
+        } else if (key == save_schema::field::reclamationOxygenUses) {
+            save.reclamationOxygenUses = parseInt(value, 0);
+        } else if (key == save_schema::field::reclamationFuelRecovered) {
+            save.reclamationFuelRecovered = parseDouble(value, 0.0);
         } else if (key == save_schema::field::miningActive) {
+        #endif
+        if (key == save_schema::field::miningActive) {
             save.mining.active = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDestination) {
             save.mining.destinationId = std::string(value);

@@ -1082,7 +1082,7 @@ int AttackDroneCoordinator::findPriorityTarget(
         }
         const double dx = enemy.x - anchor.x;
         const double dy = enemy.y - anchor.y;
-        const double score = dx * dx + dy * dy;
+        const double score = (enemy.scannedPrioritySeconds > 0.0 ? -1.0e9 : 0.0) + dx * dx + dy * dy;
         if (score < bestScore) {
             bestScore = score;
             bestIndex = static_cast<int>(i);

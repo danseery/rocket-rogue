@@ -92,7 +92,12 @@ struct SurfaceUpgradeCardPresentation {
     std::string detail;
     std::vector<PanelMetricPresentation> effectChips;
     PanelButtonPresentation action;
+    bool droneModule = false;
+    std::string hostRole;
+    std::string secondaryRole;
 };
+
+inline std::string miniDroneRoleLabel(MiniDroneRole role);
 
 struct SurfaceExpeditionPresentation {
     std::vector<PhaseStepPresentation> phaseSteps;
@@ -460,7 +465,26 @@ inline SurfaceUpgradeCardPresentation surfaceUpgradeCardPresentation(const Surfa
         upgrade.name,
         upgrade.description,
         surfaceUpgradeChips(upgrade.stats),
-        panelActionButton("Choose upgrade", ui::actions::surfaceUpgrade(index), "ok")
+        panelActionButton("Choose upgrade", ui::actions::surfaceUpgrade(index), "ok"),
+        false,
+        {},
+        {}
+    };
+}
+
+inline SurfaceUpgradeCardPresentation droneModuleCardPresentation(const DroneModuleDefinition& module, int index)
+{
+    return {
+        index,
+        "Drone module",
+        "Field",
+        module.name,
+        "Grafts onto a " + miniDroneRoleLabel(module.hostRole) + " frame.",
+        {panelMetric("Frame", miniDroneRoleLabel(module.hostRole) + " + " + miniDroneRoleLabel(module.secondaryRole))},
+        panelActionButton("Graft module", ui::actions::surfaceUpgrade(index), "ok"),
+        true,
+        miniDroneRoleLabel(module.hostRole),
+        miniDroneRoleLabel(module.secondaryRole)
     };
 }
 
@@ -1896,8 +1920,34 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     presentation.selectedUpgradeNames = upgrades.names;
     if (expedition.surfaceUpgradeOfferAvailable) {
         for (std::size_t i = 0; i < expedition.surfaceUpgradeOfferIds.size(); ++i) {
-            if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(expedition.surfaceUpgradeOfferIds[i])) {
+            if (!expedition.surfaceModuleOfferIds[i].empty()) {
+                if (const DroneModuleDefinition* module = catalog.findDroneModule(expedition.surfaceModuleOfferIds[i])) {
+                    presentation.upgradeOffers.push_back(droneModuleCardPresentation(*module, static_cast<int>(i)));
+                }
+            } else if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(expedition.surfaceUpgradeOfferIds[i])) {
                 presentation.upgradeOffers.push_back(surfaceUpgradeCardPresentation(*upgrade, static_cast<int>(i)));
+            }
+        }
+    }
+    if (!expedition.pendingDroneModuleId.empty()) {
+        if (const DroneModuleDefinition* module = catalog.findDroneModule(expedition.pendingDroneModuleId)) {
+            presentation.upgradeOffers.clear();
+            for (std::size_t frame = 0; frame < state.meta.equippedDroneIds.size(); ++frame) {
+                const MiniDrone* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[frame]);
+                if (drone == nullptr || drone->role != module->hostRole) continue;
+                int rank = 1;
+                for (const DroneUpgradeRecord& record : state.meta.droneUpgrades) if (record.droneId == drone->id) rank = std::clamp(record.level, 1, 3);
+                SurfaceUpgradeCardPresentation card;
+                card.index = static_cast<int>(frame);
+                card.category = "Frame";
+                card.rarity = "Module";
+                card.title = miniDroneRoleLabel(drone->role) + " MK " + std::to_string(rank) + " + " + miniDroneRoleLabel(module->secondaryRole);
+                card.detail = expedition.pendingDroneModuleReplacementConfirmation && expedition.pendingDroneModuleFrame == static_cast<int>(frame) ? "Confirm replace" : "Attach module";
+                card.action = panelActionButton(card.detail, ui::actions::surfaceModuleFrame(static_cast<int>(frame)), "ok");
+                card.droneModule = true;
+                card.hostRole = miniDroneRoleLabel(drone->role);
+                card.secondaryRole = miniDroneRoleLabel(module->secondaryRole);
+                presentation.upgradeOffers.push_back(std::move(card));
             }
         }
     }

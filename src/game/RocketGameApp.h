@@ -93,6 +93,7 @@ public:
     void pushSurfaceBank();
     void extractSurface();
     void selectSurfaceUpgrade(int index);
+    void assignSurfaceModuleFrame(int index);
     void openDroneOps();
     void backToSurfaceOps();
     void equipDrone(int index);

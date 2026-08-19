@@ -98,6 +98,19 @@ bool miniDroneTuningGateUnlocked(const MetaProgress& meta, const MiniDrone& dron
     return !combatDrone || hasUnlock(meta, content::unlock::perimeterCoordination);
 }
 
+std::string_view coreDroneRoleName(MiniDroneRole role)
+{
+    switch (role) {
+    case MiniDroneRole::Mining: return "MINING";
+    case MiniDroneRole::Resource: return "RESOURCE";
+    case MiniDroneRole::Survey: return "SURVEY";
+    case MiniDroneRole::Hazard: return "HAZARD";
+    case MiniDroneRole::Attack: return "ATTACK";
+    case MiniDroneRole::Defense: return "DEFENSE";
+    }
+    return "DRONE";
+}
+
 void appendUniqueId(std::vector<std::string>& ids, std::string_view id)
 {
     if (!id.empty() && !containsId(ids, id)) {
@@ -3187,6 +3200,9 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
             " transfer + " + display::fixed(expedition.expeditionPackFuel, 1) +
             " expedition pack). Return stage reserved.");
     state.run.surfaceExpedition = expedition;
+    if (rng != nullptr) {
+        generateSurfaceUpgradeOffers(state, catalog, *rng);
+    }
 }
 
 void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
@@ -3204,7 +3220,28 @@ void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalo
     }
 
     expedition.surfaceUpgradeOfferIds = {};
-    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && !available.empty(); ++slot) {
+    expedition.surfaceModuleOfferIds = {};
+
+    // The first Field Upgrade board always teaches the expedition graft loop
+    // when a compatible frame exists. Later boards mix one module into the
+    // normal three-card offer without creating a second screen.
+    std::vector<const DroneModuleDefinition*> moduleOffers;
+    for (const DroneModuleDefinition& module : catalog.droneModules) {
+        if (!hasUnlock(state.meta, module.unlockKey) || containsId(state.run.surfaceUpgradeIds, module.id)) {
+            continue;
+        }
+        const bool compatible = std::any_of(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), [&](const std::string& droneId) {
+            const MiniDrone* drone = catalog.findMiniDrone(droneId);
+            return drone != nullptr && drone->role == module.hostRole;
+        }) || std::any_of(expedition.surfaceModuleOfferIds.begin(), expedition.surfaceModuleOfferIds.end(), [](const std::string& id) { return !id.empty(); });
+        if (compatible) moduleOffers.push_back(&module);
+    }
+    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && (!available.empty() || (slot == 0 && !moduleOffers.empty())); ++slot) {
+        if (!moduleOffers.empty() && slot == 0) {
+            expedition.surfaceModuleOfferIds[slot] = moduleOffers.front()->id;
+            moduleOffers.erase(moduleOffers.begin());
+            continue;
+        }
         const int picked = rng.rangeInt(0, static_cast<int>(available.size()) - 1);
         expedition.surfaceUpgradeOfferIds[slot] = available[static_cast<std::size_t>(picked)]->id;
         available.erase(available.begin() + picked);
@@ -3215,7 +3252,7 @@ void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalo
         expedition.surfaceUpgradeOfferIds.end(),
         [](const std::string& id) {
             return !id.empty();
-        });
+        }) || std::any_of(expedition.surfaceModuleOfferIds.begin(), expedition.surfaceModuleOfferIds.end(), [](const std::string& id) { return !id.empty(); });
     if (expedition.surfaceUpgradeOfferAvailable) {
         expedition.surfaceUpgradeOffersSeen += 1;
     }
@@ -3272,6 +3309,17 @@ bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int i
         return false;
     }
 
+    const std::string moduleId = expedition.surfaceModuleOfferIds[static_cast<std::size_t>(index)];
+    if (!moduleId.empty()) {
+        const DroneModuleDefinition* module = catalog.findDroneModule(moduleId);
+        if (module == nullptr) return false;
+        expedition.pendingDroneModuleId = moduleId;
+        expedition.pendingDroneModuleOfferIndex = index;
+        expedition.pendingDroneModuleFrame = -1;
+        expedition.pendingDroneModuleReplacementConfirmation = false;
+        state.statusLine = "Choose a " + std::string(coreDroneRoleName(module->hostRole)) + " frame for " + module->name + ".";
+        return true;
+    }
     const std::string upgradeId = expedition.surfaceUpgradeOfferIds[static_cast<std::size_t>(index)];
     const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
     if (upgrade == nullptr) {
@@ -3280,9 +3328,37 @@ bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int i
 
     state.run.surfaceUpgradeIds.push_back(upgrade->id);
     expedition.surfaceUpgradeOfferIds = {};
+    expedition.surfaceModuleOfferIds = {};
     expedition.surfaceUpgradeOfferAvailable = false;
     appendSurfaceLog(expedition, "Field upgrade installed: " + upgrade->name + ".");
     state.statusLine = "Field upgrade installed: " + upgrade->name + ".";
+    return true;
+}
+
+bool assignPendingDroneModuleFrame(GameState& state, const ContentCatalog& catalog, int frameIndex, bool confirmReplacement)
+{
+    auto& expedition = state.run.surfaceExpedition;
+    if (!expedition.active || expedition.pendingDroneModuleId.empty() || frameIndex < 0 || frameIndex >= static_cast<int>(state.meta.equippedDroneIds.size())) return false;
+    const auto* module = catalog.findDroneModule(expedition.pendingDroneModuleId);
+    const auto* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(frameIndex)]);
+    if (!module || !drone || drone->role != module->hostRole) return false;
+    auto existing = std::find_if(expedition.droneModuleAssignments.begin(), expedition.droneModuleAssignments.end(), [&](const DroneFrameModuleAssignment& a) { return a.equippedFrame == frameIndex; });
+    if (existing != expedition.droneModuleAssignments.end() && !confirmReplacement) {
+        expedition.pendingDroneModuleFrame = frameIndex;
+        expedition.pendingDroneModuleReplacementConfirmation = true;
+        state.statusLine = "Frame already has a module. Confirm replacement.";
+        return false;
+    }
+    if (existing == expedition.droneModuleAssignments.end()) expedition.droneModuleAssignments.push_back({frameIndex, drone->id, module->kind});
+    else *existing = {frameIndex, drone->id, module->kind};
+    expedition.surfaceModuleOfferIds = {};
+    expedition.surfaceUpgradeOfferIds = {};
+    expedition.pendingDroneModuleId.clear();
+    expedition.pendingDroneModuleOfferIndex = -1;
+    expedition.pendingDroneModuleFrame = -1;
+    expedition.pendingDroneModuleReplacementConfirmation = false;
+    expedition.surfaceUpgradeOfferAvailable = false;
+    state.statusLine = "Module grafted to frame.";
     return true;
 }
 

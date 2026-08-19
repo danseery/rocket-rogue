@@ -2408,6 +2408,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
         const bool rewardCell = miningRewardMaterial(material);
+        const bool treasureCell = rewardCell && std::any_of(snapshot.miningTreasureMarks.begin(), snapshot.miningTreasureMarks.end(), [&](const TreasureMark& mark) { return mark.x == x && mark.y == y; });
         const bool hazardCell = cell.material == MiningCellMaterial::HazardPocket;
         const bool scannerPing = scannerBoost > 0.04F && miningScannerPingMaterial(material);
         if (!rewardCell && !scannerPing && !hazardCell) {
@@ -2428,7 +2429,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             center.y,
             size * 0.5F,
             material,
-            {glow.r, glow.g, glow.b, std::min(alpha, 0.78F)});
+            treasureCell ? Color{1.0F, 0.78F, 0.20F, std::min(alpha + 0.22F, 0.95F)} : Color{glow.r, glow.g, glow.b, std::min(alpha, 0.78F)});
+        if (treasureCell) {
+            drawCircle(center.x, center.y, size * 0.72F, {1.0F, 0.78F, 0.20F, 0.72F}, 12);
+            drawPoiLabel(center.x, center.y - size * 0.9F, 0.0038F, "x2", PoiGuidanceKind::None);
+        }
     }
 
     std::vector<SceneVertex>& oreSparkVertices = scratchVertices(snapshot.miningCells.size() * 32U);
@@ -3097,6 +3102,18 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                             static_cast<float>(upgradeLevel - 1) * 0.05F
                     },
                     droneAsset);
+            }
+        }
+        const auto graftIt = std::find_if(snapshot.miningDroneModuleAssignments.begin(), snapshot.miningDroneModuleAssignments.end(), [&](const DroneFrameModuleAssignment& candidate) {
+            return candidate.equippedFrame == agent.equippedFrame;
+        });
+        if (graftIt != snapshot.miningDroneModuleAssignments.end()) {
+            const DroneFrameModuleAssignment& graft = *graftIt;
+            if (graft.module != DroneModuleKind::None) {
+                Color pip = {0.95F, 0.72F, 0.22F, 0.95F};
+                if (graft.module == DroneModuleKind::DrillGuard || graft.module == DroneModuleKind::ContainmentShell || graft.module == DroneModuleKind::HazardScreen) pip = {0.35F, 0.82F, 1.0F, 0.95F};
+                else if (graft.module == DroneModuleKind::CombatDrill || graft.module == DroneModuleKind::PulseStrike || graft.module == DroneModuleKind::TargetedAssault || graft.module == DroneModuleKind::PenetratingImpact || graft.module == DroneModuleKind::RetributionArc) pip = {1.0F, 0.34F, 0.24F, 0.95F};
+                drawCircle(sx + cellSize * 0.42F, sy - cellSize * 0.42F, cellSize * 0.12F, pip, 10);
             }
         }
         if (hazardTraversingSolid) {

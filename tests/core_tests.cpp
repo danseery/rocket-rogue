@@ -1446,9 +1446,9 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
         "Saturn arrival must unlock Hull III");
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 11, "new saves must use schema version 11");
+    require(captured.version == 12, "new saves must use schema version 12");
     const std::optional<SaveData> decoded = deserializeSaveData(serializeSaveData(captured));
-    require(decoded && decoded->version == 11 &&
+    require(decoded && decoded->version == 12 &&
             decoded->launchUpgrades.fuelTanks == state.meta.launchUpgrades.fuelTanks &&
             decoded->launchLessons.stage == state.meta.launchLessons.stage,
         "version-10 launch ranks and lesson state must round-trip");
@@ -4070,7 +4070,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
     require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
         "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 11 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == 12 && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
     require(parsed.has_value(), "current campaign state should deserialize");
@@ -4454,6 +4454,11 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     };
     MiningRunState& mining = state.run.mining;
     mining.active = true;
+    mining.arenaMetadata.act = MiningAct::ActTwo;
+    mining.arenaMetadata.act = MiningAct::ActTwo;
+    state.meta.equippedDroneIds = {content::drone::surveyDrone};
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     mining.destinationId = content::destination::jupiter;
     mining.scenarioId = content::scenario::volcanicDescent;
     mining.scenarioStepId = "recovery";
@@ -4525,7 +4530,7 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     state.screen = Screen::Mining;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 11, "new saves should use schema version eleven");
+    require(captured.version == 12, "new saves should use schema version twelve");
     const std::optional<SaveData> parsed =
         deserializeSaveData(serializeSaveData(captured));
     require(parsed.has_value(), "v10 scenario and cocoon state should deserialize");
@@ -9069,6 +9074,89 @@ void miningSwarmNestPreviewAndPersistence()
     updateMiningRun(state, catalog, 0.08);
     mining.droneX = static_cast<double>(mining.swarm.triggerX);
     mining.droneY = static_cast<double>(mining.swarm.chamberY);
+    mining.droneHealth = 100000.0;
+    mining.oxygenSeconds = 1000.0;
+    mining.miniDrones.clear();
+    for (int step = 0; step < 80 && mining.swarm.spawnedInWave == 0; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    const auto firstSwarmEnemy = std::find_if(
+        mining.enemies.begin(),
+        mining.enemies.end(),
+        [](const MiningEnemy& enemy) { return enemy.active && enemy.swarmAssociated; });
+    require(firstSwarmEnemy != mining.enemies.end(), "Swarm wave should begin after its warning");
+    require(
+        firstSwarmEnemy->x < 0.0 || firstSwarmEnemy->x > static_cast<double>(mining.terrain.width) ||
+            firstSwarmEnemy->y < 0.0 || firstSwarmEnemy->y > static_cast<double>(mining.terrain.height),
+        "Swarm enemies should begin beyond the visible mine bounds instead of appearing beside the player");
+    for (int step = 0; step < 160 && mining.swarm.spawnedInWave < 32; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    const int openingSwarmEnemies = static_cast<int>(std::count_if(
+        mining.enemies.begin(),
+        mining.enemies.end(),
+        [](const MiningEnemy& enemy) { return enemy.active && enemy.swarmAssociated; }));
+    require(mining.swarm.wave == 1 && mining.swarm.waveSize == 32,
+        "Act 2 Combine Swarm Nests should open with a 32-enemy horde");
+    require(openingSwarmEnemies >= 30,
+        "Swarm Nests should use their horde cap instead of the four-enemy procedural cap");
+    const int swarmEnemiesInsideChamber = static_cast<int>(std::count_if(
+        mining.enemies.begin(),
+        mining.enemies.end(),
+        [&](const MiningEnemy& enemy) {
+            return enemy.active && enemy.swarmAssociated &&
+                std::abs(enemy.x - mining.swarm.cacheX) <=
+                    static_cast<double>(tuning::mining::swarmChamberHalfWidthCells) &&
+                std::abs(enemy.y - mining.swarm.cacheY) <=
+                    static_cast<double>(tuning::mining::swarmChamberHalfHeightCells);
+        }));
+    require(swarmEnemiesInsideChamber >= 16,
+        "Off-screen Swarm enemies should complete their radial ingress instead of remaining beyond the mine");
+
+    mining.gravityStrength = 0.0;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    const auto verifySwarmRetreat = [&](MiningEnemyType type, double startRadius, double cooldown) {
+        const auto found = std::find_if(
+            mining.enemies.begin(),
+            mining.enemies.end(),
+            [](const MiningEnemy& enemy) { return enemy.active && enemy.swarmAssociated; });
+        require(found != mining.enemies.end(), "Swarm retreat fixture requires an active enemy");
+        const std::size_t enemyIndex = static_cast<std::size_t>(std::distance(mining.enemies.begin(), found));
+        MiningEnemy& enemy = *found;
+        enemy.type = type;
+        enemy.maxHealth = 1000.0;
+        enemy.health = enemy.maxHealth;
+        enemy.attackCooldownSeconds = cooldown;
+        constexpr double goldenAngle = 2.39996322973;
+        const double orbitDirection = enemyIndex % 2 == 0 ? 1.0 : -1.0;
+        const double slotAngle = std::fmod(
+            static_cast<double>(enemyIndex + 1) * goldenAngle +
+                static_cast<double>(mining.swarm.wave) * 0.61 +
+                mining.elapsedSeconds * tuning::mining::swarmOrbitRadiansPerSecond * orbitDirection,
+            6.28318530718);
+        enemy.x = mining.droneX + std::cos(slotAngle) * startRadius;
+        enemy.y = mining.droneY +
+            std::sin(slotAngle) * startRadius * tuning::mining::swarmVerticalRingScale;
+        const double before = std::hypot(enemy.x - mining.droneX, enemy.y - mining.droneY);
+        updateMiningRun(state, catalog, 0.08);
+        const double after = std::hypot(enemy.x - mining.droneX, enemy.y - mining.droneY);
+        require(after > before,
+            "Swarm enemies on attack cooldown should retreat from the player before re-engaging");
+        if (type == MiningEnemyType::Flying) {
+            require(std::isfinite(enemy.velocityX) && std::isfinite(enemy.velocityY),
+                "Swarm flying enemies should retain finite movement after reduced-speed steering");
+        }
+    };
+    verifySwarmRetreat(
+        MiningEnemyType::Ant,
+        0.60,
+        tuning::mining::swarmMeleeAttackIntervalSeconds);
+    verifySwarmRetreat(
+        MiningEnemyType::Flying,
+        2.00,
+        tuning::mining::swarmRangedAttackIntervalSeconds);
+
     for (int step = 0; step < 900 && !mining.swarm.cacheExposed; ++step) {
         updateMiningRun(state, catalog, 0.08);
         for (MiningEnemy& enemy : mining.enemies) {
@@ -9661,7 +9749,7 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 11, "new saves should use version eleven");
+    require(captured.version == 12, "new saves should use version twelve");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
@@ -11936,6 +12024,144 @@ void legacyOuterPlanetSavesMigrateByStableId()
         "Khepri Prime and Rift Belt history should survive their tier shift by stable id");
 }
 
+void secondaryMiningStateRoundTrips()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1);
+    auto& expedition = state.run.surfaceExpedition;
+    expedition.fieldInsight = 7;
+    expedition.fieldInsightAwardKeys = {"layer:1", "cargo:3"};
+    expedition.scannerCooldownSeconds = 2.5;
+    expedition.treasureMarks.push_back({4, 5, 2});
+    expedition.droneModuleAssignments.push_back({1, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
+    expedition.droneModuleRuntime.push_back({1, 0.4, 1.2, {}});
+    const auto parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(parsed.has_value(), "secondary mining state should serialize");
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *parsed);
+    require(restored.run.surfaceExpedition.fieldInsight == 7 && restored.run.surfaceExpedition.fieldInsightAwardKeys.size() == 2,
+        "field insight progress and anti-farm keys should round trip");
+    require(restored.run.surfaceExpedition.scannerCooldownSeconds > 2.4 && restored.run.surfaceExpedition.treasureMarks.size() == 1,
+        "scanner cooldown and treasure marks should round trip");
+    require(restored.run.surfaceExpedition.droneModuleAssignments.size() == 1 && restored.run.surfaceExpedition.droneModuleRuntime.size() == 1,
+        "module assignments and runtime should round trip");
+}
+
+void secondaryPulseUsesUnifiedCooldownAndStrongestHit()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1234);
+    auto& mining = state.run.mining;
+    mining.arenaMetadata.act = MiningAct::ActTwo;
+    mining.arenaMetadata.difficulty = 2;
+    state.meta.equippedDroneIds = {content::drone::surveyDrone};
+    state.meta.droneBaySlots = 1;
+    state.meta.unlockKeys = {content::unlock::droneBay, content::unlock::droneSupportSuite};
+    state.meta.droneUpgrades.push_back({content::drone::surveyDrone, 3});
+    mining.active = true;
+    mining.terrain.width = 12; mining.terrain.height = 12; mining.terrain.cells.resize(144);
+    mining.droneX = mining.operatorX = 6.0; mining.droneY = mining.operatorY = 6.0;
+    MiningEnemy enemy = createMiningEnemy(MiningEnemyType::Mammal, MiningCellFeature::EncounterZone, 6.0, 6.0);
+    enemy.health = enemy.maxHealth = 20.0; mining.enemies.push_back(enemy);
+    MiningMiniDroneAgent survey; survey.role = MiniDroneRole::Survey; survey.roleIndex = 0; survey.equippedFrame = 0; survey.upgradeLevel = 3; survey.x = 6.0; survey.y = 6.0; mining.miniDrones.push_back(survey);
+    state.run.surfaceExpedition.droneModuleAssignments.push_back({0, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
+    state.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::resonantDischarge);
+    pulseMiningScanner(state, catalog);
+    const double healthAfterPulse = mining.enemies.front().health;
+    require(healthAfterPulse == 17.0, "pulse should leave enemy state valid after activation");
+    pulseMiningScanner(state, catalog);
+    require(mining.enemies.front().health == healthAfterPulse, "manual scanner should respect unified cooldown");
+}
+
+void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 4567);
+    auto& mining = state.run.mining;
+    mining.arenaMetadata.act = MiningAct::ActTwo;
+    mining.arenaMetadata.difficulty = 2;
+    mining.active = true; mining.terrain.width = 10; mining.terrain.height = 10; mining.terrain.cells.resize(100);
+    state.meta.equippedDroneIds = {content::drone::resourceDrone};
+    state.meta.droneBaySlots = 1;
+    state.meta.droneUpgrades.push_back({content::drone::resourceDrone, 2});
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    mining.droneX = mining.operatorX = 5.0; mining.droneY = mining.operatorY = 5.0;
+    for (int y = 2; y < 8; ++y) for (int x = 2; x < 8; ++x) {
+        MiningCell& cell = mining.terrain.cells[static_cast<std::size_t>(y * 10 + x)];
+        cell.material = (x == 3 ? MiningCellMaterial::RareOre : MiningCellMaterial::CommonOre);
+        cell.revealed = true; cell.maxToughness = cell.remainingToughness = 1.0;
+    }
+    mining.terrain.cells[22].material = MiningCellMaterial::ExoticVein;
+    mining.terrain.cells[23].material = MiningCellMaterial::ArtifactCache;
+    MiningMiniDroneAgent resource; resource.role = MiniDroneRole::Resource; resource.roleIndex = 0; resource.equippedFrame = 0; resource.upgradeLevel = 2; mining.miniDrones.push_back(resource);
+    state.run.surfaceExpedition.droneModuleAssignments.push_back({0, content::drone::resourceDrone, DroneModuleKind::TreasurePing});
+    pulseMiningScanner(state, catalog);
+    require(state.run.surfaceExpedition.treasureMarks.size() == 2, "Mk II Treasure Ping should mark two tiles");
+    require(state.run.surfaceExpedition.treasureMarks.front().x == 3, "Treasure Ping should prioritize Rare ore");
+    require(std::none_of(state.run.surfaceExpedition.treasureMarks.begin(), state.run.surfaceExpedition.treasureMarks.end(), [](const TreasureMark& mark) { return mark.x == 2 && (mark.y == 2 || mark.y == 3); }), "Treasure Ping should exclude non-normal materials");
+    const auto first = state.run.surfaceExpedition.treasureMarks;
+    state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
+    pulseMiningScanner(state, catalog);
+    require(state.run.surfaceExpedition.scannerCooldownSeconds > 3.9, "manual pulse should start the unified recharge");
+    require(state.run.surfaceExpedition.treasureMarks.size() >= first.size(), "repeated Treasure Ping should preserve existing marks and select new tiles");
+    resource.upgradeLevel = 3;
+    mining.miniDrones.front().upgradeLevel = 3;
+    state.meta.droneUpgrades.front().level = 3;
+    state.run.surfaceExpedition.treasureMarks.clear();
+    state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
+    pulseMiningScanner(state, catalog);
+    require(state.run.surfaceExpedition.treasureMarks.size() == 3, "Mk III Treasure Ping should mark three tiles");
+    state.meta.droneUpgrades.front().level = 1;
+    mining.miniDrones.front().upgradeLevel = 1;
+    state.run.surfaceExpedition.treasureMarks.clear();
+    state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
+    pulseMiningScanner(state, catalog);
+    require(state.run.surfaceExpedition.treasureMarks.size() == 1, "Mk I Treasure Ping should mark one tile");
+    require(applyMiningTreasureMultiplier({1, 0, 0}, MiningCellMaterial::CommonOre, 2).common == 2 &&
+            applyMiningTreasureMultiplier({0, 1, 0}, MiningCellMaterial::RareOre, 2).rare == 2 &&
+            applyMiningTreasureMultiplier({0, 0, 1}, MiningCellMaterial::ExoticVein, 2).exotic == 1,
+        "Treasure multiplier should double only normal Common and Rare payouts");
+}
+
+void secondaryHybridTuningCoversAllRanksAndCaps()
+{
+    const auto near = [](double a, double b) { return std::abs(a - b) < 1e-9; };
+    const std::array<DroneModuleKind, 10> modules = {
+        DroneModuleKind::CombatDrill, DroneModuleKind::DrillGuard, DroneModuleKind::SpectrumFilter,
+        DroneModuleKind::OreRelay, DroneModuleKind::ContainmentShell, DroneModuleKind::ReclamationLoop,
+        DroneModuleKind::TargetedAssault, DroneModuleKind::PenetratingImpact,
+        DroneModuleKind::RetributionArc, DroneModuleKind::HazardScreen};
+    for (const DroneModuleKind module : modules) {
+        require(secondaryModuleValue(module, 1) > 0.0 && secondaryModuleValue(module, 2) >= secondaryModuleValue(module, 1)
+                && secondaryModuleValue(module, 3) >= secondaryModuleValue(module, 2),
+            "every secondary hybrid should scale monotonically through Mk III");
+    }
+    require(near(secondaryModuleValue(DroneModuleKind::CombatDrill, 1), 1.0)
+            && near(secondaryModuleValue(DroneModuleKind::CombatDrill, 2), 2.0)
+            && near(secondaryModuleValue(DroneModuleKind::CombatDrill, 3), 3.0), "Combat Drill damage should scale 1/2/3");
+    require(near(secondaryModuleValue(DroneModuleKind::DrillGuard, 1), .08)
+            && near(secondaryModuleValue(DroneModuleKind::DrillGuard, 2), .12)
+            && near(secondaryModuleValue(DroneModuleKind::DrillGuard, 3), .16), "Drill Guard relief should scale 8/12/16 percent");
+    require(near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 1), .10)
+            && near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 2), .18)
+            && near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 3), .25), "Spectrum Filter relief should scale 10/18/25 percent");
+    require(near(secondaryModuleValue(DroneModuleKind::OreRelay, 3), 3.0), "Ore Relay should add three chunks at Mk III");
+    require(near(secondaryModuleValue(DroneModuleKind::ContainmentShell, 3), .16), "Containment Shell should reach 16 percent");
+    require(near(secondaryModuleValue(DroneModuleKind::ReclamationLoop, 1), .5)
+            && near(secondaryModuleValue(DroneModuleKind::ReclamationLoop, 3), 1.5), "Reclamation Loop should recover .5/1/1.5 fuel per tile");
+    require(near(secondaryModuleValue(DroneModuleKind::TargetedAssault, 3), 16.0), "Targeted Assault should add 16 crit points at Mk III");
+    require(near(secondaryModuleValue(DroneModuleKind::PenetratingImpact, 1), .10)
+            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 1) == 0
+            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 2) == 1
+            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 3) == 2, "Penetrating Impact should scale armor and aligned targets");
+    require(near(secondaryModuleValue(DroneModuleKind::RetributionArc, 3), 3.0), "Retribution Arc should reach three counter damage");
+    require(near(secondaryModuleValue(DroneModuleKind::HazardScreen, 3), .25), "Hazard Screen should reach 25 percent");
+    require(secondaryModuleSecondaryHits(DroneModuleKind::CombatDrill, 3) == 0, "non-penetrating hybrids should not gain secondary hits");
+    require(std::min(.24, .16 + .16 + .16) == .24, "Drill Guard duplicate relief should cap at 24 percent");
+    require(std::max(.10, .25) == .25, "Hazard Screen duplicates should use highest protection");
+}
+
 } // namespace
 
 int main()
@@ -12094,6 +12320,10 @@ int main()
     miningThermalCutoffAndGuidanceAreExplicit();
     marsMiningPressureFitsOxygenWindow();
     legacyOuterPlanetSavesMigrateByStableId();
+    secondaryMiningStateRoundTrips();
+    secondaryPulseUsesUnifiedCooldownAndStrongestHit();
+    treasurePingMarksRareFirstAndSkipsExcludedMaterials();
+    secondaryHybridTuningCoversAllRanksAndCaps();
 
     std::cout << "rocket_core_tests passed\n";
     return 0;

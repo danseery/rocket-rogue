@@ -21,6 +21,8 @@ Each act has ten difficulty levels split into four teaching bands:
 
 A tutorial callout appears at a band transition, not at every number. Swarm combat remains autonomous, while the EVA operator can aim a limited sidearm for vulnerable self-defense. The player pilots, drills, scans, tethers, manages endurance, and chooses routes. Mining remains the single fuel-only deployment opened by Survey Site or Push Deeper in a surface loop.
 
+Optional Swarm Nests are horde set-pieces rather than ordinary room encounters. Their simultaneous enemy cap starts at 24, reaches 32 in the Act 2 Combine band used by the debug Swarm Arena, and scales to 64 in Act 3 Mastery. Each nest sends three rapid waves containing 1x, 1.5x, and 2x the simultaneous cap. Each wave begins beyond evenly distributed radial points outside the visible mine bounds, then moves quickly inward before entering the nest chamber; enemies never materialize around the player. Swarm enemies have reduced individual health and damage so the threat comes from crowd movement, target saturation, and sustained replacement rather than four oversized enemies. The pack occupies rotating slots around the player instead of collapsing into one point: melee creatures stagger their dives, bite, and retreat to the ring, while ranged creatures fire from a wider band and pull back between shots.
+
 ### Act 1: learn the mining rig
 
 Act 1 never creates enemies or exotic minerals.
@@ -140,7 +142,7 @@ The stable resolver and query API lives in `MiningProgression.h`. Consumers shou
 
 Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. Save version 11 retains version 10's separate rig/operator state, destination gravity, loose chunks, disabled-rig state, artifact tether state, purchased duplicate Support Drone frames, scenario/site context, protected-objective state, launch-curriculum progress, and each unit's anchor target, formation, motion, haul, shield, recharge, and cooldowns while adding the Arrival Ops transfer-fuel and Surface Ops rig-fuel fields. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Version 10 active Mining saves keep their arena and convert the former 30-unit surface pool to route-derived rig fuel at the same remaining percentage. Older saves restore the operator seated in the rig; their drones migrate to `ControlledActor` with slots derived from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
 
-The current `miningArenaRulesVersion` is `1`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
+The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
 
 ## Integration invariants
 

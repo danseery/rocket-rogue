@@ -107,6 +107,26 @@
       display: block;
     }
 
+    .debug-tools-toggle {
+      display: none;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 11;
+      min-height: 28px;
+      padding: 5px 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 5px;
+      background: var(--panel);
+      color: var(--muted);
+      font: 11px/1.2 var(--font-ui);
+      cursor: pointer;
+    }
+
+    .debug-tools-toggle.is-visible {
+      display: block;
+    }
+
     body.rmlui-modal-open .debug-tools {
       visibility: hidden;
       pointer-events: none;
@@ -124,6 +144,24 @@
       font-size: 15px;
       letter-spacing: 0.08em;
       text-transform: uppercase;
+    }
+
+    .debug-tools-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .debug-tools-heading button {
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+      font: 10px/1.2 var(--font-ui);
+      cursor: pointer;
     }
 
     .debug-tools > p,
@@ -321,9 +359,13 @@
 <body>
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
   <div id="ui-startup-status" role="status">Starting RmlUi...</div>
+  <button id="debug-tools-toggle" class="debug-tools-toggle" type="button" aria-controls="debug-tools" aria-expanded="false">Show debug</button>
 
   <aside id="debug-tools" class="debug-tools" aria-label="Debug screen tools">
-    <h2>Debug screens</h2>
+    <div class="debug-tools-heading">
+      <h2>Debug screens</h2>
+      <button type="button" data-debug-visibility="hide">Hide</button>
+    </div>
     <p>Sandbox screens use default settings and do not write save data.</p>
 
     <section class="debug-act-one-flow" aria-label="Act 1 progression controls">
@@ -459,6 +501,7 @@
 
     const canvas = document.getElementById("canvas");
     const debugTools = document.getElementById("debug-tools");
+    const debugToolsToggle = document.getElementById("debug-tools-toggle");
     const debugActOneLabel = document.getElementById("debug-act-one-label");
     const debugActOnePrevious = debugTools.querySelector("[data-debug-act-one-previous]");
     const debugActOneNext = debugTools.querySelector("[data-debug-act-one-next]");
@@ -513,6 +556,7 @@
 
     const resolutionStorageKey = "rocket_rogue_resolution";
     const debugToolsStorageKey = "rocket_rogue_debug_tools";
+    const debugToolsHiddenStorageKey = "rocket_rogue_debug_tools_hidden";
     const gameSpeedStorageKey = "rocket_rogue_game_speed";
     const controllerPreferencesStorageKey = "rocket_rogue_controller_preferences_v1";
     const resolutionOptions = Object.freeze(["auto", "1280x800", "1920x1080", "2560x1440", "3840x2160"]);
@@ -609,10 +653,32 @@
       }
     }
 
+    function debugToolsHidden() {
+      try {
+        return localStorage.getItem(debugToolsHiddenStorageKey) === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function setDebugToolsHidden(hidden) {
+      try {
+        if (hidden) localStorage.setItem(debugToolsHiddenStorageKey, "1");
+        else localStorage.removeItem(debugToolsHiddenStorageKey);
+      } catch (error) {
+        // Storage can be unavailable in private or embedded contexts.
+      }
+      syncDebugToolsVisibility();
+    }
+
     function syncDebugToolsVisibility() {
       const query = new URLSearchParams(window.location.search);
-      const sessionOverride = query.has("debug_tools") || query.has("debug_minigames");
-      debugTools.classList.toggle("is-visible", sessionOverride || debugToolsVisible());
+      const enabled = query.has("debug_tools") || query.has("debug_minigames") || debugToolsVisible();
+      const hidden = debugToolsHidden();
+      debugTools.classList.toggle("is-visible", enabled && !hidden);
+      debugToolsToggle.classList.toggle("is-visible", enabled);
+      debugToolsToggle.textContent = hidden ? "Show debug" : "Hide debug";
+      debugToolsToggle.setAttribute("aria-expanded", String(enabled && !hidden));
     }
 
     function requestedDebugLaunchLesson() {
@@ -895,6 +961,18 @@
       rr.debugMiningArena(act, difficulty, seed, loadoutMode, gateOverride);
     }
 
+    function returnKeyboardToGame() {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && debugTools.contains(active)) active.blur();
+      canvas.focus({ preventScroll: true });
+    }
+
+    function debugEditorConsumesKeyboard(target) {
+      if (!(target instanceof Element)) return false;
+      const editor = target.closest("input, select, textarea, [contenteditable='true']");
+      return Boolean(editor && debugTools.contains(editor));
+    }
+
     async function copyDebugMiningArenaId() {
       const { act, difficulty, seed, loadoutMode, gateOverride } = normalizedDebugMiningValues();
       const preview = rr.debugMiningPreview(act, difficulty, gateOverride) || `Act ${act} • Level ${difficulty}`;
@@ -996,6 +1074,12 @@
     }
 
     debugTools.addEventListener("click", (event) => {
+      const visibility = closestFromEvent(event, "button[data-debug-visibility]");
+      if (visibility && debugTools.contains(visibility)) {
+        event.preventDefault();
+        setDebugToolsHidden(visibility.dataset.debugVisibility === "hide");
+        return;
+      }
       const synthetic = closestFromEvent(event, "button[data-controller-synthetic]");
       if (synthetic && debugTools.contains(synthetic)) {
         event.preventDefault();
@@ -1027,6 +1111,11 @@
       event.preventDefault();
       action();
       syncDebugActOneControls();
+      returnKeyboardToGame();
+    });
+
+    debugToolsToggle.addEventListener("click", () => {
+      setDebugToolsHidden(!debugToolsHidden());
     });
 
     const launchKeys = new Set();
@@ -1284,7 +1373,7 @@
     });
 
     window.addEventListener("keydown", (event) => {
-      if (debugTools.contains(event.target)) return;
+      if (debugEditorConsumesKeyboard(event.target)) return;
       if (!rmlUiAvailable) return;
       if (rmlUiModalOpen) {
         handleRmlUiKey(event);

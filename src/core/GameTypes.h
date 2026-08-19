@@ -163,6 +163,52 @@ enum class MiniDroneRole {
     Defense
 };
 
+// Temporary per-expedition module grafted onto an equipped support-drone frame.
+enum class DroneModuleKind {
+    None,
+    CombatDrill,
+    DrillGuard,
+    PulseStrike,
+    SpectrumFilter,
+    OreRelay,
+    TreasurePing,
+    ContainmentShell,
+    ReclamationLoop,
+    TargetedAssault,
+    PenetratingImpact,
+    RetributionArc,
+    HazardScreen
+};
+
+struct DroneModuleDefinition {
+    std::string id;
+    std::string name;
+    MiniDroneRole hostRole = MiniDroneRole::Mining;
+    MiniDroneRole secondaryRole = MiniDroneRole::Mining;
+    DroneModuleKind kind = DroneModuleKind::None;
+    std::string unlockKey = content::unlock::starter;
+};
+
+struct DroneFrameModuleAssignment {
+    int equippedFrame = -1;
+    std::string primaryDroneId;
+    DroneModuleKind module = DroneModuleKind::None;
+};
+
+struct TreasureMark {
+    int x = -1;
+    int y = -1;
+    int multiplier = 2;
+};
+
+struct DroneModuleRuntimeState {
+    int equippedFrame = -1;
+    double retributionCooldownSeconds = 0.0;
+    double reclamationOxygenRecovered = 0.0;
+    double reclamationFuelRecovered = 0.0;
+    std::vector<std::pair<int, double>> combatDrillEnemyCooldowns;
+};
+
 enum class MiningMiniDroneBehavior {
     Following,
     Traveling,
@@ -1278,6 +1324,22 @@ struct SurfaceExpeditionState {
     std::array<std::string, 3> surfaceUpgradeOfferIds {};
     bool surfaceUpgradeOfferAvailable = false;
     int surfaceUpgradeOffersSeen = 0;
+    std::array<std::string, 3> surfaceModuleOfferIds {};
+    std::string pendingDroneModuleId;
+    int pendingDroneModuleOfferIndex = -1;
+    int pendingDroneModuleFrame = -1;
+    bool pendingDroneModuleReplacementConfirmation = false;
+    std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
+    std::vector<DroneModuleRuntimeState> droneModuleRuntime;
+    int fieldInsight = 0;
+    std::vector<std::string> fieldInsightAwardKeys;
+    int miningDraftsEarned = 0;
+    int pendingFieldDraftThreshold = 0;
+    Screen fieldDraftReturnScreen = Screen::SurfaceExpedition;
+    double scannerCooldownSeconds = 0.0;
+    std::vector<TreasureMark> treasureMarks;
+    int reclamationOxygenUses = 0;
+    double reclamationFuelRecovered = 0.0;
 };
 
 enum class SurfaceScanPulseGrade {
@@ -1376,6 +1438,8 @@ struct MiningEnemy {
     bool active = true;
     MiningElementalAffinity affinity = MiningElementalAffinity::None;
     double attackCooldownSeconds = 0.0;
+    double scannedPrioritySeconds = 0.0;
+    int insightGroupKey = -1;
     MiningEnemySpawnSpec spawn;
     bool gateAssociated = false;
     bool swarmAssociated = false;
@@ -1483,6 +1547,7 @@ struct MiniDroneAnchorFrame {
 struct MiningMiniDroneAgent {
     MiniDroneRole role = MiniDroneRole::Mining;
     int roleIndex = 0;
+    int equippedFrame = -1;
     int upgradeLevel = 1;
     double x = 0.0;
     double y = 0.0;

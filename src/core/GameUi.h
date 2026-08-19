@@ -40,6 +40,7 @@ inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
+inline constexpr std::string_view surfaceModuleFramePrefix = "surface_module_frame:";
 inline constexpr std::string_view droneOps = "drone_ops";
 inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
 inline constexpr std::string_view equipDronePrefix = "equip_drone:";
@@ -104,6 +105,11 @@ inline std::string selectNavigationDestination(int index)
 inline std::string surfaceUpgrade(int index)
 {
     return std::string(surfaceUpgradePrefix) + std::to_string(index);
+}
+
+inline std::string surfaceModuleFrame(int index)
+{
+    return std::string(surfaceModuleFramePrefix) + std::to_string(index);
 }
 
 inline std::string equipDrone(int index)

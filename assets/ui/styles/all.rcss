@@ -8000,6 +8000,51 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     margin-right: 0px;
 }
 
+/* Keep narrow side-rail metrics inside their panel. */
+#rr-document.rr-side-rail #rr-panel.phase-board-panel .panel-kpis {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 6px;
+}
+#rr-document.rr-side-rail #rr-panel.phase-board-panel .panel-kpis .metric {
+    flex: 1 1 140px;
+    width: auto;
+    min-width: 0px;
+    margin: 0px;
+}
+
+/* The Hangar fuel summary is always three compact, two-line readouts. */
+#rr-panel.hangar-family-panel .hangar-fuel-strip {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    max-width: 100%;
+    margin: 0px 0px 8px 0px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-strip .hangar-fuel-chip {
+    flex: 0 0 150px;
+    box-sizing: border-box;
+    width: 150px;
+    min-width: 150px;
+    max-width: 150px;
+    min-height: 44px;
+    height: 44px;
+    margin: 0px 8px 0px 0px;
+    padding: 5px 8px;
+    text-align: center;
+    white-space: nowrap;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-strip .hangar-fuel-chip:last-child {
+    margin-right: 0px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-chip .rr-chip-label {
+    line-height: 16px;
+    white-space: nowrap;
+}
+
 
 /* Non-gameplay management, decision, and selection families own the viewport.
    Preserve the shared phase-board components, but give them one generous

@@ -867,6 +867,33 @@ inline constexpr double bossHealthScale = 2.65;
 inline constexpr double roomEnemyHealthScale = 1.25;
 inline constexpr double enemySpawnerArmor = 0.12;
 inline constexpr double enemySpawnerSpawnRadiusCells = 1.65;
+// Swarm Nests are horde set-pieces, separate from the smaller procedural
+// encounter cap. The current debug nest (Act 2 Combine) holds 32 at once;
+// late Act 3 scales to 64 while remaining below genre peers' triple-digit caps.
+inline constexpr int swarmBaseConcurrentEnemies = 24;
+inline constexpr int swarmBandConcurrentStep = 8;
+inline constexpr int swarmActThreeConcurrentBonus = 16;
+inline constexpr double swarmSpawnIntervalSeconds = 0.12;
+inline constexpr double swarmEnemyHealthScale = 0.45;
+inline constexpr double swarmEnemyDamageScale = 0.20;
+inline constexpr int swarmChamberHalfWidthCells = 11;
+inline constexpr int swarmChamberHalfHeightCells = 8;
+inline constexpr double swarmOffscreenSpawnMarginCells = 1.5;
+inline constexpr double swarmIngressSpeedScale = 4.25;
+inline constexpr double swarmFlyingSpeedScale = 0.25;
+inline constexpr double swarmOrbitRadiansPerSecond = 0.34;
+inline constexpr double swarmVerticalRingScale = 0.72;
+inline constexpr double swarmMeleeHoldingRadiusCells = 2.15;
+inline constexpr double swarmMeleeRetreatRadiusCells = 3.35;
+inline constexpr double swarmMeleeDiveRadiusCells = 0.48;
+inline constexpr double swarmMeleeDiveCycleSeconds = 1.40;
+inline constexpr double swarmMeleeDiveWindowSeconds = 0.30;
+inline constexpr double swarmMeleeAttackIntervalSeconds = 1.05;
+inline constexpr double swarmMeleeRetreatThresholdSeconds = 0.38;
+inline constexpr double swarmRangedFiringRadiusCells = 4.35;
+inline constexpr double swarmRangedRetreatRadiusCells = 5.90;
+inline constexpr double swarmRangedAttackIntervalSeconds = 1.35;
+inline constexpr double swarmRangedRetreatThresholdSeconds = 0.58;
 } // namespace mining
 
 namespace outcomes {

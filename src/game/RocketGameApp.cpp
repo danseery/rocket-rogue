@@ -425,7 +425,7 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
     }
     if (refitWindowPresentation(state_, catalog_).offers.empty()) {
         state_.run.refitEntitled = false;
-        state_.run.offerModuleIds = {};
+        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
         state_.run.offerCrewUpgradeIds = {};
         return false;
     }
@@ -487,8 +487,8 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
         restoreSaveData(state_, catalog_, *saveData);
         rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
         const bool staleCompatibilityOffer = std::any_of(
-            state_.run.offerModuleIds.begin(),
-            state_.run.offerModuleIds.end(),
+            state_.run.surfaceExpedition.surfaceModuleOfferIds.begin(),
+            state_.run.surfaceExpedition.surfaceModuleOfferIds.end(),
             [&](const std::string& moduleId) {
                 const ShipModule* module = catalog_.findModule(moduleId);
                 return module != nullptr && module->compatibilityOnly &&
@@ -1471,6 +1471,23 @@ void RocketGameApp::tick(double deltaSeconds)
             const bool wasActive = state_.run.mining.active;
             const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
             updateMiningRun(state_, catalog_, deltaSeconds);
+            // Field Insight drafts are queued at threshold crossings. The
+            // existing Field Upgrade screen is modal, so mining naturally
+            // stops simulating while the queued board is open.
+            if (state_.run.surfaceExpedition.pendingDroneModuleId.empty() &&
+                !state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable &&
+                state_.run.surfaceExpedition.miningDraftsEarned < 5) {
+                constexpr int insightThresholds[] = {1, 3, 5, 8, 12};
+                const int earned = state_.run.surfaceExpedition.miningDraftsEarned;
+                if (earned < 5 && state_.run.surfaceExpedition.fieldInsight >= insightThresholds[earned]) {
+                    state_.run.surfaceExpedition.miningDraftsEarned += 1;
+                    state_.run.surfaceExpedition.pendingFieldDraftThreshold = insightThresholds[earned];
+                    state_.run.surfaceExpedition.fieldDraftReturnScreen = Screen::Mining;
+                    state_.run.surfaceExpedition.surfaceUpgradeOffersSeen = 0;
+                    generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+                    state_.screen = Screen::SurfaceUpgrade;
+                }
+            }
             if (!thermalLockWasActive && state_.run.mining.drillThermalLock) {
                 keyboardRealtimeInput_.drilling = false;
                 controllerRealtimeInput_.drilling = false;
@@ -1777,8 +1794,10 @@ void RocketGameApp::next()
         save();
     } else if (state_.screen == Screen::SurfaceUpgrade) {
         state_.run.surfaceExpedition.surfaceUpgradeOfferIds = {};
+        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
         state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable = false;
-        state_.screen = Screen::SurfaceExpedition;
+        state_.run.surfaceExpedition.pendingFieldDraftThreshold = 0;
+        state_.screen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
         state_.statusLine = "Field upgrade skipped. Keep digging or extract while the window holds.";
         save();
     } else if (state_.screen == Screen::Upgrade) {
@@ -1788,7 +1807,7 @@ void RocketGameApp::next()
             panelDirty_ = true;
             return;
         }
-        state_.run.offerModuleIds = {};
+        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
         state_.run.offerCrewUpgradeIds = {};
         state_.run.refitEntitled = false;
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
@@ -2076,6 +2095,13 @@ void RocketGameApp::mineSurface()
         return;
     }
     SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    if (expedition.surfaceUpgradeOfferAvailable || !expedition.pendingDroneModuleId.empty()) {
+        expedition.fieldDraftReturnScreen = Screen::SurfaceExpedition;
+        state_.screen = Screen::SurfaceUpgrade;
+        save();
+        panelDirty_ = true;
+        return;
+    }
     const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
         state_,
         catalog_,
@@ -2192,10 +2218,25 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
         return;
     }
 
-    if (chooseSurfaceUpgrade(state_, catalog_, index)) {
-        state_.screen = Screen::SurfaceExpedition;
-        save();
+    const Screen returnScreen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
+    chooseSurfaceUpgrade(state_, catalog_, index);
+    if (state_.run.surfaceExpedition.pendingDroneModuleId.empty()) {
+        state_.screen = returnScreen;
+        state_.run.surfaceExpedition.pendingFieldDraftThreshold = 0;
     }
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::assignSurfaceModuleFrame(int index)
+{
+    if (state_.screen != Screen::SurfaceUpgrade) return;
+    const bool confirm = state_.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation &&
+        state_.run.surfaceExpedition.pendingDroneModuleFrame == index;
+    if (assignPendingDroneModuleFrame(state_, catalog_, index, confirm)) {
+        state_.screen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
+    }
+    save();
     panelDirty_ = true;
 }
 
@@ -2749,7 +2790,7 @@ void RocketGameApp::debugStartSwarmArena()
             continue;
         }
         if (enterMiningSwarmArenaForDebug(state_, catalog_)) {
-            state_.statusLine = "Swarm Arena Lab: nest layer loaded. Follow the branch tunnel to trigger the waves. Sandbox rewards are not saved.";
+            state_.statusLine = "Swarm Arena Lab: wave 1 active. Sandbox rewards are not saved.";
         } else {
             state_.statusLine = "Swarm Arena Lab could not enter the generated nest layer.";
         }
@@ -2821,6 +2862,12 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
     expedition.enemyEncountersEnabled = miningAct != MiningAct::ActOne;
     expedition.miningSitePrepared = true;
     expedition.prospectArtifacts = rules.mechanics.artifactRecovery ? 1 : 0;
+    // Debug arenas bypass campaign Field Upgrade teaching and Insight drafts;
+    // the debug command should enter the requested arena directly.
+    expedition.fieldInsight = 0;
+    expedition.miningDraftsEarned = 5;
+    expedition.pendingFieldDraftThreshold = 0;
+    expedition.surfaceUpgradeOfferAvailable = false;
 
     const int normalizedLoadout = std::clamp(loadoutMode, 0, 2);
     if (normalizedLoadout == 1) {
@@ -3974,6 +4021,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectResearchProject(index);
     } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {
         selectSurfaceUpgrade(index);
+    } else if (consumeIndexedAction(action, ui::actions::surfaceModuleFramePrefix, index)) {
+        assignSurfaceModuleFrame(index);
     } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
         equipDrone(index);
     } else if (consumeIndexedAction(action, ui::actions::unequipDroneSlotPrefix, index)) {
@@ -4288,6 +4337,8 @@ RenderSnapshot RocketGameApp::snapshot() const
             };
         }
         result.bindMiningFrameViews(mining);
+        result.miningDroneModuleAssignments = state_.run.surfaceExpedition.droneModuleAssignments;
+        result.miningTreasureMarks = state_.run.surfaceExpedition.treasureMarks;
     }
 
     if (state_.screen == Screen::Flyby && state_.run.flyby.active) {

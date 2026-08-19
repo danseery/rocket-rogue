@@ -163,7 +163,15 @@ public:
         surfacePushForecastMarkers = snapshot.surfacePushForecastMarkers;
         surfacePushForecastDepthOffsets = snapshot.surfacePushForecastDepthOffsets;
         miningSwarmActive = snapshot.miningSwarmActive;
+        miningSwarmAlert = snapshot.miningSwarmAlert;
+        miningSwarmWave = snapshot.miningSwarmWave;
         miningSwarmDepth = snapshot.miningSwarmDepth;
+        miningSwarmEnemies = static_cast<int>(std::count_if(
+            snapshot.miningEnemies.begin(),
+            snapshot.miningEnemies.end(),
+            [](const rocket::MiningEnemy& enemy) {
+                return enemy.active && enemy.swarmAssociated;
+            }));
         if (snapshot.screen == rocket::Screen::Mining) {
             miningViewsObserved = true;
             const std::size_t expectedCells = static_cast<std::size_t>(
@@ -228,6 +236,8 @@ public:
     int launchDestinationTier = 0;
     int surfacePushSteps = 0;
     int miningSwarmDepth = -1;
+    int miningSwarmWave = 0;
+    int miningSwarmEnemies = 0;
     rocket::MaterialInventory surfacePushMaterials;
     std::vector<rocket::MiningCellMaterial> surfacePushRewardMarkers;
     std::vector<int> surfacePushRewardDepthOffsets;
@@ -244,6 +254,7 @@ public:
     bool miningViewsObserved = false;
     bool miningViewsValid = false;
     bool miningSwarmActive = false;
+    bool miningSwarmAlert = false;
 };
 
 class FakeUi final : public rocket::IGameUi {
@@ -2437,8 +2448,36 @@ int main()
     runner.app().debugStartSwarmArena();
     host.now += 1.0 / 60.0;
     runner.frame();
+    // A Field Insight threshold may interrupt the debug arena with the
+    // existing Field Upgrade board. Resolve the board through the same action
+    // path as the player, then verify the arena resumes.
+    if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
+        ui.dispatchAction("surface_upgrade:0");
+        host.now += 1.0 / 60.0;
+        runner.frame();
+        if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
+            ui.dispatchAction("surface_module_frame:0");
+            host.now += 1.0 / 60.0;
+            runner.frame();
+            if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
+                ui.dispatchAction("surface_module_frame:0");
+                host.now += 1.0 / 60.0;
+                runner.frame();
+            }
+        }
+    }
+    if (renderer.screen == rocket::Screen::SurfaceExpedition) {
+        // The debug arena entry point supplies the same authored prerequisites
+        // as a real mining deployment, without depending on tutorial state.
+        runner.app().debugStartSwarmArena();
+        host.now += 1.0 / 60.0;
+        runner.frame();
+    }
     assert(renderer.screen == rocket::Screen::Mining);
     assert(renderer.miningSwarmActive);
+    assert(renderer.miningSwarmAlert);
+    assert(renderer.miningSwarmWave == 1);
+    assert(renderer.miningSwarmEnemies >= 30);
     assert(renderer.miningSwarmDepth >= 2);
     assert(renderer.miningViewsValid);
     assert(saves.storeCount == savesBeforeSwarmArena);
@@ -2448,6 +2487,35 @@ int main()
     assert(!host.fullscreen());
     assert(host.setFullscreen(true));
     assert(host.fullscreen());
+
+    // Deterministic secondary-module assignment behavior: choosing a module
+    // only opens the frame step; empty frames attach immediately, occupied
+    // frames require confirmation, and duplicate modules may occupy both.
+    {
+        rocket::GameState moduleState;
+        const rocket::ContentCatalog moduleCatalog = rocket::createDefaultContent();
+        moduleState.run.surfaceExpedition.active = true;
+        moduleState.meta.equippedDroneIds = {rocket::content::drone::miningDrone, rocket::content::drone::miningDrone};
+        moduleState.meta.unlockKeys.push_back(rocket::content::unlock::perimeterDrones);
+        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
+        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
+        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
+        assert(!moduleState.run.surfaceExpedition.pendingDroneModuleId.empty());
+        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.empty());
+        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0));
+        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.size() == 1);
+        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
+        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
+        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
+        assert(!rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0));
+        assert(moduleState.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation);
+        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0, true));
+        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
+        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
+        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
+        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 1));
+        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.size() == 2);
+    }
 
     runner.shutdown();
     assert(controllers.resetCalled);

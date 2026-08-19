@@ -405,6 +405,8 @@ void miningGateContractsAndRuntimeAreDeterministic()
         surveyState.run.mining.droneY = marker.y;
         pulseMiningScanner(surveyState, catalog);
     }
+    require(surveyState.run.surfaceExpedition.scannerCooldownSeconds > 0.0,
+        "triangulation calibration should preserve the shared scanner recharge");
     require(surveyState.run.mining.gate.derivedStateDirty,
         "activating a triangulation marker should invalidate gate-derived state");
     updateMiningRun(surveyState, catalog, 0.01);
@@ -581,6 +583,10 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
             !mining.artifact.revealed,
         "a later OnAny layer should remain hidden until the player discovers it");
 
+    pulseMiningScanner(state, catalog);
+    require(!mining.gate.cocoonLayers[2].revealed,
+        "an ordinary follow-up scan should wait for the shared scanner recharge");
+    updateMiningRun(state, catalog, 4.0);
     pulseMiningScanner(state, catalog);
     require(mining.gate.cocoonLayers[2].revealed,
         "the active later OnAny layer should reveal atomically through the shared scanner path");

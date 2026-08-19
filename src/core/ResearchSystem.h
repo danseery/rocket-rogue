@@ -262,6 +262,7 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 bool rerollSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index);
+bool assignPendingDroneModuleFrame(GameState& state, const ContentCatalog& catalog, int frameIndex, bool confirmReplacement = false);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state);
 double surfaceEnemyEncounterChance(const GameState& state);

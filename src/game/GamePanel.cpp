@@ -679,6 +679,12 @@ std::string resourceChip(const PanelMetricPresentation& chip)
         htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span></span>";
 }
 
+std::string hangarFuelChip(const PanelMetricPresentation& chip)
+{
+    return "<span class=\"stat-chip up wide hangar-fuel-chip\"><span class=\"rr-chip-label\">" +
+        htmlEscape(chip.label) + "<br/>" + htmlEscape(chip.value) + "</span></span>";
+}
+
 std::string realtimeResourceChip(std::string_view id, const PanelMetricPresentation& chip)
 {
     const bool positive = chip.value.empty() || chip.value.front() != '-';
@@ -1847,7 +1853,7 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade, bo
         out << resourceChip(upgrade.effectChips[index]);
     }
     out << "</div>";
-    out << "<div class=\"draft-card-footer action-row\"><span>" << htmlEscape("Until drone loss") << "</span>"
+    out << "<div class=\"draft-card-footer action-row\"><span>" << htmlEscape(upgrade.droneModule ? (upgrade.action.label == "Confirm replace" ? "This expedition" : "Until extraction") : "This expedition") << "</span>"
         << panelButton(upgrade.action, defaultFocus) << "</div></article>";
     return out.str();
 }
@@ -4175,10 +4181,12 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::SurfaceUpgrade) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
+        const bool assigningModule = !state.run.surfaceExpedition.pendingDroneModuleId.empty();
         out << phaseBoardOpen("phase-board-surface-upgrade phase-board-draft-room", state.statusLine);
-        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape("Drone Upgrade")
-            << "</span><h2>" << htmlEscape("Pick your Field Research") << "</h2><p>"
-            << htmlEscape("Choose one Mining Rig upgrade. It stays active until your shuttle or Mining Rig is destroyed.") << "</p></div>";
+        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape(assigningModule ? "Assign Module" : "Field Upgrade")
+            << "</span><h2>" << htmlEscape(assigningModule ? "Choose a frame" : "Choose one") << "</h2>";
+        if (!assigningModule) out << "<p>" << htmlEscape("One upgrade for this expedition.") << "</p>";
+        out << "</div>";
         std::vector<PanelMetricPresentation> fieldContext;
         for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
             if (metricItem.label == text::labels::site
@@ -4189,9 +4197,9 @@ std::string buildGamePanelMarkup(
         }
         out << "<div class=\"stat-grid chip-strip draft-context\">" << fieldContextChipGrid(fieldContext) << "</div></section>";
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
-            << htmlEscape("Choose one drone upgrade") << "</h2><p>"
-            << htmlEscape("Choose an offer, reroll, or leave it.") << "</p></div><div class=\"utility-row compact-tools utility-actions\">"
-            << modalButton("Compare details", "surface_upgrade_compare", "ghost") << "</div></div>";
+            << htmlEscape(assigningModule ? "Compatible frames" : "Available upgrades") << "</h2></div>";
+        if (!assigningModule) out << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton("Compare", "surface_upgrade_compare", "ghost") << "</div>";
+        out << "</div>";
         out << "<div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
         for (std::size_t index = 0; index < surfacePanel.upgradeOffers.size(); ++index) {
             out << surfaceUpgradeCard(surfacePanel.upgradeOffers[index], index == 0);
@@ -4199,10 +4207,10 @@ std::string buildGamePanelMarkup(
         out << "</div>";
         out << "<div class=\"actions action-row draft-actions controller-action-row\">";
         const double rerollCost = offerRerollCost(state);
-        out << panelButton(state.run.credits >= rerollCost
+        if (!assigningModule) out << panelButton(state.run.credits >= rerollCost
             ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
             : disabledPanelButton(display::needCredits(rerollCost)));
-        out << panelButton(panelActionButton("Skip field research", ui::actions::next));
+        if (!assigningModule) out << panelButton(panelActionButton("Keep", ui::actions::next));
         out << "</div></section>";
         out << phaseBoardClose();
         std::ostringstream surfaceUpgradeComparison;
@@ -4349,12 +4357,15 @@ std::string buildGamePanelMarkup(
     out << phaseBoardOpen("phase-board-hangar", state.statusLine);
     out << "<h2>" << htmlEscape(text::panel::sections::hangarBay) << "</h2>";
     const std::vector<PanelMetricPresentation> hangarFuelMetrics {
-        panelMetric(text::labels::transferFuel, display::fixed(launchFuelCapacity(state), 0) + " capacity"),
-        panelMetric("Expedition rig pack", display::fixed(tuning::research::expeditionRigPackFuel, 0)),
-        panelMetric(text::labels::returnStage, "RESERVED")
+        panelMetric("Transfer Tank", display::fixed(launchFuelCapacity(state), 0) + " fuel"),
+        panelMetric("Rig fuel", display::fixed(tuning::research::expeditionRigPackFuel, 0) + " fuel"),
+        panelMetric("Return fuel", "Full")
     };
-    out << "<div class=\"stat-grid chip-strip phase-lane\">"
-        << resourceChipGrid(hangarFuelMetrics) << "</div>";
+    out << "<div class=\"stat-grid chip-strip phase-lane hangar-fuel-strip\">";
+    for (const PanelMetricPresentation& metric : hangarFuelMetrics) {
+        out << hangarFuelChip(metric);
+    }
+    out << "</div>";
     if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
         const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         out << "<section class=\"objective-strip rr-objective-strip phase-lane\"><span>Objective</span><strong>"

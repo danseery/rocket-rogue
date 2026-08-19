@@ -173,6 +173,14 @@ const MiniDrone* ContentCatalog::findMiniDrone(std::string_view id) const
     return found == miniDrones.end() ? nullptr : &*found;
 }
 
+const DroneModuleDefinition* ContentCatalog::findDroneModule(std::string_view id) const
+{
+    const auto found = std::find_if(droneModules.begin(), droneModules.end(), [id](const DroneModuleDefinition& module) {
+        return module.id == id;
+    });
+    return found == droneModules.end() ? nullptr : &*found;
+}
+
 const ResearchProject* ContentCatalog::findResearchProject(std::string_view id) const
 {
     const auto found = std::find_if(researchProjects.begin(), researchProjects.end(), [id](const ResearchProject& project) {
@@ -304,6 +312,7 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.surfaceUpgrades = {
+        surfaceUpgrade(content::surfaceUpgrade::resonantDischarge, "Resonant Discharge", "A combat-tuned scanner pulse shocks enemies caught in the player-centered ring.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 0.0}, {"scanner", "combat", "pulse"}),
         surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines and steady deeper pushes.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4, .drillDurability = 0.4}, {"drill", "cooling", "depth"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams, bad pockets, and one deeper layer.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.5, .hazardRelief = 0.02}, {"scanner", "reveal", "depth"}),
         surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids help the Mining Rig haul heavier canisters without load drag getting ugly.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
@@ -326,6 +335,21 @@ ContentCatalog createDefaultContent()
         miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::ioHazardDrone, {"engineering", "remediation"}),
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
         miniDrone(content::drone::defenseDrone, "Defense Drone", "Holds a rotating charged shield arc, recharges after a break, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
+    };
+
+    catalog.droneModules = {
+        {content::droneModule::combatDrill, "Combat Drill", MiniDroneRole::Mining, MiniDroneRole::Attack, DroneModuleKind::CombatDrill, content::unlock::perimeterDrones},
+        {content::droneModule::drillGuard, "Drill Guard", MiniDroneRole::Mining, MiniDroneRole::Defense, DroneModuleKind::DrillGuard, content::unlock::perimeterDrones},
+        {content::droneModule::pulseStrike, "Pulse Strike", MiniDroneRole::Survey, MiniDroneRole::Attack, DroneModuleKind::PulseStrike, content::unlock::perimeterDrones},
+        {content::droneModule::spectrumFilter, "Spectrum Filter", MiniDroneRole::Survey, MiniDroneRole::Hazard, DroneModuleKind::SpectrumFilter, content::unlock::ioHazardDrone},
+        {content::droneModule::oreRelay, "Ore Relay", MiniDroneRole::Resource, MiniDroneRole::Mining, DroneModuleKind::OreRelay, content::unlock::droneSupportSuite},
+        {content::droneModule::treasurePing, "Treasure Ping", MiniDroneRole::Resource, MiniDroneRole::Survey, DroneModuleKind::TreasurePing, content::unlock::droneSupportSuite},
+        {content::droneModule::containmentShell, "Containment Shell", MiniDroneRole::Hazard, MiniDroneRole::Defense, DroneModuleKind::ContainmentShell, content::unlock::ioHazardDrone},
+        {content::droneModule::reclamationLoop, "Reclamation Loop", MiniDroneRole::Hazard, MiniDroneRole::Resource, DroneModuleKind::ReclamationLoop, content::unlock::ioHazardDrone},
+        {content::droneModule::targetedAssault, "Targeted Assault", MiniDroneRole::Attack, MiniDroneRole::Survey, DroneModuleKind::TargetedAssault, content::unlock::perimeterDrones},
+        {content::droneModule::penetratingImpact, "Penetrating Impact", MiniDroneRole::Attack, MiniDroneRole::Mining, DroneModuleKind::PenetratingImpact, content::unlock::perimeterDrones},
+        {content::droneModule::retributionArc, "Retribution Arc", MiniDroneRole::Defense, MiniDroneRole::Attack, DroneModuleKind::RetributionArc, content::unlock::perimeterDrones},
+        {content::droneModule::hazardScreen, "Hazard Screen", MiniDroneRole::Defense, MiniDroneRole::Hazard, DroneModuleKind::HazardScreen, content::unlock::perimeterDrones}
     };
 
     catalog.researchProjects = {

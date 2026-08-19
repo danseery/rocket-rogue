@@ -59,6 +59,10 @@ std::string_view miningElementalAffinityName(MiningElementalAffinity affinity);
 MiningEnemy createMiningEnemy(MiningEnemyType type, MiningCellFeature sourceFeature, double x, double y, MiningElementalAffinity affinity = MiningElementalAffinity::None);
 MiningEnemy createMiningEnemySpawner(double x, double y, double health, MiningEnemyType spawnType, int maxSpawns, double spawnIntervalSeconds, MiningElementalAffinity affinity = MiningElementalAffinity::None);
 bool miningMaterialSolid(MiningCellMaterial material);
+MaterialInventory applyMiningTreasureMultiplier(MaterialInventory gain, MiningCellMaterial material, int multiplier);
+// Deterministic secondary-module tuning used by the live mining simulation and behavioral tests.
+double secondaryModuleValue(DroneModuleKind module, int rank);
+int secondaryModuleSecondaryHits(DroneModuleKind module, int rank);
 double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
