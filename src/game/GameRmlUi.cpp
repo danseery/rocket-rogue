@@ -2941,6 +2941,10 @@ void GameRmlUi::render()
         return;
     }
 
+    // Raw RmlUi mouse dispatch owns the element tree for the duration of the
+    // input callback. A UI action can rebuild that tree, so pointer actions
+    // are always applied here, after the callback has returned.
+    applyPendingPointerActivation();
     applyPendingModalOpen();
 
     const ViewportMetrics viewport = host_.viewportMetrics();
@@ -3035,9 +3039,22 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
         return false;
     }
     g_context->ProcessMouseMove(x, y, 0);
+    // ProcessMouseButtonUp can dispatch RmlUi's own input handlers. Snapshot
+    // every value needed for activation before it has an opportunity to
+    // invalidate the pressed element.
+    Rml::Element* pressedButton = pressedButton_;
+    const double pressedAt = pressedButtonAtSeconds_;
+    RmlButtonBinding pressedBinding;
+    double holdSeconds = 0.0;
+    if (button == 0 && pressedButton) {
+        pressedBinding = buttonBindingFromElement(*pressedButton);
+        const Rml::String holdValue = pressedButton->GetAttribute<Rml::String>("data-controller-hold-seconds", "");
+        holdSeconds = holdValue.empty() ? 0.0 : std::max(0.0, std::atof(holdValue.c_str()));
+    }
     g_context->ProcessMouseButtonUp(std::max(0, button), 0);
     if (!hitTest(x, y)) {
         pressedButton_ = nullptr;
+        pressedButtonAtSeconds_ = 0.0;
         return false;
     }
     const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
@@ -3045,30 +3062,15 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     if (releasedButton && modalOpen() && !releasedButton->Closest("#rr-modal")) {
         releasedButton = nullptr;
     }
-    Rml::Element* pressedButton = pressedButton_;
-    const double pressedAt = pressedButtonAtSeconds_;
     pressedButton_ = nullptr;
     pressedButtonAtSeconds_ = 0.0;
     if (button != 0 || !pressedButton || releasedButton != pressedButton) {
         return true;
     }
-    const Rml::String holdValue = pressedButton->GetAttribute<Rml::String>("data-controller-hold-seconds", "");
-    const double holdSeconds = holdValue.empty() ? 0.0 : std::max(0.0, std::atof(holdValue.c_str()));
     if (holdSeconds > 0.0 && rr_rml_now_seconds() - pressedAt + 0.001 < holdSeconds) {
         return true;
     }
-    // RmlUi owns the raw mouse-up dispatch stack. Rebuilding a modal host from
-    // inside that stack can leave its native geometry compiler repeatedly
-    // allocating against a tree it is still traversing. Queue modal opens and
-    // apply them at the start of the next render instead.
-    deferModalOpen_ = true;
-    try {
-        activateButtonElement(*this, pressedButton);
-        deferModalOpen_ = false;
-    } catch (...) {
-        deferModalOpen_ = false;
-        throw;
-    }
+    pendingPointerActivation_ = std::move(pressedBinding);
     return true;
 }
 
@@ -3494,6 +3496,21 @@ void GameRmlUi::applyPendingModalOpen()
                 + std::to_string(diagnostics.liveGeometryBytes) + " live bytes/"
                 + std::to_string(diagnostics.retiredGeometryBytes) + " retired bytes.");
         throw;
+    }
+}
+
+void GameRmlUi::applyPendingPointerActivation()
+{
+    if (!pendingPointerActivation_) {
+        return;
+    }
+    RmlButtonBinding binding = std::move(*pendingPointerActivation_);
+    pendingPointerActivation_.reset();
+    if (dispatchButtonBinding(*this, binding)) {
+        return;
+    }
+    if (!binding.label.empty()) {
+        activateButtonLabel(binding.label);
     }
 }
 
@@ -4073,6 +4090,7 @@ void GameRmlUi::shutdown()
     presentation_ = {};
     openModalId_.clear();
     pendingModalOpenId_.clear();
+    pendingPointerActivation_.reset();
     renderedModalId_.clear();
     modalStack_.clear();
     modalFocusStack_.clear();

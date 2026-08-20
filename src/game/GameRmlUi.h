@@ -5,6 +5,7 @@
 #include "platform/AppServices.h"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -99,6 +100,7 @@ private:
     bool rebuildPerformanceHost();
     void rebindAndRestoreFocus(bool restoreFocus);
     bool applyPendingFocusIfAvailable();
+    void applyPendingPointerActivation();
     void applyPendingModalOpen();
     void openModalImmediately(const std::string& id);
 
@@ -112,6 +114,7 @@ private:
     std::string externalRcss_;
     std::string openModalId_;
     std::string pendingModalOpenId_;
+    std::optional<RmlButtonBinding> pendingPointerActivation_;
     std::string renderedModalId_;
     std::vector<std::string> modalStack_;
     std::vector<std::string> modalFocusStack_;

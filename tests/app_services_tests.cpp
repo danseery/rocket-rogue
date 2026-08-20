@@ -1215,6 +1215,7 @@ int main()
                 pointerAction.clear();
                 ui.mouseDown(x, y, 0);
                 ui.mouseUp(x, y, 0);
+                ui.render();
                 for (std::size_t index = 0; index < surfaceActions.size(); ++index) {
                     pointerReachable[index] = pointerReachable[index]
                         || pointerAction == surfaceActions[index];
@@ -1274,6 +1275,32 @@ int main()
             assert(ui.modalOpen());
             ui.closeModal();
         }
+
+        // Once the briefing has been acknowledged, the same Dig button
+        // dispatches the real surface action instead of opening a modal. That
+        // action also mutates the panel state, so it must leave raw mouse-up
+        // before it runs.
+        rocket::GameState directDigState = digIntroductionState;
+        rocket::ui::briefings::acknowledge(
+            directDigState.meta.acknowledgedActivityBriefingIds,
+            rocket::ui::briefings::surfaceDigIntroduction);
+        rocket::Random directDigRng(0xD161D162ULL);
+        const rocket::PreparedLaunch directDigLaunch =
+            rocket::prepareLaunch(directDigState, catalog, directDigRng);
+        rocket::PanelRenderContext directDigContext {
+            directDigState,
+            catalog,
+            directDigLaunch,
+            directDigLaunch};
+        directDigContext.firstTimeIntroductionsEnabled = true;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(directDigContext));
+        ui.refresh();
+        pointerAction.clear();
+        ui.mouseDown(digPointerX, digPointerY, 0);
+        ui.mouseUp(digPointerX, digPointerY, 0);
+        assert(pointerAction.empty());
+        ui.render();
+        assert(pointerAction == rocket::ui::actions::pushSurface);
         ui.shutdown();
     }
 
