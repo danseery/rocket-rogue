@@ -235,6 +235,7 @@ private:
     bool swapchainCaptureSupported_ = false;
     bool frameCaptureRequested_ = false;
     bool frameCaptureRecorded_ = false;
+    bool sceneSafetyWarningActive_ = false;
     bool initialized_ = false;
 };
 

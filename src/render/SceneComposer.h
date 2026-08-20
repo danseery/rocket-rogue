@@ -170,6 +170,7 @@ private:
     std::uint32_t miningBackdropFogInstanceCount_ = 0;
     std::uint32_t miningBaseTerrainInstanceCount_ = 0;
     std::uint64_t miningTerrainRevision_ = 0;
+    std::size_t droppedFrameInstances_ = 0;
     bool miningTerrainCacheValid_ = false;
     bool miningTerrainStreamUsed_ = false;
     std::vector<int> currentMiningMaterials_;

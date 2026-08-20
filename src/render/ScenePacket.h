@@ -433,6 +433,12 @@ struct ScenePacket {
     UiRect logicalSceneClip;
     Color clearColor {0.02F, 0.03F, 0.05F, 1.0F};
     std::uint64_t miningTerrainRevision = 0;
+    // Safety telemetry for malformed presentation inputs. Backends can surface
+    // this once without allowing one damaged frame to allocate unbounded data.
+    std::size_t droppedFrameInstances = 0;
+    int surfacePushRawSteps = 0;
+    int surfacePushRawMaxSteps = 1;
+    bool surfacePushInputClamped = false;
 };
 
 constexpr std::size_t textureIndex(TextureId id) noexcept

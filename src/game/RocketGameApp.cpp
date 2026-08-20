@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -28,6 +29,11 @@ namespace rocket {
 namespace {
 
 constexpr double asteroidImpactFeedbackDuration = 0.32;
+// The renderer displays at most this many scan/push markers. Keep snapshot
+// construction bounded too, so a malformed saved prospect cannot allocate a
+// large transient vector before the renderer reaches its own visual limit.
+constexpr std::size_t kMaxSurfaceProspectMarkers = 14U;
+constexpr std::size_t kMaxSurfacePushRewardMarkers = 10U;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
@@ -331,7 +337,8 @@ void appendProspectMarkers(
     const SurfaceDepthProspect& prospect)
 {
     auto append = [&](MiningCellMaterial material, int count) {
-        for (int i = 0; i < std::max(0, count); ++i) {
+        for (int i = 0; i < std::max(0, count)
+            && markers.size() < kMaxSurfaceProspectMarkers; ++i) {
             markers.push_back(material);
             depthOffsets.push_back(std::max(0, prospect.depthOffset));
         }
@@ -4396,6 +4403,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfaceScanMaterials = scan.temporaryMaterials;
         result.surfaceScanArtifacts = static_cast<int>(scan.temporaryArtifacts.size());
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
+            if (result.surfaceScanPreviewMarkers.size() >= kMaxSurfaceProspectMarkers) {
+                break;
+            }
             appendProspectMarkers(result.surfaceScanPreviewMarkers, result.surfaceScanPreviewDepthOffsets, prospect);
         }
     }
@@ -4409,9 +4419,22 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfacePushCollapseRisk = push.collapseRisk;
         result.surfacePushMaterials = push.temporaryMaterials;
         result.surfacePushArtifacts = static_cast<int>(push.temporaryArtifacts.size());
-        result.surfacePushRewardMarkers = push.rewardMarkers;
-        result.surfacePushRewardDepthOffsets = push.rewardMarkerDepthOffsets;
+        const std::size_t visibleRewardCount = std::min(
+            push.rewardMarkers.size(),
+            kMaxSurfacePushRewardMarkers);
+        result.surfacePushRewardMarkers.assign(
+            push.rewardMarkers.begin(),
+            push.rewardMarkers.begin() + static_cast<std::ptrdiff_t>(visibleRewardCount));
+        const std::size_t visibleRewardOffsetCount = std::min(
+            push.rewardMarkerDepthOffsets.size(),
+            visibleRewardCount);
+        result.surfacePushRewardDepthOffsets.assign(
+            push.rewardMarkerDepthOffsets.begin(),
+            push.rewardMarkerDepthOffsets.begin() + static_cast<std::ptrdiff_t>(visibleRewardOffsetCount));
         for (const SurfaceDepthProspect& prospect : state_.run.surfaceExpedition.depthProspects) {
+            if (result.surfacePushForecastMarkers.size() >= kMaxSurfaceProspectMarkers) {
+                break;
+            }
             appendProspectMarkers(result.surfacePushForecastMarkers, result.surfacePushForecastDepthOffsets, prospect);
         }
     }

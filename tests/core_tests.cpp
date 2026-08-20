@@ -11566,9 +11566,12 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
     Random pushRng(0xA119);
     require(startSurfacePushRun(push, pushRng).applied,
         "first-wave template test should create an active Surface Push");
+    const PanelDocumentPresentation pushPresentation = presentationFor(push, 0xA119);
     require(
-        presentationFor(push, 0xA119).metadata.interaction == PanelInteractionMode::Realtime,
-        "an active Surface Push should own its realtime step shortcut");
+        pushPresentation.templateKind == PanelTemplateKind::SurfaceMinigame
+            && pushPresentation.metadata.surface == PanelSurfaceKind::SurfacePush
+            && pushPresentation.metadata.interaction == PanelInteractionMode::Realtime,
+        "Surface Push should select the shared Surface Minigame template and own its realtime step shortcut");
     push.run.surfacePush.busted = true;
     require(
         presentationFor(push, 0xA119).metadata.interaction == PanelInteractionMode::Standard,
@@ -11626,6 +11629,7 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
         hangarPresentation.metadata.legacyContentOwnsLaneGeometry
             && flybyPresentation.metadata.legacyContentOwnsLaneGeometry
             && scanPresentation.metadata.legacyContentOwnsLaneGeometry
+            && pushPresentation.metadata.legacyContentOwnsLaneGeometry
             && miningPresentation.metadata.legacyContentOwnsLaneGeometry
             && briefingPresentation.metadata.legacyContentOwnsLaneGeometry
             && resultsPresentation.metadata.legacyContentOwnsLaneGeometry,

@@ -63,6 +63,18 @@ struct SceneComposerTestAccess {
         return composer.packet_;
     }
 
+    static ScenePacket surfacePushPacketWithAspect(
+        SceneComposer& composer,
+        const RenderSnapshot& snapshot,
+        float aspect)
+    {
+        composer.beginFrame(snapshot);
+        composer.sceneAspect_ = aspect;
+        composer.drawSurfacePush(snapshot);
+        composer.finalizePacket();
+        return composer.packet_;
+    }
+
     static ScenePacket poiGuidancePacket(
         SceneComposer& composer,
         std::string_view label,
@@ -2125,6 +2137,74 @@ void testPoiGuidanceUsesOneDynamicBouncingArrow()
     assert(hasMarkerColor(0.78F, 0.52F, 1.0F));
 }
 
+void testSurfacePushHostileStepCountsStayBounded()
+{
+    // Gameplay can only produce 0..6 Dig steps. These values model a damaged
+    // native snapshot and must not turn the renderer into an unbounded packet
+    // producer before it can present the next frame.
+    const std::array<std::pair<int, int>, 3> hostileCounts {{
+        {std::numeric_limits<int>::max(), 4},
+        {2, std::numeric_limits<int>::max()},
+        {std::numeric_limits<int>::min(), std::numeric_limits<int>::min()}
+    }};
+
+    for (const auto [steps, maxSteps] : hostileCounts) {
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+
+        // Establish the normal pre-Dig frame first so the hostile positive
+        // step case also exercises the post-action burst path.
+        RenderSnapshot baseline;
+        baseline.screen = rocket::Screen::SurfacePush;
+        baseline.animationTime = 1.0;
+        baseline.surfacePushSteps = 1;
+        baseline.surfacePushMaxSteps = 4;
+        (void)composer.compose(baseline);
+
+        RenderSnapshot hostile = baseline;
+        hostile.animationTime += 1.0 / 60.0;
+        hostile.surfacePushSteps = steps;
+        hostile.surfacePushMaxSteps = maxSteps;
+        const ScenePacket& packet = composer.compose(hostile);
+
+        assertValidDrawRanges(packet);
+        assert(packet.surfacePushInputClamped);
+        assert(packet.surfacePushRawSteps == steps);
+        assert(packet.surfacePushRawMaxSteps == maxSteps);
+        assert(packet.droppedFrameInstances == 0U);
+        assert(packet.instances.size() <= 1024U);
+        assert(packet.vertices.size() <= 4096U);
+    }
+}
+
+void testSurfacePushTerrainGuardBoundsInvalidAspect()
+{
+    const std::array<float, 2> hostileAspects {{
+        1'000'000.0F,
+        std::numeric_limits<float>::infinity()
+    }};
+
+    for (const float aspect : hostileAspects) {
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::SurfacePush;
+        snapshot.surfacePushSteps = 1;
+        snapshot.surfacePushMaxSteps = 4;
+
+        const ScenePacket packet = rocket::SceneComposerTestAccess::surfacePushPacketWithAspect(
+            composer,
+            snapshot,
+            aspect);
+        assertValidDrawRanges(packet);
+        // A 14:1 visual aspect tops out below 27k terrain vertices. This
+        // makes a malformed viewport incapable of requesting the old massive
+        // scratch-vector reserve.
+        assert(packet.vertices.size() <= 27'000U);
+        assert(packet.instances.size() <= 1024U);
+    }
+}
+
 void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
 {
     const auto hasTextureFrame = [](const ScenePacket& packet, TextureId texture, int frame, int frameCount = 1) {
@@ -2283,6 +2363,8 @@ int main()
     testHazardDroneTransitShimmerAndAssistantBeams();
     testMiningTerrainPersistentStreamInvalidation();
     testPoiGuidanceUsesOneDynamicBouncingArrow();
+    testSurfacePushHostileStepCountsStayBounded();
+    testSurfacePushTerrainGuardBoundsInvalidAspect();
     testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;
 }

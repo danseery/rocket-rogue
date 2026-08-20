@@ -4516,6 +4516,7 @@ PanelTemplateKind templateKindForContext(const PanelRenderContext& context)
             ? PanelTemplateKind::LegacyRaw
             : PanelTemplateKind::ControlPanel;
     case Screen::SurfaceScan:
+    case Screen::SurfacePush:
         return PanelTemplateKind::SurfaceMinigame;
     case Screen::Mining:
         return PanelTemplateKind::Mining;
@@ -4533,6 +4534,7 @@ bool legacyContentOwnsLaneGeometry(const PanelRenderContext& context)
     switch (context.state.screen) {
     case Screen::Hangar:
     case Screen::SurfaceScan:
+    case Screen::SurfacePush:
     case Screen::Mining:
     case Screen::StoryBriefing:
     case Screen::Results:
