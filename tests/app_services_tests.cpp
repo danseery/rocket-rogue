@@ -1533,6 +1533,8 @@ int main()
         click(1272, 112);
         assert(pointerAction.empty());
         click(1150, 112);
+        assert(pointerAction.empty());
+        ui.render();
         assert(pointerAction == rocket::ui::actions::backToSurfaceOps);
 
         // A tall desktop viewport used to reinstate the vertical rail. Keep
