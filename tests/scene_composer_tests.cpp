@@ -2165,6 +2165,7 @@ void testSurfacePushHostileStepCountsStayBounded()
         hostile.animationTime += 1.0 / 60.0;
         hostile.surfacePushSteps = steps;
         hostile.surfacePushMaxSteps = maxSteps;
+        hostile.destinationTier = std::numeric_limits<int>::max();
         const ScenePacket& packet = composer.compose(hostile);
 
         assertValidDrawRanges(packet);
@@ -2175,6 +2176,38 @@ void testSurfacePushHostileStepCountsStayBounded()
         assert(packet.instances.size() <= 1024U);
         assert(packet.vertices.size() <= 4096U);
     }
+}
+
+void testSurfacePushSecondDigFrameCompletes()
+{
+    // GCC Release previously optimized the reached/pending rung color branch
+    // into a loop that repeated rung 2 forever. Reproduce the exact Deck state
+    // transition so this test times out instead of silently regressing.
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+
+    RenderSnapshot push;
+    push.screen = rocket::Screen::SurfacePush;
+    push.destinationTier = 1;
+    push.animationTime = 2.0;
+    push.surfacePushSteps = 1;
+    push.surfacePushMaxSteps = 4;
+    push.surfacePushMaterials = {1, 1, 0};
+    (void)composer.compose(push);
+
+    push.animationTime = 2.29953163;
+    push.surfacePushSteps = 2;
+    push.surfacePushMaterials = {1, 2, 0};
+    push.surfacePushArtifacts = 1;
+    const ScenePacket& secondDig = composer.compose(push);
+
+    assertValidDrawRanges(secondDig);
+    assert(!secondDig.surfacePushInputClamped);
+    assert(secondDig.surfacePushRawSteps == 2);
+    assert(secondDig.surfacePushRawMaxSteps == 4);
+    assert(secondDig.droppedFrameInstances == 0U);
+    assert(secondDig.instances.size() <= 1024U);
+    assert(secondDig.vertices.size() <= 27'000U);
 }
 
 void testSurfacePushTerrainGuardBoundsInvalidAspect()
@@ -2364,6 +2397,7 @@ int main()
     testMiningTerrainPersistentStreamInvalidation();
     testPoiGuidanceUsesOneDynamicBouncingArrow();
     testSurfacePushHostileStepCountsStayBounded();
+    testSurfacePushSecondDigFrameCompletes();
     testSurfacePushTerrainGuardBoundsInvalidAspect();
     testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;

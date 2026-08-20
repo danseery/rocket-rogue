@@ -7,7 +7,9 @@
 #include "core/Tuning.h"
 #include "render/SceneAtlas.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <utility>
@@ -283,7 +285,9 @@ int destinationBodyAsset(int destinationTier)
             OuterPlanet08Asset,
             OuterPlanet09Asset
         };
-        const std::size_t assetIndex = static_cast<std::size_t>((destinationTier * 5 + 1) % static_cast<int>(outerPlanetAssets.size()));
+        const std::size_t assetIndex = (
+            static_cast<std::uint32_t>(destinationTier) * 5U + 1U)
+            % outerPlanetAssets.size();
         return outerPlanetAssets[assetIndex];
     }
     return -1;
@@ -635,7 +639,13 @@ Color miningArtifactColor(int kind, int state)
 
 float miningCellNoise(int x, int y, int salt)
 {
-    unsigned int n = static_cast<unsigned int>(x * 374761393 + y * 668265263 + salt * 2246822519U);
+    // This hash intentionally wraps at 32 bits. Keep every operation unsigned:
+    // signed overflow here is undefined in native C++, while Wasm's integer
+    // arithmetic happened to provide the intended wrapping behavior. Explicit
+    // wrapping keeps both renderer builds deterministic and optimizer-safe.
+    std::uint32_t n = static_cast<std::uint32_t>(x) * 374761393U
+        + static_cast<std::uint32_t>(y) * 668265263U
+        + static_cast<std::uint32_t>(salt) * 2246822519U;
     n = (n ^ (n >> 13U)) * 1274126177U;
     return static_cast<float>((n ^ (n >> 16U)) & 1023U) / 1023.0F;
 }
@@ -4155,6 +4165,9 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     const float time = static_cast<float>(snapshot.animationTime);
     const int safeSteps = boundedSurfacePushMaxSteps(snapshot.surfacePushMaxSteps);
     const int displayedSteps = boundedSurfacePushSteps(snapshot.surfacePushSteps, safeSteps);
+    // The destination catalog uses tiers 0..8. Bound renderer-only seed math
+    // before multiplication so a damaged snapshot cannot reintroduce UB.
+    const int visualTier = std::clamp(snapshot.destinationTier, 0, 8);
     packet_.surfacePushRawSteps = snapshot.surfacePushSteps;
     packet_.surfacePushRawMaxSteps = snapshot.surfacePushMaxSteps;
     packet_.surfacePushInputClamped = snapshot.surfacePushSteps != displayedSteps
@@ -4174,28 +4187,28 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     const auto planetPalette = [&](float depth, float variation) {
         Color surface {0.30F, 0.31F, 0.32F, 1.0F};
         Color deep {0.12F, 0.13F, 0.15F, 1.0F};
-        if (snapshot.destinationTier == 0) {
+        if (visualTier == 0) {
             surface = {0.30F, 0.35F, 0.19F, 1.0F};
             deep = {0.14F, 0.18F, 0.10F, 1.0F};
-        } else if (snapshot.destinationTier == 1) {
+        } else if (visualTier == 1) {
             surface = {0.42F, 0.43F, 0.45F, 1.0F};
             deep = {0.14F, 0.15F, 0.18F, 1.0F};
-        } else if (snapshot.destinationTier == 2) {
+        } else if (visualTier == 2) {
             surface = {0.53F, 0.25F, 0.13F, 1.0F};
             deep = {0.20F, 0.075F, 0.045F, 1.0F};
-        } else if (snapshot.destinationTier == 3) {
+        } else if (visualTier == 3) {
             surface = {0.50F, 0.38F, 0.22F, 1.0F};
             deep = {0.20F, 0.13F, 0.075F, 1.0F};
-        } else if (snapshot.destinationTier == 4) {
+        } else if (visualTier == 4) {
             surface = {0.56F, 0.41F, 0.18F, 1.0F};
             deep = {0.21F, 0.14F, 0.055F, 1.0F};
-        } else if (snapshot.destinationTier == 5) {
+        } else if (visualTier == 5) {
             surface = {0.20F, 0.48F, 0.48F, 1.0F};
             deep = {0.065F, 0.20F, 0.24F, 1.0F};
-        } else if (snapshot.destinationTier == 6) {
+        } else if (visualTier == 6) {
             surface = {0.14F, 0.34F, 0.62F, 1.0F};
             deep = {0.035F, 0.12F, 0.28F, 1.0F};
-        } else if (snapshot.destinationTier >= 7) {
+        } else if (visualTier >= 7) {
             surface = {0.42F, 0.22F, 0.49F, 1.0F};
             deep = {0.13F, 0.055F, 0.20F, 1.0F};
         }
@@ -4229,9 +4242,9 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         const float depth = std::clamp((shaftTop - y) / (shaftTop - shaftBottom), 0.0F, 1.0F);
         for (int column = 0; column < terrainColumns; ++column) {
             const float x = -surfaceAspect - 0.06F + (static_cast<float>(column) + 0.5F) * tileWidth;
-            const float noise = miningCellNoise(column, row + snapshot.destinationTier * 17, 211);
+            const float noise = miningCellNoise(column, row + visualTier * 17, 211);
             Color tile = planetPalette(depth, noise);
-            if ((row + column * 3 + snapshot.destinationTier) % 13 == 0) {
+            if ((row + column * 3 + visualTier) % 13 == 0) {
                 tile = mix(tile, {0.82F, 0.58F, 0.20F, 1.0F}, 0.14F);
             }
             appendRect(terrain, x, y, tileWidth * 0.94F, tileHeight * 0.92F, tile);
@@ -4241,7 +4254,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
 
     for (int band = 0; band < 5; ++band) {
         const float bandY = shaftTop - 0.19F - static_cast<float>(band) * 0.31F;
-        const float wave = std::sin(static_cast<float>(band) * 1.73F + static_cast<float>(snapshot.destinationTier)) * 0.035F;
+        const float wave = std::sin(static_cast<float>(band) * 1.73F + static_cast<float>(visualTier)) * 0.035F;
         drawLine(
             -surfaceAspect, bandY,
             surfaceAspect, bandY + wave,
@@ -4270,7 +4283,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         {0.003F, 0.006F, 0.008F, 0.98F});
     const int notchCount = displayedSteps * 3 + 2;
     for (int notch = 0; notch < notchCount; ++notch) {
-        const float seed = miningCellNoise(notch, snapshot.destinationTier * 9, 227);
+        const float seed = miningCellNoise(notch, visualTier * 9, 227);
         const float notchProgress = std::clamp(
             (static_cast<float>(notch) + 0.65F) /
                 static_cast<float>(std::max(2, notchCount)),
@@ -4289,13 +4302,16 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     drawLine(shaftX + shaftHalfWidth, shaftMouthTop, shaftX + shaftHalfWidth, probeY, {0.96F, 0.66F, 0.18F, 0.22F}, 1.4F);
     drawLine(shaftX, shaftMouthTop, shaftX, shaftBottom, {1.0F, 0.72F, 0.20F, 0.64F}, 1.8F);
 
-    for (int i = 0; i <= safeSteps; ++i) {
-        const float t = static_cast<float>(i) / static_cast<float>(safeSteps);
+    constexpr std::array<Color, 2> rungColors {{
+        {1.0F, 0.72F, 0.22F, 0.58F},
+        {0.28F, 0.76F, 0.95F, 0.22F}
+    }};
+    const std::size_t rungCount = static_cast<std::size_t>(safeSteps) + 1U;
+    for (std::size_t rung = 0; rung < rungCount; ++rung) {
+        const float t = static_cast<float>(rung) / static_cast<float>(safeSteps);
         const float y = shaftTop + (shaftBottom - shaftTop) * t;
-        const Color line = i <= displayedSteps
-            ? Color{1.0F, 0.72F, 0.22F, 0.58F}
-            : Color{0.28F, 0.76F, 0.95F, 0.22F};
-        drawLine(shaftX - 0.22F, y, shaftX + 0.22F, y, line, 1.5F);
+        const std::size_t colorIndex = rung <= static_cast<std::size_t>(displayedSteps) ? 0U : 1U;
+        drawLine(shaftX - 0.22F, y, shaftX + 0.22F, y, rungColors[colorIndex], 1.5F);
     }
 
     drawRadialGlow(shaftX, probeY, 0.11F + digBurst * 0.10F, {1.0F, 0.48F, 0.08F, 0.12F + digBurst * 0.15F}, 36);
@@ -4355,7 +4371,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     auto markerPosition = [&](int index, int depthOffset, float lateralScale) {
         const int clampedOffset = std::clamp(depthOffset, 0, safeSteps);
         const float layerT = static_cast<float>(clampedOffset) / static_cast<float>(safeSteps);
-        const float seed = miningCellNoise(index, snapshot.destinationTier + clampedOffset * 7, 151);
+        const float seed = miningCellNoise(index, visualTier + clampedOffset * 7, 151);
         const float y = shaftTop + (shaftBottom - shaftTop) * std::clamp(layerT + std::sin(static_cast<float>(snapshot.animationTime) * 0.18F + seed * kPi) * 0.006F, 0.0F, 1.0F);
         const float side = index % 2 == 0 ? -1.0F : 1.0F;
         const float x = shaftX + side * lateralScale * (0.72F + 0.20F * seed) +
@@ -4429,7 +4445,7 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     Vec2 artifactGuidanceTarget;
     for (std::size_t i = 0; i < pockets.size(); ++i) {
         const int markerIndex = static_cast<int>(i);
-        const float seed = miningCellNoise(markerIndex, displayedSteps + snapshot.destinationTier * 5, 131);
+        const float seed = miningCellNoise(markerIndex, displayedSteps + visualTier * 5, 131);
         const int depthOffset = i < snapshot.surfacePushRewardDepthOffsets.size()
             ? snapshot.surfacePushRewardDepthOffsets[i]
             : std::max(1, displayedSteps);
