@@ -73,6 +73,10 @@ struct UiDiagnostics {
     int hudPatches = 0;
     int compiledGeometry = 0;
     int renderedGeometry = 0;
+    int liveGeometry = 0;
+    int retiredGeometry = 0;
+    std::size_t liveGeometryBytes = 0;
+    std::size_t retiredGeometryBytes = 0;
 };
 
 struct PlatformDiagnostics {

@@ -36,6 +36,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <new>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -1964,7 +1965,10 @@ std::string performanceStatsMarkup(const PerformanceStats& stats)
     out << "<p>UI rebuilds " << stats.ui.documentRebuilds << " doc / "
         << stats.ui.panelRebuilds << " panel | HUD " << stats.ui.hudPatches << " patches</p>";
     out << "<p>UI geometry "
-        << stats.ui.compiledGeometry << " compiled / " << stats.ui.renderedGeometry << " rendered</p>";
+        << stats.ui.compiledGeometry << " compiled / " << stats.ui.renderedGeometry << " rendered | "
+        << stats.ui.liveGeometry << " live / " << stats.ui.retiredGeometry << " retired | "
+        << (static_cast<double>(stats.ui.liveGeometryBytes) / 1024.0) << " KiB live / "
+        << (static_cast<double>(stats.ui.retiredGeometryBytes) / 1024.0) << " KiB retired</p>";
     out << "<p>Textures " << stats.renderer.texturesReady << " ready | "
         << stats.renderer.texturesPending << " pending";
     if (stats.renderer.texturesFailed > 0) {
@@ -2937,6 +2941,8 @@ void GameRmlUi::render()
         return;
     }
 
+    applyPendingModalOpen();
+
     const ViewportMetrics viewport = host_.viewportMetrics();
     const int viewportWidth = viewport.logicalWidth;
     const int viewportHeight = viewport.logicalHeight;
@@ -3051,7 +3057,18 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     if (holdSeconds > 0.0 && rr_rml_now_seconds() - pressedAt + 0.001 < holdSeconds) {
         return true;
     }
-    activateButtonElement(*this, pressedButton);
+    // RmlUi owns the raw mouse-up dispatch stack. Rebuilding a modal host from
+    // inside that stack can leave its native geometry compiler repeatedly
+    // allocating against a tree it is still traversing. Queue modal opens and
+    // apply them at the start of the next render instead.
+    deferModalOpen_ = true;
+    try {
+        activateButtonElement(*this, pressedButton);
+        deferModalOpen_ = false;
+    } catch (...) {
+        deferModalOpen_ = false;
+        throw;
+    }
     return true;
 }
 
@@ -3422,6 +3439,17 @@ void GameRmlUi::requestFocus(std::string_view id)
 
 void GameRmlUi::openModal(const std::string& id)
 {
+    if (deferModalOpen_) {
+        if (initialized_ && !id.empty() && id != openModalId_ && findModal(presentation_.modals, id)) {
+            pendingModalOpenId_ = id;
+        }
+        return;
+    }
+    openModalImmediately(id);
+}
+
+void GameRmlUi::openModalImmediately(const std::string& id)
+{
     if (!initialized_) {
         return;
     }
@@ -3443,6 +3471,30 @@ void GameRmlUi::openModal(const std::string& id)
     focusedId_.clear();
     hasLastFocusCenter_ = false;
     refreshPersistentHosts(false, false, true, true, true, true);
+}
+
+void GameRmlUi::applyPendingModalOpen()
+{
+    if (pendingModalOpenId_.empty()) {
+        return;
+    }
+    std::string modalId = std::move(pendingModalOpenId_);
+    pendingModalOpenId_.clear();
+    try {
+        openModalImmediately(modalId);
+    } catch (const std::bad_alloc&) {
+        const UiDiagnostics diagnostics = renderHost_.diagnostics();
+        const ViewportMetrics viewport = host_.viewportMetrics();
+        host_.log(
+            PlatformLogLevel::Error,
+            "RmlUi modal allocation failed while opening '" + modalId + "' at "
+                + std::to_string(viewport.logicalWidth) + "x" + std::to_string(viewport.logicalHeight)
+                + "; geometry " + std::to_string(diagnostics.liveGeometry) + " live/"
+                + std::to_string(diagnostics.retiredGeometry) + " retired, "
+                + std::to_string(diagnostics.liveGeometryBytes) + " live bytes/"
+                + std::to_string(diagnostics.retiredGeometryBytes) + " retired bytes.");
+        throw;
+    }
 }
 
 void GameRmlUi::closeModal()
@@ -4020,6 +4072,7 @@ void GameRmlUi::shutdown()
     uiDiagnostics_ = {};
     presentation_ = {};
     openModalId_.clear();
+    pendingModalOpenId_.clear();
     renderedModalId_.clear();
     modalStack_.clear();
     modalFocusStack_.clear();

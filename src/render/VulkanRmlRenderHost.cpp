@@ -55,6 +55,7 @@ struct VulkanRmlGeometry {
     VkDeviceSize indexOffset = 0;
     std::uint32_t indexCount = 0;
     std::uint64_t lastUsedSerial = 0;
+    VkDeviceSize bytes = 0;
 };
 
 struct VulkanRmlTexture {
@@ -335,6 +336,7 @@ public:
 
         VkBufferCreateInfo bufferInfo {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         bufferInfo.size = geometry->indexOffset + indexBytes;
+        geometry->bytes = bufferInfo.size;
         bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -376,6 +378,7 @@ public:
 
         VulkanRmlGeometry* handle = geometry.release();
         liveGeometries_.insert(handle);
+        liveGeometryBytes_ += static_cast<std::size_t>(handle->bytes);
         return reinterpret_cast<Rml::CompiledGeometryHandle>(handle);
     }
 
@@ -448,7 +451,11 @@ public:
         if (!geometry) {
             return;
         }
-        liveGeometries_.erase(geometry);
+        if (liveGeometries_.erase(geometry) == 0) {
+            return;
+        }
+        liveGeometryBytes_ -= static_cast<std::size_t>(geometry->bytes);
+        retiredGeometryBytes_ += static_cast<std::size_t>(geometry->bytes);
         retiredGeometries_.push_back({
             geometry,
             std::max(geometry->lastUsedSerial, frameContext_.frameSerial()),
@@ -522,6 +529,10 @@ public:
         UiDiagnostics diagnostics;
         diagnostics.compiledGeometry = compiledGeometryThisFrame_;
         diagnostics.renderedGeometry = renderedGeometryThisFrame_;
+        diagnostics.liveGeometry = static_cast<int>(liveGeometries_.size());
+        diagnostics.retiredGeometry = static_cast<int>(retiredGeometries_.size());
+        diagnostics.liveGeometryBytes = liveGeometryBytes_;
+        diagnostics.retiredGeometryBytes = retiredGeometryBytes_;
         return diagnostics;
     }
 
@@ -1013,6 +1024,7 @@ private:
                     if (retired.retireSerial > completedSerial) {
                         return false;
                     }
+                    retiredGeometryBytes_ -= static_cast<std::size_t>(retired.geometry->bytes);
                     destroyGeometry(retired.geometry);
                     return true;
                 }),
@@ -1146,6 +1158,8 @@ private:
     int compiledGeometryPending_ = 0;
     int compiledGeometryThisFrame_ = 0;
     int renderedGeometryThisFrame_ = 0;
+    std::size_t liveGeometryBytes_ = 0;
+    std::size_t retiredGeometryBytes_ = 0;
     bool initialized_ = false;
     bool frameActive_ = false;
     bool scissorEnabled_ = false;

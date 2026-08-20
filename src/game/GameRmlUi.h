@@ -99,6 +99,8 @@ private:
     bool rebuildPerformanceHost();
     void rebindAndRestoreFocus(bool restoreFocus);
     bool applyPendingFocusIfAvailable();
+    void applyPendingModalOpen();
+    void openModalImmediately(const std::string& id);
 
     IPreferenceStore& preferences_;
     IPlatformHost& host_;
@@ -109,6 +111,7 @@ private:
     PanelDocumentPresentation presentation_;
     std::string externalRcss_;
     std::string openModalId_;
+    std::string pendingModalOpenId_;
     std::string renderedModalId_;
     std::vector<std::string> modalStack_;
     std::vector<std::string> modalFocusStack_;
@@ -126,6 +129,7 @@ private:
     bool controllerResumeBlocked_ = false;
     bool controllerResumeConnected_ = false;
     bool performanceStatsVisible_ = false;
+    bool deferModalOpen_ = false;
     ControllerFamily controllerFamily_ = ControllerFamily::Generic;
     Rml::Element* pressedButton_ = nullptr;
     double pressedButtonAtSeconds_ = 0.0;

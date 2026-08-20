@@ -1264,10 +1264,16 @@ int main()
         ui.setPanelPresentation(
             rocket::buildGamePanelPresentation(digIntroductionContext));
         ui.refresh();
-        ui.mouseDown(digPointerX, digPointerY, 0);
-        ui.mouseUp(digPointerX, digPointerY, 0);
-        assert(ui.modalOpen());
-        ui.closeModal();
+        for (int attempt = 0; attempt < 12; ++attempt) {
+            ui.mouseDown(digPointerX, digPointerY, 0);
+            ui.mouseUp(digPointerX, digPointerY, 0);
+            // Pointer activation queues the modal until RmlUi has left its raw
+            // mouse-up dispatch. This is the native Deck crash regression path.
+            assert(!ui.modalOpen());
+            ui.render();
+            assert(ui.modalOpen());
+            ui.closeModal();
+        }
         ui.shutdown();
     }
 
@@ -1492,6 +1498,7 @@ int main()
         click(1272, 35);
         assert(!ui.modalOpen());
         click(1220, 35);
+        ui.render();
         assert(ui.modalOpen());
         ui.closeModal();
 
