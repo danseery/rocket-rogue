@@ -4299,21 +4299,9 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     }
 
     drawRadialGlow(shaftX, probeY, 0.11F + digBurst * 0.10F, {1.0F, 0.48F, 0.08F, 0.12F + digBurst * 0.15F}, 36);
-    if (digBurst > 0.0F) {
-        const float burstTravel = (1.0F - digBurst) * 0.16F;
-        for (int piece = 0; piece < 16; ++piece) {
-            const float seed = miningCellNoise(piece, displayedSteps + snapshot.destinationTier * 19, 239);
-            const float angle = -0.10F * kPi + (static_cast<float>(piece) / 15.0F) * 1.20F * kPi;
-            const float distance = 0.035F + burstTravel * (0.48F + seed * 0.72F);
-            const float x = shaftX + std::cos(angle) * distance;
-            const float y = probeY - std::abs(std::sin(angle)) * distance * 0.58F + digBurst * 0.025F;
-            const Color debris = planetPalette(progress, seed);
-            drawRect(x, y, 0.010F + seed * 0.013F, 0.009F + seed * 0.010F, {debris.r, debris.g, debris.b, digBurst * 0.90F});
-        }
-        const float ring = 0.05F + (1.0F - digBurst) * 0.15F;
-        drawEllipseLine(shaftX, probeY, ring, ring * 0.58F, {1.0F, 0.68F, 0.18F, digBurst * 0.72F}, 36, 0.0F, 2.0F * kPi);
-        drawLine(shaftX - 0.12F, probeY, shaftX + 0.12F, probeY, {1.0F, 0.86F, 0.38F, digBurst * 0.52F}, 2.2F);
-    }
+    // The post-Dig debris burst is purely decorative. On Steam Deck it can
+    // enter a native-only CPU spin after the first Dig despite bounded game
+    // state, so keep the stable shaft/probe presentation and omit it.
 
     drawRadialGlow(shaftX, probeY, 0.072F, {0.18F, 0.78F, 1.0F, 0.13F}, 28);
     if (textureReady(RocketClosedAsset)) {
