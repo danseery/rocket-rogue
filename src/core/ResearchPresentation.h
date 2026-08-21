@@ -127,7 +127,6 @@ struct MiniDroneCardPresentation {
     std::string upgradeSummary;
     std::vector<PanelMetricPresentation> effectChips;
     PanelButtonPresentation action;
-    PanelButtonPresentation upgradeAction;
 };
 
 struct DroneBuildRecipePresentation {
@@ -453,39 +452,10 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
     addDoubleChip(chips, "Storage", stats.droneStorage);
     addPercentChip(chips, "Haul engines", stats.droneEngineEfficiency);
     addPercentChip(chips, "Towline", stats.artifactTowEfficiency);
+    if (stats.scannerPulseDamage > 0) {
+        chips.push_back(panelMetric("Scan pulse", "+" + std::to_string(stats.scannerPulseDamage) + " damage / rank"));
+    }
     return chips;
-}
-
-inline SurfaceUpgradeCardPresentation surfaceUpgradeCardPresentation(const SurfaceUpgrade& upgrade, int index)
-{
-    return {
-        index,
-        std::string(toString(upgrade.category)),
-        std::string(toString(upgrade.rarity)),
-        upgrade.name,
-        upgrade.description,
-        surfaceUpgradeChips(upgrade.stats),
-        panelActionButton("Choose upgrade", ui::actions::surfaceUpgrade(index), "ok"),
-        false,
-        {},
-        {}
-    };
-}
-
-inline SurfaceUpgradeCardPresentation droneModuleCardPresentation(const DroneModuleDefinition& module, int index)
-{
-    return {
-        index,
-        "Drone module",
-        "Field",
-        module.name,
-        "Grafts onto a " + miniDroneRoleLabel(module.hostRole) + " frame.",
-        {panelMetric("Frame", miniDroneRoleLabel(module.hostRole) + " + " + miniDroneRoleLabel(module.secondaryRole))},
-        panelActionButton("Graft module", ui::actions::surfaceUpgrade(index), "ok"),
-        true,
-        miniDroneRoleLabel(module.hostRole),
-        miniDroneRoleLabel(module.secondaryRole)
-    };
 }
 
 inline MiniDroneStats scaledMiniDroneStats(MiniDroneStats stats, int upgradeLevel)
@@ -513,7 +483,7 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(
 {
     std::vector<PanelMetricPresentation> chips;
     if (upgradeLevel > 1) {
-        chips.push_back(panelMetric("Upgrade", "Mk " + std::to_string(upgradeLevel)));
+        chips.push_back(panelMetric("Upgrade", "Mk " + runUpgradeRankLabel(upgradeLevel)));
     }
     if (role == MiniDroneRole::Defense) {
         chips.push_back(panelMetric(
@@ -577,94 +547,191 @@ inline std::vector<PanelMetricPresentation> miniDroneChips(
     return chips;
 }
 
-inline std::string miniDroneBestUpgradePayoff(const MiniDroneStats& current, const MiniDroneStats& next)
+inline std::vector<PanelMetricPresentation> droneSynergyChips(const DroneSynergyStats& stats)
 {
-    struct Candidate {
-        std::string label;
-        std::string value;
-        double weight = 0.0;
-    };
-    std::vector<Candidate> candidates;
-    auto addRate = [&](std::string label, double before, double after, double scale, std::string suffix, double weightScale) {
-        const double delta = after - before;
-        if (delta > 0.0001) {
-            candidates.push_back({std::move(label), "+" + display::fixed(delta * scale, 1) + suffix, delta * weightScale});
-        }
-    };
-    auto addPercent = [&](std::string label, double before, double after, double weightScale) {
-        const double delta = after - before;
-        if (delta > 0.0001) {
-            candidates.push_back({std::move(label), display::signedPercent(delta), delta * weightScale});
-        }
-    };
-    addRate("auto-mine", current.passiveMiningRate, next.passiveMiningRate, 60.0, "/min", 80.0);
-    addRate("oxygen", current.oxygenSeconds, next.oxygenSeconds, 1.0, "s", 1.0);
-    addRate("scanner", current.scannerRadius, next.scannerRadius, 1.0, " radius", 12.0);
-    addPercent("durability", current.drillIntegrityRelief, next.drillIntegrityRelief, 100.0);
-    addPercent("bounce relief", current.hardRockBounceRelief, next.hardRockBounceRelief, 80.0);
-    addPercent("contact risk", current.enemyEncounterRelief, next.enemyEncounterRelief, 90.0);
-    addRate("shot power", current.sentryDamagePerSecond, next.sentryDamagePerSecond, 1.0, "/s", 18.0);
-    addPercent("shield", current.enemyDamageRelief + current.environmentalShieldRelief, next.enemyDamageRelief + next.environmentalShieldRelief, 120.0);
-    addRate("field pulse", current.areaControlDamagePerSecond, next.areaControlDamagePerSecond, 1.0, "/s", 14.0);
-    addPercent("slow field", current.enemySlow, next.enemySlow, 90.0);
-    addRate("counter-hit", current.reactiveArmorDamagePerSecond, next.reactiveArmorDamagePerSecond, 1.0, "/s", 16.0);
-    if (candidates.empty()) {
-        return "No stat gain";
+    std::vector<PanelMetricPresentation> chips;
+    addPercentChip(chips, "Passive mining", stats.passiveMiningRate);
+    if (stats.oxygenSeconds > 0.0) {
+        chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
     }
-    const auto best = std::max_element(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
-        return lhs.weight < rhs.weight;
-    });
-    return best->label + " " + best->value;
+    addDoubleChip(chips, "Scanner", stats.scannerRadius);
+    addPercentChip(chips, "Damage relief", stats.enemyDamageRelief);
+    if (stats.areaControlDamagePerSecond > 0.0) {
+        chips.push_back(panelMetric("Field pulse", "+" + display::fixed(stats.areaControlDamagePerSecond, 2) + "/s"));
+    }
+    addPercentChip(chips, "Enemy slow", stats.enemySlow);
+    if (stats.reactiveArmorDamagePerSecond > 0.0) {
+        chips.push_back(panelMetric("Counter-hit", "+" + display::fixed(stats.reactiveArmorDamagePerSecond, 2) + "/s"));
+    }
+    addPercentChip(chips, "Hazard shield", stats.environmentalShieldRelief);
+    addPercentChip(chips, "Treatment rate", stats.hazardTreatmentRateBonus);
+    addPercentChip(chips, "Crit chance", stats.alliedCritChanceBonus);
+    addPercentChip(chips, "Fire rate", stats.alliedFireRateBonus);
+    if (stats.sentryVolleyBonus > 0) {
+        chips.push_back(panelMetric("Volley", "+" + std::to_string(stats.sentryVolleyBonus) + " target" + (stats.sentryVolleyBonus == 1 ? "" : "s")));
+    }
+    return chips;
 }
 
-inline std::string miniDroneUpgradeSummary(const MiniDrone& drone, bool owned, int upgradeLevel)
+inline std::vector<PanelMetricPresentation> droneModuleEffectChips(DroneModuleKind kind, int rank)
 {
-    if (!owned) {
-        return "Acquire Support Drone to upgrade";
+    const int safeRank = std::clamp(rank, 1, 3);
+    const double value = secondaryModuleValue(kind, safeRank);
+    switch (kind) {
+    case DroneModuleKind::CombatDrill:
+        return {panelMetric("Drill contact", display::fixed(value, 1) + " damage"), panelMetric("Per target", "0.8s")};
+    case DroneModuleKind::DrillGuard:
+        return {panelMetric("While drilling", display::percent(value) + " damage relief")};
+    case DroneModuleKind::PulseStrike:
+        return {panelMetric("Scan pulse", std::to_string(safeRank) + " damage"), panelMetric("Drone radius", "145%")};
+    case DroneModuleKind::SpectrumFilter:
+        return {panelMetric("After scan", display::percent(value) + " hazard relief")};
+    case DroneModuleKind::OreRelay:
+        return {panelMetric("Haul", "+" + std::to_string(safeRank) + " chunks"), panelMetric("Pickup radius", "+" + display::fixed(0.5 * value, 1))};
+    case DroneModuleKind::TreasurePing:
+        return {panelMetric("Marked ore tiles", std::to_string(safeRank)), panelMetric("Marked deposit", "2x yield"), panelMetric("Scan radius", "+" + display::fixed(1.5 * safeRank, 1))};
+    case DroneModuleKind::ContainmentShell:
+        return {panelMetric("Within 3.5 cells", display::percent(value) + " hazard relief")};
+    case DroneModuleKind::ReclamationLoop:
+        return {panelMetric("Per treatment", "+" + display::fixed(value, 1) + "s O2"), panelMetric("Fuel", "+" + display::fixed(0.05 * value / 0.5, 2))};
+    case DroneModuleKind::TargetedAssault:
+        return {panelMetric("Scanned target", "+" + display::fixed(value, 0) + "% crit")};
+    case DroneModuleKind::PenetratingImpact:
+        return {panelMetric("Armor bypass", display::percent(value)), panelMetric("Half-damage pierce", std::to_string(secondaryModuleSecondaryHits(kind, safeRank)))};
+    case DroneModuleKind::RetributionArc:
+        return {panelMetric("Shield counter", display::fixed(value, 1) + " damage"), panelMetric("Cooldown", "1.2s")};
+    case DroneModuleKind::HazardScreen:
+        return {panelMetric("Charged shield", display::percent(value) + " elemental relief")};
+    case DroneModuleKind::None:
+        break;
     }
-    if (upgradeLevel >= 3) {
-        return "Mk 3 max upgrade";
+    return {};
+}
+
+inline std::string effectChipSummary(const std::vector<PanelMetricPresentation>& chips)
+{
+    if (chips.empty()) {
+        return {};
     }
-    const int nextLevel = upgradeLevel + 1;
-    if (drone.role == MiniDroneRole::Defense) {
-        return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) +
-            ": arc " + display::percent(tuning::mining::defenseDroneShieldHitPoints(upgradeLevel)) +
-            " -> " + display::percent(tuning::mining::defenseDroneShieldHitPoints(nextLevel)) +
-            ", recharge " + display::fixed(tuning::mining::defenseDroneRechargeSeconds(nextLevel), 1) +
-            "s / " + materialSummary(miniDroneUpgradeCost(nextLevel));
+    std::string summary;
+    for (const PanelMetricPresentation& chip : chips) {
+        if (!summary.empty()) {
+            summary += "; ";
+        }
+        summary += chip.label + " " + chip.value;
     }
-    if (drone.role == MiniDroneRole::Hazard) {
-        const std::string unlock = nextLevel == 2 ? "adds Toxic" : "adds Radiation";
-        return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) +
-            ": " + unlock + ", " +
-            display::fixed(tuning::mining::hazardDroneTreatmentSeconds(nextLevel), 2) + "s, " +
-            std::to_string(tuning::mining::hazardDroneBatchSize(nextLevel)) + " tiles, " +
-            display::percent(tuning::mining::hazardDroneRefinementChance(nextLevel)) + " refine / " +
-            materialSummary(miniDroneUpgradeCost(nextLevel));
+    return summary;
+}
+
+inline std::string droneModuleEffectSummary(DroneModuleKind kind, int rank)
+{
+    const std::string summary = effectChipSummary(droneModuleEffectChips(kind, rank));
+    return summary.empty() ? "No field effect." : summary + ".";
+}
+
+inline SurfaceUpgradeCardPresentation runUpgradeOfferCardPresentation(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const RunUpgradeOffer& offer,
+    int index)
+{
+    SurfaceUpgradeCardPresentation card;
+    card.index = index;
+    card.category = std::string(runUpgradeKindLabel(offer.kind));
+    card.rarity = std::string(toString(runUpgradeOfferRarity(state, catalog, offer)));
+
+    switch (offer.kind) {
+    case RunUpgradeKind::Rig:
+        if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(offer.definitionId)) {
+            card.title = upgrade->name + " " + runUpgradeRankLabel(offer.targetRank);
+            card.detail = "Rank " + runUpgradeRankLabel(offer.targetRank) + " adds another full stack this expedition. " + upgrade->description;
+            card.effectChips = surfaceUpgradeChips(upgrade->stats);
+            if (upgrade->stats.scannerPulseDamage > 0) {
+                for (PanelMetricPresentation& chip : card.effectChips) {
+                    if (chip.label == "Scan pulse") {
+                        chip.value = "+" + std::to_string(upgrade->stats.scannerPulseDamage * offer.targetRank) + " damage";
+                    }
+                }
+            }
+            const std::string currentRank = offer.targetRank <= 1
+                ? "Uninstalled"
+                : ("Rank " + runUpgradeRankLabel(offer.targetRank - 1));
+            card.effectChips.insert(card.effectChips.begin(), panelMetric("Progression", currentRank + " -> Rank " + runUpgradeRankLabel(offer.targetRank)));
+            card.action = panelActionButton("UPGRADE RIG TO " + runUpgradeRankLabel(offer.targetRank), ui::actions::surfaceUpgrade(index), "ok");
+        }
+        break;
+    case RunUpgradeKind::DroneRank:
+        if (const MiniDrone* drone = catalog.findMiniDrone(offer.definitionId)) {
+            card.title = drone->name + " MK " + runUpgradeRankLabel(offer.targetRank);
+            card.detail = "All current and future equipped copies gain +30% damage and support stats for this expedition.";
+            card.effectChips = miniDroneChips(scaledMiniDroneStats(drone->stats, offer.targetRank), offer.targetRank, drone->role);
+            card.effectChips.insert(card.effectChips.begin(), panelMetric("Scope", "All " + drone->name + " copies"));
+            card.effectChips.insert(card.effectChips.begin(), panelMetric(
+                "Progression",
+                "Mk " + runUpgradeRankLabel(offer.targetRank - 1) + " -> Mk " + runUpgradeRankLabel(offer.targetRank)));
+            card.action = panelActionButton("UPGRADE TO MK " + runUpgradeRankLabel(offer.targetRank), ui::actions::surfaceUpgrade(index), "ok");
+        }
+        break;
+    case RunUpgradeKind::DroneGraft:
+        if (const DroneModuleDefinition* module = catalog.findDroneModule(offer.definitionId)) {
+            const bool slotValid = offer.slotIndex >= 0 && offer.slotIndex < static_cast<int>(state.meta.equippedDroneIds.size());
+            const MiniDrone* drone = slotValid
+                ? catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(offer.slotIndex)])
+                : nullptr;
+            const int rank = drone == nullptr ? 1 : expeditionDroneRank(state, drone->id);
+            card.title = "SLOT " + std::to_string(offer.slotIndex + 1) + " / " +
+                (drone == nullptr ? std::string("EMPTY") : drone->name) + " / " + module->name;
+            card.detail = miniDroneRoleLabel(module->hostRole) + " + " + miniDroneRoleLabel(module->secondaryRole) +
+                ". One graft occupies this slot for the expedition.";
+            card.effectChips = droneModuleEffectChips(module->kind, rank);
+            card.effectChips.insert(card.effectChips.begin(), panelMetric("Frame", miniDroneRoleLabel(module->hostRole) + " -> " + miniDroneRoleLabel(module->secondaryRole)));
+            card.action = panelActionButton("INSTALL ON SLOT " + std::to_string(offer.slotIndex + 1), ui::actions::surfaceUpgrade(index), "ok");
+            card.droneModule = true;
+            card.hostRole = miniDroneRoleLabel(module->hostRole);
+            card.secondaryRole = miniDroneRoleLabel(module->secondaryRole);
+        }
+        break;
+    case RunUpgradeKind::Synergy:
+        if (const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(offer.definitionId)) {
+            card.title = synergy->name;
+            card.detail = synergy->description;
+            card.effectChips = droneSynergyChips(synergy->stats);
+            std::string roles;
+            for (MiniDroneRole role : synergy->requiredRoles) {
+                if (!roles.empty()) {
+                    roles += " + ";
+                }
+                roles += miniDroneRoleLabel(role);
+            }
+            card.effectChips.insert(card.effectChips.begin(), panelMetric("Required roles", roles));
+            card.action = panelActionButton("ACTIVATE SYNERGY", ui::actions::surfaceUpgrade(index), "ok");
+        }
+        break;
     }
-    const MiniDroneStats currentStats = scaledMiniDroneStats(drone.stats, upgradeLevel);
-    const MiniDroneStats nextStats = scaledMiniDroneStats(drone.stats, nextLevel);
-    return "Mk " + std::to_string(upgradeLevel) + " -> Mk " + std::to_string(nextLevel) + ": " +
-        miniDroneBestUpgradePayoff(currentStats, nextStats) + " / " + materialSummary(miniDroneUpgradeCost(nextLevel));
+    const std::string effectSummary = effectChipSummary(card.effectChips);
+    if (!effectSummary.empty()) {
+        card.detail += " EFFECTS // " + effectSummary + ".";
+    }
+    return card;
 }
 
 inline std::string miniDroneBuildHook(MiniDroneRole role)
 {
     switch (role) {
     case MiniDroneRole::Mining:
-        return "Pairs with Attack for Excavation Barrage, Resource for Long Haul Rig, and Survey for Relic Pathfinder.";
+        return "Can qualify future Level Up offers for Excavation Barrage, Long Haul Rig, and Relic Pathfinder.";
     case MiniDroneRole::Resource:
-        return "Pairs with Mining for Long Haul Rig, Survey for Pathfinder Loop, and Defense/Hazard for Containment Rig.";
+        return "Can qualify future Level Up offers for Long Haul Rig, Pathfinder Loop, and Containment Rig.";
     case MiniDroneRole::Survey:
-        return "Pairs with Attack for Targeting Grid and helps unlock Sentry Killbox or Relic Pathfinder signatures.";
+        return "Can qualify future Level Up offers for Targeting Grid, Sentry Killbox, or Relic Pathfinder.";
     case MiniDroneRole::Hazard:
-        return "Pairs with Defense for Containment Screen and anchors the Containment Rig endurance signature.";
+        return "Can qualify future Level Up offers for Containment Screen and Containment Rig.";
     case MiniDroneRole::Attack:
-        return "Pairs with Survey for crits, Defense for volleys, and Mining for area-control excavation.";
+        return "Can qualify future Level Up offers for targeting, volley, and excavation synergies.";
     case MiniDroneRole::Defense:
-        return "Pairs with Attack for Killbox Screen and Hazard/Resource for containment-heavy endurance builds.";
+        return "Can qualify future Level Up offers for Killbox Screen and containment synergies.";
     }
-    return "Equip complementary roles to unlock named Support Drone synergies.";
+    return "Equip complementary roles, then choose a named synergy when it appears at Level Up.";
 }
 
 inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& drone, const GameState& state, int index)
@@ -675,21 +742,17 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
     const int equippedCount = equippedMiniDroneCount(state, drone.id);
     const bool hasFreeSlot = state.meta.equippedDroneIds.size() < static_cast<std::size_t>(std::max(0, state.meta.droneBaySlots));
     const MaterialInventory additionalUnitCost = miniDroneAdditionalUnitCost(drone);
-    const int upgradeLevel = owned ? miniDroneUpgradeLevel(state, drone.id) : 1;
-    const MaterialInventory nextUpgradeCost = miniDroneUpgradeCost(upgradeLevel + 1);
-    const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
-    const bool coordinationRequired = combatDrone && !hasUnlock(state.meta, content::unlock::perimeterCoordination);
+    const int upgradeLevel = owned ? expeditionDroneRank(state, drone.id) : 1;
     PanelButtonPresentation action = disabledPanelButton(unlocked ? "Slot full" : "Locked");
     std::string status = unlocked
         ? (equippedCount > 0
             ? "Assigned " + std::to_string(equippedCount) + "/" + std::to_string(ownedCount)
             : (owned ? "Ready " + std::to_string(ownedCount) : "Not owned"))
         : "Locked";
-    PanelButtonPresentation upgradeAction = disabledPanelButton(unlocked ? "Locked" : "Locked");
-    std::string upgradeSummary = miniDroneUpgradeSummary(drone, owned, upgradeLevel);
-    if (owned && unlocked && upgradeLevel < 3 && coordinationRequired) {
-        upgradeSummary = "Mk " + std::to_string(upgradeLevel) + " tuning locked: complete Perimeter Drone Network research";
-    }
+    std::string upgradeSummary = !owned
+        ? "Fabricate this Support Drone to make its run-rank cards eligible."
+        : ("Expedition Mk " + runUpgradeRankLabel(upgradeLevel) +
+            (upgradeLevel >= 3 ? " / maximum" : " / higher ranks appear at Level Up"));
     if (unlocked) {
         if (!hasFreeSlot) {
             action = disabledPanelButton("Slot full");
@@ -702,15 +765,6 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
             action = disabledPanelButton("Need " + materialSummary(additionalUnitCost));
             status += " / Build " + materialSummary(additionalUnitCost);
         }
-        upgradeAction = !owned
-            ? disabledPanelButton("Fabricate first")
-            : (upgradeLevel >= 3
-            ? disabledPanelButton("Mk III")
-            : (coordinationRequired
-                ? disabledPanelButton("Need research")
-                : (canAffordMaterials(state.meta.materials, nextUpgradeCost)
-                ? panelActionButton("Upgrade", ui::actions::upgradeDrone(index), "ok")
-                : disabledPanelButton("Need mats"))));
     }
     return {
         index,
@@ -722,8 +776,7 @@ inline MiniDroneCardPresentation miniDroneCardPresentation(const MiniDrone& dron
         miniDroneBuildHook(drone.role),
         std::move(upgradeSummary),
         miniDroneChips(scaledMiniDroneStats(drone.stats, upgradeLevel), upgradeLevel, drone.role),
-        std::move(action),
-        std::move(upgradeAction)
+        std::move(action)
     };
 }
 
@@ -813,7 +866,7 @@ inline std::string droneBuildDetail(const MiniDroneLoadoutEffects& effects)
     if (!effects.synergyNames.empty()) {
         return "Active synergies change how the Mining Rig survives while you mine: " + miniDroneSynergySummary(effects) + ".";
     }
-    return "This loadout has useful solo Support Drone effects. Add complementary roles to unlock named synergies.";
+    return "This loadout has useful solo Support Drone effects. Add complementary roles to make named synergy cards eligible at Level Up.";
 }
 
 inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniDroneLoadoutEffects& effects)
@@ -849,8 +902,8 @@ inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniD
 
 inline int tunedDroneCount(const GameState& state)
 {
-    return static_cast<int>(std::count_if(state.meta.droneUpgrades.begin(), state.meta.droneUpgrades.end(), [](const DroneUpgradeRecord& record) {
-        return record.level > 1;
+    return static_cast<int>(std::count_if(state.run.surfaceExpedition.runDroneRanks.begin(), state.run.surfaceExpedition.runDroneRanks.end(), [](const RunDroneRank& record) {
+        return record.rank > 1;
     }));
 }
 
@@ -912,38 +965,75 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
         add(materials.exotic, "E");
         return summary.empty() ? "Free" : summary;
     };
+    auto graftForSlot = [&](int slot) -> const DroneFrameModuleAssignment* {
+        const auto found = std::find_if(
+            state.run.surfaceExpedition.droneModuleAssignments.begin(),
+            state.run.surfaceExpedition.droneModuleAssignments.end(),
+            [&](const DroneFrameModuleAssignment& assignment) { return assignment.equippedFrame == slot; });
+        return found == state.run.surfaceExpedition.droneModuleAssignments.end() ? nullptr : &*found;
+    };
+    auto graftDefinition = [&](const DroneFrameModuleAssignment* assignment) -> const DroneModuleDefinition* {
+        if (assignment == nullptr) {
+            return nullptr;
+        }
+        const auto found = std::find_if(
+            catalog.droneModules.begin(),
+            catalog.droneModules.end(),
+            [&](const DroneModuleDefinition& module) { return module.kind == assignment->module; });
+        return found == catalog.droneModules.end() ? nullptr : &*found;
+    };
     for (int index = 0; index < maxSlots; ++index) {
         const int slotNumber = index + 1;
         if (index < unlockedSlots) {
             const bool equipped = index < static_cast<int>(state.meta.equippedDroneIds.size());
             const MiniDrone* drone = equipped ? catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(index)]) : nullptr;
+            const DroneFrameModuleAssignment* graft = graftForSlot(index);
+            const DroneModuleDefinition* module = graftDefinition(graft);
             if (drone != nullptr) {
-                const int upgradeLevel = miniDroneUpgradeLevel(state, drone->id);
+                const int upgradeLevel = expeditionDroneRank(state, drone->id);
+                const bool graftActive = module != nullptr && drone->role == module->hostRole;
+                std::string detail = "Expedition Mk " + runUpgradeRankLabel(upgradeLevel) + " " +
+                    miniDroneRoleLabel(drone->role) + " support is active in the next mining run.";
+                std::vector<PanelMetricPresentation> chips {
+                    panelMetric("Slot", std::to_string(slotNumber)),
+                    panelMetric("Run Mk", runUpgradeRankLabel(upgradeLevel))
+                };
+                if (module != nullptr) {
+                    detail += " Graft: " + module->name + " — " + (graftActive ? "Active. " : "Dormant. ") +
+                        droneModuleEffectSummary(module->kind, upgradeLevel);
+                    chips.push_back(panelMetric("Graft", module->name));
+                    chips.push_back(panelMetric("Graft state", graftActive ? "Active" : "Dormant"));
+                }
                 slots.push_back({
                     slotNumber,
                     drone->name,
                     miniDroneRoleLabel(drone->role),
-                    "Equipped",
-                    "Mk " + std::to_string(upgradeLevel) + " " + miniDroneRoleLabel(drone->role) + " support is active in the next mining run.",
-                    "filled " + miniDroneRoleClass(drone->role),
-                    {
-                        panelMetric("Slot", std::to_string(slotNumber)),
-                        panelMetric("Mk", std::to_string(upgradeLevel))
-                    },
+                    module == nullptr ? "Equipped" : (graftActive ? "Equipped / Graft active" : "Equipped / Graft dormant"),
+                    std::move(detail),
+                    "filled " + miniDroneRoleClass(drone->role) + (module == nullptr ? "" : (graftActive ? " graft-active" : " graft-dormant")),
+                    std::move(chips),
                     panelActionButton("Unequip", ui::actions::unequipDroneSlot(index), "warn")
                 });
             } else {
+                std::string detail = "Equip a Support Drone from the roster to add another passive ability to the build.";
+                std::vector<PanelMetricPresentation> chips {
+                    panelMetric("Slot", std::to_string(slotNumber)),
+                    panelMetric("State", "Open")
+                };
+                if (module != nullptr) {
+                    detail += " Installed graft: " + module->name + " — Dormant until a compatible " +
+                        miniDroneRoleLabel(module->hostRole) + " Drone occupies this slot.";
+                    chips.push_back(panelMetric("Graft", module->name));
+                    chips.push_back(panelMetric("Graft state", "Dormant"));
+                }
                 slots.push_back({
                     slotNumber,
                     "Open slot",
                     "Empty",
-                    "Ready",
-                    "Equip a Support Drone from the roster to add another passive ability to the build.",
-                    "open",
-                    {
-                        panelMetric("Slot", std::to_string(slotNumber)),
-                        panelMetric("State", "Open")
-                    },
+                    module == nullptr ? "Ready" : "Graft dormant",
+                    std::move(detail),
+                    module == nullptr ? "open" : "open graft-dormant",
+                    std::move(chips),
                     {}
                 });
             }
@@ -1015,19 +1105,57 @@ inline DroneBuildRecipePresentation droneBuildRecipe(
 
 inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameState& state, const ContentCatalog& catalog)
 {
-    return {
-        droneBuildRecipe(state, catalog, "Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Crit chance, fire rate, and scanner paint for priority targets.", false),
-        droneBuildRecipe(state, catalog, "Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Extra sentry target plus shield and retaliatory damage.", false),
-        droneBuildRecipe(state, catalog, "Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Mining output and area-control pressure in the work zone.", false),
-        droneBuildRecipe(state, catalog, "Containment Screen", {MiniDroneRole::Defense, MiniDroneRole::Hazard}, "Faster hazard treatment backed by stronger environmental shielding.", false),
-        droneBuildRecipe(state, catalog, "Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "More passive excavation, oxygen, and safer extraction.", false),
-        droneBuildRecipe(state, catalog, "Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scanner reach and extraction safety for artifact routes.", false),
-        droneBuildRecipe(state, catalog, "Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Signature: faster volleys, better crits, and tougher shields.", true),
-        droneBuildRecipe(state, catalog, "Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "Signature: ore flow stays high while combat pulses slow enemies.", true),
-        droneBuildRecipe(state, catalog, "Containment Rig", {MiniDroneRole::Defense, MiniDroneRole::Hazard, MiniDroneRole::Resource}, "Signature: fast remediation with shields, reserve time, and counter-hits.", true),
-        droneBuildRecipe(state, catalog, "Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "Signature: artifact routing with wider scans and safer extraction.", true),
-        droneBuildRecipe(state, catalog, "Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Hazard}, "Capstone: every role online for volleys, scans, remediation, shields, logistics, and mining.", true)
-    };
+    std::vector<DroneBuildRecipePresentation> recipes;
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+
+    for (const DroneFrameModuleAssignment& assignment : expedition.droneModuleAssignments) {
+        const auto module = std::find_if(
+            catalog.droneModules.begin(),
+            catalog.droneModules.end(),
+            [&](const DroneModuleDefinition& candidate) { return candidate.kind == assignment.module; });
+        if (module == catalog.droneModules.end()) {
+            continue;
+        }
+        const bool slotValid = assignment.equippedFrame >= 0 &&
+            assignment.equippedFrame < static_cast<int>(state.meta.equippedDroneIds.size());
+        const MiniDrone* drone = slotValid
+            ? catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(assignment.equippedFrame)])
+            : nullptr;
+        const bool active = drone != nullptr && drone->role == module->hostRole;
+        const int rank = drone == nullptr ? 1 : expeditionDroneRank(state, drone->id);
+        recipes.push_back({
+            "Slot " + std::to_string(assignment.equippedFrame + 1) + " / " + module->name,
+            miniDroneRoleLabel(module->hostRole) + " -> " + miniDroneRoleLabel(module->secondaryRole),
+            droneModuleEffectSummary(module->kind, rank),
+            active
+                ? "Active"
+                : ("Dormant / needs " + miniDroneRoleLabel(module->hostRole) + " in slot " + std::to_string(assignment.equippedFrame + 1)),
+            active,
+            false
+        });
+    }
+
+    for (const std::string& synergyId : expedition.selectedSynergyIds) {
+        const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
+        if (synergy == nullptr) {
+            continue;
+        }
+        DroneBuildRecipePresentation recipe = droneBuildRecipe(
+            state,
+            catalog,
+            synergy->name,
+            synergy->requiredRoles,
+            synergy->description,
+            synergy->signatureKind != MiniDroneSignatureKind::None);
+        if (!hasUnlock(state.meta, synergy->requiredUnlock)) {
+            recipe.active = false;
+            recipe.status = "Dormant / research locked";
+        } else if (!recipe.active) {
+            recipe.status = "Dormant / " + recipe.status;
+        }
+        recipes.push_back(std::move(recipe));
+    }
+    return recipes;
 }
 
 struct DroneBuildGuidancePresentation {
@@ -1094,7 +1222,7 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
     auto equippedDroneWithRole = [&](MiniDroneRole role) -> const MiniDrone* {
         for (const std::string& droneId : state.meta.equippedDroneIds) {
             const MiniDrone* drone = catalog.findMiniDrone(droneId);
-            if (drone != nullptr && drone->role == role && miniDroneUpgradeLevel(state, drone->id) < 3) {
+            if (drone != nullptr && drone->role == role && expeditionDroneRank(state, drone->id) < 3) {
                 return drone;
             }
         }
@@ -1123,13 +1251,13 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
 
     for (MiniDroneRole role : priorities) {
         if (const MiniDrone* drone = equippedDroneWithRole(role)) {
-            return shortDroneName(*drone) + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+            return shortDroneName(*drone) + " Mk " + runUpgradeRankLabel(expeditionDroneRank(state, drone->id) + 1);
         }
     }
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
-        if (drone != nullptr && miniDroneUpgradeLevel(state, drone->id) < 3) {
-            return shortDroneName(*drone) + " Mk " + std::to_string(miniDroneUpgradeLevel(state, drone->id) + 1);
+        if (drone != nullptr && expeditionDroneRank(state, drone->id) < 3) {
+            return shortDroneName(*drone) + " Mk " + runUpgradeRankLabel(expeditionDroneRank(state, drone->id) + 1);
         }
     }
     return state.meta.equippedDroneIds.empty() ? "Equip first" : "All Mk III";
@@ -1137,75 +1265,42 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
 
 inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
 {
-    struct Candidate {
-        std::string title;
-        std::vector<MiniDroneRole> roles;
-        std::string detail;
-        bool signature = false;
-    };
-    const std::vector<Candidate> candidates {
-        {"Targeting Grid", {MiniDroneRole::Attack, MiniDroneRole::Survey}, "Add scanner paint to raise crit chance and Support Drone fire rate.", false},
-        {"Killbox Screen", {MiniDroneRole::Attack, MiniDroneRole::Defense}, "Pair cover fire with shields so close threats trigger counter-hits.", false},
-        {"Excavation Barrage", {MiniDroneRole::Attack, MiniDroneRole::Mining}, "Turn ore tempo into area-control pressure around the work zone.", false},
-        {"Containment Screen", {MiniDroneRole::Defense, MiniDroneRole::Hazard}, "Pair remediation with environmental shielding for safer long digs.", false},
-        {"Long Haul Rig", {MiniDroneRole::Mining, MiniDroneRole::Resource}, "Keep ore and oxygen flowing for deeper mining routes.", false},
-        {"Pathfinder Loop", {MiniDroneRole::Resource, MiniDroneRole::Survey}, "Scout artifact paths and reduce extraction pressure.", false},
-        {"Sentry Killbox", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey}, "Next logical combat signature: volleys, crits, and shield relief.", true},
-        {"Excavation Storm", {MiniDroneRole::Attack, MiniDroneRole::Mining, MiniDroneRole::Resource}, "A greedier mining signature that keeps damage pulsing while ore flows.", true},
-        {"Containment Rig", {MiniDroneRole::Defense, MiniDroneRole::Hazard, MiniDroneRole::Resource}, "The remediation and endurance signature for hazardous long digs.", true},
-        {"Relic Pathfinder", {MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Survey}, "The artifact-routing signature for safer, wider recovery lines.", true},
-        {"Full Spectrum Swarm", {MiniDroneRole::Attack, MiniDroneRole::Defense, MiniDroneRole::Survey, MiniDroneRole::Mining, MiniDroneRole::Resource, MiniDroneRole::Hazard}, "Capstone build: every role online for combat, logistics, scans, remediation, and mining.", true}
-    };
-
-    const Candidate* best = nullptr;
-    std::vector<MiniDroneRole> bestMissing;
-    int bestMissingCount = 99;
-    for (const Candidate& candidate : candidates) {
+    for (const std::string& synergyId : state.run.surfaceExpedition.selectedSynergyIds) {
+        const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
+        if (synergy == nullptr) {
+            continue;
+        }
         std::vector<MiniDroneRole> missing;
-        for (MiniDroneRole role : candidate.roles) {
+        for (MiniDroneRole role : synergy->requiredRoles) {
             if (equippedMiniDroneRoleCount(state, catalog, role) <= 0) {
                 missing.push_back(role);
             }
         }
-        if (missing.empty()) {
-            continue;
-        }
-        const int missingCount = static_cast<int>(missing.size());
-        const bool preferCandidate =
-            best == nullptr ||
-            missingCount < bestMissingCount ||
-            (missingCount == bestMissingCount && candidate.signature && !best->signature);
-        if (preferCandidate) {
-            best = &candidate;
-            bestMissing = std::move(missing);
-            bestMissingCount = missingCount;
+        if (!missing.empty() || !hasUnlock(state.meta, synergy->requiredUnlock)) {
+            return {
+                synergy->name,
+                missing.empty() ? "Research unlock" : droneRoleListSummary(missing),
+                droneTunePriority(state, catalog, effects),
+                droneRunPosture(effects),
+                "This selected synergy is dormant until its required roles and research are active again."
+            };
         }
     }
-
-    if (best == nullptr) {
+    if (state.run.surfaceExpedition.selectedSynergyIds.empty()) {
         return {
-            "Full Spectrum Swarm",
-            "None",
+            "Await Level Up",
+            "Chosen synergy",
             droneTunePriority(state, catalog, effects),
             droneRunPosture(effects),
-            "Every build recipe is active. Spend materials on favorite Support Drones and push hostile mining depth."
-        };
-    }
-    if (state.meta.equippedDroneIds.empty()) {
-        return {
-            "First role",
-            "Mining or Attack",
-            droneTunePriority(state, catalog, effects),
-            droneRunPosture(effects),
-            "Start with Mining for ore tempo or Attack for hostile-system cover, then pair a second role to unlock the first named recipe."
+            "Named synergies are expedition upgrades. Matching roles make a card eligible, but no synergy activates until you choose it at Level Up."
         };
     }
     return {
-        best->title,
-        droneRoleListSummary(bestMissing),
+        "Selected upgrades active",
+        "None",
         droneTunePriority(state, catalog, effects),
         droneRunPosture(effects),
-        best->detail
+        "Every listed synergy was selected this expedition and its required roles are currently equipped."
     };
 }
 
@@ -1238,7 +1333,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
     presentation.buildChips = {
         panelMetric("Signature", effects.signatureName.empty() ? "None" : effects.signatureName),
         panelMetric("Active synergies", std::to_string(static_cast<int>(effects.synergyNames.size()))),
-        panelMetric("Upgraded Support Drones", std::to_string(tunedDroneCount(state))),
+        panelMetric("Ranked Support Drones", std::to_string(tunedDroneCount(state))),
         panelMetric("Crit chance", display::percent(std::clamp(tuning::mining::alliedCritChance + effects.alliedCritChanceBonus, 0.0, tuning::mining::alliedCritChanceMaximum))),
         panelMetric("Volley", std::to_string(1 + effects.sentryVolleyBonus)),
         panelMetric("Fire rate", effects.alliedFireRateBonus > 0.0 ? ("+" + display::percent(effects.alliedFireRateBonus)) : "Base")
@@ -1256,16 +1351,16 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
         detailPresentationRow(
             "First frame",
             state.meta.ownedDroneIds.empty()
-                ? std::string("Fabricate a Support Drone frame, assign it to an open bay slot, then tune it toward Mk III. New roles unlock as the campaign expands.")
-                : std::string("Fabricate extra frames for open slots, assign roles, then tune each type toward Mk III.")),
+                ? std::string("Fabricate a Support Drone frame and assign it to an open bay slot. Run ranks, grafts, and synergies are chosen at Level Up.")
+                : std::string("Fabricate extra frames for open slots; expedition upgrades apply to every equipped copy of a chosen type.")),
         detailPresentationRow("Drone Bay", std::to_string(std::max(0, state.meta.droneBaySlots)) + " slot capacity"),
         detailPresentationRow("Loadout", miniDroneNameSummary(state, catalog)),
         detailPresentationRow("Build signature", effects.signatureName.empty() ? "None" : effects.signatureName),
         detailPresentationRow("Signature payoff", effects.signatureDetail.empty() ? "Equip three complementary roles to activate a signature build." : effects.signatureDetail),
         detailPresentationRow("Build guidance", guidance.detail),
         detailPresentationRow("Next recipe", guidance.nextRecipe + " / Missing: " + guidance.missingRoles + " / Upgrade: " + guidance.tuneNext),
-        detailPresentationRow("Support Drone copies", std::string("Each unlocked type starts with one frame. Build extra copies into open slots; duplicate frames share that type's Mk tuning.")),
-        detailPresentationRow("Support Drone upgrades", std::to_string(tunedDroneCount(state)) + " Support Drone types above Mk I. Tuning applies to every owned copy of that type."),
+        detailPresentationRow("Support Drone copies", std::string("Each unlocked type starts with one frame. Build extra copies into open slots; duplicate equipped frames share that type's expedition rank.")),
+        detailPresentationRow("Run ranks", std::to_string(tunedDroneCount(state)) + " Support Drone types above Mk I this expedition. Ranks reset with the run."),
         detailPresentationRow(
             "Capacity objective",
             paidCapacityUnlocked
@@ -1273,7 +1368,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                 : (capacityObjective.available
                     ? capacityObjective.title + " // " + capacityObjective.rewardPreview
                     : "Claim a scenario reward that installs a second bay slot.")),
-        detailPresentationRow("Active synergies", miniDroneSynergySummary(effects)),
+        detailPresentationRow("Selected synergies", state.run.surfaceExpedition.selectedSynergyIds.empty() ? "None" : miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
@@ -1847,7 +1942,7 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::fieldKit, surfaceFieldKitSummary(meta)),
         detailPresentationRow("Support Drone loadout", supportDroneLoadoutDetail()),
         detailPresentationRow(text::panel::details::fieldSpecialist, crew.summary),
-        detailPresentationRow("Field upgrades", surfaceUpgradeNameSummary(upgrades.names)),
+        detailPresentationRow("Rig upgrades", surfaceUpgradeNameSummary(upgrades.names)),
         detailPresentationRow(text::fuel::reserveLabel(arkKnown), display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1) + " available for Mining Rig operations"),
         detailPresentationRow(text::labels::transferFuel, display::fixed(expedition.transferFuelRecovered, 1) + " recovered at touchdown"),
         detailPresentationRow("Expedition rig pack", display::fixed(expedition.expeditionPackFuel, 1)),
@@ -1918,40 +2013,37 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     });
     presentation.logEntries = expedition.logEntries;
     presentation.selectedUpgradeNames = upgrades.names;
-    if (expedition.surfaceUpgradeOfferAvailable) {
-        for (std::size_t i = 0; i < expedition.surfaceUpgradeOfferIds.size(); ++i) {
-            if (!expedition.surfaceModuleOfferIds[i].empty()) {
-                if (const DroneModuleDefinition* module = catalog.findDroneModule(expedition.surfaceModuleOfferIds[i])) {
-                    presentation.upgradeOffers.push_back(droneModuleCardPresentation(*module, static_cast<int>(i)));
-                }
-            } else if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(expedition.surfaceUpgradeOfferIds[i])) {
-                presentation.upgradeOffers.push_back(surfaceUpgradeCardPresentation(*upgrade, static_cast<int>(i)));
-            }
+    for (const RunDroneRank& rank : expedition.runDroneRanks) {
+        if (const MiniDrone* drone = catalog.findMiniDrone(rank.droneId)) {
+            presentation.selectedUpgradeNames.push_back(drone->name + " Mk " + runUpgradeRankLabel(rank.rank));
         }
     }
-    if (!expedition.pendingDroneModuleId.empty()) {
-        if (const DroneModuleDefinition* module = catalog.findDroneModule(expedition.pendingDroneModuleId)) {
-            presentation.upgradeOffers.clear();
-            for (std::size_t frame = 0; frame < state.meta.equippedDroneIds.size(); ++frame) {
-                const MiniDrone* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[frame]);
-                if (drone == nullptr || drone->role != module->hostRole) continue;
-                int rank = 1;
-                for (const DroneUpgradeRecord& record : state.meta.droneUpgrades) if (record.droneId == drone->id) rank = std::clamp(record.level, 1, 3);
-                SurfaceUpgradeCardPresentation card;
-                card.index = static_cast<int>(frame);
-                card.category = "Frame";
-                card.rarity = "Module";
-                card.title = miniDroneRoleLabel(drone->role) + " MK " + std::to_string(rank) + " + " + miniDroneRoleLabel(module->secondaryRole);
-                card.detail = expedition.pendingDroneModuleReplacementConfirmation && expedition.pendingDroneModuleFrame == static_cast<int>(frame) ? "Confirm replace" : "Attach module";
-                card.action = panelActionButton(card.detail, ui::actions::surfaceModuleFrame(static_cast<int>(frame)), "ok");
-                card.droneModule = true;
-                card.hostRole = miniDroneRoleLabel(drone->role);
-                card.secondaryRole = miniDroneRoleLabel(module->secondaryRole);
-                presentation.upgradeOffers.push_back(std::move(card));
-            }
+    for (const DroneFrameModuleAssignment& assignment : expedition.droneModuleAssignments) {
+        const auto module = std::find_if(catalog.droneModules.begin(), catalog.droneModules.end(), [&](const DroneModuleDefinition& candidate) {
+            return candidate.kind == assignment.module;
+        });
+        if (module != catalog.droneModules.end()) {
+            presentation.selectedUpgradeNames.push_back(module->name + " / Slot " + std::to_string(assignment.equippedFrame + 1));
+        }
+    }
+    for (const std::string& synergyId : expedition.selectedSynergyIds) {
+        if (const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId)) {
+            presentation.selectedUpgradeNames.push_back(synergy->name);
+        }
+    }
+    if (expedition.runUpgradeOfferPending) {
+        for (int i = 0; i < expedition.runUpgradeOfferCount && i < static_cast<int>(expedition.runUpgradeOffers.size()); ++i) {
+            presentation.upgradeOffers.push_back(runUpgradeOfferCardPresentation(
+                state,
+                catalog,
+                expedition.runUpgradeOffers[static_cast<std::size_t>(i)],
+                i));
         }
     }
     presentation.metrics = {
+        panelMetric("Expedition level", std::to_string(std::max(1, expedition.expeditionLevel))),
+        panelMetric("Experience", std::to_string(static_cast<int>(std::floor(std::max(0.0, expedition.expeditionExperience)))) + "/" + std::to_string(static_cast<int>(expeditionExperienceThreshold(expedition.expeditionLevel)))),
+        panelMetric("Level-up choices", std::to_string(std::max(0, expedition.pendingRunUpgradeChoices))),
         panelMetric(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
         panelMetric(text::labels::fieldKit, surfaceFieldKitSummary(state.meta)),
         panelMetric(text::labels::hazard, display::percent(expedition.hazard)),

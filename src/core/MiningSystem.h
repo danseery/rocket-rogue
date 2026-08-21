@@ -63,6 +63,9 @@ MaterialInventory applyMiningTreasureMultiplier(MaterialInventory gain, MiningCe
 // Deterministic secondary-module tuning used by the live mining simulation and behavioral tests.
 double secondaryModuleValue(DroneModuleKind module, int rank);
 int secondaryModuleSecondaryHits(DroneModuleKind module, int rank);
+int miningEnemyDefeatExperience(const MiningEnemy& enemy, int difficulty);
+int miningHazardTreatmentExperience(MiningElementalAffinity affinity);
+int miningSwarmWaveExperience(int wave, int difficulty);
 double miningMaterialToughness(MiningCellMaterial material, int depthZone);
 MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);

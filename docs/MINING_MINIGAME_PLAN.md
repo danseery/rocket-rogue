@@ -6,7 +6,7 @@ See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current min
 
 See `docs/MINI_DRONE_SYSTEM.md` for the persistent Support Drone Bay layer that modifies mining, scanner, logistics, oxygen, extraction, and later autonomous-defense behavior. The `MiniDrone*` names in C++ are legacy internal identifiers; UI and design copy use Support Drone.
 
-This note describes the current playable mining phase layered onto the post-arrival Surface Ops flow. Mining does not replace launch, arrival, research, or surface-expedition architecture; it resolves back into the same `SurfaceActionOutcome` path so cargo, materials, hazards, artifacts, field upgrades, and log entries stay consistent.
+This note describes the current playable mining phase layered onto the post-arrival Surface Ops flow. Mining does not replace launch, arrival, research, or surface-expedition architecture; it resolves back into the same `SurfaceActionOutcome` path so cargo, materials, hazards, artifacts, Expedition XP, temporary upgrades, and log entries stay consistent.
 
 ## Mechanical Touchstone: Solar Jetman
 
@@ -176,7 +176,7 @@ Training still levels the active crewmember. Animal class traits affect both men
 | Squirrel Hoarder | Resource Gathering | Better rare-material odds and cargo payoff. |
 | Chipmunk Speedster | Exploration | Faster Support Drone movement and traversal. |
 
-## Research, Support Drones, And Field Upgrades
+## Research, Support Drones, And Expedition Upgrades
 
 Research improves mining through specific tools:
 
@@ -189,9 +189,9 @@ Research improves mining through specific tools:
 - Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.
 - Current Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second authored arena stages outer `0/4` and inner `0/4` lava layers around a protected Artifact. The same `MiningCocoonDefinition` can protect a different objective with any number of authored layers.
 - Arkfall emergency kit: Mk I Attack and Defense Support Drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
-- Perimeter Drone Network: Perimeter Coordination for Mk II/Mk III combat tuning and advanced combat synergies.
+- Perimeter Drone Network: Perimeter Coordination makes advanced combat grafts and named synergies eligible in Level Up drafts.
 
-Surface field upgrades are temporary ship-loop upgrades selected during surface play. Current examples include:
+Expedition Level Up offers can rank the existing temporary Rig upgrades through Rank III. Current examples include:
 
 - Thermal Drill Jackets and Coolant Mist for heat control.
 - Wideband Pulse and Deep Echo Mapper for scanner reach.
@@ -215,10 +215,10 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/MiningSystem.*` owns terrain, actor physics, destination gravity, rig/operator state, loose chunks, drills, sidearm raycasts, tether forces, oxygen/fuel cadence, scanner pulses, mining enemies, finish/abort/failure outcomes, and payload conversion.
 - `src/core/MiniDroneCoordination.*` consumes `MiniDroneAnchorFrame` for all home, orbit, task, targeting, shield, scanner, and clearance decisions. These `MiniDrone*` names are legacy internal identifiers; `resolveMiniDroneAnchor` and `transferMiniDroneSwarmAnchor` are the only authoritative binding helpers.
 - `src/core/MiningPresentation.h` owns mining HUD copy, controls copy, mode, gravity, suit integrity, drill heat, tether burden, loose-chunk count, Support Drone anchor status, `Suit carry: 0`, metrics, and detail rows.
-- `src/core/ResearchSystem.*` owns transfer-to-rig fuel conversion, surface expedition state, one-run-per-loop gating, field upgrades, Drone Bay state, and deterministic return allocation.
+- `src/core/ResearchSystem.*` owns transfer-to-rig fuel conversion, surface expedition state, one-run-per-loop gating, Expedition XP and temporary run upgrades, Drone Bay state, and deterministic return allocation.
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 11 retains version 10's rig/operator, loose-chunk, disabled-rig, purchased-frame, Support Drone anchor/formation, scenario/site, cocoon, protected-objective, layer, reveal, cell-tag, and launch-curriculum state while adding double-precision transfer and rig fuel. Version 10 active Surface/Mining saves preserve the old pool's consumed percentage when converted to route-derived rig fuel. Older saves restore seated in the rig, migrate Support Drones to `ControlledActor`, de-duplicate repeated pre-v8 loadout IDs once, and synthesize scenario/cocoon state before later migrations without replaying rewards.
+- Save version 13 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, and selected synergies. Version 12 and older saves are rejected and require New Game; no legacy progression migration runs.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

@@ -672,26 +672,6 @@ void rr_unequip_drone_slot(int slotIndex)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_upgrade_drone(int index)
-{
-    if (g_app) {
-        g_app->upgradeDrone(index);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_redeem_drone_upgrade_credit(int index)
-{
-    if (g_app) {
-        g_app->redeemDroneUpgradeCredit(index);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_upgrade_drone_slot()
 {
     if (g_app) {

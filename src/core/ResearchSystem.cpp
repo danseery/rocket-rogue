@@ -92,32 +92,6 @@ bool containsId(const std::vector<std::string>& ids, std::string_view id)
     return std::find(ids.begin(), ids.end(), id) != ids.end();
 }
 
-bool miniDroneTuningGateUnlocked(const MetaProgress& meta, const MiniDrone& drone)
-{
-    const bool combatDrone = drone.role == MiniDroneRole::Attack || drone.role == MiniDroneRole::Defense;
-    return !combatDrone || hasUnlock(meta, content::unlock::perimeterCoordination);
-}
-
-std::string_view coreDroneRoleName(MiniDroneRole role)
-{
-    switch (role) {
-    case MiniDroneRole::Mining: return "MINING";
-    case MiniDroneRole::Resource: return "RESOURCE";
-    case MiniDroneRole::Survey: return "SURVEY";
-    case MiniDroneRole::Hazard: return "HAZARD";
-    case MiniDroneRole::Attack: return "ATTACK";
-    case MiniDroneRole::Defense: return "DEFENSE";
-    }
-    return "DRONE";
-}
-
-void appendUniqueId(std::vector<std::string>& ids, std::string_view id)
-{
-    if (!id.empty() && !containsId(ids, id)) {
-        ids.emplace_back(id);
-    }
-}
-
 // These bindings are deliberately confined to the legacy public API used by
 // existing UI and input bindings. Scenario definitions remain the authority;
 // the old CampaignObjectiveId names are only a compatibility facade while the
@@ -340,13 +314,6 @@ void applyRecoveredArtifactRewards(
             break;
         case ArtifactRewardType::BlueprintInsight:
             state.meta.blueprintProgress += std::max(1, static_cast<int>(std::ceil(static_cast<double>(tuning::mining::artifactBlueprintReward) * condition)));
-            artifact.rewardApplied = true;
-            break;
-        case ArtifactRewardType::DroneUpgradeCredit:
-            // The generic protected-objective dispatcher above already
-            // handles scenario-owned credit rewards. A standalone credit
-            // artifact keeps its local, non-scenario payout.
-            state.meta.droneUpgradeCredits += 1;
             artifact.rewardApplied = true;
             break;
         case ArtifactRewardType::None:
@@ -1375,52 +1342,7 @@ bool creditRecoveredProtectedObjective(
         return false;
     }
 
-    // Standalone artifacts retain the old local upgrade-credit reward. Their
-    // identity never participates in a scenario reward ledger.
-    if (artifact.rewardType != ArtifactRewardType::DroneUpgradeCredit) {
-        return false;
-    }
-    state.meta.droneUpgradeCredits += 1;
-    artifact.rewardApplied = true;
-    writeLegacyCampaignSaveProjection(state, catalog);
-    return true;
-}
-
-bool canRedeemDroneUpgradeCredit(const GameState& state, const ContentCatalog& catalog, int index)
-{
-    if (state.meta.droneUpgradeCredits <= 0
-        || index < 0
-        || index >= static_cast<int>(catalog.miniDrones.size())) {
-        return false;
-    }
-    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
-    return containsId(state.meta.ownedDroneIds, drone.id)
-        && isMiniDroneUnlocked(state.meta, drone)
-        && miniDroneTuningGateUnlocked(state.meta, drone)
-        && miniDroneUpgradeLevel(state, drone.id) < 3;
-}
-
-bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, int index)
-{
-    ensureDroneBayState(state, catalog);
-    if (!canRedeemDroneUpgradeCredit(state, catalog, index)) {
-        state.statusLine = "No eligible Support Drone can use a free upgrade credit.";
-        return false;
-    }
-    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
-    const int nextLevel = miniDroneUpgradeLevel(state, drone.id) + 1;
-    const auto record = std::find_if(
-        state.meta.droneUpgrades.begin(),
-        state.meta.droneUpgrades.end(),
-        [&](const DroneUpgradeRecord& candidate) { return candidate.droneId == drone.id; });
-    if (record == state.meta.droneUpgrades.end()) {
-        state.meta.droneUpgrades.push_back({drone.id, nextLevel});
-    } else {
-        record->level = nextLevel;
-    }
-    state.meta.droneUpgradeCredits -= 1;
-    state.statusLine = drone.name + " upgraded to Mk " + std::to_string(nextLevel) + " with a free Support Drone upgrade credit.";
-    return true;
+    return false;
 }
 
 bool destinationSupportsResearch(const Destination& destination)
@@ -2531,27 +2453,454 @@ SurfaceSiteProfileEffects surfaceSiteProfileEffects(SurfaceSiteProfile profile)
     return effects;
 }
 
+namespace {
+
+constexpr int kMaximumRunUpgradeRank = 3;
+constexpr double kBaseExpeditionExperienceThreshold = 10.0;
+constexpr double kExpeditionExperienceGrowth = 1.55;
+
+void clearRunUpgradeOffers(SurfaceExpeditionState& expedition)
+{
+    expedition.runUpgradeOffers = {};
+    expedition.runUpgradeOfferCount = 0;
+    expedition.runUpgradeOfferPending = false;
+}
+
+int rarityOrdinal(Rarity rarity)
+{
+    return std::clamp(static_cast<int>(rarity), 0, static_cast<int>(Rarity::Prototype));
+}
+
+Rarity rarityAtLeast(Rarity rarity, Rarity minimum)
+{
+    return static_cast<Rarity>(std::max(rarityOrdinal(rarity), rarityOrdinal(minimum)));
+}
+
+int runUpgradeOfferWeight(Rarity rarity)
+{
+    switch (rarity) {
+    case Rarity::Common: return 60;
+    case Rarity::Uncommon: return 30;
+    case Rarity::Rare: return 10;
+    case Rarity::Prototype: return 3;
+    }
+    return 1;
+}
+
+bool equippedRoleAvailable(const GameState& state, const ContentCatalog& catalog, MiniDroneRole role)
+{
+    return std::any_of(
+        state.meta.equippedDroneIds.begin(),
+        state.meta.equippedDroneIds.end(),
+        [&](const std::string& droneId) {
+            const MiniDrone* drone = catalog.findMiniDrone(droneId);
+            return drone != nullptr && isMiniDroneUnlocked(state.meta, *drone) && drone->role == role;
+        });
+}
+
+bool synergyRequirementsMet(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const DroneSynergyDefinition& synergy)
+{
+    if (!hasUnlock(state.meta, synergy.requiredUnlock)) {
+        return false;
+    }
+    return std::all_of(
+        synergy.requiredRoles.begin(),
+        synergy.requiredRoles.end(),
+        [&](MiniDroneRole role) { return equippedRoleAvailable(state, catalog, role); });
+}
+
+void copyRunProgression(
+    const SurfaceExpeditionState& source,
+    SurfaceExpeditionState& destination)
+{
+    destination.expeditionLevel = std::max(1, source.expeditionLevel);
+    destination.expeditionExperience = std::max(0.0, source.expeditionExperience);
+    destination.pendingRunUpgradeChoices = std::max(0, source.pendingRunUpgradeChoices);
+    destination.runUpgradeOffers = source.runUpgradeOffers;
+    destination.runUpgradeOfferCount = std::clamp(
+        source.runUpgradeOfferCount,
+        0,
+        static_cast<int>(destination.runUpgradeOffers.size()));
+    destination.runUpgradeOfferPending = source.runUpgradeOfferPending && destination.runUpgradeOfferCount > 0;
+    destination.runUpgradeReturnScreen = source.runUpgradeReturnScreen;
+    destination.runRigUpgradeRanks = source.runRigUpgradeRanks;
+    destination.runDroneRanks = source.runDroneRanks;
+    destination.selectedSynergyIds = source.selectedSynergyIds;
+    destination.droneModuleAssignments = source.droneModuleAssignments;
+}
+
+struct WeightedRunUpgradeCandidate {
+    RunUpgradeOffer offer;
+    Rarity rarity = Rarity::Common;
+};
+
+} // namespace
+
+int runRigUpgradeRank(const GameState& state, std::string_view upgradeId)
+{
+    const auto found = std::find_if(
+        state.run.surfaceExpedition.runRigUpgradeRanks.begin(),
+        state.run.surfaceExpedition.runRigUpgradeRanks.end(),
+        [&](const RunRigUpgradeRank& record) { return record.upgradeId == upgradeId; });
+    return found == state.run.surfaceExpedition.runRigUpgradeRanks.end()
+        ? 0
+        : std::clamp(found->rank, 0, kMaximumRunUpgradeRank);
+}
+
+int expeditionDroneRank(const GameState& state, std::string_view droneId)
+{
+    const auto found = std::find_if(
+        state.run.surfaceExpedition.runDroneRanks.begin(),
+        state.run.surfaceExpedition.runDroneRanks.end(),
+        [&](const RunDroneRank& record) { return record.droneId == droneId; });
+    return found == state.run.surfaceExpedition.runDroneRanks.end()
+        ? 1
+        : std::clamp(found->rank, 1, kMaximumRunUpgradeRank);
+}
+
+double expeditionExperienceThreshold(int level)
+{
+    const int safeLevel = std::clamp(level, 1, 80);
+    return std::ceil(kBaseExpeditionExperienceThreshold * std::pow(
+        kExpeditionExperienceGrowth,
+        static_cast<double>(safeLevel - 1)));
+}
+
+void resetExpeditionProgression(SurfaceExpeditionState& expedition)
+{
+    expedition.expeditionLevel = 1;
+    expedition.expeditionExperience = 0.0;
+    expedition.pendingRunUpgradeChoices = 0;
+    clearRunUpgradeOffers(expedition);
+    expedition.runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    expedition.runRigUpgradeRanks.clear();
+    expedition.runDroneRanks.clear();
+    expedition.selectedSynergyIds.clear();
+    expedition.droneModuleAssignments.clear();
+    expedition.droneModuleRuntime.clear();
+
+}
+
+void resetExpeditionProgression(GameState& state)
+{
+    resetExpeditionProgression(state.run.surfaceExpedition);
+}
+
+ExpeditionExperienceAward awardExpeditionExperience(
+    GameState& state,
+    double amount,
+    Screen returnScreen)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    ExpeditionExperienceAward award;
+    award.resultingLevel = std::max(1, expedition.expeditionLevel);
+    award.resultingExperience = std::max(0.0, expedition.expeditionExperience);
+    award.pendingChoices = std::max(0, expedition.pendingRunUpgradeChoices);
+    if (!state.run.active || !std::isfinite(amount) || amount <= 0.0) {
+        return award;
+    }
+
+    const bool hadPendingChoice = expedition.pendingRunUpgradeChoices > 0 || expedition.runUpgradeOfferPending;
+    const double applied = std::min(amount, 1.0e12);
+    expedition.expeditionLevel = std::max(1, expedition.expeditionLevel);
+    expedition.expeditionExperience = std::max(0.0, expedition.expeditionExperience) + applied;
+    award.appliedExperience = applied;
+    for (int guard = 0; guard < 256; ++guard) {
+        const double threshold = expeditionExperienceThreshold(expedition.expeditionLevel);
+        if (expedition.expeditionExperience + 0.000001 < threshold) {
+            break;
+        }
+        expedition.expeditionExperience = std::max(0.0, expedition.expeditionExperience - threshold);
+        expedition.expeditionLevel += 1;
+        expedition.pendingRunUpgradeChoices += 1;
+        award.levelsGained += 1;
+    }
+    if (award.levelsGained > 0 && !hadPendingChoice) {
+        expedition.runUpgradeReturnScreen = returnScreen;
+    }
+    award.resultingLevel = expedition.expeditionLevel;
+    award.resultingExperience = expedition.expeditionExperience;
+    award.pendingChoices = expedition.pendingRunUpgradeChoices;
+    return award;
+}
+
+int miningMaterialExperience(const MaterialInventory& materials)
+{
+    const long long total =
+        static_cast<long long>(std::max(0, materials.common)) +
+        static_cast<long long>(std::max(0, materials.rare)) * 3LL +
+        static_cast<long long>(std::max(0, materials.exotic)) * 9LL;
+    return static_cast<int>(std::min<long long>(total, std::numeric_limits<int>::max()));
+}
+
+Rarity runUpgradeOfferRarity(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const RunUpgradeOffer& offer)
+{
+    switch (offer.kind) {
+    case RunUpgradeKind::Rig:
+        if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(offer.definitionId)) {
+            const Rarity rankFloor = offer.targetRank >= 3
+                ? Rarity::Rare
+                : (offer.targetRank == 2 ? Rarity::Uncommon : Rarity::Common);
+            return rarityAtLeast(upgrade->rarity, rankFloor);
+        }
+        break;
+    case RunUpgradeKind::DroneRank:
+        if (catalog.findMiniDrone(offer.definitionId) != nullptr) {
+            return offer.targetRank >= 3 ? Rarity::Rare : Rarity::Uncommon;
+        }
+        break;
+    case RunUpgradeKind::DroneGraft:
+        if (const DroneModuleDefinition* module = catalog.findDroneModule(offer.definitionId)) {
+            return module->rarity;
+        }
+        break;
+    case RunUpgradeKind::Synergy:
+        if (const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(offer.definitionId)) {
+            return synergy->rarity;
+        }
+        break;
+    }
+    (void)state;
+    return Rarity::Common;
+}
+
+std::string_view runUpgradeKindLabel(RunUpgradeKind kind)
+{
+    switch (kind) {
+    case RunUpgradeKind::Rig: return "RIG";
+    case RunUpgradeKind::DroneRank:
+    case RunUpgradeKind::DroneGraft:
+        return "DRONE";
+    case RunUpgradeKind::Synergy: return "SYNERGY";
+    }
+    return "UPGRADE";
+}
+
+std::string runUpgradeRankLabel(int rank)
+{
+    switch (std::clamp(rank, 1, kMaximumRunUpgradeRank)) {
+    case 1: return "I";
+    case 2: return "II";
+    case 3: return "III";
+    }
+    return "I";
+}
+
+bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (expedition.runUpgradeOfferPending) {
+        return expedition.runUpgradeOfferCount > 0;
+    }
+    clearRunUpgradeOffers(expedition);
+    if (expedition.pendingRunUpgradeChoices <= 0) {
+        return false;
+    }
+
+    std::vector<WeightedRunUpgradeCandidate> candidates;
+    candidates.reserve(catalog.surfaceUpgrades.size() + catalog.miniDrones.size() +
+        catalog.droneModules.size() + catalog.droneSynergies.size());
+
+    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
+        const int targetRank = runRigUpgradeRank(state, upgrade.id) + 1;
+        if (targetRank <= std::clamp(upgrade.maxRank, 1, kMaximumRunUpgradeRank)) {
+            RunUpgradeOffer offer {RunUpgradeKind::Rig, upgrade.id, targetRank, -1};
+            candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
+        }
+    }
+
+    std::vector<std::string> seenDroneIds;
+    for (const std::string& droneId : state.meta.equippedDroneIds) {
+        if (containsId(seenDroneIds, droneId)) {
+            continue;
+        }
+        seenDroneIds.push_back(droneId);
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        const int targetRank = expeditionDroneRank(state, droneId) + 1;
+        if (drone != nullptr && isMiniDroneUnlocked(state.meta, *drone) && targetRank <= kMaximumRunUpgradeRank) {
+            RunUpgradeOffer offer {RunUpgradeKind::DroneRank, droneId, targetRank, -1};
+            candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
+        }
+    }
+
+    for (const DroneModuleDefinition& module : catalog.droneModules) {
+        if (!hasUnlock(state.meta, module.unlockKey)) {
+            continue;
+        }
+        for (std::size_t slot = 0; slot < state.meta.equippedDroneIds.size(); ++slot) {
+            const bool occupied = std::any_of(
+                expedition.droneModuleAssignments.begin(),
+                expedition.droneModuleAssignments.end(),
+                [&](const DroneFrameModuleAssignment& assignment) {
+                    return assignment.equippedFrame == static_cast<int>(slot);
+                });
+            const MiniDrone* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[slot]);
+            if (!occupied && drone != nullptr && drone->role == module.hostRole) {
+                RunUpgradeOffer offer {
+                    RunUpgradeKind::DroneGraft,
+                    module.id,
+                    0,
+                    static_cast<int>(slot)};
+                candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
+            }
+        }
+    }
+
+    for (const DroneSynergyDefinition& synergy : catalog.droneSynergies) {
+        if (!containsId(expedition.selectedSynergyIds, synergy.id) &&
+            synergyRequirementsMet(state, catalog, synergy)) {
+            RunUpgradeOffer offer {RunUpgradeKind::Synergy, synergy.id, 0, -1};
+            candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
+        }
+    }
+
+    if (candidates.empty()) {
+        // A level is never rolled back. If every finite upgrade is exhausted,
+        // consume exactly one pending choice so the App can loop deterministically.
+        expedition.pendingRunUpgradeChoices = std::max(0, expedition.pendingRunUpgradeChoices - 1);
+        return false;
+    }
+
+    const int offerCount = std::min(3, static_cast<int>(candidates.size()));
+    for (int slot = 0; slot < offerCount; ++slot) {
+        int totalWeight = 0;
+        for (const WeightedRunUpgradeCandidate& candidate : candidates) {
+            totalWeight += runUpgradeOfferWeight(candidate.rarity);
+        }
+        int roll = rng.rangeInt(1, std::max(1, totalWeight));
+        std::size_t picked = 0;
+        for (; picked + 1 < candidates.size(); ++picked) {
+            roll -= runUpgradeOfferWeight(candidates[picked].rarity);
+            if (roll <= 0) {
+                break;
+            }
+        }
+        expedition.runUpgradeOffers[static_cast<std::size_t>(slot)] = candidates[picked].offer;
+        candidates.erase(candidates.begin() + static_cast<std::ptrdiff_t>(picked));
+    }
+    expedition.runUpgradeOfferCount = offerCount;
+    expedition.runUpgradeOfferPending = offerCount > 0;
+    return expedition.runUpgradeOfferPending;
+}
+
+bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index)
+{
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.runUpgradeOfferPending || expedition.pendingRunUpgradeChoices <= 0 ||
+        index < 0 || index >= expedition.runUpgradeOfferCount ||
+        index >= static_cast<int>(expedition.runUpgradeOffers.size())) {
+        return false;
+    }
+    const RunUpgradeOffer offer = expedition.runUpgradeOffers[static_cast<std::size_t>(index)];
+    std::string installedName;
+    switch (offer.kind) {
+    case RunUpgradeKind::Rig: {
+        const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(offer.definitionId);
+        const int expectedRank = runRigUpgradeRank(state, offer.definitionId) + 1;
+        if (upgrade == nullptr || offer.targetRank != expectedRank || expectedRank > upgrade->maxRank) {
+            return false;
+        }
+        auto found = std::find_if(
+            expedition.runRigUpgradeRanks.begin(),
+            expedition.runRigUpgradeRanks.end(),
+            [&](const RunRigUpgradeRank& record) { return record.upgradeId == offer.definitionId; });
+        if (found == expedition.runRigUpgradeRanks.end()) {
+            expedition.runRigUpgradeRanks.push_back({offer.definitionId, expectedRank});
+        } else {
+            found->rank = expectedRank;
+        }
+        installedName = upgrade->name + " " + runUpgradeRankLabel(expectedRank);
+        break;
+    }
+    case RunUpgradeKind::DroneRank: {
+        const MiniDrone* drone = catalog.findMiniDrone(offer.definitionId);
+        const int expectedRank = expeditionDroneRank(state, offer.definitionId) + 1;
+        if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone) ||
+            !containsId(state.meta.equippedDroneIds, offer.definitionId) ||
+            offer.targetRank != expectedRank || expectedRank > kMaximumRunUpgradeRank) {
+            return false;
+        }
+        auto found = std::find_if(
+            expedition.runDroneRanks.begin(),
+            expedition.runDroneRanks.end(),
+            [&](const RunDroneRank& record) { return record.droneId == offer.definitionId; });
+        if (found == expedition.runDroneRanks.end()) {
+            expedition.runDroneRanks.push_back({offer.definitionId, expectedRank});
+        } else {
+            found->rank = expectedRank;
+        }
+        installedName = drone->name + " " + runUpgradeRankLabel(expectedRank);
+        break;
+    }
+    case RunUpgradeKind::DroneGraft: {
+        const DroneModuleDefinition* module = catalog.findDroneModule(offer.definitionId);
+        if (module == nullptr || !hasUnlock(state.meta, module->unlockKey) ||
+            offer.slotIndex < 0 || offer.slotIndex >= static_cast<int>(state.meta.equippedDroneIds.size())) {
+            return false;
+        }
+        const bool occupied = std::any_of(
+            expedition.droneModuleAssignments.begin(),
+            expedition.droneModuleAssignments.end(),
+            [&](const DroneFrameModuleAssignment& assignment) {
+                return assignment.equippedFrame == offer.slotIndex;
+            });
+        const std::string& droneId = state.meta.equippedDroneIds[static_cast<std::size_t>(offer.slotIndex)];
+        const MiniDrone* drone = catalog.findMiniDrone(droneId);
+        if (occupied || drone == nullptr || drone->role != module->hostRole) {
+            return false;
+        }
+        expedition.droneModuleAssignments.push_back({offer.slotIndex, droneId, module->kind});
+        installedName = module->name + " on slot " + std::to_string(offer.slotIndex + 1);
+        break;
+    }
+    case RunUpgradeKind::Synergy: {
+        const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(offer.definitionId);
+        if (synergy == nullptr || containsId(expedition.selectedSynergyIds, synergy->id) ||
+            !synergyRequirementsMet(state, catalog, *synergy)) {
+            return false;
+        }
+        expedition.selectedSynergyIds.push_back(synergy->id);
+        installedName = synergy->name;
+        break;
+    }
+    }
+
+    expedition.pendingRunUpgradeChoices = std::max(0, expedition.pendingRunUpgradeChoices - 1);
+    clearRunUpgradeOffers(expedition);
+    appendSurfaceLog(expedition, "Run upgrade installed: " + installedName + ".");
+    state.statusLine = "Run upgrade installed: " + installedName + ".";
+    return true;
+}
+
 SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const ContentCatalog& catalog)
 {
     SurfaceUpgradeEffects effects;
-    for (const std::string& upgradeId : state.run.surfaceUpgradeIds) {
-        const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
-        if (upgrade == nullptr) {
+    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
+        const int rank = runRigUpgradeRank(state, upgrade.id);
+        if (rank <= 0) {
             continue;
         }
-        effects.drillPower += upgrade->stats.drillPower;
-        effects.drillCooling += upgrade->stats.drillCooling;
-        effects.drillDurability += upgrade->stats.drillDurability;
-        effects.hardRockBounceRelief += upgrade->stats.hardRockBounceRelief;
-        effects.oreYieldChance += upgrade->stats.oreYieldChance;
-        effects.scannerRadius += upgrade->stats.scannerRadius;
-        effects.hazardRelief += upgrade->stats.hazardRelief;
-        effects.droneSpeed += upgrade->stats.droneSpeed;
-        effects.oxygenSeconds += upgrade->stats.oxygenSeconds;
-        effects.droneStorage += upgrade->stats.droneStorage;
-        effects.droneEngineEfficiency += upgrade->stats.droneEngineEfficiency;
-        effects.artifactTowEfficiency += upgrade->stats.artifactTowEfficiency;
-        effects.names.push_back(upgrade->name);
+        const double scale = static_cast<double>(rank);
+        effects.drillPower += upgrade.stats.drillPower * scale;
+        effects.drillCooling += upgrade.stats.drillCooling * scale;
+        effects.drillDurability += upgrade.stats.drillDurability * scale;
+        effects.hardRockBounceRelief += upgrade.stats.hardRockBounceRelief * scale;
+        effects.oreYieldChance += upgrade.stats.oreYieldChance * scale;
+        effects.scannerRadius += upgrade.stats.scannerRadius * scale;
+        effects.hazardRelief += upgrade.stats.hazardRelief * scale;
+        effects.droneSpeed += upgrade.stats.droneSpeed * scale;
+        effects.oxygenSeconds += upgrade.stats.oxygenSeconds * scale;
+        effects.droneStorage += upgrade.stats.droneStorage * scale;
+        effects.droneEngineEfficiency += upgrade.stats.droneEngineEfficiency * scale;
+        effects.artifactTowEfficiency += upgrade.stats.artifactTowEfficiency * scale;
+        effects.scannerPulseDamage += upgrade.stats.scannerPulseDamage * rank;
+        effects.names.push_back(upgrade.name + " " + runUpgradeRankLabel(rank));
     }
     effects.hardRockBounceRelief = std::clamp(effects.hardRockBounceRelief, 0.0, 0.35);
     effects.droneEngineEfficiency = std::clamp(effects.droneEngineEfficiency, 0.0, 0.75);
@@ -2604,28 +2953,6 @@ MaterialInventory droneSlotUpgradeCost(int nextSlot)
     }
 }
 
-int miniDroneUpgradeLevel(const GameState& state, std::string_view droneId)
-{
-    for (const DroneUpgradeRecord& record : state.meta.droneUpgrades) {
-        if (record.droneId == droneId) {
-            return std::clamp(record.level, 1, 3);
-        }
-    }
-    return 1;
-}
-
-MaterialInventory miniDroneUpgradeCost(int nextLevel)
-{
-    switch (std::clamp(nextLevel, 1, 4)) {
-    case 2:
-        return {.common = 3, .rare = 1};
-    case 3:
-        return {.common = 6, .rare = 3, .exotic = 1};
-    default:
-        return {};
-    }
-}
-
 MaterialInventory miniDroneAdditionalUnitCost(const MiniDrone& drone)
 {
     switch (drone.rarity) {
@@ -2657,7 +2984,7 @@ int equippedMiniDroneCount(const GameState& state, std::string_view droneId)
         droneId));
 }
 
-double miniDroneUpgradeMultiplier(int level)
+double expeditionDroneRankMultiplier(int level)
 {
     return 1.0 + 0.30 * static_cast<double>(std::clamp(level, 1, 3) - 1);
 }
@@ -2668,7 +2995,6 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
         state.meta.droneBaySlots = 0;
         state.meta.ownedDroneIds.clear();
         state.meta.equippedDroneIds.clear();
-        state.meta.droneUpgrades.clear();
         return;
     }
 
@@ -2701,26 +3027,6 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog)
         state.meta.equippedDroneIds.resize(static_cast<std::size_t>(state.meta.droneBaySlots));
     }
 
-    state.meta.droneUpgrades.erase(
-        std::remove_if(
-            state.meta.droneUpgrades.begin(),
-            state.meta.droneUpgrades.end(),
-            [&](const DroneUpgradeRecord& record) {
-                return std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), record.droneId) == state.meta.ownedDroneIds.end();
-            }),
-        state.meta.droneUpgrades.end());
-    for (DroneUpgradeRecord& record : state.meta.droneUpgrades) {
-        record.level = std::clamp(record.level, 1, 3);
-    }
-    for (const std::string& droneId : state.meta.ownedDroneIds) {
-        const auto existing = std::find_if(
-            state.meta.droneUpgrades.begin(),
-            state.meta.droneUpgrades.end(),
-            [&](const DroneUpgradeRecord& record) { return record.droneId == droneId; });
-        if (existing == state.meta.droneUpgrades.end()) {
-            state.meta.droneUpgrades.push_back({droneId, 1});
-        }
-    }
 }
 
 bool canUpgradeDroneSlot(const GameState& state)
@@ -2756,66 +3062,6 @@ bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog)
 
     state.meta.droneBaySlots += 1;
     state.statusLine = "Drone Bay expanded to " + std::to_string(state.meta.droneBaySlots) + " slots.";
-    return true;
-}
-
-bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, int index)
-{
-    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size())) {
-        return false;
-    }
-    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
-    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
-    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
-        return false;
-    }
-    if (!miniDroneTuningGateUnlocked(state.meta, drone)) {
-        return false;
-    }
-    const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
-    if (currentLevel >= 3) {
-        return false;
-    }
-    return canAffordMaterials(state.meta.materials, miniDroneUpgradeCost(currentLevel + 1));
-}
-
-bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
-{
-    ensureDroneBayState(state, catalog);
-    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size())) {
-        return false;
-    }
-    const MiniDrone& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
-    const bool owned = std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), drone.id) != state.meta.ownedDroneIds.end();
-    if (!owned || !isMiniDroneUnlocked(state.meta, drone)) {
-        state.statusLine = drone.name + " is still locked.";
-        return false;
-    }
-    if (!miniDroneTuningGateUnlocked(state.meta, drone)) {
-        state.statusLine = "Complete Perimeter Drone Network research before tuning " + drone.name + ".";
-        return false;
-    }
-    const int currentLevel = miniDroneUpgradeLevel(state, drone.id);
-    if (currentLevel >= 3) {
-        state.statusLine = drone.name + " is already fully upgraded.";
-        return false;
-    }
-    const MaterialInventory cost = miniDroneUpgradeCost(currentLevel + 1);
-    if (!canAffordMaterials(state.meta.materials, cost)) {
-        state.statusLine = "Need " + std::to_string(cost.common) + " common, " + std::to_string(cost.rare) + " rare, " + std::to_string(cost.exotic) + " exotic to upgrade " + drone.name + ".";
-        return false;
-    }
-    spendMaterials(state.meta.materials, cost);
-    auto existing = std::find_if(
-        state.meta.droneUpgrades.begin(),
-        state.meta.droneUpgrades.end(),
-        [&](const DroneUpgradeRecord& record) { return record.droneId == drone.id; });
-    if (existing == state.meta.droneUpgrades.end()) {
-        state.meta.droneUpgrades.push_back({drone.id, currentLevel + 1});
-    } else {
-        existing->level = currentLevel + 1;
-    }
-    state.statusLine = drone.name + " upgraded to Mk " + std::to_string(currentLevel + 1) + ".";
     return true;
 }
 
@@ -2889,14 +3135,13 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     int hazardDrones = 0;
     int attackDrones = 0;
     int defenseDrones = 0;
-    const bool perimeterCoordination = hasUnlock(state.meta, content::unlock::perimeterCoordination);
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone == nullptr || !isMiniDroneUnlocked(state.meta, *drone)) {
             continue;
         }
-        const int upgradeLevel = miniDroneUpgradeLevel(state, drone->id);
-        const double upgradeMultiplier = miniDroneUpgradeMultiplier(upgradeLevel);
+        const int upgradeLevel = expeditionDroneRank(state, drone->id);
+        const double upgradeMultiplier = expeditionDroneRankMultiplier(upgradeLevel);
         effects.passiveMiningRate += drone->stats.passiveMiningRate * upgradeMultiplier;
         effects.oxygenSeconds += drone->stats.oxygenSeconds * upgradeMultiplier;
         effects.scannerRadius += drone->stats.scannerRadius * upgradeMultiplier;
@@ -2909,7 +3154,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         effects.enemySlow += drone->stats.enemySlow * upgradeMultiplier;
         effects.reactiveArmorDamagePerSecond += drone->stats.reactiveArmorDamagePerSecond * upgradeMultiplier;
         effects.environmentalShieldRelief += drone->stats.environmentalShieldRelief * upgradeMultiplier;
-        effects.names.push_back(drone->name + " Mk " + std::to_string(upgradeLevel));
+        effects.names.push_back(drone->name + " Mk " + runUpgradeRankLabel(upgradeLevel));
         switch (drone->role) {
         case MiniDroneRole::Mining:
             miningDrones += 1;
@@ -2932,99 +3177,38 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
         }
     }
 
-    auto addSynergy = [&effects](std::string name) {
-        effects.synergyNames.push_back(std::move(name));
-    };
-    if (perimeterCoordination && attackDrones > 0 && surveyDrones > 0) {
-        effects.alliedCritChanceBonus += 0.12;
-        effects.alliedFireRateBonus += 0.15;
-        effects.scannerRadius += 0.75;
-        addSynergy("Targeting Grid");
-    }
-    if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0) {
-        effects.sentryVolleyBonus += 1;
-        effects.enemyDamageRelief += 0.08;
-        effects.reactiveArmorDamagePerSecond += 0.45;
-        addSynergy("Killbox Screen");
-    }
-    if (perimeterCoordination && attackDrones > 0 && miningDrones > 0) {
-        effects.passiveMiningRate += 0.04;
-        effects.areaControlDamagePerSecond += 0.40;
-        effects.enemySlow += 0.04;
-        addSynergy("Excavation Barrage");
-    }
-    if (perimeterCoordination && defenseDrones > 0 && hazardDrones > 0) {
-        effects.environmentalShieldRelief += 0.06;
-        effects.hazardTreatmentRateBonus += 0.15;
-        addSynergy("Containment Screen");
-    }
-    if (miningDrones > 0 && resourceDrones > 0) {
-        effects.passiveMiningRate += 0.035;
-        effects.oxygenSeconds += 12.0;
-        addSynergy("Long Haul Rig");
-    }
-    if (resourceDrones > 0 && surveyDrones > 0) {
-        effects.scannerRadius += 0.85;
-        addSynergy("Pathfinder Loop");
-    }
-
-    auto setSignature = [&effects](MiniDroneSignatureKind kind, std::string name, std::string detail, int tier) {
-        effects.signatureKind = kind;
-        effects.signatureName = std::move(name);
-        effects.signatureDetail = std::move(detail);
-        effects.signatureTier = tier;
-    };
-    if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0 && miningDrones > 0 && resourceDrones > 0 && hazardDrones > 0) {
-        effects.alliedCritChanceBonus += 0.05;
-        effects.alliedFireRateBonus += 0.10;
-        effects.sentryVolleyBonus += 1;
-        effects.passiveMiningRate += 0.025;
-        effects.oxygenSeconds += 8.0;
-        effects.scannerRadius += 0.50;
-        effects.enemyDamageRelief += 0.04;
-        setSignature(
-            MiniDroneSignatureKind::FullSpectrumSwarm,
-            "Full Spectrum Swarm",
-            "Every drone bay role is online: sentries volley, scanners paint targets, hazards are treated, shields hold, and logistics keep the dig alive.",
-            3);
-    } else if (perimeterCoordination && attackDrones > 0 && defenseDrones > 0 && surveyDrones > 0) {
-        effects.alliedCritChanceBonus += 0.06;
-        effects.alliedFireRateBonus += 0.20;
-        effects.sentryVolleyBonus += 1;
-        effects.enemyDamageRelief += 0.04;
-        setSignature(
-            MiniDroneSignatureKind::SentryKillbox,
-            "Sentry Killbox",
-            "Attack, Defense, and Survey drones turn the rig into a marked killbox with faster volleys, better crits, and tougher shields.",
-            2);
-    } else if (perimeterCoordination && attackDrones > 0 && miningDrones > 0 && resourceDrones > 0) {
-        effects.passiveMiningRate += 0.045;
-        effects.areaControlDamagePerSecond += 0.55;
-        effects.enemySlow += 0.03;
-        effects.alliedFireRateBonus += 0.10;
-        setSignature(
-            MiniDroneSignatureKind::ExcavationStorm,
-            "Excavation Storm",
-            "Mining, Resource, and Attack drones keep ore flowing while combat pulses punish enemies that enter the work zone.",
-            2);
-    } else if (perimeterCoordination && defenseDrones > 0 && hazardDrones > 0 && resourceDrones > 0) {
-        effects.environmentalShieldRelief += 0.05;
-        effects.reactiveArmorDamagePerSecond += 0.35;
-        effects.oxygenSeconds += 10.0;
-        effects.hazardTreatmentRateBonus += 0.10;
-        setSignature(
-            MiniDroneSignatureKind::ContainmentRig,
-            "Containment Rig",
-            "Defense, Hazard, and Resource drones sustain long digs with faster treatment, stronger shields, reserve time, and counter-hits.",
-            2);
-    } else if (miningDrones > 0 && resourceDrones > 0 && surveyDrones > 0) {
-        effects.passiveMiningRate += 0.020;
-        effects.scannerRadius += 0.70;
-        setSignature(
-            MiniDroneSignatureKind::RelicPathfinder,
-            "Relic Pathfinder",
-            "Mining, Resource, and Survey drones favor artifact routes with wider scans and steady passive excavation.",
-            2);
+    (void)miningDrones;
+    (void)resourceDrones;
+    (void)surveyDrones;
+    (void)hazardDrones;
+    (void)attackDrones;
+    (void)defenseDrones;
+    for (const std::string& synergyId : state.run.surfaceExpedition.selectedSynergyIds) {
+        const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
+        if (synergy == nullptr || !synergyRequirementsMet(state, catalog, *synergy)) {
+            continue;
+        }
+        const DroneSynergyStats& bonus = synergy->stats;
+        effects.passiveMiningRate += bonus.passiveMiningRate;
+        effects.oxygenSeconds += bonus.oxygenSeconds;
+        effects.scannerRadius += bonus.scannerRadius;
+        effects.enemyDamageRelief += bonus.enemyDamageRelief;
+        effects.areaControlDamagePerSecond += bonus.areaControlDamagePerSecond;
+        effects.enemySlow += bonus.enemySlow;
+        effects.reactiveArmorDamagePerSecond += bonus.reactiveArmorDamagePerSecond;
+        effects.environmentalShieldRelief += bonus.environmentalShieldRelief;
+        effects.hazardTreatmentRateBonus += bonus.hazardTreatmentRateBonus;
+        effects.alliedCritChanceBonus += bonus.alliedCritChanceBonus;
+        effects.alliedFireRateBonus += bonus.alliedFireRateBonus;
+        effects.sentryVolleyBonus += bonus.sentryVolleyBonus;
+        effects.synergyNames.push_back(synergy->name);
+        if (synergy->signatureKind != MiniDroneSignatureKind::None &&
+            synergy->signatureTier > effects.signatureTier) {
+            effects.signatureKind = synergy->signatureKind;
+            effects.signatureName = synergy->name;
+            effects.signatureDetail = synergy->description;
+            effects.signatureTier = synergy->signatureTier;
+        }
     }
 
     effects.passiveMiningRate = std::clamp(effects.passiveMiningRate, 0.0, 0.40);
@@ -3163,11 +3347,15 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 {
     const Destination* destination = currentResearchDestination(state, catalog);
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
-        state.run.surfaceExpedition = {};
+        SurfaceExpeditionState preserved;
+        copyRunProgression(state.run.surfaceExpedition, preserved);
+        state.run.surfaceExpedition = std::move(preserved);
         return;
     }
 
+    const SurfaceExpeditionState previousExpedition = state.run.surfaceExpedition;
     SurfaceExpeditionState expedition;
+    copyRunProgression(previousExpedition, expedition);
     expedition.active = true;
     expedition.destinationId = destination->id;
     expedition.siteProfile = generatedSurfaceSiteProfile(state, *destination, rng);
@@ -3200,166 +3388,9 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
             " transfer + " + display::fixed(expedition.expeditionPackFuel, 1) +
             " expedition pack). Return stage reserved.");
     state.run.surfaceExpedition = expedition;
-    if (rng != nullptr) {
-        generateSurfaceUpgradeOffers(state, catalog, *rng);
-    }
-}
-
-void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
-{
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    if (!expedition.active || expedition.surfaceUpgradeOfferAvailable || expedition.surfaceUpgradeOffersSeen > 0) {
-        return;
-    }
-
-    std::vector<const SurfaceUpgrade*> available;
-    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
-        if (std::find(state.run.surfaceUpgradeIds.begin(), state.run.surfaceUpgradeIds.end(), upgrade.id) == state.run.surfaceUpgradeIds.end()) {
-            available.push_back(&upgrade);
-        }
-    }
-
-    expedition.surfaceUpgradeOfferIds = {};
-    expedition.surfaceModuleOfferIds = {};
-
-    // The first Field Upgrade board always teaches the expedition graft loop
-    // when a compatible frame exists. Later boards mix one module into the
-    // normal three-card offer without creating a second screen.
-    std::vector<const DroneModuleDefinition*> moduleOffers;
-    for (const DroneModuleDefinition& module : catalog.droneModules) {
-        if (!hasUnlock(state.meta, module.unlockKey) || containsId(state.run.surfaceUpgradeIds, module.id)) {
-            continue;
-        }
-        const bool compatible = std::any_of(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), [&](const std::string& droneId) {
-            const MiniDrone* drone = catalog.findMiniDrone(droneId);
-            return drone != nullptr && drone->role == module.hostRole;
-        }) || std::any_of(expedition.surfaceModuleOfferIds.begin(), expedition.surfaceModuleOfferIds.end(), [](const std::string& id) { return !id.empty(); });
-        if (compatible) moduleOffers.push_back(&module);
-    }
-    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && (!available.empty() || (slot == 0 && !moduleOffers.empty())); ++slot) {
-        if (!moduleOffers.empty() && slot == 0) {
-            expedition.surfaceModuleOfferIds[slot] = moduleOffers.front()->id;
-            moduleOffers.erase(moduleOffers.begin());
-            continue;
-        }
-        const int picked = rng.rangeInt(0, static_cast<int>(available.size()) - 1);
-        expedition.surfaceUpgradeOfferIds[slot] = available[static_cast<std::size_t>(picked)]->id;
-        available.erase(available.begin() + picked);
-    }
-
-    expedition.surfaceUpgradeOfferAvailable = std::any_of(
-        expedition.surfaceUpgradeOfferIds.begin(),
-        expedition.surfaceUpgradeOfferIds.end(),
-        [](const std::string& id) {
-            return !id.empty();
-        }) || std::any_of(expedition.surfaceModuleOfferIds.begin(), expedition.surfaceModuleOfferIds.end(), [](const std::string& id) { return !id.empty(); });
-    if (expedition.surfaceUpgradeOfferAvailable) {
-        expedition.surfaceUpgradeOffersSeen += 1;
-    }
-}
-
-bool rerollSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
-{
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    if (!expedition.active || !expedition.surfaceUpgradeOfferAvailable) {
-        return false;
-    }
-
-    const double cost = offerRerollCost(state);
-    if (state.run.credits < cost) {
-        state.statusLine = "Not enough mission credits to reroll the field-upgrade board.";
-        return false;
-    }
-
-    std::vector<const SurfaceUpgrade*> available;
-    for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
-        if (std::find(state.run.surfaceUpgradeIds.begin(), state.run.surfaceUpgradeIds.end(), upgrade.id) == state.run.surfaceUpgradeIds.end()) {
-            available.push_back(&upgrade);
-        }
-    }
-    if (available.empty()) {
-        return false;
-    }
-
-    state.run.credits -= cost;
-    state.run.offerRerollsThisExpedition += 1;
-
-    expedition.surfaceUpgradeOfferIds = {};
-    for (std::size_t slot = 0; slot < expedition.surfaceUpgradeOfferIds.size() && !available.empty(); ++slot) {
-        const int picked = rng.rangeInt(0, static_cast<int>(available.size()) - 1);
-        expedition.surfaceUpgradeOfferIds[slot] = available[static_cast<std::size_t>(picked)]->id;
-        available.erase(available.begin() + picked);
-    }
-
-    expedition.surfaceUpgradeOfferAvailable = std::any_of(
-        expedition.surfaceUpgradeOfferIds.begin(),
-        expedition.surfaceUpgradeOfferIds.end(),
-        [](const std::string& id) {
-            return !id.empty();
-        });
-
-    state.statusLine = "Field upgrade board rerolled. Next reroll costs " + std::to_string(static_cast<int>(offerRerollCost(state))) + " credits.";
-    return expedition.surfaceUpgradeOfferAvailable;
-}
-
-bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index)
-{
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
-    if (!expedition.active || !expedition.surfaceUpgradeOfferAvailable || index < 0 || index >= static_cast<int>(expedition.surfaceUpgradeOfferIds.size())) {
-        return false;
-    }
-
-    const std::string moduleId = expedition.surfaceModuleOfferIds[static_cast<std::size_t>(index)];
-    if (!moduleId.empty()) {
-        const DroneModuleDefinition* module = catalog.findDroneModule(moduleId);
-        if (module == nullptr) return false;
-        expedition.pendingDroneModuleId = moduleId;
-        expedition.pendingDroneModuleOfferIndex = index;
-        expedition.pendingDroneModuleFrame = -1;
-        expedition.pendingDroneModuleReplacementConfirmation = false;
-        state.statusLine = "Choose a " + std::string(coreDroneRoleName(module->hostRole)) + " frame for " + module->name + ".";
-        return true;
-    }
-    const std::string upgradeId = expedition.surfaceUpgradeOfferIds[static_cast<std::size_t>(index)];
-    const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(upgradeId);
-    if (upgrade == nullptr) {
-        return false;
-    }
-
-    state.run.surfaceUpgradeIds.push_back(upgrade->id);
-    expedition.surfaceUpgradeOfferIds = {};
-    expedition.surfaceModuleOfferIds = {};
-    expedition.surfaceUpgradeOfferAvailable = false;
-    appendSurfaceLog(expedition, "Field upgrade installed: " + upgrade->name + ".");
-    state.statusLine = "Field upgrade installed: " + upgrade->name + ".";
-    return true;
-}
-
-bool assignPendingDroneModuleFrame(GameState& state, const ContentCatalog& catalog, int frameIndex, bool confirmReplacement)
-{
-    auto& expedition = state.run.surfaceExpedition;
-    if (!expedition.active || expedition.pendingDroneModuleId.empty() || frameIndex < 0 || frameIndex >= static_cast<int>(state.meta.equippedDroneIds.size())) return false;
-    const auto* module = catalog.findDroneModule(expedition.pendingDroneModuleId);
-    const auto* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[static_cast<std::size_t>(frameIndex)]);
-    if (!module || !drone || drone->role != module->hostRole) return false;
-    auto existing = std::find_if(expedition.droneModuleAssignments.begin(), expedition.droneModuleAssignments.end(), [&](const DroneFrameModuleAssignment& a) { return a.equippedFrame == frameIndex; });
-    if (existing != expedition.droneModuleAssignments.end() && !confirmReplacement) {
-        expedition.pendingDroneModuleFrame = frameIndex;
-        expedition.pendingDroneModuleReplacementConfirmation = true;
-        state.statusLine = "Frame already has a module. Confirm replacement.";
-        return false;
-    }
-    if (existing == expedition.droneModuleAssignments.end()) expedition.droneModuleAssignments.push_back({frameIndex, drone->id, module->kind});
-    else *existing = {frameIndex, drone->id, module->kind};
-    expedition.surfaceModuleOfferIds = {};
-    expedition.surfaceUpgradeOfferIds = {};
-    expedition.pendingDroneModuleId.clear();
-    expedition.pendingDroneModuleOfferIndex = -1;
-    expedition.pendingDroneModuleFrame = -1;
-    expedition.pendingDroneModuleReplacementConfirmation = false;
-    expedition.surfaceUpgradeOfferAvailable = false;
-    state.statusLine = "Module grafted to frame.";
-    return true;
+    // Landing never grants a free draft. XP thresholds are the only source of
+    // run-upgrade choices; the App opens a persisted offer after an award.
+    (void)rng;
 }
 
 double surfaceEnemyEncounterChance(const GameState& state)
@@ -3408,6 +3439,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
             : tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus
     };
     addMaterials(expedition.temporaryMaterials, gain);
+    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::SurfaceExpedition);
     expedition.miningSitePrepared = true;
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
@@ -3454,6 +3486,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     }
 
     addMaterials(expedition.temporaryMaterials, gain);
+    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::SurfaceExpedition);
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
     outcome.cargoDelta = materialCargo(gain);
@@ -3489,6 +3522,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
 
     expedition.miningSitePrepared = true;
     expedition.depth += 1;
+    awardExpeditionExperience(state, 2.0, Screen::SurfaceExpedition);
     expedition.hazard += tuning::research::hazardPerDepth;
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
@@ -4059,6 +4093,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     }
 
     push.steps += 1;
+    awardExpeditionExperience(state, 2.0, Screen::SurfacePush);
     const SurfacePushSupport support = surfacePushSupport(state);
     push.depthGain = std::max(push.depthGain, push.steps);
     push.pressure = std::clamp(push.pressure + std::max(0.08, 0.16 - support.pressureRelief * 0.35) + rng.range(0.00, 0.06), 0.0, 1.0);
@@ -4281,6 +4316,12 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
     creditExtractedCompatibilityMiningSiteArtifacts(
         state.meta,
         expedition.temporaryArtifacts);
+    if (!expedition.temporaryArtifacts.empty()) {
+        awardExpeditionExperience(
+            state,
+            75.0 * static_cast<double>(expedition.temporaryArtifacts.size()),
+            state.screen);
+    }
     state.meta.artifacts.insert(
         state.meta.artifacts.end(),
         expedition.temporaryArtifacts.begin(),
@@ -4322,7 +4363,9 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              0});
     }
 
-    expedition = {};
+    SurfaceExpeditionState preservedProgression;
+    copyRunProgression(expedition, preservedProgression);
+    expedition = std::move(preservedProgression);
     return outcome;
 }
 

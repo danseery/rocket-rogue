@@ -9530,3 +9530,214 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     max-width: 100%;
     overflow: hidden;
 }
+
+/* Expedition XP is the one new progression instrument. All three placements
+   share this stable segmented DOM so native RmlUi and web patch values without
+   rebuilding gameplay panels. */
+.expedition-xp {
+    display: block;
+    box-sizing: border-box;
+    min-width: 0px;
+    min-height: 30px;
+    padding: 5px 7px;
+    background-color: #07141c;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.expedition-xp > header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    min-height: 12px;
+    margin: 0px 0px 4px 0px;
+}
+.expedition-xp > header strong,
+.expedition-xp > header span,
+.expedition-xp > header b {
+    font-size: 9px;
+    line-height: 1.0;
+    white-space: nowrap;
+}
+.expedition-xp > header strong { color: #f2d15f; }
+.expedition-xp > header span {
+    margin-left: 8px;
+    color: #d9f7ff;
+}
+.expedition-xp > header b {
+    margin-left: auto;
+    color: #55d8eb;
+}
+.expedition-xp-track {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    height: 6px;
+}
+.expedition-xp-track .xp-segment {
+    flex: 1 1 1px;
+    min-width: 2px;
+    height: 6px;
+    margin-right: 2px;
+    background-color: #142a34;
+    border-width: 0px;
+}
+.expedition-xp-track .xp-segment:last-child { margin-right: 0px; }
+.expedition-xp-track .xp-segment.is-filled { background-color: #36cfe4; }
+.expedition-xp.is-pulsing {
+    background-color: #10252a;
+    border-color: #f2d15f;
+}
+.expedition-xp.is-pulsing .xp-segment.is-filled { background-color: #f2d15f; }
+
+.phase-board-surface.surface-ops-screen .surface-quickbar > .expedition-xp {
+    flex: 2 1 220px;
+    width: 220px;
+    min-height: 32px;
+    height: 32px;
+    margin: 0px 0px 0px 4px;
+    padding: 4px 6px;
+}
+.mining-run-title > .expedition-xp {
+    width: 100%;
+    min-height: 20px;
+    height: 20px;
+    margin-top: 4px;
+    padding: 1px 0px;
+    background-color: transparent;
+    border-width: 0px;
+}
+.mining-run-title > .expedition-xp > header {
+    min-height: 9px;
+    margin-bottom: 2px;
+}
+.mining-run-title > .expedition-xp > header strong,
+.mining-run-title > .expedition-xp > header span,
+.mining-run-title > .expedition-xp > header b {
+    font-size: 8px;
+}
+.mining-run-title > .expedition-xp-track,
+.mining-run-title .expedition-xp-track,
+.mining-run-title .expedition-xp-track .xp-segment {
+    height: 4px;
+}
+
+/* The Level Up stamp deliberately reuses the compact draft room. It is scoped
+   so permanent Refit keeps its established layout and hidden helper hero. */
+#rr-panel.selection-family-panel .phase-board-draft-room.level-up-draft .draft-hero {
+    display: flex;
+    flex-direction: row;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 88px;
+    height: 88px;
+    margin: 0px 0px 8px 0px;
+    padding: 10px 12px;
+    background-color: #07151d;
+    border-width: 1px;
+    border-color: #b99a38;
+    border-radius: 5px;
+}
+#rr-panel.selection-family-panel .level-up-stamp > div {
+    flex: 1 1 auto;
+    min-width: 0px;
+}
+#rr-panel.selection-family-panel .level-up-stamp > div > span {
+    display: block;
+    color: #f2d15f;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+#rr-panel.selection-family-panel .level-up-stamp > div > h2 {
+    margin: 3px 0px 2px 0px;
+    color: #f4fbff;
+    font-size: 20px;
+    line-height: 1.0;
+}
+#rr-panel.selection-family-panel .level-up-stamp > div > p,
+#rr-panel.selection-family-panel .level-up-stamp > div > strong {
+    display: block;
+    margin: 0px;
+    color: #8fc8d6;
+    font-size: 10px;
+    line-height: 1.1;
+}
+#rr-panel.selection-family-panel .level-up-stamp > div > strong {
+    margin-top: 3px;
+    color: #55d8eb;
+}
+#rr-panel.selection-family-panel .level-up-stamp > .expedition-xp {
+    flex: 0 0 286px;
+    width: 286px;
+    min-height: 50px;
+    height: 50px;
+    margin: 8px 0px 0px 12px;
+    padding: 8px;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-activation-locked .surface-upgrade-card button {
+    opacity: 0.55;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .level-up-stamp {
+    animation: rr-level-up-stamp 0.70s cubic-in-out 1;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .surface-upgrade-card {
+    animation: rr-level-up-card 0.45s cubic-in-out 1;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .surface-upgrade-card.offer-index-1 {
+    animation-delay: 0.06s;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .surface-upgrade-card.offer-index-2 {
+    animation-delay: 0.12s;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .level-up-stamp .xp-segment {
+    animation: rr-level-up-xp-rollover-empty 0.45s cubic-in-out 1;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-celebrating .level-up-stamp .xp-segment.is-filled {
+    animation: rr-level-up-xp-rollover-filled 0.45s cubic-in-out 1;
+}
+#rr-panel.selection-family-panel .level-up-draft.is-refreshing .surface-upgrade-card {
+    animation: rr-level-up-refresh 0.22s cubic-in-out 1;
+}
+#rr-panel.selection-family-panel .level-up-draft .surface-upgrade-card {
+    position: relative;
+}
+#rr-panel.selection-family-panel .run-upgrade-resolve-flash {
+    display: none;
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    bottom: 2px;
+    left: 2px;
+    border-width: 2px;
+    border-color: #f2d15f;
+    border-radius: 4px;
+    background-color: #f2d15f18;
+}
+#rr-panel.selection-family-panel .run-upgrade-resolve-flash.is-active {
+    display: block;
+}
+@keyframes rr-level-up-stamp {
+    from { transform: scale(0.97); opacity: 0.58; }
+    35% { transform: scale(1.01); opacity: 1.0; }
+    to { transform: scale(1.0); opacity: 1.0; }
+}
+@keyframes rr-level-up-card {
+    from { transform: translateY(10px); opacity: 0.0; }
+    to { transform: translateY(0px); opacity: 1.0; }
+}
+@keyframes rr-level-up-xp-rollover-empty {
+    from { background-color: #f2d15f; }
+    33% { background-color: #fff3a6; }
+    to { background-color: #142a34; }
+}
+@keyframes rr-level-up-xp-rollover-filled {
+    from { background-color: #f2d15f; }
+    33% { background-color: #fff3a6; }
+    to { background-color: #36cfe4; }
+}
+@keyframes rr-level-up-refresh {
+    from { transform: translateY(4px); opacity: 0.45; }
+    to { transform: translateY(0px); opacity: 1.0; }
+}

@@ -34,6 +34,10 @@ constexpr double asteroidImpactFeedbackDuration = 0.32;
 // large transient vector before the renderer reaches its own visual limit.
 constexpr std::size_t kMaxSurfaceProspectMarkers = 14U;
 constexpr std::size_t kMaxSurfacePushRewardMarkers = 10U;
+constexpr double kLevelUpFanfareSeconds = 0.70;
+constexpr double kLevelUpActivationFenceSeconds = 0.35;
+constexpr double kLevelUpRefreshFenceSeconds = 0.22;
+constexpr double kLevelUpSelectionResolveSeconds = 0.10;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
@@ -407,6 +411,152 @@ void RocketGameApp::finishArrivalFanfare()
     panelDirty_ = true;
 }
 
+bool RocketGameApp::levelUpActivationLocked() const
+{
+    return levelUp_.resolving || levelUp_.activationFenceSeconds > 0.0;
+}
+
+void RocketGameApp::maybeOpenLevelUpDraft()
+{
+    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    if (titleScreenActive_ || services_.ui.modalOpen() || levelUp_.resolving) {
+        return;
+    }
+
+    if (state_.screen == Screen::SurfaceUpgrade) {
+        if (expedition.runUpgradeOfferPending) {
+            return;
+        }
+        if (expedition.pendingRunUpgradeChoices <= 0) {
+            const Screen returnScreen = expedition.runUpgradeReturnScreen == Screen::SurfaceUpgrade
+                ? Screen::SurfaceExpedition
+                : expedition.runUpgradeReturnScreen;
+            state_.screen = returnScreen;
+            state_.statusLine = "Expedition upgrade installed.";
+            levelUp_ = {};
+            save();
+            panelDirty_ = true;
+            return;
+        }
+    } else {
+        if (expedition.pendingRunUpgradeChoices <= 0) {
+            return;
+        }
+        const bool priorityTransition = state_.screen == Screen::StoryBriefing
+            || state_.screen == Screen::Results
+            || state_.screen == Screen::ArrivalFanfare
+            || (state_.screen == Screen::Flyby && state_.run.flyby.completed)
+            || (state_.screen == Screen::Orbit && state_.run.orbit.completed)
+            || (state_.screen == Screen::Mining && state_.run.mining.failurePending)
+            || miningExtraction_.active;
+        if (priorityTransition) {
+            return;
+        }
+        expedition.runUpgradeReturnScreen = state_.screen;
+    }
+
+    // Exhausted pools consume their pending choice in the core generator.
+    // Bound the loop defensively so malformed state can never stall a frame.
+    for (int guard = 0;
+         guard < 64 && expedition.pendingRunUpgradeChoices > 0 && !expedition.runUpgradeOfferPending;
+         ++guard) {
+        const int choicesBefore = expedition.pendingRunUpgradeChoices;
+        if (generateRunUpgradeOffers(state_, catalog_, rng_)) {
+            break;
+        }
+        if (expedition.pendingRunUpgradeChoices >= choicesBefore) {
+            break;
+        }
+    }
+    if (!expedition.runUpgradeOfferPending) {
+        if (expedition.pendingRunUpgradeChoices <= 0) {
+            if (state_.screen == Screen::SurfaceUpgrade) {
+                state_.screen = expedition.runUpgradeReturnScreen;
+            }
+            state_.statusLine = "ALL ELIGIBLE UPGRADES INSTALLED";
+            levelUp_ = {};
+            save();
+            panelDirty_ = true;
+        }
+        return;
+    }
+
+    const bool openingBatch = state_.screen != Screen::SurfaceUpgrade;
+    if (openingBatch) {
+        releaseRealtimeInputs(true);
+        levelUp_ = {};
+        levelUp_.fanfareActive = true;
+        levelUp_.activationFenceSeconds = kLevelUpActivationFenceSeconds;
+        levelUp_.batchChoices = expedition.pendingRunUpgradeChoices;
+        state_.screen = Screen::SurfaceUpgrade;
+        state_.statusLine = "LEVEL UP \xE2\x80\x94 choose one expedition upgrade.";
+        queueControllerHapticCue(ControllerHapticCue::LevelUp);
+    }
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::finishLevelUpSelection()
+{
+    if (!levelUp_.resolving) {
+        return;
+    }
+    levelUp_.resolving = false;
+    levelUp_.resolveElapsed = 0.0;
+    levelUp_.selectedOfferIndex = -1;
+
+    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    for (int guard = 0;
+         guard < 64 && expedition.pendingRunUpgradeChoices > 0 && !expedition.runUpgradeOfferPending;
+         ++guard) {
+        const int choicesBefore = expedition.pendingRunUpgradeChoices;
+        if (generateRunUpgradeOffers(state_, catalog_, rng_)) {
+            break;
+        }
+        if (expedition.pendingRunUpgradeChoices >= choicesBefore) {
+            break;
+        }
+    }
+
+    if (expedition.runUpgradeOfferPending) {
+        levelUp_.activationFenceSeconds = kLevelUpRefreshFenceSeconds;
+        state_.statusLine = std::to_string(expedition.pendingRunUpgradeChoices) + " PICKS REMAIN";
+    } else {
+        const Screen returnScreen = expedition.runUpgradeReturnScreen == Screen::SurfaceUpgrade
+            ? Screen::SurfaceExpedition
+            : expedition.runUpgradeReturnScreen;
+        state_.screen = returnScreen;
+        state_.statusLine = expedition.pendingRunUpgradeChoices <= 0
+            ? "Expedition upgrade installed."
+            : "ALL ELIGIBLE UPGRADES INSTALLED";
+        levelUp_ = {};
+    }
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::observeExpeditionExperience()
+{
+    const SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    if (!expeditionXpObservationInitialized_) {
+        observedExpeditionLevel_ = expedition.expeditionLevel;
+        observedExpeditionExperience_ = expedition.expeditionExperience;
+        expeditionXpObservationInitialized_ = true;
+        return;
+    }
+    const bool gained = expedition.expeditionLevel > observedExpeditionLevel_
+        || (expedition.expeditionLevel == observedExpeditionLevel_
+            && expedition.expeditionExperience > observedExpeditionExperience_ + 0.0001);
+    if (gained) {
+        expeditionXpPulseSeconds_ = expedition.expeditionLevel > observedExpeditionLevel_
+            ? kLevelUpFanfareSeconds
+            : 0.36;
+        realtimeHudDirty_ = true;
+    }
+    observedExpeditionLevel_ = expedition.expeditionLevel;
+    observedExpeditionExperience_ = expedition.expeditionExperience;
+}
+
 void RocketGameApp::beginSurfaceExpeditionOrRefit()
 {
     startSurfaceExpedition(state_, catalog_, &rng_);
@@ -432,7 +582,6 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
     }
     if (refitWindowPresentation(state_, catalog_).offers.empty()) {
         state_.run.refitEntitled = false;
-        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
         state_.run.offerCrewUpgradeIds = {};
         return false;
     }
@@ -484,31 +633,29 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     rng_ = Random(state_.seed);
     session_ = {};
     miningExtraction_ = {};
+    levelUp_ = {};
+    expeditionXpPulseSeconds_ = 0.0;
+    expeditionXpObservationInitialized_ = false;
     keyboardRealtimeInput_ = {};
     controllerRealtimeInput_ = {};
     hasSavedGame_ = false;
     titleNotice_.clear();
     panelDirty_ = true;
 
-    if (const auto saveData = deserializeSaveData(services_.saves.load())) {
+    const std::string storedSave = services_.saves.load();
+    if (const auto saveData = deserializeSaveData(storedSave)) {
         restoreSaveData(state_, catalog_, *saveData);
         rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
-        const bool staleCompatibilityOffer = std::any_of(
-            state_.run.surfaceExpedition.surfaceModuleOfferIds.begin(),
-            state_.run.surfaceExpedition.surfaceModuleOfferIds.end(),
-            [&](const std::string& moduleId) {
-                const ShipModule* module = catalog_.findModule(moduleId);
-                return module != nullptr && module->compatibilityOnly &&
-                    module->launchUpgradeKind == LaunchUpgradeKind::None;
-            });
-        if (staleCompatibilityOffer && state_.run.refitEntitled) {
-            generateModuleOffers(state_, catalog_, rng_);
-        }
         if (state_.screen == Screen::Upgrade && !openRefitIfAvailable(false)) {
             state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         }
         state_.statusLine = std::string(text::status::saveRestored);
         hasSavedGame_ = true;
+    } else if (!storedSave.empty()) {
+        // Save v13 is an intentional fresh-start boundary. Keep an older file
+        // untouched until New Game successfully replaces it, but never expose
+        // Continue for partially compatible progression state.
+        titleNotice_ = "Progression update requires a new game.";
     }
 
     ensureDroneBayState(state_, catalog_);
@@ -526,6 +673,9 @@ void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
     state_ = createNewGame(catalog_, 0xD36B6D3BU);
     rng_ = Random(state_.seed ^ 0x51A7E5ULL);
     session_ = {};
+    levelUp_ = {};
+    expeditionXpPulseSeconds_ = 0.0;
+    expeditionXpObservationInitialized_ = false;
     ensureDroneBayState(state_, catalog_);
     syncLaunchConfig(state_, catalog_);
     clearResearchAndExpeditionState(state_);
@@ -544,7 +694,7 @@ void RocketGameApp::captureDebugDroneLoadout()
     }
     debugDroneLoadout_.configured = true;
     debugDroneLoadout_.equippedDroneIds = state_.meta.equippedDroneIds;
-    debugDroneLoadout_.droneUpgrades = state_.meta.droneUpgrades;
+    debugDroneLoadout_.droneRanks = state_.run.surfaceExpedition.runDroneRanks;
 }
 
 void RocketGameApp::applyDebugDroneLoadout()
@@ -554,7 +704,7 @@ void RocketGameApp::applyDebugDroneLoadout()
         return;
     }
     state_.meta.equippedDroneIds = debugDroneLoadout_.equippedDroneIds;
-    state_.meta.droneUpgrades = debugDroneLoadout_.droneUpgrades;
+    state_.run.surfaceExpedition.runDroneRanks = debugDroneLoadout_.droneRanks;
     ensureDroneBayState(state_, catalog_);
 }
 
@@ -1364,6 +1514,12 @@ void RocketGameApp::tick(double deltaSeconds)
         return;
     }
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
+    if (expeditionXpPulseSeconds_ > 0.0) {
+        expeditionXpPulseSeconds_ = std::max(
+            0.0,
+            expeditionXpPulseSeconds_ - std::clamp(deltaSeconds, 0.0, 0.25));
+        realtimeHudDirty_ = true;
+    }
     if (miningOperatorToggleConfirmationSeconds_ > 0.0) {
         miningOperatorToggleConfirmationSeconds_ = std::max(
             0.0,
@@ -1376,6 +1532,33 @@ void RocketGameApp::tick(double deltaSeconds)
     }
 
     if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
+        return;
+    }
+
+    if (state_.screen == Screen::SurfaceUpgrade) {
+        const double clampedDelta = std::clamp(deltaSeconds, 0.0, 0.25);
+        const bool activationWasLocked = levelUp_.activationFenceSeconds > 0.0;
+        levelUp_.activationFenceSeconds = std::max(
+            0.0,
+            levelUp_.activationFenceSeconds - clampedDelta);
+        if (activationWasLocked) {
+            realtimeHudDirty_ = true;
+        }
+        if (levelUp_.fanfareActive) {
+            levelUp_.elapsed = std::min(
+                levelUp_.elapsed + clampedDelta,
+                kLevelUpFanfareSeconds);
+            if (levelUp_.elapsed >= kLevelUpFanfareSeconds) {
+                levelUp_.fanfareActive = false;
+            }
+            realtimeHudDirty_ = true;
+        }
+        if (levelUp_.resolving) {
+            levelUp_.resolveElapsed += clampedDelta;
+            if (levelUp_.resolveElapsed >= kLevelUpSelectionResolveSeconds) {
+                finishLevelUpSelection();
+            }
+        }
         return;
     }
 
@@ -1469,32 +1652,14 @@ void RocketGameApp::tick(double deltaSeconds)
                 miningExtraction_.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
                 tuning::mining::miningExtractionSequenceSeconds);
             if (miningExtraction_.elapsed >= tuning::mining::miningExtractionSequenceSeconds) {
-                const bool showUpgradeDraft = miningExtraction_.showUpgradeDraft;
                 miningExtraction_ = {};
                 state_.run.mining = {};
-                state_.screen = showUpgradeDraft ? Screen::SurfaceUpgrade : Screen::SurfaceExpedition;
+                state_.screen = Screen::SurfaceExpedition;
             }
         } else {
             const bool wasActive = state_.run.mining.active;
             const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
             updateMiningRun(state_, catalog_, deltaSeconds);
-            // Field Insight drafts are queued at threshold crossings. The
-            // existing Field Upgrade screen is modal, so mining naturally
-            // stops simulating while the queued board is open.
-            if (state_.run.surfaceExpedition.pendingDroneModuleId.empty() &&
-                !state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable &&
-                state_.run.surfaceExpedition.miningDraftsEarned < 5) {
-                constexpr int insightThresholds[] = {1, 3, 5, 8, 12};
-                const int earned = state_.run.surfaceExpedition.miningDraftsEarned;
-                if (earned < 5 && state_.run.surfaceExpedition.fieldInsight >= insightThresholds[earned]) {
-                    state_.run.surfaceExpedition.miningDraftsEarned += 1;
-                    state_.run.surfaceExpedition.pendingFieldDraftThreshold = insightThresholds[earned];
-                    state_.run.surfaceExpedition.fieldDraftReturnScreen = Screen::Mining;
-                    state_.run.surfaceExpedition.surfaceUpgradeOffersSeen = 0;
-                    generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-                    state_.screen = Screen::SurfaceUpgrade;
-                }
-            }
             if (!thermalLockWasActive && state_.run.mining.drillThermalLock) {
                 keyboardRealtimeInput_.drilling = false;
                 controllerRealtimeInput_.drilling = false;
@@ -1597,6 +1762,11 @@ void RocketGameApp::renderScene()
 
 void RocketGameApp::renderUi()
 {
+    // XP sources mutate only authoritative progression state. Presentation
+    // opens the persisted draft here, after the current simulation update and
+    // after failure/story transitions have had first priority.
+    observeExpeditionExperience();
+    maybeOpenLevelUpDraft();
     // Simulation can run several fixed steps before one presentation. Collapse
     // all resulting panel changes into a single UI synchronization so RmlUi is
     // never rebuilt once per simulation substep.
@@ -1800,13 +1970,9 @@ void RocketGameApp::next()
         syncLaunchConfig(state_, catalog_);
         save();
     } else if (state_.screen == Screen::SurfaceUpgrade) {
-        state_.run.surfaceExpedition.surfaceUpgradeOfferIds = {};
-        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
-        state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable = false;
-        state_.run.surfaceExpedition.pendingFieldDraftThreshold = 0;
-        state_.screen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
-        state_.statusLine = "Field upgrade skipped. Keep digging or extract while the window holds.";
-        save();
+        state_.statusLine = "Choose an eligible expedition upgrade to continue.";
+        panelDirty_ = true;
+        return;
     } else if (state_.screen == Screen::Upgrade) {
         if (curatedProvingRefitsActive(state_) &&
             !refitWindowPresentation(state_, catalog_).showSkip) {
@@ -1814,7 +1980,6 @@ void RocketGameApp::next()
             panelDirty_ = true;
             return;
         }
-        state_.run.surfaceExpedition.surfaceModuleOfferIds = {};
         state_.run.offerCrewUpgradeIds = {};
         state_.run.refitEntitled = false;
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
@@ -2102,13 +2267,6 @@ void RocketGameApp::mineSurface()
         return;
     }
     SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
-    if (expedition.surfaceUpgradeOfferAvailable || !expedition.pendingDroneModuleId.empty()) {
-        expedition.fieldDraftReturnScreen = Screen::SurfaceExpedition;
-        state_.screen = Screen::SurfaceUpgrade;
-        save();
-        panelDirty_ = true;
-        return;
-    }
     const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
         state_,
         catalog_,
@@ -2221,30 +2379,26 @@ void RocketGameApp::extractSurface()
 
 void RocketGameApp::selectSurfaceUpgrade(int index)
 {
-    if (state_.screen != Screen::SurfaceUpgrade) {
+    if (state_.screen != Screen::SurfaceUpgrade || levelUpActivationLocked()) {
         return;
     }
 
-    const Screen returnScreen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
-    chooseSurfaceUpgrade(state_, catalog_, index);
-    if (state_.run.surfaceExpedition.pendingDroneModuleId.empty()) {
-        state_.screen = returnScreen;
-        state_.run.surfaceExpedition.pendingFieldDraftThreshold = 0;
+    if (!chooseRunUpgrade(state_, catalog_, index)) {
+        state_.statusLine = "That expedition upgrade is no longer eligible.";
+        panelDirty_ = true;
+        return;
     }
+    // Gameplay state and the persisted offer are committed immediately. The
+    // old DOM remains visible for a short focused-card resolve beat before the
+    // next queued offer (or the captured gameplay screen) replaces it.
+    levelUp_.resolving = true;
+    levelUp_.fanfareActive = false;
+    levelUp_.elapsed = kLevelUpFanfareSeconds;
+    levelUp_.resolveElapsed = 0.0;
+    levelUp_.selectedOfferIndex = index;
+    state_.statusLine = "Expedition upgrade installed.";
     save();
-    panelDirty_ = true;
-}
-
-void RocketGameApp::assignSurfaceModuleFrame(int index)
-{
-    if (state_.screen != Screen::SurfaceUpgrade) return;
-    const bool confirm = state_.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation &&
-        state_.run.surfaceExpedition.pendingDroneModuleFrame == index;
-    if (assignPendingDroneModuleFrame(state_, catalog_, index, confirm)) {
-        state_.screen = state_.run.surfaceExpedition.fieldDraftReturnScreen;
-    }
-    save();
-    panelDirty_ = true;
+    realtimeHudDirty_ = true;
 }
 
 void RocketGameApp::openDroneOps()
@@ -2301,33 +2455,6 @@ void RocketGameApp::unequipDroneSlot(int slotIndex)
 
     if (unequipMiniDroneSlot(state_, catalog_, slotIndex)) {
         captureDebugDroneLoadout();
-        save();
-    }
-    panelDirty_ = true;
-}
-
-void RocketGameApp::upgradeDrone(int index)
-{
-    if (state_.screen != Screen::DroneOps) {
-        return;
-    }
-
-    if (::rocket::upgradeMiniDrone(state_, catalog_, index)) {
-        captureDebugDroneLoadout();
-        save();
-    }
-    panelDirty_ = true;
-}
-
-void RocketGameApp::redeemDroneUpgradeCredit(int index)
-{
-    if (state_.screen != Screen::DroneOps) {
-        return;
-    }
-
-    if (rocket::redeemDroneUpgradeCredit(state_, catalog_, index)) {
-        captureDebugDroneLoadout();
-        state_.statusLine = "Artifact credit applied. The selected Support Drone is upgraded.";
         save();
     }
     panelDirty_ = true;
@@ -2573,7 +2700,6 @@ void RocketGameApp::miningStow()
     const MiningRunState extractionVisual = state_.run.mining;
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
     if (outcome.applied) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
         state_.run.mining = extractionVisual;
         state_.run.mining.active = false;
         state_.run.mining.drilling = false;
@@ -2588,7 +2714,6 @@ void RocketGameApp::miningStow()
         state_.run.mining.damageNumbers.clear();
         miningExtraction_.active = true;
         miningExtraction_.elapsed = 0.0;
-        miningExtraction_.showUpgradeDraft = state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable;
         state_.screen = Screen::Mining;
     }
     state_.statusLine = outcome.applied
@@ -2597,28 +2722,6 @@ void RocketGameApp::miningStow()
     save();
     panelDirty_ = true;
 }
-
-namespace {
-
-bool hasRecoveredSurfacePayload(const SurfaceExpeditionState& expedition)
-{
-    return expedition.cargo > 0
-        || expedition.temporaryMaterials.common > 0
-        || expedition.temporaryMaterials.rare > 0
-        || expedition.temporaryMaterials.exotic > 0
-        || !expedition.temporaryArtifacts.empty();
-}
-
-bool recoveredSurfacePayloadThisAction(const SurfaceActionOutcome& outcome)
-{
-    return outcome.cargoDelta > 0
-        || outcome.materialDelta.common > 0
-        || outcome.materialDelta.rare > 0
-        || outcome.materialDelta.exotic > 0
-        || outcome.artifactFound;
-}
-
-} // namespace
 
 void RocketGameApp::scanSurfacePulse()
 {
@@ -2639,12 +2742,6 @@ void RocketGameApp::scanSurfaceBank()
     }
 
     const SurfaceActionOutcome outcome = bankSurfaceScan(state_);
-    if (outcome.applied && recoveredSurfacePayloadThisAction(outcome)) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -2681,12 +2778,6 @@ void RocketGameApp::pushSurfaceBank()
     }
 
     const SurfaceActionOutcome outcome = bankSurfacePush(state_);
-    if (outcome.applied && recoveredSurfacePayloadThisAction(outcome)) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
     state_.statusLine = surfaceActionSummary(outcome);
     save();
     panelDirty_ = true;
@@ -2705,12 +2796,6 @@ void RocketGameApp::miningAbort()
 
     recordActiveMiningScenarioAbort(state_, catalog_);
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
-    if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
@@ -2734,12 +2819,6 @@ void RocketGameApp::miningFailureAck()
 
     recordActiveMiningScenarioAbort(state_, catalog_);
     const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
-    if (outcome.applied && hasRecoveredSurfacePayload(state_.run.surfaceExpedition)) {
-        generateSurfaceUpgradeOffers(state_, catalog_, rng_);
-        if (state_.run.surfaceExpedition.surfaceUpgradeOfferAvailable) {
-            state_.screen = Screen::SurfaceUpgrade;
-        }
-    }
     state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
     save();
     panelDirty_ = true;
@@ -2869,12 +2948,6 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
     expedition.enemyEncountersEnabled = miningAct != MiningAct::ActOne;
     expedition.miningSitePrepared = true;
     expedition.prospectArtifacts = rules.mechanics.artifactRecovery ? 1 : 0;
-    // Debug arenas bypass campaign Field Upgrade teaching and Insight drafts;
-    // the debug command should enter the requested arena directly.
-    expedition.fieldInsight = 0;
-    expedition.miningDraftsEarned = 5;
-    expedition.pendingFieldDraftThreshold = 0;
-    expedition.surfaceUpgradeOfferAvailable = false;
 
     const int normalizedLoadout = std::clamp(loadoutMode, 0, 2);
     if (normalizedLoadout == 1) {
@@ -2896,12 +2969,14 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
                 continue;
             }
             state_.meta.equippedDroneIds.push_back(drone->id);
-            const auto upgrade = std::find_if(
-                state_.meta.droneUpgrades.begin(),
-                state_.meta.droneUpgrades.end(),
-                [&](const DroneUpgradeRecord& record) { return record.droneId == drone->id; });
-            if (upgrade != state_.meta.droneUpgrades.end()) {
-                upgrade->level = std::max(1, rules.referenceDrones.maximumMark);
+            const auto rank = std::find_if(
+                expedition.runDroneRanks.begin(),
+                expedition.runDroneRanks.end(),
+                [&](const RunDroneRank& record) { return record.droneId == drone->id; });
+            if (rank != expedition.runDroneRanks.end()) {
+                rank->rank = std::max(1, rules.referenceDrones.maximumMark);
+            } else if (rules.referenceDrones.maximumMark > 1) {
+                expedition.runDroneRanks.push_back({drone->id, rules.referenceDrones.maximumMark});
             }
         }
         ensureDroneBayState(state_, catalog_);
@@ -3127,9 +3202,11 @@ void RocketGameApp::debugShowSurfaceUpgrade()
     beginDebugSandbox("Debug Surface Upgrade board. No save data will be written.");
     seedDebugResearchAccess(state_);
     seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::mars);
-    generateSurfaceUpgradeOffers(state_, catalog_, rng_);
+    (void)awardExpeditionExperience(state_, 10.0, Screen::SurfaceExpedition);
+    generateRunUpgradeOffers(state_, catalog_, rng_);
     state_.screen = Screen::SurfaceUpgrade;
-    state_.statusLine = "Debug Surface Upgrade board. Inspect draft cards without touching your save.";
+    state_.run.surfaceExpedition.runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    state_.statusLine = "Debug Level Up board. Inspect draft cards without touching your save.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -3286,6 +3363,9 @@ void RocketGameApp::applyDebugActOneCheckpoint()
     const DebugActOneCheckpoint& checkpoint = kDebugActOneCheckpoints[static_cast<std::size_t>(debugActOneCheckpoint_)];
 
     session_ = {};
+    levelUp_ = {};
+    expeditionXpPulseSeconds_ = 0.0;
+    expeditionXpObservationInitialized_ = false;
     clearResearchAndExpeditionState(state_);
     state_.lastOutcome = debugActOneCheckpoint_ == 0
         ? LaunchOutcome{}
@@ -3481,11 +3561,8 @@ void RocketGameApp::rerollOffers()
         return;
     }
 
-    if (state_.screen == Screen::SurfaceUpgrade) {
-        if (rocket::rerollSurfaceUpgradeOffers(state_, catalog_, rng_)) {
-            save();
-        }
-    }
+    // Expedition Level Up choices are mandatory and persisted. Their pool has
+    // no paid reroll path and does not share Refit's economy counter.
     panelDirty_ = true;
 }
 
@@ -3547,6 +3624,9 @@ void RocketGameApp::resetSave()
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
     session_ = {};
+    levelUp_ = {};
+    expeditionXpPulseSeconds_ = 0.0;
+    expeditionXpObservationInitialized_ = false;
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
     disableDebugToolsForFreshCampaign();
     refreshPanel();
@@ -3582,6 +3662,9 @@ void RocketGameApp::newGame()
     session_ = {};
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
     miningExtraction_ = {};
+    levelUp_ = {};
+    expeditionXpPulseSeconds_ = 0.0;
+    expeditionXpObservationInitialized_ = false;
     releaseRealtimeInputs(true);
     disableDebugToolsForFreshCampaign();
     hasSavedGame_ = stored;
@@ -3782,6 +3865,11 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         firstTimeIntroductionsEnabled_,
         selectedRefitOfferIndex_,
         &session_.flight,
+        levelUp_.elapsed,
+        levelUp_.batchChoices,
+        levelUpActivationLocked(),
+        levelUp_.resolving ? levelUp_.selectedOfferIndex : -1,
+        expeditionXpPulseSeconds_ > 0.0,
     };
 }
 
@@ -4028,16 +4116,10 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectResearchProject(index);
     } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {
         selectSurfaceUpgrade(index);
-    } else if (consumeIndexedAction(action, ui::actions::surfaceModuleFramePrefix, index)) {
-        assignSurfaceModuleFrame(index);
     } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
         equipDrone(index);
     } else if (consumeIndexedAction(action, ui::actions::unequipDroneSlotPrefix, index)) {
         unequipDroneSlot(index);
-    } else if (consumeIndexedAction(action, ui::actions::upgradeDronePrefix, index)) {
-        upgradeDrone(index);
-    } else if (consumeIndexedAction(action, ui::actions::redeemDroneUpgradeCreditPrefix, index)) {
-        redeemDroneUpgradeCredit(index);
     } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
         selectNavigationDestination(index);
     } else if (consumeIndexedAction(action, ui::actions::recruitCandidatePrefix, index)) {
@@ -4166,6 +4248,11 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.animationTime = state_.run.surfaceScan.elapsedSeconds;
     } else if (state_.screen == Screen::SurfacePush) {
         result.animationTime = visualTimeSeconds_;
+    } else if (state_.screen == Screen::SurfaceUpgrade) {
+        result.animationTime = visualTimeSeconds_;
+        result.levelUpFanfare = levelUp_.fanfareActive
+            ? 1.0 - std::clamp(levelUp_.elapsed / kLevelUpFanfareSeconds, 0.0, 1.0)
+            : 0.0;
     } else if (state_.screen == Screen::ArrivalFanfare) {
         result.animationTime = session_.arrivalFanfare.elapsed;
     }

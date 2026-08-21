@@ -1,13 +1,14 @@
 #pragma once
 
 #include "core/GameState.h"
+#include "core/SaveSchema.h"
 
 #include <optional>
 
 namespace rocket {
 
 struct SaveData {
-    int version = 12;
+    int version = save_schema::currentVersion;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 0.0;
     int destinationIndex = 0;
@@ -36,7 +37,6 @@ struct SaveData {
     bool straylightDiscoveryAcknowledged = false;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
-    std::vector<std::string> surfaceUpgradeIds;
     std::vector<std::string> crewUpgradeIds;
     std::vector<std::string> offerModuleIds;
     std::vector<std::string> offerCrewUpgradeIds;
@@ -45,17 +45,7 @@ struct SaveData {
     SurfaceExpeditionState surfaceExpedition;
     MiningRunState mining;
     std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
-    std::array<std::string, 3> surfaceModuleOfferIds {};
-    std::string pendingDroneModuleId;
-    int pendingDroneModuleOfferIndex = -1;
-    int pendingDroneModuleFrame = -1;
-    bool pendingDroneModuleReplacementConfirmation = false;
     std::vector<DroneModuleRuntimeState> droneModuleRuntime;
-    int fieldInsight = 0;
-    std::vector<std::string> fieldInsightAwardKeys;
-    int miningDraftsEarned = 0;
-    int pendingFieldDraftThreshold = 0;
-    Screen fieldDraftReturnScreen = Screen::SurfaceExpedition;
     double scannerCooldownSeconds = 0.0;
     std::vector<TreasureMark> treasureMarks;
     int reclamationOxygenUses = 0;
@@ -68,7 +58,6 @@ struct SaveData {
     int droneBaySlots = 0;
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
-    std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ScenarioInstance> scenarios;
     int prospectorCommonOreRecovered = 0;
     bool lunarMiningBriefingAcknowledged = false;
@@ -79,7 +68,6 @@ struct SaveData {
     bool ioVolcanicBriefingAcknowledged = false;
     bool ioHazardDroneCommissioned = false;
     bool ioArtifactRecovered = false;
-    int droneUpgradeCredits = 0;
     bool saturnSlingshotBriefingAcknowledged = false;
     bool saturnSlingshotPerfect = false;
     bool saturnRouteUnlocked = false;

@@ -35,6 +35,11 @@ struct PanelRenderContext {
     bool firstTimeIntroductionsEnabled = true;
     int selectedRefitOfferIndex = 0;
     const LaunchFlightState* launchFlight = nullptr;
+    double levelUpFanfareElapsed = 1.0;
+    int levelUpBatchChoices = 0;
+    bool levelUpActivationLocked = false;
+    int levelUpResolvingOfferIndex = -1;
+    bool expeditionXpPulse = false;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

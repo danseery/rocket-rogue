@@ -517,6 +517,22 @@ std::string activeMiningSave(double drillHeat)
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string levelUpExpeditionSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0x1E7E1ULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.screen = rocket::Screen::SurfaceExpedition;
+    const rocket::ExpeditionExperienceAward award = rocket::awardExpeditionExperience(
+        state,
+        rocket::expeditionExperienceThreshold(1) + rocket::expeditionExperienceThreshold(2),
+        rocket::Screen::SurfaceExpedition);
+    assert(award.levelsGained == 2);
+    assert(state.run.surfaceExpedition.pendingRunUpgradeChoices == 2);
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 std::string freshSurfaceExpeditionSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -1758,8 +1774,8 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Field Upgrade cards commit directly; no preview-selection state or
-    // duplicate selected-offer section is required.
+    // Level Up cards commit directly, then retain the chosen border for the
+    // short resolve beat before returning to Surface Ops.
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
@@ -1773,7 +1789,7 @@ int main()
         assert(fixture.ui.html.find("selected-upgrade-detail") == std::string::npos);
 
         fixture.ui.dispatchAction("surface_upgrade:1");
-        fixture.host.now += 1.0 / 60.0;
+        fixture.host.now += 0.11;
         fixture.runner.frame();
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
         fixture.runner.shutdown();
@@ -2480,78 +2496,69 @@ int main()
     assert(renderer.miningViewsValid);
     assert(std::isfinite(renderer.miningViewChecksum));
 
-    const int savesBeforeSwarmArena = saves.storeCount;
-    runner.app().debugStartSwarmArena();
-    host.now += 1.0 / 60.0;
-    runner.frame();
-    // A Field Insight threshold may interrupt the debug arena with the
-    // existing Field Upgrade board. Resolve the board through the same action
-    // path as the player, then verify the arena resumes.
-    if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
-        ui.dispatchAction("surface_upgrade:0");
-        host.now += 1.0 / 60.0;
-        runner.frame();
-        if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
-            ui.dispatchAction("surface_module_frame:0");
-            host.now += 1.0 / 60.0;
-            runner.frame();
-            if (renderer.screen == rocket::Screen::SurfaceUpgrade) {
-                ui.dispatchAction("surface_module_frame:0");
-                host.now += 1.0 / 60.0;
-                runner.frame();
+    // XP thresholds open a persisted mandatory Level Up draft. The first
+    // frame is fenced so a held/queued activation cannot choose a card.
+    {
+        AppFixture levelUpFixture;
+        levelUpFixture.saves.value = levelUpExpeditionSave();
+        assert(levelUpFixture.runner.initialize());
+        levelUpFixture.ui.dispatchAction("continue_game");
+        levelUpFixture.runner.resetFrameClock();
+        levelUpFixture.runner.frame();
+        assert(levelUpFixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceUpgrade));
+        assert(levelUpFixture.ui.html.find("rr-level-up-draft") != std::string::npos);
+        assert(levelUpFixture.ui.html.find("aria-label=\"Expedition experience\"") != std::string::npos);
+        assert(levelUpFixture.ui.html.find("data-rr-action=\"next\"") == std::string::npos);
+        assert(levelUpFixture.ui.html.find("data-rr-action=\"reroll_offers\"") == std::string::npos);
+        assert(levelUpFixture.ui.html.find("surface_module_frame") == std::string::npos);
+
+        const std::optional<rocket::SaveData> persisted = rocket::deserializeSaveData(levelUpFixture.saves.value);
+        assert(persisted.has_value());
+        assert(persisted->surfaceExpedition.runUpgradeOfferPending);
+        assert(persisted->surfaceExpedition.pendingRunUpgradeChoices == 2);
+
+        const auto advanceLevelUp = [&](double seconds) {
+            const int frames = static_cast<int>(std::ceil(seconds * 60.0));
+            for (int frame = 0; frame < frames; ++frame) {
+                levelUpFixture.host.now += 1.0 / 60.0;
+                levelUpFixture.runner.frame();
             }
-        }
+        };
+
+        levelUpFixture.ui.dispatchAction("surface_upgrade:0");
+        assert(levelUpFixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceUpgrade));
+        assert(levelUpFixture.saves.storeCount == 1);
+        advanceLevelUp(0.36);
+        levelUpFixture.ui.dispatchAction("surface_upgrade:0");
+        advanceLevelUp(0.11);
+        assert(levelUpFixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceUpgrade));
+        assert(levelUpFixture.ui.html.find("1 PICKS REMAIN") != std::string::npos);
+        advanceLevelUp(0.25);
+        levelUpFixture.ui.dispatchAction("surface_upgrade:0");
+        advanceLevelUp(0.11);
+        assert(levelUpFixture.runner.app().currentScreen() != static_cast<int>(rocket::Screen::SurfaceUpgrade));
+        levelUpFixture.runner.shutdown();
     }
-    if (renderer.screen == rocket::Screen::SurfaceExpedition) {
-        // The debug arena entry point supplies the same authored prerequisites
-        // as a real mining deployment, without depending on tutorial state.
-        runner.app().debugStartSwarmArena();
-        host.now += 1.0 / 60.0;
-        runner.frame();
+
+    // An older v12 payload is rejected at the title boundary with Continue
+    // unavailable and the exact fresh-start notice.
+    {
+        AppFixture oldSaveFixture;
+        oldSaveFixture.saves.value = levelUpExpeditionSave();
+        const std::size_t versionOffset = oldSaveFixture.saves.value.find("version=13");
+        assert(versionOffset != std::string::npos);
+        oldSaveFixture.saves.value.replace(versionOffset, 10, "version=12");
+        assert(oldSaveFixture.runner.initialize());
+        assert(oldSaveFixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
+        assert(oldSaveFixture.ui.html.find("Progression update requires a new game.") != std::string::npos);
+        oldSaveFixture.runner.shutdown();
     }
-    assert(renderer.screen == rocket::Screen::Mining);
-    assert(renderer.miningSwarmActive);
-    assert(renderer.miningSwarmAlert);
-    assert(renderer.miningSwarmWave == 1);
-    assert(renderer.miningSwarmEnemies >= 30);
-    assert(renderer.miningSwarmDepth >= 2);
-    assert(renderer.miningViewsValid);
-    assert(saves.storeCount == savesBeforeSwarmArena);
 
     assert(host.viewportMetrics().logicalWidth == 1280);
     assert(host.viewportMetrics().drawableWidth == 2560);
     assert(!host.fullscreen());
     assert(host.setFullscreen(true));
     assert(host.fullscreen());
-
-    // Deterministic secondary-module assignment behavior: choosing a module
-    // only opens the frame step; empty frames attach immediately, occupied
-    // frames require confirmation, and duplicate modules may occupy both.
-    {
-        rocket::GameState moduleState;
-        const rocket::ContentCatalog moduleCatalog = rocket::createDefaultContent();
-        moduleState.run.surfaceExpedition.active = true;
-        moduleState.meta.equippedDroneIds = {rocket::content::drone::miningDrone, rocket::content::drone::miningDrone};
-        moduleState.meta.unlockKeys.push_back(rocket::content::unlock::perimeterDrones);
-        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
-        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
-        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
-        assert(!moduleState.run.surfaceExpedition.pendingDroneModuleId.empty());
-        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.empty());
-        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0));
-        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.size() == 1);
-        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
-        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
-        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
-        assert(!rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0));
-        assert(moduleState.run.surfaceExpedition.pendingDroneModuleReplacementConfirmation);
-        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 0, true));
-        moduleState.run.surfaceExpedition.surfaceModuleOfferIds[0] = rocket::content::droneModule::combatDrill;
-        moduleState.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
-        assert(rocket::chooseSurfaceUpgrade(moduleState, moduleCatalog, 0));
-        assert(rocket::assignPendingDroneModuleFrame(moduleState, moduleCatalog, 1));
-        assert(moduleState.run.surfaceExpedition.droneModuleAssignments.size() == 2);
-    }
 
     runner.shutdown();
     assert(controllers.resetCalled);

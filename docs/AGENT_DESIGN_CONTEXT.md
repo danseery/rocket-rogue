@@ -67,7 +67,7 @@ Generic crew placeholders have been replaced with animal specialists. Training s
 
 See [MINI_DRONE_SYSTEM.md](MINI_DRONE_SYSTEM.md) for the active Drone Bay design and current implementation slice.
 
-Support Drone systems start as environmental mining support in the solar system. Arkfall grants the emergency Mk I Attack/Defense kit and raises undersized bays to three slots. Perimeter Drone Network research then unlocks Perimeter Coordination for Mk II/Mk III combat tuning and advanced synergies.
+Support Drone systems start as environmental mining support in the solar system. Arkfall grants the emergency Mk I Attack/Defense kit and raises undersized bays to three slots. Perimeter Drone Network research then unlocks Perimeter Coordination, making advanced combat grafts and named synergies eligible in Expedition Level Up drafts. Mk II/Mk III ranks are temporary Transport-run choices, not permanent material purchases.
 
 Support Drones belong to the player, not the Mining Rig. Each independent unit resolves `MiningAnchorTarget { ControlledActor, Rig, Operator }` into an active `MiniDroneAnchorFrame` every fixed update. `MiniDrone*` remains a legacy internal C++ identifier; UI and design copy use Support Drone. Equipped units default to `ControlledActor`, follow/orbit/defend whichever actor is controlled, and transfer without same-layer snapping. Following and defense outrank finishing remote tasks; cross-depth transfers preserve haul, shields, cooldowns, stable formation slot, and orbit phase.
 
@@ -96,7 +96,7 @@ Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering,
 Prefer incremental systems that hook into the shared C++ application and preserve parity between native Vulkan 1.3 and WebGL2 builds:
 
 - Add content types and presentation helpers before new architecture.
-- Save version 11 retains version 10's scenario/mining/launch state and adds persisted Arrival Ops transfer fuel plus derived Surface Ops rig fuel. Version 10 active expeditions preserve the consumed percentage of the former 30-unit pool when converted to nominal route-derived capacity, and active Mining runs remain active. Earlier migration still keeps `earth_orbit` at index 0 internally, maps pristine/progressed campaigns conservatively, and converts retired proving-card ownership before pruning old IDs.
+- Save version 13 is the only accepted schema. It persists current scenario, Arrival, Surface, Mining, Expedition XP, queued-choice, run-rank, graft, and synergy state; version 12 and older payloads are rejected before restoration and require New Game.
 - Make new systems visible through concise UI states.
 - Avoid enemies throughout the solar system and Aaru Vale; enemy combat begins only after Arkfall near Khepri Prime.
 - Treat rig fuel as an explicit tradeoff. The UI and docs should show the 3-unit expedition pack, transfer fuel recovered at touchdown, and the separate return stage; autonomous bay units are Support Drones.

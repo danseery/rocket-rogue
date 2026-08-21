@@ -63,6 +63,30 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     return true;
 }
 
+bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
+{
+    switch (kind) {
+    case ScenarioEventKind::SafeMaterialDelivered:
+    case ScenarioEventKind::ProtectedObjectiveExtracted:
+    case ScenarioEventKind::FlybyFinished:
+    case ScenarioEventKind::MiningSiteCompleted:
+        return true;
+    case ScenarioEventKind::None:
+    case ScenarioEventKind::ManualAction:
+    case ScenarioEventKind::ActivityAborted:
+    case ScenarioEventKind::EquipmentAssigned:
+        return false;
+    }
+    return false;
+}
+
+void awardScenarioStepExperience(GameState& state, const ScenarioStepDefinition& step)
+{
+    if (awardsAuthoredObjectiveExperience(step.completionEvent)) {
+        (void)awardExpeditionExperience(state, 10.0, state.screen);
+    }
+}
+
 bool parseScenarioActionKind(std::string_view text, ScenarioActionKind& value)
 {
     if (text == "none") value = ScenarioActionKind::None;
@@ -80,7 +104,6 @@ bool parseScenarioRewardKind(std::string_view text, ScenarioRewardKind& value)
     if (text == "unlock_key") value = ScenarioRewardKind::UnlockKey;
     else if (text == "drone_bay_slots") value = ScenarioRewardKind::DroneBaySlots;
     else if (text == "support_drone") value = ScenarioRewardKind::SupportDrone;
-    else if (text == "drone_upgrade_credit") value = ScenarioRewardKind::DroneUpgradeCredit;
     else if (text == "frontier_readiness") value = ScenarioRewardKind::FrontierReadiness;
     else if (text == "inventory_resources") value = ScenarioRewardKind::InventoryResources;
     else if (text == "route_access") value = ScenarioRewardKind::RouteAccess;
@@ -125,7 +148,6 @@ bool validateScenarioReward(
         return !reward.id.empty() ||
             failResolvedParameter(error, "A scenario unlock-key reward requires an ID.");
     case ScenarioRewardKind::DroneBaySlots:
-    case ScenarioRewardKind::DroneUpgradeCredit:
         return reward.amount > 0 ||
             failResolvedParameter(error, "A scenario quantity reward requires a positive amount.");
     case ScenarioRewardKind::SupportDrone:
@@ -425,9 +447,6 @@ void applyReward(
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
         }
-        break;
-    case ScenarioRewardKind::DroneUpgradeCredit:
-        state.meta.droneUpgradeCredits += std::max(0, reward.amount);
         break;
     case ScenarioRewardKind::FrontierReadiness:
         state.run.frontierReadiness = frontierReadinessCap(state, catalog);
@@ -872,6 +891,7 @@ ScenarioActionOutcome performScenarioAction(
         if (step->completionEvent == ScenarioEventKind::None) {
             progress->progress = std::max(1, step->requiredProgress);
             progress->completed = true;
+            awardScenarioStepExperience(state, *step);
             progress->claimed = true;
             applyStepRewards(state, catalog, *instance, resolved, *step);
             refreshScenarioCompletion(resolved, *instance);
@@ -922,8 +942,12 @@ ScenarioActionOutcome performScenarioAction(
         }
         outcome.applied = true;
         if (step->completionEvent == ScenarioEventKind::ManualAction) {
+            const bool wasCompleted = progress->completed;
             progress->progress = std::max(1, step->requiredProgress);
             progress->completed = true;
+            if (!wasCompleted) {
+                awardScenarioStepExperience(state, *step);
+            }
             progress->claimed = true;
             applyStepRewards(state, catalog, *instance, resolved, *step);
             refreshScenarioCompletion(resolved, *instance);
@@ -985,6 +1009,7 @@ bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const 
                 progress->progress + increment);
             if (progress->progress >= std::max(1, step.requiredProgress)) {
                 progress->completed = true;
+                awardScenarioStepExperience(state, step);
                 if (!step.claimRequired) {
                     progress->claimed = true;
                     applyStepRewards(state, catalog, instance, resolved, step);

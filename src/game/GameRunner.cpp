@@ -244,6 +244,9 @@ void GameRunner::dispatchPendingHaptic()
     case ControllerHapticCue::Failure:
         services_.host.haptic(0.300, 0.70, 1.00);
         break;
+    case ControllerHapticCue::LevelUp:
+        services_.host.haptic(0.100, 0.25, 0.50);
+        break;
     case ControllerHapticCue::None:
     default:
         break;

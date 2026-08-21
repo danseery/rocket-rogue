@@ -57,7 +57,7 @@ Claiming Prospector Mk I opens Drone Bay Slot 1; the bay can then grow to 6 slot
 
 Slots persist across expeditions. Equipped loadouts can be changed before a mining run. Each unlocked Support Drone type starts with one owned frame; an open slot can use that spare frame or fabricate a paid duplicate. Duplicate costs scale by rarity: Common `20 Common`, Uncommon `30 Common`, Rare `40 Common + 1 Rare`, Prototype `60 Common + 2 Rare`. New slots remain visibly empty until the player assigns or builds a frame.
 
-Each Support Drone type can also be tuned from Mk I to Mk III with materials. Tuning applies to every owned copy of that type, so a duplicate is a capacity and specialization decision rather than a free separate upgrade track.
+During a Transport expedition, Level Up can advance an equipped Support Drone type from Mk I to Mk III. That temporary rank applies to every current or later-equipped copy of the type and resets only with the Transport expedition. Materials remain the permanent economy for Drone ownership, duplicate frames, and bay slots; they do not buy Mk ranks.
 
 Drone Ops should present this as a build table, not a hidden ruleset: the active build strip summarizes the equipped Support Drone loadout, the build guidance strip names the closest next recipe and tuning priority, the loadout bench shows filled/open/locked bay slots, the combat forecast shows the next run's autonomous swarm profile, the recipe board shows pair/signature requirements and missing roles, and each unit card shows the synergies it helps unlock.
 
@@ -68,18 +68,18 @@ The current implementation supports persistent Support Drone loadouts, transfera
 - The Prospector contract unlocks Drone Ops and grants the first Prospector Support Drone.
 - Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the first Hazard Support Drone Mk I.
 - Arkfall grants Mk I Attack and Defense Support Drones and raises undersized bays to three slots without erasing stronger equipment.
-- Perimeter Drone Network research grants Perimeter Coordination, which gates Mk II/Mk III combat tuning and advanced combat synergies.
+- Perimeter Drone Network research grants Perimeter Coordination, which makes advanced combat grafts and named synergies eligible for Level Up drafts.
 - Mining HUD summarizes active Support Drone coverage, active synergies, anchor status, rig health or suit integrity, threat roles, bullet colors, damage text, and the current build signature.
 - Equipped Support Drones affect mining stats, surface extraction/contact risk, oxygen, scanner reach, physical excavation, hazard remediation, and hostile-system autonomous defense.
-- Pair synergies add named build payoffs such as Targeting Grid, Killbox Screen, Excavation Barrage, Containment Screen, Long Haul Rig, and Pathfinder Loop.
-- Three-role signature builds such as Sentry Killbox, Excavation Storm, Containment Rig, Relic Pathfinder, and Full Spectrum Swarm make slot expansion feel like a build decision rather than only a stat increase.
-- Mk tuning gives individual favorite Support Drones stronger output, shields, scanner reach, oxygen support, or combat pressure without adding manual combat controls.
-- Drone Ops controls equip or unequip owned Support Drone frames, fabricate paid duplicates into open slots, and upgrade a type's tuning. A recovered Io minor artifact contributes a persistent `FREE UPGRADE ×1` credit that the player explicitly applies to any eligible owned Mk I/Mk II Support Drone type.
+- Pair synergies such as Targeting Grid, Killbox Screen, Excavation Barrage, Containment Screen, Long Haul Rig, and Pathfinder Loop activate only after their named Level Up card is selected.
+- Three-role signature cards such as Sentry Killbox, Excavation Storm, Containment Rig, Relic Pathfinder, and Full Spectrum Swarm make slot expansion feel like a build decision rather than only a stat increase.
+- Temporary Mk ranks give favorite Support Drone types stronger output, shields, scanner reach, oxygen support, or combat pressure without adding manual combat controls.
+- Drone Ops controls equip or unequip owned Support Drone frames and fabricate paid duplicates into open slots. It displays temporary ranks, slot grafts, and selected active or dormant synergies; it is not a parallel rank storefront.
 - The Drone Ops build guidance strip keeps buildcraft actionable by showing the closest inactive recipe, missing roles, next tuning target, and run posture for the current loadout.
 - The Drone Ops loadout bench makes the six-slot build shape explicit, showing equipped frames with Mk level and role, open slots ready for an owned frame or a paid duplicate, and locked slots that need bay upgrades.
 - The Drone Ops combat forecast previews autonomous shot cadence, volley size, crit chance, sentry output, field pulses, shield relief, counter-hits, slows, and auto-mining so loadout changes feel tactical before the run starts.
-- Support Drone cards preview the next tuning payoff and material cost, so upgrading a preferred unit reads as a build choice instead of a blind stat purchase.
-- The Drone Ops recipe board marks active recipes and calls out missing roles, giving players a clear reason to expand slots or swap drones before a hostile mining run.
+- Support Drone cards show the current expedition Mk and capabilities; rank choices arrive through the shared Level Up draft.
+- The Drone Ops recipe board lists only selected synergies and grafts, marks each Active or Dormant, and calls out missing roles without granting free bonuses for matching a loadout.
 - During mining, the Swarm command strip keeps the chosen build visible with active build name, current anchor, threat count, allied/enemy shot counts, crit chance, volley size, shield relief, defeated enemies, Support Drone damage, counter-hit damage, shield absorption, and damage routed to the rig or suit.
 - Hostile mining renders compact enemy silhouettes, allied blue/cyan projectiles, enemy red/orange or elemental projectiles, directional shield barriers during incoming fire, rig health bars, and floating damage/crit text without persistent aura disks.
 - Every equipped Support Drone is an independent saved simulation agent with its own world position, velocity, behavior, target, cooldown, anchor target, stable formation slot, and orbit phase. Logical parenting resolves a home frame but never directly transforms a Support Drone sprite.
@@ -110,6 +110,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 11 retains version 10's paid-frame, anchor, formation, position, haul, shield, recharge, cooldown, scenario, generic-cocoon, and launch-curriculum context while adding Arrival Ops transfer fuel and Surface Ops rig fuel. Older units migrate to `ControlledActor`, derive stable slots from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once.
+Save version 13 is an intentional fresh-start boundary. It persists permanent Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Version 12 and older saves are rejected without partial restoration or migration.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

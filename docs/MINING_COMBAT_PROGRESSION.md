@@ -121,7 +121,7 @@ First-clear progress is stored per act/band in `MetaProgress::miningFirstClearPr
 | 9 - Ouroboros | Act 3, levels 5-8 |
 | 10 - Ascent | Act 3, levels 9-10 |
 
-The current catalog associates Jupiter's stable travel route with an Io surface scenario and a Thermal layered-recovery site: non-paying Regolith, no direct ore deposits, two staged four-segment lava layers, deterministic lava-to-Common treatment, a 60-second baseline oxygen budget, and an Artifact objective whose scenario reward is one explicit Support Drone upgrade credit after safe extraction. These are `MiningSiteDefinition` and scenario settings, not special cases in Act progression or terrain generation.
+The current catalog associates Jupiter's stable travel route with an Io surface scenario and a Thermal layered-recovery site: non-paying Regolith, no direct ore deposits, two staged four-segment lava layers, deterministic lava-to-Common treatment, a 60-second baseline oxygen budget, and an Artifact objective that grants the standard 75 Expedition XP only after safe Surface extraction. These are `MiningSiteDefinition` and scenario settings, not special cases in Act progression or terrain generation.
 
 In Chapter 7 the base is level 4 after the first successful hostile sortie, level 5 after the second, and level 6 after the third. Surface depth then adds up to four levels, capped at 10.
 
@@ -140,7 +140,7 @@ The stable shared types live in `GameTypes.h`:
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies. Restore must never reroll serialized terrain. Save version 11 retains version 10's separate rig/operator state, destination gravity, loose chunks, disabled-rig state, artifact tether state, purchased duplicate Support Drone frames, scenario/site context, protected-objective state, launch-curriculum progress, and each unit's anchor target, formation, motion, haul, shield, recharge, and cooldowns while adding the Arrival Ops transfer-fuel and Surface Ops rig-fuel fields. If an active legacy arena has no metadata, save restoration derives metadata from its chapter, destination, surface depth, campaign seed, landing history, and hostile successes, then leaves the existing arena intact. Version 10 active Mining saves keep their arena and convert the former 30-unit surface pool to route-derived rig fuel at the same remaining percentage. Older saves restore the operator seated in the rig; their drones migrate to `ControlledActor` with slots derived from equipped order and deterministic phases, and repeated pre-v8 loadout IDs are de-duplicated once. Legacy saves default every first-clear record to zero, so no guarantee is silently marked complete.
+Active version-13 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, and each Support Drone's haul provenance. Version 12 and older saves are rejected at the fresh-start boundary instead of being migrated.
 
 The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
 

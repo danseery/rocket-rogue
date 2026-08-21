@@ -13,6 +13,7 @@ struct ContentCatalog {
     std::vector<SurfaceUpgrade> surfaceUpgrades;
     std::vector<MiniDrone> miniDrones;
     std::vector<DroneModuleDefinition> droneModules;
+    std::vector<DroneSynergyDefinition> droneSynergies;
     std::vector<ResearchProject> researchProjects;
     std::vector<ShipFrame> frames;
     std::vector<Astronaut> astronauts;
@@ -26,6 +27,7 @@ struct ContentCatalog {
     const SurfaceUpgrade* findSurfaceUpgrade(std::string_view id) const;
     const MiniDrone* findMiniDrone(std::string_view id) const;
     const DroneModuleDefinition* findDroneModule(std::string_view id) const;
+    const DroneSynergyDefinition* findDroneSynergy(std::string_view id) const;
     const ResearchProject* findResearchProject(std::string_view id) const;
     const ShipFrame* findFrame(std::string_view id) const;
     const Astronaut* findAstronaut(std::string_view id) const;

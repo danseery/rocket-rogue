@@ -6,7 +6,7 @@ USG Notes remain the primary design direction. This implementation adds the firs
 
 - The visible mandatory solar route is Moon -> Mars -> Jupiter/Io -> Saturn -> Uranus -> Neptune. `earth_orbit` remains an internal version-9 save origin only. The stable travel id remains `jupiter`, while its landed surface is presented as Io.
 - Early route advancement is explicit: the claimed 30-Common lunar Prospector contract opens Mars readiness; the claimed 40-Common Mars bay expansion opens Jupiter readiness; safe Io artifact recovery enables the Saturn slingshot; and a claimed Perfect Jupiter Flyby permanently opens Saturn.
-- Jupiter, Saturn, Uranus, and Neptune remain independent destinations with stable history and map states. The retired `outer_planets` id exists only to migrate older saves to Jupiter.
+- Jupiter, Saturn, Uranus, and Neptune remain independent destinations with stable history and map states. The retired `outer_planets` id stays reserved and must not be reused; current version-13 saves use the individual destination IDs.
 - Locking the Saturn course begins the one-way outer expedition. From Saturn onward, recovery UI says `Recover to Expedition` instead of promising an Earth return; after the Straylight discovery, it says `Return to Ark`.
 - Before Neptune succeeds, no Straylight name, contact, silhouette, art, signal, or Ark-return framing may appear anywhere.
 - Successful Neptune arrival persists a blocking, full-screen discovery briefing. Its only action, `Approach the Straylight`, acknowledges the beat, discovers the derelict-but-operable Ark, saves, and resumes Neptune Arrival Ops.

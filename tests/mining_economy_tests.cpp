@@ -38,6 +38,31 @@ void prepareSurface(GameState& state, std::string destinationId)
     state.screen = Screen::SurfaceExpedition;
 }
 
+struct ExpeditionExperienceSnapshot {
+    int level = 1;
+    double progress = 0.0;
+};
+
+ExpeditionExperienceSnapshot snapshotExpeditionExperience(const GameState& state)
+{
+    return {
+        state.run.surfaceExpedition.expeditionLevel,
+        state.run.surfaceExpedition.expeditionExperience
+    };
+}
+
+double expeditionExperienceEarnedSince(
+    const ExpeditionExperienceSnapshot& before,
+    const GameState& state)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    double earned = expedition.expeditionExperience - before.progress;
+    for (int level = before.level; level < expedition.expeditionLevel; ++level) {
+        earned += expeditionExperienceThreshold(level);
+    }
+    return earned;
+}
+
 int richCellCount(const MiningTerrain& terrain, MiningCellMaterial material)
 {
     int count = 0;
@@ -58,6 +83,82 @@ GameState extractWithSuccessfulSeed(const GameState& beforeExtraction)
         }
     }
     throw std::runtime_error("expected at least one deterministic successful surface extraction");
+}
+
+void miningExperienceAwardsMatchApprovedEconomy()
+{
+    require(
+        miningMaterialExperience({1, 1, 1}) == 13,
+        "Common, Rare, and Exotic ore should award 1, 3, and 9 XP");
+    require(
+        miningMaterialExperience({-4, 2, -1}) == 6,
+        "negative material counts should never subtract expedition XP");
+
+    require(
+        miningHazardTreatmentExperience(MiningElementalAffinity::Thermal) == 1
+            && miningHazardTreatmentExperience(MiningElementalAffinity::Cryo) == 1
+            && miningHazardTreatmentExperience(MiningElementalAffinity::Toxic) == 3
+            && miningHazardTreatmentExperience(MiningElementalAffinity::Radiation) == 9,
+        "hazard conversion XP should follow the approved 1/3/9 rarity economy");
+
+    MiningEnemy normal = createMiningEnemy(
+        MiningEnemyType::Ant,
+        MiningCellFeature::None,
+        0.0,
+        0.0);
+    MiningEnemy elite = normal;
+    elite.elite = true;
+    MiningEnemy spawner = createMiningEnemySpawner(
+        0.0,
+        0.0,
+        1.0,
+        MiningEnemyType::Ant,
+        1,
+        1.0);
+    MiningEnemy miniboss = normal;
+    miniboss.sourceFeature = MiningCellFeature::MinibossLair;
+    miniboss.elite = true;
+    MiningEnemy boss = normal;
+    boss.sourceFeature = MiningCellFeature::BossChamber;
+    boss.elite = true;
+
+    require(
+        miningEnemyDefeatExperience(normal, 5) == 1
+            && miningEnemyDefeatExperience(normal, 10) == 2,
+        "normal enemy XP should use the approved difficulty scaling");
+    require(
+        miningEnemyDefeatExperience(elite, 5) == 4
+            && miningEnemyDefeatExperience(elite, 10) == 5
+            && miningEnemyDefeatExperience(spawner, 5) == 4
+            && miningEnemyDefeatExperience(spawner, 10) == 5,
+        "elite and spawner XP should share one exclusive combat class");
+    require(
+        miningEnemyDefeatExperience(miniboss, 5) == 10
+            && miningEnemyDefeatExperience(miniboss, 10) == 12,
+        "miniboss XP should not stack with the elite class");
+    require(
+        miningEnemyDefeatExperience(boss, 5) == 25
+            && miningEnemyDefeatExperience(boss, 10) == 31,
+        "boss XP should not stack with the elite class");
+
+    boss.swarmAssociated = true;
+    require(
+        miningEnemyDefeatExperience(boss, 10) == 0,
+        "individual swarm bodies, including the final elite, should award no combat XP");
+    require(
+        miningSwarmWaveExperience(1, 1)
+                + miningSwarmWaveExperience(2, 1)
+                + miningSwarmWaveExperience(3, 1)
+            == 10
+            && miningSwarmWaveExperience(1, 5)
+                + miningSwarmWaveExperience(2, 5)
+                + miningSwarmWaveExperience(3, 5)
+            == 12
+            && miningSwarmWaveExperience(1, 10)
+                + miningSwarmWaveExperience(2, 10)
+                + miningSwarmWaveExperience(3, 10)
+            == 16,
+        "completed swarm waves should award the approved 2/3/5 bases with difficulty scaling");
 }
 
 void explicitArenaIsDeterministicAndBudgeted()
@@ -119,6 +220,9 @@ void richPayoutsShareOneLedger()
     setMiningMove(state, 1.0, 0.0);
     setMiningMove(state, 0.0, 0.0);
     setMiningDrilling(state, true);
+    const MaterialInventory materialsBefore = mining.temporaryMaterials;
+    const ExpeditionExperienceSnapshot experienceBefore =
+        snapshotExpeditionExperience(state);
 
     auto breakRareCell = [&]() {
         MiningCell* cell = miningCellAt(mining.terrain, 33, 4);
@@ -137,6 +241,125 @@ void richPayoutsShareOneLedger()
     require(rareCollected == 1 && mining.richRewardsAwarded.rare == 1,
         "all mining reward paths should stop rare payouts at the shared cap");
     require(commonCollected >= 1, "rich payout overflow should retain common salvage value");
+    const MaterialInventory acquired {
+        mining.temporaryMaterials.common - materialsBefore.common,
+        mining.temporaryMaterials.rare - materialsBefore.rare,
+        mining.temporaryMaterials.exotic - materialsBefore.exotic
+    };
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBefore, state)
+            - static_cast<double>(miningMaterialExperience(acquired)))
+            < 0.000001,
+        "direct rig ore should award XP exactly when it enters the rig manifest");
+}
+
+void supportDroneXpWaitsForAuthoritativeShipDelivery()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 252);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::resourceDrone};
+    prepareSurface(state, content::destination::mars);
+    require(
+        startMiningRun(
+            state,
+            catalog,
+            {MiningAct::ActOne, 3, 0xD311ULL},
+            false).applied,
+        "Support Drone XP fixture should start");
+
+    MiningRunState& mining = state.run.mining;
+    mining.enemies.clear();
+    mining.oxygenSeconds = 100.0;
+    require(
+        mining.miniDrones.size() == 1
+            && mining.miniDrones.front().role == MiniDroneRole::Resource,
+        "Support Drone XP fixture should create its Resource Drone agent");
+    MiningMiniDroneAgent& resource = mining.miniDrones.front();
+    resource.haulMaterials = {1, 1, 1};
+    resource.uncreditedHaulMaterials = {1, 0, 1};
+    resource.behavior = MiningMiniDroneBehavior::DeliveringToShip;
+    resource.actionCooldownSeconds = 0.0;
+
+    const ExpeditionExperienceSnapshot experienceBefore =
+        snapshotExpeditionExperience(state);
+    updateMiningRun(state, catalog, 0.01);
+    require(
+        resource.haulMaterials.common == 0
+            && resource.haulMaterials.rare == 0
+            && resource.haulMaterials.exotic == 0
+            && resource.uncreditedHaulMaterials.common == 0
+            && resource.uncreditedHaulMaterials.rare == 0
+            && resource.uncreditedHaulMaterials.exotic == 0,
+        "timed Ship delivery should unload the manifest and consume its XP provenance");
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBefore, state)
+            - 10.0)
+            < 0.000001,
+        "Support Drone delivery should credit only loose or drone-mined Common and Exotic ore, not rig-transferred Rare ore");
+
+    resource.haulMaterials.rare = 1;
+    resource.uncreditedHaulMaterials.rare = 1;
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    const ExpeditionExperienceSnapshot beforeSafeRecall =
+        snapshotExpeditionExperience(state);
+    require(
+        finishMiningRun(state, catalog, false).applied,
+        "normal departure should recall the Support Drone manifest");
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(beforeSafeRecall, state)
+            - 3.0)
+            < 0.000001,
+        "normal departure should credit newly owned Support Drone ore when the intact drone reaches Ship cargo");
+}
+
+void looseEvaOreAwardsXpWhenTheRigCollectsIt()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 253);
+    prepareSurface(state, content::destination::mars);
+    require(
+        startMiningRun(
+            state,
+            catalog,
+            {MiningAct::ActOne, 3, 0xE7AULL},
+            false).applied,
+        "loose EVA ore XP fixture should start");
+
+    MiningRunState& mining = state.run.mining;
+    mining.enemies.clear();
+    mining.oxygenSeconds = 100.0;
+    MiningLooseChunk chunk;
+    chunk.material = MiningCellMaterial::ExoticVein;
+    chunk.x = mining.droneX;
+    chunk.y = mining.droneY;
+    chunk.cargoValue = tuning::mining::exoticCargo;
+    mining.looseChunks.push_back(chunk);
+    const ExpeditionExperienceSnapshot experienceBefore =
+        snapshotExpeditionExperience(state);
+    require(
+        std::abs(expeditionExperienceEarnedSince(experienceBefore, state))
+            < 0.000001,
+        "loose EVA ore should not award XP before collection");
+
+    updateMiningRun(state, catalog, 0.01);
+    require(
+        mining.temporaryMaterials.exotic == 1
+            && mining.looseChunks.empty(),
+        "the rig should take ownership of the loose EVA ore");
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBefore, state)
+            - 9.0)
+            < 0.000001,
+        "loose Exotic EVA ore should award nine XP at rig collection");
 }
 
 void firstClearCreditsOnlyExtractedMiningMaterials()
@@ -207,7 +430,15 @@ void oxygenCapacityHasAHardCeiling()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 606);
-    state.run.surfaceUpgradeIds.assign(64, content::surfaceUpgrade::emergencyWinch);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    state.meta.droneBaySlots = 6;
+    state.meta.ownedDroneIds.assign(6, content::drone::resourceDrone);
+    state.meta.equippedDroneIds.assign(6, content::drone::resourceDrone);
+    state.run.surfaceExpedition.runRigUpgradeRanks.push_back(
+        {content::surfaceUpgrade::emergencyWinch, 3});
+    state.run.surfaceExpedition.runDroneRanks.push_back(
+        {content::drone::resourceDrone, 3});
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     require(stats.oxygenSeconds <= tuning::mining::maximumOxygenSeconds,
         "combined upgrades should never exceed the 120-second mining oxygen ceiling");
@@ -463,6 +694,36 @@ void ioTerrainAndArtifactSealAreDeterministic()
         require(inner != nullptr && inner->revealed,
             "all four inner Io seal segments should reveal together");
     }
+
+    const ExpeditionExperienceSnapshot experienceBeforeGateOpen =
+        snapshotExpeditionExperience(first);
+    for (const auto& [dx, dy] : innerOffsets) {
+        MiningCell* inner = miningCellAt(
+            mining.terrain,
+            anchorX + dx,
+            anchorY + dy);
+        require(inner != nullptr, "inner Io seal segment should still exist");
+        *inner = {};
+    }
+    mining.gate.derivedStateDirty = true;
+    updateMiningRun(first, catalog, 0.01);
+    require(
+        mining.gate.state == MiningGateState::Open,
+        "clearing the final protected layer should authoritatively open the gate");
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBeforeGateOpen, first)
+            - 10.0)
+            < 0.000001,
+        "opening the protected objective gate should award ten XP");
+    mining.gate.derivedStateDirty = true;
+    updateMiningRun(first, catalog, 0.01);
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBeforeGateOpen, first)
+            - 10.0)
+            < 0.000001,
+        "refreshing an already-open gate should not duplicate objective XP");
 }
 
 void ioLavaAlwaysCoolsIntoMineableCommonOre()
@@ -492,7 +753,6 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
     state.run.surfaceExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::hazardDrone};
-    state.meta.droneUpgrades = {{content::drone::hazardDrone, 1}};
     require(startMiningRun(
                 state,
                 catalog,
@@ -526,6 +786,7 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
     }
     MiningCell* lava = miningCellAt(mining.terrain, targetX, targetY);
     require(lava != nullptr, "Io lava treatment test cell should exist");
+    mining.gate = {};
     *lava = {
         MiningCellMaterial::HazardPocket,
         1.0,
@@ -535,6 +796,8 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
     };
     lava->hazardAffinity = MiningElementalAffinity::Thermal;
     const MaterialInventory before = mining.temporaryMaterials;
+    const ExpeditionExperienceSnapshot experienceBefore =
+        snapshotExpeditionExperience(state);
     for (int tick = 0;
          tick < 300 && lava->material == MiningCellMaterial::HazardPocket;
          ++tick) {
@@ -546,6 +809,12 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
         "Io Thermal lava should deterministically cool into a mineable gray Common Ore cell");
     require(mining.temporaryMaterials.common == before.common,
         "Hazard treatment should create ore for drilling rather than award it immediately");
+    require(
+        std::abs(
+            expeditionExperienceEarnedSince(experienceBefore, state)
+            - 1.0)
+            < 0.000001,
+        "successful Thermal conversion should award one XP exactly once");
 }
 
 } // namespace
@@ -553,8 +822,11 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
 int main()
 {
     try {
+        miningExperienceAwardsMatchApprovedEconomy();
         explicitArenaIsDeterministicAndBudgeted();
         richPayoutsShareOneLedger();
+        supportDroneXpWaitsForAuthoritativeShipDelivery();
+        looseEvaOreAwardsXpWhenTheRigCollectsIt();
         firstClearCreditsOnlyExtractedMiningMaterials();
         rewardLedgerAndPendingCreditRoundTrip();
         oxygenCapacityHasAHardCeiling();

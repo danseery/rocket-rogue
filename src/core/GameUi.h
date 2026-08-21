@@ -40,12 +40,10 @@ inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
-inline constexpr std::string_view surfaceModuleFramePrefix = "surface_module_frame:";
 inline constexpr std::string_view droneOps = "drone_ops";
 inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
 inline constexpr std::string_view equipDronePrefix = "equip_drone:";
 inline constexpr std::string_view unequipDroneSlotPrefix = "unequip_drone_slot:";
-inline constexpr std::string_view upgradeDronePrefix = "upgrade_drone:";
 inline constexpr std::string_view upgradeDroneSlot = "upgrade_drone_slot";
 inline constexpr std::string_view skipResearch = "skip_research";
 inline constexpr std::string_view surveySurface = "survey_surface";
@@ -75,7 +73,6 @@ inline constexpr std::string_view retrySaturnSlingshot = "retry_saturn_slingshot
 inline constexpr std::string_view acknowledgeSaturnSlingshotFailure = "acknowledge_saturn_slingshot_failure";
 inline constexpr std::string_view claimSaturnCourse = "claim_saturn_course";
 inline constexpr std::string_view scenarioActionPrefix = "scenario_action:";
-inline constexpr std::string_view redeemDroneUpgradeCreditPrefix = "redeem_drone_upgrade_credit:";
 
 inline std::string buyOffer(int index)
 {
@@ -107,11 +104,6 @@ inline std::string surfaceUpgrade(int index)
     return std::string(surfaceUpgradePrefix) + std::to_string(index);
 }
 
-inline std::string surfaceModuleFrame(int index)
-{
-    return std::string(surfaceModuleFramePrefix) + std::to_string(index);
-}
-
 inline std::string equipDrone(int index)
 {
     return std::string(equipDronePrefix) + std::to_string(index);
@@ -120,16 +112,6 @@ inline std::string equipDrone(int index)
 inline std::string unequipDroneSlot(int slotIndex)
 {
     return std::string(unequipDroneSlotPrefix) + std::to_string(slotIndex);
-}
-
-inline std::string upgradeDrone(int index)
-{
-    return std::string(upgradeDronePrefix) + std::to_string(index);
-}
-
-inline std::string redeemDroneUpgradeCredit(int index)
-{
-    return std::string(redeemDroneUpgradeCreditPrefix) + std::to_string(index);
 }
 
 // Scenario IDs and step IDs are stable content identifiers. Keep the action

@@ -62,6 +62,7 @@ private:
     void drawMining(const RenderSnapshot& snapshot);
     void drawSurfaceScan(const RenderSnapshot& snapshot);
     void drawSurfacePush(const RenderSnapshot& snapshot);
+    void drawLevelUpFanfare(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
     void drawLaunchAsteroids(const RenderSnapshot& snapshot);

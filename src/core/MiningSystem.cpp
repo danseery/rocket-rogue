@@ -45,6 +45,51 @@ int secondaryModuleSecondaryHits(DroneModuleKind module, int rank)
     return std::max(0, std::clamp(rank, 1, 3) - 1);
 }
 
+namespace {
+
+int scaledMiningCombatExperience(int base, int difficulty)
+{
+    const int effectiveDifficulty = std::clamp(difficulty, 1, 10);
+    const double multiplier = 1.0 + 0.06 * static_cast<double>(effectiveDifficulty - 1);
+    return std::max(0, static_cast<int>(std::lround(static_cast<double>(std::max(0, base)) * multiplier)));
+}
+
+} // namespace
+
+int miningEnemyDefeatExperience(const MiningEnemy& enemy, int difficulty)
+{
+    if (enemy.swarmAssociated) {
+        return 0;
+    }
+    const int base = enemy.sourceFeature == MiningCellFeature::BossChamber
+        ? 20
+        : (enemy.sourceFeature == MiningCellFeature::MinibossLair
+            ? 8
+            : (enemy.elite || enemy.type == MiningEnemyType::Spawner ? 3 : 1));
+    return scaledMiningCombatExperience(base, difficulty);
+}
+
+int miningHazardTreatmentExperience(MiningElementalAffinity affinity)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::Toxic:
+        return 3;
+    case MiningElementalAffinity::Radiation:
+        return 9;
+    case MiningElementalAffinity::None:
+    case MiningElementalAffinity::Thermal:
+    case MiningElementalAffinity::Cryo:
+        return 1;
+    }
+    return 1;
+}
+
+int miningSwarmWaveExperience(int wave, int difficulty)
+{
+    const int base = wave <= 1 ? 2 : (wave == 2 ? 3 : 5);
+    return scaledMiningCombatExperience(base, difficulty);
+}
+
 MiningTerrain generateMiningTerrainForRules(
     const GameState& state,
     const Destination& destination,
@@ -64,14 +109,6 @@ void normalizeRichTerrainDeposits(
     int reservedExoticGuarantees);
 
 namespace {
-void awardFieldInsight(GameState& state, const std::string& key, int amount)
-{
-    auto& expedition = state.run.surfaceExpedition;
-    if (amount <= 0 || std::find(expedition.fieldInsightAwardKeys.begin(), expedition.fieldInsightAwardKeys.end(), key) != expedition.fieldInsightAwardKeys.end()) return;
-    expedition.fieldInsightAwardKeys.push_back(key);
-    expedition.fieldInsight += amount;
-}
-
 double applyDefenseDamage(GameState&, MiningEnemy&, double, bool, bool, double = 0.0);
 
 constexpr double kPi = 3.14159265358979323846;
@@ -1108,7 +1145,8 @@ bool completeBrokenMiningCell(
     const MiningDrillStats& stats,
     int x,
     int y,
-    MaterialInventory* miniDroneHaul = nullptr)
+    MaterialInventory* miniDroneHaul = nullptr,
+    MaterialInventory* miniDroneUncreditedHaul = nullptr)
 {
     MiningRunState& mining = state.run.mining;
     MiningCell* target = miningCellAt(mining.terrain, x, y);
@@ -1149,6 +1187,9 @@ bool completeBrokenMiningCell(
         gain = applyMiningTreasureMultiplier(gain, brokenMaterial, treasureMultiplier);
         if (miniDroneHaul != nullptr) {
             addMiningMaterials(*miniDroneHaul, gain);
+            if (miniDroneUncreditedHaul != nullptr) {
+                addMiningMaterials(*miniDroneUncreditedHaul, gain);
+            }
             recordMiningMaterialPickup(
                 mining,
                 gain,
@@ -1163,6 +1204,10 @@ bool completeBrokenMiningCell(
         } else {
             addMiningMaterials(mining.temporaryMaterials, gain);
             mining.cargo += materialCargo(gain);
+            awardExpeditionExperience(
+                state,
+                miningMaterialExperience(gain),
+                Screen::Mining);
             recordMiningMaterialPickup(
                 mining,
                 gain,
@@ -1607,14 +1652,17 @@ bool loadOneNearbyLooseChunk(
     switch (closestChunk->material) {
     case MiningCellMaterial::ExoticVein:
         ++agent.haulMaterials.exotic;
+        ++agent.uncreditedHaulMaterials.exotic;
         recordMiningPickup(mining, MiningPickupKind::ExoticOre, 1, closestChunk->x, closestChunk->y);
         break;
     case MiningCellMaterial::RareOre:
         ++agent.haulMaterials.rare;
+        ++agent.uncreditedHaulMaterials.rare;
         recordMiningPickup(mining, MiningPickupKind::RareOre, 1, closestChunk->x, closestChunk->y);
         break;
     default:
         ++agent.haulMaterials.common;
+        ++agent.uncreditedHaulMaterials.common;
         recordMiningPickup(mining, MiningPickupKind::CommonOre, 1, closestChunk->x, closestChunk->y);
         break;
     }
@@ -1718,24 +1766,45 @@ bool loadOneResourceChunk(GameState& state, MiningRunState& mining, MiningMiniDr
     return false;
 }
 
-bool unloadOneMiniDroneChunk(MiningRunState& mining, MiningMiniDroneAgent& agent)
+bool unloadOneMiniDroneChunk(
+    MiningRunState& mining,
+    MiningMiniDroneAgent& agent,
+    MaterialInventory* newlyOwned)
 {
     if (agent.haulMaterials.common > 0) {
         --agent.haulMaterials.common;
         ++mining.stowedMaterials.common;
         mining.stowedCargo += tuning::mining::commonCargo;
+        if (agent.uncreditedHaulMaterials.common > 0) {
+            --agent.uncreditedHaulMaterials.common;
+            if (newlyOwned != nullptr) {
+                ++newlyOwned->common;
+            }
+        }
         return true;
     }
     if (agent.haulMaterials.rare > 0) {
         --agent.haulMaterials.rare;
         ++mining.stowedMaterials.rare;
         mining.stowedCargo += tuning::mining::rareCargo;
+        if (agent.uncreditedHaulMaterials.rare > 0) {
+            --agent.uncreditedHaulMaterials.rare;
+            if (newlyOwned != nullptr) {
+                ++newlyOwned->rare;
+            }
+        }
         return true;
     }
     if (agent.haulMaterials.exotic > 0) {
         --agent.haulMaterials.exotic;
         ++mining.stowedMaterials.exotic;
         mining.stowedCargo += tuning::mining::exoticCargo;
+        if (agent.uncreditedHaulMaterials.exotic > 0) {
+            --agent.uncreditedHaulMaterials.exotic;
+            if (newlyOwned != nullptr) {
+                ++newlyOwned->exotic;
+            }
+        }
         return true;
     }
     return false;
@@ -1757,10 +1826,13 @@ void beginMiniDroneShipDelivery(MiningRunState& mining, MiningMiniDroneAgent& ag
     agent.actionCooldownSeconds = miniDroneShipTransitSeconds(mining);
 }
 
-void unloadAllMiniDroneCargo(MiningRunState& mining, MiningMiniDroneAgent& agent)
+MaterialInventory unloadAllMiniDroneCargo(MiningRunState& mining, MiningMiniDroneAgent& agent)
 {
-    while (unloadOneMiniDroneChunk(mining, agent)) {
+    MaterialInventory newlyOwned;
+    while (unloadOneMiniDroneChunk(mining, agent, &newlyOwned)) {
     }
+    agent.uncreditedHaulMaterials = {};
+    return newlyOwned;
 }
 
 MaterialInventory miniDroneCargoManifest(const MiningRunState& mining)
@@ -1772,16 +1844,18 @@ MaterialInventory miniDroneCargoManifest(const MiningRunState& mining)
     return result;
 }
 
-void recallMiniDroneCargoToShip(MiningRunState& mining)
+MaterialInventory recallMiniDroneCargoToShip(MiningRunState& mining)
 {
+    MaterialInventory newlyOwned;
     for (MiningMiniDroneAgent& agent : mining.miniDrones) {
-        unloadAllMiniDroneCargo(mining, agent);
+        addMiningMaterials(newlyOwned, unloadAllMiniDroneCargo(mining, agent));
         if (agent.behavior == MiningMiniDroneBehavior::DeliveringToShip ||
             agent.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
             agent.behavior = MiningMiniDroneBehavior::Following;
             agent.actionCooldownSeconds = 0.0;
         }
     }
+    return newlyOwned;
 }
 
 bool miniDroneTargetEnemyValid(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
@@ -1917,6 +1991,10 @@ int completeHazardTreatment(
         if (gateAssociated) {
             markMiningGateDerivedStateDirty(mining);
         }
+        awardExpeditionExperience(
+            state,
+            miningHazardTreatmentExperience(affinity),
+            Screen::Mining);
         refinedCount += refined ? 1 : 0;
     }
     if (batchSize > 0) {
@@ -1992,7 +2070,7 @@ void ensureMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
     for (const std::string& droneId : state.meta.equippedDroneIds) {
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         if (drone != nullptr && isMiniDroneUnlocked(state.meta, *drone)) {
-            expected.push_back({drone->role, miniDroneUpgradeLevel(state, drone->id)});
+            expected.push_back({drone->role, expeditionDroneRank(state, drone->id)});
         }
     }
     bool matches = mining.miniDrones.size() == expected.size();
@@ -2083,7 +2161,12 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
         if ((agent.role == MiniDroneRole::Mining || agent.role == MiniDroneRole::Resource) &&
             agent.behavior == MiningMiniDroneBehavior::DeliveringToShip) {
             if (agent.actionCooldownSeconds <= 0.0) {
-                unloadAllMiniDroneCargo(mining, agent);
+                const MaterialInventory newlyOwned =
+                    unloadAllMiniDroneCargo(mining, agent);
+                awardExpeditionExperience(
+                    state,
+                    miningMaterialExperience(newlyOwned),
+                    Screen::Mining);
                 agent.behavior = MiningMiniDroneBehavior::ReturningFromShip;
                 agent.actionCooldownSeconds = miniDroneShipTransitSeconds(mining);
             }
@@ -2180,7 +2263,8 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                             stats,
                             agent.targetCellX,
                             agent.targetCellY,
-                            &agent.haulMaterials)) {
+                            &agent.haulMaterials,
+                            &agent.uncreditedHaulMaterials)) {
                         miningCoordinator.releaseAssignment(agent);
                         carriedChunks = miniDroneHaulChunkCount(agent);
                         if (carriedChunks >= capacity) {
@@ -3593,7 +3677,7 @@ void setupMiningGate(
     } else if (compatibilityCritical) {
         if (legacyCocoon.has_value()) {
             mining.artifact.kind = ArtifactKind::Boost;
-            mining.artifact.rewardType = ArtifactRewardType::DroneUpgradeCredit;
+            mining.artifact.rewardType = ArtifactRewardType::None;
         } else {
             mining.artifact.kind = ArtifactKind::Story;
             mining.artifact.rewardType = ArtifactRewardType::None;
@@ -3817,7 +3901,7 @@ void updateMiningGate(GameState& state, const MiningArenaRules& rules)
          gate.type == MiningGateType::SurveyTriangulation || gate.type == MiningGateType::BurrowBreach ||
          gate.type == MiningGateType::CompoundVault)) {
         gate.state = MiningGateState::Open;
-        awardFieldInsight(state, "gate:" + std::to_string(static_cast<int>(gate.type)), 2);
+        awardExpeditionExperience(state, 10, Screen::Mining);
         if (!gate.completionNotified) {
             state.statusLine = std::string(miningGateName(gate.type)) + " opened. The artifact can now be extracted.";
             gate.completionNotified = true;
@@ -3825,7 +3909,6 @@ void updateMiningGate(GameState& state, const MiningArenaRules& rules)
     }
     if (mining.artifact.state == MiningArtifactState::Delivered) {
         gate.state = MiningGateState::Completed;
-        awardFieldInsight(state, "objective:" + std::to_string(static_cast<int>(gate.type)), 2);
     }
 }
 
@@ -4178,6 +4261,10 @@ void addEnemyDefeatReward(GameState& state, const MiningEnemy& enemy)
     } else {
         addMiningMaterials(mining.temporaryMaterials, gain);
         mining.cargo += materialCargo(gain);
+        awardExpeditionExperience(
+            state,
+            miningMaterialExperience(gain),
+            Screen::Mining);
     }
     pushMiningCombatPopup(mining, enemy.x, enemy.y, 1.0, MiningCombatTextKind::Defeat);
     if (gain.common > 0) {
@@ -4207,15 +4294,12 @@ double applyDefenseDamage(GameState& state, MiningEnemy& enemy, double rawDamage
             markMiningGateDerivedStateDirty(state.run.mining);
         }
         state.run.mining.enemiesDefeated += 1;
-        if (!enemy.swarmAssociated) {
-            const int groupId = enemy.insightGroupKey >= 0 ? enemy.insightGroupKey : static_cast<int>(enemy.sourceFeature) * 1000 + state.run.mining.depthZone;
-            const std::string group = "encounter:" + std::to_string(groupId);
-            const bool groupCleared = std::none_of(state.run.mining.enemies.begin(), state.run.mining.enemies.end(), [&](const MiningEnemy& other) { return other.active && other.insightGroupKey == groupId; });
-            if (groupCleared) {
-                const int eventAward = enemy.elite || enemy.type == MiningEnemyType::Spawner || enemy.sourceFeature == MiningCellFeature::MinibossLair || enemy.sourceFeature == MiningCellFeature::BossChamber ? 2 : 1;
-                awardFieldInsight(state, group, eventAward);
-            }
-        }
+        awardExpeditionExperience(
+            state,
+            miningEnemyDefeatExperience(
+                enemy,
+                state.run.mining.arenaMetadata.difficulty),
+            Screen::Mining);
         addEnemyDefeatReward(state, enemy);
     }
     return appliedDamage;
@@ -5119,6 +5203,10 @@ void updateMiningSwarm(
             if (dx * dx + dy * dy <= 2.25) {
                 addMiningMaterials(mining.temporaryMaterials, swarm.cacheMaterials);
                 mining.cargo += materialCargo(swarm.cacheMaterials);
+                awardExpeditionExperience(
+                    state,
+                    miningMaterialExperience(swarm.cacheMaterials),
+                    Screen::Mining);
                 if (swarm.bonusArtifactRolled) {
                     mining.temporaryArtifacts.push_back(swarm.bonusArtifact);
                     mining.cargo += tuning::mining::artifactCargo;
@@ -5149,7 +5237,10 @@ void updateMiningSwarm(
         swarm.spawnCooldownSeconds = tuning::mining::swarmSpawnIntervalSeconds;
     }
     if (swarm.spawnedInWave >= swarm.waveSize && activeSwarmEnemyCount(mining) == 0) {
-        awardFieldInsight(state, "swarm:" + std::to_string(mining.depthZone) + ":" + std::to_string(swarm.wave), 1);
+        awardExpeditionExperience(
+            state,
+            miningSwarmWaveExperience(swarm.wave, rules.request.difficulty),
+            Screen::Mining);
         if (swarm.wave >= 3) {
             swarm.cacheExposed = true;
             state.statusLine = swarm.bonusArtifactRolled
@@ -5279,9 +5370,6 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
     const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
     if (!revisiting) {
     mining.depthZone = targetDepth;
-    if (targetDepth > mining.entryDepthZone) {
-        awardFieldInsight(state, "layer:" + std::to_string(targetDepth), 2);
-    }
         mining.terrain = generateMiningTerrainForRules(
             state,
             *destination,
@@ -5583,10 +5671,12 @@ void simulateMiningActorMotion(
     }
 }
 
-void updateMiningLooseChunks(MiningRunState& mining, double dt)
+void updateMiningLooseChunks(GameState& state, double dt)
 {
+    MiningRunState& mining = state.run.mining;
     constexpr double chunkCollider = 0.10;
     constexpr double rigCollectionRadius = 0.70;
+    MaterialInventory newlyOwned;
     const bool rigSharesLayer =
         !mining.rigDisabled && mining.rigDepthZone == mining.depthZone;
     for (MiningLooseChunk& chunk : mining.looseChunks) {
@@ -5641,20 +5731,28 @@ void updateMiningLooseChunks(MiningRunState& mining, double dt)
         switch (chunk.material) {
         case MiningCellMaterial::ExoticVein:
             ++mining.temporaryMaterials.exotic;
+            ++newlyOwned.exotic;
             recordMiningPickup(mining, MiningPickupKind::ExoticOre, 1, chunk.x, chunk.y);
             break;
         case MiningCellMaterial::RareOre:
             ++mining.temporaryMaterials.rare;
+            ++newlyOwned.rare;
             recordMiningPickup(mining, MiningPickupKind::RareOre, 1, chunk.x, chunk.y);
             break;
         default:
             ++mining.temporaryMaterials.common;
+            ++newlyOwned.common;
             recordMiningPickup(mining, MiningPickupKind::CommonOre, 1, chunk.x, chunk.y);
             break;
         }
         mining.cargo += std::max(0, chunk.cargoValue);
         chunk.active = false;
     }
+
+    awardExpeditionExperience(
+        state,
+        miningMaterialExperience(newlyOwned),
+        Screen::Mining);
 
     mining.looseChunks.erase(
         std::remove_if(
@@ -6159,7 +6257,7 @@ MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const Co
         }
         const std::size_t role = static_cast<std::size_t>(drone->role);
         if (role < profile.roleMarks.size()) {
-            profile.roleMarks[role] = std::max(profile.roleMarks[role], miniDroneUpgradeLevel(state, droneId));
+            profile.roleMarks[role] = std::max(profile.roleMarks[role], expeditionDroneRank(state, droneId));
         }
     }
     return profile;
@@ -6334,7 +6432,6 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
 bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
-    const int cargoBefore = mining.stowedCargo;
     if (mining.rigDisabled) {
         return false;
     }
@@ -6366,8 +6463,6 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
     mining.stowedArtifacts.insert(mining.stowedArtifacts.end(), mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
     mining.temporaryArtifacts.clear();
     mining.stowedCargo += std::max(0, mining.cargo);
-    if (mining.stowedCargo - cargoBefore >= tuning::mining::commonCargo * 3 || mining.stowedCargo >= tuning::mining::commonCargo * 3)
-        awardFieldInsight(state, "cargo:3", 1);
     mining.cargo = 0;
     mining.oxygenSeconds = miningDrillStats(state, catalog).oxygenSeconds;
     mining.oxygenSeconds = std::max(
@@ -7267,17 +7362,14 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
             activateGateMarkers(agent.x, agent.y, scannerRadius * 1.45);
             for (const DroneFrameModuleAssignment& assignment : state.run.surfaceExpedition.droneModuleAssignments) {
                 if (assignment.module == DroneModuleKind::PulseStrike &&
-                    assignment.equippedFrame == agent.equippedFrame &&
-                    assignment.primaryDroneId == content::drone::surveyDrone) {
+                    assignment.equippedFrame == agent.equippedFrame) {
                     pulseStrike = true;
                 }
             }
         }
     }
-    const bool resonantDischarge = std::find(
-        state.run.surfaceUpgradeIds.begin(), state.run.surfaceUpgradeIds.end(),
-        content::surfaceUpgrade::resonantDischarge) != state.run.surfaceUpgradeIds.end();
-    if (resonantDischarge || pulseStrike) {
+    const int resonantDischargeRank = runRigUpgradeRank(state, content::surfaceUpgrade::resonantDischarge);
+    if (resonantDischargeRank > 0 || pulseStrike) {
         std::vector<double> pulseDamage(mining.enemies.size(), 0.0);
         auto discharge = [&](double x, double y, double radius, int damage) {
             for (std::size_t index = 0; index < mining.enemies.size(); ++index) {
@@ -7290,7 +7382,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
                 }
             }
         };
-        if (resonantDischarge) discharge(originX, originY, scannerRadius, 1);
+        if (resonantDischargeRank > 0) discharge(originX, originY, scannerRadius, resonantDischargeRank);
         if (pulseStrike) {
             for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
                 if (agent.role != MiniDroneRole::Survey) continue;
@@ -7298,8 +7390,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
                     state.run.surfaceExpedition.droneModuleAssignments.begin(),
                     state.run.surfaceExpedition.droneModuleAssignments.end(),
                     [&](const DroneFrameModuleAssignment& assignment) {
-                        return assignment.primaryDroneId == content::drone::surveyDrone &&
-                            assignment.equippedFrame == agent.equippedFrame &&
+                        return assignment.equippedFrame == agent.equippedFrame &&
                             assignment.module == DroneModuleKind::PulseStrike;
                     });
                 if (hasPulseStrike) discharge(agent.x, agent.y, scannerRadius * 1.45, std::clamp(agent.upgradeLevel, 1, 3));
@@ -7630,7 +7721,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             dt);
         mining.rigDepthZone = mining.depthZone;
     }
-    updateMiningLooseChunks(mining, dt);
+    updateMiningLooseChunks(state, dt);
 
     const double activeX = controlledActorX(mining);
     const double activeY = controlledActorY(mining);
@@ -7788,7 +7879,11 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     if (!recoveryLoss) {
         // A normal departure is atomic: every intact Support Drone is recalled
         // and its manifest becomes Ship cargo before the surface ledger settles.
-        recallMiniDroneCargoToShip(mining);
+        const MaterialInventory newlyOwned = recallMiniDroneCargoToShip(mining);
+        awardExpeditionExperience(
+            state,
+            miningMaterialExperience(newlyOwned),
+            Screen::Mining);
         bankMiningPayloadAtShip(state, catalog);
         bankPhysicallyDeliveredArtifactsAtShip(mining);
         if (mining.swarm.cacheClaimed && !mining.swarm.cacheBanked) {
@@ -7820,9 +7915,6 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
             std::string(": keep ") + std::to_string(shipOre) + " Ship Ore; lose " +
             std::to_string(lostOre) + " Rig/Drone Ore.";
     }
-    const bool emergencyRecall = abort;
-    const bool hadDroneUpgrades = !state.run.surfaceUpgradeIds.empty();
-
     addMiningMaterials(expedition.temporaryMaterials, mining.stowedMaterials);
     expedition.bankedMiningArenaValid = true;
     expedition.bankedMiningProgressionEligible = mining.progressionCreditEligible;
@@ -7832,13 +7924,6 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     expedition.cargo += mining.stowedCargo;
     expedition.depth = std::max(expedition.depth, mining.deepestDepthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
-    if (emergencyRecall) {
-        state.run.surfaceUpgradeIds.clear();
-        if (hadDroneUpgrades) {
-            appendSurfaceLog(expedition, "Emergency recall cleared temporary field upgrades.");
-        }
-    }
-
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
     mining = {};
     state.screen = Screen::SurfaceExpedition;

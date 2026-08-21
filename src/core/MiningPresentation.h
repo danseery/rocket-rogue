@@ -163,9 +163,12 @@ inline int activeMiningCritTextCount(const MiningRunState& mining)
 
 inline int tunedMiningDroneCount(const GameState& state)
 {
-    return static_cast<int>(std::count_if(state.meta.droneUpgrades.begin(), state.meta.droneUpgrades.end(), [](const DroneUpgradeRecord& record) {
-        return record.level > 1;
-    }));
+    return static_cast<int>(std::count_if(
+        state.run.surfaceExpedition.runDroneRanks.begin(),
+        state.run.surfaceExpedition.runDroneRanks.end(),
+        [](const RunDroneRank& record) {
+            return record.rank > 1;
+        }));
 }
 
 inline std::string activeElementalSummary(const MiningRunState& mining)

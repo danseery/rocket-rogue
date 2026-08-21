@@ -154,6 +154,13 @@ enum class SurfaceUpgradeCategory {
     Drone
 };
 
+enum class RunUpgradeKind {
+    Rig,
+    DroneRank,
+    DroneGraft,
+    Synergy
+};
+
 enum class MiniDroneRole {
     Mining,
     Resource,
@@ -161,6 +168,15 @@ enum class MiniDroneRole {
     Hazard,
     Attack,
     Defense
+};
+
+enum class MiniDroneSignatureKind {
+    None,
+    SentryKillbox,
+    ExcavationStorm,
+    ContainmentRig,
+    RelicPathfinder,
+    FullSpectrumSwarm
 };
 
 // Temporary per-expedition module grafted onto an equipped support-drone frame.
@@ -187,6 +203,7 @@ struct DroneModuleDefinition {
     MiniDroneRole secondaryRole = MiniDroneRole::Mining;
     DroneModuleKind kind = DroneModuleKind::None;
     std::string unlockKey = content::unlock::starter;
+    Rarity rarity = Rarity::Uncommon;
 };
 
 struct DroneFrameModuleAssignment {
@@ -207,6 +224,23 @@ struct DroneModuleRuntimeState {
     double reclamationOxygenRecovered = 0.0;
     double reclamationFuelRecovered = 0.0;
     std::vector<std::pair<int, double>> combatDrillEnemyCooldowns;
+};
+
+struct RunRigUpgradeRank {
+    std::string upgradeId;
+    int rank = 0;
+};
+
+struct RunDroneRank {
+    std::string droneId;
+    int rank = 1;
+};
+
+struct RunUpgradeOffer {
+    RunUpgradeKind kind = RunUpgradeKind::Rig;
+    std::string definitionId;
+    int targetRank = 0;
+    int slotIndex = -1;
 };
 
 enum class MiningMiniDroneBehavior {
@@ -607,8 +641,7 @@ enum class ArtifactRewardType {
     None,
     Credits,
     ArkFuel,
-    BlueprintInsight,
-    DroneUpgradeCredit
+    BlueprintInsight
 };
 
 enum class MiningArtifactState {
@@ -753,6 +786,7 @@ struct SurfaceUpgradeStats {
     double droneStorage = 0.0;
     double droneEngineEfficiency = 0.0;
     double artifactTowEfficiency = 0.0;
+    int scannerPulseDamage = 0;
 };
 
 struct MiniDroneStats {
@@ -770,15 +804,25 @@ struct MiniDroneStats {
     double environmentalShieldRelief = 0.0;
 };
 
+struct DroneSynergyStats {
+    double passiveMiningRate = 0.0;
+    double oxygenSeconds = 0.0;
+    double scannerRadius = 0.0;
+    double enemyDamageRelief = 0.0;
+    double areaControlDamagePerSecond = 0.0;
+    double enemySlow = 0.0;
+    double reactiveArmorDamagePerSecond = 0.0;
+    double environmentalShieldRelief = 0.0;
+    double hazardTreatmentRateBonus = 0.0;
+    double alliedCritChanceBonus = 0.0;
+    double alliedFireRateBonus = 0.0;
+    int sentryVolleyBonus = 0;
+};
+
 struct MaterialInventory {
     int common = 0;
     int rare = 0;
     int exotic = 0;
-};
-
-struct DroneUpgradeRecord {
-    std::string droneId;
-    int level = 1;
 };
 
 struct SurfaceDepthProspect {
@@ -833,6 +877,19 @@ struct SurfaceUpgrade {
     SurfaceUpgradeCategory category = SurfaceUpgradeCategory::Drill;
     SurfaceUpgradeStats stats;
     std::vector<std::string> tags;
+    int maxRank = 3;
+};
+
+struct DroneSynergyDefinition {
+    std::string id;
+    std::string name;
+    std::string description;
+    Rarity rarity = Rarity::Uncommon;
+    std::vector<MiniDroneRole> requiredRoles;
+    DroneSynergyStats stats;
+    MiniDroneSignatureKind signatureKind = MiniDroneSignatureKind::None;
+    int signatureTier = 0;
+    std::string requiredUnlock = content::unlock::starter;
 };
 
 struct MiniDrone {
@@ -888,7 +945,6 @@ enum class ScenarioRewardKind {
     UnlockKey,
     DroneBaySlots,
     SupportDrone,
-    DroneUpgradeCredit,
     FrontierReadiness,
     // Appended so any future serialized representation retains the existing
     // reward-kind ordinals.
@@ -1150,7 +1206,6 @@ struct MetaProgress {
     int droneBaySlots = 0;
     std::vector<std::string> ownedDroneIds;
     std::vector<std::string> equippedDroneIds;
-    std::vector<DroneUpgradeRecord> droneUpgrades;
     std::vector<ScenarioInstance> scenarios;
     int prospectorCommonOreRecovered = 0;
     bool lunarMiningBriefingAcknowledged = false;
@@ -1161,7 +1216,6 @@ struct MetaProgress {
     bool ioVolcanicBriefingAcknowledged = false;
     bool ioHazardDroneCommissioned = false;
     bool ioArtifactRecovered = false;
-    int droneUpgradeCredits = 0;
     bool saturnSlingshotBriefingAcknowledged = false;
     bool saturnSlingshotPerfect = false;
     bool saturnRouteUnlocked = false;
@@ -1309,6 +1363,16 @@ struct SurfaceExpeditionState {
     int prospectArtifacts = 0;
     std::vector<SurfaceDepthProspect> depthProspects;
     std::vector<std::string> logEntries;
+    int expeditionLevel = 1;
+    double expeditionExperience = 0.0;
+    int pendingRunUpgradeChoices = 0;
+    std::array<RunUpgradeOffer, 3> runUpgradeOffers {};
+    int runUpgradeOfferCount = 0;
+    bool runUpgradeOfferPending = false;
+    Screen runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    std::vector<RunRigUpgradeRank> runRigUpgradeRanks;
+    std::vector<RunDroneRank> runDroneRanks;
+    std::vector<std::string> selectedSynergyIds;
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
     bool miningRunUsed = false;
@@ -1321,21 +1385,8 @@ struct SurfaceExpeditionState {
     bool bankedMiningProgressionEligible = false;
     MiningArenaMetadata bankedMiningArenaMetadata;
     MaterialInventory bankedMiningMaterials;
-    std::array<std::string, 3> surfaceUpgradeOfferIds {};
-    bool surfaceUpgradeOfferAvailable = false;
-    int surfaceUpgradeOffersSeen = 0;
-    std::array<std::string, 3> surfaceModuleOfferIds {};
-    std::string pendingDroneModuleId;
-    int pendingDroneModuleOfferIndex = -1;
-    int pendingDroneModuleFrame = -1;
-    bool pendingDroneModuleReplacementConfirmation = false;
     std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
     std::vector<DroneModuleRuntimeState> droneModuleRuntime;
-    int fieldInsight = 0;
-    std::vector<std::string> fieldInsightAwardKeys;
-    int miningDraftsEarned = 0;
-    int pendingFieldDraftThreshold = 0;
-    Screen fieldDraftReturnScreen = Screen::SurfaceExpedition;
     double scannerCooldownSeconds = 0.0;
     std::vector<TreasureMark> treasureMarks;
     int reclamationOxygenUses = 0;
@@ -1565,6 +1616,7 @@ struct MiningMiniDroneAgent {
     double shieldRechargeSeconds = 0.0;
     double shieldImpactSeconds = 0.0;
     MaterialInventory haulMaterials;
+    MaterialInventory uncreditedHaulMaterials;
     bool finishTargetBeforeReturn = false;
     bool defenseAngleInitialized = false;
     MiningAnchorTarget anchorTarget = MiningAnchorTarget::ControlledActor;
@@ -1735,7 +1787,6 @@ struct RunState {
     std::string frameId;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
-    std::vector<std::string> surfaceUpgradeIds;
     std::vector<std::string> crewUpgradeIds;
     std::vector<Astronaut> crew;
     std::array<std::string, 3> offerModuleIds {};

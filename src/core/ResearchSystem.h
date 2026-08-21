@@ -70,16 +70,8 @@ struct SurfaceUpgradeEffects {
     double droneStorage = 0.0;
     double droneEngineEfficiency = 0.0;
     double artifactTowEfficiency = 0.0;
+    int scannerPulseDamage = 0;
     std::vector<std::string> names;
-};
-
-enum class MiniDroneSignatureKind {
-    None,
-    SentryKillbox,
-    ExcavationStorm,
-    ContainmentRig,
-    RelicPathfinder,
-    FullSpectrumSwarm
 };
 
 struct MiniDroneLoadoutEffects {
@@ -132,6 +124,14 @@ struct SurfaceActionOutcome {
     bool prospectorUnlocked = false;
 };
 
+struct ExpeditionExperienceAward {
+    double appliedExperience = 0.0;
+    int levelsGained = 0;
+    int resultingLevel = 1;
+    double resultingExperience = 0.0;
+    int pendingChoices = 0;
+};
+
 struct SurfaceReturnAllocation {
     std::string scenarioId;
     std::string stepId;
@@ -174,8 +174,6 @@ bool creditRecoveredProtectedObjective(
     std::string_view miningSiteDefinitionId = {});
 bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact);
 bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, ArtifactRecord& artifact);
-bool canRedeemDroneUpgradeCredit(const GameState& state, const ContentCatalog& catalog, int index);
-bool redeemDroneUpgradeCredit(GameState& state, const ContentCatalog& catalog, int index);
 bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
 bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
 bool startScenarioFlybyRun(
@@ -235,19 +233,27 @@ double nominalSurfaceRigFuelCapacity(
     std::string_view destinationId);
 bool droneBayUnlocked(const GameState& state);
 MaterialInventory droneSlotUpgradeCost(int nextSlot);
-int miniDroneUpgradeLevel(const GameState& state, std::string_view droneId);
-MaterialInventory miniDroneUpgradeCost(int nextLevel);
 MaterialInventory miniDroneAdditionalUnitCost(const MiniDrone& drone);
 int ownedMiniDroneCount(const GameState& state, std::string_view droneId);
 int equippedMiniDroneCount(const GameState& state, std::string_view droneId);
 void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
 bool canUpgradeDroneSlot(const GameState& state);
 bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog);
-bool canUpgradeMiniDrone(const GameState& state, const ContentCatalog& catalog, int index);
-bool upgradeMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
 bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
 bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex);
 MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog);
+int expeditionDroneRank(const GameState& state, std::string_view droneId);
+int runRigUpgradeRank(const GameState& state, std::string_view upgradeId);
+double expeditionExperienceThreshold(int level);
+void resetExpeditionProgression(SurfaceExpeditionState& expedition);
+void resetExpeditionProgression(GameState& state);
+ExpeditionExperienceAward awardExpeditionExperience(GameState& state, double amount, Screen returnScreen);
+int miningMaterialExperience(const MaterialInventory& materials);
+bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
+bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index);
+Rarity runUpgradeOfferRarity(const GameState& state, const ContentCatalog& catalog, const RunUpgradeOffer& offer);
+std::string_view runUpgradeKindLabel(RunUpgradeKind kind);
+std::string runUpgradeRankLabel(int rank);
 std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);
 std::string researchOutcomeSummary(const ResearchOutcome& outcome);
@@ -259,10 +265,6 @@ bool surfaceOpsTutorialMiningUnlocked(const GameState& state);
 bool surfaceOpsTutorialNeedsFirstSurveyBank(const GameState& state);
 ResearchOutcome completeResearchProject(GameState& state, const ContentCatalog& catalog, int index);
 void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random* rng = nullptr);
-void generateSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
-bool rerollSurfaceUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
-bool chooseSurfaceUpgrade(GameState& state, const ContentCatalog& catalog, int index);
-bool assignPendingDroneModuleFrame(GameState& state, const ContentCatalog& catalog, int frameIndex, bool confirmReplacement = false);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state);
 double surfaceEnemyEncounterChance(const GameState& state);

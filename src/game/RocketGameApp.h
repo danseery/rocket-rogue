@@ -21,7 +21,8 @@ enum class ControllerHapticCue {
     Confirmation,
     MiningHardContact,
     Damage,
-    Failure
+    Failure,
+    LevelUp
 };
 
 class RocketGameApp {
@@ -93,13 +94,10 @@ public:
     void pushSurfaceBank();
     void extractSurface();
     void selectSurfaceUpgrade(int index);
-    void assignSurfaceModuleFrame(int index);
     void openDroneOps();
     void backToSurfaceOps();
     void equipDrone(int index);
     void unequipDroneSlot(int slotIndex);
-    void upgradeDrone(int index);
-    void redeemDroneUpgradeCredit(int index);
     void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
     void miningAim(double normalizedX, double normalizedY);
@@ -181,13 +179,22 @@ private:
 
     struct MiningExtractionState {
         bool active = false;
-        bool showUpgradeDraft = false;
         double elapsed = 0.0;
     };
 
     struct ArrivalFanfareState {
         bool active = false;
         double elapsed = 0.0;
+    };
+
+    struct LevelUpSessionState {
+        bool fanfareActive = false;
+        double elapsed = 0.0;
+        double activationFenceSeconds = 0.0;
+        int batchChoices = 0;
+        bool resolving = false;
+        double resolveElapsed = 0.0;
+        int selectedOfferIndex = -1;
     };
 
     struct LunarImpactCinematicState {
@@ -222,6 +229,10 @@ private:
     void beginLunarImpactCinematic();
     void beginArrivalFanfare();
     void finishArrivalFanfare();
+    void maybeOpenLevelUpDraft();
+    void finishLevelUpSelection();
+    bool levelUpActivationLocked() const;
+    void observeExpeditionExperience();
     void loadSavedGameOrDefault(bool showTitleScreen);
     void beginDebugSandbox(const std::string& statusLine);
     void seedDebugDroneLoadout();
@@ -278,6 +289,7 @@ private:
     InputSource activeInputSource_ = InputSource::None;
     LaunchSessionState session_;
     MiningExtractionState miningExtraction_;
+    LevelUpSessionState levelUp_;
     RealtimeInputState keyboardRealtimeInput_;
     RealtimeInputState controllerRealtimeInput_;
     MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;
@@ -297,6 +309,10 @@ private:
     double lastControllerInputSeconds_ = 0.0;
     double visualTimeSeconds_ = 0.0;
     double miningOperatorToggleConfirmationSeconds_ = 0.0;
+    double expeditionXpPulseSeconds_ = 0.0;
+    int observedExpeditionLevel_ = 1;
+    double observedExpeditionExperience_ = 0.0;
+    bool expeditionXpObservationInitialized_ = false;
     bool titleScreenActive_ = true;
     bool hasSavedGame_ = false;
     std::string titleNotice_;
@@ -310,7 +326,7 @@ private:
     struct DebugDroneLoadout {
         bool configured = false;
         std::vector<std::string> equippedDroneIds;
-        std::vector<DroneUpgradeRecord> droneUpgrades;
+        std::vector<RunDroneRank> droneRanks;
     };
     DebugDroneLoadout debugDroneLoadout_;
 };

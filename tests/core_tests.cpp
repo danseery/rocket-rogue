@@ -1155,7 +1155,7 @@ void launchAsteroidsAreDeterministicFairAndHullScaled()
         "a no-hit pilot must complete Jupiter without Hull Plating");
 }
 
-void launchCurriculumEconomyGatesAndVersionTenMigration()
+void launchCurriculumEconomyGatesAndRoundTrips()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 5501);
@@ -1446,112 +1446,13 @@ void launchCurriculumEconomyGatesAndVersionTenMigration()
         "Saturn arrival must unlock Hull III");
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 12, "new saves must use schema version 12");
+    require(captured.version == save_schema::currentVersion, "new saves must use the current schema version");
     const std::optional<SaveData> decoded = deserializeSaveData(serializeSaveData(captured));
-    require(decoded && decoded->version == 12 &&
+    require(decoded && decoded->version == save_schema::currentVersion &&
             decoded->launchUpgrades.fuelTanks == state.meta.launchUpgrades.fuelTanks &&
             decoded->launchLessons.stage == state.meta.launchLessons.stage,
         "version-10 launch ranks and lesson state must round-trip");
 
-    SaveData pristineV9;
-    pristineV9.version = 9;
-    pristineV9.credits = 100.0;
-    pristineV9.destinationIndex = 0;
-    pristineV9.furthestTier = 0;
-    GameState migratedPristine = createNewGame(catalog, 5502);
-    restoreSaveData(migratedPristine, catalog, pristineV9);
-    require(migratedPristine.run.credits == 0.0 &&
-            migratedPristine.meta.launchLessons.stage == LaunchTrainingStage::FuelCalibration,
-        "a truly pristine version-nine campaign must migrate into the zero-credit fuel lesson");
-
-    for (const int legacyFlightData : {1, 2}) {
-        SaveData partialV9 = pristineV9;
-        partialV9.credits = 91.0;
-        partialV9.frontierReadiness = legacyFlightData;
-        GameState migratedPartial = createNewGame(catalog, 5502 + legacyFlightData);
-        restoreSaveData(migratedPartial, catalog, partialV9);
-        require(migratedPartial.run.credits == 91.0 &&
-                migratedPartial.meta.launchUpgrades.fuelTanks == 1 &&
-                migratedPartial.meta.launchUpgrades.flightControls == 0 &&
-                migratedPartial.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration,
-            "one or two legacy Earth Flight Data points must conservatively complete only the fuel lesson");
-    }
-
-    SaveData progressedV9 = pristineV9;
-    progressedV9.credits = 91.0;
-    progressedV9.frontierReadiness = 3;
-    progressedV9.ownedModuleIds = {
-        content::module::reserveFeedManifold,
-        content::module::sparrowInjectorTune};
-    progressedV9.defaultEquippedModuleIds = progressedV9.ownedModuleIds;
-    progressedV9.inventoryModuleIds = progressedV9.ownedModuleIds;
-    progressedV9.equippedModuleIds = progressedV9.ownedModuleIds;
-    GameState migratedProgress = createNewGame(catalog, 5503);
-    restoreSaveData(migratedProgress, catalog, progressedV9);
-    require(migratedProgress.run.credits == 91.0,
-        "progressed version-nine campaigns must retain their credits");
-    require(migratedProgress.meta.launchUpgrades.fuelTanks >= 1 &&
-            migratedProgress.meta.launchUpgrades.flightControls >= 1 &&
-            migratedProgress.meta.launchLessons.stage == LaunchTrainingStage::MoonTransfer,
-        "full legacy Moon readiness must become Fuel I plus Controls I");
-    require(std::find(
-                migratedProgress.meta.ownedModuleIds.begin(),
-                migratedProgress.meta.ownedModuleIds.end(),
-                content::module::reserveFeedManifold) ==
-            migratedProgress.meta.ownedModuleIds.end(),
-        "retired proving-card IDs must be removed after rank conversion");
-
-    SaveData marsV9;
-    marsV9.version = 9;
-    marsV9.credits = 37.0;
-    marsV9.destinationIndex = 2;
-    marsV9.furthestTier = 2;
-    GameState migratedMars = createNewGame(catalog, 5504);
-    restoreSaveData(migratedMars, catalog, marsV9);
-    require(migratedMars.meta.launchUpgrades.fuelTanks >= 2 &&
-            migratedMars.meta.launchUpgrades.flightControls >= 1 &&
-            migratedMars.meta.launchUpgrades.cooling == 0 &&
-            migratedMars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity,
-        "Mars-era saves must skip completed lessons without silently granting optional cooling");
-
-    SaveData jupiterV9 = marsV9;
-    jupiterV9.credits = 58.0;
-    jupiterV9.destinationIndex = 3;
-    jupiterV9.furthestTier = 3;
-    GameState migratedJupiter = createNewGame(catalog, 5505);
-    restoreSaveData(migratedJupiter, catalog, jupiterV9);
-    require(migratedJupiter.meta.launchUpgrades.fuelTanks == 3 &&
-            migratedJupiter.meta.launchUpgrades.flightControls >= 1 &&
-            migratedJupiter.meta.launchUpgrades.cooling == 0 &&
-            migratedJupiter.meta.launchUpgrades.hull == 0 &&
-            migratedJupiter.meta.launchLessons.stage == LaunchTrainingStage::Complete,
-        "Jupiter-era saves must skip the belt lesson while keeping Cooling and Hull optional");
-
-    SaveData convertedV9 = progressedV9;
-    convertedV9.ownedModuleIds = {
-        content::module::deepReservoir,
-        content::module::pressureBalanceBaffles,
-        content::module::sacrificialSink,
-        content::module::recoveryCradle};
-    convertedV9.defaultEquippedModuleIds = convertedV9.ownedModuleIds;
-    convertedV9.inventoryModuleIds = convertedV9.ownedModuleIds;
-    convertedV9.equippedModuleIds = convertedV9.ownedModuleIds;
-    GameState converted = createNewGame(catalog, 5506);
-    restoreSaveData(converted, catalog, convertedV9);
-    require(converted.meta.launchUpgrades.fuelTanks == 3 &&
-            converted.meta.launchUpgrades.flightControls == 3 &&
-            converted.meta.launchUpgrades.cooling == 3 &&
-            converted.meta.launchUpgrades.hull == 3,
-        "version-nine modules must convert to the highest equivalent rank on each direct launch track");
-    require(std::find(
-                converted.meta.ownedModuleIds.begin(),
-                converted.meta.ownedModuleIds.end(),
-                content::module::pressureBalanceBaffles) == converted.meta.ownedModuleIds.end() &&
-            std::find(
-                converted.meta.ownedModuleIds.begin(),
-                converted.meta.ownedModuleIds.end(),
-                content::module::recoveryCradle) == converted.meta.ownedModuleIds.end(),
-        "converted version-nine proving IDs must be retired from permanent inventory");
 }
 
 void launchCompetentPoliciesSurviveFiveThousandSeeds()
@@ -3265,55 +3166,130 @@ void animalCrewClassesModifySurfaceExpeditions()
     require(!presentation.details.empty(), "surface details should expose active expedition modifiers");
 }
 
-void surfaceUpgradeOffersAreDistinctAndSelectable()
+void expeditionExperienceQueuesDistinctSelectableOffers()
 {
-    const ContentCatalog catalog = createDefaultContent();
+    ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 642);
-    state.run.destinationIndex = 2;
     state.screen = Screen::SurfaceExpedition;
-    startSurfaceExpedition(state, catalog);
-
+    const ExpeditionExperienceAward award = awardExpeditionExperience(state, 75.0, state.screen);
+    require(award.levelsGained == 3 && state.run.surfaceExpedition.expeditionLevel == 4,
+        "75 expedition XP should cross the 10, 16, and 25 thresholds");
+    require(std::abs(state.run.surfaceExpedition.expeditionExperience - 24.0) < 0.001 &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 3,
+        "75 expedition XP should leave 24 XP and queue three mandatory choices");
     Random rng(643);
-    generateSurfaceUpgradeOffers(state, catalog, rng);
-    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "successful surface progress should expose a field upgrade offer");
-
-    std::vector<std::string> offers;
-    for (const std::string& offerId : state.run.surfaceExpedition.surfaceUpgradeOfferIds) {
-        if (!offerId.empty()) {
-            offers.push_back(offerId);
-            require(catalog.findSurfaceUpgrade(offerId) != nullptr, "surface upgrade offer ids should resolve through content");
+    require(generateRunUpgradeOffers(state, catalog, rng), "a queued level should generate a persisted offer");
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    require(expedition.runUpgradeOfferPending && expedition.runUpgradeOfferCount == 3,
+        "a populated run-upgrade pool should expose three cards");
+    for (int left = 0; left < expedition.runUpgradeOfferCount; ++left) {
+        for (int right = left + 1; right < expedition.runUpgradeOfferCount; ++right) {
+            const RunUpgradeOffer& a = expedition.runUpgradeOffers[static_cast<std::size_t>(left)];
+            const RunUpgradeOffer& b = expedition.runUpgradeOffers[static_cast<std::size_t>(right)];
+            require(a.kind != b.kind || a.definitionId != b.definitionId || a.slotIndex != b.slotIndex,
+                "one level-up board must not repeat an identical offer target");
         }
     }
-    require(offers.size() == 3, "surface upgrade offers should present three options when possible");
-    std::sort(offers.begin(), offers.end());
-    require(std::adjacent_find(offers.begin(), offers.end()) == offers.end(), "surface upgrade offers should be distinct");
-
-    const std::string chosenId = state.run.surfaceExpedition.surfaceUpgradeOfferIds[0];
-    require(chooseSurfaceUpgrade(state, catalog, 0), "selecting a valid surface upgrade should apply it");
-    require(!state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "choosing a surface upgrade should consume the offer");
-    require(state.run.surfaceUpgradeIds.size() == 1 && state.run.surfaceUpgradeIds.front() == chosenId, "selected surface upgrade should persist on the current ship");
-    require(!state.run.surfaceExpedition.logEntries.empty(), "surface upgrade selection should be logged");
+    const Screen originalScreen = state.screen;
+    require(chooseRunUpgrade(state, catalog, 0), "selecting a valid persisted offer should apply it");
+    require(state.run.surfaceExpedition.pendingRunUpgradeChoices == 2 &&
+            !state.run.surfaceExpedition.runUpgradeOfferPending,
+        "selection should consume exactly one choice and clear only the current board");
+    require(state.screen == originalScreen,
+        "core offer selection must not mutate screens or auto-open the next board");
 }
 
-void surfaceUpgradeOffersCanRerollAndKeepDraftState()
+void exhaustedRunUpgradePoolConsumesQueuedChoices()
+{
+    ContentCatalog catalog = createDefaultContent();
+    catalog.surfaceUpgrades.clear();
+    catalog.miniDrones.clear();
+    catalog.droneModules.clear();
+    catalog.droneSynergies.clear();
+
+    GameState state = createNewGame(catalog, 6421);
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 2;
+    Random rng(6422);
+    require(!generateRunUpgradeOffers(state, catalog, rng) &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 1 &&
+            !state.run.surfaceExpedition.runUpgradeOfferPending,
+        "an exhausted finite pool should consume exactly one mandatory choice without opening an empty board");
+    require(!generateRunUpgradeOffers(state, catalog, rng) &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 0 &&
+            state.run.surfaceExpedition.runUpgradeOfferCount == 0,
+        "queued choices should drain deterministically when every eligible upgrade is installed");
+}
+
+void droneGraftOffersAreDistinctPerCompatibleSlot()
+{
+    ContentCatalog catalog = createDefaultContent();
+    catalog.surfaceUpgrades.clear();
+    catalog.droneSynergies.clear();
+    GameState state = createNewGame(catalog, 6431);
+    state.screen = Screen::SurfaceUpgrade;
+    state.meta.unlockKeys = {content::unlock::droneBay, content::unlock::perimeterDrones};
+    state.meta.droneBaySlots = 2;
+    state.meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
+    state.meta.equippedDroneIds = state.meta.ownedDroneIds;
+    state.run.surfaceExpedition.runDroneRanks = {{content::drone::miningDrone, 3}};
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 1;
+    Random rng(6432);
+    require(generateRunUpgradeOffers(state, catalog, rng), "compatible empty drone slots should create graft candidates");
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    require(expedition.runUpgradeOfferCount == 3,
+        "four slot-specific Mining graft candidates should produce a three-card board");
+    bool sameGraftDifferentSlots = false;
+    for (int left = 0; left < expedition.runUpgradeOfferCount; ++left) {
+        const RunUpgradeOffer& a = expedition.runUpgradeOffers[static_cast<std::size_t>(left)];
+        require(a.kind == RunUpgradeKind::DroneGraft && (a.slotIndex == 0 || a.slotIndex == 1),
+            "the exhausted filtered pool should contain only pre-bound compatible grafts");
+        for (int right = left + 1; right < expedition.runUpgradeOfferCount; ++right) {
+            const RunUpgradeOffer& b = expedition.runUpgradeOffers[static_cast<std::size_t>(right)];
+            sameGraftDifferentSlots = sameGraftDifferentSlots ||
+                (a.definitionId == b.definitionId && a.slotIndex != b.slotIndex);
+        }
+    }
+    require(sameGraftDifferentSlots,
+        "duplicate Drone types must allow the same graft definition to target separate slots");
+    const RunUpgradeOffer chosen = expedition.runUpgradeOffers[0];
+    require(chooseRunUpgrade(state, catalog, 0) &&
+            state.run.surfaceExpedition.droneModuleAssignments.size() == 1 &&
+            state.run.surfaceExpedition.droneModuleAssignments.front().equippedFrame == chosen.slotIndex,
+        "choosing a graft should install it directly on its offered slot without assignment UI");
+}
+
+void postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime()
 {
     const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 6431);
-    state.run.destinationIndex = 2;
+    GameState state = createNewGame(catalog, 6433);
+    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    expedition.active = false;
+    expedition.expeditionLevel = 4;
+    expedition.expeditionExperience = 24.0;
+    expedition.pendingRunUpgradeChoices = 1;
+    expedition.runUpgradeOffers[0] = {
+        RunUpgradeKind::Rig,
+        content::surfaceUpgrade::thermalDrillJackets,
+        1,
+        -1};
+    expedition.runUpgradeOfferCount = 1;
+    expedition.runUpgradeOfferPending = true;
+    expedition.runUpgradeReturnScreen = Screen::Hangar;
     state.screen = Screen::SurfaceUpgrade;
-    state.run.credits = 200.0;
-    startSurfaceExpedition(state, catalog);
 
-    Random rng(6432);
-    generateSurfaceUpgradeOffers(state, catalog, rng);
-    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade draft should start with offers available");
-    const auto originalOffers = state.run.surfaceExpedition.surfaceUpgradeOfferIds;
-    const double originalCredits = state.run.credits;
+    const std::optional<SaveData> save = deserializeSaveData(
+        serializeSaveData(captureSaveData(state)));
+    require(save.has_value(), "a post-extraction Level Up draft should serialize as a valid v13 save");
 
-    require(rerollSurfaceUpgradeOffers(state, catalog, rng), "affordable surface upgrade reroll should succeed");
-    require(state.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "rerolling should keep the draft active");
-    require(state.run.credits < originalCredits, "field-upgrade reroll should spend credits");
-    require(state.run.surfaceExpedition.surfaceUpgradeOfferIds != originalOffers, "rerolling should refresh the field-upgrade board when options remain");
+    GameState restored = createNewGame(catalog, 1);
+    restoreSaveData(restored, catalog, *save);
+    require(restored.screen == Screen::SurfaceUpgrade,
+        "an open post-extraction Level Up draft should restore even after Surface runtime ends");
+    require(!restored.run.surfaceExpedition.active &&
+            restored.run.surfaceExpedition.runUpgradeOfferPending &&
+            restored.run.surfaceExpedition.runUpgradeOfferCount == 1 &&
+            restored.run.surfaceExpedition.runUpgradeReturnScreen == Screen::Hangar,
+        "post-extraction draft offers and their eventual return screen should round trip intact");
 }
 
 void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
@@ -3324,12 +3300,12 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     startSurfaceExpedition(baseline, catalog);
 
     GameState upgraded = baseline;
-    upgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::thermalDrillJackets,
-        content::surfaceUpgrade::widebandPulse,
-        content::surfaceUpgrade::cargoSkids,
-        content::surfaceUpgrade::shockMounts,
-        content::surfaceUpgrade::oreScentArray
+    upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::widebandPulse, 1},
+        {content::surfaceUpgrade::cargoSkids, 1},
+        {content::surfaceUpgrade::shockMounts, 1},
+        {content::surfaceUpgrade::oreScentArray, 1}
     };
 
     const MiningDrillStats baselineStats = miningDrillStats(baseline, catalog);
@@ -3355,10 +3331,10 @@ void surfaceUpgradesAndDronesModifyScanMiniGame()
     baseline.run.surfaceExpedition.hazard = 0.35;
 
     GameState upgraded = baseline;
-    upgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::widebandPulse,
-        content::surfaceUpgrade::oreScentArray,
-        content::surfaceUpgrade::deepEchoMapper
+    upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::widebandPulse, 1},
+        {content::surfaceUpgrade::oreScentArray, 1},
+        {content::surfaceUpgrade::deepEchoMapper, 1}
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     upgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
@@ -3392,11 +3368,11 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     baseline.run.surfaceExpedition.hazard = 0.35;
 
     GameState upgraded = baseline;
-    upgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::thermalDrillJackets,
-        content::surfaceUpgrade::shockMounts,
-        content::surfaceUpgrade::recoilBraces,
-        content::surfaceUpgrade::oreHopper
+    upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::shockMounts, 1},
+        {content::surfaceUpgrade::recoilBraces, 1},
+        {content::surfaceUpgrade::oreHopper, 1}
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     upgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
@@ -3445,9 +3421,9 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     require(baselineLimits.first == baselineLimits.second + 1, "baseline scan should map current layer plus every reachable pushed layer");
 
     GameState scannerUpgraded = baseline;
-    scannerUpgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::widebandPulse,
-        content::surfaceUpgrade::deepEchoMapper
+    scannerUpgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::widebandPulse, 1},
+        {content::surfaceUpgrade::deepEchoMapper, 1}
     };
     scannerUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     scannerUpgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
@@ -3458,10 +3434,10 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     require(scannerLimits.second > baselineLimits.second, "scanner support should also expand reachable push depth");
 
     GameState structureUpgraded = baseline;
-    structureUpgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::thermalDrillJackets,
-        content::surfaceUpgrade::shockMounts,
-        content::surfaceUpgrade::recoilBraces
+    structureUpgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::shockMounts, 1},
+        {content::surfaceUpgrade::recoilBraces, 1}
     };
     structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     structureUpgraded.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
@@ -3472,54 +3448,8 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     require(structureLimits.first > baselineLimits.first, "structural support should also expand scan depth");
 }
 
-void surfaceUpgradesPersistUntilNewShipAndRoundTripSave()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 645);
-    state.run.destinationIndex = 2;
-    state.screen = Screen::SurfaceUpgrade;
-    startSurfaceExpedition(state, catalog);
-    state.run.surfaceUpgradeIds = {content::surfaceUpgrade::shockMounts};
-    state.run.surfaceExpedition.surfaceUpgradeOfferIds = {
-        content::surfaceUpgrade::thermalDrillJackets,
-        content::surfaceUpgrade::widebandPulse,
-        content::surfaceUpgrade::shockMounts
-    };
-    state.run.surfaceExpedition.surfaceUpgradeOfferAvailable = true;
-    state.run.surfaceExpedition.surfaceUpgradeOffersSeen = 1;
 
-    const std::string serialized = serializeSaveData(captureSaveData(state));
-    const auto save = deserializeSaveData(serialized);
-    require(save.has_value(), "surface upgrade save should parse");
-
-    GameState restored = createNewGame(catalog, 1);
-    restoreSaveData(restored, catalog, *save);
-    require(restored.screen == Screen::SurfaceUpgrade, "active field-upgrade draft should round trip through save data");
-    require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "selected surface upgrades should round trip");
-    require(restored.run.surfaceExpedition.surfaceUpgradeOfferIds == state.run.surfaceExpedition.surfaceUpgradeOfferIds, "surface upgrade offers should round trip");
-    require(restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offer availability should round trip");
-
-    Random rng(646);
-    restored.run.surfaceExpedition.temporaryMaterials.common = 1;
-    const SurfaceActionOutcome extracted = extractSurfacePayload(restored);
-    require(extracted.applied, "surface extraction should resolve while upgrades are active");
-    require(restored.run.surfaceUpgradeIds == state.run.surfaceUpgradeIds, "surface upgrades should persist after successful extraction");
-    require(!restored.run.surfaceExpedition.surfaceUpgradeOfferAvailable, "surface upgrade offers should clear after extraction");
-
-    restored.run.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
-    LaunchOutcome destroyed;
-    destroyed.type = LaunchResultType::Destroyed;
-    destroyed.destinationId = currentDestination(restored, catalog).id;
-    destroyed.shipDamage = tuning::damage::destroyedShipDamage;
-    applyLaunchOutcome(restored, catalog, destroyed);
-    require(restored.run.surfaceUpgradeIds.empty(), "surface upgrades should clear immediately when the current ship is destroyed");
-
-    restored.run.surfaceUpgradeIds = state.run.surfaceUpgradeIds;
-    startNewExpedition(restored, catalog);
-    require(restored.run.surfaceUpgradeIds.empty(), "surface upgrades should clear when the current ship/run is replaced");
-}
-
-void surfaceUpgradesResetOnEmergencyRecallOnly()
+void runUpgradesSurviveEmergencyRecall()
 {
     const ContentCatalog catalog = createDefaultContent();
 
@@ -3527,21 +3457,28 @@ void surfaceUpgradesResetOnEmergencyRecallOnly()
     brokenBit.run.destinationIndex = 2;
     startSurfaceExpedition(brokenBit, catalog);
     prepareMiningSiteForTest(brokenBit);
-    brokenBit.run.surfaceUpgradeIds = {content::surfaceUpgrade::shockMounts};
+    brokenBit.run.surfaceExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
     require(startMiningRun(brokenBit, catalog).applied, "mining should start for drill break upgrade test");
     brokenBit.run.mining.drillIntegrity = 0.0;
     updateMiningRun(brokenBit, catalog, 0.08);
     require(!brokenBit.run.mining.failurePending, "broken drill bit should not force emergency recall");
-    require(brokenBit.run.surfaceUpgradeIds.size() == 1 && brokenBit.run.surfaceUpgradeIds.front() == content::surfaceUpgrade::shockMounts, "field upgrades should survive a broken drill bit");
+    require(runRigUpgradeRank(brokenBit, content::surfaceUpgrade::shockMounts) == 1,
+        "run upgrades should survive a broken drill bit");
 
     GameState recalled = createNewGame(catalog, 649);
     recalled.run.destinationIndex = 2;
     startSurfaceExpedition(recalled, catalog);
     prepareMiningSiteForTest(recalled);
-    recalled.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::shockMounts,
-        content::surfaceUpgrade::oreHopper
+    recalled.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::shockMounts, 1},
+        {content::surfaceUpgrade::oreHopper, 1}
     };
+    recalled.run.surfaceExpedition.expeditionLevel = 3;
+    recalled.run.surfaceExpedition.expeditionExperience = 7.0;
+    recalled.run.surfaceExpedition.runDroneRanks = {{content::drone::miningDrone, 2}};
+    recalled.run.surfaceExpedition.droneModuleAssignments = {
+        {0, content::drone::miningDrone, DroneModuleKind::CombatDrill}};
+    recalled.run.surfaceExpedition.selectedSynergyIds = {"long_haul_rig"};
     require(startMiningRun(recalled, catalog).applied, "mining should start for emergency recall upgrade test");
     recalled.run.mining.droneHealth = 0.0;
     updateMiningRun(recalled, catalog, 0.08);
@@ -3552,7 +3489,81 @@ void surfaceUpgradesResetOnEmergencyRecallOnly()
             !recalled.run.mining.failurePending,
         "zero rig health should emergency-eject the operator instead of ending the run");
     require(finishMiningRun(recalled, catalog, true).applied, "emergency recall should be acknowledgeable");
-    require(recalled.run.surfaceUpgradeIds.empty(), "field upgrades should reset on emergency recall");
+    require(runRigUpgradeRank(recalled, content::surfaceUpgrade::shockMounts) == 1 &&
+            runRigUpgradeRank(recalled, content::surfaceUpgrade::oreHopper) == 1,
+        "emergency recall should preserve run-scoped upgrades");
+    require(recalled.run.surfaceExpedition.expeditionLevel == 3 &&
+            std::abs(recalled.run.surfaceExpedition.expeditionExperience - 7.0) < 0.001 &&
+            expeditionDroneRank(recalled, content::drone::miningDrone) == 2 &&
+            recalled.run.surfaceExpedition.droneModuleAssignments.size() == 1 &&
+            recalled.run.surfaceExpedition.selectedSynergyIds == std::vector<std::string>{"long_haul_rig"},
+        "emergency recall should preserve XP, temporary Drone ranks, grafts, and selected synergies together");
+}
+
+void runUpgradeLifetimeFollowsTheTransport()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    auto seedBuild = [](GameState& state) {
+        SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+        expedition.expeditionLevel = 4;
+        expedition.expeditionExperience = 11.0;
+        expedition.pendingRunUpgradeChoices = 1;
+        expedition.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 2}};
+        expedition.runDroneRanks = {{content::drone::surveyDrone, 3}};
+        expedition.droneModuleAssignments = {
+            {0, content::drone::surveyDrone, DroneModuleKind::PulseStrike}};
+        expedition.selectedSynergyIds = {"pathfinder_loop"};
+    };
+    auto requireBuild = [](const GameState& state, std::string_view transition) {
+        const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+        require(expedition.expeditionLevel == 4 &&
+                std::abs(expedition.expeditionExperience - 11.0) < 0.001 &&
+                expedition.pendingRunUpgradeChoices == 1 &&
+                runRigUpgradeRank(state, content::surfaceUpgrade::widebandPulse) == 2 &&
+                expeditionDroneRank(state, content::drone::surveyDrone) == 3 &&
+                expedition.droneModuleAssignments.size() == 1 &&
+                expedition.selectedSynergyIds == std::vector<std::string>{"pathfinder_loop"},
+            std::string("the complete run build should survive ") + std::string(transition));
+    };
+
+    GameState state = createNewGame(catalog, 6491);
+    state.run.destinationIndex = 2;
+    seedBuild(state);
+    startSurfaceExpedition(state, catalog);
+    requireBuild(state, "landing");
+    require(extractSurfacePayload(state, catalog).applied, "a surface extraction should resolve for the run-lifetime test");
+    requireBuild(state, "safe Surface extraction");
+
+    LaunchOutcome survived;
+    survived.type = LaunchResultType::SafeEject;
+    survived.recoveryMethod = RecoveryMethod::ReturnHome;
+    survived.destinationId = content::destination::mars;
+    applyLaunchOutcome(state, catalog, survived);
+    requireBuild(state, "a survived launch");
+
+    startNewExpedition(state, catalog);
+    require(state.run.surfaceExpedition.expeditionLevel == 1 &&
+            state.run.surfaceExpedition.expeditionExperience == 0.0 &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 0 &&
+            state.run.surfaceExpedition.runRigUpgradeRanks.empty() &&
+            state.run.surfaceExpedition.runDroneRanks.empty() &&
+            state.run.surfaceExpedition.droneModuleAssignments.empty() &&
+            state.run.surfaceExpedition.selectedSynergyIds.empty(),
+        "New Expedition should reset XP and every temporary upgrade family atomically");
+
+    GameState destroyed = createNewGame(catalog, 6492);
+    seedBuild(destroyed);
+    LaunchOutcome loss;
+    loss.type = LaunchResultType::Destroyed;
+    loss.destinationId = content::destination::earthOrbit;
+    applyLaunchOutcome(destroyed, catalog, loss);
+    require(!destroyed.run.active &&
+            destroyed.run.surfaceExpedition.expeditionLevel == 1 &&
+            destroyed.run.surfaceExpedition.runRigUpgradeRanks.empty() &&
+            destroyed.run.surfaceExpedition.runDroneRanks.empty() &&
+            destroyed.run.surfaceExpedition.droneModuleAssignments.empty() &&
+            destroyed.run.surfaceExpedition.selectedSynergyIds.empty(),
+        "Transport destruction should clear XP progression and every temporary upgrade family");
 }
 
 void miningDepletionAtShipGracefullyEndsRun()
@@ -3649,6 +3660,10 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
              tuning::research::marsBayCommonOreGoal,
              0}),
         "the Mars slot fixture should complete its delivery through a generic scenario event");
+    require(state.run.surfaceExpedition.expeditionLevel == 2 &&
+            std::abs(state.run.surfaceExpedition.expeditionExperience) < 0.001 &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 1,
+        "completing an authored material-delivery objective should award exactly 10 expedition XP");
     require(claimMarsBayExpansion(state, catalog), "the completed Mars objective should explicitly fabricate Slot 2");
     require(state.meta.droneBaySlots == 2 && state.meta.equippedDroneIds.size() == 1,
         "Mars should add an empty second slot without assigning another drone");
@@ -3664,12 +3679,12 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
     const MiniDroneLoadoutEffects beforeTune = miniDroneLoadoutEffects(state, catalog);
-    state.meta.materials.common = 3;
-    require(canUpgradeMiniDrone(state, catalog, 0), "funded owned drone should expose tuning");
-    require(upgradeMiniDrone(state, catalog, 0), "material-funded drone tuning should succeed");
-    require(miniDroneUpgradeLevel(state, content::drone::miningDrone) == 2, "tuned drone should advance to Mk II");
+    state.run.surfaceExpedition.runDroneRanks = {{content::drone::miningDrone, 2}};
+    require(expeditionDroneRank(state, content::drone::miningDrone) == 2,
+        "a run-scoped Drone rank should advance every Prospector copy to Mk II");
     const MiniDroneLoadoutEffects afterTune = miniDroneLoadoutEffects(state, catalog);
-    require(afterTune.passiveMiningRate > beforeTune.passiveMiningRate, "tuned mining drone should scale passive mining output");
+    require(afterTune.passiveMiningRate > beforeTune.passiveMiningRate,
+        "run-scoped Drone ranks should scale passive mining output");
 
     for (int i = 0; i < 4; ++i) {
         state.meta.materials.common = 99;
@@ -3689,7 +3704,8 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     require(restored.meta.droneBaySlots == state.meta.droneBaySlots, "drone bay slots should round trip");
     require(restored.meta.ownedDroneIds == state.meta.ownedDroneIds, "owned drones should round trip");
     require(restored.meta.equippedDroneIds == state.meta.equippedDroneIds, "equipped drones should round trip");
-    require(miniDroneUpgradeLevel(restored, content::drone::miningDrone) == 2, "drone tuning should round trip");
+    require(expeditionDroneRank(restored, content::drone::miningDrone) == 2,
+        "run-scoped Drone ranks should round trip with the active expedition");
 
     restored.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     ensureDroneBayState(restored, catalog);
@@ -3699,7 +3715,6 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
         return drone.role == MiniDroneRole::Attack;
     });
     require(attackIndex != catalog.miniDrones.end(), "default content should include an Attack drone");
-    const int attackCatalogIndex = static_cast<int>(std::distance(catalog.miniDrones.begin(), attackIndex));
     restored.meta.droneBaySlots = 2;
     restored.meta.ownedDroneIds.push_back(content::drone::attackDrone);
     restored.meta.ownedDroneIds.push_back(content::drone::defenseDrone);
@@ -3709,16 +3724,14 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
         return drone.role == MiniDroneRole::Defense;
     });
     require(defenseIndex != catalog.miniDrones.end(), "default content should include a Defense drone");
-    restored.meta.materials = {.common = 99, .rare = 99, .exotic = 99};
-    require(!canUpgradeMiniDrone(restored, catalog, attackCatalogIndex), "Arkfall combat drones should stay at Mk I until perimeter coordination is researched");
+    restored.run.surfaceExpedition.selectedSynergyIds = {"killbox_screen"};
     const MiniDroneLoadoutEffects uncoordinated = miniDroneLoadoutEffects(restored, catalog);
     require(uncoordinated.synergyNames.empty(),
-        "Arkfall Mk I combat roles should not activate advanced formations before research");
+        "a selected combat formation should remain dormant before its required research");
     restored.meta.unlockKeys.push_back(content::unlock::perimeterCoordination);
-    require(canUpgradeMiniDrone(restored, catalog, attackCatalogIndex), "Perimeter Drone Network research should unlock combat-drone tuning");
     const MiniDroneLoadoutEffects coordinated = miniDroneLoadoutEffects(restored, catalog);
     require(!coordinated.synergyNames.empty(),
-        "perimeter coordination should activate combat formations");
+        "perimeter coordination should activate a previously selected compatible formation");
 
     const ResearchProject* perimeterProject = catalog.findResearchProject(content::research::perimeterDroneNetwork);
     require(perimeterProject != nullptr && perimeterProject->unlockKey == content::unlock::perimeterDrones &&
@@ -3839,16 +3852,6 @@ void firstMiningContractBuildsAndCelebratesProspector()
     require(html.find(lunarClaimModalId) == std::string::npos,
         "the Prospector celebration should not repeat after acknowledgment");
 
-    SaveData legacy = captureSaveData(createNewGame(catalog, 77));
-    legacy.version = 3;
-    legacy.acknowledgedActivityBriefingIds.push_back(std::string(ui::briefings::mining));
-    GameState migrated = createNewGame(catalog, 78);
-    restoreSaveData(migrated, catalog, legacy);
-    require(hasUnlock(migrated.meta, content::unlock::droneBay)
-            && migrated.meta.prospectorCommonOreRecovered == tuning::research::prospectorCommonOreGoal
-            && migrated.meta.lunarProspectorClaimed
-            && ui::briefings::acknowledged(migrated.meta.acknowledgedActivityBriefingIds, ui::briefings::prospectorComplete),
-        "campaigns that already used mining should migrate past the new opening contract without a stale modal");
 }
 
 void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
@@ -3870,7 +3873,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
             && tuning::research::marsBayCommonOreGoal == 40,
         "early campaign contracts should use the tuned thirty and forty ore requirements");
     SaveData partialContractSave = captureSaveData(state);
-    partialContractSave.version = 7;
+    partialContractSave.version = save_schema::currentVersion;
     partialContractSave.prospectorCommonOreRecovered = 3;
     GameState restoredPartialContract = createNewGame(catalog, 0x10A8);
     restoreSaveData(restoredPartialContract, catalog, partialContractSave);
@@ -3973,26 +3976,8 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     require(creditRecoveredIoArtifact(state, ioArtifact)
             && !creditRecoveredIoArtifact(state, ioArtifact)
             && state.meta.ioArtifactRecovered
-            && state.meta.droneUpgradeCredits == 1,
-        "a protected objective with no local artifact payout should grant exactly one persistent scenario upgrade credit");
-    const auto lockedCombatDrone = std::find_if(
-        catalog.miniDrones.begin(),
-        catalog.miniDrones.end(),
-        [](const MiniDrone& drone) { return drone.role == MiniDroneRole::Attack; });
-    require(lockedCombatDrone != catalog.miniDrones.end(), "the credit-lock fixture requires an Attack Support Drone");
-    state.meta.unlockKeys.push_back(lockedCombatDrone->unlockKey);
-    state.meta.ownedDroneIds.push_back(lockedCombatDrone->id);
-    const int lockedCombatIndex = static_cast<int>(std::distance(catalog.miniDrones.begin(), lockedCombatDrone));
-    require(!canRedeemDroneUpgradeCredit(state, catalog, lockedCombatIndex),
-        "an artifact credit must not bypass the Perimeter Coordination tuning gate");
-    const MaterialInventory materialsBeforeCredit = state.meta.materials;
-    require(redeemDroneUpgradeCredit(state, catalog, 0)
-            && state.meta.droneUpgradeCredits == 0
-            && miniDroneUpgradeLevel(state, content::drone::miningDrone) == 2
-            && state.meta.materials.common == materialsBeforeCredit.common
-            && state.meta.materials.rare == materialsBeforeCredit.rare
-            && state.meta.materials.exotic == materialsBeforeCredit.exotic,
-        "the explicit artifact-credit action should upgrade one eligible drone without material spend");
+            && state.run.surfaceExpedition.runDroneRanks.empty(),
+        "a protected objective should record exactly once without granting a free permanent Drone rank");
 
     require(startSaturnSlingshotRun(state, catalog)
             && state.screen == Screen::Flyby
@@ -4021,7 +4006,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         "claiming the saved Perfect solution should permanently satisfy Saturn's authored route requirement");
 }
 
-void versionSevenCampaignStateRoundTripsAndMigrates()
+void campaignStateRoundTripsAtCurrentVersion()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0x7007);
@@ -4070,7 +4055,7 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
     require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
         "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
     const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == 12 && activeSave.screen == Screen::Hangar,
+    require(activeSave.version == save_schema::currentVersion && activeSave.screen == Screen::Hangar,
         "saving during the special Flyby should normalize safely to Hangar");
     const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
     require(parsed.has_value(), "current campaign state should deserialize");
@@ -4080,300 +4065,35 @@ void versionSevenCampaignStateRoundTripsAndMigrates()
             && restored.meta.marsBayExpansionClaimed
             && restored.meta.ioHazardDroneCommissioned
             && restored.meta.ioArtifactRecovered
-            && restored.meta.droneUpgradeCredits == 1
             && restored.meta.saturnSlingshotFailureAcknowledged
             && canStartSaturnSlingshot(restored, catalog),
-        "v7 campaign flags and a retryable normalized slingshot should survive roundtrip");
+        "current campaign flags and a retryable normalized slingshot should survive roundtrip");
 
-    SaveData legacyMars = captureSaveData(createNewGame(catalog, 0x6A25));
-    legacyMars.version = 6;
-    legacyMars.destinationIndex = 2;
-    legacyMars.furthestTier = 2;
-    legacyMars.unlockKeys = {
-        content::unlock::starter,
-        content::unlock::droneBay,
-    };
-    legacyMars.droneBaySlots = 2;
-    legacyMars.ownedDroneIds = {content::drone::miningDrone};
-    legacyMars.equippedDroneIds = {content::drone::miningDrone};
-    GameState migratedMars = createNewGame(catalog, 0x7A25);
-    restoreSaveData(migratedMars, catalog, legacyMars);
-    const FrontierGateStatus migratedMarsGate = frontierGateStatus(migratedMars, catalog);
-    require(migratedMars.meta.lunarProspectorClaimed
-            && migratedMars.meta.marsMiningBriefingAcknowledged
-            && migratedMars.meta.marsBayExpansionClaimed
-            && migratedMars.meta.marsCommonOreRecovered == tuning::research::marsBayCommonOreGoal,
-        "a v6 Mars save that already owns Slot 2 should migrate past the redundant Mars bay contract");
-    require(migratedMars.meta.droneBaySlots == 2
-            && migratedMars.meta.ownedDroneIds == std::vector<std::string>{content::drone::miningDrone}
-            && migratedMars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
-        "the v6 Mars repair should preserve one Prospector and leave the inherited second slot empty");
-    require(hasUnlock(migratedMars.meta, content::unlock::routeJupiter) &&
-            migratedMars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity &&
-            migratedMars.meta.launchUpgrades.fuelTanks >= 2 &&
-            migratedMarsGate.kind == FrontierGateKind::FlightData &&
-            !migratedMarsGate.satisfied,
-        "the repaired v6 Mars save should retain the Jupiter story route while entering the new Hull lesson and Fuel III gate");
-
-    SaveData inconsistentV7Mars = legacyMars;
-    inconsistentV7Mars.version = 7;
-    inconsistentV7Mars.lunarMiningBriefingAcknowledged = true;
-    inconsistentV7Mars.lunarProspectorClaimed = true;
-    inconsistentV7Mars.prospectorCommonOreRecovered = tuning::research::prospectorCommonOreGoal;
-    inconsistentV7Mars.marsMiningBriefingAcknowledged = false;
-    inconsistentV7Mars.marsBayExpansionClaimed = false;
-    inconsistentV7Mars.marsCommonOreRecovered = 0;
-    GameState repairedV7Mars = createNewGame(catalog, 0x7A26);
-    restoreSaveData(repairedV7Mars, catalog, inconsistentV7Mars);
-    const FrontierGateStatus repairedV7MarsGate = frontierGateStatus(repairedV7Mars, catalog);
-    require(repairedV7Mars.meta.marsMiningBriefingAcknowledged
-            && repairedV7Mars.meta.marsBayExpansionClaimed
-            && repairedV7Mars.meta.marsCommonOreRecovered == tuning::research::marsBayCommonOreGoal
-            && repairedV7Mars.meta.droneBaySlots == 2
-            && repairedV7Mars.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone}
-            && hasUnlock(repairedV7Mars.meta, content::unlock::routeJupiter)
-            && repairedV7Mars.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity
-            && repairedV7MarsGate.kind == FrontierGateKind::FlightData
-            && !repairedV7MarsGate.satisfied,
-        "an already-v7 Mars save with inherited Slot 2 should self-heal its story route while entering the new Hull curriculum gate");
-
-    SaveData legacy = captureSaveData(createNewGame(catalog, 0x6006));
-    legacy.version = 6;
-    legacy.destinationIndex = 4;
-    legacy.furthestTier = 4;
-    legacy.unlockKeys = {
-        content::unlock::starter,
-        content::unlock::droneBay,
-        content::unlock::droneSupportSuite,
-    };
-    legacy.droneBaySlots = 2;
-    legacy.ownedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::hazardDrone,
-    };
-    legacy.equippedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::miningDrone,
-    };
-    legacy.miningSites.push_back({
-        "legacy_io_cocoon",
-        content::destination::jupiter,
-        MiningAct::ActOne,
-        8,
-        88,
-        MiningGateType::HazardCocoon,
-        "legacy_io_artifact",
-        true,
-        true,
-    });
-    GameState migrated = createNewGame(catalog, 2);
-    restoreSaveData(migrated, catalog, legacy);
-    require(migrated.meta.lunarProspectorClaimed
-            && migrated.meta.marsBayExpansionClaimed
-            && migrated.meta.ioHazardDroneCommissioned
-            && migrated.meta.ioArtifactRecovered
-            && migrated.meta.saturnSlingshotPerfect
-            && migrated.meta.saturnRouteUnlocked
-            && migrated.meta.droneUpgradeCredits == 1,
-        "a Saturn-or-later v6 save should migrate past completed mandatory gates with one Io credit");
-    require(std::count(
-                migrated.meta.equippedDroneIds.begin(),
-                migrated.meta.equippedDroneIds.end(),
-                content::drone::miningDrone) == 1,
-        "v7 migration should de-duplicate repeated legacy loadout IDs");
 }
 
-void versionSixPendingIoArtifactsMigrateToUpgradeCredit()
+void scenarioUiActionsDoNotAwardExpeditionExperience()
 {
     const ContentCatalog catalog = createDefaultContent();
-    const auto jupiter = std::find_if(
-        catalog.destinations.begin(),
-        catalog.destinations.end(),
-        [](const Destination& destination) {
-            return destination.id == content::destination::jupiter;
-        });
-    require(jupiter != catalog.destinations.end(), "Jupiter should exist for legacy Io migration tests");
-    const int jupiterIndex =
-        static_cast<int>(std::distance(catalog.destinations.begin(), jupiter));
+    GameState state = createNewGame(catalog, 6481);
+    state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    ensureScenarioInstances(state, catalog);
 
-    GameState activeSource = createNewGame(catalog, 0x600601);
-    activeSource.run.destinationIndex = jupiterIndex;
-    activeSource.meta.furthestTier = jupiter->tier;
-    startSurfaceExpedition(activeSource, catalog);
-    activeSource.run.surfaceExpedition.pendingScenarioId =
-        std::string(content::scenario::volcanicDescent);
-    activeSource.run.surfaceExpedition.pendingScenarioStepId = "recovery";
-    activeSource.run.surfaceExpedition.pendingMiningSiteDefinitionId =
-        std::string(content::miningSite::thermalLayeredRecovery);
-    prepareMiningSiteForTest(activeSource);
-    require(
-        startMiningRun(
-            activeSource,
-            catalog,
-            {MiningAct::ActOne, 8, 0x600601},
-            true)
-            .applied,
-        "legacy active-Io fixture should begin the cocoon mining run");
-    require(
-        activeSource.run.mining.artifact.present
-            && activeSource.run.mining.gate.type == MiningGateType::HazardCocoon
-            && !activeSource.run.mining.gate.compatibilityCritical,
-        "the generic active-site fixture should contain a configured cocoon without a legacy compatibility flag");
-    // Serialize a representative v6 active gate after the generic run has
-    // supplied its deterministic terrain. The migration must restore this as
-    // a compatibility record without making new scenarios depend on it.
-    activeSource.run.mining.gate.compatibilityCritical = true;
-    activeSource.run.mining.artifact.kind = ArtifactKind::Story;
-    activeSource.run.mining.artifact.rewardType = ArtifactRewardType::None;
-    activeSource.run.mining.gate.outerShellTilesTotal = 0;
-    activeSource.run.mining.gate.outerShellTilesRemaining = 0;
-    activeSource.run.mining.gate.innerShellTilesTotal = 0;
-    activeSource.run.mining.gate.innerShellTilesRemaining = 0;
-
-    SaveData activeLegacy = captureSaveData(activeSource);
-    activeLegacy.version = 6;
-    activeLegacy.ioArtifactRecovered = false;
-    activeLegacy.droneUpgradeCredits = 0;
-    const std::optional<SaveData> parsedActiveLegacy =
-        deserializeSaveData(serializeSaveData(activeLegacy));
-    require(parsedActiveLegacy.has_value(), "legacy active-Io save should deserialize");
-
-    GameState activeMigrated = createNewGame(catalog, 0x700601);
-    restoreSaveData(activeMigrated, catalog, *parsedActiveLegacy);
-    const MiningRunState& restoredMining = activeMigrated.run.mining;
-    const auto restoredSite = std::find_if(
-        activeMigrated.meta.miningSites.begin(),
-        activeMigrated.meta.miningSites.end(),
-        [&](const MiningSiteProgress& site) {
-            return site.destinationId == content::destination::jupiter
-                && site.gateType == MiningGateType::HazardCocoon
-                && site.artifactId == restoredMining.artifact.id;
-        });
-    require(
-        restoredMining.artifact.kind == ArtifactKind::Boost
-            && restoredMining.artifact.rewardType == ArtifactRewardType::DroneUpgradeCredit
-            && restoredMining.gate.compatibilityCritical
-            && restoredMining.gate.hazardAffinity == MiningElementalAffinity::Thermal
-            && restoredMining.gate.artifactId == restoredMining.artifact.id
-            && restoredSite != activeMigrated.meta.miningSites.end()
-            && restoredSite->legacyMigrated,
-        "a v6 active Jupiter cocoon should migrate to the persistent Io site and minor-artifact reward");
-
-    MiningRunState& deliverableMining = activeMigrated.run.mining;
-    for (MiningCell& cell : deliverableMining.terrain.cells) {
-        cell = {};
-        cell.revealed = true;
-    }
-    deliverableMining.gravityStrength = 0.0;
-    deliverableMining.gate.derivedStateDirty = true;
-    deliverableMining.artifact.state = MiningArtifactState::Loose;
-    deliverableMining.artifact.tethered = true;
-    deliverableMining.artifact.x = deliverableMining.returnZoneX;
-    deliverableMining.artifact.y = deliverableMining.returnZoneY;
-    deliverableMining.artifact.velocityX = 0.0;
-    deliverableMining.artifact.velocityY = 0.0;
-    deliverableMining.droneX = deliverableMining.returnZoneX;
-    deliverableMining.droneY = deliverableMining.returnZoneY;
-    deliverableMining.rigDepthZone = deliverableMining.entryDepthZone;
-    updateMiningRun(activeMigrated, catalog, 0.01);
-    require(
-        deliverableMining.stowedArtifacts.size() == 1
-            && deliverableMining.stowedArtifacts.front().kind == ArtifactKind::Boost
-            && deliverableMining.stowedArtifacts.front().rewardType
-                == ArtifactRewardType::DroneUpgradeCredit,
-        "the migrated active artifact should retain Io reward semantics when towed aboard");
-    require(
-        finishMiningRun(activeMigrated, catalog, false).applied,
-        "the migrated active Io run should return its delivered artifact to Surface Ops");
-    activeMigrated.run.surfaceExpedition.hazard = 0.0;
-    activeMigrated.run.surfaceExpedition.cargo = 0;
-    activeMigrated.run.surfaceExpedition.supply = 10;
-    Random activeExtractionRng(1);
-    require(
-        extractSurfacePayload(activeMigrated).cargoRecovered
-            && activeMigrated.meta.ioArtifactRecovered
-            && activeMigrated.meta.droneUpgradeCredits == 1
-            && activeMigrated.meta.ark.repairProgress == 0,
-        "safe extraction of a migrated active cocoon should award exactly one Io upgrade credit");
-
-    SaveData bankedLegacy = captureSaveData(createNewGame(catalog, 0x600602));
-    bankedLegacy.version = 6;
-    bankedLegacy.destinationIndex = jupiterIndex;
-    bankedLegacy.furthestTier = jupiter->tier;
-    bankedLegacy.screen = Screen::SurfaceExpedition;
-    bankedLegacy.surfaceExpedition.active = true;
-    bankedLegacy.surfaceExpedition.destinationId =
-        std::string(content::destination::jupiter);
-    bankedLegacy.surfaceExpedition.hazard = 0.0;
-    bankedLegacy.surfaceExpedition.supply = 10;
-    bankedLegacy.surfaceExpedition.rigFuelCapacity = 3.0;
-    bankedLegacy.surfaceExpedition.rigFuel = 3.0;
-    bankedLegacy.surfaceExpedition.bankedMiningArenaValid = true;
-    bankedLegacy.surfaceExpedition.bankedMiningArenaMetadata = {
-        MiningAct::ActOne,
-        8,
-        0x600602,
-        0,
-        MiningGateType::HazardCocoon,
-        true,
-    };
-    bankedLegacy.surfaceExpedition.temporaryArtifacts = {{
-        "legacy_banked_io_cocoon_artifact",
-        content::destination::jupiter,
-        false,
-        ArtifactKind::Story,
-        ArtifactRewardType::None,
-        1.0,
-        false,
-    }};
-    bankedLegacy.miningSites = {{
-        "legacy_banked_io_cocoon",
-        content::destination::jupiter,
-        MiningAct::ActOne,
-        8,
-        0x600602,
-        MiningGateType::HazardCocoon,
-        "legacy_banked_io_cocoon_artifact",
-        true,
-        false,
-    }};
-    bankedLegacy.ioArtifactRecovered = false;
-    bankedLegacy.droneUpgradeCredits = 0;
-
-    const std::optional<SaveData> parsedBankedLegacy =
-        deserializeSaveData(serializeSaveData(bankedLegacy));
-    require(parsedBankedLegacy.has_value(), "legacy banked-Io save should deserialize");
-    GameState bankedMigrated = createNewGame(catalog, 0x700602);
-    restoreSaveData(bankedMigrated, catalog, *parsedBankedLegacy);
-    require(
-        bankedMigrated.run.surfaceExpedition.temporaryArtifacts.size() == 1
-            && bankedMigrated.run.surfaceExpedition.temporaryArtifacts.front().kind
-                == ArtifactKind::Boost
-            && bankedMigrated.run.surfaceExpedition.temporaryArtifacts.front().rewardType
-                == ArtifactRewardType::DroneUpgradeCredit
-            && !bankedMigrated.meta.ioArtifactRecovered
-            && bankedMigrated.meta.droneUpgradeCredits == 0,
-        "a v6 cocoon banked before extraction should wait with the Io minor-artifact reward");
-    Random bankedExtractionRng(1);
-    require(
-        extractSurfacePayload(bankedMigrated).cargoRecovered
-            && bankedMigrated.meta.ioArtifactRecovered
-            && bankedMigrated.meta.droneUpgradeCredits == 1
-            && bankedMigrated.meta.ark.repairProgress == 0
-            && bankedMigrated.meta.miningSites.front().completed
-            && bankedMigrated.meta.miningSites.front().legacyMigrated,
-        "safe extraction of a banked v6 cocoon should complete Io and award exactly one credit");
-
-    const SaveData recoveredRoundTrip = captureSaveData(bankedMigrated);
-    GameState recoveredRestored = createNewGame(catalog, 0x700603);
-    restoreSaveData(recoveredRestored, catalog, recoveredRoundTrip);
-    require(
-        recoveredRestored.meta.ioArtifactRecovered
-            && recoveredRestored.meta.droneUpgradeCredits == 1,
-        "the migrated Io credit should remain exactly-once after a v7 roundtrip");
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state,
+        catalog,
+        content::scenario::volcanicDescent,
+        "commission",
+        ScenarioActionKind::BeginActivity);
+    require(outcome.applied,
+        "the manual Hazard Drone commissioning action should resolve in the UI-action XP regression");
+    require(state.run.surfaceExpedition.expeditionLevel == 1 &&
+            state.run.surfaceExpedition.expeditionExperience == 0.0 &&
+            state.run.surfaceExpedition.pendingRunUpgradeChoices == 0,
+        "briefings, manual actions, equipment assignment, and other UI actions must not grant expedition XP");
 }
 
-void versionNineScenarioAndCocoonStateRoundTrips()
+
+void scenarioAndCocoonStateRoundTrips()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0x9009);
@@ -4504,7 +4224,7 @@ void versionNineScenarioAndCocoonStateRoundTrips()
         },
     };
     MiningCell* activeTagged = miningCellAt(mining.terrain, 2, 2);
-    require(activeTagged != nullptr, "v9 active cocoon cell should exist");
+    require(activeTagged != nullptr, "active cocoon cell should exist");
     activeTagged->material = MiningCellMaterial::HazardPocket;
     activeTagged->hazard = true;
     activeTagged->gateAssociated = true;
@@ -4521,7 +4241,7 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     cached.gate.cocoonLayers[1].remaining = 3;
     cached.gate.cocoonLayers[1].revealed = true;
     MiningCell* cachedTagged = miningCellAt(cached.terrain, 3, 3);
-    require(cachedTagged != nullptr, "v9 cached cocoon cell should exist");
+    require(cachedTagged != nullptr, "cached cocoon cell should exist");
     cachedTagged->material = MiningCellMaterial::CommonOre;
     cachedTagged->gateAssociated = true;
     cachedTagged->cocoonLayer = 1;
@@ -4530,10 +4250,10 @@ void versionNineScenarioAndCocoonStateRoundTrips()
     state.screen = Screen::Mining;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 12, "new saves should use schema version twelve");
+    require(captured.version == save_schema::currentVersion, "new saves should use the current schema version");
     const std::optional<SaveData> parsed =
         deserializeSaveData(serializeSaveData(captured));
-    require(parsed.has_value(), "v10 scenario and cocoon state should deserialize");
+    require(parsed.has_value(), "current scenario and cocoon state should deserialize");
 
     GameState restored = createNewGame(catalog, 0x900A);
     restoreSaveData(restored, catalog, *parsed);
@@ -4572,7 +4292,7 @@ void versionNineScenarioAndCocoonStateRoundTrips()
             restored.meta.miningSites[1].siteId ==
                 "roundtrip_legacy_site" &&
             restored.meta.miningSites[1].legacyMigrated,
-        "generic and legacy-migrated mining-site progress should retain identity and provenance through v9");
+        "generic and compatibility-tagged mining-site progress should retain identity and provenance");
     require(
         restored.run.surfaceExpedition.pendingScenarioId ==
                 content::scenario::volcanicDescent &&
@@ -4630,62 +4350,6 @@ void versionNineScenarioAndCocoonStateRoundTrips()
             restoredCachedTagged->revealed,
         "cached-depth cocoon tags and visibility should round trip");
 
-    SaveData compatibility;
-    ScenarioInstance preDefinitionId;
-    preDefinitionId.id = "pre_definition_id";
-    preDefinitionId.definitionId = preDefinitionId.id;
-    compatibility.scenarios = {preDefinitionId};
-    compatibility.miningSites = {{
-        "pre_site_provenance",
-        content::destination::jupiter,
-        MiningAct::ActOne,
-        8,
-        0x900945,
-        MiningGateType::HazardCocoon,
-        "pre_site_payload",
-        true,
-        false,
-        false,
-    }};
-    std::string compatibilityText = serializeSaveData(compatibility);
-    const auto eraseLastField = [&](std::string_view key, char delimiter) {
-        const std::string prefix = std::string(key) + '=';
-        const std::size_t valueStart = compatibilityText.find(prefix);
-        require(
-            valueStart != std::string::npos,
-            "compatibility fixture should contain the requested save field");
-        const std::size_t lineEnd =
-            compatibilityText.find('\n', valueStart);
-        const std::size_t fieldStart =
-            compatibilityText.rfind(
-                delimiter,
-                lineEnd == std::string::npos
-                    ? compatibilityText.size()
-                    : lineEnd);
-        require(
-            fieldStart != std::string::npos && fieldStart > valueStart,
-            "compatibility fixture should contain an optional final field");
-        compatibilityText.erase(
-            fieldStart,
-            (lineEnd == std::string::npos
-                 ? compatibilityText.size()
-                 : lineEnd) -
-                fieldStart);
-    };
-    eraseLastField(save_schema::field::scenarios, '^');
-    eraseLastField(save_schema::field::miningStorySites, ':');
-    const std::optional<SaveData> parsedCompatibility =
-        deserializeSaveData(compatibilityText);
-    require(
-        parsedCompatibility.has_value() &&
-            parsedCompatibility->scenarios.size() == 1 &&
-            parsedCompatibility->scenarios[0].definitionId ==
-                parsedCompatibility->scenarios[0].id,
-        "a scenario record without the optional definition ID should default it to the runtime ID");
-    require(
-        parsedCompatibility->miningSites.size() == 1 &&
-            parsedCompatibility->miningSites[0].legacyMigrated,
-        "a mining-site record without provenance should default to legacy-migrated");
 }
 
 void proceduralScenarioTemplatesStayDormantUntilInstanced()
@@ -4747,14 +4411,12 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
         {
             "destination=procedural_fixture_destination",
             "step.delivery.required_progress=7",
-            "step.delivery.reward_count=3",
-            "step.delivery.reward.0.kind=drone_upgrade_credit",
-            "step.delivery.reward.0.amount=2",
-            "step.delivery.reward.1.kind=inventory_resources",
-            "step.delivery.reward.1.materials.common=3",
-            "step.delivery.reward.1.materials.rare=1",
-            "step.delivery.reward.2.kind=route_access",
-            "step.delivery.reward.2.id=procedural_route_destination"
+            "step.delivery.reward_count=2",
+            "step.delivery.reward.0.kind=inventory_resources",
+            "step.delivery.reward.0.materials.common=3",
+            "step.delivery.reward.0.materials.rare=1",
+            "step.delivery.reward.1.kind=route_access",
+            "step.delivery.reward.1.id=procedural_route_destination"
         });
     require(
         !instance.id.empty() && instance.definitionId == content::scenario::generatedTemplate &&
@@ -4774,14 +4436,12 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
     require(
             resolvedDelivery.destinationId == "procedural_fixture_destination" &&
             resolvedDeliveryStep != nullptr && resolvedDeliveryStep->requiredProgress == 7 &&
-            resolvedDeliveryStep->rewards.size() == 3 &&
-            resolvedDeliveryStep->rewards[0].kind == ScenarioRewardKind::DroneUpgradeCredit &&
-            resolvedDeliveryStep->rewards[0].amount == 2 &&
-            resolvedDeliveryStep->rewards[1].kind == ScenarioRewardKind::InventoryResources &&
-            resolvedDeliveryStep->rewards[1].materials.common == 3 &&
-            resolvedDeliveryStep->rewards[1].materials.rare == 1 &&
-            resolvedDeliveryStep->rewards[2].kind == ScenarioRewardKind::RouteAccess &&
-            resolvedDeliveryStep->rewards[2].id == "procedural_route_destination",
+            resolvedDeliveryStep->rewards.size() == 2 &&
+            resolvedDeliveryStep->rewards[0].kind == ScenarioRewardKind::InventoryResources &&
+            resolvedDeliveryStep->rewards[0].materials.common == 3 &&
+            resolvedDeliveryStep->rewards[0].materials.rare == 1 &&
+            resolvedDeliveryStep->rewards[1].kind == ScenarioRewardKind::RouteAccess &&
+            resolvedDeliveryStep->rewards[1].id == "procedural_route_destination",
         "a factory should persist and materialize typed procedural destination, material, and route reward parameters");
     const ScenarioObjectivePresentation presentation = scenarioObjectiveForDestination(
         state,
@@ -4832,7 +4492,7 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
             catalog,
             instanceId,
             "delivery",
-            ScenarioActionKind::ClaimReward).applied && state.meta.droneUpgradeCredits == 2 &&
+            ScenarioActionKind::ClaimReward).applied &&
             state.meta.materials.common == 3 && state.meta.materials.rare == 1 &&
             hasUnlock(state.meta, "procedural_route_key") &&
             scenarioRouteRequirementStatus(state, catalog, *routeDestination).satisfied,
@@ -4908,343 +4568,6 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
         "a scenario factory must reject a template that would auto-instantiate as a live contract");
 }
 
-void versionEightCampaignAndIoCocoonMigrateToVersionNine()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    SaveData legacy = captureSaveData(createNewGame(catalog, 0x8009));
-    legacy.version = 8;
-    legacy.scenarios.clear();
-    legacy.screen = Screen::Mining;
-    legacy.destinationIndex = 3;
-    legacy.furthestTier = 3;
-    legacy.unlockKeys = {
-        content::unlock::starter,
-        content::unlock::droneBay,
-        content::unlock::ioHazardDrone,
-    };
-    legacy.droneBaySlots = 2;
-    legacy.ownedDroneIds = {
-        content::drone::miningDrone,
-        content::drone::hazardDrone,
-    };
-    legacy.equippedDroneIds = legacy.ownedDroneIds;
-    legacy.prospectorCommonOreRecovered =
-        tuning::research::prospectorCommonOreGoal;
-    legacy.lunarMiningBriefingAcknowledged = true;
-    legacy.lunarProspectorClaimed = true;
-    legacy.marsCommonOreRecovered =
-        tuning::research::marsBayCommonOreGoal;
-    legacy.marsMiningBriefingAcknowledged = true;
-    legacy.marsBayExpansionClaimed = true;
-    legacy.ioVolcanicBriefingAcknowledged = true;
-    legacy.ioHazardDroneCommissioned = true;
-    legacy.ioArtifactRecovered = true;
-    legacy.droneUpgradeCredits = 1;
-    legacy.saturnSlingshotBriefingAcknowledged = true;
-    legacy.saturnSlingshotPerfect = true;
-    legacy.saturnRouteUnlocked = false;
-    legacy.saturnSlingshotFailed = true;
-    legacy.saturnSlingshotFailureAcknowledged = true;
-
-    const auto makeTerrain = [](int depthZone) {
-        MiningTerrain terrain;
-        terrain.width = 11;
-        terrain.height = 11;
-        terrain.depthZone = depthZone;
-        terrain.cells.assign(
-            static_cast<std::size_t>(terrain.width * terrain.height),
-            MiningCell {});
-        return terrain;
-    };
-    legacy.surfaceExpedition.active = true;
-    legacy.surfaceExpedition.destinationId =
-        content::destination::jupiter;
-    MiningRunState& mining = legacy.mining;
-    mining.active = true;
-    mining.destinationId = content::destination::jupiter;
-    mining.scenarioId.clear();
-    mining.scenarioStepId.clear();
-    mining.miningSiteDefinitionId.clear();
-    mining.depthZone = 1;
-    mining.entryDepthZone = 0;
-    mining.deepestDepthZone = 1;
-    mining.terrain = makeTerrain(1);
-    mining.gate.active = true;
-    mining.gate.type = MiningGateType::HazardCocoon;
-    mining.gate.compatibilityCritical = true;
-    mining.gate.anchorX = 5.0;
-    mining.gate.anchorY = 5.0;
-    mining.gate.shellTilesTotal = 8;
-    mining.gate.shellTilesRemaining = 5;
-    mining.gate.outerShellTilesTotal = 4;
-    mining.gate.outerShellTilesRemaining = 1;
-    mining.gate.innerShellTilesTotal = 4;
-    mining.gate.innerShellTilesRemaining = 4;
-    mining.gate.cocoonLayers.clear();
-    mining.gate.activeCocoonLayer = -1;
-
-    constexpr std::array<std::pair<int, int>, 4> outerOffsets {{
-        {0, -2},
-        {2, 0},
-        {0, 2},
-        {-2, 0},
-    }};
-    constexpr std::array<std::pair<int, int>, 4> innerOffsets {{
-        {-1, -1},
-        {1, -1},
-        {1, 1},
-        {-1, 1},
-    }};
-    for (std::size_t index = 0; index < outerOffsets.size(); ++index) {
-        const auto [dx, dy] = outerOffsets[index];
-        MiningCell* cell = miningCellAt(
-            mining.terrain,
-            5 + dx,
-            5 + dy);
-        require(cell != nullptr, "legacy active outer seal cell should exist");
-        cell->material = index == 0
-            ? MiningCellMaterial::CommonOre
-            : MiningCellMaterial::Empty;
-        cell->gateAssociated = index == 0;
-        cell->revealed = index == 0;
-        cell->cocoonLayer = -1;
-    }
-    for (const auto& [dx, dy] : innerOffsets) {
-        MiningCell* cell = miningCellAt(
-            mining.terrain,
-            5 + dx,
-            5 + dy);
-        require(cell != nullptr, "legacy active inner seal cell should exist");
-        cell->material = MiningCellMaterial::HazardPocket;
-        cell->hazard = true;
-        cell->gateAssociated = true;
-        cell->revealed = true;
-        cell->cocoonLayer = -1;
-    }
-    MiningCell* embeddedCell = miningCellAt(mining.terrain, 5, 5);
-    require(embeddedCell != nullptr, "legacy embedded payload cell should exist");
-    embeddedCell->material = MiningCellMaterial::ArtifactCache;
-    embeddedCell->gateAssociated = true;
-    embeddedCell->revealed = true;
-    mining.artifact.present = true;
-    mining.artifact.id = "legacy_embedded_payload";
-    mining.artifact.kind = ArtifactKind::Boost;
-    mining.artifact.rewardType =
-        ArtifactRewardType::DroneUpgradeCredit;
-    mining.artifact.state = MiningArtifactState::Embedded;
-    mining.artifact.x = 5.5;
-    mining.artifact.y = 5.5;
-    mining.artifact.revealed = true;
-
-    MiningDepthLayerState cached;
-    cached.depthZone = 0;
-    cached.terrain = makeTerrain(0);
-    cached.gate = mining.gate;
-    cached.gate.shellTilesRemaining = 2;
-    cached.gate.outerShellTilesRemaining = 0;
-    cached.gate.innerShellTilesRemaining = 2;
-    for (const auto& [dx, dy] : outerOffsets) {
-        MiningCell* cell = miningCellAt(cached.terrain, 5 + dx, 5 + dy);
-        require(cell != nullptr, "legacy cached outer seal cell should exist");
-        cell->material = MiningCellMaterial::Empty;
-        cell->revealed = true;
-    }
-    for (std::size_t index = 0; index < innerOffsets.size(); ++index) {
-        const auto [dx, dy] = innerOffsets[index];
-        MiningCell* cell = miningCellAt(cached.terrain, 5 + dx, 5 + dy);
-        require(cell != nullptr, "legacy cached inner seal cell should exist");
-        cell->material = index < 2
-            ? MiningCellMaterial::Empty
-            : MiningCellMaterial::HazardPocket;
-        cell->hazard = index >= 2;
-        cell->gateAssociated = index >= 2;
-        cell->revealed = false;
-    }
-    cached.artifact.present = true;
-    cached.artifact.id = "legacy_loose_payload";
-    cached.artifact.state = MiningArtifactState::Loose;
-    cached.artifact.x = 6.5;
-    cached.artifact.y = 5.5;
-    cached.artifact.tethered = true;
-    cached.artifact.revealed = false;
-    mining.depthLayers = {cached};
-
-    const std::optional<SaveData> parsedLegacy =
-        deserializeSaveData(serializeSaveData(legacy));
-    require(
-        parsedLegacy.has_value() && parsedLegacy->version == 8,
-        "the v8 campaign and active Io fixture should survive its legacy text-save boundary");
-    GameState migrated = createNewGame(catalog, 0x9010);
-    restoreSaveData(migrated, catalog, *parsedLegacy);
-    const auto hasReward = [](const ScenarioInstance* instance, std::string_view id) {
-        return instance != nullptr &&
-            std::find(
-                instance->awardedRewardIds.begin(),
-                instance->awardedRewardIds.end(),
-                id) != instance->awardedRewardIds.end();
-    };
-    const ScenarioInstance* lunar =
-        findScenarioInstance(
-            migrated.meta,
-            content::scenario::lunarProspector);
-    const ScenarioInstance* mars =
-        findScenarioInstance(
-            migrated.meta,
-            content::scenario::marsBayExpansion);
-    const ScenarioInstance* io =
-        findScenarioInstance(
-            migrated.meta,
-            content::scenario::volcanicDescent);
-    const ScenarioInstance* transfer =
-        findScenarioInstance(
-            migrated.meta,
-            content::scenario::outerTransfer);
-    require(
-        lunar != nullptr && lunar->completed &&
-            mars != nullptr && mars->completed &&
-            io != nullptr && io->completed &&
-            transfer != nullptr && !transfer->completed,
-        "v8 campaign flags should become authored scenario instances without auto-claiming a saved Perfect slingshot");
-    require(
-        hasReward(
-            lunar,
-            "lunar_prospector_contract/delivery/4") &&
-            hasReward(
-                mars,
-                "mars_bay_expansion/delivery/2") &&
-            hasReward(
-                io,
-                "volcanic_descent/commission/1") &&
-            hasReward(
-                io,
-                "volcanic_descent/recovery/1") &&
-            !hasReward(
-                transfer,
-                "outer_transfer/flyby/0"),
-        "v8 claimed rewards should receive canonical idempotency IDs while an unclaimed Perfect remains reward-free");
-    const ScenarioStepProgress* flyby =
-        transfer == nullptr
-        ? nullptr
-        : findScenarioStepProgress(*transfer, "flyby");
-    require(
-        flyby != nullptr &&
-            flyby->completed &&
-            !flyby->claimed &&
-            flyby->failureSeen &&
-            flyby->failureAcknowledged,
-        "v8 slingshot completion and first-failure acknowledgement should migrate independently from route claim");
-    require(
-        hasUnlock(migrated.meta, content::unlock::routeMars) &&
-            hasUnlock(migrated.meta, content::unlock::routeJupiter) &&
-            hasUnlock(migrated.meta, "outer_transfer_ready") &&
-            !hasUnlock(migrated.meta, content::unlock::routeSaturn) &&
-            migrated.meta.droneUpgradeCredits == 1,
-        "v8 route unlocks should be repaired without re-awarding the Io upgrade credit or auto-opening Saturn");
-
-    const MiningRunState& migratedMining = migrated.run.mining;
-    require(
-        migratedMining.scenarioId ==
-                content::scenario::volcanicDescent &&
-            migratedMining.scenarioStepId == "recovery" &&
-            migratedMining.miningSiteDefinitionId ==
-                content::miningSite::thermalLayeredRecovery &&
-            migratedMining.miningSiteBiome ==
-                MiningSiteBiome::ThermalLava &&
-            std::abs(
-                migratedMining.siteBaselineOxygenSeconds -
-                60.0) < 0.0001,
-        "a live v8 Io recovery should gain generic scenario and site context");
-    require(
-        migratedMining.gate.cocoonLayers.size() == 2 &&
-            migratedMining.gate.activeCocoonLayer == 0 &&
-            migratedMining.gate.cocoonLayers[0].remaining == 1 &&
-            migratedMining.gate.cocoonLayers[0].revealed &&
-            migratedMining.gate.cocoonLayers[1].remaining == 4 &&
-            !migratedMining.gate.cocoonLayers[1].revealed,
-        "a partial v8 outer seal should reveal atomically while keeping every inner segment hidden");
-    for (const auto& [dx, dy] : outerOffsets) {
-        const MiningCell* cell =
-            miningCellAt(migratedMining.terrain, 5 + dx, 5 + dy);
-        require(
-            cell != nullptr &&
-                cell->cocoonLayer == 0 &&
-                cell->revealed,
-            "all migrated outer cells should share tag zero and one atomic visibility state");
-    }
-    for (const auto& [dx, dy] : innerOffsets) {
-        const MiningCell* cell =
-            miningCellAt(migratedMining.terrain, 5 + dx, 5 + dy);
-        require(
-            cell != nullptr &&
-                cell->cocoonLayer == 1 &&
-                !cell->revealed,
-            "all migrated inner cells should share tag one and remain hidden behind the outer layer");
-    }
-    const MiningCell* migratedEmbeddedCell =
-        miningCellAt(migratedMining.terrain, 5, 5);
-    require(
-        migratedMining.artifact.state ==
-                MiningArtifactState::Embedded &&
-            !migratedMining.artifact.revealed &&
-            migratedEmbeddedCell != nullptr &&
-            migratedEmbeddedCell->material ==
-                MiningCellMaterial::ArtifactCache &&
-            !migratedEmbeddedCell->revealed,
-        "an embedded v8 payload should remain present but hidden until every cocoon layer clears");
-    require(
-        migratedMining.depthLayers.size() == 1 &&
-            migratedMining.depthLayers[0].gate.cocoonLayers.size() == 2 &&
-            migratedMining.depthLayers[0].gate.activeCocoonLayer == 1 &&
-            migratedMining.depthLayers[0].gate.cocoonLayers[0].completed &&
-            migratedMining.depthLayers[0].gate.cocoonLayers[1].remaining == 2 &&
-            migratedMining.depthLayers[0].gate.cocoonLayers[1].revealed &&
-            migratedMining.depthLayers[0].artifact.state ==
-                MiningArtifactState::Loose &&
-            migratedMining.depthLayers[0].artifact.tethered &&
-            migratedMining.depthLayers[0].artifact.revealed,
-        "cached v8 layers should expose the inner ring only after the outer clears and should never re-lock a loose tethered payload");
-
-    SaveData partial = captureSaveData(createNewGame(catalog, 0x8010));
-    partial.version = 8;
-    partial.scenarios.clear();
-    partial.destinationIndex = 1;
-    partial.furthestTier = 1;
-    partial.unlockKeys = {content::unlock::starter};
-    partial.prospectorCommonOreRecovered = 29;
-    partial.lunarMiningBriefingAcknowledged = true;
-    partial.marsCommonOreRecovered =
-        tuning::research::marsBayCommonOreGoal;
-    partial.marsMiningBriefingAcknowledged = true;
-    GameState partialMigrated = createNewGame(catalog, 0x9011);
-    restoreSaveData(partialMigrated, catalog, partial);
-    const ScenarioInstance* partialLunar =
-        findScenarioInstance(
-            partialMigrated.meta,
-            content::scenario::lunarProspector);
-    const ScenarioInstance* partialMars =
-        findScenarioInstance(
-            partialMigrated.meta,
-            content::scenario::marsBayExpansion);
-    const ScenarioStepProgress* partialLunarDelivery =
-        partialLunar == nullptr
-        ? nullptr
-        : findScenarioStepProgress(*partialLunar, "delivery");
-    const ScenarioStepProgress* partialMarsDelivery =
-        partialMars == nullptr
-        ? nullptr
-        : findScenarioStepProgress(*partialMars, "delivery");
-    require(
-        partialLunarDelivery != nullptr &&
-            partialLunarDelivery->progress == 29 &&
-            !partialLunarDelivery->completed &&
-            partialMarsDelivery != nullptr &&
-            partialMarsDelivery->progress ==
-                tuning::research::marsBayCommonOreGoal &&
-            partialMarsDelivery->completed &&
-            !partialMarsDelivery->claimed &&
-            partialMars->awardedRewardIds.empty(),
-        "unfinished v8 delivery counts should remain partial or READY TO CLAIM without silently applying rewards");
-}
 
 
 void surfaceSiteProfilesChangeExpeditionRules()
@@ -6706,13 +6029,9 @@ void hazardDroneTreatsAffinityLadderAndBatches()
         ensureDroneBayState(state, catalog);
         state.meta.droneBaySlots = 1;
         state.meta.equippedDroneIds = {content::drone::hazardDrone};
-        for (DroneUpgradeRecord& record : state.meta.droneUpgrades) {
-            if (record.droneId == content::drone::hazardDrone) {
-                record.level = level;
-            }
-        }
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
+        state.run.surfaceExpedition.runDroneRanks = {{content::drone::hazardDrone, level}};
         prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "hazard treatment test run should start");
         MiningRunState& mining = state.run.mining;
@@ -7210,32 +6529,6 @@ void miningHazardAffinitiesApplyOnlyOnDrillContact()
     require(nearbyOnly.run.mining.droneHealth < healthBeforeProximity, "nearby thermal hazards should visibly damage rig health while the Hazard Drone is still treating them");
 }
 
-void legacyStabilizerSavesMigrateToHazardDrone()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState source = createNewGame(catalog, 93200);
-    source.meta.unlockKeys.push_back(content::unlock::droneBay);
-    source.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
-    ensureDroneBayState(source, catalog);
-    SaveData save = captureSaveData(source);
-    save.version = 7;
-    save.droneBaySlots = 3;
-    save.ownedDroneIds = {content::drone::legacyStabilizerDrone};
-    save.equippedDroneIds = {content::drone::legacyStabilizerDrone, content::drone::legacyStabilizerDrone};
-    save.droneUpgrades = {{content::drone::legacyStabilizerDrone, 3}};
-
-    GameState restored = createNewGame(catalog, 93201);
-    restoreSaveData(restored, catalog, save);
-    require(std::find(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), content::drone::hazardDrone) != restored.meta.ownedDroneIds.end(),
-        "legacy Stabilizer ownership should migrate to the Hazard Drone");
-    require(std::count(restored.meta.equippedDroneIds.begin(), restored.meta.equippedDroneIds.end(), content::drone::hazardDrone) == 1,
-        "legacy duplicate Stabilizer loadout slots should migrate to one Hazard Support Drone frame");
-    require(miniDroneUpgradeLevel(restored, content::drone::hazardDrone) == 3,
-        "legacy Stabilizer upgrades should migrate to the Hazard Drone");
-    require(std::none_of(restored.meta.ownedDroneIds.begin(), restored.meta.ownedDroneIds.end(), [](const std::string& id) {
-        return id == content::drone::legacyStabilizerDrone;
-    }), "legacy Stabilizer ids should not remain in normalized ownership");
-}
 
 void miningAndSurveyDroneAgentsPerformWorldActions()
 {
@@ -7612,9 +6905,9 @@ void resourceDroneRunsTimedMaterialShuttles()
         ensureDroneBayState(state, catalog);
         state.meta.droneBaySlots = 1;
         state.meta.equippedDroneIds = {content::drone::resourceDrone};
-        state.meta.droneUpgrades = {{content::drone::resourceDrone, upgradeLevel}};
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
+        state.run.surfaceExpedition.runDroneRanks = {{content::drone::resourceDrone, upgradeLevel}};
         prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "resource shuttle mining run should start");
         clearMiningTerrainForEvaTest(state.run.mining);
@@ -7808,9 +7101,9 @@ void miningDroneRunsTimedCapacityShuttles()
     ensureDroneBayState(state, catalog);
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::miningDrone};
-    state.meta.droneUpgrades = {{content::drone::miningDrone, 1}};
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.runDroneRanks = {{content::drone::miningDrone, 1}};
     prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining shuttle run should start");
     state.run.mining.enemies.clear();
@@ -8506,8 +7799,8 @@ void miningUsesRigFuelReserve()
 
     GameState state = createNewGame(catalog, 92934);
     state.run.destinationIndex = 2;
-    state.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::emergencyWinch);
     startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::emergencyWinch, 1}};
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.rigFuel = 1.0;
     require(
@@ -8624,7 +7917,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
     GameState dampedState = state;
-    dampedState.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::shockMounts);
+    dampedState.run.surfaceExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
     updateMiningRun(state, catalog, 0.08);
     updateMiningRun(dampedState, catalog, 0.08);
 
@@ -8911,62 +8204,17 @@ void transferFuelPersistsAndBecomesRigFuel()
         "empty rig fuel must never block the protected return stage or surface extraction");
 }
 
-void versionTenSurfaceFuelMigratesToArrivalDerivedRigFuel()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    SaveData legacy = captureSaveData(createNewGame(catalog, 0xF116));
-    legacy.version = 10;
-    legacy.destinationIndex = 2;
-    legacy.launchUpgrades.fuelTanks = 2;
-    legacy.screen = Screen::SurfaceExpedition;
-    legacy.surfaceExpedition.active = true;
-    legacy.surfaceExpedition.destinationId = content::destination::mars;
-    legacy.surfaceExpedition.rigFuelCapacity = 30.0;
-    legacy.surfaceExpedition.rigFuel = 15.0;
-
-    GameState migrated = createNewGame(catalog, 1);
-    restoreSaveData(migrated, catalog, legacy);
-    require(nearlyEqual(migrated.run.surfaceExpedition.rigFuelCapacity, 8.0) &&
-            nearlyEqual(migrated.run.surfaceExpedition.rigFuel, 4.0) &&
-            nearlyEqual(migrated.run.surfaceExpedition.expeditionPackFuel, 3.0) &&
-            nearlyEqual(migrated.run.surfaceExpedition.transferFuelRecovered, 5.0),
-        "version-ten Surface Ops must derive an eight-unit nominal Mars pool and preserve the old consumed share");
-
-    GameState activeMining = createNewGame(catalog, 0xF117);
-    activeMining.run.destinationIndex = 2;
-    activeMining.meta.launchUpgrades.fuelTanks = 2;
-    startSurfaceExpedition(activeMining, catalog);
-    require(startMiningRun(activeMining, catalog).applied,
-        "legacy migration fixture must begin an active mining run");
-    SaveData legacyMining = captureSaveData(activeMining);
-    legacyMining.version = 10;
-    legacyMining.surfaceExpedition.rigFuelCapacity = 30.0;
-    legacyMining.surfaceExpedition.rigFuel = 12.0;
-
-    GameState migratedMining = createNewGame(catalog, 3);
-    restoreSaveData(migratedMining, catalog, legacyMining);
-    require(migratedMining.screen == Screen::Mining && migratedMining.run.mining.active &&
-            nearlyEqual(migratedMining.run.surfaceExpedition.rigFuelCapacity, 8.0) &&
-            nearlyEqual(migratedMining.run.surfaceExpedition.rigFuel, 3.2),
-        "version-ten mid-mining saves must stay active and preserve the old pool's remaining percentage");
-
-    legacy.screen = Screen::ArrivalOps;
-    legacy.surfaceExpedition = {};
-    legacy.arrivalOps = {true, content::destination::mars};
-    GameState migratedArrival = createNewGame(catalog, 2);
-    restoreSaveData(migratedArrival, catalog, legacy);
-    require(nearlyEqual(migratedArrival.run.arrivalOps.transferFuelRemaining, 5.0) &&
-            nearlyEqual(migratedArrival.run.arrivalOps.transferFuelCapacity, 20.0),
-        "version-ten Arrival Ops must receive the nominal calibrated transfer remainder and installed capacity");
-}
 
 void miningShipBankingLeaveAndEmergencyRecallRules()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 95959);
     state.run.destinationIndex = 2;
-    state.run.surfaceUpgradeIds = {content::surfaceUpgrade::cargoSkids, content::surfaceUpgrade::emergencyWinch};
     startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::cargoSkids, 1},
+        {content::surfaceUpgrade::emergencyWinch, 1}
+    };
     prepareMiningSiteForTest(state);
     require(
         startMiningRun(state, catalog, {MiningAct::ActOne, 2, 95959}, false).applied,
@@ -9024,7 +8272,9 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(state.run.surfaceExpedition.temporaryMaterials.common == 2, "emergency recall should preserve banked materials");
     require(state.run.surfaceExpedition.temporaryMaterials.rare == 0, "emergency recall should lose carried materials");
     require(state.run.surfaceExpedition.cargo == 2, "emergency recall should preserve only banked cargo");
-    require(state.run.surfaceUpgradeIds.empty(), "emergency recall should clear temporary field upgrades");
+    require(runRigUpgradeRank(state, content::surfaceUpgrade::cargoSkids) == 1 &&
+            runRigUpgradeRank(state, content::surfaceUpgrade::emergencyWinch) == 1,
+        "emergency recall should preserve temporary run upgrades");
     require(recalled.hazardDelta >= tuning::mining::emergencyRecallHazardPenalty - 0.000001, "emergency recall should add the steep hazard penalty");
 }
 
@@ -9054,7 +8304,7 @@ void miningSwarmNestPreviewAndPersistence()
         "Swarm preview must be repeatable for the same expedition seed");
 
     GameState lucky = state;
-    lucky.run.surfaceUpgradeIds = {content::surfaceUpgrade::widebandPulse};
+    lucky.run.surfaceExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 1}};
     const MiningSwarmPreview luckyPreview = miningSwarmPreview(lucky, catalog, resolveMiningArenaRules(request), 0);
     require(luckyPreview.available && luckyPreview.artifactChance >= preview.artifactChance,
         "current scanner luck modifiers should never reduce Swarm artifact chance");
@@ -9234,7 +8484,10 @@ void miningLoadBurdenAndUpgradeRelief()
     require(heavyLoad.speedMultiplier >= tuning::mining::minLoadedSpeedMultiplier, "load slowdown should keep the minimum speed floor");
 
     GameState upgraded = loaded;
-    upgraded.run.surfaceUpgradeIds = {content::surfaceUpgrade::expandablePanniers, content::surfaceUpgrade::vectorNozzles};
+    upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::expandablePanniers, 1},
+        {content::surfaceUpgrade::vectorNozzles, 1}
+    };
     upgraded.run.equippedModuleIds = {content::module::cargoSpine, content::module::haulerThrusters};
     MiningLoadStats upgradedLoad = miningLoadStats(upgraded, catalog);
     require(upgradedLoad.freeBuffer > heavyLoad.freeBuffer, "storage upgrades should increase the free carry buffer");
@@ -9302,18 +8555,18 @@ void miningEvaFixedDrillProfileIgnoresRigUpgrades()
         content::module::coolantSleeve,
         content::module::diamondBearings
     };
-    upgraded.run.surfaceUpgradeIds = {
-        content::surfaceUpgrade::thermalDrillJackets,
-        content::surfaceUpgrade::shockMounts,
-        content::surfaceUpgrade::oreScentArray,
-        content::surfaceUpgrade::oreHopper
+    upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
+        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::shockMounts, 1},
+        {content::surfaceUpgrade::oreScentArray, 1},
+        {content::surfaceUpgrade::oreHopper, 1}
     };
     upgraded.meta.unlockKeys.push_back(content::unlock::droneBay);
     upgraded.meta.unlockKeys.push_back(content::unlock::perimeterDrones);
     upgraded.meta.droneBaySlots = 1;
     upgraded.meta.ownedDroneIds = {content::drone::defenseDrone};
     upgraded.meta.equippedDroneIds = {content::drone::defenseDrone};
-    upgraded.meta.droneUpgrades = {
+    upgraded.run.surfaceExpedition.runDroneRanks = {
         {content::drone::defenseDrone, 3}
     };
 
@@ -9554,87 +8807,6 @@ void activeMiningRoundTripsThroughSave()
     require(restored.run.mining.enemies.front().type == MiningEnemyType::Elemental, "active mining enemy type should round trip");
     require(restored.run.mining.enemies.front().sourceFeature == MiningCellFeature::EncounterZone, "active mining enemy source feature should round trip");
 
-    std::string legacySerialized = serialized;
-    const std::size_t legacyCycleStart = legacySerialized.find("miningFuelCycle=");
-    const std::size_t legacyCycleEnd = legacySerialized.find('\n', legacyCycleStart);
-    require(legacyCycleStart != std::string::npos && legacyCycleEnd != std::string::npos, "fuel cycle save line should be replaceable for migration coverage");
-    legacySerialized.replace(legacyCycleStart, legacyCycleEnd - legacyCycleStart, "miningFuelBurn=4.5");
-    const std::string currentVersionField =
-        std::string(save_schema::field::version) +
-        save_schema::keyValueDelimiter + std::to_string(SaveData {}.version);
-    const std::size_t versionFieldStart = legacySerialized.find(currentVersionField);
-    require(versionFieldStart != std::string::npos, "current save field should be replaceable for migration coverage");
-    legacySerialized.replace(
-        versionFieldStart,
-        currentVersionField.size(),
-        std::string(save_schema::field::version) +
-            save_schema::keyValueDelimiter + "5");
-
-    const std::string cellFieldPrefix =
-        std::string(save_schema::field::miningTerrainCells) +
-        save_schema::keyValueDelimiter;
-    const std::size_t cellFieldStart = legacySerialized.find(cellFieldPrefix);
-    const std::size_t cellPayloadStart =
-        cellFieldStart == std::string::npos
-        ? std::string::npos
-        : cellFieldStart + cellFieldPrefix.size();
-    const std::size_t cellFieldEnd =
-        cellPayloadStart == std::string::npos
-        ? std::string::npos
-        : legacySerialized.find('\n', cellPayloadStart);
-    require(
-        cellPayloadStart != std::string::npos &&
-            cellFieldEnd != std::string::npos,
-        "mining terrain cell records should be replaceable for migration coverage");
-    const std::string currentCellPayload =
-        legacySerialized.substr(cellPayloadStart, cellFieldEnd - cellPayloadStart);
-    std::string legacyCellPayload;
-    std::size_t recordStart = 0;
-    while (recordStart <= currentCellPayload.size()) {
-        const std::size_t recordEnd =
-            currentCellPayload.find(save_schema::listDelimiter, recordStart);
-        std::string record = currentCellPayload.substr(
-            recordStart,
-            recordEnd == std::string::npos
-                ? std::string::npos
-                : recordEnd - recordStart);
-        const std::size_t cocoonLayerField = record.rfind(save_schema::crewFieldDelimiter);
-        require(
-            cocoonLayerField != std::string::npos,
-            "current mining cell records should contain an appended cocoon-layer field");
-        const std::size_t suitOnlyField = record.rfind(
-            save_schema::crewFieldDelimiter,
-            cocoonLayerField == 0 ? 0 : cocoonLayerField - 1);
-        require(
-            suitOnlyField != std::string::npos,
-            "current mining cell records should contain an appended suit-only field");
-        // A v5 record predates both fields. Strip the pair so this fixture
-        // exercises the default values rather than treating cocoonLayer as
-        // suitOnlyPassage.
-        record.erase(suitOnlyField);
-        if (!legacyCellPayload.empty()) {
-            legacyCellPayload.push_back(save_schema::listDelimiter);
-        }
-        legacyCellPayload += record;
-        if (recordEnd == std::string::npos) {
-            break;
-        }
-        recordStart = recordEnd + 1;
-    }
-    legacySerialized.replace(
-        cellPayloadStart,
-        cellFieldEnd - cellPayloadStart,
-        legacyCellPayload);
-    const auto legacySave = deserializeSaveData(legacySerialized);
-    require(legacySave.has_value(), "legacy seconds-based mining fuel saves should still parse");
-    require(legacySave->version == 5, "legacy mining-cell migration fixture should parse as save version five");
-    require(
-        std::abs(legacySave->mining.fuelCycleProgress - 0.30) < 0.000001,
-        "legacy mining fuel seconds should migrate to normalized cycle progress");
-    const MiningCell* legacyCell = miningCellAt(legacySave->mining.terrain, 20, 10);
-    require(
-        legacyCell != nullptr && !legacyCell->suitOnlyPassage,
-        "legacy mining cell records without suit-only or cocoon-layer fields should default to a normal passage");
     require(restored.run.mining.enemies.front().affinity == MiningElementalAffinity::Radiation, "active mining enemy affinity should round trip");
     require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
@@ -9649,7 +8821,7 @@ void activeMiningRoundTripsThroughSave()
         "mining hazard affinity should round trip with active terrain");
 }
 
-void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
+void miningEvaAndSwarmStateRoundTrips()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0xE6A);
@@ -9749,7 +8921,7 @@ void miningEvaAndSwarmStateRoundTripsThroughVersionSixSave()
     mining.deepestDepthZone = cachedLayer.depthZone;
 
     const SaveData captured = captureSaveData(state);
-    require(captured.version == 12, "new saves should use version twelve");
+    require(captured.version == save_schema::currentVersion, "new saves should use the current schema version");
     const std::string serialized = serializeSaveData(captured);
     require(serialized.find("miningRigState=") != std::string::npos, "version-six saves should write rig state");
     require(serialized.find("miningOperatorState=") != std::string::npos, "version-six saves should write operator state");
@@ -9844,78 +9016,6 @@ void operatorRigTetherRoundTripsThroughSave()
         "an active EVA player-to-rig tether should round trip without restoring the ship winch");
 }
 
-void versionFiveMiningSavesMigrateToSeatedRigAndDeterministicSwarm()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 0xE5A);
-    state.run.destinationIndex = 2;
-    startSurfaceExpedition(state, catalog);
-    prepareMiningSiteForTest(state);
-    require(startMiningRun(state, catalog).applied, "legacy EVA migration test should start mining");
-
-    SaveData legacy = captureSaveData(state);
-    legacy.version = 5;
-    MiningRunState& mining = legacy.mining;
-    mining.rigVelocityX = 9.0;
-    mining.rigVelocityY = -7.0;
-    mining.rigDisabled = true;
-    mining.rigDepthZone = mining.depthZone + 3;
-    mining.operatorMode = MiningOperatorMode::Jetpack;
-    mining.operatorPresent = true;
-    mining.operatorX = 2.0;
-    mining.operatorY = 3.0;
-    mining.operatorVelocityX = 4.0;
-    mining.operatorVelocityY = 5.0;
-    mining.operatorIntegrity = 0.1;
-    mining.gravityDirectionX = 1.0;
-    mining.gravityDirectionY = 0.0;
-    mining.gravityStrength = 99.0;
-    mining.looseChunks.push_back({});
-    mining.miniDrones.clear();
-    for (const MiniDroneRole role : {MiniDroneRole::Mining, MiniDroneRole::Mining, MiniDroneRole::Survey}) {
-        MiningMiniDroneAgent agent;
-        agent.role = role;
-        agent.anchorTarget = MiningAnchorTarget::Operator;
-        agent.stableFormationSlot = 99;
-        agent.orbitPhaseRadians = 5.5;
-        mining.miniDrones.push_back(agent);
-    }
-
-    GameState restored = createNewGame(catalog, 0xE5B);
-    restoreSaveData(restored, catalog, legacy);
-    const MiningRunState& result = restored.run.mining;
-    require(result.operatorMode == MiningOperatorMode::Rig && !result.operatorPresent,
-        "version-five mining saves should restore with the operator seated in the rig");
-    require(!result.rigDisabled && result.rigDepthZone == result.depthZone &&
-            std::abs(result.rigVelocityX) < 0.000001 && std::abs(result.rigVelocityY) < 0.000001,
-        "legacy saves should initialize a functioning stationary rig on the active layer");
-    require(std::abs(result.operatorX - result.droneX) < 0.000001 &&
-            std::abs(result.operatorY - result.droneY) < 0.000001 &&
-            std::abs(result.operatorIntegrity - 1.0) < 0.000001,
-        "legacy saves should initialize the seated operator at full integrity");
-    const Destination* destination = catalog.findDestination(result.destinationId);
-    require(destination != nullptr, "legacy mining destination should resolve for gravity migration");
-    require(std::abs(result.gravityDirectionX - destination->gravityDirectionX) < 0.000001 &&
-            std::abs(result.gravityDirectionY - destination->gravityDirectionY) < 0.000001 &&
-            std::abs(result.gravityStrength -
-                tuning::mining::baseGravityCellsPerSecondSquared * destination->gravityScale) < 0.000001,
-        "legacy saves should derive destination gravity");
-    require(result.looseChunks.empty(), "version-five saves should not inherit impossible loose-chunk data");
-    require(result.miniDrones.size() == 3, "legacy swarm agents should remain present");
-    require(std::all_of(result.miniDrones.begin(), result.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
-        return agent.anchorTarget == MiningAnchorTarget::ControlledActor;
-    }), "legacy mini drones should migrate to the controlled-actor anchor");
-    require(result.miniDrones[0].stableFormationSlot == 0 &&
-            result.miniDrones[1].stableFormationSlot == 1 &&
-            result.miniDrones[2].stableFormationSlot == 0,
-        "legacy formation slots should derive from equipped order within each role");
-    constexpr double tau = 6.28318530717958647692;
-    require(std::abs(result.miniDrones[0].orbitPhaseRadians) < 0.000001 &&
-            std::abs(result.miniDrones[1].orbitPhaseRadians) < 0.000001 &&
-            std::abs(result.miniDrones[2].orbitPhaseRadians -
-                tau * static_cast<double>(MiniDroneRole::Survey) / 6.0) < 0.000001,
-        "legacy orbit phases should derive deterministically from drone role");
-}
 
 void miningDepthLayersAreBidirectionalAndPersistent()
 {
@@ -10033,15 +9133,6 @@ void miningDepthLayersAreBidirectionalAndPersistent()
             hasReturnShaft(restored.run.mining.depthLayers.front().terrain),
         "active mining saves should preserve shafts only on the prior layers that earned them");
 
-    SaveData legacy = *parsed;
-    legacy.version = 4;
-    GameState migrated = createNewGame(catalog, 2);
-    restoreSaveData(migrated, catalog, legacy);
-    require(migrated.run.mining.entryDepthZone == 0 &&
-            migrated.run.mining.depthZone == entryDepth + 1,
-        "legacy active mining saves should preserve the layer while moving the ship to surface");
-    require(migrated.run.mining.depthLayers.empty(),
-        "legacy one-way mining saves should not restore depth snapshots they could never have authored");
 }
 
 void miningDeploysDeepAndGeneratesTheRouteBackToSurface()
@@ -11075,32 +10166,18 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
         "a campaign with recorded launch history should migrate past the first-flight introduction");
 }
 
-void versionTwoStoredModulesMigrateToInstalledSystems()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState legacyState = createNewGame(catalog, 56);
-    SaveData legacy = captureSaveData(legacyState);
-    legacy.version = 2;
-    legacy.ownedModuleIds.push_back(content::module::cryoLoop);
-    legacy.inventoryModuleIds.push_back(content::module::cryoLoop);
-    legacy.equippedModuleIds.erase(std::remove(legacy.equippedModuleIds.begin(), legacy.equippedModuleIds.end(), content::module::cryoLoop), legacy.equippedModuleIds.end());
-    legacy.defaultEquippedModuleIds.erase(std::remove(legacy.defaultEquippedModuleIds.begin(), legacy.defaultEquippedModuleIds.end(), content::module::cryoLoop), legacy.defaultEquippedModuleIds.end());
-
-    GameState restored = createNewGame(catalog, 57);
-    restoreSaveData(restored, catalog, legacy);
-    require(std::find(restored.run.equippedModuleIds.begin(), restored.run.equippedModuleIds.end(), content::module::cryoLoop) != restored.run.equippedModuleIds.end(), "version-two stored modules should migrate to installed systems");
-    require(std::find(restored.meta.defaultEquippedModuleIds.begin(), restored.meta.defaultEquippedModuleIds.end(), content::module::cryoLoop) != restored.meta.defaultEquippedModuleIds.end(), "migrated installed systems should survive replacement ships");
-}
 
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
+    require(save_schema::currentVersion == 13, "the current save schema should be version thirteen");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
     state.meta.memorials = {"Ada burned late", "Ben returned home"};
 
-    const std::string text = serializeSaveData(captureSaveData(state));
+    const SaveData captured = captureSaveData(state);
+    const std::string text = serializeSaveData(captured);
     require(text.find(std::string(save_schema::header) + "\n") == 0, "save should start with shared schema header");
     require(text.find(std::string(save_schema::field::credits) + save_schema::keyValueDelimiter) != std::string::npos, "credits key should use shared schema name");
     require(text.find(std::string(save_schema::field::inventory) + save_schema::keyValueDelimiter) != std::string::npos, "inventory key should use shared schema name");
@@ -11114,8 +10191,17 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceLog) + save_schema::keyValueDelimiter) != std::string::npos, "surface log key should use shared schema name");
-    require(text.find(std::string(save_schema::field::surfaceUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrades key should use shared schema name");
-    require(text.find(std::string(save_schema::field::surfaceUpgradeOffers) + save_schema::keyValueDelimiter) != std::string::npos, "surface upgrade offers key should use shared schema name");
+    require(text.find(std::string(save_schema::field::expeditionLevel) + save_schema::keyValueDelimiter) != std::string::npos, "expedition level should use a shared schema name");
+    require(text.find(std::string(save_schema::field::expeditionExperience) + save_schema::keyValueDelimiter) != std::string::npos, "expedition experience should use a shared schema name");
+    require(text.find(std::string(save_schema::field::pendingRunUpgradeChoices) + save_schema::keyValueDelimiter) != std::string::npos, "pending run choices should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runUpgradeOffers) + save_schema::keyValueDelimiter) != std::string::npos, "run upgrade offers should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runUpgradeOfferCount) + save_schema::keyValueDelimiter) != std::string::npos, "run offer count should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runUpgradeOfferPending) + save_schema::keyValueDelimiter) != std::string::npos, "run offer pending state should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runUpgradeReturnScreen) + save_schema::keyValueDelimiter) != std::string::npos, "run offer return screen should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runRigUpgradeRanks) + save_schema::keyValueDelimiter) != std::string::npos, "run rig ranks should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runDroneRanks) + save_schema::keyValueDelimiter) != std::string::npos, "run drone ranks should use a shared schema name");
+    require(text.find(std::string(save_schema::field::selectedSynergyIds) + save_schema::keyValueDelimiter) != std::string::npos, "selected synergies should use a shared schema name");
+    require(text.find(std::string(save_schema::field::droneModuleAssignments) + save_schema::keyValueDelimiter) != std::string::npos, "temporary drone grafts should use a shared schema name");
     require(text.find(std::string(save_schema::field::miningRigState) + save_schema::keyValueDelimiter) != std::string::npos, "mining rig state key should use shared schema name");
     require(text.find(std::string(save_schema::field::miningOperatorState) + save_schema::keyValueDelimiter) != std::string::npos, "mining operator state key should use shared schema name");
     require(text.find(std::string(save_schema::field::miningGravity) + save_schema::keyValueDelimiter) != std::string::npos, "mining gravity key should use shared schema name");
@@ -11123,20 +10209,71 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::droneBaySlots) + save_schema::keyValueDelimiter) != std::string::npos, "drone bay slots key should use shared schema name");
     require(text.find(std::string(save_schema::field::ownedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "owned drones key should use shared schema name");
     require(text.find(std::string(save_schema::field::equippedDrones) + save_schema::keyValueDelimiter) != std::string::npos, "equipped drones key should use shared schema name");
-    require(text.find(std::string(save_schema::field::droneUpgrades) + save_schema::keyValueDelimiter) != std::string::npos, "drone tuning key should use shared schema name");
     require(text.find(std::string(save_schema::field::prospectorCommonOreRecovered) + save_schema::keyValueDelimiter) != std::string::npos, "Prospector contract progress should use a shared schema name");
     require(text.find(std::string(save_schema::field::marsCommonOreRecovered) + save_schema::keyValueDelimiter) != std::string::npos, "Mars contract progress should use a shared schema name");
     require(text.find(std::string(save_schema::field::ioArtifactRecovered) + save_schema::keyValueDelimiter) != std::string::npos, "Io artifact state should use a shared schema name");
-    require(text.find(std::string(save_schema::field::droneUpgradeCredits) + save_schema::keyValueDelimiter) != std::string::npos, "artifact upgrade credits should use a shared schema name");
     require(text.find(std::string(save_schema::field::saturnRouteUnlocked) + save_schema::keyValueDelimiter) != std::string::npos, "Saturn route state should use a shared schema name");
+    require(text.find("surfaceUpgrades=") == std::string::npos &&
+            text.find("surfaceUpgradeOffers=") == std::string::npos &&
+            text.find("surfaceUpgradeOfferAvailable=") == std::string::npos &&
+            text.find("surfaceUpgradeOffersSeen=") == std::string::npos &&
+            text.find("surfaceModuleOffers=") == std::string::npos &&
+            text.find("pendingDroneModuleId=") == std::string::npos &&
+            text.find("pendingDroneModuleOfferIndex=") == std::string::npos &&
+            text.find("pendingDroneModuleFrame=") == std::string::npos &&
+            text.find("pendingDroneModuleReplacementConfirmation=") == std::string::npos,
+        "version-thirteen saves must not persist the retired surface draft subflows");
+    require(text.find("fieldInsight=") == std::string::npos &&
+            text.find("fieldInsightAwardKeys=") == std::string::npos &&
+            text.find("miningDraftsEarned=") == std::string::npos &&
+            text.find("pendingFieldDraftThreshold=") == std::string::npos &&
+            text.find("fieldDraftReturnScreen=") == std::string::npos,
+        "version-thirteen saves must not persist retired Field Insight progression");
+    require(text.find("droneUpgrades=") == std::string::npos &&
+            text.find("droneUpgradeCredits=") == std::string::npos,
+        "version-thirteen saves must not persist retired permanent drone progression");
+    require(text.find("miningFuelBurn=") == std::string::npos,
+        "version-thirteen saves must not persist the retired seconds-based fuel field");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
+        std::string(save_schema::field::version) + save_schema::keyValueDelimiter +
+            std::to_string(save_schema::currentVersion) + "\n" +
         std::string(save_schema::field::credits) + save_schema::keyValueDelimiter + "321\n";
     const auto parsed = deserializeSaveData(minimalSave);
     require(parsed.has_value(), "minimal save with shared header should parse");
     require(std::abs(parsed->credits - 321.0) < 0.001, "shared credits key should parse");
     require(!deserializeSaveData("RR_SAVE_V0\ncredits=1\n").has_value(), "unknown save header should not parse");
+    require(!deserializeSaveData(std::string(save_schema::header) + "\ncredits=1\n").has_value(),
+        "save payloads without an explicit schema version must not parse");
+    const std::string duplicateVersionSave = std::string(save_schema::header) +
+        "\nversion=" + std::to_string(save_schema::currentVersion) +
+        "\nversion=" + std::to_string(save_schema::currentVersion) + "\ncredits=1\n";
+    require(!deserializeSaveData(duplicateVersionSave).has_value(),
+        "save payloads with duplicate version declarations must not parse");
+    require(!deserializeSaveData(
+                std::string(save_schema::header) + "\nversion=invalid\ncredits=1\n")
+                .has_value(),
+        "save payloads with malformed version declarations must not parse");
+    require(!deserializeSaveData(
+                std::string(save_schema::header) + "\nversion=13trailing-data\ncredits=1\n")
+                .has_value(),
+        "save payloads must declare the exact current version value");
+
+    SaveData incompatible = captureSaveData(state);
+    incompatible.version = save_schema::currentVersion - 1;
+    require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
+        "version-twelve saves must be rejected instead of partially migrated");
+    incompatible.version = save_schema::currentVersion + 1;
+    require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
+        "future save versions must also be rejected instead of partially restored");
+
+    GameState unchanged = createNewGame(catalog, 13);
+    unchanged.run.credits = 77.0;
+    incompatible.version = save_schema::currentVersion - 1;
+    restoreSaveData(unchanged, catalog, incompatible);
+    require(std::abs(unchanged.run.credits - 77.0) < 0.001,
+        "restore must reject an incompatible schema before mutating game state");
 }
 
 void legacyRecordsTrackAchievementStats()
@@ -11256,8 +10393,10 @@ void arkDiscoveryAndScriptedJumpProgression()
         "Arkfall should grant an Attack drone");
     require(std::find(state.meta.ownedDroneIds.begin(), state.meta.ownedDroneIds.end(), content::drone::defenseDrone) != state.meta.ownedDroneIds.end(),
         "Arkfall should grant a Defense drone");
-    require(miniDroneUpgradeLevel(state, content::drone::attackDrone) == 1 && miniDroneUpgradeLevel(state, content::drone::defenseDrone) == 1,
-        "Arkfall combat drones should enter service at Mk I");
+    require(expeditionDroneRank(state, content::drone::attackDrone) == 1 &&
+            expeditionDroneRank(state, content::drone::defenseDrone) == 1 &&
+            state.run.surfaceExpedition.runDroneRanks.empty(),
+        "Arkfall combat drones should enter service at baseline Mk I without free run upgrades");
     require(state.screen == Screen::Navigation, "gravity-well disaster should land the player on Navigation");
 
     GameState upgraded = createNewGame(catalog, 62002);
@@ -11266,11 +10405,10 @@ void arkDiscoveryAndScriptedJumpProgression()
     upgraded.meta.campaignMilestone = CampaignMilestone::FirstArkJumpComplete;
     upgraded.meta.droneBaySlots = 5;
     upgraded.meta.ownedDroneIds = {content::drone::attackDrone};
-    upgraded.meta.droneUpgrades = {{content::drone::attackDrone, 3}};
     require(performArkJump(upgraded, catalog), "pre-upgraded Ark should still resolve the scripted disaster");
     require(upgraded.meta.droneBaySlots == 5, "Arkfall should never shrink an already expanded Drone Bay");
-    require(miniDroneUpgradeLevel(upgraded, content::drone::attackDrone) == 3, "Arkfall should never downgrade an existing combat drone");
-    require(miniDroneUpgradeLevel(upgraded, content::drone::defenseDrone) == 1, "Arkfall should add only the missing Defense drone at Mk I");
+    require(upgraded.run.surfaceExpedition.runDroneRanks.empty(),
+        "Arkfall should grant ownership without silently granting temporary Drone ranks");
 }
 
 void numberedChaptersAdvanceMonotonically()
@@ -11423,15 +10561,6 @@ void arkCampaignStateRoundTripsThroughSave()
     require(restored.meta.navigation.currentSystemId == "hostile_system", "navigation system id should round trip");
     require(restored.meta.navigation.selectedDestinationId == content::destination::nearbyGalaxy, "selected navigation target should round trip");
 
-    SaveData legacy = captureSaveData(createNewGame(catalog, 62006));
-    legacy.destinationIndex = 3;
-    legacy.furthestTier = 3;
-    legacy.campaignMilestone = CampaignMilestone::ArkDiscovered;
-    legacy.chapter = GameChapter::ProvingGround;
-    legacy.ark.condition = ArkCondition::DerelictOperable;
-    GameState migrated = createNewGame(catalog, 1);
-    restoreSaveData(migrated, catalog, legacy);
-    require(migrated.meta.chapter == GameChapter::Breakthrough, "old saves should derive the highest eligible chapter when no saved chapter existed");
 }
 
 void uiActionsUseStableSchemaIds()
@@ -11450,7 +10579,6 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::surfaceUpgrade(2) == "surface_upgrade:2", "indexed surface upgrade actions should share one action family");
     require(ui::actions::droneOps == "drone_ops", "Drone Ops action should use a stable schema id");
     require(ui::actions::equipDrone(2) == "equip_drone:2", "indexed drone equipment actions should share one action family");
-    require(ui::actions::upgradeDrone(2) == "upgrade_drone:2", "indexed drone tuning actions should share one action family");
     require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
     require(ui::actions::recruitCandidate(2) == "recruit_candidate:2", "indexed recruit actions should share one action family");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
@@ -11983,72 +11111,68 @@ void marsMiningPressureFitsOxygenWindow()
         "continuous Mars drilling should enter integrity wear and thermal lock before the 30-second oxygen cycle expires");
 }
 
-void legacyOuterPlanetSavesMigrateByStableId()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    SaveData unfinished = captureSaveData(createNewGame(catalog, 0x5555));
-    unfinished.version = 1;
-    unfinished.destinationIndex = 3;
-    unfinished.furthestTier = 3;
-    unfinished.destinationHistoryIds.clear();
-    unfinished.destinationAttempts = {2, 2, 2, 1, 0, 0};
-    unfinished.destinationSuccesses = {1, 1, 1, 0, 0, 0};
-
-    GameState migrated = createNewGame(catalog, 1);
-    restoreSaveData(migrated, catalog, unfinished);
-    require(currentDestination(migrated, catalog).id == content::destination::jupiter && !arkDiscovered(migrated),
-        "unfinished legacy outer_planets progress should become Jupiter without discovering the Ark");
-    require(destinationHistoryValue(migrated.meta.destinationAttempts, catalog, content::destination::jupiter) == 1,
-        "legacy grouped-outer history should map to Jupiter by stable id");
-
-    SaveData arkSave = unfinished;
-    arkSave.campaignMilestone = CampaignMilestone::ArkDiscovered;
-    arkSave.ark.condition = ArkCondition::DerelictOperable;
-    GameState arkMigrated = createNewGame(catalog, 1);
-    restoreSaveData(arkMigrated, catalog, arkSave);
-    for (const std::string_view id : {std::string_view(content::destination::jupiter), std::string_view(content::destination::saturn), std::string_view(content::destination::uranus), std::string_view(content::destination::neptune)}) {
-        require(destinationHistoryValue(arkMigrated.meta.destinationSuccesses, catalog, id) >= 1,
-            "Ark-discovered legacy saves should complete every required outer planet");
-    }
-    require(arkMigrated.meta.straylightDiscoveryAcknowledged,
-        "Ark-discovered legacy saves should acknowledge the one-time Straylight reveal");
-
-    SaveData postArk = arkSave;
-    postArk.destinationIndex = 5;
-    postArk.campaignMilestone = CampaignMilestone::HostileSystemStranded;
-    postArk.ark.condition = ArkCondition::DamagedStranded;
-    postArk.ark.gravityWellDisaster = true;
-    postArk.destinationSuccesses = {1, 1, 1, 1, 3, 2};
-    GameState postArkMigrated = createNewGame(catalog, 1);
-    restoreSaveData(postArkMigrated, catalog, postArk);
-    require(currentDestination(postArkMigrated, catalog).id == content::destination::nearbyGalaxy,
-        "post-Ark legacy destination index should map to Rift Belt by id");
-    require(destinationHistoryValue(postArkMigrated.meta.destinationSuccesses, catalog, content::destination::nearbyStar) == 3
-            && destinationHistoryValue(postArkMigrated.meta.destinationSuccesses, catalog, content::destination::nearbyGalaxy) == 2,
-        "Khepri Prime and Rift Belt history should survive their tier shift by stable id");
-}
 
 void secondaryMiningStateRoundTrips()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 1);
     auto& expedition = state.run.surfaceExpedition;
-    expedition.fieldInsight = 7;
-    expedition.fieldInsightAwardKeys = {"layer:1", "cargo:3"};
+    expedition.active = true;
+    state.screen = Screen::SurfaceUpgrade;
+    expedition.expeditionLevel = 4;
+    expedition.expeditionExperience = 37.5;
+    expedition.pendingRunUpgradeChoices = 2;
+    expedition.runUpgradeOffers = {{
+        {RunUpgradeKind::Rig, content::surfaceUpgrade::thermalDrillJackets, 2, -1},
+        {RunUpgradeKind::DroneRank, content::drone::surveyDrone, 3, -1},
+        {RunUpgradeKind::DroneGraft, "pulse_strike", 0, 1}}};
+    expedition.runUpgradeOfferCount = 3;
+    expedition.runUpgradeOfferPending = true;
+    expedition.runUpgradeReturnScreen = Screen::Mining;
+    expedition.runRigUpgradeRanks = {{content::surfaceUpgrade::thermalDrillJackets, 2}};
+    expedition.runDroneRanks = {{content::drone::surveyDrone, 3}};
+    expedition.selectedSynergyIds = {"relic_pathfinder", "full_spectrum_swarm"};
     expedition.scannerCooldownSeconds = 2.5;
     expedition.treasureMarks.push_back({4, 5, 2});
     expedition.droneModuleAssignments.push_back({1, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
     expedition.droneModuleRuntime.push_back({1, 0.4, 1.2, {}});
+    MiningMiniDroneAgent agent;
+    agent.haulMaterials = {4, 2, 1};
+    agent.uncreditedHaulMaterials = {3, 1, 1};
+    state.run.mining.miniDrones.push_back(agent);
     const auto parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
     require(parsed.has_value(), "secondary mining state should serialize");
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *parsed);
-    require(restored.run.surfaceExpedition.fieldInsight == 7 && restored.run.surfaceExpedition.fieldInsightAwardKeys.size() == 2,
-        "field insight progress and anti-farm keys should round trip");
+    const auto& restoredExpedition = restored.run.surfaceExpedition;
+    require(restoredExpedition.expeditionLevel == 4 && std::abs(restoredExpedition.expeditionExperience - 37.5) < 0.001 &&
+            restoredExpedition.pendingRunUpgradeChoices == 2,
+        "expedition level, experience, and queued run choices should round trip");
+    require(restoredExpedition.runUpgradeOfferPending && restoredExpedition.runUpgradeOfferCount == 3 &&
+            restoredExpedition.runUpgradeOffers[0].kind == RunUpgradeKind::Rig &&
+            restoredExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets &&
+            restoredExpedition.runUpgradeOffers[1].kind == RunUpgradeKind::DroneRank &&
+            restoredExpedition.runUpgradeOffers[1].targetRank == 3 &&
+            restoredExpedition.runUpgradeOffers[2].kind == RunUpgradeKind::DroneGraft &&
+            restoredExpedition.runUpgradeOffers[2].slotIndex == 1 &&
+            restoredExpedition.runUpgradeReturnScreen == Screen::Mining &&
+            restored.screen == Screen::SurfaceUpgrade,
+        "the pending level-up draft and return screen should round trip");
+    require(restoredExpedition.runRigUpgradeRanks.size() == 1 &&
+            restoredExpedition.runRigUpgradeRanks.front().rank == 2 &&
+            restoredExpedition.runDroneRanks.size() == 1 &&
+            restoredExpedition.runDroneRanks.front().rank == 3 &&
+            restoredExpedition.selectedSynergyIds.size() == 2,
+        "temporary rig ranks, drone ranks, and selected synergies should round trip");
     require(restored.run.surfaceExpedition.scannerCooldownSeconds > 2.4 && restored.run.surfaceExpedition.treasureMarks.size() == 1,
         "scanner cooldown and treasure marks should round trip");
     require(restored.run.surfaceExpedition.droneModuleAssignments.size() == 1 && restored.run.surfaceExpedition.droneModuleRuntime.size() == 1,
         "module assignments and runtime should round trip");
+    require(restored.run.mining.miniDrones.size() == 1 &&
+            restored.run.mining.miniDrones.front().uncreditedHaulMaterials.common == 3 &&
+            restored.run.mining.miniDrones.front().uncreditedHaulMaterials.rare == 1 &&
+            restored.run.mining.miniDrones.front().uncreditedHaulMaterials.exotic == 1,
+        "uncredited drone haul provenance should round trip without creating duplicate XP");
 }
 
 void secondaryPulseUsesUnifiedCooldownAndStrongestHit()
@@ -12061,7 +11185,7 @@ void secondaryPulseUsesUnifiedCooldownAndStrongestHit()
     state.meta.equippedDroneIds = {content::drone::surveyDrone};
     state.meta.droneBaySlots = 1;
     state.meta.unlockKeys = {content::unlock::droneBay, content::unlock::droneSupportSuite};
-    state.meta.droneUpgrades.push_back({content::drone::surveyDrone, 3});
+    state.run.surfaceExpedition.runDroneRanks.push_back({content::drone::surveyDrone, 3});
     mining.active = true;
     mining.terrain.width = 12; mining.terrain.height = 12; mining.terrain.cells.resize(144);
     mining.droneX = mining.operatorX = 6.0; mining.droneY = mining.operatorY = 6.0;
@@ -12069,7 +11193,7 @@ void secondaryPulseUsesUnifiedCooldownAndStrongestHit()
     enemy.health = enemy.maxHealth = 20.0; mining.enemies.push_back(enemy);
     MiningMiniDroneAgent survey; survey.role = MiniDroneRole::Survey; survey.roleIndex = 0; survey.equippedFrame = 0; survey.upgradeLevel = 3; survey.x = 6.0; survey.y = 6.0; mining.miniDrones.push_back(survey);
     state.run.surfaceExpedition.droneModuleAssignments.push_back({0, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
-    state.run.surfaceUpgradeIds.push_back(content::surfaceUpgrade::resonantDischarge);
+    state.run.surfaceExpedition.runRigUpgradeRanks.push_back({content::surfaceUpgrade::resonantDischarge, 3});
     pulseMiningScanner(state, catalog);
     const double healthAfterPulse = mining.enemies.front().health;
     require(healthAfterPulse == 17.0, "pulse should leave enemy state valid after activation");
@@ -12087,7 +11211,7 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     mining.active = true; mining.terrain.width = 10; mining.terrain.height = 10; mining.terrain.cells.resize(100);
     state.meta.equippedDroneIds = {content::drone::resourceDrone};
     state.meta.droneBaySlots = 1;
-    state.meta.droneUpgrades.push_back({content::drone::resourceDrone, 2});
+    state.run.surfaceExpedition.runDroneRanks.push_back({content::drone::resourceDrone, 2});
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     mining.droneX = mining.operatorX = 5.0; mining.droneY = mining.operatorY = 5.0;
@@ -12111,12 +11235,12 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     require(state.run.surfaceExpedition.treasureMarks.size() >= first.size(), "repeated Treasure Ping should preserve existing marks and select new tiles");
     resource.upgradeLevel = 3;
     mining.miniDrones.front().upgradeLevel = 3;
-    state.meta.droneUpgrades.front().level = 3;
+    state.run.surfaceExpedition.runDroneRanks.front().rank = 3;
     state.run.surfaceExpedition.treasureMarks.clear();
     state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
     pulseMiningScanner(state, catalog);
     require(state.run.surfaceExpedition.treasureMarks.size() == 3, "Mk III Treasure Ping should mark three tiles");
-    state.meta.droneUpgrades.front().level = 1;
+    state.run.surfaceExpedition.runDroneRanks.front().rank = 1;
     mining.miniDrones.front().upgradeLevel = 1;
     state.run.surfaceExpedition.treasureMarks.clear();
     state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
@@ -12175,7 +11299,7 @@ int main()
     launchThermalManagementIsPlayerDriven();
     launchCurriculumResolutionHasNoHiddenDamageOrBlueprintLeaks();
     launchAsteroidsAreDeterministicFairAndHullScaled();
-    launchCurriculumEconomyGatesAndVersionTenMigration();
+    launchCurriculumEconomyGatesAndRoundTrips();
     launchCompetentPoliciesSurviveFiveThousandSeeds();
     launchSkillFailuresRemainVisibleAndNonRandom();
     launchCurriculumFuelMathAndRange();
@@ -12212,22 +11336,23 @@ int main()
     artifactResearchIdentifiesRecoveredArtifacts();
     surfaceToolResearchImprovesExpeditions();
     animalCrewClassesModifySurfaceExpeditions();
-    surfaceUpgradeOffersAreDistinctAndSelectable();
-    surfaceUpgradeOffersCanRerollAndKeepDraftState();
+    expeditionExperienceQueuesDistinctSelectableOffers();
+    exhaustedRunUpgradePoolConsumesQueuedChoices();
+    droneGraftOffersAreDistinctPerCompatibleSlot();
+    postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
     surfaceUpgradesAndDronesModifyScanMiniGame();
     surfaceUpgradesAndDronesModifyPushDeeperMiniGame();
     surfaceScanAndPushDepthLimitsStayInParity();
-    surfaceUpgradesPersistUntilNewShipAndRoundTripSave();
-    surfaceUpgradesResetOnEmergencyRecallOnly();
+    runUpgradesSurviveEmergencyRecall();
+    runUpgradeLifetimeFollowsTheTransport();
     miningDepletionAtShipGracefullyEndsRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
+    scenarioUiActionsDoNotAwardExpeditionExperience();
     firstMiningContractBuildsAndCelebratesProspector();
     explicitSolarCampaignObjectivesGateRewardsAndRoutes();
-    versionSevenCampaignStateRoundTripsAndMigrates();
-    versionSixPendingIoArtifactsMigrateToUpgradeCredit();
-    versionNineScenarioAndCocoonStateRoundTrips();
-    versionEightCampaignAndIoCocoonMigrateToVersionNine();
+    campaignStateRoundTripsAtCurrentVersion();
+    scenarioAndCocoonStateRoundTrips();
     surfaceSiteProfilesChangeExpeditionRules();
     surfaceHazardsCreateEnvironmentalSetbacks();
     surfaceEventsCreateSmallRunVariation();
@@ -12235,7 +11360,6 @@ int main()
     surfaceExpeditionBanksMaterialsAndDefersEnemies();
     surfaceExpeditionRoundTripsThroughSave();
     transferFuelPersistsAndBecomesRigFuel();
-    versionTenSurfaceFuelMigratesToArrivalDerivedRigFuel();
     surfaceMiningUsesRigFuelAndRunsOnce();
     physicalMiningArtifactsAreSingleAndDeliveryGated();
     miningArtifactTetherAndDestructionRules();
@@ -12263,7 +11387,6 @@ int main()
     duplicateHazardDronesCoordinatePriorityAndExactAssistance();
     hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
-    legacyStabilizerSavesMigrateToHazardDrone();
     miningAndSurveyDroneAgentsPerformWorldActions();
     surveyDroneRunsAnchoredPriorityScanCycles();
     surveyDronesMaintainCoordinatedSearchLanes();
@@ -12291,8 +11414,7 @@ int main()
     miningEvaFixedDrillProfileIgnoresRigUpgrades();
     activeMiningRoundTripsThroughSave();
     operatorRigTetherRoundTripsThroughSave();
-    miningEvaAndSwarmStateRoundTripsThroughVersionSixSave();
-    versionFiveMiningSavesMigrateToSeatedRigAndDeterministicSwarm();
+    miningEvaAndSwarmStateRoundTrips();
     miningDepthLayersAreBidirectionalAndPersistent();
     miningDeploysDeepAndGeneratesTheRouteBackToSurface();
     miningDestinationGravityAndEvaMotionUsePhysicalProfiles();
@@ -12305,7 +11427,6 @@ int main()
     roughMiningOreCreditsTheSurvivingContractPayload();
     saveRoundTripPreservesProgress();
     progressedSavesSkipTheFirstLaunchIntroduction();
-    versionTwoStoredModulesMigrateToInstalledSystems();
     saveSchemaConstantsMatchSerializedFields();
     legacyRecordsTrackAchievementStats();
     flightProgressHelpersShareTravelAndReturnMath();
@@ -12323,7 +11444,6 @@ int main()
     storyBriefingsTakeOverAndPersist();
     miningThermalCutoffAndGuidanceAreExplicit();
     marsMiningPressureFitsOxygenWindow();
-    legacyOuterPlanetSavesMigrateByStableId();
     secondaryMiningStateRoundTrips();
     secondaryPulseUsesUnifiedCooldownAndStrongestHit();
     treasurePingMarksRareFirstAndSkipsExcludedMaterials();

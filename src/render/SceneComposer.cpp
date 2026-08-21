@@ -846,6 +846,9 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
             if (snapshot.screen != Screen::Launch) {
                 drawTelemetry(snapshot);
             }
+            if (snapshot.screen == Screen::SurfaceUpgrade && snapshot.levelUpFanfare > 0.0) {
+                drawLevelUpFanfare(snapshot);
+            }
         }
     }
     finalizePacket();
@@ -926,6 +929,13 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 34.0F) * shimmer * 3.5F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 29.0F) * shimmer * 2.5F;
     }
+    if (cameraShakeEnabled && snapshot.screen == Screen::SurfaceUpgrade && snapshot.levelUpFanfare > 0.0) {
+        const float envelope = static_cast<float>(std::clamp(snapshot.levelUpFanfare, 0.0, 1.0));
+        const float shake = envelope * envelope;
+        const float age = (1.0F - envelope) * 0.70F;
+        scenePixelCenterX_ += std::sin(age * 91.0F) * shake * 4.0F;
+        scenePixelCenterY_ += std::cos(age * 77.0F) * shake * 3.0F;
+    }
     if (cameraShakeEnabled && snapshot.screen == Screen::Mining) {
         const float contactShake = static_cast<float>(std::clamp(snapshot.miningContactIntensity, 0.0, 1.0)) * (snapshot.miningDrilling ? 1.0F : 0.35F);
         const float failureShake = static_cast<float>(std::clamp(snapshot.miningFailurePulse, 0.0, 1.0));
@@ -958,10 +968,13 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     const float arrivalGlow = snapshot.screen == Screen::ArrivalFanfare
         ? 0.018F * (1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0)))
         : 0.0F;
+    const float levelUpGlow = snapshot.screen == Screen::SurfaceUpgrade
+        ? 0.024F * static_cast<float>(std::clamp(snapshot.levelUpFanfare, 0.0, 1.0))
+        : 0.0F;
     packet_.clearColor = {
-        0.02F + clearHeat * 0.05F + arrivalGlow,
-        0.03F + arrivalGlow * 0.70F,
-        0.05F + clearHeat * 0.02F + arrivalGlow * 0.35F,
+        0.02F + clearHeat * 0.05F + arrivalGlow + levelUpGlow * 0.65F,
+        0.03F + arrivalGlow * 0.70F + levelUpGlow,
+        0.05F + clearHeat * 0.02F + arrivalGlow * 0.35F + levelUpGlow * 1.25F,
         1.0F
     };
 }
@@ -4493,6 +4506,66 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     if (snapshot.surfacePushBusted) {
         drawRadialGlow(shaftX, probeY, 0.28F, {1.0F, 0.22F, 0.10F, 0.070F}, 48);
         drawEllipseLine(shaftX, probeY, 0.18F, 0.11F, {1.0F, 0.28F, 0.10F, 0.52F}, 48, 0.0F, 2.0F * kPi);
+    }
+}
+
+void SceneComposer::drawLevelUpFanfare(const RenderSnapshot& snapshot)
+{
+    const float envelope = static_cast<float>(std::clamp(snapshot.levelUpFanfare, 0.0, 1.0));
+    if (envelope <= 0.0F) {
+        return;
+    }
+
+    constexpr float duration = 0.70F;
+    const float age = (1.0F - envelope) * duration;
+    const float flash = 1.0F - std::clamp(age / 0.15F, 0.0F, 1.0F);
+    const float strike = 1.0F - std::clamp(age / 0.45F, 0.0F, 1.0F);
+    const float expand = std::clamp(age / duration, 0.0F, 1.0F);
+    const float cx = 0.28F;
+    const float cy = 0.02F;
+    const Color cyan {0.28F, 0.92F, 1.0F, 0.62F * strike};
+    const Color gold {1.0F, 0.78F, 0.24F, 0.72F * strike};
+
+    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.78F, 0.98F, 1.0F, 0.10F * flash}, false);
+    drawRadialGlow(cx, cy, 0.34F + expand * 0.20F, {0.25F, 0.90F, 1.0F, 0.095F * strike}, 48);
+
+    const float rotation = age * 1.8F;
+    const float outerRadiusX = 0.40F + expand * 0.18F;
+    const float outerRadiusY = 0.24F + expand * 0.11F;
+    for (int arc = 0; arc < 3; ++arc) {
+        const float start = rotation + static_cast<float>(arc) * (2.0F * kPi / 3.0F);
+        drawEllipseLine(
+            cx,
+            cy,
+            outerRadiusX,
+            outerRadiusY,
+            arc == 1 ? gold : cyan,
+            18,
+            start,
+            start + 1.25F);
+    }
+
+    for (int ray = 0; ray < 12; ++ray) {
+        const float angle = rotation * 0.45F + static_cast<float>(ray) * (2.0F * kPi / 12.0F);
+        const float inner = 0.24F + expand * 0.10F;
+        const float outer = inner + 0.075F + (ray % 3 == 0 ? 0.055F : 0.0F);
+        const float aspectY = 0.68F;
+        drawLine(
+            cx + std::cos(angle) * inner,
+            cy + std::sin(angle) * inner * aspectY,
+            cx + std::cos(angle) * outer,
+            cy + std::sin(angle) * outer * aspectY,
+            ray % 3 == 0 ? gold : cyan,
+            ray % 3 == 0 ? 2.0F : 1.2F);
+    }
+
+    for (int spark = 0; spark < 8; ++spark) {
+        const float phase = static_cast<float>(spark) * (2.0F * kPi / 8.0F) - age * 2.4F;
+        const float radius = 0.16F + expand * (0.32F + 0.025F * static_cast<float>(spark % 3));
+        const float x = cx + std::cos(phase) * radius;
+        const float y = cy + std::sin(phase) * radius * 0.68F;
+        const float size = 0.008F + 0.007F * strike;
+        drawRect(x, y, size, size * 2.2F, spark % 2 == 0 ? gold : cyan);
     }
 }
 

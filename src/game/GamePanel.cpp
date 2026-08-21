@@ -223,7 +223,7 @@ std::string phaseTitle(Screen screen)
     case Screen::SurfaceExpedition:
         return "Surface Ops";
     case Screen::SurfaceUpgrade:
-        return "Field Upgrade";
+        return "Level Up";
     case Screen::SurfaceScan:
         return "Planet Scan";
     case Screen::SurfacePush:
@@ -1471,7 +1471,7 @@ CampaignObjectivePresentation campaignObjectivePresentation(
             : (!hazardEquipped
                   ? "ASSIGN HAZARD DRONE: free one slot, then equip it for the Io descent."
                   : "Cool and drill both lava seals, tow the artifact, then extract safely.");
-        presentation.reward = "REWARD // FREE SUPPORT DRONE UPGRADE";
+        presentation.reward = "REWARD // 75 EXPEDITION XP + OUTER TRANSFER DATA";
         if (!state.meta.ioHazardDroneCommissioned) {
             presentation.action = panelActionButton(
                 "Commission Hazard Drone",
@@ -1842,10 +1842,13 @@ std::string surfaceActionCard(
 std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade, bool defaultFocus)
 {
     std::ostringstream out;
-    out << "<article class=\"pilot-card upgrade-draft-card compact-draft-selector surface-upgrade-card "
-        << rarityCardClass(upgrade.rarity) << "\">";
+    out << "<article id=\"rr-run-upgrade-card-" << upgrade.index
+        << "\" class=\"pilot-card upgrade-draft-card compact-draft-selector surface-upgrade-card "
+        << rarityCardClass(upgrade.rarity) << " offer-index-" << upgrade.index << "\">";
+    out << "<i id=\"rr-run-upgrade-resolve-" << upgrade.index
+        << "\" class=\"run-upgrade-resolve-flash\"></i>";
     out << "<div class=\"pilot-card-top\"><span>" << htmlEscape(upgrade.category) << "</span><strong>"
-        << htmlEscape(upgrade.rarity) << " field mod</strong></div>";
+        << htmlEscape(upgrade.rarity) << "</strong></div>";
     out << "<h3 class=\"card-title\">" << htmlEscape(upgrade.title) << "</h3>";
     out << "<p class=\"card-copy surface-upgrade-detail\">" << htmlEscape(upgrade.detail) << "</p>";
     out << "<div class=\"stat-grid chip-strip\">";
@@ -1853,7 +1856,7 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade, bo
         out << resourceChip(upgrade.effectChips[index]);
     }
     out << "</div>";
-    out << "<div class=\"draft-card-footer action-row\"><span>" << htmlEscape(upgrade.droneModule ? (upgrade.action.label == "Confirm replace" ? "This expedition" : "Until extraction") : "This expedition") << "</span>"
+    out << "<div class=\"draft-card-footer action-row\"><span>TRANSPORT EXPEDITION</span>"
         << panelButton(upgrade.action, defaultFocus) << "</div></article>";
     return out.str();
 }
@@ -1875,10 +1878,7 @@ std::string miniDroneControlCard(const MiniDroneCardPresentation& drone)
     return out.str();
 }
 
-std::string droneDetailsModalBody(
-    const MiniDroneCardPresentation& drone,
-    const GameState& state,
-    const ContentCatalog& catalog)
+std::string droneDetailsModalBody(const MiniDroneCardPresentation& drone)
 {
     std::ostringstream out;
     out << "<section class=\"drone-details-modal modal-body\">"
@@ -1890,20 +1890,12 @@ std::string droneDetailsModalBody(
         << htmlEscape(drone.detail) << "</p></section>"
         << "<section class=\"drone-detail-section\"><h3>Capabilities</h3>"
         << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(drone.effectChips) << "</div></section>"
-        << "<section class=\"drone-detail-section\"><h3>Upgrade path</h3><p class=\"drone-details-upgrade\">"
+        << "<section class=\"drone-detail-section\"><h3>Expedition progression</h3><p class=\"drone-details-upgrade\">"
         << htmlEscape(drone.upgradeSummary) << "</p></section>"
         << "<section class=\"drone-detail-section\"><h3>Build contribution</h3><p>"
         << htmlEscape(drone.buildHook) << "</p></section>"
         << "<div class=\"modal-actions action-row drone-details-actions\">"
-        << panelButton(drone.action) << panelButton(drone.upgradeAction);
-    if (state.meta.droneUpgradeCredits > 0) {
-        out << panelButton(canRedeemDroneUpgradeCredit(state, catalog, drone.index)
-                ? panelActionButton(
-                      "Use artifact credit",
-                      ui::actions::redeemDroneUpgradeCredit(drone.index),
-                      "ok")
-                : disabledPanelButton("Credit unavailable"));
-    }
+        << panelButton(drone.action);
     out << "</div></section>";
     return out.str();
 }
@@ -2150,10 +2142,18 @@ std::string inventoryTemplate(const GameState& state, const ContentCatalog& cata
     return modalTemplate(ui::modals::inventory, "Inventory", inventoryBody(inventoryPresentation(state, catalog)));
 }
 
-std::string phaseBoardOpen(std::string_view cssClass, std::string_view status, bool fullPanel = true)
+std::string phaseBoardOpen(
+    std::string_view cssClass,
+    std::string_view status,
+    bool fullPanel = true,
+    std::string_view id = {})
 {
     (void)status;
-    std::string out = "<section class=\"phase-board " + htmlEscape(cssClass) + "\"";
+    std::string out = "<section";
+    if (!id.empty()) {
+        out += " id=\"" + htmlEscape(id) + "\"";
+    }
+    out += " class=\"phase-board " + htmlEscape(cssClass) + "\"";
     if (fullPanel) {
         const bool activeSurfaceMinigame = cssClass.find("phase-board-scan") != std::string_view::npos
             || cssClass.find("phase-board-push") != std::string_view::npos;
@@ -2186,7 +2186,68 @@ std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
     return out;
 }
 
-std::string surfaceQuickbar(const SurfaceExpeditionState& expedition)
+constexpr int kExpeditionXpSegments = 12;
+constexpr double kLevelUpDraftFanfareSeconds = 0.70;
+
+int expeditionXpFilledSegments(const SurfaceExpeditionState& expedition)
+{
+    const double required = std::max(1.0, expeditionExperienceThreshold(expedition.expeditionLevel));
+    const double progress = std::clamp(expedition.expeditionExperience / required, 0.0, 1.0);
+    return std::clamp(
+        static_cast<int>(std::floor(progress * static_cast<double>(kExpeditionXpSegments) + 0.0001)),
+        0,
+        kExpeditionXpSegments);
+}
+
+std::string expeditionXpClass(bool pulse, bool hero = false)
+{
+    std::string result = "expedition-xp";
+    if (pulse) result += " is-pulsing";
+    if (hero) result += " is-hero";
+    return result;
+}
+
+std::string expeditionXpMarkup(
+    const SurfaceExpeditionState& expedition,
+    std::string_view id,
+    bool pulse,
+    bool hero = false)
+{
+    const int required = static_cast<int>(std::ceil(std::max(
+        1.0,
+        expeditionExperienceThreshold(expedition.expeditionLevel))));
+    const int current = std::clamp(
+        static_cast<int>(std::floor(expedition.expeditionExperience + 0.0001)),
+        0,
+        required);
+    const int filled = expeditionXpFilledSegments(expedition);
+    std::ostringstream out;
+    out << "<section id=\"" << id << "\" class=\"" << expeditionXpClass(pulse, hero)
+        << "\" aria-label=\"Expedition experience\"><header><strong id=\"" << id
+        << "-level\">LV " << std::max(1, expedition.expeditionLevel) << "</strong><span id=\""
+        << id << "-value\">" << current << " / " << required << " XP</span><b id=\""
+        << id << "-pending\">" << std::max(0, expedition.pendingRunUpgradeChoices)
+        << " PICKS</b></header><div class=\"expedition-xp-track\">";
+    for (int segment = 0; segment < kExpeditionXpSegments; ++segment) {
+        out << "<i id=\"" << id << "-segment-" << segment << "\" class=\"xp-segment"
+            << (segment < filled ? " is-filled" : "") << "\"></i>";
+    }
+    out << "</div></section>";
+    return out.str();
+}
+
+std::string levelUpDraftClass(const PanelRenderContext& context)
+{
+    const bool celebrating = context.levelUpBatchChoices > 0
+        && context.levelUpFanfareElapsed < kLevelUpDraftFanfareSeconds;
+    std::string result = "phase-board phase-board-surface-upgrade phase-board-draft-room level-up-draft";
+    if (celebrating) result += " is-celebrating";
+    if (context.levelUpActivationLocked) result += " is-activation-locked";
+    if (context.levelUpActivationLocked && !celebrating) result += " is-refreshing";
+    return result;
+}
+
+std::string surfaceQuickbar(const SurfaceExpeditionState& expedition, bool xpPulse)
 {
     std::ostringstream out;
     out << "<section class=\"surface-quickbar phase-lane phase-row\">";
@@ -2194,6 +2255,7 @@ std::string surfaceQuickbar(const SurfaceExpeditionState& expedition)
     out << surfaceQuickMetric(text::labels::rigFuel, display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1));
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
     out << surfaceQuickMetric("On Ship", std::to_string(expedition.temporaryMaterials.common) + " CM", "", true);
+    out << expeditionXpMarkup(expedition, "rr-hud-surface-xp", xpPulse);
     out << "</section>";
     return out.str();
 }
@@ -3486,8 +3548,8 @@ std::string buildGamePanelMarkup(
             out << activityIntroductionModal(
                 ui::modals::landingIntroduction,
                 "SURFACE DEPLOYMENT",
-                "Landing opens surface operations, where recovered materials and artifacts fuel field upgrades.",
-                "Surface upgrades improve your MINING RIG for future mining runs.",
+                "Mining, combat, objectives, and safely returned artifacts earn Expedition XP.",
+                "Level Up offers temporary RIG, DRONE, or SYNERGY upgrades for this Transport expedition.",
                 "Begin landing",
                 ui::actions::arrivalLanding,
                 "danger");
@@ -3563,7 +3625,11 @@ std::string buildGamePanelMarkup(
         out << "<header class=\"mining-top-rail ui-screen-header rr-screen-header\"><div class=\"mining-run-title\"><strong id=\"rr-hud-mining-title\">"
             << htmlEscape(miningHud.runLabel) << "</strong><span class=\"mining-run-objective\" id=\"rr-hud-mining-objective-title\">"
             << htmlEscape(scenarioMining ? compactMiningScenarioObjective(state, catalog) : miningHud.objective)
-            << "</span></div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
+            << "</span>" << expeditionXpMarkup(
+                state.run.surfaceExpedition,
+                "rr-hud-mining-xp",
+                context.expeditionXpPulse)
+            << "</div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
         for (std::size_t index = 0; index < miningHud.vitals.size(); ++index) {
             const MiningHudTilePresentation& tile = miningHud.vitals[index];
             const std::string_view id = miningVitalIds[index];
@@ -3827,17 +3893,10 @@ std::string buildGamePanelMarkup(
             << "<div class=\"stat-grid chip-strip drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
             << panelButton(dronePanel.upgradeSlotAction) << "</section>";
         out << "</div>";
-        if (state.meta.droneUpgradeCredits > 0) {
-            out << "<section class=\"resource-bank drone-credit-callout state-ready\"><div>"
-                << "<span class=\"ui-kicker\">MINOR ARTIFACT REWARD</span><h2>FREE SUPPORT DRONE UPGRADE ×"
-                << state.meta.droneUpgradeCredits
-                << "</h2><p>Open an eligible owned Mk I or Mk II frame and choose Use artifact credit.</p></div>"
-                << "<strong>PLAYER CHOICE // NEVER AUTO-SPENT</strong></section>";
-        }
         out << "<div class=\"drone-workspace-main\">";
         out << "<section class=\"board-primary drone-roster\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
             << htmlEscape("AVAILABLE FRAMES") << "</span><h2>" << htmlEscape("Drone controls")
-            << "</h2></div><p>" << htmlEscape("Assign owned frames, build paid copies, or tune a type.") << "</p></div><div class=\"drone-control-grid drone-controller-choice-row\">";
+            << "</h2></div><p>" << htmlEscape("Assign owned frames and inspect expedition grafts or synergies.") << "</p></div><div class=\"drone-control-grid drone-controller-choice-row\">";
         for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
             out << miniDroneControlCard(drone);
         }
@@ -3862,7 +3921,7 @@ std::string buildGamePanelMarkup(
             out << modalTemplate(
                 droneDetailsModalId(drone.index),
                 drone.title + " Details",
-                droneDetailsModalBody(drone, state, catalog));
+                droneDetailsModalBody(drone));
         }
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
@@ -4065,7 +4124,7 @@ std::string buildGamePanelMarkup(
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
         out << "</div></div>";
-        out << surfaceQuickbar(expedition);
+        out << surfaceQuickbar(expedition, context.expeditionXpPulse);
         if (scenarioSurface) {
             out << scenarioObjectiveMarkup(displayedSurfaceScenario);
             if (surfaceDelivery.objective.available &&
@@ -4181,37 +4240,35 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::SurfaceUpgrade) {
         const SurfaceExpeditionPresentation surfacePanel = surfaceExpeditionPresentation(state, catalog);
-        const bool assigningModule = !state.run.surfaceExpedition.pendingDroneModuleId.empty();
-        out << phaseBoardOpen("phase-board-surface-upgrade phase-board-draft-room", state.statusLine);
-        out << "<section class=\"draft-hero\"><div><span>" << htmlEscape(assigningModule ? "Assign Module" : "Field Upgrade")
-            << "</span><h2>" << htmlEscape(assigningModule ? "Choose a frame" : "Choose one") << "</h2>";
-        if (!assigningModule) out << "<p>" << htmlEscape("One upgrade for this expedition.") << "</p>";
-        out << "</div>";
-        std::vector<PanelMetricPresentation> fieldContext;
-        for (const PanelMetricPresentation& metricItem : surfacePanel.metrics) {
-            if (metricItem.label == text::labels::site
-                || metricItem.label == text::fuel::reserveLabel(arkDiscovered(state))
-                || metricItem.label == text::labels::cargo) {
-                fieldContext.push_back(metricItem);
-            }
-        }
-        out << "<div class=\"stat-grid chip-strip draft-context\">" << fieldContextChipGrid(fieldContext) << "</div></section>";
+        const int pendingPicks = std::max(0, state.run.surfaceExpedition.pendingRunUpgradeChoices);
+        const int fanfarePicks = std::max(pendingPicks, context.levelUpBatchChoices);
+        std::string levelUpClass = levelUpDraftClass(context);
+        levelUpClass.erase(0, std::string("phase-board ").size());
+        out << phaseBoardOpen(levelUpClass, state.statusLine, true, "rr-level-up-draft");
+        out << "<section class=\"draft-hero level-up-stamp\"><div><span>"
+            << htmlEscape(fanfarePicks > 1 ? "LEVEL UP \xC3\x97" + std::to_string(fanfarePicks) : "LEVEL UP")
+            << "</span><h2>EXPEDITION LEVEL " << std::max(1, state.run.surfaceExpedition.expeditionLevel)
+            << "</h2><p>Choose one upgrade</p><strong>" << pendingPicks << " PICKS REMAIN</strong></div>"
+            << expeditionXpMarkup(
+                state.run.surfaceExpedition,
+                "rr-hud-level-up-xp",
+                context.expeditionXpPulse,
+                true)
+            << "</section>";
         out << "<section class=\"draft-board\"><div class=\"phase-titlebar\"><div><h2>"
-            << htmlEscape(assigningModule ? "Compatible frames" : "Available upgrades") << "</h2></div>";
-        if (!assigningModule) out << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton("Compare", "surface_upgrade_compare", "ghost") << "</div>";
+            << htmlEscape(surfacePanel.upgradeOffers.empty() ? "ALL ELIGIBLE UPGRADES INSTALLED" : "CHOOSE ONE UPGRADE")
+            << "</h2></div>";
+        if (!surfacePanel.upgradeOffers.empty()) {
+            out << "<div class=\"utility-row compact-tools utility-actions\">"
+                << modalButton("Compare", "surface_upgrade_compare", "ghost") << "</div>";
+        }
         out << "</div>";
         out << "<div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
         for (std::size_t index = 0; index < surfacePanel.upgradeOffers.size(); ++index) {
             out << surfaceUpgradeCard(surfacePanel.upgradeOffers[index], index == 0);
         }
         out << "</div>";
-        out << "<div class=\"actions action-row draft-actions controller-action-row\">";
-        const double rerollCost = offerRerollCost(state);
-        if (!assigningModule) out << panelButton(state.run.credits >= rerollCost
-            ? panelActionButton(std::string("Reroll draft (") + display::money(rerollCost) + ")", ui::actions::rerollOffers, "warn")
-            : disabledPanelButton(display::needCredits(rerollCost)));
-        if (!assigningModule) out << panelButton(panelActionButton("Keep", ui::actions::next));
-        out << "</div></section>";
+        out << "</section>";
         out << phaseBoardClose();
         std::ostringstream surfaceUpgradeComparison;
         surfaceUpgradeComparison << "<div class=\"comparison-list\">";
@@ -4223,7 +4280,7 @@ std::string buildGamePanelMarkup(
                 << resourceChipGrid(upgrade.effectChips) << "</div></article>";
         }
         surfaceUpgradeComparison << "</div>";
-        out << modalTemplate("surface_upgrade_compare", "Compare Field Upgrades", surfaceUpgradeComparison.str());
+        out << modalTemplate("surface_upgrade_compare", "Compare Expedition Upgrades", surfaceUpgradeComparison.str());
         out << scenarioObjectiveModalForDestination(state, catalog, currentDestination(state, catalog).id);
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
@@ -4743,7 +4800,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     const GameState& state = context.state;
     const ContentCatalog& catalog = context.catalog;
     result.patches.clear();
-    result.patches.reserve(48);
+    result.patches.reserve(80);
 
     const auto appendMetric = [&result](
                                   std::string id,
@@ -4753,6 +4810,44 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         appendHudText(result, id + "-value", std::move(value));
         appendHudClass(result, id, metricClass(label, cssClass));
     };
+    const auto appendExpeditionXp = [&](std::string_view id, bool hero = false) {
+        const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+        const int required = static_cast<int>(std::ceil(std::max(
+            1.0,
+            expeditionExperienceThreshold(expedition.expeditionLevel))));
+        const int current = std::clamp(
+            static_cast<int>(std::floor(expedition.expeditionExperience + 0.0001)),
+            0,
+            required);
+        const int filled = expeditionXpFilledSegments(expedition);
+        appendHudClass(result, id, expeditionXpClass(context.expeditionXpPulse, hero));
+        appendHudText(result, std::string(id) + "-level", "LV " + std::to_string(std::max(1, expedition.expeditionLevel)));
+        appendHudText(result, std::string(id) + "-value", std::to_string(current) + " / " + std::to_string(required) + " XP");
+        appendHudText(result, std::string(id) + "-pending", std::to_string(std::max(0, expedition.pendingRunUpgradeChoices)) + " PICKS");
+        for (int segment = 0; segment < kExpeditionXpSegments; ++segment) {
+            appendHudClass(
+                result,
+                std::string(id) + "-segment-" + std::to_string(segment),
+                segment < filled ? "xp-segment is-filled" : "xp-segment");
+        }
+    };
+
+    if (state.screen == Screen::Mining) {
+        appendExpeditionXp("rr-hud-mining-xp");
+    } else if (state.screen == Screen::SurfaceExpedition) {
+        appendExpeditionXp("rr-hud-surface-xp");
+    } else if (state.screen == Screen::SurfaceUpgrade) {
+        appendHudClass(result, "rr-level-up-draft", levelUpDraftClass(context));
+        appendExpeditionXp("rr-hud-level-up-xp", true);
+        for (int index = 0; index < 3; ++index) {
+            appendHudClass(
+                result,
+                "rr-run-upgrade-resolve-" + std::to_string(index),
+                index == context.levelUpResolvingOfferIndex
+                    ? "run-upgrade-resolve-flash is-active"
+                    : "run-upgrade-resolve-flash");
+        }
+    }
 
     if (state.screen == Screen::Flyby && !state.run.flyby.completed) {
         const FlybyRunState& flyby = state.run.flyby;

@@ -741,7 +741,10 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.frameId = catalog.frames.empty() ? "" : catalog.frames.front().id;
     state.run.inventoryModuleIds = state.meta.ownedModuleIds;
     state.run.equippedModuleIds = state.meta.defaultEquippedModuleIds;
-    state.run.surfaceUpgradeIds.clear();
+    state.run.surfaceExpedition = {};
+    state.run.surfaceScan = {};
+    state.run.surfacePush = {};
+    state.run.mining = {};
     state.run.offerModuleIds = {};
     state.run.offerCrewUpgradeIds = {};
     state.run.launchesThisExpedition = 0;
@@ -1575,13 +1578,6 @@ bool performArkJump(GameState& state, const ContentCatalog& catalog)
         };
         for (const std::string_view droneId : arkfallCombatDrones) {
             addUniqueId(state.meta.ownedDroneIds, std::string(droneId));
-            const auto upgrade = std::find_if(
-                state.meta.droneUpgrades.begin(),
-                state.meta.droneUpgrades.end(),
-                [droneId](const DroneUpgradeRecord& record) { return record.droneId == droneId; });
-            if (upgrade == state.meta.droneUpgrades.end()) {
-                state.meta.droneUpgrades.push_back({std::string(droneId), 1});
-            }
         }
         const int hostileIndex = destinationIndexForId(catalog, content::destination::nearbyStar);
         if (hostileIndex >= 0) {
@@ -1991,7 +1987,10 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     if (outcome.type == LaunchResultType::Destroyed) {
         state.meta.shipsLost += 1;
         state.run.credits = std::max(expeditionCreditFloor(state), state.run.credits - tuning::mission::destroyedCreditPenalty);
-        state.run.surfaceUpgradeIds.clear();
+        state.run.surfaceExpedition = {};
+        state.run.surfaceScan = {};
+        state.run.surfacePush = {};
+        state.run.mining = {};
         state.run.active = false;
         if (cleanShallowRecoveryDestroyed) {
             state.statusLine = std::string(text::status::cleanShallowRecoveryDestroyed);

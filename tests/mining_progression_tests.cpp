@@ -228,11 +228,7 @@ void progressionSaveFieldsRoundTripAndLegacyDefault()
 
     const std::string legacy = std::string(save_schema::header) + "\nversion=1\nseed=44\n";
     const std::optional<SaveData> legacySave = deserializeSaveData(legacy);
-    require(legacySave.has_value(), "legacy save should still deserialize");
-    for (const MiningFirstClearProgress& item : legacySave->miningFirstClearProgress) {
-        require(item.rareBanked == 0 && item.exoticBanked == 0, "legacy saves should default to no fulfilled rich guarantees");
-    }
-    require(legacySave->mining.arenaMetadata.rulesVersion == 0, "missing legacy arena metadata should remain detectable for restore migration");
+    require(!legacySave.has_value(), "pre-v13 saves must be rejected at the fresh-start boundary");
 
     const ContentCatalog catalog = createDefaultContent();
     SaveData activeLegacy;

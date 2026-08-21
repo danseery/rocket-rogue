@@ -2238,6 +2238,42 @@ void testSurfacePushTerrainGuardBoundsInvalidAspect()
     }
 }
 
+void testLevelUpFanfareGeometryAndAccessibleShake()
+{
+    RenderSnapshot fanfare;
+    fanfare.screen = rocket::Screen::SurfaceUpgrade;
+    fanfare.levelUpFanfare = 1.0;
+    fanfare.animationTime = 0.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& first = composer.compose(fanfare);
+    assert(!first.vertices.empty() || !first.instances.empty());
+    assert(first.vertices.size() < 20000);
+    assert(first.instances.size() < 20000);
+
+    fanfare.levelUpFanfare = 0.35;
+    const ScenePacket& mid = composer.compose(fanfare);
+    assert(!mid.vertices.empty() || !mid.instances.empty());
+    assert(mid.vertices.size() < 20000);
+    assert(mid.instances.size() < 20000);
+    const std::size_t midVertexCount = mid.vertices.size();
+    const std::size_t midInstanceCount = mid.instances.size();
+
+    SceneComposer shaken;
+    shaken.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto shakenCenter = rocket::SceneComposerTestAccess::frameCenter(shaken, fanfare);
+    SceneComposer stable;
+    stable.setViewport({1280, 800, 1280, 800, 1.0F});
+    stable.setCameraShakeEnabled(false);
+    const auto stableCenter = rocket::SceneComposerTestAccess::frameCenter(stable, fanfare);
+    assert(std::hypot(shakenCenter.first - stableCenter.first, shakenCenter.second - stableCenter.second) > 0.001F);
+
+    fanfare.levelUpFanfare = 0.0;
+    const ScenePacket& quiet = composer.compose(fanfare);
+    assert(quiet.vertices.size() < midVertexCount || quiet.instances.size() < midInstanceCount);
+}
+
 void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
 {
     const auto hasTextureFrame = [](const ScenePacket& packet, TextureId texture, int frame, int frameCount = 1) {
@@ -2399,6 +2435,7 @@ int main()
     testSurfacePushHostileStepCountsStayBounded();
     testSurfacePushSecondDigFrameCompletes();
     testSurfacePushTerrainGuardBoundsInvalidAspect();
+    testLevelUpFanfareGeometryAndAccessibleShake();
     testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;
 }

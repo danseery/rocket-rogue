@@ -192,6 +192,10 @@ struct RenderSnapshot {
     std::array<double, 12> heatTelemetry {};
     int telemetryCount = 0;
     double animationTime = 0.0;
+    // Transient presentation envelope for the survivor-style Level Up board.
+    // One is the impact frame and zero is fully settled; it is intentionally
+    // excluded from save data.
+    double levelUpFanfare = 0.0;
     int miningWidth = 0;
     int miningHeight = 0;
     double miningDroneX = 0.0;
