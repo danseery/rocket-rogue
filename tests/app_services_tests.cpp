@@ -504,6 +504,17 @@ struct AppFixture {
     rocket::GameRunner runner {services};
 };
 
+void completeTitleLaunch(AppFixture& fixture)
+{
+    fixture.runner.resetFrameClock();
+    for (int frame = 0; frame < 6; ++frame) {
+        fixture.host.now += 0.25;
+        fixture.runner.frame();
+    }
+    fixture.host.now += 1.0 / 120.0;
+    fixture.runner.frame();
+}
+
 std::string activeMiningSave(double drillHeat)
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -567,6 +578,9 @@ std::string freshSurfaceExpeditionSave()
     rocket::ui::briefings::acknowledge(
         state.meta.acknowledgedActivityBriefingIds,
         rocket::ui::briefings::mining);
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
+    state.run.surfaceExpedition.runUpgradeOfferPending = false;
+    state.run.surfaceExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
@@ -628,6 +642,9 @@ std::string readyProspectorClaimSave()
          0}));
     rocket::Random rng(0xF002ULL);
     rocket::generateModuleOffers(state, catalog, rng);
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
+    state.run.surfaceExpedition.runUpgradeOfferPending = false;
+    state.run.surfaceExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::Upgrade;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -664,6 +681,9 @@ std::string readyMarsExpansionClaimSave()
          0}));
     rocket::Random rng(0xF003ULL);
     rocket::generateModuleOffers(state, catalog, rng);
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
+    state.run.surfaceExpedition.runUpgradeOfferPending = false;
+    state.run.surfaceExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::Upgrade;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -1694,11 +1714,7 @@ int main()
         assert(fixture.saves.value == originalSave);
 
         fixture.ui.dispatchAction("continue_game");
-        fixture.runner.resetFrameClock();
-        for (int frame = 0; frame < 6; ++frame) {
-            fixture.host.now += 0.25;
-            fixture.runner.frame();
-        }
+        completeTitleLaunch(fixture);
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::Mining);
         assert(std::abs(fixture.renderer.shipDamage - 37.0) < 0.0001);
@@ -1784,6 +1800,7 @@ int main()
         fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(moonState));
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         fixture.runner.app().prepareForLaunch();
         fixture.host.now += 1.0 / 120.0;
         fixture.runner.frame();
@@ -1905,10 +1922,7 @@ int main()
         fixture.preferences.value.debugToolsEnabled = true;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
-        for (int frame = 0; frame < 6; ++frame) {
-            fixture.host.now += 0.25;
-            fixture.runner.frame();
-        }
+        completeTitleLaunch(fixture);
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::StoryBriefing);
         assert(!fixture.preferences.value.debugToolsEnabled);
@@ -1943,6 +1957,7 @@ int main()
         AppFixture fixture;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
+        completeTitleLaunch(fixture);
         fixture.ui.dispatchAction("acknowledge_story_briefing");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
         assert(fixture.ui.html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos);
@@ -1969,6 +1984,7 @@ int main()
         fixture.saves.value = firstSurfaceTutorialSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         fixture.runner.app().setFirstTimeIntroductionsEnabled(false);
         fixture.runner.frame();
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
@@ -2030,6 +2046,7 @@ int main()
         fixture.saves.value = freshSurfaceExpeditionSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
         assert(fixture.ui.html.find("data-modal=\"scenario_mars_bay_expansion_briefing\" data-auto-modal=\"1\"") != std::string::npos);
         assert(fixture.ui.html.find("data-scenario-id=\"mars_bay_expansion\" data-scenario-step-id=\"briefing\"") != std::string::npos);
@@ -2078,6 +2095,7 @@ int main()
         fixture.saves.value = activeDroneBaySurfaceExpeditionSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
 
         fixture.ui.dispatchAction("drone_ops");
@@ -2133,6 +2151,7 @@ int main()
         fixture.saves.value = readyProspectorClaimSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
 
         fixture.ui.dispatchAction(
@@ -2159,6 +2178,7 @@ int main()
         fixture.saves.value = readyMarsExpansionClaimSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
 
         fixture.ui.dispatchAction(
@@ -2217,6 +2237,7 @@ int main()
         fixture.saves.value = activeJupiterSlingshotSave();
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
         fixture.host.now += 1.0 / 120.0;
         fixture.runner.frame();
@@ -2244,10 +2265,7 @@ int main()
         fixture.saves.failStore = true;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
-        for (int frame = 0; frame < 6; ++frame) {
-            fixture.host.now += 0.25;
-            fixture.runner.frame();
-        }
+        completeTitleLaunch(fixture);
         assert(fixture.renderer.titleScreen);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         assert(fixture.ui.html.find("data-panel-mode=\"title\"") != std::string::npos);
@@ -2341,6 +2359,7 @@ int main()
         AppFixture fixture;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
+        completeTitleLaunch(fixture);
         fixture.ui.dispatchAction("acknowledge_story_briefing");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
 
@@ -2572,8 +2591,7 @@ int main()
         levelUpFixture.saves.value = levelUpExpeditionSave();
         assert(levelUpFixture.runner.initialize());
         levelUpFixture.ui.dispatchAction("continue_game");
-        levelUpFixture.runner.resetFrameClock();
-        levelUpFixture.runner.frame();
+        completeTitleLaunch(levelUpFixture);
         assert(levelUpFixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceUpgrade));
         assert(levelUpFixture.ui.html.find("rr-level-up-draft") != std::string::npos);
         assert(levelUpFixture.ui.html.find("aria-label=\"Expedition experience\"") != std::string::npos);
