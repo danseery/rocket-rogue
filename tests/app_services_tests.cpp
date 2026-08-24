@@ -1362,9 +1362,9 @@ int main()
         ui.shutdown();
     }
 
-    // Hangar has a visual hierarchy below the shared titlebar: details,
-    // operations, then launch. Keep that bridge explicit so a controller
-    // cannot become stranded in Map / Inventory / Menu on the Steam Deck.
+    // Hangar keeps Details in the shared titlebar, with operations and launch
+    // below it. Keep both axes explicit so a controller can reach the Details
+    // gateway and cannot become stranded in the header on the Steam Deck.
     {
         const rocket::ContentCatalog catalog = rocket::createDefaultContent();
         rocket::GameState state = rocket::createNewGame(catalog, 0x48A6A2ULL);
@@ -1391,15 +1391,17 @@ int main()
         ui.requestFocus("modal:map");
         ui.refresh();
 
-        assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "modal:crew");
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "modal:inventory");
+        assert(ui.navigate(rocket::UiDirection::Right));
+        assert(ui.focusedId() == "modal:hangar_details");
         assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "action:prepare_launch");
         assert(ui.navigate(rocket::UiDirection::Up));
         assert(ui.focusedId().starts_with("modal:"));
-        assert(ui.navigate(rocket::UiDirection::Up));
         assert(ui.focusedId() == "modal:map"
             || ui.focusedId() == "modal:inventory"
+            || ui.focusedId() == "modal:hangar_details"
             || ui.focusedId() == "modal:system_menu");
 
         // Disabled controls are correctly absent from the focus list, but an
@@ -1418,13 +1420,16 @@ int main()
             unavailableOpsLaunch};
         unavailableOpsContext.firstTimeIntroductionsEnabled = false;
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(unavailableOpsContext));
-        ui.requestFocus("modal:crew");
+        ui.requestFocus("modal:hangar_details");
         ui.refresh();
 
         assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "action:prepare_launch");
         assert(ui.navigate(rocket::UiDirection::Up));
-        assert(ui.focusedId().starts_with("modal:"));
+        assert(ui.focusedId() == "modal:map"
+            || ui.focusedId() == "modal:inventory"
+            || ui.focusedId() == "modal:hangar_details"
+            || ui.focusedId() == "modal:system_menu");
         ui.shutdown();
     }
 

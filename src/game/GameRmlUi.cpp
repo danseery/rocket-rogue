@@ -3332,7 +3332,7 @@ bool GameRmlUi::navigate(UiDirection direction)
             firstDirectionalControllerRowTarget(
                 *current,
                 direction,
-                {ControllerFocusRow::HangarChoices, ControllerFocusRow::Utilities}),
+                {ControllerFocusRow::HangarChoices, ControllerFocusRow::Utilities, ControllerFocusRow::Titlebar}),
             focusedId_,
             lastFocusCenterX_,
             lastFocusCenterY_,
