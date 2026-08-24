@@ -39,8 +39,10 @@ enum class PanelInteractionMode {
 enum class PanelOverlayKind {
     None,
     PreflightLaunch,
+    FlightInstruments,
     TelemetryLegend,
-    SurfaceScanReadout
+    SurfaceScanReadout,
+    MiningExperience
 };
 
 enum class ModalTone {
@@ -82,6 +84,19 @@ struct PanelRuntimeHints {
     bool miningTetherAvailable = false;
     bool miningStowAvailable = false;
     bool miningAbortAvailable = false;
+    int expeditionLevel = 1;
+    int expeditionExperienceCurrent = 0;
+    int expeditionExperienceRequired = 1;
+    int expeditionExperienceFilledSegments = 0;
+    int expeditionPendingPicks = 0;
+    bool expeditionXpPulse = false;
+    std::string instrumentSpeedValue;
+    std::string instrumentTemperatureValue;
+    std::string instrumentFuelValue;
+    std::string instrumentThrottleValue;
+    bool instrumentTemperatureCritical = false;
+    bool instrumentOffCourse = false;
+    bool instrumentCourseCritical = false;
     std::string overlayValue;
 };
 

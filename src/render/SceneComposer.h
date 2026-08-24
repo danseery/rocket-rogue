@@ -54,6 +54,7 @@ private:
     void appendLine(std::vector<SceneVertex>& vertices, float ax, float ay, float bx, float by, Color color);
     bool textureReady(int assetIndex) const noexcept;
     void drawTelemetry(const RenderSnapshot& snapshot);
+    void drawFlightInstruments(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawTitleBackdrop(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
@@ -167,6 +168,8 @@ private:
     std::vector<SceneDraw> drawCommands_;
     std::vector<MiningTerrainCellPresentationState> miningTerrainCellStates_;
     std::vector<MiningTerrainScannerPresentationState> miningTerrainScannerStates_;
+    std::vector<std::uint8_t> miningPulseNewlyRevealedCells_;
+    float previousMiningScannerPulse_ = 0.0F;
     MiningTerrainPresentationKey miningTerrainPresentationKey_;
     std::uint32_t miningBackdropFogInstanceCount_ = 0;
     std::uint32_t miningBaseTerrainInstanceCount_ = 0;

@@ -4,6 +4,7 @@
 #include "core/GameFormat.h"
 #include "core/GameState.h"
 #include "core/PanelPresentation.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <string>
@@ -12,6 +13,19 @@
 #include <vector>
 
 namespace rocket {
+
+inline std::string researchDataInventoryProgress(int progress)
+{
+    for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
+        if (progress < milestone.threshold) {
+            return std::to_string(std::max(0, progress)) + " / " + std::to_string(milestone.threshold)
+                + " — next " + unlockDisplayName(milestone.key);
+        }
+    }
+    const int finalThreshold = tuning::unlocks::blueprintUnlocks[
+        std::size(tuning::unlocks::blueprintUnlocks) - 1].threshold;
+    return std::to_string(std::max(0, progress)) + " / " + std::to_string(finalThreshold);
+}
 
 struct InventoryItemPresentation {
     std::string glyph;
@@ -117,7 +131,13 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
         "Stowed materials available for research, Drone Bay work, and special components.",
         {}
     };
-    addInventoryItem(resources, "BP", text::labels::blueprints.data(), "Research and unlock progress", std::to_string(state.meta.blueprintProgress), "blueprint");
+    addInventoryItem(
+        resources,
+        "RD",
+        text::labels::blueprints.data(),
+        "Milestones add families to future Refit offers; they are not immediately owned",
+        researchDataInventoryProgress(state.meta.blueprintProgress),
+        "blueprint");
     addInventoryItem(resources, "CM", text::labels::commonMaterials.data(), "Bulk build stock", std::to_string(owned.common), "common rarity-common");
     addInventoryItem(resources, "RM", text::labels::rareMaterials.data(), "Refined specialty stock", std::to_string(owned.rare), "rare rarity-rare");
     addInventoryItem(resources, "EX", text::labels::exoticMaterials.data(), "Deep-field material", std::to_string(owned.exotic), "exotic rarity-exotic");

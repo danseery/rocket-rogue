@@ -1119,6 +1119,10 @@ struct Destination {
     // destination ID.
     std::string provingRouteReadyTitle;
     std::string provingRouteReadyConsequence;
+    // Content-owned approach framing keeps destination story copy out of the
+    // generic Arrival board renderer.
+    std::string approachBriefTitle;
+    std::string approachBriefDetail;
     // Hidden origins remain addressable for save compatibility and route
     // calculations, but never appear as a player-facing destination.
     bool hiddenFromProgression = false;
@@ -1256,11 +1260,17 @@ struct StoryBriefingState {
     Screen continuation = Screen::Hangar;
 };
 
+enum class ApproachCommitment {
+    Uncommitted = 0,
+    OrbitCaptured = 1
+};
+
 struct ArrivalOpsState {
     bool active = false;
     std::string destinationId;
     double transferFuelRemaining = 0.0;
     double transferFuelCapacity = 0.0;
+    ApproachCommitment commitment = ApproachCommitment::Uncommitted;
 };
 
 struct FlybyTrailPoint {
@@ -1283,13 +1293,16 @@ struct FlybyRunState {
     double velocityX = 0.26;
     double velocityY = 0.13;
     double inputX = 0.0;
+    // A signed input that adjusts the retained throttle setpoint. It is not
+    // itself engine power: releasing the key/stick leaves selectedThrottle
+    // where the player set it.
     double inputY = 0.0;
+    double selectedThrottle = 0.0;
     double gravityStrength = 0.0;
     double goodBand = 0.145;
     double perfectBand = 0.050;
     double turnRateRadians = 1.45;
     double thrustAcceleration = 0.66;
-    double brakeAcceleration = 0.52;
     int impactHullDamage = 18;
     double pathProgress = 0.0;
     int worstZone = 2;
@@ -1327,7 +1340,11 @@ struct OrbitRunState {
     double velocityX = 0.0;
     double velocityY = 0.30;
     double inputX = 0.0;
+    // Vertical input adjusts the retained prograde throttle setpoint. Releasing
+    // the key/stick holds selectedThrottle while radial steering stays direct.
     double inputY = 0.0;
+    double selectedThrottle = 0.0;
+    bool trimApplied = false;
     double gravityStrength = 0.040;
     double thrustAcceleration = 0.075;
     double collisionPadding = 0.018;
@@ -1411,6 +1428,9 @@ struct SurfaceScanRunState {
     SurfaceScanPulseGrade lastPulseGrade = SurfaceScanPulseGrade::None;
     int lastPulseDepthOffset = 0;
     double successFanfareSeconds = 0.0;
+    // Presentation-only sting after a missed pulse. It has no impact on
+    // survey rewards, risk, or saved progression.
+    double missFanfareSeconds = 0.0;
     double signal = 0.0;
     double interference = 0.0;
     double bustRisk = 0.0;

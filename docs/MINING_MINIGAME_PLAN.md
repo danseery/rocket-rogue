@@ -30,7 +30,7 @@ Mining is the landed version of the rocket launch loop:
 Current flow:
 
 1. Reach a destination.
-2. Choose Flyby, Orbit, or Landing.
+2. Commit to Pass Through, Orbit Capture, or Direct Descent. Orbit Capture can continue into mapped landing; Direct Descent carries the visible `+0.20` hazard.
 3. Landing opens Research, then Surface Ops.
 4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked. Mine deposit remains unavailable until Survey Site or Push Deeper prepares the site.
 5. Push Deeper guarantees a bankable layer +1. Collapse risk begins on the attempt for layer +2; a scanned artifact becomes guaranteed when its mapped layer succeeds.
@@ -183,7 +183,7 @@ Research improves mining through specific tools:
 - Field Probe Network: more action-kit margin and better survey support.
 - Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
-- Mission Analysis Lab: extra blueprint progress from recovered field notes.
+- Mission Analysis Lab: extra Research Data from recovered field notes in the deferred debug Research board.
 - Moon mining contract: 30 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
 - Mars bay contract: 40 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Slot 2` consumes the reserve and opens an empty specialist slot.
 - Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.

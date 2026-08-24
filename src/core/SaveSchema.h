@@ -63,6 +63,7 @@ inline constexpr std::string_view arrivalActive = "arrivalActive";
 inline constexpr std::string_view arrivalDestination = "arrivalDestination";
 inline constexpr std::string_view arrivalTransferFuelRemaining = "arrivalTransferFuelRemaining";
 inline constexpr std::string_view arrivalTransferFuelCapacity = "arrivalTransferFuelCapacity";
+inline constexpr std::string_view arrivalApproachCommitment = "arrivalApproachCommitment";
 inline constexpr std::string_view surfaceActive = "surfaceActive";
 inline constexpr std::string_view surfaceDestination = "surfaceDestination";
 inline constexpr std::string_view surfaceSite = "surfaceSite";

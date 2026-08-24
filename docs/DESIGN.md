@@ -7,7 +7,7 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 - Skill-based launch tension with visible fuel, control, temperature, and hull tradeoffs and no real-money gambling mechanics.
 - Ship-first management through readable permanent systems, expedition damage, and meaningful upgrade tracks.
 - Light but painful crew consequences.
-- Roguelite persistence through unlock variety, records, memorials, and blueprints.
+- Roguelite persistence through unlock variety, records, memorials, and Research Data milestones.
 - Asset-light proof of concept using backend-neutral procedural primitives, RmlUi mission-control panels, and replaceable arcade sprites across native Vulkan and WebGL2 builds.
 
 ## Core loop
@@ -19,25 +19,27 @@ For future design work, start with `docs/AGENT_DESIGN_CONTEXT.md`. It links the 
 5. Add Temperature and `Engines Off` for the Mars thermal qualification. Engine cuts always cool and coasting cannot finish the route for free.
 6. Add Hull and a guaranteed-steerable asteroid belt for Jupiter. Skilled no-hit play can bypass Hull Plating, while collisions make the upgrade valuable.
 7. Use `Turn Around` to fly the same stateful ship home from surveys. Training failures are non-destructive rescues; frontier-transfer failures retain normal consequences.
-8. Continue through the authored surface, Flyby, Orbit, and outer-system progression without changing those minigames.
+8. At each arrival, commit to Pass Through, Orbit Capture, or Direct Descent before continuing through the authored surface and outer-system progression.
 
 ## Post-arrival research loop
 
-Surface expeditions start at the Moon with a narrow mining lesson; broader research still starts at Mars. The launch curriculum reaches for the Moon immediately, while Earth Orbit remains only as a hidden compatibility origin. The Moon teaches inert regolith versus gray Common Ore and explicit contract delivery, and Mars turns that lesson into the second Drone Bay slot and wider long-term capability.
+Surface expeditions start at the Moon with a narrow mining lesson. The launch curriculum reaches for the Moon immediately, while Earth Orbit remains only as a hidden compatibility origin. The Moon teaches inert regolith versus gray Common Ore and explicit contract delivery, and Mars turns that lesson into the second Drone Bay slot and wider long-term capability. The generated Research board remains a debug-only prototype rather than a campaign phase.
 
 See `docs/POST_ARRIVAL_PHASES.md` for the detailed phase breakdown and Unity prototype takeaways.
 See `docs/MINI_DRONE_SYSTEM.md` for the persistent Drone Bay / Support Drone layer.
 See `docs/MINING_MINIGAME_PLAN.md` for the authoritative rig/EVA physics, controls, failure, loose-chunk, and tether contract.
 
-The first implemented phase model is:
+The implemented phase model is:
 
 1. Complete a frontier-transfer arrival at the Moon or beyond.
-2. Choose from generated research projects that convert blueprints and recovered materials into unlock variety.
-3. Start a surface expedition with action kits, a 3-unit expedition rig pack plus transfer fuel preserved at touchdown, a rolled site profile, and a short mission log.
+2. Commit to one approach. Good/Perfect Pass Through ends the visit; Orbit Capture closes Pass Through and exposes mapped landing or science departure; Direct Descent immediately accepts `+0.20` hazard and starts Surface Ops.
+3. If landing, start a surface expedition with action kits, a 3-unit expedition rig pack plus transfer fuel preserved at touchdown, a rolled site profile, and a short mission log.
 4. Survey, use Push Deeper, or deploy the player-controlled Mining Rig for one fuel-gated mining run.
 5. Extract the payload before hazard, cargo, low kits, or spent fuel make recovery too risky.
 
-The first selection of optional Flyby and Orbit activities retains saved introductions. Campaign-critical surface beats use mandatory, non-dismissible briefings and explicit claims: deliver 30 lunar Common Ore and install Prospector Mk I/Slot 1; deliver 40 Mars Common Ore and fabricate empty Slot 2; commission the Hazard Support Drone Mk I on Io, cool and mine two four-segment lava seals, and safely extract the minor artifact; then claim a Perfect Jupiter slingshot to open Saturn. Moon remains the simple excavation-and-return lesson; Mars makes repeated oxygen, heat, integrity, repair, cargo, and return decisions mandatory. Live objectives expose carried, aboard, delivered, ready-to-claim, and complete state rather than advancing silently.
+Arrival choices retain saved introductions and show exact Research Data, credits, route effects, launch boosts, and descent hazard before commitment. Pass Through cannot bypass authored Moon, Mars, or Io objectives; later destinations with generic Flight Data gates use it as the fast route-clearance path. Campaign-critical surface beats still use mandatory, non-dismissible briefings and explicit claims: deliver 30 lunar Common Ore and install Prospector Mk I/Slot 1; deliver 40 Mars Common Ore and fabricate empty Slot 2; commission the Hazard Support Drone Mk I on Io, cool and mine two four-segment lava seals, and safely extract the minor artifact; then claim the distinct Perfect Jupiter departure slingshot to open Saturn.
+
+The old generated Research board is debug-only and campaign-inaccessible. It spends materials and can award internal blueprint progress, but Orbit does not open it. Restoring and redesigning that board is a separate feature. Player-facing blueprint progress is `Research Data`; thresholds `2/8/12/18/24` automatically add Thermal, Recovery, Deep-Space, Predictive Guidance, and Exotic families to future Refit offers and create saved breakthrough reviews.
 
 Surface exploration should stay distinct from active launch piloting. Before Saturn, the launch loop asks "can we fly there and back?" The surface loop asks "how much can we safely recover before the expedition overextends?" Claiming the Saturn course commits the expedition outward; later recovery copy says `Recover to Expedition`, never promises a return to Earth, and changes to `Return to Ark` only after the Straylight discovery. The solar system and Aaru Vale do not have enemies. Enemy encounters begin only after Arkfall near Khepri Prime, when the game leaves familiar exploration and introduces hostile unknowns.
 

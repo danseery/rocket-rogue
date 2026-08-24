@@ -8,27 +8,31 @@ This note extends the current launch/refit prototype with the next two layers: r
 
 The launch curriculum begins Moon-bound: Fuel Survey, Flight Controls Calibration, and the first true transfer all happen before surface play. Earth Orbit is only a hidden save-compatibility origin. After arrival, the Moon adds the first explicit surface objective: safely deliver 30 lunar Common Ore and claim Prospector Mk I plus Drone Bay Slot 1.
 
-Mars is the first research frontier. After a successful Mars arrival, the game opens a post-arrival sequence:
+Every successful surface-destination arrival opens a committed approach decision:
 
 1. Arrival summary: confirms the transfer succeeded and shows what the agency can investigate.
-2. Research phase: spend recovered materials and blueprints to unlock new module families, crew facilities, surface tools, and artifact analysis threads.
-3. Surface expedition: spend action kits to survey/push/extract and spend arrival-derived rig fuel to deploy the player-controlled Mining Rig.
+2. Approach commitment: Pass Through ends the visit; Orbit Capture opens mapped landing or science departure; Direct Descent starts Surface Ops with `+0.20` hazard.
+3. Surface expedition after landing: spend action kits to survey/push/extract and arrival-derived rig fuel to deploy the player-controlled Mining Rig.
 4. Recovery decision: return with the payload before hazard, cargo weight, low action kits, or low fuel makes extraction too risky.
-5. Refit window: use credits, research unlocks, and recovered materials to improve the next launch cycle.
+5. Refit window: use credits, Research Data families, and recovered materials to improve the next launch cycle.
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Optional Flyby and Orbit activities still explain their progression value at first use, but campaign-critical mining beats use mandatory saved briefings and explicit claim actions. The Moon objective distinguishes Rig, Drone, Ship, and committed ore before it opens Drone Ops with a funded Prospector Mk I fabrication. The player explicitly fabricates and assigns that first frame, introducing permanent Drone ownership and temporary Expedition Mk ranks. Mars repeats the lesson with 40 local Common Ore and `Fabricate Slot 2`, leaving the slot empty until a specialist is deliberately commissioned, equipped, or fabricated as a paid duplicate. Its first briefing calls out the active oxygen timer, drill heat, integrity wear, field repairs, and return decision.
+Arrival choices explain their exact progression value before commitment. Good or Perfect Pass Through banks one Research Data plus credits and closes Orbit/Landing; Perfect also stores the next-launch solution. Orbit banks its tiered Research Data and credits, removes the unmapped descent penalty for that visit, and then offers Land or Depart. Misses and aborts do not commit. Campaign-critical mining beats use mandatory saved briefings and explicit claim actions. Moon, Mars, and Io may be skipped for a visit, but their objective remains incomplete and the authored onward route stays locked.
 
 The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The current authored site presents outer and inner four-segment lava layers, then requires protected-Artifact towing and safe Surface extraction. The Artifact grants the standard 75 Expedition XP on full return while the authored scenario preserves its story and route unlocks. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward. Future protected sites configure the same reusable cocoon, objective, event, and reward boundaries rather than adding destination-specific mining code.
 
-## Research Phase
+## Research Data And Deferred Research Board
 
-Research is a strategic menu phase, not an action scene. It should be quick, readable, and tied to long-term agency capability.
+The player-facing progression currency is `Research Data`; the internal/save field remains `blueprintProgress` for version-13 compatibility. It is not spendable. At `2/8/12/18/24`, it automatically adds Thermal, Recovery, Deep-Space, Predictive Guidance, and Exotic families to future Refit offers. It does not grant or install an item. The UI always shows current/next milestone and uses saved `RESEARCH BREAKTHROUGH` reviews when a threshold is crossed.
+
+The generated Research board is currently debug-only: normal campaign play neither generates its projects nor enters its screen. Its prototype projects spend recovered materials and grant additional Research Data. Orbit does not open the board. Restoring and redesigning it is deferred as a separate feature.
+
+The deferred board's inputs are:
 
 Research inputs:
 
-- Blueprints from launch milestones and later press-your-luck transfers.
+- Research Data from launch milestones and later press-your-luck transfers.
 - Common, rare, and exotic materials from surface expeditions.
 - Identified artifacts from deeper exploration.
 - Frontier tier, so advanced projects appear only after the agency reaches the right scale.
@@ -45,7 +49,7 @@ Design rule: research should mostly unlock variety and new decisions, not perman
 
 The current POC treats research facilities and surface tools as small unlock layers:
 
-- Mission Analysis Lab adds a small blueprint bonus to future research, representing better debriefs and sample processing.
+- Mission Analysis Lab adds a small Research Data bonus to future debug research, representing better debriefs and sample processing.
 - Field probes add action-kit margin and improve survey yield.
 - Surface drills improve mining yield and rare-material odds.
 - Cargo rigs reduce Push Deeper hazard chances while retaining their visible hauling benefits.
@@ -147,8 +151,8 @@ Avoid for now:
 
 The current shared C++ native/web application should keep this scope focused:
 
-- Mars arrival opens research.
-- Research projects spend materials and blueprints.
+- The Research board is debug-only and is not opened by Mars or Orbit.
+- Debug research projects spend materials and grant Research Data; redesign is deferred.
 - Some research unlocks module or facility families.
 - Mission Analysis Lab improves future research output.
 - Some research unlocks field-kit tools that change future surface expedition math.

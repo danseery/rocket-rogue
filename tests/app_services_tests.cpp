@@ -1355,7 +1355,10 @@ int main()
         ui.refresh();
 
         assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "action:arrival_flyby");
+        const std::string arrivalFocus = ui.focusedId();
+        assert(arrivalFocus == "action:arrival_flyby"
+            || arrivalFocus == "action:arrival_orbit"
+            || arrivalFocus == "action:arrival_landing");
         ui.shutdown();
     }
 

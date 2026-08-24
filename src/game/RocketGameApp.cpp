@@ -1,6 +1,7 @@
 #include "game/RocketGameApp.h"
 
 #include "core/FlightProgress.h"
+#include "core/FlightInstrumentPresentation.h"
 #include "core/ContentIds.h"
 #include "core/GameUi.h"
 #include "core/GameText.h"
@@ -569,6 +570,15 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         state_.statusLine = std::string(text::status::refitWindowClosed);
     }
+}
+
+void RocketGameApp::finishArrivalVisit(std::string statusLine)
+{
+    state_.run.arrivalOps = {};
+    if (!openRefitIfAvailable()) {
+        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+    }
+    state_.statusLine = std::move(statusLine);
 }
 
 bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
@@ -1744,6 +1754,9 @@ void RocketGameApp::tick(double deltaSeconds)
         state_.run.surfaceScan.successFanfareSeconds = std::max(
             0.0,
             state_.run.surfaceScan.successFanfareSeconds - clampedDelta);
+        state_.run.surfaceScan.missFanfareSeconds = std::max(
+            0.0,
+            state_.run.surfaceScan.missFanfareSeconds - clampedDelta);
         realtimeHudDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
@@ -2114,14 +2127,16 @@ void RocketGameApp::flybyContinue()
     completeFlybyRun(state_, catalog_);
     switch (grade) {
     case FlybyGrade::Perfect:
-        state_.statusLine = "Perfect slingshot telemetry validated. Choose the next approach.";
+        (void)bankFlybyRouteClearance(state_, catalog_);
+        finishArrivalVisit("Planet skipped. Perfect launch solution stored for the next launch.");
         break;
     case FlybyGrade::Good:
-        state_.statusLine = "Flyby telemetry validated. Choose the next approach.";
+        (void)bankFlybyRouteClearance(state_, catalog_);
+        finishArrivalVisit("Planet skipped. Pass Through complete.");
         break;
     case FlybyGrade::Miss:
     default:
-        state_.statusLine = "Missed window. Choose another approach or try again.";
+        state_.statusLine = "Missed window. Approach remains uncommitted.";
         break;
     }
     syncLaunchConfig(state_, catalog_);
@@ -2176,14 +2191,16 @@ void RocketGameApp::orbitContinue()
     completeOrbitRun(state_, catalog_);
     switch (grade) {
     case OrbitGrade::Perfect:
-        state_.statusLine = "Perfect orbit telemetry validated. Choose the next approach.";
+        (void)captureArrivalOrbit(state_);
+        state_.statusLine = "Orbit captured. Choose mapped landing or depart with science.";
         break;
     case OrbitGrade::Good:
-        state_.statusLine = "Orbit telemetry validated. Choose the next approach.";
+        (void)captureArrivalOrbit(state_);
+        state_.statusLine = "Orbit captured. Choose mapped landing or depart with science.";
         break;
     case OrbitGrade::Miss:
     default:
-        state_.statusLine = "Missed orbit. Choose another approach or try again.";
+        state_.statusLine = "Missed orbit. Approach remains uncommitted.";
         break;
     }
     syncLaunchConfig(state_, catalog_);
@@ -2200,9 +2217,25 @@ void RocketGameApp::attemptArrivalLanding()
     }
 
     ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::landing);
-    state_.statusLine = std::string(text::status::landingCommitted);
+    const bool mappedDescent = state_.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
     bankArrivalLandingFlightData(state_, catalog_);
     beginSurfaceExpeditionOrRefit();
+    state_.statusLine = mappedDescent
+        ? "Mapped descent committed. Orbital survey removed the +20 descent hazard."
+        : "Unmapped descent committed. Surface hazard +20.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::departCapturedOrbit()
+{
+    if (state_.screen != Screen::ArrivalOps
+        || state_.run.arrivalOps.commitment != ApproachCommitment::OrbitCaptured) {
+        return;
+    }
+
+    finishArrivalVisit("Departed with orbital science. No route clearance or surface Flight Data earned.");
     syncLaunchConfig(state_, catalog_);
     save();
     panelDirty_ = true;
@@ -4104,6 +4137,17 @@ void RocketGameApp::runUiAction(const std::string& action)
     int index = 0;
     if (runScenarioUiAction(action) || runLegacyScenarioUiAction(action)) {
         return;
+    } else if (action.starts_with(ui::actions::acknowledgeResearchBreakthroughPrefix)) {
+        const std::string key = action.substr(ui::actions::acknowledgeResearchBreakthroughPrefix.size());
+        for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
+            if (milestone.key == key && state_.meta.blueprintProgress >= milestone.threshold && hasUnlock(state_.meta, key)) {
+                ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, action);
+                state_.statusLine = unlockDisplayName(key) + " added to future Refit offers.";
+                save();
+                panelDirty_ = true;
+                break;
+            }
+        }
     } else if (action == ui::actions::newGame) {
         newGame();
     } else if (action == ui::actions::continueGame) {
@@ -4164,6 +4208,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         orbitContinue();
     } else if (action == ui::actions::arrivalLanding) {
         attemptArrivalLanding();
+    } else if (action == ui::actions::arrivalOrbitDepart) {
+        departCapturedOrbit();
     } else if (action == ui::actions::skipResearch) {
         skipResearch();
     } else if (action == ui::actions::surveySurface) {
@@ -4348,6 +4394,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
         result.miningContactIntensity = mining.contactIntensity;
         result.miningScannerPulse = mining.scannerPulseSeconds;
+        result.miningScannerRechargeProgress = tuning::mining::scannerRechargePresentationProgress(
+            state_.run.surfaceExpedition.scannerCooldownSeconds);
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
         if (!miningExtraction_.active) {
             result.miningPoiGuidance = miningPoiGuidanceTarget(
@@ -4444,6 +4492,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.flybyShipY = flyby.shipY;
         result.flybyVelocityX = flyby.velocityX;
         result.flybyVelocityY = flyby.velocityY;
+        result.flybyInputX = flyby.inputX;
         result.flybyInputY = flyby.inputY;
         result.flybyDestinationX = tuning::flyby::destinationX;
         result.flybyDestinationY = tuning::flyby::destinationY;
@@ -4484,6 +4533,10 @@ RenderSnapshot RocketGameApp::snapshot() const
             : tuning::research::scanGoodSuccessFanfareSeconds;
         result.surfaceScanSuccessFanfare = std::clamp(
             scan.successFanfareSeconds / fanfareDuration,
+            0.0,
+            1.0);
+        result.surfaceScanMissFanfare = std::clamp(
+            scan.missFanfareSeconds / tuning::research::scanMissFanfareSeconds,
             0.0,
             1.0);
         result.surfaceScanLastPulseGrade = scan.lastPulseGrade;
@@ -4562,6 +4615,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
         result.heat = flightModel.heatEnabled ? session_.flight.heat : 0.0;
         result.warning = event.warning;
+        result.launchSteerInput = session_.steerInput;
         result.launchThrottle = session_.controls.actions.cutEnginesActive ? 0.0 : session_.flight.selectedThrottle;
         result.launchFuel = session_.flight.fuelRemaining / std::max(0.01, session_.flight.fuelCapacity);
         result.launchCourseOffset = session_.flight.courseOffset;
@@ -4603,6 +4657,22 @@ RenderSnapshot RocketGameApp::snapshot() const
         }
         result.telemetryCount = count;
     }
+
+    FlightInstrumentPresentation instruments;
+    if (state_.screen == Screen::Launch && session_.flightArmed && !session_.lunarImpact.active) {
+        instruments = launchFlightInstruments(flightModel, session_.flight);
+    } else if (state_.screen == Screen::Flyby) {
+        instruments = flybyFlightInstruments(state_.run.flyby);
+    } else if (state_.screen == Screen::Orbit) {
+        instruments = orbitFlightInstruments(state_.run.orbit);
+    }
+    result.flightInstrumentsVisible = instruments.visible;
+    result.instrumentSpeed = instruments.speed;
+    result.instrumentTemperature = instruments.temperature;
+    result.instrumentFuel = instruments.fuel;
+    result.instrumentThrottle = instruments.throttle;
+    result.instrumentOffCourse = instruments.offCourse;
+    result.instrumentCourseCritical = instruments.courseCritical;
 
     return result;
 }

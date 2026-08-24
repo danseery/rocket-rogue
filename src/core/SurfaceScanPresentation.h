@@ -16,7 +16,7 @@ namespace rocket {
 struct SurfaceScanRailPresentation {
     std::string kicker = "OREBIT";
     std::string title = "Survey Scan";
-    std::string objective = "Time the pulse: green maps all data; yellow maps 80%.";
+    std::string objective = "Time the pulse: gold maps all data; green maps 80%.";
     std::array<PanelMetricPresentation, 3> metrics;
     std::string signal;
     int signalPercent = 0;

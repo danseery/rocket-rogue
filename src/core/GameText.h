@@ -30,7 +30,7 @@ inline constexpr std::string_view orbitCompleted = "Orbital insertion complete. 
 inline constexpr std::string_view moonFlybyRequired = "Moon landing requires one flyby before the agency clears orbital work.";
 inline constexpr std::string_view moonOrbitRequired = "Moon landing requires a successful orbit before descent.";
 inline constexpr std::string_view landingCommitted = "Landing committed. Surface team is preparing the extraction plan.";
-inline constexpr std::string_view researchCompleted = "Research completed. Blueprint work logged in the agency archive.";
+inline constexpr std::string_view researchCompleted = "Research completed. Research Data logged in the agency archive.";
 inline constexpr std::string_view researchSkipped = "Research skipped. The field team kept the schedule moving.";
 inline constexpr std::string_view surfaceExpeditionStarted = "Surface expedition underway. Gather what you can, then extract before the risk spikes.";
 inline constexpr std::string_view surfaceSurveyed = "Surface survey logged recoverable samples.";
@@ -44,7 +44,7 @@ inline constexpr std::string_view surfaceDrillHazard = "Drill chatter damaged ca
 inline constexpr std::string_view surfaceTerrainHazard = "Unstable terrain forced a costly route correction.";
 inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault consumed spare action kits.";
 inline constexpr std::string_view surfaceUnexpectedDeposit = "Field team uncovered an unexpected deposit.";
-inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added a blueprint lead.";
+inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added Research Data.";
 inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced the field team into a defensive retreat.";
 inline constexpr std::string_view miningStarted = "Mining Rig deployed. Mine outward; Support Drones deliver to the Ship automatically.";
 inline constexpr std::string_view miningStowed = "Ship cargo secured. Oxygen replenished.";
@@ -162,7 +162,7 @@ inline constexpr std::string_view recovery = "Recovery";
 inline constexpr std::string_view failurePoint = "Failure point";
 inline constexpr std::string_view peakWarning = "Peak warning";
 inline constexpr std::string_view creditDelta = "Credit delta";
-inline constexpr std::string_view blueprints = "Blueprints";
+inline constexpr std::string_view blueprints = "Research Data";
 inline constexpr std::string_view artifactInsight = "Artifact insight";
 inline constexpr std::string_view labBonus = "Lab bonus";
 inline constexpr std::string_view commonMaterials = "Common mats";
@@ -551,7 +551,7 @@ inline constexpr std::string_view crew = "Crew";
 inline constexpr std::string_view requiredAction = "Required action";
 inline constexpr std::string_view ship = "Ship";
 inline constexpr std::string_view frontier = "Frontier";
-inline constexpr std::string_view blueprints = "Blueprints";
+inline constexpr std::string_view blueprints = "Research Data";
 inline constexpr std::string_view commonMaterials = "Common materials";
 inline constexpr std::string_view rareMaterials = "Rare materials";
 inline constexpr std::string_view exoticMaterials = "Exotic materials";
@@ -582,7 +582,7 @@ inline constexpr std::string_view refitPhase = "Refit";
 inline constexpr std::string_view flyby = "Flyby";
 inline constexpr std::string_view orbit = "Orbit";
 inline constexpr std::string_view landing = "Landing";
-inline constexpr std::string_view blueprintUse = "Blueprint use";
+inline constexpr std::string_view blueprintUse = "Research Data use";
 inline constexpr std::string_view materialsUse = "Materials use";
 inline constexpr std::string_view artifactInsightUse = "Artifact insight";
 inline constexpr std::string_view labBonusUse = "Lab bonus";
@@ -635,11 +635,11 @@ inline constexpr std::string_view provingReturn = "Proving Return";
 namespace messages {
 inline constexpr std::string_view crewLossRecorded = "Crew loss recorded in the memorial ledger.";
 inline constexpr std::string_view crewInjured = "Crew injured. Rest before you ask for another miracle.";
-inline constexpr std::string_view postArrivalResearchReady = "Arrival opens a research window and surface expedition before refit.";
-inline constexpr std::string_view flybyDetail = "Safe telemetry pass. Validates flight telemetry for credits and blueprint progress, then returns to refit.";
-inline constexpr std::string_view orbitDetail = "Riskier orbital work. Validates higher-value science and opens research where facilities exist.";
+inline constexpr std::string_view postArrivalResearchReady = "Arrival opens committed approach choices before refit.";
+inline constexpr std::string_view flybyDetail = "Pass through for credits and Research Data, closing Orbit and Landing for this visit.";
+inline constexpr std::string_view orbitDetail = "Capture orbit for credits, Research Data, and a mapped descent; the Research board remains debug-only.";
 inline constexpr std::string_view landingDetail = "Highest-value operation. Opens surface exploration, material recovery, and artifacts.";
-inline constexpr std::string_view recoveredResourcesDetail = "Recovered samples, blueprints, and artifacts feed research and material-gated ship parts.";
+inline constexpr std::string_view recoveredResourcesDetail = "Recovered samples, Research Data, and artifacts feed milestone and material-gated ship parts.";
 inline constexpr std::string_view totalHullBlocked = "Mission control will not clear a vehicle at total hull damage.";
 inline constexpr std::string_view noLivingCrewBlocked = "Choose the next crew specialist before launch.";
 inline constexpr std::string_view noStructuralWork = "No structural work is needed right now.";
@@ -741,7 +741,7 @@ inline std::string rerollOffers(std::string cost)
 
 inline std::string blueprintGain(int amount)
 {
-    return "+" + std::to_string(amount) + " BP";
+    return "+" + std::to_string(amount) + " Research Data";
 }
 
 inline std::string materialSummary(int common, int rare, int exotic)

@@ -1,5 +1,6 @@
 #include "render/SceneComposer.h"
 
+#include "core/FlightInstrumentLayout.h"
 #include "core/UiViewportLayout.h"
 
 #include "core/MiningSystem.h"
@@ -25,13 +26,33 @@ constexpr float kSceneViewportPadding = 0.92F;
 // trajectory remain legible on a Steam Deck without changing simulation.
 constexpr float kOrbitSceneScale = 1.66F;
 constexpr float kFlybySceneScale = 1.50F;
+constexpr Color kFlightPathTrailColor {1.0F, 0.18F, 0.16F, 1.0F};
+constexpr float kFlightPathTrailAlphaStart = 0.18F;
+constexpr float kFlightPathTrailAlphaRange = 0.34F;
+constexpr float kFlightPathTrailWidth = 2.4F;
+constexpr float kManeuverBoosterHalfWidth = 0.007F;
+constexpr float kManeuverBoosterBaseLength = 0.013F;
+constexpr float kManeuverBoosterLengthRange = 0.016F;
+constexpr float kFlightThrustWidth = 0.054F;
+constexpr float kFlightThrustHeight = 0.104F;
+// Keep the leading edge of the animated sheet at the nozzle while letting the
+// exhaust visibly breathe with throttle. The padding matches the transparent
+// leading edge in the authored thrust frames.
+constexpr float kFlightThrustNozzlePadding = 0.023F;
+constexpr float kFlightThrustMinimumLengthScale = 0.40F;
+constexpr float kFlightThrustMinimumWidthScale = 0.72F;
+constexpr float kLaunchThrustNozzlePaddingScale = 0.245F;
+constexpr float kLaunchThrustMinimumLengthScale = 0.40F;
+constexpr float kLaunchThrustMinimumWidthScale = 0.72F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
 // than letting the dock clip its lower edge.
 constexpr float kBottomDockSceneViewportPadding = 0.56F;
 constexpr float kMiningLightRadiusCells = 2.15F;
-constexpr float kMiningScannerPulseSeconds = 0.9F;
+constexpr float kMiningScannerExpandSeconds = 0.34F;
+constexpr float kMiningScannerFadeSeconds = 0.30F;
+constexpr float kMiningScannerWavefrontCells = 0.65F;
 constexpr float kMiningPickupTextLifetimeSeconds = 2.0F;
 constexpr float kMiningPickupTextScale = 2.25F;
 // Core gameplay permits four base Dig steps plus at most two depth-envelope
@@ -101,7 +122,8 @@ enum ArtAsset {
     HeroicCapybaraAsset = 33,
     JetpackCapybaraAsset = 34,
     PoiGuidanceArrowAsset = 35,
-    AsteroidAsset = 36
+    AsteroidAsset = 36,
+    FlightInstrumentClusterAsset = 37
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -768,6 +790,8 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         previousMiningStowedCargo_ = 0;
         lastMiningPickupEventSequence_ = 0;
         miningSurveyDrones_.clear();
+        miningPulseNewlyRevealedCells_.clear();
+        previousMiningScannerPulse_ = 0.0F;
         miningPickupBursts_.clear();
         miningPickupBurstScratch_.clear();
         miningVisualHeadingInitialized_ = false;
@@ -851,8 +875,143 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
             }
         }
     }
+    if (snapshot.flightInstrumentsVisible) {
+        drawFlightInstruments(snapshot);
+    }
     finalizePacket();
     return packet_;
+}
+
+void SceneComposer::drawFlightInstruments(const RenderSnapshot& snapshot)
+{
+    const UiRect scene = packet_.logicalSceneClip;
+    const float availableWidth = std::max(flight_instrument_layout::kMinimumWidthPixels, static_cast<float>(scene.width - 24));
+    const float availableHeight = std::max(120.0F, static_cast<float>(scene.height - 24));
+    const float clusterWidth = std::max(
+        flight_instrument_layout::kMinimumWidthPixels,
+        std::min({flight_instrument_layout::kMaximumWidthPixels, availableWidth, availableHeight / flight_instrument_layout::kAspectRatio}));
+    const float clusterHeight = clusterWidth * flight_instrument_layout::kAspectRatio;
+    const float clusterLeft = static_cast<float>(scene.x + scene.width) - clusterWidth - flight_instrument_layout::kSceneInsetPixels;
+    const int promptClearance = std::clamp((scene.height * 6) / 100, 28, 64);
+    const float clusterTop = static_cast<float>(scene.y + scene.height - promptClearance) - clusterHeight;
+
+    const auto clipX = [&](float pixelX) {
+        return pixelX / std::max(1.0F, sceneCssWidth_) * 2.0F - 1.0F;
+    };
+    const auto clipY = [&](float pixelY) {
+        return 1.0F - pixelY / std::max(1.0F, sceneCssHeight_) * 2.0F;
+    };
+    const float clusterCenterX = clipX(clusterLeft + clusterWidth * 0.5F);
+    const float clusterCenterY = clipY(clusterTop + clusterHeight * 0.5F);
+    const float clusterClipWidth = clusterWidth / std::max(1.0F, sceneCssWidth_) * 2.0F;
+    const float clusterClipHeight = clusterHeight / std::max(1.0F, sceneCssHeight_) * 2.0F;
+
+    if (textureReady(FlightInstrumentClusterAsset)) {
+        drawSprite(
+            clusterCenterX,
+            clusterCenterY,
+            clusterClipWidth,
+            clusterClipHeight,
+            {1.0F, 1.0F, 1.0F, 0.96F},
+            FlightInstrumentClusterAsset,
+            0,
+            1,
+            false);
+    } else {
+        drawRect(
+            clusterCenterX,
+            clusterCenterY,
+            clusterClipWidth,
+            clusterClipHeight,
+            {0.035F, 0.055F, 0.070F, 0.90F},
+            false);
+    }
+
+    const auto drawNeedle = [&](float centerShareX,
+                                float centerShareY,
+                                float radiusShare,
+                                double normalized,
+                                Color color) {
+        const float centerPixelX = clusterLeft + clusterWidth * centerShareX;
+        const float centerPixelY = clusterTop + clusterHeight * centerShareY;
+        // Read left-to-right around the top of each dial: empty begins at the
+        // lower-left and full ends at the lower-right, matching the bezel.
+        const float angle = (220.0F - 260.0F * static_cast<float>(std::clamp(normalized, 0.0, 1.0))) *
+            kPi / 180.0F;
+        const float radiusPixels = clusterWidth * radiusShare;
+        const float tipPixelX = centerPixelX + std::cos(angle) * radiusPixels;
+        const float tipPixelY = centerPixelY - std::sin(angle) * radiusPixels;
+        drawLine(
+            clipX(centerPixelX),
+            clipY(centerPixelY),
+            clipX(tipPixelX),
+            clipY(tipPixelY),
+            color,
+            3.0F,
+            false);
+        drawRect(
+            clipX(centerPixelX),
+            clipY(centerPixelY),
+            7.0F / std::max(1.0F, sceneCssWidth_) * 2.0F,
+            7.0F / std::max(1.0F, sceneCssHeight_) * 2.0F,
+            color,
+            false);
+    };
+
+    const bool temperatureCritical = snapshot.instrumentTemperature > 0.80;
+    const bool temperatureBlinkOn = static_cast<int>(std::floor(snapshot.animationTime * 3.0)) % 2 == 0;
+    const Color temperatureColor = temperatureCritical && temperatureBlinkOn
+        ? Color {1.0F, 0.18F, 0.10F, 1.0F}
+        : Color {1.0F, 0.68F, 0.12F, 1.0F};
+    const Color fuelColor = snapshot.instrumentFuel <= 0.20
+        ? Color {1.0F, 0.34F, 0.12F, 1.0F}
+        : Color {0.18F, 0.88F, 1.0F, 1.0F};
+    drawNeedle(flight_instrument_layout::kTemperatureDialCenterX, flight_instrument_layout::kTemperatureDialCenterY, flight_instrument_layout::kTemperatureNeedleRadius, snapshot.instrumentTemperature, temperatureColor);
+    drawNeedle(flight_instrument_layout::kSpeedDialCenterX, flight_instrument_layout::kSpeedDialCenterY, flight_instrument_layout::kSpeedNeedleRadius, snapshot.instrumentSpeed, {0.20F, 0.90F, 1.0F, 1.0F});
+    drawNeedle(flight_instrument_layout::kFuelDialCenterX, flight_instrument_layout::kFuelDialCenterY, flight_instrument_layout::kFuelNeedleRadius, snapshot.instrumentFuel, fuelColor);
+
+    const float throttleShare = static_cast<float>(std::clamp(snapshot.instrumentThrottle, 0.0, 1.0));
+    constexpr int throttleSegments = 10;
+    const int filledThrottleSegments = static_cast<int>(std::round(throttleShare * throttleSegments));
+    const float throttleTrackWidth = clusterWidth * flight_instrument_layout::kThrottleTray.width;
+    const float throttleSegmentGap = std::max(1.0F, clusterWidth * 0.005F);
+    const float throttleSegmentWidth =
+        (throttleTrackWidth - throttleSegmentGap * static_cast<float>(throttleSegments - 1)) /
+        static_cast<float>(throttleSegments);
+    const float throttleSegmentHeight = std::max(4.0F, clusterHeight * flight_instrument_layout::kThrottleTray.height);
+    const float throttleStartX = clusterLeft + clusterWidth * flight_instrument_layout::kThrottleTray.left;
+    const float throttleCenterY = clusterTop + clusterHeight * (flight_instrument_layout::kThrottleTray.top + flight_instrument_layout::kThrottleTray.height * 0.5F);
+    for (int segment = 0; segment < throttleSegments; ++segment) {
+        const bool filled = segment < filledThrottleSegments;
+        const bool highThrottle = segment >= 8;
+        drawRect(
+            clipX(throttleStartX + (throttleSegmentWidth + throttleSegmentGap) * static_cast<float>(segment) + throttleSegmentWidth * 0.5F),
+            clipY(throttleCenterY),
+            throttleSegmentWidth / std::max(1.0F, sceneCssWidth_) * 2.0F,
+            throttleSegmentHeight / std::max(1.0F, sceneCssHeight_) * 2.0F,
+            filled
+                ? (highThrottle
+                    ? Color {1.0F, 0.45F, 0.10F, 1.0F}
+                    : Color {0.22F, 0.92F, 1.0F, 1.0F})
+                : Color {0.03F, 0.12F, 0.16F, 0.92F},
+            false);
+    }
+
+    if (snapshot.instrumentOffCourse) {
+        const bool blinkOn = static_cast<int>(std::floor(snapshot.animationTime * 3.0)) % 2 == 0;
+        if (blinkOn) {
+            const Color warning = snapshot.instrumentCourseCritical
+                ? Color {1.0F, 0.10F, 0.05F, 0.88F}
+                : Color {1.0F, 0.58F, 0.05F, 0.78F};
+            drawRect(
+                clipX(clusterLeft + clusterWidth * (flight_instrument_layout::kNavigationWarning.left + flight_instrument_layout::kNavigationWarning.width * 0.5F)),
+                clipY(clusterTop + clusterHeight * (flight_instrument_layout::kNavigationWarning.top + flight_instrument_layout::kNavigationWarning.height * 0.5F)),
+                clusterClipWidth * flight_instrument_layout::kNavigationWarning.width,
+                clusterClipHeight * flight_instrument_layout::kNavigationWarning.height,
+                warning,
+                false);
+        }
+    }
 }
 
 void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
@@ -952,6 +1111,14 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
             const float shake = fanfare * fanfare * gradeScale;
             scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 89.0F) * shake * 4.2F;
             scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 73.0F) * shake * 3.0F;
+        }
+        const float miss = static_cast<float>(std::clamp(snapshot.surfaceScanMissFanfare, 0.0, 1.0));
+        if (miss > 0.0F) {
+            // A miss should feel more threatening than the positive result
+            // juice, but remains brief enough to preserve timing readability.
+            const float shake = miss * miss;
+            scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 121.0F) * shake * 8.0F;
+            scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 103.0F) * shake * 6.0F;
         }
     }
     if (cameraShakeEnabled && snapshot.screen == Screen::SurfacePush &&
@@ -1784,16 +1951,17 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
         for (std::size_t i = 1; i < snapshot.flybyTrailPoints.size(); ++i) {
             const FlybyTrailPoint& previous = snapshot.flybyTrailPoints[i - 1];
             const FlybyTrailPoint& current = snapshot.flybyTrailPoints[i];
-            const float alpha = 0.18F + 0.34F * (static_cast<float>(i) / static_cast<float>(snapshot.flybyTrailPoints.size() - 1));
+            const float alpha = kFlightPathTrailAlphaStart
+                + kFlightPathTrailAlphaRange * (static_cast<float>(i) / static_cast<float>(snapshot.flybyTrailPoints.size() - 1));
             appendLine(
                 pathVertices,
                 static_cast<float>(previous.x),
                 static_cast<float>(previous.y),
                 static_cast<float>(current.x),
                 static_cast<float>(current.y),
-                {1.0F, 0.18F, 0.16F, alpha});
+                {kFlightPathTrailColor.r, kFlightPathTrailColor.g, kFlightPathTrailColor.b, alpha});
         }
-        submitLines(pathVertices, 2.4F);
+        submitLines(pathVertices, kFlightPathTrailWidth);
     }
 
     const int zone = snapshot.flybyCompleted ? snapshot.flybyResult : snapshot.flybyZone;
@@ -1808,31 +1976,62 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
     drawRadialGlow(shipX, shipY, 0.078F + pulse * 0.008F, zoneGlow, 42);
     drawEllipseLine(shipX, shipY, 0.052F + pulse * 0.005F, 0.052F + pulse * 0.005F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
-    const float throttleInput = static_cast<float>(snapshot.flybyInputY);
-    if (!snapshot.flybyCompleted && throttleInput > 0.05F) {
-        const Vec2 thrust {-velocity.x, -velocity.y};
-        const Vec2 tail {
-            shipX + thrust.x * 0.072F,
-            shipY + thrust.y * 0.072F
-        };
-        drawCircle(tail.x, tail.y, 0.026F + pulse * 0.006F, {1.0F, 0.62F, 0.16F, 0.58F}, 18);
-        drawCircle(tail.x + thrust.x * 0.030F, tail.y + thrust.y * 0.030F, 0.014F, {1.0F, 0.92F, 0.36F, 0.64F}, 14);
-    }
-
+    // Use the live key input as well as the retained setting. This keeps the
+    // flame visible on the first Flyby frame that W is pressed.
+    const float throttle = std::max(
+        static_cast<float>(std::clamp(snapshot.instrumentThrottle, 0.0, 1.0)),
+        std::max(0.0F, static_cast<float>(snapshot.flybyInputY)));
     if (textureReady(RocketClosedAsset)) {
-        if (!snapshot.flybyCompleted && throttleInput > 0.05F && textureReady(ThrustAsset)) {
+        if (!snapshot.flybyCompleted && throttle > 0.01F && textureReady(ThrustAsset)) {
             const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+            const float plumeLength = kFlightThrustHeight * std::lerp(
+                kFlightThrustMinimumLengthScale,
+                1.0F,
+                throttle);
+            const float plumeWidth = kFlightThrustWidth * std::lerp(
+                kFlightThrustMinimumWidthScale,
+                1.0F,
+                throttle);
             drawSpriteRotated(
-                shipX - velocity.x * 0.030F,
-                shipY - velocity.y * 0.030F,
-                0.040F,
-                0.070F,
+                shipX - velocity.x * (kFlightThrustNozzlePadding + plumeLength * 0.5F),
+                shipY - velocity.y * (kFlightThrustNozzlePadding + plumeLength * 0.5F),
+                plumeWidth,
+                plumeLength,
                 velocity.x,
                 velocity.y,
-                {1.0F, 1.0F, 1.0F, 0.88F},
+                {1.0F, 1.0F, 1.0F, 0.96F},
                 ThrustAsset,
                 thrustFrame,
                 6);
+        }
+        const float steeringInput = static_cast<float>(
+            std::clamp(snapshot.flybyInputX, -1.0, 1.0));
+        if (!snapshot.flybyCompleted && std::abs(steeringInput) > 0.05F) {
+            // The triangle points toward the commanded turn side and is
+            // submitted before the rocket so its root remains behind/touching
+            // the hull. Its authored size matches the Orbit maneuver booster.
+            const float direction = steeringInput < 0.0F ? -1.0F : 1.0F;
+            const Vec2 turnSide {-velocity.y * direction, velocity.x * direction};
+            const Vec2 baseAxis {-turnSide.y, turnSide.x};
+            const Vec2 root {
+                shipX + turnSide.x * 0.052F,
+                shipY + turnSide.y * 0.052F
+            };
+            const float halfWidth = kManeuverBoosterHalfWidth;
+            const float length = kManeuverBoosterBaseLength
+                + std::abs(steeringInput) * kManeuverBoosterLengthRange;
+            const Vec2 tip {
+                root.x + turnSide.x * length,
+                root.y + turnSide.y * length
+            };
+            drawTriangle(
+                root.x + baseAxis.x * halfWidth,
+                root.y + baseAxis.y * halfWidth,
+                root.x - baseAxis.x * halfWidth,
+                root.y - baseAxis.y * halfWidth,
+                tip.x,
+                tip.y,
+                {1.0F, 0.42F, 0.06F, 1.0F});
         }
         drawSpriteRotated(shipX, shipY, 0.12F, 0.12F, velocity.x, velocity.y, {1.0F, 1.0F, 1.0F, 1.0F}, RocketClosedAsset);
     } else {
@@ -1913,16 +2112,17 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
         for (std::size_t i = 1; i < snapshot.orbitTrailPoints.size(); ++i) {
             const FlybyTrailPoint& previous = snapshot.orbitTrailPoints[i - 1];
             const FlybyTrailPoint& current = snapshot.orbitTrailPoints[i];
-            const float alpha = 0.12F + 0.40F * (static_cast<float>(i) / static_cast<float>(snapshot.orbitTrailPoints.size() - 1));
+            const float alpha = kFlightPathTrailAlphaStart
+                + kFlightPathTrailAlphaRange * (static_cast<float>(i) / static_cast<float>(snapshot.orbitTrailPoints.size() - 1));
             appendLine(
                 pathVertices,
                 static_cast<float>(previous.x),
                 static_cast<float>(previous.y),
                 static_cast<float>(current.x),
                 static_cast<float>(current.y),
-                {0.58F, 0.92F, 1.0F, alpha});
+                {kFlightPathTrailColor.r, kFlightPathTrailColor.g, kFlightPathTrailColor.b, alpha});
         }
-        submitLines(pathVertices, 2.2F);
+        submitLines(pathVertices, kFlightPathTrailWidth);
     }
 
     const float shipX = static_cast<float>(snapshot.orbitShipX);
@@ -1946,20 +2146,57 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
     drawRadialGlow(shipX, shipY, 0.074F + pulse * 0.008F, zoneGlow, 42);
     drawEllipseLine(shipX, shipY, 0.050F + pulse * 0.004F, 0.050F + pulse * 0.004F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
-    const float inputMagnitude = std::hypot(static_cast<float>(snapshot.orbitInputX), static_cast<float>(snapshot.orbitInputY));
-    if (!snapshot.orbitCompleted && inputMagnitude > 0.05F) {
-        const Vec2 radial = normalize({shipX, shipY});
-        const Vec2 tangent {-radial.y, radial.x};
-        const Vec2 input = normalize({
-            radial.x * static_cast<float>(snapshot.orbitInputX) + tangent.x * static_cast<float>(snapshot.orbitInputY),
-            radial.y * static_cast<float>(snapshot.orbitInputX) + tangent.y * static_cast<float>(snapshot.orbitInputY)
-        });
-        const Vec2 tail {shipX - input.x * 0.066F, shipY - input.y * 0.066F};
-        drawCircle(tail.x, tail.y, 0.024F + pulse * 0.005F, {1.0F, 0.62F, 0.16F, 0.52F}, 18);
-        drawCircle(tail.x - input.x * 0.026F, tail.y - input.y * 0.026F, 0.012F, {1.0F, 0.92F, 0.36F, 0.58F}, 14);
-    }
-
+    const float throttle = static_cast<float>(std::clamp(snapshot.instrumentThrottle, 0.0, 1.0));
+    const float radialInput = static_cast<float>(snapshot.orbitInputX);
+    const float inputMagnitude = std::abs(radialInput);
     if (textureReady(RocketClosedAsset)) {
+        if (!snapshot.orbitCompleted && throttle > 0.01F && textureReady(ThrustAsset)) {
+            const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+            const float plumeLength = kFlightThrustHeight * std::lerp(
+                kFlightThrustMinimumLengthScale,
+                1.0F,
+                throttle);
+            const float plumeWidth = kFlightThrustWidth * std::lerp(
+                kFlightThrustMinimumWidthScale,
+                1.0F,
+                throttle);
+            drawSpriteRotated(
+                shipX - velocity.x * (kFlightThrustNozzlePadding + plumeLength * 0.5F),
+                shipY - velocity.y * (kFlightThrustNozzlePadding + plumeLength * 0.5F),
+                plumeWidth,
+                plumeLength,
+                velocity.x,
+                velocity.y,
+                {1.0F, 1.0F, 1.0F, 0.96F},
+                ThrustAsset,
+                thrustFrame,
+                6);
+        }
+        if (!snapshot.orbitCompleted && (throttle > 0.01F || inputMagnitude > 0.05F)) {
+            // Orbit's horizontal control is an immediate radial burn. Show its
+            // booster even at zero retained prograde throttle, so Left/Right
+            // has the same physical feedback as forward thrust.
+            const Vec2 radial = normalize({shipX, shipY});
+            const Vec2 burnDirection = inputMagnitude > 0.05F
+                ? Vec2 {radial.x * (radialInput < 0.0F ? -1.0F : 1.0F), radial.y * (radialInput < 0.0F ? -1.0F : 1.0F)}
+                : velocity;
+            const Vec2 exhaust {-burnDirection.x, -burnDirection.y};
+            const Vec2 side {-exhaust.y, exhaust.x};
+            const Vec2 nozzle {shipX + exhaust.x * 0.028F, shipY + exhaust.y * 0.028F};
+            const float halfWidth = kManeuverBoosterHalfWidth;
+            const float burnStrength = std::max(throttle, inputMagnitude);
+            const float length = kManeuverBoosterBaseLength
+                + burnStrength * kManeuverBoosterLengthRange;
+            const Vec2 tip {nozzle.x + exhaust.x * length, nozzle.y + exhaust.y * length};
+            drawTriangle(
+                nozzle.x + side.x * halfWidth,
+                nozzle.y + side.y * halfWidth,
+                nozzle.x - side.x * halfWidth,
+                nozzle.y - side.y * halfWidth,
+                tip.x,
+                tip.y,
+                {1.0F, 0.42F, 0.06F, 1.0F});
+        }
         drawSpriteRotated(shipX, shipY, 0.11F, 0.11F, velocity.x, velocity.y, {1.0F, 1.0F, 1.0F, 1.0F}, RocketClosedAsset);
     } else {
         const Vec2 right {velocity.y, -velocity.x};
@@ -2045,16 +2282,32 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         ? actorDamagePressure
         : std::max(drillPressure, actorDamagePressure);
     const Color damageColor = miningDamageEdgeColor(damagePressure);
-    const float scannerPulse = static_cast<float>(std::clamp(snapshot.miningScannerPulse / kMiningScannerPulseSeconds, 0.0, 1.0));
+    const float scannerPulse = static_cast<float>(std::clamp(
+        snapshot.miningScannerPulse / tuning::mining::scannerPulseSeconds,
+        0.0,
+        1.0));
     const float scannerRevealRadiusCells = std::max(kMiningLightRadiusCells, static_cast<float>(std::max(0.0, snapshot.miningScannerRadius)));
-    const float scannerSweepStartCells = std::min(scannerRevealRadiusCells, kMiningLightRadiusCells + 0.35F);
-    const float scannerSweepRadiusCells = scannerSweepStartCells + (scannerRevealRadiusCells - scannerSweepStartCells) * (1.0F - scannerPulse);
+    const float scannerPulseAgeSeconds = static_cast<float>(tuning::mining::scannerPulseSeconds)
+        - static_cast<float>(std::clamp(snapshot.miningScannerPulse, 0.0, tuning::mining::scannerPulseSeconds));
+    const auto smoothStep = [](float value) {
+        const float clamped = std::clamp(value, 0.0F, 1.0F);
+        return clamped * clamped * (3.0F - 2.0F * clamped);
+    };
+    const float scannerExpansion = smoothStep(scannerPulseAgeSeconds / kMiningScannerExpandSeconds);
+    const float scannerFade = 1.0F - smoothStep(
+        (scannerPulseAgeSeconds - kMiningScannerExpandSeconds) / kMiningScannerFadeSeconds);
+    const bool scannerExpanding = scannerPulse > 0.0F && scannerPulseAgeSeconds <= kMiningScannerExpandSeconds;
+    const float scannerVisualOpacity = scannerExpanding
+        ? 0.35F + scannerExpansion * 0.65F
+        : scannerFade;
+    const float scannerSweepRadiusCells = scannerRevealRadiusCells * scannerExpansion;
+    const float scannerRingRadiusCells = scannerRevealRadiusCells * (0.08F + scannerExpansion * 0.92F);
     auto scannerSweepBoost = [&](float distCells, float widthBase) {
-        if (scannerPulse <= 0.0F || scannerRevealRadiusCells <= 0.0F) {
+        if (!scannerExpanding || scannerRevealRadiusCells <= 0.0F) {
             return 0.0F;
         }
-        const float ringWidth = widthBase + scannerPulse * 0.45F;
-        return std::clamp(1.0F - std::abs(distCells - scannerSweepRadiusCells) / std::max(0.1F, ringWidth), 0.0F, 1.0F) * scannerPulse;
+        const float ringWidth = widthBase + (1.0F - scannerExpansion) * 0.45F;
+        return std::clamp(1.0F - std::abs(distCells - scannerSweepRadiusCells) / std::max(0.1F, ringWidth), 0.0F, 1.0F);
     };
     const Vec2 returnZone = cellCenter(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY);
 
@@ -2070,12 +2323,49 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     const std::size_t renderedCellCount = std::min(
         snapshot.miningCells.size(),
         static_cast<std::size_t>(std::max(0, cellCount)));
+    const bool scannerPulseStarted = scannerPulse > 0.0F && previousMiningScannerPulse_ <= 0.0F;
+    if (scannerPulseStarted) {
+        miningPulseNewlyRevealedCells_.assign(renderedCellCount, 0U);
+        if (miningTerrainCellStates_.size() == renderedCellCount) {
+            for (std::size_t index = 0; index < renderedCellCount; ++index) {
+                miningPulseNewlyRevealedCells_[index] = static_cast<std::uint8_t>(
+                    snapshot.miningCells[index].revealed && !miningTerrainCellStates_[index].revealed);
+            }
+        }
+    } else if (scannerPulse <= 0.0F) {
+        miningPulseNewlyRevealedCells_.clear();
+    } else if (miningPulseNewlyRevealedCells_.size() != renderedCellCount) {
+        miningPulseNewlyRevealedCells_.assign(renderedCellCount, 0U);
+    }
+    previousMiningScannerPulse_ = scannerPulse;
+    const auto pulseRevealFraction = [&](std::size_t index, int x, int y) {
+        if (index >= miningPulseNewlyRevealedCells_.size() || miningPulseNewlyRevealedCells_[index] == 0U) {
+            return 1.0F;
+        }
+        const float distanceCells = nearestScannerDistanceCells(
+            static_cast<double>(x) + 0.5,
+            static_cast<double>(y) + 0.5);
+        return smoothStep(
+            (scannerSweepRadiusCells - distanceCells + kMiningScannerWavefrontCells * 0.5F) /
+            kMiningScannerWavefrontCells);
+    };
+    const auto pulseRevealFractionAt = [&](double x, double y) {
+        const int cellX = static_cast<int>(std::floor(x));
+        const int cellY = static_cast<int>(std::floor(y));
+        if (cellX < 0 || cellX >= snapshot.miningWidth || cellY < 0 || cellY >= snapshot.miningHeight) {
+            return 1.0F;
+        }
+        const std::size_t index = static_cast<std::size_t>(cellY * snapshot.miningWidth + cellX);
+        return pulseRevealFraction(index, cellX, cellY);
+    };
     for (std::size_t index = 0; index < renderedCellCount; ++index) {
         // This cache feeds scanner-edge markers on later frames. Never retain
         // a hidden cell's material here: doing so would leak an unrevealed
         // cocoon layer or protected objective through an adjacent empty tile.
         const MiningCell& cell = snapshot.miningCells[index];
-        currentMiningMaterials_[index] = cell.revealed
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        currentMiningMaterials_[index] = cell.revealed && pulseRevealFraction(index, x, y) >= 0.98F
             ? static_cast<int>(cell.material)
             : static_cast<int>(MiningCellMaterial::Empty);
     }
@@ -2238,18 +2528,23 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 cell.revealed,
                 cell.hazard
             };
-            if (cell.revealed) {
-                continue;
-            }
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+            const float revealFraction = cell.revealed ? pulseRevealFraction(index, x, y) : 0.0F;
+            if (cell.revealed && revealFraction >= 1.0F) {
+                continue;
+            }
             const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+            Color fogColor = unexploredFog;
+            if (cell.revealed) {
+                fogColor.a *= 1.0F - revealFraction;
+            }
             appendTerrainRect(
                 center.x,
                 center.y,
                 cellW * 0.90F,
                 cellH * 0.90F,
-                unexploredFog);
+                fogColor);
         }
         miningBackdropFogInstanceCount_ =
             static_cast<std::uint32_t>(packedMiningTerrainInstances_.size());
@@ -2263,13 +2558,17 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
             const int material = static_cast<int>(cell.material);
             const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
+            const float revealFraction = pulseRevealFraction(index, x, y);
+            if (revealFraction <= 0.0F) {
+                continue;
+            }
             const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - activeActorX);
             const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - activeActorY);
             const float mainDistanceCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
             const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
             float localLight = std::clamp(1.0F - mainDistanceCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
             localLight = std::max(localLight, scannerSweepBoost(scannerDistanceCells, 0.85F) * 0.032F);
-            const Color color = miningMaterialColor(
+            Color color = miningMaterialColor(
                 material,
                 static_cast<float>(cellIntegrity(cell)),
                 cell.revealed,
@@ -2277,6 +2576,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 static_cast<int>(cell.hazardAffinity),
                 snapshot.destinationTier,
                 localLight);
+            color.a *= revealFraction;
             appendTerrainRect(center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
         }
         miningBaseTerrainInstanceCount_ =
@@ -2406,10 +2706,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         }
         const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
         const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        const float revealFraction = pulseRevealFraction(index, x, y);
+        if (revealFraction <= 0.0F) {
+            continue;
+        }
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-        const Color gateColor = cell.material == MiningCellMaterial::HazardPocket
+        Color gateColor = cell.material == MiningCellMaterial::HazardPocket
             ? Color {1.0F, 0.52F, 0.18F, 0.62F + gatePulse * 0.22F}
             : Color {0.78F, 0.54F, 1.0F, 0.50F + gatePulse * 0.18F};
+        gateColor.a *= revealFraction;
         const float halfW = cellW * 0.47F;
         const float halfH = cellH * 0.47F;
         drawLine(center.x - halfW, center.y - halfH, center.x + halfW, center.y - halfH, gateColor, 1.6F);
@@ -2462,10 +2767,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
         const int material = static_cast<int>(cell.material);
         const int affinity = static_cast<int>(cell.hazardAffinity);
+        const float revealFraction = pulseRevealFraction(index, x, y);
+        if (revealFraction <= 0.0F) {
+            continue;
+        }
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-        const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - activeActorX);
-        const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - activeActorY);
-        const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
+        const float distCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
         const bool rewardCell = miningRewardMaterial(material);
         const bool treasureCell = rewardCell && std::any_of(snapshot.miningTreasureMarks.begin(), snapshot.miningTreasureMarks.end(), [&](const TreasureMark& mark) { return mark.x == x && mark.y == y; });
@@ -2489,10 +2796,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             center.y,
             size * 0.5F,
             material,
-            treasureCell ? Color{1.0F, 0.78F, 0.20F, std::min(alpha + 0.22F, 0.95F)} : Color{glow.r, glow.g, glow.b, std::min(alpha, 0.78F)});
+            treasureCell ? Color{1.0F, 0.78F, 0.20F, std::min(alpha + 0.22F, 0.95F) * revealFraction} : Color{glow.r, glow.g, glow.b, std::min(alpha, 0.78F) * revealFraction});
         if (treasureCell) {
-            drawCircle(center.x, center.y, size * 0.72F, {1.0F, 0.78F, 0.20F, 0.72F}, 12);
-            drawPoiLabel(center.x, center.y - size * 0.9F, 0.0038F, "x2", PoiGuidanceKind::None);
+            drawCircle(center.x, center.y, size * 0.72F, {1.0F, 0.78F, 0.20F, 0.72F * revealFraction}, 12);
+            if (revealFraction >= 0.98F) {
+                drawPoiLabel(center.x, center.y - size * 0.9F, 0.0038F, "x2", PoiGuidanceKind::None);
+            }
         }
     }
 
@@ -2506,10 +2815,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
         const int material = static_cast<int>(cell.material);
         const int affinity = static_cast<int>(cell.hazardAffinity);
+        const float revealFraction = pulseRevealFraction(index, x, y);
+        if (revealFraction <= 0.0F) {
+            continue;
+        }
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-        const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - activeActorX);
-        const float dyCells = static_cast<float>(static_cast<double>(y) + 0.5 - activeActorY);
-        const float distCells = std::sqrt(dxCells * dxCells + dyCells * dyCells);
+        const float distCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
         const float scannerBoost = scannerSweepBoost(distCells, 0.78F);
         const bool rewardCell = miningRewardMaterial(material);
         const bool hazardCell = cell.material == MiningCellMaterial::HazardPocket;
@@ -2527,7 +2838,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const Color glow = rewardCell ? miningRewardGlowColor(material) : miningScannerPingColor(material, affinity);
         const float flare = std::max(1.0F - phase / activeWindow, scannerPing ? scannerBoost : 0.0F);
         const float length = cellSize * ((rewardCell ? 0.34F : 0.24F) + flare * 0.44F);
-        const float alpha = (rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F);
+        const float alpha = ((rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F)) * revealFraction;
         appendLine(oreSparkVertices, center.x - length, center.y, center.x + length, center.y, {glow.r, glow.g, glow.b, alpha});
         appendLine(oreSparkVertices, center.x, center.y - length, center.x, center.y + length, {glow.r, glow.g, glow.b, alpha});
     }
@@ -2797,19 +3108,21 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     if (snapshot.miningArtifact.present && (snapshot.miningArtifact.revealed || snapshot.miningArtifact.state != static_cast<int>(MiningArtifactState::Embedded))) {
         const Vec2 artifact = cellCenter(snapshot.miningArtifact.x - 0.5, snapshot.miningArtifact.y - 0.5);
         const Color artifactColor = miningArtifactColor(snapshot.miningArtifact.kind, snapshot.miningArtifact.state);
+        const float artifactReveal = pulseRevealFractionAt(snapshot.miningArtifact.x, snapshot.miningArtifact.y);
+        if (artifactReveal > 0.0F) {
         if (snapshot.miningArtifact.tethered) {
             const float tetherBurden = std::clamp(static_cast<float>(snapshot.miningLoad) / 10.0F, 0.0F, 1.0F);
-            drawLine(activeActor.x, activeActor.y, artifact.x, artifact.y, {0.62F, 0.92F, 1.0F, 0.50F + tetherBurden * 0.28F}, 2.0F + tetherBurden * 2.6F);
-            drawRadialGlow(artifact.x, artifact.y, cellSize * 1.8F, {0.52F, 0.92F, 1.0F, 0.032F}, 24);
+            drawLine(activeActor.x, activeActor.y, artifact.x, artifact.y, {0.62F, 0.92F, 1.0F, (0.50F + tetherBurden * 0.28F) * artifactReveal}, 2.0F + tetherBurden * 2.6F);
+            drawRadialGlow(artifact.x, artifact.y, cellSize * 1.8F, {0.52F, 0.92F, 1.0F, 0.032F * artifactReveal}, 24);
         }
         const float statePulse = snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Delivered)
             ? 0.35F + 0.18F * std::sin(static_cast<float>(snapshot.animationTime) * 12.0F)
             : 0.0F;
-        drawCircle(artifact.x, artifact.y, cellSize * (0.72F + statePulse), {artifactColor.r, artifactColor.g, artifactColor.b, artifactColor.a}, 18);
-        drawCircle(artifact.x, artifact.y, cellSize * 0.34F, {1.0F, 1.0F, 0.86F, snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Destroyed) ? 0.20F : 0.82F}, 14);
+        drawCircle(artifact.x, artifact.y, cellSize * (0.72F + statePulse), {artifactColor.r, artifactColor.g, artifactColor.b, artifactColor.a * artifactReveal}, 18);
+        drawCircle(artifact.x, artifact.y, cellSize * 0.34F, {1.0F, 1.0F, 0.86F, (snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Destroyed) ? 0.20F : 0.82F) * artifactReveal}, 14);
         const float health = static_cast<float>(std::clamp(snapshot.miningArtifact.maxHealth <= 0.0 ? 0.0 : snapshot.miningArtifact.health / snapshot.miningArtifact.maxHealth, 0.0, 1.0));
-        drawRect(artifact.x, artifact.y - cellH * 0.92F, cellW * 1.65F, cellH * 0.12F, {0.12F, 0.04F, 0.04F, 0.76F});
-        drawRect(artifact.x - cellW * 0.825F * (1.0F - health), artifact.y - cellH * 0.92F, cellW * 1.65F * health, cellH * 0.12F, {0.34F + (1.0F - health) * 0.66F, 0.95F * health, 0.24F, 0.90F});
+        drawRect(artifact.x, artifact.y - cellH * 0.92F, cellW * 1.65F, cellH * 0.12F, {0.12F, 0.04F, 0.04F, 0.76F * artifactReveal});
+        drawRect(artifact.x - cellW * 0.825F * (1.0F - health), artifact.y - cellH * 0.92F, cellW * 1.65F * health, cellH * 0.12F, {0.34F + (1.0F - health) * 0.66F, 0.95F * health, 0.24F, 0.90F * artifactReveal});
         if (snapshot.miningArtifact.gateType != static_cast<int>(MiningGateType::None) &&
             snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Open) &&
             snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Completed)) {
@@ -2818,17 +3131,23 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 artifact.y,
                 cellW * (1.05F + gatePulse * 0.10F),
                 cellH * (1.05F + gatePulse * 0.10F),
-                {0.88F, 0.44F, 1.0F, 0.72F},
+                {0.88F, 0.44F, 1.0F, 0.72F * artifactReveal},
                 28,
                 0.0F,
                 kPi * 2.0F);
         }
+        }
     }
     for (const MiningGateMarker& marker : snapshot.miningGateMarkers) {
         const Vec2 center = cellCenter(marker.x - 0.5, marker.y - 0.5);
-        const Color markerColor = marker.activated
+        const float markerReveal = pulseRevealFractionAt(marker.x, marker.y);
+        if (markerReveal <= 0.0F) {
+            continue;
+        }
+        Color markerColor = marker.activated
             ? Color {0.30F, 1.0F, 0.66F, 0.82F}
             : Color {0.46F, 0.86F, 1.0F, 0.60F + gatePulse * 0.24F};
+        markerColor.a *= markerReveal;
         drawEllipseLine(center.x, center.y, cellW * 0.72F, cellH * 0.72F, markerColor, 24, 0.0F, kPi * 2.0F);
         drawLine(center.x - cellW * 0.44F, center.y, center.x + cellW * 0.44F, center.y, markerColor, 1.4F);
         drawLine(center.x, center.y - cellH * 0.44F, center.x, center.y + cellH * 0.44F, markerColor, 1.4F);
@@ -2846,11 +3165,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 const float lineExtentCells = std::sqrt(std::max(0.0F, scannerRevealRadiusCells * scannerRevealRadiusCells - static_cast<float>(i * i)));
                 if (gx >= left && gx <= right && lineExtentCells > 0.0F) {
                     const float yExtent = lineExtentCells * cellH;
-                    appendLine(scannerGridVertices, gx, std::max(bottom, scannerOrigin.y - yExtent), gx, std::min(top, scannerOrigin.y + yExtent), {0.40F, 0.92F, 1.0F, 0.022F * scannerPulse});
+                    appendLine(scannerGridVertices, gx, std::max(bottom, scannerOrigin.y - yExtent), gx, std::min(top, scannerOrigin.y + yExtent), {0.40F, 0.92F, 1.0F, 0.022F * scannerVisualOpacity});
                 }
                 if (gy >= bottom && gy <= top && lineExtentCells > 0.0F) {
                     const float xExtent = lineExtentCells * cellW;
-                    appendLine(scannerGridVertices, std::max(left, scannerOrigin.x - xExtent), gy, std::min(right, scannerOrigin.x + xExtent), gy, {0.40F, 0.92F, 1.0F, 0.022F * scannerPulse});
+                    appendLine(scannerGridVertices, std::max(left, scannerOrigin.x - xExtent), gy, std::min(right, scannerOrigin.x + xExtent), gy, {0.40F, 0.92F, 1.0F, 0.022F * scannerVisualOpacity});
                 }
             }
         };
@@ -2859,6 +3178,33 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             appendScannerGrid(cellCenter(survey->x, survey->y));
         }
         submitLines(scannerGridVertices, 1.0F);
+
+        // Gameplay discovery is immediate. The renderer's monotonic reveal
+        // radius lets the cyan wave deliver those results spatially. Once the
+        // wave reaches full range it stays there and fades cleanly instead of
+        // snapping back to the actor.
+        const Color pulseRing {0.18F, 0.96F, 1.0F, 0.96F * scannerVisualOpacity};
+        const auto drawPulseAt = [&](const Vec2& origin) {
+            drawRadialGlow(
+                origin.x,
+                origin.y,
+                scannerRingRadiusCells * cellSize * 0.78F,
+                {pulseRing.r, pulseRing.g, pulseRing.b, scannerVisualOpacity * 0.075F},
+                40);
+            drawEllipseLine(
+                origin.x,
+                origin.y,
+                scannerRingRadiusCells * cellW,
+                scannerRingRadiusCells * cellH,
+                pulseRing,
+                64,
+                0.0F,
+                kPi * 2.0F);
+        };
+        drawPulseAt(activeActor);
+        for (const MiningMiniDroneAgent* survey : miningSurveyDrones_) {
+            drawPulseAt(cellCenter(survey->x, survey->y));
+        }
     }
     for (const MiningMiniDroneAgent* survey : miningSurveyDrones_) {
         const float pulse = std::clamp(
@@ -2918,7 +3264,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     const bool alliedShotActive = std::any_of(snapshot.miningProjectiles.begin(), snapshot.miningProjectiles.end(), [](const MiningProjectileVisual& projectile) {
         return projectile.team == MiningCombatTeam::Allied;
     });
-    const float scannerActivity = std::clamp(static_cast<float>(snapshot.miningScannerPulse) / kMiningScannerPulseSeconds, 0.0F, 1.0F);
+    const float scannerActivity = std::clamp(
+        static_cast<float>(snapshot.miningScannerPulse / tuning::mining::scannerPulseSeconds),
+        0.0F,
+        1.0F);
     for (const MiningMiniDroneAgent& shieldDrone : snapshot.miningMiniDrones) {
         if (snapshot.miningExtractionActive) {
             continue;
@@ -3494,6 +3843,33 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             {1.0F, 0.22F, 0.14F, 0.58F + disabledPulse * 0.24F},
             2.2F);
     }
+    if (!snapshot.miningExtractionActive && snapshot.miningScannerPulse <= 0.0 && snapshot.miningScannerRechargeProgress >= 0.0) {
+        const float rechargeProgress = static_cast<float>(
+            std::clamp(snapshot.miningScannerRechargeProgress, 0.0, 1.0));
+        const bool operatorActive = snapshot.miningOperatorPresent && snapshot.miningOperatorActive;
+        const Vec2 pulseCenter = operatorActive ? operatorPosition : drone;
+        const float pulseRadius = (operatorActive ? operatorSize : droneSize) * 0.68F;
+        constexpr Color pulseTrack {0.025F, 0.14F, 0.18F, 0.72F};
+        constexpr Color pulseCyan {0.18F, 0.96F, 1.0F, 0.96F};
+        drawEllipseLine(
+            pulseCenter.x,
+            pulseCenter.y,
+            pulseRadius,
+            pulseRadius,
+            pulseTrack,
+            42,
+            -kPi * 0.5F,
+            kPi * 1.5F);
+        drawEllipseLine(
+            pulseCenter.x,
+            pulseCenter.y,
+            pulseRadius,
+            pulseRadius,
+            pulseCyan,
+            42,
+            -kPi * 0.5F,
+            -kPi * 0.5F + kPi * 2.0F * rechargeProgress);
+    }
     if (snapshot.miningRigPresent && !snapshot.miningExtractionActive) {
         const float toggleProgress = static_cast<float>(
             std::clamp(snapshot.miningOperatorToggleProgress, 0.0, 1.0));
@@ -4029,15 +4405,15 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
                 1.2F);
         }
     };
-    // The yellow success window surrounds the narrower green perfect window.
+    // The green good window surrounds the narrower gold perfect window.
     drawScanWindow(
         static_cast<float>(tuning::research::scanGoodWindowHalfAngleRadians),
-        {1.0F, 0.74F, 0.16F, 0.13F},
-        {1.0F, 0.82F, 0.24F, 0.62F});
+        {0.18F, 0.92F, 0.40F, 0.13F},
+        {0.28F, 1.0F, 0.48F, 0.62F});
     drawScanWindow(
         static_cast<float>(tuning::research::scanPerfectWindowHalfAngleRadians),
-        {0.18F, 0.92F, 0.40F, 0.24F},
-        {0.28F, 1.0F, 0.48F, 0.86F});
+        {1.0F, 0.74F, 0.16F, 0.24F},
+        {1.0F, 0.82F, 0.24F, 0.86F});
 
     for (int tick = 0; tick < 8; ++tick) {
         const float angle = static_cast<float>(tick) * kPi * 0.25F;
@@ -4068,8 +4444,8 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
         const bool perfect = snapshot.surfaceScanLastPulseGrade == SurfaceScanPulseGrade::Perfect;
         const float progress = 1.0F - fanfare;
         const Color celebration = perfect
-            ? Color{0.28F, 1.0F, 0.48F, 0.94F}
-            : Color{1.0F, 0.80F, 0.24F, 0.86F};
+            ? Color{1.0F, 0.80F, 0.24F, 0.94F}
+            : Color{0.28F, 1.0F, 0.48F, 0.86F};
         const float burstRadius = 0.14F + progress * (perfect ? 0.36F : 0.28F);
         drawRadialGlow(
             destination.x,
@@ -4170,6 +4546,29 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     if (snapshot.surfaceScanBusted) {
         drawEllipseLine(destination.x, destination.y, surfaceRadius * 0.98F, surfaceRadius * 0.74F, {1.0F, 0.24F, 0.12F, 0.45F}, 64, 0.0F, 2.0F * kPi);
         drawRadialGlow(destination.x, destination.y, outerRadius * 1.02F, {0.95F, 0.12F, 0.08F, 0.055F + interference * 0.035F}, 64);
+    }
+    const float missFanfare = static_cast<float>(std::clamp(snapshot.surfaceScanMissFanfare, 0.0, 1.0));
+    if (missFanfare > 0.0F) {
+        const float crash = missFanfare * missFanfare;
+        const float strobe = 0.72F + 0.28F * std::sin(time * 44.0F);
+        drawRadialGlow(
+            destination.x,
+            destination.y,
+            outerRadius * (0.92F + (1.0F - missFanfare) * 0.20F),
+            {1.0F, 0.03F, 0.02F, crash * 0.22F},
+            64);
+        drawEllipseLine(
+            destination.x,
+            destination.y,
+            outerRadius * (0.74F + (1.0F - missFanfare) * 0.14F),
+            outerRadius * (0.74F + (1.0F - missFanfare) * 0.14F),
+            {1.0F, 0.06F, 0.03F, crash * 0.92F},
+            64,
+            0.0F,
+            2.0F * kPi);
+        // This is a deliberately harsher, scene-wide hit than a successful
+        // scan fanfare: a deep red strobe with no positive-colored residue.
+        drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.72F, 0.015F, 0.015F, crash * strobe * 0.30F}, false);
     }
 }
 
@@ -4994,9 +5393,55 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         return;
     }
 
-    if (snapshot.poweredFlight && textureReady(ThrustAsset)) {
-        const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
-        texturedQuad(ThrustAsset, 0.20F * scale, 0.38F * scale, {1.0F, 1.0F, 1.0F, 1.0F}, thrustFrame, 6, 0.0F, -0.48F * scale);
+    const float launchThrottle = static_cast<float>(std::clamp(snapshot.launchThrottle, 0.0, 1.0));
+    if (snapshot.poweredFlight && launchThrottle > 0.01F) {
+        if (textureReady(ThrustAsset)) {
+            const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+            const float plumeLength = 0.42F * scale * std::lerp(
+                kLaunchThrustMinimumLengthScale,
+                1.0F,
+                launchThrottle);
+            const float plumeWidth = 0.22F * scale * std::lerp(
+                kLaunchThrustMinimumWidthScale,
+                1.0F,
+                launchThrottle);
+            texturedQuad(
+                ThrustAsset,
+                plumeWidth,
+                plumeLength,
+                {1.0F, 1.0F, 1.0F, 0.98F},
+                thrustFrame,
+                6,
+                0.0F,
+                -(kLaunchThrustNozzlePaddingScale * scale + plumeLength * 0.5F));
+        }
+    }
+
+    const float launchSteering = static_cast<float>(
+        std::clamp(snapshot.launchSteerInput, -1.0, 1.0));
+    if (snapshot.screen == Screen::Launch
+        && !snapshot.preflightActive
+        && std::abs(launchSteering) > 0.05F) {
+        const float direction = launchSteering < 0.0F ? -1.0F : 1.0F;
+        const Vec2 turnSide {right.x * direction, right.y * direction};
+        const float rocketSize = 0.86F * scale;
+        const Vec2 root {
+            cx + turnSide.x * rocketSize * (0.052F / 0.11F),
+            cy + turnSide.y * rocketSize * (0.052F / 0.11F)
+        };
+        const float halfWidth = rocketSize * (kManeuverBoosterHalfWidth / 0.11F);
+        const float length = rocketSize
+            * ((kManeuverBoosterBaseLength
+                + std::abs(launchSteering) * kManeuverBoosterLengthRange) / 0.11F);
+        const Vec2 tip {root.x + turnSide.x * length, root.y + turnSide.y * length};
+        drawTriangle(
+            root.x + forward.x * halfWidth,
+            root.y + forward.y * halfWidth,
+            root.x - forward.x * halfWidth,
+            root.y - forward.y * halfWidth,
+            tip.x,
+            tip.y,
+            {1.0F, 0.42F, 0.06F, 1.0F});
     }
 
     if (snapshot.preflightActive) {
@@ -5699,6 +6144,8 @@ void SceneComposer::reset()
     drawCommands_.clear();
     miningTerrainCellStates_.clear();
     miningTerrainScannerStates_.clear();
+    miningPulseNewlyRevealedCells_.clear();
+    previousMiningScannerPulse_ = 0.0F;
     miningTerrainPresentationKey_ = {};
     miningBackdropFogInstanceCount_ = 0;
     miningBaseTerrainInstanceCount_ = 0;

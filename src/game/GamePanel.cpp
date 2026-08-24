@@ -1,5 +1,6 @@
 #include "game/GamePanel.h"
 #include "core/CrewPresentation.h"
+#include "core/FlightInstrumentPresentation.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/HangarPresentation.h"
@@ -32,6 +33,20 @@ namespace rocket {
 
 namespace {
 
+FlightInstrumentPresentation flightInstrumentsForContext(const PanelRenderContext& context)
+{
+    if (context.state.screen == Screen::Launch && context.flightArmed && context.launchFlight != nullptr) {
+        return launchFlightInstruments(context.flightModel, *context.launchFlight);
+    }
+    if (context.state.screen == Screen::Flyby) {
+        return flybyFlightInstruments(context.state.run.flyby);
+    }
+    if (context.state.screen == Screen::Orbit) {
+        return orbitFlightInstruments(context.state.run.orbit);
+    }
+    return {};
+}
+
 std::string htmlEscape(std::string_view text)
 {
     std::string out;
@@ -56,6 +71,13 @@ std::string htmlEscape(std::string_view text)
         }
     }
     return out;
+}
+
+std::string flightStatusRow(std::string_view id, std::string_view label, std::string value)
+{
+    return "<div class=\"flight-status-row\"><span>" + htmlEscape(label) +
+        "</span><strong id=\"" + std::string(id) + "\">" + htmlEscape(value) +
+        "</strong></div>";
 }
 
 std::string metricClass(std::string_view label, std::string_view cssClass = {})
@@ -219,7 +241,7 @@ std::string phaseTitle(Screen screen)
     case Screen::Orbit:
         return "Orbit";
     case Screen::Research:
-        return "Science";
+        return "Research (Debug)";
     case Screen::SurfaceExpedition:
         return "Surface Ops";
     case Screen::SurfaceUpgrade:
@@ -673,16 +695,19 @@ std::string statChip(const RefitStatChip& chip)
 std::string resourceChip(const PanelMetricPresentation& chip)
 {
     const bool positive = chip.value.empty() || chip.value.front() != '-';
-    const bool wideChip = chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
+    const bool wideChip = chip.label.empty() || chip.label.size() > 8 || chip.label.find(' ') != std::string::npos;
+    const std::string text = chip.label.empty()
+        ? chip.value
+        : chip.label + " " + chip.value;
     return "<span class=\"stat-chip " + std::string(positive ? "up" : "down") +
         std::string(wideChip ? " wide" : "") + "\"><span class=\"rr-chip-label\">" +
-        htmlEscape(chip.label) + " " + htmlEscape(chip.value) + "</span></span>";
+        htmlEscape(text) + "</span></span>";
 }
 
 std::string hangarFuelChip(const PanelMetricPresentation& chip)
 {
-    return "<span class=\"stat-chip up wide hangar-fuel-chip\"><span class=\"rr-chip-label\">" +
-        htmlEscape(chip.label) + "<br/>" + htmlEscape(chip.value) + "</span></span>";
+    return "<span class=\"stat-chip up wide hangar-fuel-chip\"><span class=\"rr-chip-label\"><span class=\"hangar-fuel-label\">" +
+        htmlEscape(chip.label) + "</span><strong>" + htmlEscape(chip.value) + "</strong></span></span>";
 }
 
 std::string realtimeResourceChip(std::string_view id, const PanelMetricPresentation& chip)
@@ -811,6 +836,9 @@ PanelButtonPresentation surfaceActionFooterButton(const SurfaceActionPreviewPres
             buttonPresentation.cssClass += " risk";
         }
     }
+    if (isSurfaceExtractionAction(action) && buttonPresentation.enabled) {
+        buttonPresentation.cssClass = "surface-return-action";
+    }
     if (!buttonPresentation.enabled && (buttonPresentation.label.rfind("Need ", 0) == 0 || buttonPresentation.label.size() > 14)) {
         buttonPresentation.label = std::string(text::buttons::unavailable);
     }
@@ -909,6 +937,17 @@ std::string miningPanelButton(const PanelButtonPresentation& action, bool defaul
     }
     out << ">" << htmlEscape(action.label) << "</button>";
     return out.str();
+}
+
+std::string miningModalButton(
+    std::string_view label,
+    std::string_view modalId,
+    std::string_view cssClass = "ghost")
+{
+    const std::string classAttr = " class=\"" + std::string(cssClass) +
+        (cssClass.empty() ? "" : " ") + "rr-mining-text-button mining-utility-button\"";
+    return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) +
+        "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
 }
 
 std::string introductoryPanelButton(const PanelButtonPresentation& action, std::string_view modalId)
@@ -1711,11 +1750,11 @@ std::string orbitResultBody(OrbitGrade grade)
 {
     switch (grade) {
     case OrbitGrade::Perfect:
-        return "Full loop completed inside the perfect research band. Bonus science and funding secured.";
+        return "Deliberate trim held the Perfect band. Orbit is captured; Pass Through is closed.";
     case OrbitGrade::Good:
-        return "Full loop completed inside the orbital research band. Science and funding secured.";
+        return "The stable capture solution held. Orbit is captured; Pass Through is closed.";
     case OrbitGrade::Miss:
-        return "The orbital track fell outside the research band before a loop was completed. No orbit telemetry validated.";
+        return "The capture did not complete. No Research Data was validated and the approach remains uncommitted.";
     case OrbitGrade::Active:
     default:
         return "Complete one full loop before the insertion timer expires.";
@@ -1726,15 +1765,47 @@ std::string flybyResultBody(FlybyGrade grade)
 {
     switch (grade) {
     case FlybyGrade::Perfect:
-        return "Bonus recon secured. Gate speed multiplies the next launch's fuel margin and travel speed.";
+        return "Planet skipped. Research Data and a next-launch fuel and speed solution were secured.";
     case FlybyGrade::Good:
-        return "Recon data secured. Approach options update now.";
+        return "Planet skipped. Research Data was secured and this visit is over.";
     case FlybyGrade::Miss:
-        return "No flyby telemetry validated. Try again or choose another unlocked approach.";
+        return "No Research Data was validated. The approach remains uncommitted.";
     case FlybyGrade::Active:
     default:
         return "Hold the corridor until the timer expires.";
     }
+}
+
+std::string researchDataMilestoneLabel(int progress)
+{
+    for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
+        if (progress < milestone.threshold) {
+            std::string family = unlockDisplayName(milestone.key);
+            if (family == "Thermal systems") family = "THERMAL";
+            else if (family == "Recovery hardware") family = "RECOVERY";
+            else if (family == "Deep-space modules") family = "DEEP-SPACE";
+            else if (family == "Predictive guidance") family = "PREDICTIVE";
+            else if (family == "Exotic prototypes") family = "EXOTIC";
+            return std::to_string(std::max(0, progress)) + "/" + std::to_string(milestone.threshold)
+                + " • " + family;
+        }
+    }
+    const auto& finalMilestone = tuning::unlocks::blueprintUnlocks[std::size(tuning::unlocks::blueprintUnlocks) - 1];
+    return std::to_string(std::max(0, progress)) + " / " + std::to_string(finalMilestone.threshold)
+        + " — ALL RESEARCH FAMILIES AVAILABLE";
+}
+
+const tuning::unlocks::BlueprintUnlock* pendingResearchBreakthrough(const GameState& state)
+{
+    for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
+        const std::string acknowledgment = std::string(ui::actions::acknowledgeResearchBreakthroughPrefix) + std::string(milestone.key);
+        if (state.meta.blueprintProgress >= milestone.threshold
+            && hasUnlock(state.meta, milestone.key)
+            && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, acknowledgment)) {
+            return &milestone;
+        }
+    }
+    return nullptr;
 }
 
 double flybySlingshotScale(const FlybyRunState& flyby)
@@ -2404,7 +2475,9 @@ std::string compactHeaderObjective(
     case Screen::Navigation:
         return "Choose the next destination";
     case Screen::ArrivalOps:
-        return "Choose one approach operation";
+        return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
+            ? "ORBIT CAPTURED // LAND WITH MAP OR DEPART"
+            : "APPROACH UNCOMMITTED // CHOOSE ONE PATH";
     default:
         return state.statusLine;
     }
@@ -3005,8 +3078,11 @@ std::string buildGamePanelMarkup(
         << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
         << "<div class=\"panel-head-actions\">"
         << modalButton("Map", ui::modals::map, "ghost")
-        << modalButton("Inventory", ui::modals::inventory, "ghost")
-        << modalButton("Menu", "system_menu", "ghost") << "</div></div>";
+        << modalButton("Inventory", ui::modals::inventory, "ghost");
+    if (state.screen == Screen::Hangar) {
+        out << modalButton("Details", ui::modals::hangarDetails, "ghost hangar-details-button");
+    }
+    out << modalButton("Menu", "system_menu", "ghost") << "</div></div>";
     out << solarMapTemplate(context);
 
     if (!headerMetrics.empty()) {
@@ -3093,6 +3169,10 @@ std::string buildGamePanelMarkup(
         const ScenarioObjectivePresentation challengeObjective = scenarioChallenge
             ? scenarioObjectivePresentation(state, catalog, flyby.scenarioId, flyby.scenarioStepId)
             : ScenarioObjectivePresentation {};
+        const ScenarioObjectivePresentation skippedObjective = !scenarioChallenge && flybyDestination != nullptr
+            ? scenarioObjectiveForDestination(state, catalog, flybyDestination->id)
+            : ScenarioObjectivePresentation {};
+        const bool clearsGenericRoute = !scenarioChallenge && flybyClearsGenericNextRoute(state, catalog);
 
         if (flyby.completed) {
             const std::string resultTitle = scenarioChallenge
@@ -3101,7 +3181,11 @@ std::string buildGamePanelMarkup(
                       : (grade == FlybyGrade::Good
                             ? "CLEAN FLYBY — INSUFFICIENT"
                             : "CHALLENGE INCOMPLETE"))
-                : (flyby.collidedWithBody ? "Impact recorded" : flybyGradeLabel(grade));
+                : (flyby.collidedWithBody
+                      ? "IMPACT RECORDED"
+                      : (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect
+                            ? "PLANET SKIPPED"
+                            : flybyGradeLabel(grade)));
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
             const double flybyFuelBoost = flyby.slingshotAwarded ? flyby.slingshotFuelBoost : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
             const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
@@ -3112,29 +3196,34 @@ std::string buildGamePanelMarkup(
                             ? challengeObjective.failureExplanation
                             : challengeObjective.detail))
                 : (flyby.collidedWithBody
-                ? "The ship clipped the destination body. Hull damage added and no flyby data was recovered."
-                : (grade == FlybyGrade::Perfect
-                    ? "Perfect corridor exit. Fast completion amplified the payout, and exit speed amplified the next-launch slingshot."
-                    : flybyResultBody(grade)));
+                ? "The ship clipped the destination body. Hull damage added and no Research Data was recovered."
+                : (flybyResultBody(grade)
+                    + ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && skippedObjective.available
+                          ? " “" + skippedObjective.title + "” remains active; the next story route is still blocked."
+                          : ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && clearsGenericRoute
+                                ? " The generic onward route is cleared by sacrificing this world's surface resources for speed."
+                                : ""))));
             const std::string tagOne = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect ? "READY TO CLAIM" : "ROUTE REMAINS LOCKED")
                 : (flyby.collidedWithBody
                 ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
-                : (grade == FlybyGrade::Miss ? "No flyby data" : "Flyby data secured"));
+                : (grade == FlybyGrade::Miss ? "No Research Data" : "+" + std::to_string(flyby.blueprintGain) + " Research Data"));
             const std::string tagTwo = scenarioChallenge
                 ? "PERFECT REQUIRED"
                 : (flyby.collidedWithBody
                 ? "No recon recovered"
                 : (grade == FlybyGrade::Perfect
                     ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1)
-                    : (grade == FlybyGrade::Good ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1) : "No slingshot")));
+                    : (grade == FlybyGrade::Good ? "+" + display::money(flyby.rewardCredits) + " credits" : "NO COMMITMENT")));
             const std::string tagThree = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect ? challengeObjective.rewardPreview : "RETRY AVAILABLE")
                 : (flyby.collidedWithBody
                 ? "Hull damage logged"
                 : (grade == FlybyGrade::Perfect
                     ? "+" + display::fixed(flybyFuelBoost, 1) + " fuel, +" + display::fixed(flybySpeedBoost, 2) + " speed"
-                    : (grade == FlybyGrade::Good ? "Clean exit gate" : "Retry from approach")));
+                    : (grade == FlybyGrade::Good
+                          ? (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST"))
+                          : "APPROACH UNCOMMITTED")));
             out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\""
                 << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
             out << missionStamp(
@@ -3179,10 +3268,9 @@ std::string buildGamePanelMarkup(
             ? "Impact"
             : flybyZoneLabel(flyby.worstZone);
 
-        out << "<div class=\"metric-grid rr-metric-strip flight-readout\">"
-            << realtimeMetric("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << realtimeMetric("rr-hud-flyby-speed", "Speed", flybySpeedLabel(flyby))
-            << realtimeMetric("rr-hud-flyby-zone", "Grade forecast", zoneValue)
+        out << "<div class=\"flight-status-list\">"
+            << flightStatusRow("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << flightStatusRow("rr-hud-flyby-grade", "Grade forecast", zoneValue)
             << "</div>";
 
         out << "<div class=\"actions action-row rr-action-footer live-hud-actions\">"
@@ -3222,11 +3310,13 @@ std::string buildGamePanelMarkup(
             : (grade == OrbitGrade::Good ? tuning::orbit::goodBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0) : 0);
 
         if (orbit.completed) {
-            const std::string resultTitle = orbitGradeLabel(grade);
+            const std::string resultTitle = grade == OrbitGrade::Good || grade == OrbitGrade::Perfect
+                ? "ORBIT CAPTURED"
+                : orbitGradeLabel(grade);
             const std::string resultBody = orbitResultBody(grade);
-            const std::string tagOne = grade == OrbitGrade::Miss ? "No orbit data" : "Orbit data secured";
-            const std::string tagTwo = grade == OrbitGrade::Miss ? "No science bonus" : "+" + std::to_string(blueprintGain) + " science";
-            const std::string tagThree = grade == OrbitGrade::Miss ? "Fuel and time spent" : "+" + display::money(rewardCredits) + " credits";
+            const std::string tagOne = grade == OrbitGrade::Miss ? "APPROACH UNCOMMITTED" : "+" + std::to_string(blueprintGain) + " Research Data";
+            const std::string tagTwo = grade == OrbitGrade::Miss ? "No Research Data" : "+" + display::money(rewardCredits) + " credits";
+            const std::string tagThree = grade == OrbitGrade::Miss ? "RETRY OR CHOOSE ANOTHER PATH" : "LAND OR DEPART";
             out << "<div data-panel-mode=\"mission-stamp\" data-orbit-run=\"1\" data-orbit-completed=\"1\" hidden></div>";
             out << missionStamp("Orbit stamp", resultTitle, resultBody, tagOne, tagTwo, tagThree, ui::actions::orbitContinue);
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
@@ -3235,15 +3325,15 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<div data-orbit-run=\"1\" data-orbit-completed=\"0\" hidden></div>";
-        out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape("Orbital Research") << "</h2>"
-            << "<p class=\"phase-copy\">" << htmlEscape("Complete one loop inside the research band.")
+        out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape("Orbit Capture") << "</h2>"
+            << "<p class=\"phase-copy\">" << htmlEscape("The insertion solution holds Good without input. Trim inward and hold the Perfect band for the bonus.")
             << "</p></div>" << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
         const std::string zoneValue = orbitZoneLabel(orbit.currentZone);
 
-        out << "<div class=\"metric-grid rr-metric-strip flight-readout\">"
-            << realtimeMetric("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << realtimeMetric("rr-hud-orbit-zone", "Zone", zoneValue)
-            << realtimeMetric("rr-hud-orbit-loop", "Loop", display::percent(progress))
+        out << "<div class=\"flight-status-list\">"
+            << flightStatusRow("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
+            << flightStatusRow("rr-hud-orbit-zone", "Zone", zoneValue)
+            << flightStatusRow("rr-hud-orbit-loop", "Loop", display::percent(progress))
             << "</div>";
 
         out << "<div class=\"actions action-row rr-action-footer live-hud-actions\">"
@@ -3252,7 +3342,7 @@ std::string buildGamePanelMarkup(
         const std::vector<DetailPresentationRow> orbitDetails {
             detailPresentationRow("Destination", destinationName),
             detailPresentationRow("Projected reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits)),
-            detailPresentationRow("Science", grade == OrbitGrade::Active ? "Pending" : "+" + std::to_string(blueprintGain)),
+            detailPresentationRow("Research Data", grade == OrbitGrade::Active ? "Pending" : "+" + std::to_string(blueprintGain)),
             detailPresentationRow("Controls", std::string_view("Up/Down adjust orbital speed; Left/Right adjust altitude")),
             detailPresentationRow(
                 "Orbit assists",
@@ -3305,19 +3395,15 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"objective-strip rr-objective-strip\"><span>Lesson</span><strong>"
             << htmlEscape(launchPanel.objectiveTitle) << "</strong><p>"
             << htmlEscape(launchPanel.objectiveCopy) << "</p></section>";
-        out << "<div class=\"metric-grid rr-metric-strip flight-readout launch-readout\">";
-        const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
-            ? std::min<std::size_t>(3, launchPanel.metrics.size())
-            : launchPanel.metrics.size();
-        for (std::size_t index = 0; index < visibleLaunchMetricCount; ++index) {
-            const PanelMetricPresentation& metricItem = launchPanel.metrics[index];
-            out << realtimeMetric(
-                "rr-hud-launch-metric-" + std::to_string(index),
-                metricItem.label,
-                metricItem.value,
-                launchMetricSeverity(context, metricItem.label));
+        if (context.launchFlight != nullptr && context.flightModel.asteroidsEnabled) {
+            out << "<div class=\"flight-status-list\">"
+                << flightStatusRow(
+                    "rr-hud-launch-hull",
+                    "Hull",
+                    display::fixed(std::max(0.0, context.launchFlight->hullRemaining), 0) + " / " +
+                        display::fixed(context.launchFlight->hullMaximum, 0) + " HP")
+                << "</div>";
         }
-        out << "</div>";
 
         out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
             << htmlEscape(launchPanel.telemetryMessage) << "</p>";
@@ -3429,13 +3515,10 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::ArrivalOps) {
         const Destination* arrivalDestination = catalog.findDestination(state.run.arrivalOps.destinationId);
+        const bool orbitCaptured = state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
         const bool flybyAvailable = canRunArrivalFlyby(state, catalog);
         const bool orbitAvailable = canEnterArrivalOrbit(state, catalog);
         const bool landingAvailable = canAttemptArrivalLanding(state, catalog);
-        const std::string orbitReason = arrivalOperationBlockReason(state, catalog, "orbit");
-        const std::string landingReason = arrivalOperationBlockReason(state, catalog, "landing");
-        const std::string orbitDetail = orbitReason.empty() ? std::string(text::panel::messages::orbitDetail) : orbitReason;
-        const std::string landingDetail = landingReason.empty() ? std::string(text::panel::messages::landingDetail) : landingReason;
         const std::string_view flybyIntroduction = !context.firstTimeIntroductionsEnabled
                 || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
             ? std::string_view {}
@@ -3455,13 +3538,39 @@ std::string buildGamePanelMarkup(
         const ScenarioObjectivePresentation arrivalScenario = arrivalDestination == nullptr
             ? ScenarioObjectivePresentation {}
             : scenarioObjectiveForDestination(state, catalog, arrivalDestination->id);
-        const std::string landingLabel = arrivalScenario.available && !arrivalScenario.location.empty()
-            ? "Land at " + arrivalScenario.location
-            : std::string(text::panel::details::landing);
+        const Destination* routeDestination = nextDestination(state, catalog);
+        const bool authoredRoute = routeDestination != nullptr && !routeDestination->routeRequirementKeys.empty();
+        const std::string routeStatus = routeDestination == nullptr
+            ? "No onward route"
+            : (authoredRoute
+                  ? "Objective remains active; " + routeDestination->name + " route stays locked"
+                  : "Clears all Flight Data required for " + routeDestination->name);
+        const std::string commitmentLabel = orbitCaptured ? "ORBIT CAPTURED" : "APPROACH UNCOMMITTED";
+        const std::string landingTarget = arrivalScenario.available && !arrivalScenario.location.empty()
+            ? arrivalScenario.location
+            : (arrivalDestination == nullptr ? "surface" : arrivalDestination->name);
+
+        std::string flybyRewardDetail = "Research Data +1. ";
+        std::string orbitRewardDetail;
+        if (arrivalDestination != nullptr) {
+            flybyRewardDetail += "Good "
+                + display::money(flybyCreditRewardMinimum(*arrivalDestination, FlybyGrade::Good)) + "–"
+                + display::money(flybyCreditRewardMaximum(*arrivalDestination, FlybyGrade::Good))
+                + "; Perfect "
+                + display::money(flybyCreditRewardMinimum(*arrivalDestination, FlybyGrade::Perfect)) + "–"
+                + display::money(flybyCreditRewardMaximum(*arrivalDestination, FlybyGrade::Perfect))
+                + ". " + routeStatus
+                + ". Perfect also stores +1.5–3.0 fuel and +0.20–0.40 speed for the next launch. Closes Orbit and Landing.";
+            orbitRewardDetail = "Good +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Good))
+                + " Research Data and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Good))
+                + " credits; Perfect +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Perfect))
+                + " and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Perfect))
+                + ". Removes +20 descent hazard for this visit. Closes Pass Through; then Land or Depart.";
+        }
 
         out << phaseBoardOpen("phase-board-arrival", "");
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
-            << "</h2><p>" << htmlEscape("Optional operations are available before refit.") << "</p></div></div>";
+            << "</h2><p>" << htmlEscape(commitmentLabel + " — choose one arrival path for this visit.") << "</p></div></div>";
         const double landingPackFuel = arkDiscovered(state)
             ? std::min(
                   tuning::research::expeditionRigPackFuel,
@@ -3470,7 +3579,8 @@ std::string buildGamePanelMarkup(
         const std::vector<PanelMetricPresentation> arrivalFuelMetrics {
             panelMetric("Transfer", display::fixed(state.run.arrivalOps.transferFuelRemaining, 1)),
             panelMetric("Rig fuel", display::fixed(landingPackFuel + state.run.arrivalOps.transferFuelRemaining, 1)),
-            panelMetric("Return", "READY")
+            panelMetric("RD next", researchDataMilestoneLabel(state.meta.blueprintProgress)),
+            panelMetric("Descent", orbitCaptured ? "MAPPED +0" : "UNMAPPED +20")
         };
         out << "<div class=\"stat-grid chip-strip phase-lane\">"
             << resourceChipGrid(arrivalFuelMetrics) << "</div>";
@@ -3478,36 +3588,61 @@ std::string buildGamePanelMarkup(
             out << scenarioObjectiveMarkup(
                 scenarioObjectiveForDestination(state, catalog, arrivalDestination->id),
                 false);
+            if (!arrivalDestination->approachBriefTitle.empty()) {
+                out << phaseAdvisory({
+                    arrivalDestination->approachBriefTitle,
+                    arrivalDestination->approachBriefDetail,
+                    arrivalDestination->requiresArrivalSurveySequence ? "info" : "warning"});
+            }
         }
-        out << "<h2>" << htmlEscape("Choose approach") << "</h2>";
+        out << "<p class=\"phase-copy\">Research families are added to future Refit offers when milestones are reached; they are not immediately owned.</p>";
+        out << "<h2>" << htmlEscape(orbitCaptured ? "Resolve captured orbit" : "Commit approach") << "</h2>";
         out << "<div class=\"ops-grid\">";
-        out << arrivalOperationCard(
-            text::panel::details::flyby,
-            text::panel::messages::flybyDetail,
-            "Low risk",
-            "Credits + BP",
-            flybyAvailable
-                ? panelActionButton(text::buttons::runFlyby, ui::actions::arrivalFlyby, "ok")
-                : disabledPanelButton(text::buttons::unavailable),
-            flybyIntroduction);
-        out << arrivalOperationCard(
-            text::panel::details::orbit,
-            orbitDetail,
-            "Medium risk",
-            arrivalDestination != nullptr && destinationSupportsResearch(*arrivalDestination) ? "Research" : "Science + BP",
-            orbitAvailable
-                ? panelActionButton(text::buttons::enterOrbit, ui::actions::arrivalOrbit, "warn")
-                : disabledPanelButton(text::buttons::unavailable),
-            orbitIntroduction);
-        out << arrivalOperationCard(
-            landingLabel,
-            landingDetail,
-            "High risk",
-            "Materials + artifacts",
-            landingAvailable
-                ? panelActionButton(text::buttons::attemptLanding, ui::actions::arrivalLanding, "danger")
-                : disabledPanelButton(text::buttons::unavailable),
-            landingIntroduction);
+        if (orbitCaptured) {
+            out << arrivalOperationCard(
+                "LAND WITH ORBITAL MAP",
+                "Descend to " + landingTarget + ". Surface hazard +0 from approach mapping. Earns the normal one-step Flight Data contribution. Orbit remains this visit's committed path.",
+                "Mapped descent",
+                "",
+                landingAvailable
+                    ? panelActionButton("LAND WITH MAP", ui::actions::arrivalLanding, "ok")
+                    : disabledPanelButton(text::buttons::unavailable),
+                landingIntroduction);
+            out << arrivalOperationCard(
+                "DEPART WITH SCIENCE",
+                "Keep the Orbit credits and Research Data, end the visit, and skip surface resources. Grants no route clearance and no Landing Flight Data.",
+                "End visit",
+                "Research Data banked",
+                panelActionButton("DEPART", ui::actions::arrivalOrbitDepart, "warn"));
+        } else {
+            out << arrivalOperationCard(
+                "FLYBY — PASS THROUGH",
+                flybyRewardDetail,
+                "Terminal path",
+                "Research Data + credits",
+                flybyAvailable
+                    ? panelActionButton("PASS THROUGH", ui::actions::arrivalFlyby, "ok")
+                    : disabledPanelButton(text::buttons::unavailable),
+                flybyIntroduction);
+            out << arrivalOperationCard(
+                "ORBIT — CAPTURE",
+                orbitRewardDetail,
+                "Branching path",
+                "Map descent or depart",
+                orbitAvailable
+                    ? panelActionButton("CAPTURE ORBIT", ui::actions::arrivalOrbit, "warn")
+                    : disabledPanelButton(text::buttons::unavailable),
+                orbitIntroduction);
+            out << arrivalOperationCard(
+                "DIRECT DESCENT",
+                "Immediately descend to " + landingTarget + ". SURFACE HAZARD +20. Closes Pass Through and Orbit. Earns the normal one-step Flight Data contribution after landing.",
+                "Terminal approach",
+                "",
+                landingAvailable
+                    ? panelActionButton("DESCEND DIRECT", ui::actions::arrivalLanding, "danger")
+                    : disabledPanelButton(text::buttons::unavailable),
+                landingIntroduction);
+        }
         out << "</div>";
         out << phaseBoardClose();
         if (showApproachIntroduction) {
@@ -3517,8 +3652,8 @@ std::string buildGamePanelMarkup(
             out << activityIntroductionModal(
                 ui::modals::approachIntroduction,
                 approachLocation + " APPROACH",
-                "You made it to " + arrivalDestination->name + ". Complete this site's active objective before the next route can open.",
-                "Begin with a flyby. Successful operations unlock Orbit, then Landing and the first explicit mining objective.",
+                "Choose one committed path: Pass Through ends the visit, Capture Orbit opens mapped landing or science departure, and Direct Descent accepts +20 surface hazard.",
+                "At the Moon, skipping the planet does not complete the active capture objective or open the Mars route.",
                 "Review",
                 ui::actions::acknowledgeApproachIntroduction,
                 "ok",
@@ -3527,9 +3662,9 @@ std::string buildGamePanelMarkup(
         if (!flybyIntroduction.empty()) {
             out << activityIntroductionModal(
                 ui::modals::flybyIntroduction,
-                "FLYBY RECON",
-                "Bring back a clean flight profile to recover credits and blueprint progress.",
-                "Blueprints unlock permanent upgrades for your SHIP. A perfect flyby slingshots the next launch with more speed and fuel margin, extending its reach toward farther destinations.",
+                "FLYBY — PASS THROUGH",
+                "A Good or Perfect pass banks Research Data and credits, closes Orbit and Landing, and ends this visit.",
+                "At authored objectives the route stays blocked. Later generic routes can be cleared quickly by sacrificing surface resources. Perfect also stores a next-launch solution.",
                 "Begin flyby",
                 ui::actions::arrivalFlyby,
                 "ok");
@@ -3537,9 +3672,9 @@ std::string buildGamePanelMarkup(
         if (!orbitIntroduction.empty()) {
             out << activityIntroductionModal(
                 ui::modals::orbitIntroduction,
-                "ORBITAL SURVEY",
-                "Hold a stable orbit to return deeper science and blueprint progress.",
-                "Those blueprints unlock permanent upgrades for your SHIP in the shipyard.",
+                "ORBIT — CAPTURE",
+                "The insertion begins in a stable Good orbit. Trim deliberately into Perfect for the larger Research Data and credit award.",
+                "Capture closes Pass Through and removes the +20 descent hazard for this visit. Then choose mapped landing or depart with science.",
                 "Enter orbit",
                 ui::actions::arrivalOrbit,
                 "warn");
@@ -3547,9 +3682,11 @@ std::string buildGamePanelMarkup(
         if (!landingIntroduction.empty()) {
             out << activityIntroductionModal(
                 ui::modals::landingIntroduction,
-                "SURFACE DEPLOYMENT",
-                "Mining, combat, objectives, and safely returned artifacts earn Expedition XP.",
-                "Level Up offers temporary RIG, DRONE, or SYNERGY upgrades for this Transport expedition.",
+                orbitCaptured ? "MAPPED DESCENT" : "DIRECT DESCENT",
+                orbitCaptured
+                    ? "The orbital map removes the +20 approach hazard for this visit."
+                    : "Direct Descent intentionally accepts +20 surface hazard and closes both flight paths.",
+                "Surface Ops remains the path to materials, artifacts, campaign objectives, and one step of Flight Data.",
                 "Begin landing",
                 ui::actions::arrivalLanding,
                 "danger");
@@ -3562,8 +3699,8 @@ std::string buildGamePanelMarkup(
     if (state.screen == Screen::Research) {
         const ResearchPhasePresentation researchPanel = researchPhasePresentation(state, catalog);
         out << phaseBoardOpen("phase-board-research", state.statusLine);
-        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::research)
-            << "</h2><p>" << htmlEscape("Turn arrival data into better tools, or continue down to the surface.") << "</p></div>"
+        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape("Research Board — Debug Only")
+            << "</h2><p>" << htmlEscape("This deferred material-project prototype is not entered or populated by the campaign. Orbit does not open it.") << "</p></div>"
             << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::details, ui::modals::research, "ghost")
             << "</div></div>";
         out << phaseAdvisory(researchPanel.advisory);
@@ -3625,11 +3762,7 @@ std::string buildGamePanelMarkup(
         out << "<header class=\"mining-top-rail ui-screen-header rr-screen-header\"><div class=\"mining-run-title\"><strong id=\"rr-hud-mining-title\">"
             << htmlEscape(miningHud.runLabel) << "</strong><span class=\"mining-run-objective\" id=\"rr-hud-mining-objective-title\">"
             << htmlEscape(scenarioMining ? compactMiningScenarioObjective(state, catalog) : miningHud.objective)
-            << "</span>" << expeditionXpMarkup(
-                state.run.surfaceExpedition,
-                "rr-hud-mining-xp",
-                context.expeditionXpPulse)
-            << "</div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
+            << "</span></div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
         for (std::size_t index = 0; index < miningHud.vitals.size(); ++index) {
             const MiningHudTilePresentation& tile = miningHud.vitals[index];
             const std::string_view id = miningVitalIds[index];
@@ -3666,9 +3799,9 @@ std::string buildGamePanelMarkup(
             out << "</article>";
         }
         out << "</section><nav class=\"mining-utility-cluster\">"
-            << modalButton("DETAILS", ui::modals::surface, "ghost")
-            << modalButton("INV", ui::modals::inventory, "ghost")
-            << modalButton("MENU", ui::modals::settings, "ghost") << "</nav></header>";
+            << miningModalButton("DETAILS", ui::modals::surface)
+            << miningModalButton("INV", ui::modals::inventory)
+            << miningModalButton("MENU", ui::modals::settings) << "</nav></header>";
         const MiningCocoonHudLayout cocoonHudLayout = miningCocoonHudLayout(mining.gate);
         if (cocoonMining) {
             out << "<section class=\"mining-cocoon-progress\" aria-label=\"Protected objective layer progress\""
@@ -4379,7 +4512,7 @@ std::string buildGamePanelMarkup(
         launchBlockedBody << "<p class=\"status\"><strong>" << htmlEscape(title)
             << "</strong><br>" << htmlEscape(detail) << "</p>";
         launchBlockedBody << "<div class=\"modal-actions actions action-row\">"
-            << modalButton("Ship details", ui::modals::ship, "ok")
+            << modalButton("Open details", ui::modals::hangarDetails, "ok")
             << "</div>";
     }
     std::vector<DetailPresentationRow> launchBlockedDetails = launchReadiness.details;
@@ -4431,13 +4564,6 @@ std::string buildGamePanelMarkup(
         out << scenarioObjectiveMarkup(
             scenarioObjectiveForDestination(state, catalog, currentFrontier.id));
     }
-    out << "<div class=\"utility-row compact-tools utility-actions hangar-detail-actions\">"
-        << modalButton("Ship details", ui::modals::ship, "ghost")
-        << modalButton("Crew details", ui::modals::crew, "ghost")
-        << modalButton("Frontier details", ui::modals::frontier, "ghost")
-        << modalButton(text::buttons::legacy, ui::modals::legacy, "ghost")
-        << "</div>";
-
     out << "<h2>" << htmlEscape(text::panel::sections::hangarOps) << "</h2>";
     out << "<div class=\"ops-grid rr-card-grid controller-choice-row hangar-controller-choice-row\">";
     for (const HangarOperationCardPresentation& card : hangarOperationCards(state, catalog)) {
@@ -4459,9 +4585,24 @@ std::string buildGamePanelMarkup(
         && !ui::briefings::acknowledged(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
-    const std::string prepareLaunchLabel = "Prepare for launch: " + launchTarget.name;
+    const std::string prepareLaunchLabel = "Launch: " + launchTarget.name;
     const bool prepareLaunchBlocked =
         launchReadiness.blocked || !currentDestinationLaunchReady(state, catalog);
+    const FrontierGateStatus nextFrontierGate = next != nullptr
+        ? frontierGateStatusForDestination(state, catalog, next->id)
+        : FrontierGateStatus {};
+    const double nextFrontierRequiredFuel = next != nullptr
+        ? tuning::launchProgression::baseFuelCapacity + static_cast<double>(
+              std::clamp(next->tier, 0, tuning::launchProgression::maximumUpgradeRank)) *
+              tuning::launchProgression::fuelPerTankRank
+        : 0.0;
+    const double launchFuelAvailable = launchFuelCapacity(state);
+    const bool nextFrontierFuelShortfall = next != nullptr &&
+        !navigationAvailable(state) &&
+        !currentFrontier.hiddenFromProgression &&
+        state.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
+        nextFrontierGate.kind == FrontierGateKind::FlightData &&
+        launchFuelAvailable + 0.000001 < nextFrontierRequiredFuel;
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
@@ -4469,25 +4610,37 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
+    out << "<div class=\"hangar-launch-stack\">";
+    if (nextFrontierFuelShortfall) {
+        const int filledSegments = std::clamp(
+            static_cast<int>(std::floor(launchFuelAvailable / std::max(1.0, nextFrontierRequiredFuel) * 10.0)),
+            0,
+            10);
+        const int shortfall = std::max(0, static_cast<int>(std::ceil(nextFrontierRequiredFuel - launchFuelAvailable)));
+        out << "<section class=\"hangar-fuel-requirement\" aria-label=\"Launch fuel requirement: "
+            << htmlEscape(display::fixed(launchFuelAvailable, 0) + " of " +
+                display::fixed(nextFrontierRequiredFuel, 0) + " fuel; " + std::to_string(shortfall) + " short")
+            << "\"><header><span>LAUNCH FUEL</span><strong>"
+            << htmlEscape(display::fixed(launchFuelAvailable, 0) + " / " +
+                display::fixed(nextFrontierRequiredFuel, 0))
+            << "</strong><small>" << shortfall << " SHORT</small></header><div class=\"hangar-fuel-meter\" aria-hidden=\"true\">";
+        for (int segment = 0; segment < 10; ++segment) {
+            out << "<span class=\"" << (segment < filledSegments ? "is-filled" : "") << "\"></span>";
+        }
+        out << "</div></section>";
+    }
     out << (prepareLaunchBlocked
-        ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok")
+        ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep")
         : (showLaunchIntroduction
-            ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok")
+            ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok hangar-launch-prep")
             : (showFlightControlsIntroduction
-                ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok")
-                : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok"))));
+                ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep")
+                : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok hangar-launch-prep", true))));
+    out << "</div>";
     if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression) {
         if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
-            const FrontierGateStatus nextGate = frontierGateStatusForDestination(state, catalog, next->id);
-            const int requiredFuelRank = std::clamp(next->tier, 0, tuning::launchProgression::maximumUpgradeRank);
-            const double requiredFuel = tuning::launchProgression::baseFuelCapacity +
-                static_cast<double>(requiredFuelRank) * tuning::launchProgression::fuelPerTankRank;
-            const bool fuelCapacityShortfall = nextGate.kind == FrontierGateKind::FlightData &&
-                launchFuelCapacity(state) + 0.000001 < requiredFuel;
-            out << (fuelCapacityShortfall
-                ? disabledButton(
-                    display::fixed(requiredFuel, 0) + " transfer fuel required / " +
-                    display::fixed(launchFuelCapacity(state), 0) + " available")
+            out << (nextFrontierFuelShortfall
+                ? std::string()
                 : (launchHardwareBlocked
                     ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
                     : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
@@ -4509,8 +4662,16 @@ std::string buildGamePanelMarkup(
     out << "</div>";
 
     const std::string legacyBody = detailStack(legacyDetailsPresentation(state, catalog));
+    const std::string hangarDetailsBody =
+        "<div class=\"modal-actions action-row hangar-details-menu\">" +
+        modalButton("Ship details", ui::modals::ship, "ghost") +
+        modalButton("Crew details", ui::modals::crew, "ghost") +
+        modalButton("Frontier details", ui::modals::frontier, "ghost") +
+        modalButton(text::buttons::legacy, ui::modals::legacy, "ghost") +
+        "</div>";
 
     out << phaseBoardClose();
+    out << modalTemplate(ui::modals::hangarDetails, "Details", hangarDetailsBody);
     out << modalTemplate(ui::modals::ship, text::panel::modals::shipDetails, shipBody);
     out << modalTemplate(ui::modals::crew, text::panel::modals::crewDetails, crewBody);
     out << modalTemplate(ui::modals::frontier, text::panel::modals::frontierDetails, frontierBody);
@@ -4657,16 +4818,27 @@ PanelInteractionMode interactionModeForContext(const PanelRenderContext& context
 
 PanelOverlayKind overlayKindForContext(const PanelRenderContext& context)
 {
+    if (context.titleScreenActive) {
+        return PanelOverlayKind::None;
+    }
+
     if (context.state.screen == Screen::Launch) {
         return context.flightArmed
-            ? PanelOverlayKind::None
+            ? PanelOverlayKind::FlightInstruments
             : PanelOverlayKind::PreflightLaunch;
+    }
+    if ((context.state.screen == Screen::Flyby || context.state.screen == Screen::Orbit) &&
+        flightInstrumentsForContext(context).visible) {
+        return PanelOverlayKind::FlightInstruments;
     }
     if (context.state.screen == Screen::Results) {
         return PanelOverlayKind::TelemetryLegend;
     }
     if (context.state.screen == Screen::SurfaceScan) {
         return PanelOverlayKind::SurfaceScanReadout;
+    }
+    if (context.state.screen == Screen::Mining) {
+        return PanelOverlayKind::MiningExperience;
     }
     return PanelOverlayKind::None;
 }
@@ -4774,6 +4946,21 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     result.runtime.miningEvaActive =
         context.state.screen == Screen::Mining && miningOperatorIsEva(context.state.run.mining);
     if (context.state.screen == Screen::Mining) {
+        const SurfaceExpeditionState& expedition = context.state.run.surfaceExpedition;
+        const int required = static_cast<int>(std::ceil(std::max(
+            1.0,
+            expeditionExperienceThreshold(expedition.expeditionLevel))));
+        result.runtime.expeditionLevel = std::max(1, expedition.expeditionLevel);
+        result.runtime.expeditionExperienceRequired = required;
+        result.runtime.expeditionExperienceCurrent = std::clamp(
+            static_cast<int>(std::floor(expedition.expeditionExperience + 0.0001)),
+            0,
+            required);
+        result.runtime.expeditionExperienceFilledSegments = expeditionXpFilledSegments(expedition);
+        result.runtime.expeditionPendingPicks = std::max(0, expedition.pendingRunUpgradeChoices);
+        result.runtime.expeditionXpPulse = context.expeditionXpPulse;
+    }
+    if (context.state.screen == Screen::Mining) {
         const MiningHudPresentation miningHud = miningHudPresentation(context.state, context.catalog);
         const auto hasAction = [&miningHud](std::string_view actionId) {
             return std::any_of(
@@ -4790,8 +4977,54 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     if (result.metadata.overlay == PanelOverlayKind::SurfaceScanReadout) {
         result.runtime.overlayValue = display::percent(context.state.run.surfaceScan.signal);
     }
+    if (result.metadata.overlay == PanelOverlayKind::FlightInstruments) {
+        const FlightInstrumentPresentation instruments = flightInstrumentsForContext(context);
+        result.runtime.instrumentSpeedValue = instruments.speedValue;
+        result.runtime.instrumentTemperatureValue = instruments.temperatureValue;
+        result.runtime.instrumentFuelValue = instruments.fuelValue;
+        result.runtime.instrumentThrottleValue = instruments.throttleValue;
+        result.runtime.instrumentTemperatureCritical = instruments.temperatureCritical;
+        result.runtime.instrumentOffCourse = instruments.offCourse;
+        result.runtime.instrumentCourseCritical = instruments.courseCritical;
+    }
 
     result.contentMarkup = buildGamePanelMarkup(context, result.modals);
+    const bool canReviewResearchBreakthrough = !context.titleScreenActive
+        && (context.state.screen == Screen::ArrivalOps
+            || context.state.screen == Screen::Hangar
+            || context.state.screen == Screen::Navigation
+            || context.state.screen == Screen::Upgrade
+            || context.state.screen == Screen::Research
+            || context.state.screen == Screen::SurfaceExpedition);
+    const bool hasBlockingAutoModal = std::any_of(result.modals.begin(), result.modals.end(), [](const ModalPresentation& modal) {
+        return modal.autoOpen;
+    });
+    if (canReviewResearchBreakthrough && !hasBlockingAutoModal) {
+        if (const tuning::unlocks::BlueprintUnlock* milestone = pendingResearchBreakthrough(context.state)) {
+            const std::string action = std::string(ui::actions::acknowledgeResearchBreakthroughPrefix)
+                + std::string(milestone->key);
+            std::ostringstream body;
+            body << "<section class=\"activity-introduction modal-body research-breakthrough\">"
+                << "<span class=\"activity-introduction-kicker\">RESEARCH DATA " << milestone->threshold << " REACHED</span>"
+                << "<p class=\"activity-introduction-setup\">" << htmlEscape(unlockDisplayName(milestone->key))
+                << " is now eligible to appear in future Refit offers.</p>"
+                << "<div class=\"activity-introduction-payoff\"><span>What changed</span><strong>"
+                << htmlEscape("This unlock expands the offer pool; no module was granted or installed automatically. "
+                    + researchDataMilestoneLabel(context.state.meta.blueprintProgress))
+                << "</strong></div><div class=\"modal-actions action-row rr-action-footer\">"
+                << button("REVIEWED", action, "ok", true) << "</div></section>";
+            result.modals.push_back(ModalPresentation {
+                "research_breakthrough_" + std::string(milestone->key),
+                "RESEARCH BREAKTHROUGH",
+                body.str(),
+                action,
+                true,
+                false,
+                false,
+                ModalTone::Positive
+            });
+        }
+    }
     return result;
 }
 
@@ -4802,14 +5035,45 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     result.patches.clear();
     result.patches.reserve(80);
 
-    const auto appendMetric = [&result](
-                                  std::string id,
-                                  std::string_view label,
-                                  std::string value,
-                                  std::string cssClass = {}) {
-        appendHudText(result, id + "-value", std::move(value));
-        appendHudClass(result, id, metricClass(label, cssClass));
-    };
+    const FlightInstrumentPresentation instruments = flightInstrumentsForContext(context);
+    if (instruments.visible) {
+        appendHudText(result, "rr-flight-speed-value", instruments.speedValue);
+        appendHudText(result, "rr-flight-temperature-value", instruments.temperatureValue);
+        appendHudText(result, "rr-flight-fuel-value", instruments.fuelValue);
+        appendHudText(result, "rr-flight-throttle-accessibility", instruments.throttleValue);
+        double warningTime = 0.0;
+        if (state.screen == Screen::Launch && context.launchFlight != nullptr) {
+            warningTime = context.launchFlight->elapsedSeconds;
+        } else if (state.screen == Screen::Flyby) {
+            warningTime = state.run.flyby.elapsedSeconds;
+        } else if (state.screen == Screen::Orbit) {
+            warningTime = state.run.orbit.elapsedSeconds;
+        }
+        std::string warningClass = "flight-nav-indicator";
+        if (instruments.offCourse) {
+            warningClass += " is-active";
+            if (instruments.courseCritical) {
+                warningClass += " is-critical";
+            }
+            if (static_cast<int>(std::floor(warningTime * 3.0)) % 2 == 0) {
+                warningClass += " blink-on";
+            }
+        }
+        appendHudClass(result, "rr-flight-nav-indicator", std::move(warningClass));
+        std::string temperatureLabelClass = "flight-dial-label temperature";
+        std::string temperatureReadoutClass = "flight-gauge-readout temperature";
+        if (instruments.temperatureCritical) {
+            temperatureLabelClass += " is-critical";
+            temperatureReadoutClass += " is-critical";
+            if (static_cast<int>(std::floor(warningTime * 3.0)) % 2 == 0) {
+                temperatureLabelClass += " blink-on";
+                temperatureReadoutClass += " blink-on";
+            }
+        }
+        appendHudClass(result, "rr-flight-temperature-label", std::move(temperatureLabelClass));
+        appendHudClass(result, "rr-flight-temperature-readout", std::move(temperatureReadoutClass));
+    }
+
     const auto appendExpeditionXp = [&](std::string_view id, bool hero = false) {
         const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
         const int required = static_cast<int>(std::ceil(std::max(
@@ -4820,7 +5084,10 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             0,
             required);
         const int filled = expeditionXpFilledSegments(expedition);
-        appendHudClass(result, id, expeditionXpClass(context.expeditionXpPulse, hero));
+        const std::string xpClass = std::string(id) == "rr-hud-mining-xp"
+            ? "mining-scene-xp " + expeditionXpClass(context.expeditionXpPulse, hero)
+            : expeditionXpClass(context.expeditionXpPulse, hero);
+        appendHudClass(result, id, xpClass);
         appendHudText(result, std::string(id) + "-level", "LV " + std::to_string(std::max(1, expedition.expeditionLevel)));
         appendHudText(result, std::string(id) + "-value", std::to_string(current) + " / " + std::to_string(required) + " XP");
         appendHudText(result, std::string(id) + "-pending", std::to_string(std::max(0, expedition.pendingRunUpgradeChoices)) + " PICKS");
@@ -4852,11 +5119,10 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     if (state.screen == Screen::Flyby && !state.run.flyby.completed) {
         const FlybyRunState& flyby = state.run.flyby;
         const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
-        appendMetric("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
-        appendMetric("rr-hud-flyby-speed", "Speed", flybySpeedLabel(flyby));
-        appendMetric(
-            "rr-hud-flyby-zone",
-            "Grade forecast",
+        appendHudText(result, "rr-hud-flyby-timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
+        appendHudText(
+            result,
+            "rr-hud-flyby-grade",
             flyby.collidedWithBody ? "Impact" : flybyZoneLabel(flyby.worstZone));
         return;
     }
@@ -4864,9 +5130,9 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     if (state.screen == Screen::Orbit && !state.run.orbit.completed) {
         const OrbitRunState& orbit = state.run.orbit;
         const double remaining = std::max(0.0, orbit.durationSeconds - orbit.elapsedSeconds);
-        appendMetric("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
-        appendMetric("rr-hud-orbit-zone", "Zone", orbitZoneLabel(orbit.currentZone));
-        appendMetric("rr-hud-orbit-loop", "Loop", display::percent(std::clamp(orbit.orbitProgress, 0.0, 1.0)));
+        appendHudText(result, "rr-hud-orbit-timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
+        appendHudText(result, "rr-hud-orbit-zone", orbitZoneLabel(orbit.currentZone));
+        appendHudText(result, "rr-hud-orbit-loop", display::percent(std::clamp(orbit.orbitProgress, 0.0, 1.0)));
         return;
     }
 
@@ -4881,18 +5147,12 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             context.returnDuration,
             context.flightActions,
             context.launchFlight);
-        const std::size_t visibleLaunchMetricCount = context.launchFlight == nullptr
-            ? std::min<std::size_t>(3, launchPanel.metrics.size())
-            : launchPanel.metrics.size();
-        for (std::size_t index = 0;
-             index < visibleLaunchMetricCount;
-             ++index) {
-            const PanelMetricPresentation& item = launchPanel.metrics[index];
-            appendMetric(
-                "rr-hud-launch-metric-" + std::to_string(index),
-                item.label,
-                item.value,
-                launchMetricSeverity(context, item.label));
+        if (context.launchFlight != nullptr && context.flightModel.asteroidsEnabled) {
+            appendHudText(
+                result,
+                "rr-hud-launch-hull",
+                display::fixed(std::max(0.0, context.launchFlight->hullRemaining), 0) + " / " +
+                    display::fixed(context.launchFlight->hullMaximum, 0) + " HP");
         }
         appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
         appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));

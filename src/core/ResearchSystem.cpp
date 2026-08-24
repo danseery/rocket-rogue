@@ -379,23 +379,11 @@ void addDestinationHistoryValue(std::vector<int>& values, const ContentCatalog& 
     values[static_cast<std::size_t>(index)] += 1;
 }
 
-bool requiresArrivalSurveySequence(const Destination& destination)
+double landingReconHazardPenalty(const GameState& state)
 {
-    return destination.requiresArrivalSurveySequence;
-}
-
-double landingReconHazardPenalty(const GameState& state, const ContentCatalog& catalog, const Destination& destination)
-{
-    const int flybys = destinationHistoryValue(state.meta.destinationFlybys, catalog, destination.id);
-    const int orbits = destinationHistoryValue(state.meta.destinationOrbits, catalog, destination.id);
-    double penalty = 0.0;
-    if (flybys <= 0) {
-        penalty += 0.08;
-    }
-    if (orbits <= 0) {
-        penalty += 0.12;
-    }
-    return penalty;
+    return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
+        ? 0.0
+        : tuning::research::unmappedDescentHazardPenalty;
 }
 
 void applySurfaceHazard(
@@ -816,10 +804,6 @@ void applyShipAssistToFlyby(FlybyRunState& flyby, const ModuleStats& stats)
         stats.escape);
     flyby.turnRateRadians = tuning::flyby::turnRateRadians * controlScale;
     flyby.thrustAcceleration = tuning::flyby::thrustAcceleration * controlScale;
-    flyby.brakeAcceleration = tuning::flyby::brakeAcceleration * std::clamp(
-        1.0 + std::max(0.0, stats.escape) * tuning::flyby::escapeControlScale,
-        0.95,
-        1.18);
 
     const int relief = std::clamp(
         static_cast<int>(std::round(
@@ -949,9 +933,9 @@ double orbitTargetRadius(double planetRadius)
     return planetRadius * tuning::orbit::targetRadiusScale;
 }
 
-double circularOrbitSpeed(const OrbitRunState& orbit)
+double circularOrbitSpeedAtRadius(const OrbitRunState& orbit, double requestedRadius)
 {
-    const double radius = std::max(0.001, orbit.targetRadius);
+    const double radius = std::max(0.001, requestedRadius);
     const double gravityAcceleration = orbit.gravityStrength /
         (radius * radius + tuning::orbit::gravitySoftening);
     return std::clamp(
@@ -1360,6 +1344,71 @@ bool destinationAllowsEnemyEncounters(const Destination& destination)
     return destination.tier >= tuning::research::enemyEncounterTier;
 }
 
+double flybyCreditRewardMinimum(const Destination& destination, FlybyGrade grade)
+{
+    if (grade != FlybyGrade::Good && grade != FlybyGrade::Perfect) {
+        return 0.0;
+    }
+    const double multiplier = grade == FlybyGrade::Perfect ? tuning::flyby::perfectRewardMultiplier : 1.0;
+    return flybyBaseReward(destination) * multiplier;
+}
+
+double flybyCreditRewardMaximum(const Destination& destination, FlybyGrade grade)
+{
+    return flybyCreditRewardMinimum(destination, grade) * tuning::flyby::completionRewardMaxScale;
+}
+
+int flybyResearchDataReward(FlybyGrade grade)
+{
+    return grade == FlybyGrade::Good || grade == FlybyGrade::Perfect
+        ? tuning::flyby::goodBlueprintGain
+        : 0;
+}
+
+double orbitCreditReward(const Destination& destination, OrbitGrade grade)
+{
+    if (grade != OrbitGrade::Good && grade != OrbitGrade::Perfect) {
+        return 0.0;
+    }
+    return orbitBaseReward(destination) * (grade == OrbitGrade::Perfect ? tuning::orbit::perfectRewardMultiplier : 1.0);
+}
+
+int orbitResearchDataReward(const Destination& destination, OrbitGrade grade)
+{
+    if (grade != OrbitGrade::Good && grade != OrbitGrade::Perfect) {
+        return 0;
+    }
+    const int base = grade == OrbitGrade::Perfect
+        ? tuning::orbit::perfectBlueprintGain
+        : tuning::orbit::goodBlueprintGain;
+    return base + (destinationSupportsResearch(destination) ? 1 : 0);
+}
+
+bool flybyClearsGenericNextRoute(const GameState& state, const ContentCatalog& catalog)
+{
+    const Destination* next = nextDestination(state, catalog);
+    return next != nullptr && next->routeRequirementKeys.empty() && frontierReadinessCap(state, catalog) > 0;
+}
+
+bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog)
+{
+    if (!flybyClearsGenericNextRoute(state, catalog)) {
+        return false;
+    }
+    const int before = state.run.frontierReadiness;
+    state.run.frontierReadiness = frontierReadinessCap(state, catalog);
+    return state.run.frontierReadiness > before;
+}
+
+bool captureArrivalOrbit(GameState& state)
+{
+    if (!state.run.arrivalOps.active || state.run.arrivalOps.commitment != ApproachCommitment::Uncommitted) {
+        return false;
+    }
+    state.run.arrivalOps.commitment = ApproachCommitment::OrbitCaptured;
+    return true;
+}
+
 int destinationHistoryValue(const std::vector<int>& values, const ContentCatalog& catalog, std::string_view destinationId)
 {
     const int index = destinationIndexForId(catalog, destinationId);
@@ -1395,7 +1444,8 @@ bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCata
 
 bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog)
 {
-    return currentResearchDestination(state, catalog) != nullptr;
+    return currentResearchDestination(state, catalog) != nullptr
+        && state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
 }
 
 bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
@@ -1404,10 +1454,7 @@ bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
     if (destination == nullptr) {
         return false;
     }
-    if (!requiresArrivalSurveySequence(*destination)) {
-        return true;
-    }
-    return destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) > 0;
+    return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
 }
 
 bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& catalog)
@@ -1416,11 +1463,8 @@ bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& cata
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
         return false;
     }
-    if (!requiresArrivalSurveySequence(*destination)) {
-        return true;
-    }
-    return destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) > 0
-        && destinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id) > 0;
+    return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted
+        || state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
 }
 
 bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog)
@@ -1434,17 +1478,12 @@ bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalo
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation)
 {
     const Destination* destination = currentResearchDestination(state, catalog);
-    if (destination == nullptr || !requiresArrivalSurveySequence(*destination)) {
+    if (destination == nullptr) {
         return {};
     }
-    if (operation == "orbit" && !canEnterArrivalOrbit(state, catalog)) {
-        return std::string(text::status::moonFlybyRequired);
-    }
-    if (operation == "landing" && destinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id) <= 0) {
-        return std::string(text::status::moonFlybyRequired);
-    }
-    if (operation == "landing" && destinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id) <= 0) {
-        return std::string(text::status::moonOrbitRequired);
+    if (state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
+        && (operation == "flyby" || operation == "orbit")) {
+        return "Orbit captured. Pass Through and a second capture are closed for this visit.";
     }
     return {};
 }
@@ -1464,11 +1503,13 @@ void preserveArrivalFuelAtDestination(GameState& state, std::string destinationI
 {
     const double transferFuelRemaining = state.run.arrivalOps.transferFuelRemaining;
     const double transferFuelCapacity = state.run.arrivalOps.transferFuelCapacity;
+    const ApproachCommitment commitment = state.run.arrivalOps.commitment;
     state.run.arrivalOps = {
         true,
         std::move(destinationId),
         transferFuelRemaining,
-        transferFuelCapacity
+        transferFuelCapacity,
+        commitment
     };
 }
 
@@ -1480,7 +1521,8 @@ void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
         true,
         outcome.destinationId,
         std::max(0.0, outcome.transferFuelRemaining),
-        std::max(0.0, outcome.transferFuelCapacity)
+        std::max(0.0, outcome.transferFuelCapacity),
+        ApproachCommitment::Uncommitted
     };
 }
 
@@ -1801,12 +1843,13 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         headingY = rotatedY;
     }
 
-    const double throttle = std::clamp(flyby.inputY, -1.0, 1.0);
-    if (throttle > 0.0) {
-        speed += throttle * flyby.thrustAcceleration * dt;
-    } else if (throttle < 0.0) {
-        speed += throttle * flyby.brakeAcceleration * dt;
-    }
+    flyby.selectedThrottle = std::clamp(
+        flyby.selectedThrottle +
+            std::clamp(flyby.inputY, -1.0, 1.0) *
+                tuning::flyby::throttleChangePerSecond * dt,
+        0.0,
+        1.0);
+    speed += flyby.selectedThrottle * flyby.thrustAcceleration * dt;
     speed = std::clamp(speed, tuning::flyby::minSpeed, tuning::flyby::maxSpeed);
     flyby.velocityX = headingX * speed;
     flyby.velocityY = headingY * speed;
@@ -2142,9 +2185,10 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     applyLaunchUpgradeAssistToOrbit(state, orbit);
 
     const double angle = tuning::orbit::flybyExitAngleRadians();
-    orbit.shipX = std::cos(angle) * orbit.targetRadius;
-    orbit.shipY = std::sin(angle) * orbit.targetRadius;
-    const double insertionSpeed = circularOrbitSpeed(orbit);
+    const double insertionRadius = orbit.targetRadius + orbit.goodBand * 0.82;
+    orbit.shipX = std::cos(angle) * insertionRadius;
+    orbit.shipY = std::sin(angle) * insertionRadius;
+    const double insertionSpeed = circularOrbitSpeedAtRadius(orbit, insertionRadius);
     orbit.velocityX = tuning::orbit::direction * -std::sin(angle) * insertionSpeed;
     orbit.velocityY = tuning::orbit::direction * std::cos(angle) * insertionSpeed;
     orbit.angleRadians = std::atan2(orbit.shipY, orbit.shipX);
@@ -2174,10 +2218,15 @@ OrbitGrade orbitGrade(const OrbitRunState& orbit)
     if (orbit.orbitProgress < 1.0) {
         return OrbitGrade::Miss;
     }
-    if (orbit.worstZone >= 2) {
+    if (orbit.trimApplied
+        && orbit.currentZone >= 2
+        && orbit.perfectSeconds >= tuning::orbit::perfectHoldSeconds) {
         return OrbitGrade::Perfect;
     }
-    if (orbit.worstZone >= 1) {
+    const double trackedSeconds = orbit.goodSeconds + orbit.perfectSeconds + orbit.missSeconds;
+    const double stableSeconds = orbit.goodSeconds + orbit.perfectSeconds;
+    if (trackedSeconds <= 0.001
+        || stableSeconds / trackedSeconds >= tuning::orbit::goodBandMinimumTimeShare) {
         return OrbitGrade::Good;
     }
     return OrbitGrade::Miss;
@@ -2206,7 +2255,16 @@ void updateOrbitRun(GameState& state, double deltaSeconds)
     orbit.velocityY += -radialY * gravityAcceleration * dt;
 
     const double radialInput = std::clamp(orbit.inputX, -1.0, 1.0);
-    const double tangentialInput = std::clamp(orbit.inputY, -1.0, 1.0);
+    orbit.trimApplied = orbit.trimApplied
+        || std::abs(orbit.inputX) > 0.05
+        || std::abs(orbit.inputY) > 0.05;
+    orbit.selectedThrottle = std::clamp(
+        orbit.selectedThrottle +
+            std::clamp(orbit.inputY, -1.0, 1.0) *
+                tuning::orbit::throttleChangePerSecond * dt,
+        0.0,
+        1.0);
+    const double tangentialInput = orbit.selectedThrottle;
     orbit.velocityX += (radialX * radialInput + directedTangentX * tangentialInput) * orbit.thrustAcceleration * dt;
     orbit.velocityY += (radialY * radialInput + directedTangentY * tangentialInput) * orbit.thrustAcceleration * dt;
 
@@ -3362,7 +3420,7 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
-    const double reconPenalty = landingReconHazardPenalty(state, catalog, *destination);
+    const double reconPenalty = landingReconHazardPenalty(state);
     expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
     expedition.transferFuelRecovered = std::max(0.0, state.run.arrivalOps.transferFuelRemaining);
     expedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
@@ -3894,7 +3952,7 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
         tuning::research::scanBaseBustRisk + expedition.hazard * tuning::research::scanBustRiskHazardScale - support.riskRelief,
         0.02,
         0.38);
-    scan.message = "Time the sweep: green maps all data; yellow maps 80%.";
+    scan.message = "Time the sweep: gold maps all data; green maps 80%.";
     state.run.surfaceScan = scan;
     state.screen = Screen::SurfaceScan;
     outcome.message = "Scanner lattice armed. Survey levels before deciding where to Dig.";
@@ -3931,6 +3989,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     const int depthOffset = scan.lastPulseDepthOffset;
     if (scan.lastPulseGrade == SurfaceScanPulseGrade::Miss) {
         scan.successFanfareSeconds = 0.0;
+        scan.missFanfareSeconds = tuning::research::scanMissFanfareSeconds;
         outcome.message = scan.pulses >= scan.maxPulses
             ? "Sweep missed. The final pulse returned no data; log the survey you have."
             : "Sweep missed. Pulse spent; no data recorded. Try level +" + std::to_string(depthOffset) + " again.";
@@ -3941,6 +4000,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         return outcome;
     }
 
+    scan.missFanfareSeconds = 0.0;
     SurfaceDepthProspect prospect = rollSurfaceDepthProspect(state, depthOffset, scan.signal, support, rng);
     if (scan.lastPulseGrade == SurfaceScanPulseGrade::Good) {
         prospect = partialSurfaceDepthProspect(prospect, rng);

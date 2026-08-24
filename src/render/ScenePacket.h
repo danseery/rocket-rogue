@@ -60,6 +60,7 @@ enum class TextureId : std::uint8_t {
     JetpackCapybara,
     PoiGuidanceArrow,
     Asteroid,
+    FlightInstrumentCluster,
     Count
 };
 

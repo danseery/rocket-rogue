@@ -40,6 +40,7 @@
     { "textureId": "HeroicCapybara", "key": "heroic_capybara", "source": "assets/art/heroic-capybara.png", "columns": 1, "rows": 1 },
     { "textureId": "JetpackCapybara", "key": "jetpack_capybara", "source": "assets/art/jetpack-capybara.png", "columns": 1, "rows": 1 },
     { "textureId": "PoiGuidanceArrow", "key": "poi_guidance_arrow", "source": "assets/art/poi-guidance-arrow.png", "columns": 1, "rows": 1 },
-    { "textureId": "Asteroid", "key": "asteroid", "source": "assets/art/asteroid.png", "columns": 1, "rows": 1 }
+    { "textureId": "Asteroid", "key": "asteroid", "source": "assets/art/asteroid.png", "columns": 1, "rows": 1 },
+    { "textureId": "FlightInstrumentCluster", "key": "flight_instrument_cluster", "source": "assets/art/flight-instrument-cluster.png", "columns": 1, "rows": 1 }
   ]
 }

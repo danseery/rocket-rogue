@@ -82,6 +82,7 @@ public:
     void orbitAbort();
     void orbitContinue();
     void attemptArrivalLanding();
+    void departCapturedOrbit();
     void selectResearchProject(int index);
     void skipResearch();
     void surveySurface();
@@ -256,6 +257,7 @@ private:
     void clearFlightControls();
     void clearResultView();
     void beginSurfaceExpeditionOrRefit();
+    void finishArrivalVisit(std::string statusLine);
     bool openRefitIfAvailable(bool regenerateOffers = true);
     double liveBurnMultiplier() const;
     void applyRealtimeInputs();

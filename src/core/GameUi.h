@@ -28,6 +28,7 @@ inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
 inline constexpr std::string_view orbitAbort = "orbit_abort";
 inline constexpr std::string_view orbitContinue = "orbit_continue";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
+inline constexpr std::string_view arrivalOrbitDepart = "arrival_orbit_depart";
 inline constexpr std::string_view skipArrivalFanfare = "skip_arrival_fanfare";
 inline constexpr std::string_view acknowledgeStoryBriefing = "acknowledge_story_briefing";
 inline constexpr std::string_view repairShip = "repair_ship";
@@ -39,6 +40,7 @@ inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
 inline constexpr std::string_view researchProjectPrefix = "research_project:";
+inline constexpr std::string_view acknowledgeResearchBreakthroughPrefix = "acknowledge_research_breakthrough:";
 inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
 inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
@@ -129,6 +131,7 @@ inline std::string scenarioAction(
 
 namespace modals {
 inline constexpr std::string_view settings = "settings";
+inline constexpr std::string_view hangarDetails = "hangar_details";
 inline constexpr std::string_view ship = "ship";
 inline constexpr std::string_view crew = "crew";
 inline constexpr std::string_view frontier = "frontier";

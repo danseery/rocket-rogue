@@ -109,6 +109,20 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
             "No calibration telemetry validated | Rebuild and complete the test flight"
         };
     }
+    if (outcome.failureCause == LaunchFailureCause::ThermalRunaway) {
+        return {
+            "ENGINES TOASTED",
+            "Your engines got a little too enthusiastic and cooked themselves before Mars. Cut Engines Off to shed heat before the red line.",
+            "Thermal runaway | No upgrade unlocked | Let them cool and retry"
+        };
+    }
+    if (outcome.failureCause == LaunchFailureCause::CourseLost) {
+        return {
+            "OFF COURSE",
+            "You missed the calibration lane and went careening off into oblivion. Keep the ship centered before the warning becomes critical.",
+            "Course lost | No upgrade unlocked | Correct the drift and retry"
+        };
+    }
     if (outcome.fuelSurveyReturnTiming == FuelSurveyReturnTiming::Late) {
         return {
             "LATE RETURN",
@@ -117,6 +131,13 @@ inline LaunchOutcomeSummaryPresentation launchOutcomeSummaryPresentation(const G
         };
     }
     if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
+        if (state.launchConfig.missionKind == LaunchMissionKind::FlightControlsCalibration) {
+            return {
+                "OFF COURSE",
+                "You missed the calibration lane and went careening off into oblivion. Mission Control pulled the plug before the test ship joined you.",
+                "No upgrade unlocked | Correct the drift and retry"
+            };
+        }
         return {
             "TRAINING RESCUE",
             "Mission Control recovered the crew after the ship exhausted its fuel before safe completion. No calibration telemetry was validated.",
@@ -250,14 +271,19 @@ inline std::string_view launchOutcomeNextActionLabel(const LaunchOutcome& outcom
     return opensPostArrivalPhases ? text::buttons::arrivalOps : text::buttons::reviewRefitOptions;
 }
 
-inline std::vector<std::string> launchOutcomeNotes(const LaunchOutcome& outcome, bool opensPostArrivalPhases = false)
+inline std::vector<std::string> launchOutcomeNotes(
+    const LaunchOutcome& outcome,
+    bool opensPostArrivalPhases = false,
+    LaunchMissionKind missionKind = LaunchMissionKind::Standard)
 {
     std::vector<std::string> notes;
     if (outcome.pilotedFlight) {
         if (outcome.failureCause == LaunchFailureCause::LunarImpact) {
             notes.emplace_back("The ship collided with the Moon because lunar landing guidance has not been calibrated.");
         } else if (outcome.failureCause == LaunchFailureCause::TrainingRescue) {
-            notes.emplace_back("Mission Control recovered the crew after the ship exhausted its fuel before safe completion. No calibration telemetry was validated.");
+            notes.emplace_back(missionKind == LaunchMissionKind::FlightControlsCalibration
+                ? "The ship left the calibration lane, so Mission Control ended the test before it careened off into oblivion. No calibration telemetry was validated."
+                : "Mission Control recovered the crew after the ship exhausted its fuel before safe completion. No calibration telemetry was validated.");
         } else if (outcome.failureCause != LaunchFailureCause::None) {
             notes.push_back("Flight ended by " + std::string(toString(outcome.failureCause)) +
                 " after its visible safety countdown expired.");
@@ -419,7 +445,7 @@ inline LaunchOutcomePresentation launchOutcomePresentation(
         launchOutcomeMetricGroups(
             outcome,
             launchOutcomeRecoveryLabel(state, catalog, outcome)),
-        launchOutcomeNotes(outcome, opensPostArrivalPhases),
+        launchOutcomeNotes(outcome, opensPostArrivalPhases, state.launchConfig.missionKind),
         launchOutcomeAchievements(outcome)
     };
 }

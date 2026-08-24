@@ -3112,6 +3112,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::arrivalDestination, save.arrivalOps.destinationId);
     writeField(out, save_schema::field::arrivalTransferFuelRemaining, save.arrivalOps.transferFuelRemaining);
     writeField(out, save_schema::field::arrivalTransferFuelCapacity, save.arrivalOps.transferFuelCapacity);
+    writeField(out, save_schema::field::arrivalApproachCommitment, static_cast<int>(save.arrivalOps.commitment));
     writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
     writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
     writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
@@ -3312,6 +3313,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         }
         if (key == save_schema::field::arrivalTransferFuelCapacity) {
             save.arrivalOps.transferFuelCapacity = parseDouble(value, save.arrivalOps.transferFuelCapacity);
+            continue;
+        }
+        if (key == save_schema::field::arrivalApproachCommitment) {
+            save.arrivalOps.commitment = parseInt(value, 0) == static_cast<int>(ApproachCommitment::OrbitCaptured)
+                ? ApproachCommitment::OrbitCaptured
+                : ApproachCommitment::Uncommitted;
             continue;
         }
         if (key == save_schema::field::surfaceRigFuel) {

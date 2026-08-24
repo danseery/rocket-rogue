@@ -4302,7 +4302,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .surface-action-card {
     width: 292px;
 }
-.flight-readout .metric,
 .focus-metrics .metric {
     width: 132px;
 }
@@ -4330,7 +4329,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     justify-content: flex-start;
 }
 .control-panel .panel-kpis .metric,
-.control-panel .flight-readout .metric,
 .control-panel .focus-metrics .metric {
     width: 160px;
     padding: 7px 9px;
@@ -6645,37 +6643,153 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     margin-left: 8px;
     font-size: 10px;
 }
-#rr-panel.control-panel .flight-readout {
+.flight-status-list {
+    display: block;
+    width: 100%;
+    margin: 0px 0px 10px 0px;
+    padding: 4px 9px;
+    box-sizing: border-box;
+    background-color: #08161e;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 5px;
+}
+.flight-status-row {
     display: flex;
     flex-direction: row;
-    flex-wrap: nowrap;
-    width: 100%;
-    margin: 0px 0px 12px 0px;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 23px;
+    color: #9bb8c5;
+    font-size: 10px;
+    border-bottom-width: 1px;
+    border-color: #1e3440;
 }
-#rr-panel.control-panel .flight-readout .metric {
-    flex: 1 1 0px;
-    width: auto;
-    min-width: 0px;
-    min-height: 64px;
-    margin-right: 8px;
-    padding: 8px 5px;
+.flight-status-row:last-child { border-bottom-width: 0px; }
+.flight-status-row strong {
+    color: #e9f7fb;
+    font-size: 12px;
+    font-weight: normal;
+}
+.flight-instrument-overlay {
+    position: absolute;
+    pointer-events: none;
+    color: #dff8ff;
+}
+.flight-dial-label {
+    position: absolute;
+    box-sizing: border-box;
     text-align: center;
-    background-color: #08161e;
-    border-color: #34596a;
+    color: #a9dce7;
+    font-size: 8px;
+    line-height: 8px;
+    letter-spacing: 1px;
 }
-#rr-panel.control-panel .flight-readout .metric:last-child { margin-right: 0px; }
-#rr-panel.control-panel .flight-readout .metric strong { font-size: 16px; }
-#rr-panel.control-panel .launch-readout {
-    flex-wrap: wrap;
-    row-gap: 5px;
+.flight-dial-label.temperature {
+    color: #ffe18a;
+    font-weight: bold;
 }
-#rr-panel.control-panel .launch-readout .metric {
-    flex: 1 1 92px;
-    width: 92px;
-    min-height: 52px;
-    margin-top: 0px;
+.flight-dial-label.temperature.is-critical,
+.flight-gauge-readout.temperature.is-critical,
+.flight-gauge-readout.temperature.is-critical strong {
+    color: #7c2e29;
 }
-#rr-panel.control-panel .launch-readout .metric strong { font-size: 14px; }
+.flight-dial-label.temperature.is-critical.blink-on,
+.flight-gauge-readout.temperature.is-critical.blink-on,
+.flight-gauge-readout.temperature.is-critical.blink-on strong {
+    color: #ff5147;
+    font-effect: glow(2px #7f1512);
+}
+.flight-dial-label.speed {
+    color: #ffffff;
+    font-weight: bold;
+}
+.flight-dial-label.fuel {
+    color: #dff8ff;
+    font-weight: bold;
+}
+.flight-gauge-readout {
+    position: absolute;
+    box-sizing: border-box;
+    padding-top: 2px;
+    text-align: center;
+    color: #92dbea;
+}
+.flight-gauge-readout.temperature { color: #ffc14d; }
+.flight-gauge-readout.temperature,
+.flight-gauge-readout.fuel {
+    padding-top: 6px;
+}
+.flight-gauge-readout.fuel { padding-top: 5px; }
+.flight-gauge-readout.speed { padding-top: 0px; }
+.flight-gauge-readout strong {
+    display: block;
+    font-size: 14px;
+    line-height: 14px;
+    font-weight: normal;
+    color: #92dbea;
+}
+.flight-gauge-readout.temperature strong { color: #ffc14d; }
+.flight-gauge-readout.fuel strong { color: #92dbea; }
+.flight-gauge-readout.speed strong { font-size: 15px; line-height: 15px; }
+.flight-instrument-overlay.is-compact .flight-dial-label {
+    font-size: 6px;
+    line-height: 6px;
+    letter-spacing: 0px;
+}
+.flight-instrument-overlay.is-compact .flight-gauge-readout {
+    padding-top: 1px;
+}
+.flight-instrument-overlay.is-compact .flight-gauge-readout.temperature,
+.flight-instrument-overlay.is-compact .flight-gauge-readout.fuel {
+    padding-top: 4px;
+}
+.flight-instrument-overlay.is-compact .flight-gauge-readout.speed { padding-top: 0px; }
+.flight-instrument-overlay.is-compact .flight-gauge-readout strong {
+    font-size: 10px;
+    line-height: 10px;
+}
+.flight-instrument-overlay.is-compact .flight-gauge-readout.speed strong {
+    font-size: 11px;
+    line-height: 11px;
+}
+.flight-accessibility-readout {
+    position: absolute;
+    left: -10000px;
+    top: 0px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+.flight-nav-indicator {
+    position: absolute;
+    padding-top: 0px;
+    box-sizing: border-box;
+    text-align: center;
+    white-space: nowrap;
+    color: #51390e;
+    background-color: #281c08;
+    border-width: 1px;
+    border-color: #6b4a10;
+    border-radius: 3px;
+    font-size: 7px;
+    line-height: 7px;
+    letter-spacing: 0px;
+    opacity: 0.18;
+}
+.flight-nav-indicator.is-active {
+    color: #fff7ef;
+    border-color: #f0a91c;
+    background-color: #4c2e08;
+    font-weight: bold;
+    opacity: 0.38;
+}
+.flight-nav-indicator.is-active.blink-on { opacity: 1; }
+.flight-nav-indicator.is-critical {
+    color: #ffe2de;
+    border-color: #ff5047;
+    background-color: #5b1514;
+}
 .fuel-survey-alert { border-width: 2px; }
 .fuel-survey-alert.caution,
 .fuel-survey-status.caution {
@@ -7618,34 +7732,179 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     margin: 0px;
 }
 
-/* The Hangar fuel summary is always three compact, two-line readouts. */
+/* The Hangar fuel summary is always three high-priority, two-line readouts. */
 #rr-panel.hangar-family-panel .hangar-fuel-strip {
     display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
+    justify-content: center;
     width: 100%;
     max-width: 100%;
-    margin: 0px 0px 8px 0px;
+    margin: 0px 0px 14px 0px;
 }
 #rr-panel.hangar-family-panel .hangar-fuel-strip .hangar-fuel-chip {
-    flex: 0 0 150px;
+    flex: 0 0 208px;
     box-sizing: border-box;
-    width: 150px;
-    min-width: 150px;
-    max-width: 150px;
-    min-height: 44px;
-    height: 44px;
-    margin: 0px 8px 0px 0px;
-    padding: 5px 8px;
+    width: 208px;
+    min-width: 208px;
+    max-width: 208px;
+    min-height: 62px;
+    height: 62px;
+    margin: 0px 10px 0px 0px;
+    padding: 8px 10px;
     text-align: center;
     white-space: nowrap;
+    background-color: #102631;
+    border-width: 2px;
+    border-color: #3d91aa;
 }
 #rr-panel.hangar-family-panel .hangar-fuel-strip .hangar-fuel-chip:last-child {
     margin-right: 0px;
 }
 #rr-panel.hangar-family-panel .hangar-fuel-chip .rr-chip-label {
-    line-height: 16px;
+    display: block;
+    line-height: 1;
     white-space: nowrap;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-chip .hangar-fuel-label {
+    display: block;
+    color: #a9ddeb;
+    font-size: 14px;
+    line-height: 16px;
+}
+#rr-panel.hangar-family-panel > .panel-kpis .metric,
+#rr-panel.hangar-family-panel > .rr-shell .rr-shell-content > .panel-kpis .metric {
+    min-height: 72px;
+    height: 72px;
+    padding: 9px 6px;
+}
+#rr-panel.hangar-family-panel > .panel-kpis .metric strong,
+#rr-panel.hangar-family-panel > .rr-shell .rr-shell-content > .panel-kpis .metric strong {
+    font-size: 22px;
+    line-height: 28px;
+}
+#rr-panel.hangar-family-panel > .panel-kpis .metric span,
+#rr-panel.hangar-family-panel > .rr-shell .rr-shell-content > .panel-kpis .metric span {
+    font-size: 15px;
+    line-height: 18px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-chip strong {
+    display: block;
+    margin-top: 3px;
+    color: #f2fcff;
+    font-size: 15px;
+    font-weight: normal;
+    line-height: 18px;
+}
+#rr-panel.hangar-family-panel .hangar-actions {
+    justify-content: center;
+}
+#rr-panel.hangar-family-panel .hangar-actions button {
+    flex: 0 0 196px;
+    box-sizing: border-box;
+    width: 196px;
+    min-width: 196px;
+    min-height: 62px;
+    height: 62px;
+    margin: 0px 8px 5px 0px;
+    padding: 0px 16px;
+    font-size: 14px;
+    line-height: 1.1;
+}
+#rr-panel.hangar-family-panel .hangar-actions .hangar-launch-prep {
+    flex: 0 0 196px;
+    box-sizing: border-box;
+    width: 196px;
+    min-width: 196px;
+    min-height: 62px;
+    height: 62px;
+    margin: 0px 8px 5px 0px;
+    padding: 0px 16px;
+    font-size: 16px;
+    line-height: 1.1;
+}
+#rr-panel.hangar-family-panel .hangar-actions .hangar-launch-stack {
+    display: flex;
+    flex: 0 0 196px;
+    flex-direction: column;
+    align-items: center;
+    width: 196px;
+    margin: 0px 8px 5px 0px;
+}
+#rr-panel.hangar-family-panel .hangar-actions .hangar-launch-stack .hangar-launch-prep {
+    flex: 0 0 62px;
+    margin: 0px;
+}
+#rr-panel.hangar-family-panel .hangar-actions .hangar-fuel-requirement {
+    display: flex;
+    flex: 0 0 196px;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 196px;
+    min-width: 196px;
+    min-height: 48px;
+    height: 48px;
+    margin: 0px 0px 5px 0px;
+    padding: 5px 10px;
+    color: #f3c766;
+    background-color: #2b240f;
+    border-width: 1px;
+    border-color: #9a7b25;
+    border-radius: 5px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-requirement header {
+    display: flex;
+    align-items: baseline;
+    width: 100%;
+    white-space: nowrap;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-requirement header span {
+    color: #d1b46b;
+    font-size: 9px;
+    line-height: 12px;
+    letter-spacing: 1px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-requirement header strong {
+    margin-left: auto;
+    color: #fff0bc;
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 12px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-requirement header small {
+    margin-left: 5px;
+    color: #ff9551;
+    font-size: 8px;
+    line-height: 12px;
+    letter-spacing: 1px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-meter {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 8px;
+    margin-top: 5px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-meter span {
+    flex: 1 1 0px;
+    height: 8px;
+    margin-right: 3px;
+    background-color: #533d14;
+    border-radius: 1px;
+}
+#rr-panel.hangar-family-panel .hangar-fuel-meter span:last-child { margin-right: 0px; }
+#rr-panel.hangar-family-panel .hangar-fuel-meter span.is-filled { background-color: #f0b929; }
+.hangar-details-menu {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+}
+.hangar-details-menu button {
+    flex: 1 1 180px;
+    min-height: 46px;
+    margin: 0px 6px 6px 0px;
+    font-size: 12px;
 }
 
 
@@ -8565,6 +8824,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     flex-direction: row;
     flex-wrap: nowrap;
     align-items: stretch;
+    justify-content: center;
     width: 100%;
     min-width: 0px;
     height: var(--rr-legacy-layout-193, 0px);
@@ -8574,9 +8834,9 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 #rr-panel.selection-family-panel .phase-board-refit .refit-choice-card {
     position: relative;
     display: flex;
-    flex: 1 1 0px;
+    flex: 0 1 420px;
     box-sizing: border-box;
-    width: auto;
+    width: 420px;
     min-width: 0px;
     min-height: var(--rr-legacy-layout-193, 0px);
     height: var(--rr-legacy-layout-193, 0px);
@@ -9115,6 +9375,19 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     padding: 4px 8px;
     font-size: 11px;
 }
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row button.surface-return-action {
+    color: #dffcff;
+    background-color: #10323b;
+    border-color: #21d8ef;
+    font-size: 12px;
+    font-weight: bold;
+}
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row button.surface-return-action:hover,
+#rr-panel.phase-board-panel .surface-ops-screen .surface-choice-row button.surface-return-action:focus {
+    color: #ffffff;
+    background-color: #174957;
+    border-color: #62efff;
+}
 
 /* Shared fixed-action workspaces supersede the staged workspace rule that
    otherwise returns every phase board to content-sized scrolling. Keep this
@@ -9497,6 +9770,19 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     line-height: 48px;
 }
 
+/* Hangar alone adds the Details gateway to the shared header. Keep all four
+   actions inside the same right edge at workspace widths. */
+#rr-panel.hangar-family-panel > .panel-head .panel-head-actions,
+#rr-panel.hangar-family-panel > .rr-shell .rr-shell-content > .panel-head .panel-head-actions {
+    flex: 0 0 384px;
+    width: 384px;
+}
+#rr-panel.hangar-family-panel > .panel-head .panel-head-actions button,
+#rr-panel.hangar-family-panel > .rr-shell .rr-shell-content > .panel-head .panel-head-actions button {
+    flex: 0 0 88px;
+    width: 88px;
+}
+
 /* Flight controls keep the readable type size without clipping longer
    commands such as Return to Earth. Wrap only inside the button's own lane
    and let the control grow vertically so it never spills into its neighbor. */
@@ -9594,9 +9880,10 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 
 .phase-board-surface.surface-ops-screen .surface-quickbar > .expedition-xp {
     flex: 2 1 220px;
+    align-self: stretch;
     width: 220px;
     min-height: 32px;
-    height: 32px;
+    height: auto;
     margin: 0px 0px 0px 4px;
     padding: 4px 6px;
 }
@@ -9622,6 +9909,23 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 .mining-run-title .expedition-xp-track,
 .mining-run-title .expedition-xp-track .xp-segment {
     height: 4px;
+}
+.mining-scene-xp {
+    position: absolute;
+    left: var(--rr-legacy-layout-077, 12px);
+    top: var(--rr-legacy-layout-078, 104px);
+    width: var(--rr-legacy-layout-079, calc(100% - 24px));
+    min-height: 38px;
+    height: 38px;
+    padding: 5px 8px;
+    background-color: #07141c;
+    border-width: 1px;
+    border-color: #34596a;
+    pointer-events: none;
+}
+.mining-scene-xp .expedition-xp-track,
+.mining-scene-xp .expedition-xp-track .xp-segment {
+    height: 8px;
 }
 
 /* The Level Up stamp deliberately reuses the compact draft room. It is scoped

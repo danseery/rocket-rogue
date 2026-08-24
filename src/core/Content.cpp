@@ -391,10 +391,10 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.researchProjects = {
-        researchProject(content::research::blueprintSurvey, "Blueprint Survey", "Map Mars strata for recoverable ship schematics.", Rarity::Common, 2, 2, {}, content::unlock::starter, "", {"blueprint", "survey"}),
+        researchProject(content::research::blueprintSurvey, "Research Data Survey", "Map Mars strata for recoverable ship schematics and Research Data.", Rarity::Common, 2, 2, {}, content::unlock::starter, "", {"blueprint", "survey"}),
         researchProject(content::research::fieldProbeNetwork, "Field Probe Network", "Seed landing zones with small probes before the crew commits action kits.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "survey"}),
         researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
-        researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner blueprints.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
+        researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner Research Data.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
         researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
         researchProject(content::research::droneBayProgram, "Drone Support Program", "Expand the Prospector cradle for support drones that handle scouting and logistics.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneSupportSuite, {"surface", "drone", "logistics"}),
         researchProject(content::research::cargoReturnRig, "Cargo Return Rig", "Prototype restraint frames that make heavier payloads less terrifying to extract.", Rarity::Uncommon, 2, 3, {.common = 3}, content::unlock::recovery, content::unlock::cargoRigs, {"surface", "extraction"}),
@@ -445,6 +445,19 @@ ContentCatalog createDefaultContent()
             destination.provingRouteReadyTitle = "LUNAR ROUTE CHARTED";
             destination.provingRouteReadyConsequence =
                 "The route is complete. Mission Control has cleared the next launch for the Moon.";
+        }
+        if (destination.id == content::destination::moon) {
+            destination.approachBriefTitle = "MOON APPROACH";
+            destination.approachBriefDetail =
+                "Pass Through, Capture Orbit, and Direct Descent are mutually exclusive paths for this visit.";
+        } else if (destination.id == content::destination::mars) {
+            destination.approachBriefTitle = "MARS APPROACH";
+            destination.approachBriefDetail =
+                "Capture Orbit maps the descent and removes +20 hazard. Direct Descent is an intentional blind-risk choice.";
+        } else if (destination.id == content::destination::jupiter) {
+            destination.approachBriefTitle = "IO APPROACH";
+            destination.approachBriefDetail =
+                "Skipping Io leaves the active capture objective incomplete and the authored Saturn route blocked.";
         }
         // The current catalog begins its outward-only expedition at Saturn.
         // This is content policy: recovery and transfer mechanics consume the

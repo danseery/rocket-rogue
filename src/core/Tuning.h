@@ -333,7 +333,9 @@ inline constexpr double planetColliderPadding = 0.012;
 inline constexpr double shipColliderHalfLength = 0.055;
 inline constexpr double shipColliderHalfWidth = 0.025;
 inline constexpr double thrustAcceleration = 0.66;
-inline constexpr double brakeAcceleration = 0.52;
+// Flyby uses the same held throttle model as Launch: vertical input adjusts
+// this retained setpoint, while releasing the input keeps the current burn.
+inline constexpr double throttleChangePerSecond = 0.35;
 inline constexpr double turnRateRadians = 1.45;
 inline constexpr double sensorPerfectBandScale = 0.0025;
 inline constexpr double sensorGoodBandScale = 0.0060;
@@ -372,11 +374,14 @@ inline constexpr int impactHullDamage = 18;
 
 namespace orbit {
 inline constexpr double durationSeconds = 15.0;
+inline constexpr double throttleChangePerSecond = 0.35;
 inline constexpr double planetBaseRadius = 0.145;
 inline constexpr double planetTierRadius = 0.016;
 inline constexpr double targetRadiusScale = 2.95;
 inline constexpr double goodBandScale = 0.55;
 inline constexpr double perfectBandScale = 0.24;
+inline constexpr double perfectHoldSeconds = 3.0;
+inline constexpr double goodBandMinimumTimeShare = 0.60;
 // Orbit insertion begins at the Flyby endpoint, measured from the destination
 // center with the standard atan2(y, x) mathematical angle. With the authored
 // path this is approximately 0.797 radians; calculating it here keeps both
@@ -394,7 +399,7 @@ inline constexpr double direction = -1.0;
 inline constexpr double thrustAcceleration = 0.075;
 inline constexpr double gravitySoftening = 0.120;
 inline constexpr double gravityScale = 0.42;
-inline constexpr double driftDrag = 0.008;
+inline constexpr double driftDrag = 0.0;
 inline constexpr double minSpeed = 0.18;
 inline constexpr double maxSpeed = 0.48;
 inline constexpr double escapeRadiusScale = 2.40;
@@ -430,6 +435,7 @@ inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 } // namespace rewards
 
 namespace research {
+inline constexpr double unmappedDescentHazardPenalty = 0.20;
 inline constexpr int firstResearchTier = 2;
 inline constexpr int prospectorCommonOreGoal = 30;
 inline constexpr int marsBayCommonOreGoal = 40;
@@ -509,6 +515,7 @@ inline constexpr int scanGoodInformationPercent = 80;
 inline constexpr int scanPerfectInformationPercent = 100;
 inline constexpr double scanGoodSuccessFanfareSeconds = 0.70;
 inline constexpr double scanPerfectSuccessFanfareSeconds = 1.05;
+inline constexpr double scanMissFanfareSeconds = 0.48;
 inline double surfaceScanSweepAngleRadians(double elapsedSeconds) noexcept
 {
     constexpr double twoPi = 6.28318530717958647692;
@@ -627,6 +634,16 @@ inline constexpr double miningExtractionSequenceSeconds = 3.40;
 inline constexpr double scannerRevealRadius = 5.5;
 inline constexpr double scannerProbeBonus = 2.0;
 inline constexpr double scannerCooldownSeconds = 4.0;
+inline constexpr double scannerPulseSeconds = 0.64;
+inline double scannerRechargePresentationProgress(double cooldownRemaining) noexcept
+{
+    const double elapsed = scannerCooldownSeconds
+        - std::clamp(cooldownRemaining, 0.0, scannerCooldownSeconds);
+    return std::clamp(
+        (elapsed - scannerPulseSeconds) / (scannerCooldownSeconds - scannerPulseSeconds),
+        0.0,
+        1.0);
+}
 inline constexpr double regolithToughness = 2.1;
 inline constexpr double hardRockToughness = 6.8;
 inline constexpr double commonOreToughness = 3.9;

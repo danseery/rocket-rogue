@@ -512,6 +512,16 @@ void rr_arrival_landing()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_arrival_orbit_depart()
+{
+    if (g_app) {
+        g_app->departCapturedOrbit();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_research_project(int index)
 {
     if (g_app) {

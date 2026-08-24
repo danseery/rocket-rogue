@@ -374,11 +374,12 @@ inline PhaseStepPresentation phaseStep(std::string_view label, std::string_view 
 inline std::vector<PhaseStepPresentation> postArrivalPhaseSteps(Screen screen)
 {
     const bool arrivalActive = screen == Screen::Results;
-    const bool researchDone = screen == Screen::SurfaceExpedition || screen == Screen::Upgrade;
+    const bool debugResearch = screen == Screen::Research;
+    const bool approachDone = debugResearch || screen == Screen::SurfaceExpedition || screen == Screen::Upgrade;
     const bool surfaceDone = screen == Screen::Upgrade;
     return {
         phaseStep(text::panel::details::arrivalPhase, arrivalActive ? "Now" : "Done", arrivalActive ? "active" : "done"),
-        phaseStep(text::panel::details::researchPhase, screen == Screen::Research ? "Now" : (researchDone ? "Done" : "Next"), screen == Screen::Research ? "active" : (researchDone ? "done" : "pending")),
+        phaseStep(debugResearch ? "Research (Debug)" : "Approach", debugResearch ? "Now" : (approachDone ? "Done" : "Next"), debugResearch ? "active" : (approachDone ? "done" : "pending")),
         phaseStep(text::panel::details::surfacePhase, screen == Screen::SurfaceExpedition ? "Now" : (surfaceDone ? "Done" : "Next"), screen == Screen::SurfaceExpedition ? "active" : (surfaceDone ? "done" : "pending")),
         phaseStep(text::panel::details::refitPhase, screen == Screen::Upgrade ? "Now" : "Next", screen == Screen::Upgrade ? "active" : "pending")
     };
@@ -654,9 +655,9 @@ inline SurfaceUpgradeCardPresentation runUpgradeOfferCardPresentation(
                 }
             }
             const std::string currentRank = offer.targetRank <= 1
-                ? "Uninstalled"
+                ? "None"
                 : ("Rank " + runUpgradeRankLabel(offer.targetRank - 1));
-            card.effectChips.insert(card.effectChips.begin(), panelMetric("Progression", currentRank + " -> Rank " + runUpgradeRankLabel(offer.targetRank)));
+            card.effectChips.insert(card.effectChips.begin(), panelMetric({}, currentRank + " -> Rank " + runUpgradeRankLabel(offer.targetRank)));
             card.action = panelActionButton("UPGRADE RIG TO " + runUpgradeRankLabel(offer.targetRank), ui::actions::surfaceUpgrade(index), "ok");
         }
         break;
@@ -667,7 +668,7 @@ inline SurfaceUpgradeCardPresentation runUpgradeOfferCardPresentation(
             card.effectChips = miniDroneChips(scaledMiniDroneStats(drone->stats, offer.targetRank), offer.targetRank, drone->role);
             card.effectChips.insert(card.effectChips.begin(), panelMetric("Scope", "All " + drone->name + " copies"));
             card.effectChips.insert(card.effectChips.begin(), panelMetric(
-                "Progression",
+                {},
                 "Mk " + runUpgradeRankLabel(offer.targetRank - 1) + " -> Mk " + runUpgradeRankLabel(offer.targetRank)));
             card.action = panelActionButton("UPGRADE TO MK " + runUpgradeRankLabel(offer.targetRank), ui::actions::surfaceUpgrade(index), "ok");
         }
@@ -1420,7 +1421,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                     ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok")
                     : disabledPanelButton(blockedSlotLabel)));
     presentation.backAction = panelActionButton(
-        state.run.surfaceExpedition.active ? "Done - Return to Surface Ops" : "Done - Return to Hangar",
+        state.run.surfaceExpedition.active ? "Return to Surface Ops" : "Return to Hangar",
         ui::actions::backToSurfaceOps,
         "drone-done-action");
     return presentation;
@@ -1487,10 +1488,10 @@ inline ResearchPhasePresentation researchPhasePresentation(const GameState& stat
         detailPresentationRow(text::panel::details::rareMaterials, std::to_string(state.meta.materials.rare)),
         detailPresentationRow(text::panel::details::exoticMaterials, std::to_string(state.meta.materials.exotic)),
         detailPresentationHeader(text::panel::details::researchRules),
-        detailPresentationRow(text::panel::details::blueprintUse, std::string("Research adds blueprint progress and can unlock new module families, facilities, or field tools.")),
+        detailPresentationRow(text::panel::details::blueprintUse, std::string("Research adds Research Data and can add new module families, facilities, or field tools to future offers.")),
         detailPresentationRow(text::panel::details::materialsUse, std::string("Recovered samples pay material costs. Credit costs still happen later in refit.")),
-        detailPresentationRow(text::panel::details::artifactInsightUse, std::string("Decoded artifacts add a capped blueprint bonus to future research projects.")),
-        detailPresentationRow(text::panel::details::labBonusUse, std::string("Mission Analysis Lab adds a permanent blueprint bonus to future research choices.")),
+        detailPresentationRow(text::panel::details::artifactInsightUse, std::string("Decoded artifacts add a capped Research Data bonus to future debug research projects.")),
+        detailPresentationRow(text::panel::details::labBonusUse, std::string("Mission Analysis Lab adds a permanent Research Data bonus to future debug research choices.")),
         detailPresentationRow(text::panel::details::skippedResearch, std::string("Skipping preserves materials and moves directly to the surface expedition."))
     };
     presentation.metrics = {

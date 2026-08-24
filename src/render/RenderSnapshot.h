@@ -152,6 +152,7 @@ struct RenderSnapshot {
     double travelProgress = 0.0;
     double heat = 0.0;
     double warning = 0.0;
+    double launchSteerInput = 0.0;
     double launchThrottle = 0.60;
     double launchFuel = 1.0;
     double launchFuelCapacity = 10.0;
@@ -170,6 +171,14 @@ struct RenderSnapshot {
     bool launchManualControlsEnabled = true;
     bool launchHeatEnabled = false;
     bool launchAsteroidsEnabled = false;
+    bool flightInstrumentsVisible = false;
+    double instrumentSpeed = 0.0;
+    double instrumentTemperature = 0.0;
+    double instrumentFuel = 0.0;
+    // Throttle magnitude is normalized and represents retained forward thrust.
+    double instrumentThrottle = 0.0;
+    bool instrumentOffCourse = false;
+    bool instrumentCourseCritical = false;
     std::array<LaunchAsteroidSnapshot, 24> launchAsteroids {};
     int launchAsteroidCount = 0;
     double launchImpactFlash = 0.0;
@@ -213,6 +222,9 @@ struct RenderSnapshot {
     double miningLoadSpeedMultiplier = 1.0;
     double miningContactIntensity = 0.0;
     double miningScannerPulse = 0.0;
+    // -1 means no active mining actor. Otherwise this rises from zero after a
+    // manual Survey Pulse to one when the shared scanner is ready again.
+    double miningScannerRechargeProgress = -1.0;
     double miningScannerRadius = 5.5;
     double miningFailurePulse = 0.0;
     double miningRecoilX = 0.0;
@@ -281,6 +293,7 @@ struct RenderSnapshot {
     double flybyShipY = 0.0;
     double flybyVelocityX = 0.0;
     double flybyVelocityY = 0.0;
+    double flybyInputX = 0.0;
     double flybyInputY = 0.0;
     double flybyDestinationX = 0.0;
     double flybyDestinationY = 0.0;
@@ -309,6 +322,7 @@ struct RenderSnapshot {
     double surfaceScanInterference = 0.0;
     double surfaceScanBustRisk = 0.0;
     double surfaceScanSuccessFanfare = 0.0;
+    double surfaceScanMissFanfare = 0.0;
     SurfaceScanPulseGrade surfaceScanLastPulseGrade = SurfaceScanPulseGrade::None;
     MaterialInventory surfaceScanMaterials;
     int surfaceScanArtifacts = 0;

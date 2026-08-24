@@ -5868,7 +5868,7 @@ void triggerMiningFailure(GameState& state, std::string message)
     mining.drillIntegrity = std::max(0.0, mining.drillIntegrity);
     mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds);
     mining.contactIntensity = 1.0;
-    mining.scannerPulseSeconds = 0.9;
+    mining.scannerPulseSeconds = tuning::mining::scannerPulseSeconds;
     mining.failureMessage = std::move(message);
     state.statusLine = mining.failureMessage;
 }
@@ -7469,7 +7469,7 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     const std::string revealReport = "Scanner revealed " + std::to_string(terrainRevealed) + " terrain cells and "
         + std::to_string(signalsRevealed) + (signalsRevealed == 1 ? " signal." : " signals.");
     state.statusLine = contextualGateMessage ? state.statusLine + " " + revealReport : revealReport;
-    mining.scannerPulseSeconds = 0.9;
+    mining.scannerPulseSeconds = tuning::mining::scannerPulseSeconds;
     state.run.surfaceExpedition.scannerCooldownSeconds = tuning::mining::scannerCooldownSeconds;
 }
 

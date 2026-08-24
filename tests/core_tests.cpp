@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/CrewPresentation.h"
 #include "core/FlightProgress.h"
+#include "core/FlightInstrumentPresentation.h"
 #include "core/GameFormat.h"
 #include "core/GameMath.h"
 #include "core/GameState.h"
@@ -2372,14 +2373,14 @@ void researchPhasesUnlockOnlyAfterMarsArrival()
 
     LaunchOutcome marsArrival = moonArrival;
     marsArrival.destinationId = content::destination::mars;
-    require(shouldOpenPostArrivalPhases(marsArrival, catalog), "Mars arrival should open post-arrival research and surface phases");
+    require(shouldOpenPostArrivalPhases(marsArrival, catalog), "Mars arrival should support the later post-arrival surface systems");
     const std::vector<PhaseStepPresentation> arrivalSteps = postArrivalPhaseSteps(Screen::Results);
     require(arrivalSteps.size() == 4, "arrival result should expose the full post-arrival phase track");
     require(arrivalSteps[0].stateClass == "active" && arrivalSteps[1].stateClass == "pending",
         "arrival phase track should mark the current phase and pending follow-up");
 }
 
-void arrivalOperationsGateMoonButAllowMarsRisk()
+void arrivalOperationsUseMutuallyExclusiveCommitments()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 607);
@@ -2398,33 +2399,118 @@ void arrivalOperationsGateMoonButAllowMarsRisk()
 
     startArrivalOps(state, moonArrival);
     require(canRunArrivalFlyby(state, catalog), "Moon flyby should always be available after arrival");
-    require(!canEnterArrivalOrbit(state, catalog), "Moon orbit should require a prior flyby");
-    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should require flyby and orbit clearance");
-    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should remain locked before flyby");
-
-    completeArrivalFlyby(state, catalog);
-    startArrivalOps(state, moonArrival);
-    require(canEnterArrivalOrbit(state, catalog), "Moon orbit should unlock after a flyby");
-    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should still require orbit");
-    require(!canAttemptArrivalLanding(state, catalog), "Moon landing should remain locked before orbit");
-
-    completeArrivalOrbit(state, catalog);
-    startArrivalOps(state, moonArrival);
-    require(canAttemptArrivalLanding(state, catalog), "Moon landing should unlock after flyby and orbit");
+    require(canEnterArrivalOrbit(state, catalog), "Moon orbit should be available as an initial approach path");
+    require(canAttemptArrivalLanding(state, catalog), "Moon direct descent should be available immediately");
+    require(captureArrivalOrbit(state), "a successful orbit should capture the approach");
+    require(!canRunArrivalFlyby(state, catalog), "captured orbit should close Pass Through");
+    require(!canEnterArrivalOrbit(state, catalog), "captured orbit should close repeat capture");
+    require(canAttemptArrivalLanding(state, catalog), "captured orbit should expose mapped landing");
     require(!hasUnlock(state.meta, content::unlock::routeMars),
         "Moon landing alone must not silently chart Mars; the explicit Prospector contract owns that route unlock");
+    state.run.destinationIndex = 1;
+    require(!flybyClearsGenericNextRoute(state, catalog), "Moon Pass Through must not bypass the authored Mars route");
+    require(!bankFlybyRouteClearance(state, catalog), "authored story routes must reject generic Flyby clearance");
+
+    GameState generic = createNewGame(catalog, 611);
+    generic.run.destinationIndex = 4;
+    LaunchOutcome saturnArrival = moonArrival;
+    saturnArrival.destinationId = content::destination::saturn;
+    startArrivalOps(generic, saturnArrival);
+    require(flybyClearsGenericNextRoute(generic, catalog), "Saturn Pass Through should expose the generic Uranus fast route");
+    require(bankFlybyRouteClearance(generic, catalog), "successful generic Flyby should fill onward Flight Data readiness");
+    require(generic.run.frontierReadiness == frontierReadinessCap(generic, catalog), "generic Flyby should fill the exact route-readiness cap");
 
     LaunchOutcome marsArrival = moonArrival;
     marsArrival.destinationId = content::destination::mars;
     GameState mars = createNewGame(catalog, 608);
     startArrivalOps(mars, marsArrival);
-    require(canAttemptArrivalLanding(mars, catalog), "Mars landing should allow a high-risk YOLO descent without prior recon");
+    require(canAttemptArrivalLanding(mars, catalog), "Mars landing should allow an unmapped direct descent without prior recon");
     const Destination* marsDestination = catalog.findDestination(content::destination::mars);
     require(marsDestination != nullptr, "Mars destination should resolve");
     const double expectedNoReconPenalty = 0.20;
     startSurfaceExpedition(mars, catalog);
     require(mars.run.surfaceExpedition.active, "Mars YOLO landing should start surface operations");
-    require(mars.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001, "YOLO landing should carry extra surface hazard");
+    require(mars.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001, "direct descent should carry the visible +0.20 surface hazard");
+
+    GameState mapped = createNewGame(catalog, 609);
+    startArrivalOps(mapped, marsArrival);
+    require(captureArrivalOrbit(mapped), "mapped descent setup should capture orbit");
+    startSurfaceExpedition(mapped, catalog);
+    require(mapped.run.surfaceExpedition.hazard <= mars.run.surfaceExpedition.hazard - expectedNoReconPenalty + 0.08,
+        "captured orbit should remove the visit's unmapped descent penalty");
+
+    GameState historical = createNewGame(catalog, 610);
+    historical.meta.destinationFlybys.resize(catalog.destinations.size(), 4);
+    historical.meta.destinationOrbits.resize(catalog.destinations.size(), 4);
+    startArrivalOps(historical, marsArrival);
+    startSurfaceExpedition(historical, catalog);
+    require(historical.run.surfaceExpedition.hazard >= tuning::research::baseHazard + marsDestination->tier * tuning::research::hazardPerTier + expectedNoReconPenalty - 0.001,
+        "archive histories must not make a later direct descent safer");
+}
+
+void arrivalPresentationExplainsCommitmentAndResearchProgress()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 612);
+    state.run.destinationIndex = 1;
+    state.screen = Screen::ArrivalOps;
+    state.meta.blueprintProgress = 7;
+    LaunchOutcome arrival;
+    arrival.type = LaunchResultType::MissionComplete;
+    arrival.frontierTransfer = true;
+    arrival.destinationId = content::destination::moon;
+    arrival.transferFuelCapacity = 15.0;
+    startArrivalOps(state, arrival);
+    Random rng(612);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    PanelRenderContext context {state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+
+    const std::string uncommitted = buildGamePanelHtml(context);
+    require(uncommitted.find("APPROACH UNCOMMITTED") != std::string::npos
+            && uncommitted.find("FLYBY — PASS THROUGH") != std::string::npos
+            && uncommitted.find("ORBIT — CAPTURE") != std::string::npos
+            && uncommitted.find("DIRECT DESCENT") != std::string::npos,
+        "Arrival board should present the three mutually exclusive uncommitted paths");
+    require(uncommitted.find("UNMAPPED +20") != std::string::npos
+            && uncommitted.find("7/8 • RECOVERY") != std::string::npos
+            && uncommitted.find("future Refit offers") != std::string::npos,
+        "Arrival board should expose exact unmapped hazard and current/next Research Data milestone meaning");
+    require(uncommitted.find("Objective remains active; Mars route stays locked") != std::string::npos,
+        "Moon Pass Through should name the authored route blocker before commitment");
+
+    require(captureArrivalOrbit(state), "presentation setup should capture Orbit");
+    PanelRenderContext capturedContext {state, catalog, launch, launch};
+    capturedContext.firstTimeIntroductionsEnabled = false;
+    const std::string captured = buildGamePanelHtml(capturedContext);
+    require(captured.find("ORBIT CAPTURED") != std::string::npos
+            && captured.find("LAND WITH ORBITAL MAP") != std::string::npos
+            && captured.find("DEPART WITH SCIENCE") != std::string::npos
+            && captured.find("data-rr-action=\"arrival_orbit_depart\"") != std::string::npos,
+        "captured Orbit board should expose only mapped landing and science departure resolution");
+    require(captured.find("data-rr-action=\"arrival_flyby\"") == std::string::npos
+            && captured.find("data-rr-action=\"arrival_orbit\"") == std::string::npos,
+        "captured Orbit presentation should close Pass Through and repeat capture actions");
+
+    state.meta.blueprintProgress = tuning::unlocks::blueprintUnlocks[0].threshold;
+    state.meta.unlockKeys.push_back(std::string(tuning::unlocks::blueprintUnlocks[0].key));
+    PanelRenderContext breakthroughContext {state, catalog, launch, launch};
+    breakthroughContext.firstTimeIntroductionsEnabled = false;
+    const PanelDocumentPresentation breakthrough = buildGamePanelPresentation(breakthroughContext);
+    const auto pending = std::find_if(breakthrough.modals.begin(), breakthrough.modals.end(), [](const ModalPresentation& modal) {
+        return modal.id == "research_breakthrough_thermal";
+    });
+    require(pending != breakthrough.modals.end() && pending->autoOpen && !pending->dismissible
+            && pending->bodyMarkup.find("future Refit offers") != std::string::npos
+            && pending->bodyMarkup.find("no module was granted") != std::string::npos,
+        "crossed Research Data milestones should create an explicit saved breakthrough review");
+    ui::briefings::acknowledge(state.meta.acknowledgedActivityBriefingIds, pending->closeAction);
+    PanelRenderContext reviewedContext {state, catalog, launch, launch};
+    reviewedContext.firstTimeIntroductionsEnabled = false;
+    const PanelDocumentPresentation reviewed = buildGamePanelPresentation(reviewedContext);
+    require(std::none_of(reviewed.modals.begin(), reviewed.modals.end(), [](const ModalPresentation& modal) {
+        return modal.id == "research_breakthrough_thermal";
+    }), "reviewed Research breakthrough should remain acknowledged in saved briefing state");
 }
 
 
@@ -2670,15 +2756,21 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
             && controlsPanelHtml.find("cockpit-hud flight-hud") == std::string::npos,
         "active flyby should reserve the left panel for telemetry and expose controls through the bottom input helper");
     controls.run.flyby.gravityStrength = 0.0;
-    const double baseSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
     setFlybyMove(controls, 0.0, 1.0);
-    updateFlybyRun(controls, 0.2);
-    const double fasterSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
-    require(fasterSpeed > baseSpeed, "flyby throttle input should increase speed");
+    updateFlybyRun(controls, tuning::launch::maxFrameStepSeconds);
+    require(controls.run.flyby.selectedThrottle > 0.0,
+        "holding Flyby throttle should progressively raise the retained burn level");
+    setFlybyMove(controls, 0.0, 0.0);
+    const double heldThrottle = controls.run.flyby.selectedThrottle;
+    updateFlybyRun(controls, tuning::launch::maxFrameStepSeconds);
+    require(nearlyEqual(controls.run.flyby.selectedThrottle, heldThrottle),
+        "releasing Flyby throttle input should retain the selected burn level");
     setFlybyMove(controls, 0.0, -1.0);
-    updateFlybyRun(controls, 0.2);
-    const double slowerSpeed = std::hypot(controls.run.flyby.velocityX, controls.run.flyby.velocityY);
-    require(slowerSpeed < fasterSpeed, "flyby brake input should reduce speed");
+    for (int step = 0; step < 20; ++step) {
+        updateFlybyRun(controls, tuning::launch::maxFrameStepSeconds);
+    }
+    require(controls.run.flyby.selectedThrottle < heldThrottle,
+        "holding Flyby decrease throttle should progressively lower the retained burn level");
 
     GameState turn = createNewGame(catalog, 710);
     startArrivalOps(turn, moonArrival);
@@ -2767,19 +2859,20 @@ void orbitControlsFollowClockwiseProgradeDirection()
     const double distance = std::hypot(orbit.shipX, orbit.shipY);
     const double radialX = orbit.shipX / distance;
     const double radialY = orbit.shipY / distance;
-    const double directedTangentX = -radialY * tuning::orbit::direction;
-    const double directedTangentY = radialX * tuning::orbit::direction;
-    const double speedBefore = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
-
     setOrbitMove(state, 0.0, 1.0);
     updateOrbitRun(state, 0.08);
-    const double speedAfter = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
-    require(speedAfter > speedBefore, "positive tangential orbit input should accelerate along the clockwise approach direction");
+    require(orbit.selectedThrottle > 0.0,
+        "positive tangential Orbit input should progressively raise the retained throttle");
+    const double heldThrottle = orbit.selectedThrottle;
+    setOrbitMove(state, 0.0, 0.0);
+    updateOrbitRun(state, 0.08);
+    require(nearlyEqual(orbit.selectedThrottle, heldThrottle),
+        "releasing Orbit throttle input should retain the selected burn level");
 
     setOrbitMove(state, 0.0, -1.0);
     updateOrbitRun(state, 0.08);
-    const double brakedSpeed = orbit.velocityX * directedTangentX + orbit.velocityY * directedTangentY;
-    require(brakedSpeed < speedAfter, "negative tangential orbit input should brake against the clockwise approach direction");
+    require(orbit.selectedThrottle < heldThrottle,
+        "negative tangential Orbit input should progressively lower the retained throttle");
 }
 
 void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
@@ -2796,9 +2889,10 @@ void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
     for (std::size_t index = 0; index < destinations.size(); ++index) {
         GameState state = startOrbitForTest(catalog, destinations[index], 7200 + index);
         const OrbitRunState& started = state.run.orbit;
+        const double insertionRadius = std::hypot(started.shipX, started.shipY);
         const double expectedSpeed = std::sqrt(
-            started.gravityStrength * started.targetRadius /
-            (started.targetRadius * started.targetRadius + tuning::orbit::gravitySoftening));
+            started.gravityStrength * insertionRadius /
+            (insertionRadius * insertionRadius + tuning::orbit::gravitySoftening));
         require(
             std::abs(std::hypot(started.velocityX, started.velocityY) - expectedSpeed) < 0.000001,
             "each destination should begin at its circular-orbit speed");
@@ -2807,7 +2901,22 @@ void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
             updateOrbitRun(state, 1.0 / 60.0);
         }
         require(state.run.orbit.completed, "a baseline orbit should complete within its visible timer");
-        require(state.run.orbit.result == OrbitGrade::Perfect, "a baseline no-input orbit should remain solvable at every tested destination tier");
+        require(
+            state.run.orbit.result == OrbitGrade::Good,
+            "a baseline no-input orbit should earn Good outside the Perfect band at "
+                + std::string(destinations[index]) + " (grade " + std::to_string(static_cast<int>(state.run.orbit.result))
+                + ", perfect seconds " + display::fixed(state.run.orbit.perfectSeconds, 2)
+                + ", good seconds " + display::fixed(state.run.orbit.goodSeconds, 2)
+                + ", miss seconds " + display::fixed(state.run.orbit.missSeconds, 2) + ")");
+
+        OrbitRunState trimmed = state.run.orbit;
+        trimmed.orbitProgress = 1.0;
+        trimmed.currentZone = 2;
+        trimmed.trimApplied = true;
+        trimmed.perfectSeconds = tuning::orbit::perfectHoldSeconds;
+        trimmed.goodSeconds = std::max(trimmed.goodSeconds, 1.0);
+        require(orbitGrade(trimmed) == OrbitGrade::Perfect,
+            "reaching and holding the Perfect band should promote a controlled trim above baseline Good");
     }
 }
 
@@ -2891,8 +3000,8 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     require(miss.run.orbit.currentZone >= 1, "orbit should begin inside the scalable orbital band");
     const double expectedOrbitEntryAngle = tuning::orbit::flybyExitAngleRadians();
     require(nearlyEqual(miss.run.orbit.angleRadians, expectedOrbitEntryAngle) &&
-            nearlyEqual(miss.run.orbit.shipX, std::cos(expectedOrbitEntryAngle) * miss.run.orbit.targetRadius) &&
-            nearlyEqual(miss.run.orbit.shipY, std::sin(expectedOrbitEntryAngle) * miss.run.orbit.targetRadius),
+            nearlyEqual(std::atan2(miss.run.orbit.shipY, miss.run.orbit.shipX), expectedOrbitEntryAngle) &&
+            std::hypot(miss.run.orbit.shipX, miss.run.orbit.shipY) > miss.run.orbit.targetRadius + miss.run.orbit.perfectBand,
         "orbit insertion should begin at Flyby's endpoint angle relative to the destination");
     const double initialAngularMomentum = miss.run.orbit.shipX * miss.run.orbit.velocityY
         - miss.run.orbit.shipY * miss.run.orbit.velocityX;
@@ -2972,6 +3081,30 @@ void activeOrbitSaveResumesAtApproach()
     require(restored.screen == Screen::ArrivalOps, "loading during orbit should resume at approach options");
     require(!restored.run.orbit.active, "loading during orbit should not restore transient orbit state");
     require(restored.run.arrivalOps.active && restored.run.arrivalOps.destinationId == content::destination::moon, "approach destination should survive orbit save/load");
+    require(restored.run.arrivalOps.commitment == ApproachCommitment::Uncommitted,
+        "mid-orbit saves should normalize to an uncommitted approach");
+
+    require(captureArrivalOrbit(restored), "completed Orbit setup should persist a captured commitment");
+    const auto capturedSave = deserializeSaveData(serializeSaveData(captureSaveData(restored)));
+    require(capturedSave.has_value(), "captured Orbit save should parse");
+    GameState capturedRestored = createNewGame(catalog, 726);
+    restoreSaveData(capturedRestored, catalog, *capturedSave);
+    require(capturedRestored.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured,
+        "captured Orbit should survive a v13 save round trip");
+    require(!canRunArrivalFlyby(capturedRestored, catalog) && canAttemptArrivalLanding(capturedRestored, catalog),
+        "restored captured Orbit should keep mutually exclusive availability");
+
+    std::string legacyV13 = serializeSaveData(captureSaveData(restored));
+    const std::string commitmentField = std::string(save_schema::field::arrivalApproachCommitment) + "=";
+    const std::size_t commitmentStart = legacyV13.find(commitmentField);
+    require(commitmentStart != std::string::npos, "v13 save should write the optional approach commitment field");
+    const std::size_t commitmentEnd = legacyV13.find('\n', commitmentStart);
+    legacyV13.erase(commitmentStart, commitmentEnd == std::string::npos
+        ? std::string::npos
+        : commitmentEnd - commitmentStart + 1);
+    const auto olderV13 = deserializeSaveData(legacyV13);
+    require(olderV13.has_value() && olderV13->arrivalOps.commitment == ApproachCommitment::Uncommitted,
+        "older v13 saves without the optional field should default safely to Uncommitted");
 }
 
 void researchProjectsGenerateAndCompleteFromSharedRules()
@@ -3171,6 +3304,32 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
     ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 642);
     state.screen = Screen::SurfaceExpedition;
+    const SurfaceUpgradeCardPresentation firstRankCard = runUpgradeOfferCardPresentation(
+        state,
+        catalog,
+        {RunUpgradeKind::Rig, catalog.surfaceUpgrades.front().id, 1, -1},
+        0);
+    const auto progressionChip = std::find_if(
+        firstRankCard.effectChips.begin(),
+        firstRankCard.effectChips.end(),
+        [](const PanelMetricPresentation& chip) { return chip.value == "None -> Rank I"; });
+    require(
+        progressionChip != firstRankCard.effectChips.end()
+            && progressionChip->label.empty(),
+        "the first rig rank should use only the compact rank transition copy");
+    const SurfaceUpgradeCardPresentation secondRankCard = runUpgradeOfferCardPresentation(
+        state,
+        catalog,
+        {RunUpgradeKind::Rig, catalog.surfaceUpgrades.front().id, 2, -1},
+        0);
+    require(
+        std::any_of(
+            secondRankCard.effectChips.begin(),
+            secondRankCard.effectChips.end(),
+            [](const PanelMetricPresentation& chip) {
+                return chip.label.empty() && chip.value == "Rank I -> Rank II";
+            }),
+        "later rig ranks should also omit the redundant Progression label");
     const ExpeditionExperienceAward award = awardExpeditionExperience(state, 75.0, state.screen);
     require(award.levelsGained == 3 && state.run.surfaceExpedition.expeditionLevel == 4,
         "75 expedition XP should cross the 10, 16, and 25 thresholds");
@@ -3197,6 +3356,161 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
         "selection should consume exactly one choice and clear only the current board");
     require(state.screen == originalScreen,
         "core offer selection must not mutate screens or auto-open the next board");
+}
+
+void launchFailureSummariesMatchTheActualLesson()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 6610);
+    state.lastOutcome.failureCause = LaunchFailureCause::ThermalRunaway;
+    const LaunchOutcomeSummaryPresentation thermal = launchOutcomeSummaryPresentation(state, catalog);
+    require(thermal.title == "ENGINES TOASTED" &&
+            thermal.consequence.find("cooked themselves") != std::string::npos &&
+            thermal.consequence.find("fuel") == std::string::npos,
+        "Mars thermal failure should explain overheated engines without blaming fuel");
+
+    state.launchConfig.missionKind = LaunchMissionKind::FlightControlsCalibration;
+    state.lastOutcome.failureCause = LaunchFailureCause::TrainingRescue;
+    const LaunchOutcomeSummaryPresentation controls = launchOutcomeSummaryPresentation(state, catalog);
+    require(controls.title == "OFF COURSE" &&
+            controls.consequence.find("careening off into oblivion") != std::string::npos &&
+            controls.consequence.find("fuel") == std::string::npos,
+        "controls rescue should explain the lost course with the calibration lesson's tone");
+}
+
+void sharedFlightInstrumentPresentationMatchesEachMode()
+{
+    PreparedLaunch launch;
+    launch.config.burnGoalMultiplier = 2.0;
+    launch.manualControlsEnabled = true;
+    launch.heatEnabled = true;
+    LaunchFlightState flight;
+    flight.active = true;
+    flight.currentMultiplier = 1.5;
+    flight.heat = 0.72;
+    flight.fuelCapacity = 20.0;
+    flight.fuelRemaining = 5.0;
+    flight.selectedThrottle = 0.65;
+    flight.courseOffset = tuning::launch::pilotingCourseCaution;
+    const FlightInstrumentPresentation launchInstruments = launchFlightInstruments(launch, flight);
+    require(launchInstruments.visible && nearlyEqual(launchInstruments.speed, 0.5)
+            && nearlyEqual(launchInstruments.temperature, 0.72)
+            && nearlyEqual(launchInstruments.fuel, 0.25)
+            && nearlyEqual(launchInstruments.throttle, 0.65)
+            && !launchInstruments.temperatureCritical
+            && launchInstruments.offCourse && !launchInstruments.courseCritical,
+        "Launch instruments should use authoritative speed, heat, fuel, and course state");
+
+    FlybyRunState flyby;
+    flyby.active = true;
+    flyby.durationSeconds = 20.0;
+    flyby.elapsedSeconds = 5.0;
+    flyby.velocityX = tuning::flyby::maxSpeed;
+    flyby.velocityY = 0.0;
+    flyby.selectedThrottle = 1.0;
+    flyby.currentZone = 0;
+    const FlightInstrumentPresentation flybyInstruments = flybyFlightInstruments(flyby);
+    require(flybyInstruments.visible && nearlyEqual(flybyInstruments.speed, 1.0)
+            && nearlyEqual(flybyInstruments.fuel, 0.75)
+            && nearlyEqual(flybyInstruments.throttle, 1.0)
+            && flybyInstruments.temperature > 0.8 && flybyInstruments.temperatureCritical
+            && flybyInstruments.offCourse,
+        "Flyby instruments should derive display-only heat and fuel from thrust and endurance");
+
+    flyby.inputY = 0.0;
+    flyby.selectedThrottle = 0.46;
+    const FlightInstrumentPresentation flybyHeldInstruments = flybyFlightInstruments(flyby);
+    require(nearlyEqual(flybyHeldInstruments.throttle, 0.46)
+            && flybyHeldInstruments.throttleValue == "Throttle 46%",
+        "Flyby instruments should display the retained throttle level when no adjustment key is held");
+
+    OrbitRunState orbit;
+    orbit.active = true;
+    orbit.durationSeconds = 16.0;
+    orbit.elapsedSeconds = 8.0;
+    orbit.velocityX = tuning::orbit::minSpeed;
+    orbit.velocityY = 0.0;
+    orbit.inputX = 1.0;
+    orbit.selectedThrottle = 0.50;
+    orbit.currentZone = 0;
+    const FlightInstrumentPresentation orbitInstruments = orbitFlightInstruments(orbit);
+    require(orbitInstruments.visible && nearlyEqual(orbitInstruments.speed, 0.0)
+            && nearlyEqual(orbitInstruments.fuel, 0.5)
+            && nearlyEqual(orbitInstruments.throttle, 0.5)
+            && orbitInstruments.temperature > 0.5 && orbitInstruments.offCourse,
+        "Orbit instruments should derive display-only heat and fuel without changing mechanics");
+
+    flyby.completed = true;
+    orbit.completed = true;
+    require(!flybyFlightInstruments(flyby).visible && !orbitFlightInstruments(orbit).visible,
+        "completed flight minigames should unmount the instrument cluster");
+}
+
+void activeFlightPanelsUseTheClusterAndCompactStatusRows()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState launchState = createNewGame(catalog, 6611);
+    launchState.screen = Screen::Launch;
+    Random rng(6611);
+    PreparedLaunch launch = prepareLaunch(launchState, catalog, rng);
+    launch.asteroidsEnabled = true;
+    LaunchFlightState flight = beginLaunchFlight(launch, currentDestination(launchState, catalog));
+    PanelRenderContext launchContext {launchState, catalog, launch, launch};
+    launchContext.currentMultiplier = flight.currentMultiplier;
+    launchContext.flightArmed = true;
+    launchContext.launchFlight = &flight;
+    const PanelDocumentPresentation launchPanel = buildGamePanelPresentation(launchContext);
+    require(launchPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
+            && launchPanel.contentMarkup.find("rr-hud-launch-metric-") == std::string::npos
+            && launchPanel.contentMarkup.find("rr-hud-launch-hull") != std::string::npos,
+        "active Launch should move instrumentation into the scene and retain compact hull status");
+    require(!launchPanel.runtime.instrumentSpeedValue.empty()
+            && !launchPanel.runtime.instrumentTemperatureValue.empty()
+            && !launchPanel.runtime.instrumentFuelValue.empty()
+            && !launchPanel.runtime.instrumentThrottleValue.empty(),
+        "the scene overlay should receive initial deterministic Launch readouts including throttle");
+    RealtimeHudState launchHud;
+    buildRealtimeHudState(launchContext, launchHud);
+    const auto hasLaunchPatch = [&](std::string_view id) {
+        return std::any_of(launchHud.patches.begin(), launchHud.patches.end(), [id](const RealtimeHudPatch& patch) {
+            return patch.elementId == id;
+        });
+    };
+    require(hasLaunchPatch("rr-flight-speed-value")
+            && hasLaunchPatch("rr-flight-temperature-value")
+            && hasLaunchPatch("rr-flight-fuel-value")
+            && !hasLaunchPatch("rr-flight-throttle-value")
+            && hasLaunchPatch("rr-flight-throttle-accessibility")
+            && hasLaunchPatch("rr-flight-nav-indicator")
+            && hasLaunchPatch("rr-flight-temperature-label")
+            && hasLaunchPatch("rr-flight-temperature-readout")
+            && hasLaunchPatch("rr-hud-launch-hull"),
+        "realtime Launch patches should update every visible readout, the hidden throttle value, navigation lamp, and hull row");
+
+    GameState flybyState = createNewGame(catalog, 6612);
+    flybyState.screen = Screen::Flyby;
+    flybyState.run.flyby.active = true;
+    flybyState.run.flyby.durationSeconds = 18.0;
+    const PanelDocumentPresentation flybyPanel = buildGamePanelPresentation(
+        {flybyState, catalog, launch, launch});
+    require(flybyPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
+            && flybyPanel.contentMarkup.find("rr-hud-flyby-speed") == std::string::npos
+            && flybyPanel.contentMarkup.find("rr-hud-flyby-timer") != std::string::npos
+            && flybyPanel.contentMarkup.find("rr-hud-flyby-grade") != std::string::npos,
+        "active Flyby should use the cluster plus compact timer and grade rows");
+
+    GameState orbitState = createNewGame(catalog, 6613);
+    orbitState.screen = Screen::Orbit;
+    orbitState.run.orbit.active = true;
+    orbitState.run.orbit.durationSeconds = 15.0;
+    const PanelDocumentPresentation orbitPanel = buildGamePanelPresentation(
+        {orbitState, catalog, launch, launch});
+    require(orbitPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
+            && orbitPanel.contentMarkup.find("flight-readout") == std::string::npos
+            && orbitPanel.contentMarkup.find("rr-hud-orbit-timer") != std::string::npos
+            && orbitPanel.contentMarkup.find("rr-hud-orbit-zone") != std::string::npos
+            && orbitPanel.contentMarkup.find("rr-hud-orbit-loop") != std::string::npos,
+        "active Orbit should use the cluster plus compact mission rows");
 }
 
 void exhaustedRunUpgradePoolConsumesQueuedChoices()
@@ -5433,7 +5747,8 @@ void surfaceScanBustAndAbortDiscardForecasts()
     require(missPulse.applied && !missPulse.hazardTriggered, "a scan miss should spend a pulse without becoming a hazard");
     require(missed.run.surfaceScan.lastPulseGrade == SurfaceScanPulseGrade::Miss &&
             missed.run.surfaceScan.pulses == 1 && missed.run.surfaceScan.active &&
-            missed.run.surfaceScan.depthProspects.empty(),
+            missed.run.surfaceScan.depthProspects.empty() &&
+            missed.run.surfaceScan.missFanfareSeconds > 0.0,
         "a scan miss should reveal no data and leave the same level available to retry");
     missed.run.surfaceScan.elapsedSeconds = tuning::research::scanWindowCenterRadians /
         tuning::research::scanSweepRadiansPerSecond;
@@ -5442,7 +5757,8 @@ void surfaceScanBustAndAbortDiscardForecasts()
             missed.run.surfaceScan.depthProspects.size() == 1 &&
             missed.run.surfaceScan.depthProspects.front().depthOffset == 0 &&
             missed.run.surfaceScan.depthProspects.front().informationPercent == tuning::research::scanPerfectInformationPercent &&
-            missed.run.surfaceScan.successFanfareSeconds > 0.0,
+            missed.run.surfaceScan.successFanfareSeconds > 0.0 &&
+            missed.run.surfaceScan.missFanfareSeconds == 0.0,
         "a perfect retry should map all information for the still-current level");
 
     GameState aborted = createNewGame(catalog, 94321);
@@ -10646,6 +10962,11 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
             && hangarPresentation.contentMarkup.find("rr-fixed-lane-card") != std::string::npos
             && hangarPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
         "Hangar should consume the shared typed header, card-grid, card, and action-footer primitives");
+    require(
+        hangarPresentation.contentMarkup.find("hangar_details") != std::string::npos
+            && hangarPresentation.contentMarkup.find("hangar-detail-actions") == std::string::npos
+            && hangarPresentation.contentMarkup.find("hangar-launch-prep") != std::string::npos,
+        "Hangar details should live behind the top-bar Details modal and launch prep should own its compact control class");
 
     GameState flyby = createNewGame(catalog, 0xA111);
     LaunchOutcome moonArrival;
@@ -10662,9 +10983,10 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
             && flybyPresentation.metadata.interaction == PanelInteractionMode::Realtime,
         "an active Flyby should select the shared Control Panel template");
     require(
-        flybyPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
+        flybyPresentation.contentMarkup.find("flight-status-list") != std::string::npos
+            && flybyPresentation.contentMarkup.find("rr-metric-strip") == std::string::npos
             && flybyPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
-        "active Flyby should consume shared metric-strip and action-footer primitives");
+        "active Flyby should consume compact status and shared action-footer primitives");
 
     GameState scan = createNewGame(catalog, 0xA112);
     scan.run.destinationIndex = 2;
@@ -10726,12 +11048,42 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
     const PanelDocumentPresentation miningPresentation = presentationFor(mining, 0xA113);
     require(
         miningPresentation.templateKind == PanelTemplateKind::Mining
-            && miningPresentation.metadata.surface == PanelSurfaceKind::Mining,
+            && miningPresentation.metadata.surface == PanelSurfaceKind::Mining
+            && miningPresentation.metadata.overlay == PanelOverlayKind::MiningExperience,
         "Mining should select the shared Mining template");
     require(
         miningPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
-            && miningPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos,
+            && miningPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
+            && miningPresentation.contentMarkup.find("rr-hud-mining-xp") == std::string::npos,
         "Mining should consume shared header and metric-strip primitives");
+    require(
+        miningPresentation.contentMarkup.find("mining-utility-button") != std::string::npos
+            && miningPresentation.contentMarkup.find("\">DETAILS</button>") != std::string::npos
+            && miningPresentation.contentMarkup.find("\">INV</button>") != std::string::npos
+            && miningPresentation.contentMarkup.find("\">MENU</button>") != std::string::npos,
+        "Mining utility controls should keep direct labels that RmlUi can render inside their button shells");
+    require(
+        miningPresentation.runtime.expeditionExperienceRequired > 0
+            && miningPresentation.runtime.expeditionExperienceFilledSegments >= 0
+            && miningPresentation.runtime.expeditionExperienceFilledSegments <= 12,
+        "Mining XP should expose stable values for the scene overlay");
+
+    Random miningTitleRng(0xA113);
+    const PreparedLaunch miningTitleLaunch = prepareLaunch(mining, catalog, miningTitleRng);
+    PanelRenderContext miningTitleContext {
+        mining,
+        catalog,
+        miningTitleLaunch,
+        miningTitleLaunch,
+    };
+    miningTitleContext.titleScreenActive = true;
+    miningTitleContext.hasSavedGame = true;
+    miningTitleContext.firstTimeIntroductionsEnabled = false;
+    const PanelDocumentPresentation miningTitlePresentation =
+        buildGamePanelPresentation(miningTitleContext);
+    require(
+        miningTitlePresentation.metadata.overlay == PanelOverlayKind::None,
+        "Title screen should suppress a stale Mining XP overlay when the saved game is in Mining");
 
     GameState briefing = createNewGame(catalog, 0xA114);
     briefing.screen = Screen::StoryBriefing;
@@ -11232,6 +11584,12 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     state.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
     pulseMiningScanner(state, catalog);
     require(state.run.surfaceExpedition.scannerCooldownSeconds > 3.9, "manual pulse should start the unified recharge");
+    require(std::abs(mining.scannerPulseSeconds - tuning::mining::scannerPulseSeconds) < 1e-9,
+        "manual pulse should use the shared 0.64-second presentation duration");
+    require(tuning::mining::scannerRechargePresentationProgress(4.0) == 0.0
+            && tuning::mining::scannerRechargePresentationProgress(3.36) < 1e-9
+            && tuning::mining::scannerRechargePresentationProgress(0.0) == 1.0,
+        "visible scanner recharge should begin after the pulse and finish with the shared cooldown");
     require(state.run.surfaceExpedition.treasureMarks.size() >= first.size(), "repeated Treasure Ping should preserve existing marks and select new tiles");
     resource.upgradeLevel = 3;
     mining.miniDrones.front().upgradeLevel = 3;
@@ -11302,6 +11660,9 @@ int main()
     launchCurriculumEconomyGatesAndRoundTrips();
     launchCompetentPoliciesSurviveFiveThousandSeeds();
     launchSkillFailuresRemainVisibleAndNonRandom();
+    launchFailureSummariesMatchTheActualLesson();
+    sharedFlightInstrumentPresentationMatchesEachMode();
+    activeFlightPanelsUseTheClusterAndCompactStatusRows();
     launchCurriculumFuelMathAndRange();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     emergencyRecruitmentOffersAnimalCandidateChoice();
@@ -11320,7 +11681,8 @@ int main()
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
     researchPhasesUnlockOnlyAfterMarsArrival();
-    arrivalOperationsGateMoonButAllowMarsRisk();
+    arrivalOperationsUseMutuallyExclusiveCommitments();
+    arrivalPresentationExplainsCommitmentAndResearchProgress();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
     shipUpgradesAssistFlybyAndOrbitMinigames();
     orbitControlsFollowClockwiseProgradeDirection();

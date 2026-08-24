@@ -1,6 +1,7 @@
 #include "game/GameRmlUi.h"
 #include "game/IRmlRenderHost.h"
 
+#include "core/FlightInstrumentLayout.h"
 #include "core/UiViewportLayout.h"
 #include "input/UiFocusNavigation.h"
 
@@ -889,6 +890,71 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
         markup += "</span></button>";
         return markup;
     }
+    case PanelOverlayKind::FlightInstruments: {
+        const UiViewportLayout layout = resolveUiViewportLayout(
+            std::max(1, rr_rml_viewport_width()),
+            std::max(1, rr_rml_viewport_height()),
+            uiSurfaceKindForScreen(presentation.metadata.screen));
+        const UiRect scene = layout.sceneRect;
+        const int availableWidth = std::max(
+            static_cast<int>(flight_instrument_layout::kMinimumWidthPixels), scene.width - 24);
+        const int availableHeight = std::max(120, scene.height - 24);
+        const int clusterWidth = std::max(
+            static_cast<int>(flight_instrument_layout::kMinimumWidthPixels),
+            std::min({static_cast<int>(flight_instrument_layout::kMaximumWidthPixels), availableWidth,
+                      static_cast<int>(availableHeight / flight_instrument_layout::kAspectRatio)}));
+        const int clusterHeight = std::max(1, static_cast<int>(clusterWidth * flight_instrument_layout::kAspectRatio));
+        const int clusterLeft = scene.x + scene.width - clusterWidth
+            - static_cast<int>(flight_instrument_layout::kSceneInsetPixels);
+        const int promptClearance = std::clamp((scene.height * 6) / 100, 28, 64);
+        const int clusterTop = scene.y + scene.height - clusterHeight - promptClearance;
+        const PanelRuntimeHints& runtime = presentation.runtime;
+        const std::string clusterClass = clusterWidth < 320
+            ? "flight-instrument-overlay is-compact"
+            : "flight-instrument-overlay";
+        std::string navClass = "flight-nav-indicator";
+        if (runtime.instrumentOffCourse) {
+            navClass += " is-active blink-on";
+            if (runtime.instrumentCourseCritical) {
+                navClass += " is-critical";
+            }
+        }
+        const std::string temperatureClass = runtime.instrumentTemperatureCritical
+            ? "flight-dial-label temperature is-critical blink-on"
+            : "flight-dial-label temperature";
+        const std::string temperatureReadoutClass = runtime.instrumentTemperatureCritical
+            ? "flight-gauge-readout temperature is-critical blink-on"
+            : "flight-gauge-readout temperature";
+        const auto normalizedStyle = [](const flight_instrument_layout::Rect& rect) {
+            return "left:" + std::to_string(rect.left * 100.0F) + "%;top:"
+                + std::to_string(rect.top * 100.0F) + "%;width:"
+                + std::to_string(rect.width * 100.0F) + "%;height:"
+                + std::to_string(rect.height * 100.0F) + "%;";
+        };
+        return "<section id=\"rr-flight-instruments\" class=\"" + clusterClass + "\" style=\"left:"
+            + std::to_string(clusterLeft) + "px;top:" + std::to_string(clusterTop)
+            + "px;width:" + std::to_string(clusterWidth) + "px;height:"
+            + std::to_string(clusterHeight) + "px;\" aria-label=\"Flight instruments\">"
+            + "<div id=\"rr-flight-nav-indicator\" class=\"" + navClass + "\" style=\""
+            + normalizedStyle(flight_instrument_layout::kNavigationWarning) + "\">OFF COURSE</div>"
+            + "<div id=\"rr-flight-temperature-label\" class=\"" + temperatureClass + "\" style=\""
+            + normalizedStyle(flight_instrument_layout::kTemperatureLabel) + "\">TEMP</div>"
+            + "<div class=\"flight-dial-label speed\" style=\""
+            + normalizedStyle(flight_instrument_layout::kSpeedLabel) + "\">SPEED</div>"
+            + "<div class=\"flight-dial-label fuel\" style=\""
+            + normalizedStyle(flight_instrument_layout::kFuelLabel) + "\">FUEL</div>"
+            + "<div id=\"rr-flight-temperature-readout\" class=\"" + temperatureReadoutClass + "\" style=\""
+            + normalizedStyle(flight_instrument_layout::kTemperatureReadout) + "\"><strong id=\"rr-flight-temperature-value\">"
+            + Rml::StringUtilities::EncodeRml(runtime.instrumentTemperatureValue) + "</strong></div>"
+            + "<div class=\"flight-gauge-readout speed\" style=\""
+            + normalizedStyle(flight_instrument_layout::kSpeedReadout) + "\"><strong id=\"rr-flight-speed-value\">"
+            + Rml::StringUtilities::EncodeRml(runtime.instrumentSpeedValue) + "</strong></div>"
+            + "<div class=\"flight-gauge-readout fuel\" style=\""
+            + normalizedStyle(flight_instrument_layout::kFuelReadout) + "\"><strong id=\"rr-flight-fuel-value\">"
+            + Rml::StringUtilities::EncodeRml(runtime.instrumentFuelValue) + "</strong></div>"
+            + "<div id=\"rr-flight-throttle-accessibility\" class=\"flight-accessibility-readout\" aria-live=\"polite\">"
+            + Rml::StringUtilities::EncodeRml(runtime.instrumentThrottleValue) + "</div></section>";
+    }
     case PanelOverlayKind::TelemetryLegend:
         return R"(<div id="rr-telemetry-chart-legend" class="native-telemetry-chart-legend">
 <div class="native-telemetry-legend-chip warn"><span class="swatch"></span><strong>Warning</strong></div>
@@ -900,6 +966,38 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
             + Rml::StringUtilities::EncodeRml(
                 presentation.runtime.overlayValue.empty() ? "0%" : presentation.runtime.overlayValue)
             + "</strong></div>";
+    case PanelOverlayKind::MiningExperience: {
+        const PanelRuntimeHints& runtime = presentation.runtime;
+        const UiViewportLayout miningLayout = resolveUiViewportLayout(
+            std::max(1, rr_rml_viewport_width()),
+            std::max(1, rr_rml_viewport_height()),
+            UiSurfaceKind::Mining);
+        const UiRect miningSceneRect = miningLayout.sceneRect;
+        std::string markup = "<section id=\"rr-hud-mining-xp\" class=\"mining-scene-xp expedition-xp";
+        if (runtime.expeditionXpPulse) {
+            markup += " is-pulsing";
+        }
+        markup += "\" style=\"left:" + std::to_string(miningSceneRect.x)
+            + "px;top:" + std::to_string(miningSceneRect.y)
+            + "px;width:" + std::to_string(miningSceneRect.width)
+            + "px;\" aria-label=\"Expedition experience\"><header><strong id=\"rr-hud-mining-xp-level\">LV "
+            + std::to_string(runtime.expeditionLevel)
+            + "</strong><span id=\"rr-hud-mining-xp-value\">"
+            + std::to_string(runtime.expeditionExperienceCurrent) + " / "
+            + std::to_string(runtime.expeditionExperienceRequired)
+            + " XP</span><b id=\"rr-hud-mining-xp-pending\">"
+            + std::to_string(runtime.expeditionPendingPicks)
+            + " PICKS</b></header><div class=\"expedition-xp-track\">";
+        for (int segment = 0; segment < 12; ++segment) {
+            markup += "<i id=\"rr-hud-mining-xp-segment-" + std::to_string(segment)
+                + "\" class=\"xp-segment";
+            if (segment < runtime.expeditionExperienceFilledSegments) {
+                markup += " is-filled";
+            }
+            markup += "\"></i>";
+        }
+        return markup + "</div></section>";
+    }
     case PanelOverlayKind::None:
     default:
         return {};
@@ -2842,7 +2940,13 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         && presentation_.runtime.miningStowAvailable == presentation.runtime.miningStowAvailable
         && presentation_.runtime.miningTetherAvailable == presentation.runtime.miningTetherAvailable
         && presentation_.runtime.miningAbortAvailable == presentation.runtime.miningAbortAvailable
-        && presentation_.runtime.overlayValue == presentation.runtime.overlayValue;
+        && presentation_.runtime.overlayValue == presentation.runtime.overlayValue
+        && presentation_.runtime.expeditionLevel == presentation.runtime.expeditionLevel
+        && presentation_.runtime.expeditionExperienceCurrent == presentation.runtime.expeditionExperienceCurrent
+        && presentation_.runtime.expeditionExperienceRequired == presentation.runtime.expeditionExperienceRequired
+        && presentation_.runtime.expeditionExperienceFilledSegments == presentation.runtime.expeditionExperienceFilledSegments
+        && presentation_.runtime.expeditionPendingPicks == presentation.runtime.expeditionPendingPicks
+        && presentation_.runtime.expeditionXpPulse == presentation.runtime.expeditionXpPulse;
     const bool panelMarkupUnchanged = presentation_.contentMarkup == presentation.contentMarkup;
     const bool modalsUnchanged = presentation_.modals.size() == presentation.modals.size()
         && std::equal(
@@ -2914,7 +3018,9 @@ void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
     for (const RealtimeHudPatch& patch : state.patches) {
         Rml::Element* element = g_document->GetElementById(patch.elementId);
         if (!element) {
-            if (patch.elementId == "rr-scan-scene-readout" && !openModalId_.empty()) {
+            if (!openModalId_.empty() &&
+                (patch.elementId == "rr-scan-scene-readout" ||
+                    patch.elementId.rfind("rr-flight-", 0) == 0)) {
                 // Scene overlays are deliberately unmounted while a modal owns
                 // the viewport. The overlay is rebuilt on close and the next
                 // realtime frame supplies its current value.
@@ -3841,6 +3947,15 @@ bool GameRmlUi::rebuildOverlayHost()
             "Malformed RmlUi document lost persistent host #rr-scene-overlay-host.");
         return false;
     }
+    // The scene overlay host is a sibling of #rr-panel, so it does not inherit
+    // the mining playfield variables applied to the panel. Give it the same
+    // resolved geometry before mounting world-window overlays such as XP.
+    if (!applyPanelRcssProperties(*overlayHost, panelMode_)) {
+        host_.log(
+            PlatformLogLevel::Error,
+            "Failed to apply RmlUi layout properties to #rr-scene-overlay-host.");
+        return false;
+    }
     const ModalPresentation* activeModal = findModal(presentation_.modals, openModalId_);
     overlayHost->SetInnerRML(activeModal ? std::string {} : nativeSceneOverlayMarkup(presentation_));
     return true;
@@ -4015,6 +4130,14 @@ void GameRmlUi::refreshPersistentHosts(
     }
 
     bool valid = applyDocumentPresentationState();
+    // A mandatory modal can arrive with a new screen (for example, the Lunar
+    // Prospector contract immediately after landing). Build that scrim before
+    // replacing the panel beneath it so the new base screen cannot be exposed
+    // for a frame between the two host updates.
+    const bool installIncomingModalFirst = rebuildModal && !openModalId_.empty();
+    if (valid && installIncomingModalFirst) {
+        valid = rebuildModalHost();
+    }
     if (valid && rebuildPanel) {
         ++pendingPanelRebuilds_;
         valid = rebuildPanelHost(rebuildPanelShell);
@@ -4022,7 +4145,7 @@ void GameRmlUi::refreshPersistentHosts(
             valid = applyDocumentPresentationState();
         }
     }
-    if (valid && rebuildModal) {
+    if (valid && rebuildModal && !installIncomingModalFirst) {
         valid = rebuildModalHost();
     }
     if (valid && rebuildOverlay) {

@@ -4,7 +4,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 
 ## Registered runtime textures
 
-`scene-textures.json` declares all 37 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
+`scene-textures.json` declares all 38 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
@@ -22,6 +22,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 | `jetpack-capybara.png` | 512x512 | EVA operator suit used in mining layers. |
 | `poi-guidance-arrow.png` | 512x512 | Unlabeled POI pointer; renderer supplies dynamic labels and rotation. |
 | `asteroid.png` | 512x512 | Reusable launch-belt obstacle, scaled and rotated per seeded instance. |
+| `flight-instrument-cluster.png` | 1821x864 | Generated transparent cockpit bezel shared by Launch, Flyby, and Orbit; needles and text are rendered dynamically. |
 | `outer-system-planet-01.png` through `outer-system-planet-09.png` | 1254x1254 each | Post-solar destination variants selected by destination tier. |
 
 ## Not registered by the renderer
@@ -52,7 +53,7 @@ When adding or replacing a runtime texture, update this inventory and `scene-tex
 
 ## Generated scene atlas
 
-`scene-textures.json` is the canonical offline atlas manifest for the 37 registered
+`scene-textures.json` is the canonical offline atlas manifest for the 38 registered
 scene textures. `tools/build-scene-atlas.py` splits the four sprite sheets on their
 declared frame grids, preserves every source pixel, extrudes each frame edge by two
 pixels, and packs the frames into WebGL2-safe pages no larger than 4096 pixels on

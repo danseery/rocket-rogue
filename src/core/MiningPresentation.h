@@ -460,7 +460,9 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                 : miningDroneRepairCost(mining);
             const std::string actorName = evaActive ? "suit" : "Mining Rig";
             presentation.commandTitle = "Ship service";
-            presentation.commandDetail = "Repair, scan the site, then leave";
+            presentation.commandDetail = arenaRules.mechanics.fogAndScanner
+                ? "Repair, scan the site, then leave"
+                : "Repair the rig, then leave";
             presentation.actions = {
                 drillRepairCost <= 0
                     ? disabledPanelButton("Bit ready")
@@ -471,13 +473,14 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                     ? disabledPanelButton(evaActive ? "Suit ready" : "Rig ready")
                     : (mining.stowedMaterials.common >= actorRepairCost
                               ? panelActionButton("Repair " + actorName + " (" + std::to_string(actorRepairCost) + " common)", ui::actions::miningRepairDrone, "ok")
-                              : disabledPanelButton("Need " + std::to_string(actorRepairCost) + " common for " + actorName)),
-                // The scanner is useful before the rig leaves the shuttle. Keep
-                // the same visible action as the E key so the opening HUD never
-                // appears to require a hidden input before surveying.
-                panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"),
-                panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok")
+                              : disabledPanelButton("Need " + std::to_string(actorRepairCost) + " common for " + actorName))
             };
+            if (arenaRules.mechanics.fogAndScanner) {
+                presentation.actions.push_back(
+                    panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+            }
+            presentation.actions.push_back(
+                panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"));
         } else {
             const MiningArtifactObject& artifact = mining.artifact;
             const bool artifactRecoverable = artifact.present
@@ -498,8 +501,11 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             const bool preferOperatorRig = operatorRigInRange &&
                 (!artifactInRange || rigDistance <= artifactDistance);
             presentation.commandTitle = "Commands";
-            presentation.commandHints.push_back("Pulse Scanner (E) - Reveals nearby resources");
-            presentation.actions.push_back(panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+            if (arenaRules.mechanics.fogAndScanner) {
+                presentation.commandHints.push_back("Pulse Scanner (E) - Reveals nearby resources");
+                presentation.actions.push_back(
+                    panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+            }
             PanelButtonPresentation tetherAction = disabledPanelButton("No tether target");
             if (artifact.tethered) {
                 tetherAction = panelActionButton("Release artifact tether", ui::actions::miningTether, "warn");
