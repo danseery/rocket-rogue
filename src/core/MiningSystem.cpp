@@ -197,6 +197,19 @@ double controlledActorY(const MiningRunState& mining)
     return operatorControlled(mining) ? mining.operatorY : mining.droneY;
 }
 
+// Artifacts are stored at cell centers while actors are stored in the grid
+// coordinate consumed by cellCenter(). Keep tether math on the renderer's
+// attachment point so visual proximity and selection agree.
+double artifactTetherAnchorX(const MiningArtifactObject& artifact)
+{
+    return artifact.x - 0.5;
+}
+
+double artifactTetherAnchorY(const MiningArtifactObject& artifact)
+{
+    return artifact.y - 0.5;
+}
+
 double controlledActorVelocityX(const MiningRunState& mining)
 {
     return operatorControlled(mining) ? mining.operatorVelocityX : mining.rigVelocityX;
@@ -5522,29 +5535,6 @@ void simulateMiningActorMotion(
     velocityX += mining.gravityDirectionX * mining.gravityStrength * dt;
     velocityY += mining.gravityDirectionY * mining.gravityStrength * dt;
 
-    if (!suit && mining.rigTethered && !mining.rigDisabled) {
-        // The ship winch follows the return shaft: on a deeper layer it pulls
-        // the rig toward that layer's upper boundary, then the normal depth
-        // transition carries the tether through the previously carved route.
-        const double targetX = mining.returnZoneX;
-        const double targetY = mining.depthZone == mining.entryDepthZone
-            ? mining.returnZoneY
-            : 1.5;
-        const double tetherDx = targetX - positionX;
-        const double tetherDy = targetY - positionY;
-        const double tetherDistance = std::hypot(tetherDx, tetherDy);
-        if (tetherDistance > tuning::mining::rigTetherRestLengthCells) {
-            const double pull = std::min(
-                tuning::mining::rigTetherPullAccelerationCellsPerSecondSquared,
-                (tetherDistance - tuning::mining::rigTetherRestLengthCells) * 2.4);
-            velocityX += tetherDx / tetherDistance * pull * dt;
-            velocityY += tetherDy / tetherDistance * pull * dt;
-            const double damping = std::clamp(1.0 - tuning::mining::rigTetherDamping * dt, 0.0, 1.0);
-            velocityX *= damping;
-            velocityY *= damping;
-        }
-    }
-
     if (!suit && mining.operatorRigTethered && operatorControlled(mining) &&
         !mining.rigDisabled && mining.rigDepthZone == mining.depthZone) {
         const double tetherDx = mining.operatorX - positionX;
@@ -6439,9 +6429,9 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
         if (!tetheredRigRecoverableAtShip(mining)) {
             return false;
         }
-        // Reaching the shuttle with a live same-layer tow line hands the rig
-        // to the ship winch. Dock it before settling cargo so Bank / Leave is
-        // atomic and cannot discard payload held by the recovered rig.
+        // Reaching the shuttle with a live same-layer EVA tow line docks the
+        // rig before settling cargo so Bank / Leave is atomic and cannot
+        // discard payload held by the recovered rig.
         mining.droneX = mining.returnZoneX;
         mining.droneY = mining.returnZoneY;
         mining.rigVelocityX = 0.0;
@@ -7217,25 +7207,74 @@ bool toggleMiningOperator(GameState& state)
     return true;
 }
 
+MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& mining)
+{
+    MiningTetherTargetResolution result;
+    if (!mining.active) {
+        return result;
+    }
+
+    const MiningArtifactObject& artifact = mining.artifact;
+    const bool evaActive = operatorControlled(mining);
+    result.artifactRecoverable = artifact.present &&
+        artifact.state != MiningArtifactState::Delivered &&
+        artifact.state != MiningArtifactState::Destroyed;
+    result.artifactExposed = result.artifactRecoverable &&
+        (artifact.revealed || artifact.state == MiningArtifactState::Loose);
+    result.artifactDistance = result.artifactRecoverable
+        ? std::hypot(
+              artifactTetherAnchorX(artifact) - controlledActorX(mining),
+              artifactTetherAnchorY(artifact) - controlledActorY(mining))
+        : 0.0;
+    result.artifactInRange = result.artifactExposed &&
+        result.artifactDistance <= tuning::mining::artifactTetherRangeCells;
+
+    result.rigAvailable = !mining.rigDisabled && mining.rigDepthZone == mining.depthZone;
+    result.rigDistance = result.rigAvailable
+        ? std::hypot(mining.droneX - controlledActorX(mining), mining.droneY - controlledActorY(mining))
+        : 0.0;
+    result.rigInRange = evaActive && result.rigAvailable &&
+        result.rigDistance <= tuning::mining::operatorRigTetherRangeCells;
+
+    const bool artifactGateLocked = result.artifactInRange &&
+        artifact.state != MiningArtifactState::Loose && gateHasHardLock(mining.gate);
+    // Ties belong to the artifact. It is the more time-sensitive recovery
+    // target and avoids a nearby rig stealing a visually overlapping grab.
+    if (result.artifactInRange && (!result.rigInRange || result.artifactDistance <= result.rigDistance)) {
+        result.target = MiningTetherTarget::Artifact;
+        result.blocker = artifactGateLocked
+            ? MiningTetherBlocker::ArtifactGateLocked
+            : MiningTetherBlocker::None;
+        return result;
+    }
+    if (result.rigInRange) {
+        result.target = MiningTetherTarget::MiningRig;
+        result.blocker = MiningTetherBlocker::None;
+        return result;
+    }
+
+    if (result.artifactRecoverable && !result.artifactExposed) {
+        result.blocker = MiningTetherBlocker::ArtifactUnexposed;
+    } else if (result.artifactRecoverable && !result.artifactInRange) {
+        result.blocker = MiningTetherBlocker::ArtifactOutOfRange;
+    } else if (evaActive && !mining.rigDisabled && mining.rigDepthZone != mining.depthZone) {
+        result.blocker = MiningTetherBlocker::RigDifferentDepth;
+    } else if (evaActive && result.rigAvailable) {
+        result.blocker = MiningTetherBlocker::RigOutOfRange;
+    }
+    return result;
+}
+
 void toggleMiningTether(GameState& state)
 {
     MiningRunState& mining = state.run.mining;
     MiningArtifactObject& artifact = mining.artifact;
-    const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
     if (!mining.active) {
         return;
     }
-    const bool artifactRecoverable = arenaRules.mechanics.artifactTethering && artifact.present &&
-        artifact.state != MiningArtifactState::Delivered &&
-        artifact.state != MiningArtifactState::Destroyed;
-    const double artifactDistance = artifactRecoverable
-        ? std::hypot(artifact.x - controlledActorX(mining), artifact.y - controlledActorY(mining))
-        : 0.0;
-    const bool rigAvailable = !mining.rigDisabled && mining.rigDepthZone == mining.depthZone;
-    const bool operatorTowMode = operatorControlled(mining) && rigAvailable;
-    const double rigDistance = rigAvailable
-        ? std::hypot(mining.droneX - controlledActorX(mining), mining.droneY - controlledActorY(mining))
-        : 0.0;
+    // The historical ship-winch bit can only originate in an older save. It
+    // is not a live mechanic and must never survive another interaction.
+    mining.rigTethered = false;
     if (artifact.tethered) {
         const double speed = std::hypot(artifact.velocityX, artifact.velocityY);
         if (speed > tuning::mining::artifactDropDamageThreshold) {
@@ -7251,39 +7290,43 @@ void toggleMiningTether(GameState& state)
         mining.operatorRigTethered = false;
         return;
     }
-    if (mining.rigTethered) {
-        mining.rigTethered = false;
-        return;
-    }
 
-    const bool artifactInRange = artifactRecoverable &&
-        (artifact.revealed || artifact.state == MiningArtifactState::Loose) &&
-        artifactDistance <= tuning::mining::artifactTetherRangeCells;
-    const bool operatorRigInRange = operatorTowMode &&
-        rigDistance <= tuning::mining::operatorRigTetherRangeCells;
-    // EVA has one physical tow line. Choose the nearer valid target so
-    // stepping out beside the rig and pressing T reliably grabs the rig even
-    // when an exposed artifact also sits inside the wider tether radius.
-    if (operatorRigInRange && (!artifactInRange || rigDistance <= artifactDistance)) {
+    const MiningTetherTargetResolution resolution = resolveMiningTetherTarget(mining);
+    if (resolution.target == MiningTetherTarget::MiningRig) {
         mining.operatorRigTethered = true;
         return;
     }
-    if (!artifactInRange) {
-        if (rigAvailable && !operatorTowMode) {
-            mining.rigTethered = true;
-        }
+    if (resolution.target == MiningTetherTarget::Artifact &&
+        resolution.blocker == MiningTetherBlocker::ArtifactGateLocked) {
+        state.statusLine = std::string(miningGateName(mining.gate.type)) + " is still locked. Complete its marked requirements before tethering.";
+        return;
+    }
+    if (resolution.target == MiningTetherTarget::Artifact) {
+        artifact.tethered = true;
+        artifact.revealed = true;
         return;
     }
 
-    const bool payloadAlreadyReleased =
-        artifact.state == MiningArtifactState::Loose;
-    if (gateHasHardLock(mining.gate) && !payloadAlreadyReleased) {
-        state.statusLine = std::string(miningGateName(mining.gate.type)) + " is still locked. Complete its marked requirements before tethering.";
-        artifact.tethered = false;
-        return;
+    switch (resolution.blocker) {
+    case MiningTetherBlocker::ArtifactUnexposed:
+        state.statusLine = "Expose the artifact before tethering it.";
+        break;
+    case MiningTetherBlocker::ArtifactOutOfRange:
+        state.statusLine = "Move within artifact tether range.";
+        break;
+    case MiningTetherBlocker::RigDifferentDepth:
+        state.statusLine = "Return to the Mining Rig's depth before tethering it.";
+        break;
+    case MiningTetherBlocker::RigOutOfRange:
+        state.statusLine = "Move within Mining Rig tether range.";
+        break;
+    case MiningTetherBlocker::None:
+    case MiningTetherBlocker::NoTarget:
+        state.statusLine = "No exposed tether target is in range.";
+        break;
+    case MiningTetherBlocker::ArtifactGateLocked:
+        break;
     }
-    artifact.tethered = true;
-    artifact.revealed = true;
 }
 
 void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
@@ -7483,8 +7526,8 @@ void updateMiningArtifact(GameState& state, double dt)
 
     const double actorX = controlledActorX(mining);
     const double actorY = controlledActorY(mining);
-    const double dx = actorX - artifact.x;
-    const double dy = actorY - artifact.y;
+    const double dx = actorX - artifactTetherAnchorX(artifact);
+    const double dy = actorY - artifactTetherAnchorY(artifact);
     const double distance = std::sqrt(dx * dx + dy * dy);
     if (artifact.tethered && distance > tuning::mining::artifactTetherRangeCells * 1.75) {
         artifact.tethered = false;

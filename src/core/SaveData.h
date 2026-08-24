@@ -24,6 +24,9 @@ struct SaveData {
     int cleanShallowRecoveryStreak = 0;
     double nextLaunchFuelBoost = 0.0;
     double nextLaunchSpeedBoost = 0.0;
+    double nextLaunchInstabilityPenalty = 0.0;
+    PendingTransferAssist pendingTransferAssist;
+    // Compatibility projection for pre-transfer-assist version-13 saves.
     bool jupiterSlingshotActive = false;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;

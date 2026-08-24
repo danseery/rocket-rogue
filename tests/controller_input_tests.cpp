@@ -645,9 +645,13 @@ void routerMapsEveryGameplayContext()
     router.reset();
     frame = routedFrame();
     frame.pressed.set(index(ControllerButton::South));
-    frame.pressed.set(index(ControllerButton::West));
     input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::PrimarySurfaceAction) && input.has(GameInputAction::BankSurfaceAction), "surface contexts should route primary and bank actions");
+    require(input.has(GameInputAction::PrimarySurfaceAction), "surface contexts should route the primary action");
+    frame = routedFrame();
+    frame.released.set(index(ControllerButton::East));
+    frame.heldSeconds[index(ControllerButton::East)] = 0.12;
+    input = router.route(InputContext::SurfaceScan, frame, preferences);
+    require(input.has(GameInputAction::BankSurfaceAction), "surface contexts should bank on a short East backout press");
 
     router.reset();
     frame = routedFrame();
@@ -913,6 +917,18 @@ void routerContextualFocusPreservesDedicatedBindings()
     input = router.route(InputContext::SurfacePush, frame, preferences);
     require(input.has(GameInputAction::Abort),
         "a fresh East hold should retain the fixed surface abort binding outside UI focus");
+
+    router.reset();
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::East));
+    frame.pressed.set(index(ControllerButton::East));
+    router.route(InputContext::SurfaceScan, frame, preferences);
+    frame = routedFrame();
+    frame.released.set(index(ControllerButton::East));
+    frame.heldSeconds[index(ControllerButton::East)] = 0.12;
+    input = router.route(InputContext::SurfaceScan, frame, preferences);
+    require(input.has(GameInputAction::BankSurfaceAction) && !input.has(GameInputAction::Abort),
+        "a short East backout press should safely log Scan progress without aborting");
 }
 
 void routerHonorsConfirmSwapAndRealTimeHolds()

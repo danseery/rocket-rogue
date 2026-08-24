@@ -599,7 +599,7 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
         "a revealed protected payload should become tetherable through the generic artifact adapter");
 }
 
-void rigTetherPullsTowardShip()
+void tetherTargetingPrioritizesArtifactsAndKeepsEvaTow()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0xA11CE);
@@ -611,55 +611,74 @@ void rigTetherPullsTowardShip()
     require(startMiningRun(
                 state,
                 catalog,
-                {MiningAct::ActOne, 8, 0xA11CE, true, MiningGateType::None},
+                {MiningAct::ActOne, 1, 0xA11CE, true, MiningGateType::None},
                 false)
                 .applied,
         "rig tether test mining run should start");
     MiningRunState& mining = state.run.mining;
     mining.artifact = {};
-    for (int x = 1; x < mining.terrain.width - 1; ++x) {
-        if (MiningCell* cell = miningCellAt(mining.terrain, x, static_cast<int>(std::floor(mining.returnZoneY)))) {
-            cell->material = MiningCellMaterial::Empty;
-            cell->suitOnlyPassage = false;
-        }
+    for (MiningCell& cell : mining.terrain.cells) {
+        cell.material = MiningCellMaterial::Empty;
+        cell.remainingToughness = 0.0;
+        cell.maxToughness = 0.0;
+        cell.suitOnlyPassage = false;
     }
     mining.droneX = mining.returnZoneX + 3.0;
     mining.droneY = mining.returnZoneY;
-    const double beforeDistance = std::hypot(
-        mining.droneX - mining.returnZoneX,
-        mining.droneY - mining.returnZoneY);
+    mining.gravityStrength = 0.0;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    const double rigX = mining.droneX;
+    const double rigY = mining.droneY;
     toggleMiningTether(state);
-    require(mining.rigTethered, "the player-controlled mining rig should accept the shared tether input");
+    require(!mining.rigTethered,
+        "the player-controlled Mining Rig must never create the retired ship tether");
     updateMiningRun(state, catalog, 0.08);
-    const double afterDistance = std::hypot(
-        mining.droneX - mining.returnZoneX,
-        mining.droneY - mining.returnZoneY);
-    require(afterDistance < beforeDistance, "a tethered rig should be pulled toward the ship return zone");
+    require(std::abs(mining.droneX - rigX) < 0.000001 && std::abs(mining.droneY - rigY) < 0.000001,
+        "pressing tether without an artifact must not pull the Mining Rig toward the ship");
 
-    // In EVA, the same tether control creates an operator-to-rig tow line,
-    // rather than reusing the autonomous ship winch.
-    mining.rigTethered = false;
-    mining.operatorMode = MiningOperatorMode::Jetpack;
-    mining.operatorPresent = true;
-    // Keep this input-contract check outside the shuttle's recovery radius;
-    // entering it with a live tow line now intentionally winches the rig home.
-    mining.operatorX = mining.returnZoneX + 6.0;
-    mining.operatorY = mining.returnZoneY;
-    mining.droneX = mining.returnZoneX + 9.0;
-    mining.droneY = mining.returnZoneY;
+    // A revealed prospect is recoverable before the authored artifact tutorial
+    // tier. Its stored center is one half-cell ahead of the actor coordinate.
+    require(!resolveMiningArenaRules({MiningAct::ActOne, 1, 0xA11CE}).mechanics.artifactTethering,
+        "the artifact targeting regression must cover the pre-tutorial tier");
+    mining.artifact = {};
     mining.artifact.present = true;
     mining.artifact.revealed = true;
     mining.artifact.state = MiningArtifactState::Loose;
-    mining.artifact.x = mining.operatorX + 5.0;
-    mining.artifact.y = mining.operatorY;
+    mining.artifact.x = mining.droneX + 0.5;
+    mining.artifact.y = mining.droneY + 0.5;
+    toggleMiningTether(state);
+    require(mining.artifact.tethered,
+        "a revealed pre-tutorial artifact should tether from the Mining Rig");
+    toggleMiningTether(state);
+
+    // EVA may tow the same-depth rig, but a visually nearer artifact wins.
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = mining.returnZoneX + 10.0;
+    mining.operatorY = mining.returnZoneY + 8.0;
+    mining.droneX = mining.operatorX + 3.0;
+    mining.droneY = mining.operatorY;
+    mining.rigDepthZone = mining.depthZone;
+    mining.artifact.x = mining.operatorX + 1.5;
+    mining.artifact.y = mining.operatorY + 0.5;
+    mining.artifact.tethered = false;
     mining.rigVelocityX = 0.0;
     mining.rigVelocityY = 0.0;
+    toggleMiningTether(state);
+    require(mining.artifact.tethered && !mining.operatorRigTethered,
+        "the EVA player should tether the visually nearer artifact instead of the Mining Rig");
+    toggleMiningTether(state);
+
+    // The rig still wins when it is genuinely closer.
+    mining.artifact.x = mining.operatorX + 5.5;
+    mining.artifact.y = mining.operatorY + 0.5;
+    toggleMiningTether(state);
+    require(mining.operatorRigTethered && !mining.rigTethered,
+        "the EVA player should tether a genuinely nearer same-depth Mining Rig");
     const double operatorTowBefore = std::hypot(
         mining.droneX - mining.operatorX,
         mining.droneY - mining.operatorY);
-    toggleMiningTether(state);
-    require(mining.operatorRigTethered && !mining.rigTethered,
-        "the EVA player should attach to the nearer Mining Rig even when an exposed artifact is also in range");
     updateMiningRun(state, catalog, 0.08);
     const double operatorTowAfter = std::hypot(
         mining.droneX - mining.operatorX,
@@ -668,6 +687,37 @@ void rigTetherPullsTowardShip()
         "a jetpack tether should physically pull the Mining Rig toward the operator");
     toggleMiningTether(state);
     require(!mining.operatorRigTethered, "the shared tether input should release the EVA tow line");
+
+    // An exact visual tie belongs to the artifact, preventing an overlapping
+    // rig from stealing the recovery input.
+    mining.droneX = mining.operatorX + 2.0;
+    mining.droneY = mining.operatorY;
+    mining.artifact.x = mining.operatorX + 2.5;
+    mining.artifact.y = mining.operatorY + 0.5;
+    toggleMiningTether(state);
+    require(mining.artifact.tethered && !mining.operatorRigTethered,
+        "an artifact should win an exact visual-distance tether tie");
+    toggleMiningTether(state);
+
+    mining.gate = {};
+    mining.gate.active = true;
+    mining.gate.type = MiningGateType::HazardCocoon;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    mining.artifact.revealed = true;
+    mining.artifact.x = mining.operatorX + 1.5;
+    mining.artifact.y = mining.operatorY + 0.5;
+    toggleMiningTether(state);
+    require(!mining.artifact.tethered && !mining.operatorRigTethered &&
+            state.statusLine.find("locked") != std::string::npos,
+        "a nearest gate-locked artifact must explain its lock instead of falling through to the Mining Rig");
+
+    mining.artifact = {};
+    mining.gate = {};
+    mining.rigDepthZone = mining.depthZone + 1;
+    toggleMiningTether(state);
+    require(!mining.operatorRigTethered &&
+            state.statusLine.find("Rig's depth") != std::string::npos,
+        "an EVA player must not tether a Mining Rig on another depth");
 }
 
 void evaTetherFollowsAndRecoversAtShip()
@@ -738,7 +788,7 @@ void evaTetherFollowsAndRecoversAtShip()
     mining.temporaryMaterials.common = 3;
     const SurfaceActionOutcome recovery = finishMiningRun(state, catalog, false);
     require(recovery.applied && recovery.cargoDelta == 3 && recovery.materialDelta.common == 3,
-        "Bank / Leave should winch a tethered same-layer rig into the shuttle and bank its payload");
+        "Bank / Leave should dock a tethered same-layer Mining Rig and bank its payload");
 }
 
 } // namespace
@@ -752,7 +802,7 @@ int main()
     miningGateContractsAndRuntimeAreDeterministic();
     thermalSiteRulesAreContentDriven();
     layeredCocoonsHonorAuthoredRevealPolicies();
-    rigTetherPullsTowardShip();
+    tetherTargetingPrioritizesArtifactsAndKeepsEvaTow();
     evaTetherFollowsAndRecoversAtShip();
     std::cout << "rocket_mining_progression_tests passed\n";
     return 0;

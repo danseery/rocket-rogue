@@ -367,14 +367,18 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
 {
     PreparedLaunch launch;
     launch.config = state.launchConfig;
-    launch.slingshotFuelSavings = std::max(0.0, state.run.nextLaunchFuelBoost);
-    launch.slingshotSpeedBoost = std::max(0.0, state.run.nextLaunchSpeedBoost);
 
     const Destination* configuredDestination = catalog.findDestination(launch.config.destinationId);
     const Destination& destination = configuredDestination == nullptr
         ? currentDestination(state, catalog)
         : *configuredDestination;
     launch.config.destinationId = destination.id;
+    launch.slingshotFuelSavings = pendingLaunchFuelSavingsForDestination(state, destination.id);
+    launch.slingshotSpeedBoost = pendingLaunchSpeedBoostForDestination(state, destination.id);
+    launch.slingshotInstabilityPenalty = pendingLaunchInstabilityPenaltyForDestination(state, destination.id);
+    if (const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destination.id)) {
+        launch.transferAssistId = assist->definitionId;
+    }
     launch.config.frameId = state.run.frameId;
     launch.config.equippedModuleIds = state.run.equippedModuleIds;
 
@@ -404,7 +408,11 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     launch.manualControlsEnabled = launch.config.missionKind != LaunchMissionKind::FuelCalibration;
     launch.heatEnabled = missionUsesHeat(launch.config.missionKind, destination);
     launch.asteroidsEnabled = missionUsesAsteroids(launch.config.missionKind, destination);
-    launch.controlChaos = launchControlChaosForRank(launch.flightControlRank);
+    launch.controlChaos = std::clamp(
+        launchControlChaosForRank(launch.flightControlRank) +
+            launch.slingshotInstabilityPenalty,
+        0.0,
+        1.0);
     launch.controlSteeringResponseVariation = rng.range(
         -tuning::launch::controlSteeringResponseVariance,
         tuning::launch::controlSteeringResponseVariance) * launch.controlChaos;
@@ -894,6 +902,8 @@ LaunchOutcome resolveLaunch(
     outcome.minimumSafetyMargin = resolution.minimumSafetyMargin;
     outcome.slingshotFuelSavings = launch.slingshotFuelSavings;
     outcome.slingshotSpeedBoost = launch.slingshotSpeedBoost;
+    outcome.slingshotInstabilityPenalty = launch.slingshotInstabilityPenalty;
+    outcome.transferAssistId = launch.transferAssistId;
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {

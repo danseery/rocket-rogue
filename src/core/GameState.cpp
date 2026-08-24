@@ -371,6 +371,49 @@ double pendingLaunchFuelSavings(const GameState& state)
     return std::max(0.0, state.run.nextLaunchFuelBoost);
 }
 
+double pendingLaunchInstabilityPenalty(const GameState& state)
+{
+    return std::clamp(state.run.nextLaunchInstabilityPenalty, 0.0, 1.0);
+}
+
+const PendingTransferAssist* pendingTransferAssistForDestination(
+    const GameState& state,
+    std::string_view destinationId)
+{
+    const PendingTransferAssist& assist = state.run.pendingTransferAssist;
+    return assist.active() && assist.targetDestinationId == destinationId ? &assist : nullptr;
+}
+
+double pendingLaunchFuelSavingsForDestination(
+    const GameState& state,
+    std::string_view destinationId)
+{
+    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
+    return std::max(pendingLaunchFuelSavings(state), assist == nullptr ? 0.0 : assist->fuelSavings);
+}
+
+double pendingLaunchSpeedBoostForDestination(
+    const GameState& state,
+    std::string_view destinationId)
+{
+    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
+    return std::max(
+        std::max(0.0, state.run.nextLaunchSpeedBoost),
+        assist == nullptr ? 0.0 : assist->speedBoost);
+}
+
+double pendingLaunchInstabilityPenaltyForDestination(
+    const GameState& state,
+    std::string_view destinationId)
+{
+    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
+    return std::clamp(
+        pendingLaunchInstabilityPenalty(state) +
+            (assist == nullptr ? 0.0 : assist->instabilityPenalty),
+        0.0,
+        1.0);
+}
+
 double calibratedTransferFuelMargin(
     const GameState& state,
     const Destination& destination)
@@ -381,15 +424,25 @@ double calibratedTransferFuelMargin(
             static_cast<double>(std::max(1, destination.tier)) *
                 tuning::launch::routeFuelPerTier);
     return launchFuelCapacity(state) -
-        std::max(0.0, routeBurn - pendingLaunchFuelSavings(state));
+        std::max(0.0, routeBurn - pendingLaunchFuelSavingsForDestination(state, destination.id));
 }
 
 bool jupiterTransferMarginReady(const GameState& state)
 {
     return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3 ||
-        (state.run.jupiterSlingshotActive &&
-         pendingLaunchFuelSavings(state) + 0.000001 >=
+        (pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr &&
+         pendingLaunchFuelSavingsForDestination(state, content::destination::jupiter) + 0.000001 >=
              tuning::flyby::jupiterSlingshotFuelSavings);
+}
+
+bool destinationTransferMarginReady(
+    const GameState& state,
+    const ContentCatalog&,
+    const Destination& destination)
+{
+    return destination.calibratedTransferMarginRequired <= 0.0 ||
+        calibratedTransferFuelMargin(state, destination) + 0.000001 >=
+            destination.calibratedTransferMarginRequired;
 }
 
 const ShipModule* nextLaunchUpgrade(
@@ -1730,14 +1783,16 @@ FrontierGateStatus frontierGateStatusForDestination(
     if (destination->tier == 3 &&
         !launchTrainingAtLeast(state, LaunchTrainingStage::Complete)) {
         status.kind = FrontierGateKind::FlightData;
-        status.current = jupiterTransferMarginReady(state) ? 1 : 0;
+        status.current = destinationTransferMarginReady(state, catalog, *destination) ? 1 : 0;
         status.required = 1;
         status.satisfied =
             (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
                 state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
             status.current >= status.required;
-        status.blockerText =
-            "Create 5 fuel of Jupiter transfer margin with Fuel Tanks III, a Perfect Mars slingshot, or both.";
+        status.blockerText = destination->transferMarginBlockerText.empty()
+            ? "Create " + std::to_string(static_cast<int>(destination->calibratedTransferMarginRequired)) +
+                " fuel of " + destination->name + " transfer margin with permanent tank capacity, a matching transfer assist, or both."
+            : destination->transferMarginBlockerText;
         if (!status.satisfied) {
             return status;
         }

@@ -467,8 +467,10 @@
           <button type="button" data-debug-action="hangar">Hangar board</button>
           <button type="button" data-debug-action="jupiter-neither">Jupiter: neither</button>
           <button type="button" data-debug-action="jupiter-tanks">Jupiter: tanks</button>
-          <button type="button" data-debug-action="jupiter-slingshot">Jupiter: slingshot</button>
-          <button type="button" data-debug-action="jupiter-both">Jupiter: both</button>
+          <button type="button" data-debug-action="jupiter-slingshot">Jupiter: Good slingshot</button>
+          <button type="button" data-debug-action="jupiter-both">Jupiter: Good slingshot + tanks</button>
+          <button type="button" data-debug-action="jupiter-perfect-slingshot">Jupiter: Perfect slingshot</button>
+          <button type="button" data-debug-action="jupiter-perfect-both">Jupiter: Perfect slingshot + tanks</button>
           <button type="button" data-debug-action="navigation">Navigation board</button>
         </div>
       </section>
@@ -853,7 +855,9 @@
       orbitAbort: () => rrCall("rr_orbit_abort"),
       orbitContinue: () => rrCall("rr_orbit_continue"),
       surfaceScanPulse: () => rrCall("rr_surface_scan_pulse"),
+      surfaceScanBank: () => rrCall("rr_surface_scan_bank"),
       surfacePushStep: () => rrCall("rr_surface_push_step"),
+      surfacePushBank: () => rrCall("rr_surface_push_bank"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningPointerAim: (x, y) => rrCall("rr_mining_pointer_aim", [x, y], ["number", "number"]),
       miningFire: (active) => rrCall("rr_mining_fire", [active ? 1 : 0], ["number"]),
@@ -1012,6 +1016,8 @@
       "jupiter-tanks": () => rr.debugJupiterOptions(1),
       "jupiter-slingshot": () => rr.debugJupiterOptions(2),
       "jupiter-both": () => rr.debugJupiterOptions(3),
+      "jupiter-perfect-slingshot": () => rr.debugJupiterOptions(4),
+      "jupiter-perfect-both": () => rr.debugJupiterOptions(5),
       results: () => rr.debugResults(),
       "arrival-ops": () => rr.debugArrivalOps(),
       research: () => rr.debugResearch(),
@@ -1404,8 +1410,22 @@
         return;
       }
       if (!event.repeat && currentUiHostContext.realtimeActivityActive
+          && screen === rrScreen.surfaceScan
+          && (event.key.toLowerCase() === "b" || event.key === "Escape")) {
+        rr.surfaceScanBank();
+        event.preventDefault();
+        return;
+      }
+      if (!event.repeat && currentUiHostContext.realtimeActivityActive
           && screen === rrScreen.surfacePush && event.key === " ") {
         rr.surfacePushStep();
+        event.preventDefault();
+        return;
+      }
+      if (!event.repeat && currentUiHostContext.realtimeActivityActive
+          && screen === rrScreen.surfacePush
+          && (event.key.toLowerCase() === "b" || event.key === "Escape")) {
+        rr.surfacePushBank();
         event.preventDefault();
         return;
       }

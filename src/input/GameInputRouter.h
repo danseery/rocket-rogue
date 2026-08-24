@@ -189,15 +189,18 @@ public:
                     ? GameInputAction::ActivateFocused
                     : GameInputAction::PrimarySurfaceAction);
             }
-            if (frame.wasPressed(ControllerButton::West)) {
-                add(GameInputAction::BankSurfaceAction);
-            }
             if (contextualUiFocusActive_ && frame.wasPressed(ControllerButton::East)) {
                 add(GameInputAction::CancelFocused);
                 contextualUiFocusActive_ = false;
                 holdTriggered_.set(static_cast<std::size_t>(ControllerButton::East));
             } else if (!contextualUiFocusActive_ && holdCrossed(frame, ControllerButton::East, 0.45)) {
                 add(GameInputAction::Abort);
+            } else if (!contextualUiFocusActive_
+                && frame.wasReleased(ControllerButton::East)
+                && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::East))) {
+                // East is the normal backout control. A short press safely
+                // banks progress; only crossing the hold threshold aborts.
+                add(GameInputAction::BankSurfaceAction);
             }
             break;
 

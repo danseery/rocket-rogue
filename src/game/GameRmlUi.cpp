@@ -881,6 +881,9 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
         const bool ready = presentation.runtime.preflightReady;
         std::string markup = "<button id=\"rr-scene-launch-control\" class=\"native-scene-launch-control rr-text-button\" "
             "data-rr-action=\"start_launch\" data-ui-focus-id=\"action:start_launch\"";
+        if (ready) {
+            markup += " data-ui-default-focus=\"1\"";
+        }
         if (!ready) {
             markup += " disabled=\"1\"";
         }
@@ -1865,7 +1868,9 @@ std::string inputPromptBar(
         && presentation.metadata.interaction == PanelInteractionMode::Realtime;
     const bool orbit = screen == Screen::Orbit
         && presentation.metadata.interaction == PanelInteractionMode::Realtime;
-    if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit))) {
+    const bool surfaceActivity = (screen == Screen::SurfaceScan || screen == Screen::SurfacePush)
+        && presentation.metadata.interaction == PanelInteractionMode::Realtime;
+    if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit && !surfaceActivity))) {
         return {};
     }
 
@@ -1918,6 +1923,9 @@ std::string inputPromptBar(
             prompt += describedItem("Prograde / Retrograde", "W/S or Up/Down")
                 + describedItem("Tighten / Widen", "A/D or Left/Right")
                 + describedItem("Abort", "Esc", "Records a Miss");
+        } else if (surfaceActivity) {
+            prompt += describedItem(screen == Screen::SurfaceScan ? "Pulse scanner" : "Push deeper", "Space")
+                + describedItem(screen == Screen::SurfaceScan ? "Log survey" : "Set start depth", "B / Esc");
         }
         return prompt + "</div>";
     }
@@ -1969,7 +1977,8 @@ std::string inputPromptBar(
             + describedItem("Abort", labels.east, "Hold to record a Miss")
             + item(labels.menu, "Pause");
     } else if (screen == Screen::SurfaceScan || screen == Screen::SurfacePush) {
-        prompt += item(labels.south, "Pulse / push") + item(labels.west, screen == Screen::SurfaceScan ? "Log survey" : "Set start depth")
+        prompt += item(labels.south, "Pulse / push")
+            + item(labels.east, screen == Screen::SurfaceScan ? "Tap: log survey" : "Tap: set start depth")
             + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
     } else if (screen == Screen::Launch
         && presentation.metadata.overlay != PanelOverlayKind::PreflightLaunch) {
@@ -2624,6 +2633,16 @@ FocusTarget* defaultFocusTarget()
     if (explicitDefault != g_focusTargets.end()) {
         return &*explicitDefault;
     }
+    return nullptr;
+}
+
+// Directional navigation is an explicit player choice, so it may establish a
+// starting focus even on a screen that intentionally has no confirm default.
+FocusTarget* navigationEntryFocusTarget()
+{
+    if (FocusTarget* target = defaultFocusTarget()) {
+        return target;
+    }
     if (g_focusTargetsModalScoped) {
         const auto primary = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
             if (!target.element) {
@@ -2651,7 +2670,6 @@ FocusTarget* defaultFocusTarget()
             target.element->Closest(".final-actions") || target.element->Closest(".card-footer");
     });
     if (primary != g_focusTargets.end()) {
-        primary->element->SetAttribute("data-ui-default-focus", "1");
         return &*primary;
     }
     const auto nonTitlebar = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const FocusTarget& target) {
@@ -3230,7 +3248,9 @@ bool GameRmlUi::navigate(UiDirection direction)
 
     FocusTarget* current = findFocusTarget(focusedId_);
     if (!current) {
-        FocusTarget* fallback = hasLastFocusCenter_ ? nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_) : defaultFocusTarget();
+        FocusTarget* fallback = hasLastFocusCenter_
+            ? nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_)
+            : navigationEntryFocusTarget();
         return applyControllerFocus(fallback, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
     }
 
@@ -3401,12 +3421,7 @@ bool GameRmlUi::activateFocused()
         collectFocusTargets(modalScope);
     }
     FocusTarget* target = findFocusTarget(focusedId_);
-    if (!target) {
-        if (!navigate(UiDirection::Down)) {
-            return false;
-        }
-        target = findFocusTarget(focusedId_);
-    }
+    if (!target) target = defaultFocusTarget();
     if (!target) {
         return false;
     }

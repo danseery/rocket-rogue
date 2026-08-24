@@ -32,6 +32,10 @@ inline constexpr const char* outerTransfer = "outer_transfer";
 inline constexpr const char* generatedTemplate = "generated_mining_template";
 } // namespace scenario
 
+namespace transferAssist {
+inline constexpr const char* marsJupiter = "mars_jupiter_slingshot";
+} // namespace transferAssist
+
 namespace miningSite {
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
 } // namespace miningSite

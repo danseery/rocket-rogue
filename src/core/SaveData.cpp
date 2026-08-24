@@ -2279,7 +2279,9 @@ std::string serializeMiningRigState(const MiningRunState& mining)
         << save_schema::crewFieldDelimiter << mining.rigVelocityY
         << save_schema::crewFieldDelimiter << (mining.rigDisabled ? 1 : 0)
         << save_schema::crewFieldDelimiter << mining.rigDepthZone
-        << save_schema::crewFieldDelimiter << (mining.rigTethered ? 1 : 0);
+        // Preserve the legacy field position without persisting the removed
+        // ship-winch mechanic into new saves.
+        << save_schema::crewFieldDelimiter << 0;
     return out.str();
 }
 
@@ -2623,7 +2625,9 @@ SaveData captureSaveData(const GameState& state)
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
     save.nextLaunchFuelBoost = state.run.nextLaunchFuelBoost;
     save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
-    save.jupiterSlingshotActive = state.run.jupiterSlingshotActive;
+    save.nextLaunchInstabilityPenalty = state.run.nextLaunchInstabilityPenalty;
+    save.pendingTransferAssist = state.run.pendingTransferAssist;
+    save.jupiterSlingshotActive = state.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter;
     if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
     } else if (state.screen == Screen::Flyby) {
@@ -2737,11 +2741,27 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.cleanShallowRecoveryStreak = std::max(0, save.cleanShallowRecoveryStreak);
     state.run.nextLaunchFuelBoost = std::max(0.0, save.nextLaunchFuelBoost);
     state.run.nextLaunchSpeedBoost = std::max(0.0, save.nextLaunchSpeedBoost);
-    state.run.jupiterSlingshotActive = save.jupiterSlingshotActive;
-    if (state.run.jupiterSlingshotActive) {
-        state.run.nextLaunchFuelBoost = std::max(
-            state.run.nextLaunchFuelBoost,
-            tuning::flyby::jupiterSlingshotFuelSavings);
+    state.run.nextLaunchInstabilityPenalty = std::clamp(
+        save.nextLaunchInstabilityPenalty,
+        0.0,
+        1.0);
+    state.run.pendingTransferAssist = save.pendingTransferAssist;
+    if (!state.run.pendingTransferAssist.active() && save.jupiterSlingshotActive) {
+        state.run.pendingTransferAssist = {
+            content::transferAssist::marsJupiter,
+            content::destination::mars,
+            content::destination::jupiter,
+            save.nextLaunchInstabilityPenalty > 0.0 ? FlybyGrade::Good : FlybyGrade::Perfect,
+            std::max(save.nextLaunchFuelBoost, tuning::flyby::jupiterSlingshotFuelSavings),
+            std::max(0.0, save.nextLaunchSpeedBoost),
+            std::clamp(save.nextLaunchInstabilityPenalty, 0.0, 1.0)
+        };
+        // Older saves stored the physical Mars momentum in the generic
+        // next-launch fields. The canonical assist now owns those values, so
+        // clear the projection to avoid applying Good instability twice.
+        state.run.nextLaunchFuelBoost = 0.0;
+        state.run.nextLaunchSpeedBoost = 0.0;
+        state.run.nextLaunchInstabilityPenalty = 0.0;
     }
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
@@ -2761,16 +2781,14 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         constexpr double tau = 6.28318530717958647692;
 
         mining.rigDepthZone = std::max(0, mining.rigDepthZone);
+        // Version-13 saves can contain the retired rig-to-ship tether. Keep
+        // parsing its field for compatibility, then discard it unconditionally.
+        mining.rigTethered = false;
         if (mining.rigDisabled || mining.rigDepthZone != mining.depthZone) {
-            mining.rigTethered = false;
             mining.operatorRigTethered = false;
         }
         if (mining.operatorMode != MiningOperatorMode::Jetpack || !mining.operatorPresent) {
             mining.operatorRigTethered = false;
-        } else {
-            // A restored EVA state always uses the player-to-rig tow line, not
-            // the ship winch left over from rig mode.
-            mining.rigTethered = false;
         }
         mining.operatorIntegrity = std::clamp(mining.operatorIntegrity, 0.0, 1.0);
         mining.operatorFireCooldownSeconds = std::max(0.0, mining.operatorFireCooldownSeconds);
@@ -3088,7 +3106,15 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::cleanShallowRecoveryStreak, save.cleanShallowRecoveryStreak);
     writeField(out, save_schema::field::nextLaunchFuelBoost, save.nextLaunchFuelBoost);
     writeField(out, save_schema::field::nextLaunchSpeedBoost, save.nextLaunchSpeedBoost);
+    writeField(out, save_schema::field::nextLaunchInstabilityPenalty, save.nextLaunchInstabilityPenalty);
     writeField(out, save_schema::field::jupiterSlingshotActive, save.jupiterSlingshotActive ? 1 : 0);
+    writeField(out, save_schema::field::pendingTransferAssistId, save.pendingTransferAssist.definitionId);
+    writeField(out, save_schema::field::pendingTransferAssistSource, save.pendingTransferAssist.sourceDestinationId);
+    writeField(out, save_schema::field::pendingTransferAssistTarget, save.pendingTransferAssist.targetDestinationId);
+    writeField(out, save_schema::field::pendingTransferAssistGrade, static_cast<int>(save.pendingTransferAssist.grade));
+    writeField(out, save_schema::field::pendingTransferAssistFuelSavings, save.pendingTransferAssist.fuelSavings);
+    writeField(out, save_schema::field::pendingTransferAssistSpeedBoost, save.pendingTransferAssist.speedBoost);
+    writeField(out, save_schema::field::pendingTransferAssistInstability, save.pendingTransferAssist.instabilityPenalty);
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
@@ -3383,8 +3409,24 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.nextLaunchFuelBoost = parseDouble(value, save.nextLaunchFuelBoost);
         } else if (key == save_schema::field::nextLaunchSpeedBoost) {
             save.nextLaunchSpeedBoost = parseDouble(value, save.nextLaunchSpeedBoost);
+        } else if (key == save_schema::field::nextLaunchInstabilityPenalty) {
+            save.nextLaunchInstabilityPenalty = parseDouble(value, save.nextLaunchInstabilityPenalty);
         } else if (key == save_schema::field::jupiterSlingshotActive) {
             save.jupiterSlingshotActive = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::pendingTransferAssistId) {
+            save.pendingTransferAssist.definitionId = std::string(value);
+        } else if (key == save_schema::field::pendingTransferAssistSource) {
+            save.pendingTransferAssist.sourceDestinationId = std::string(value);
+        } else if (key == save_schema::field::pendingTransferAssistTarget) {
+            save.pendingTransferAssist.targetDestinationId = std::string(value);
+        } else if (key == save_schema::field::pendingTransferAssistGrade) {
+            save.pendingTransferAssist.grade = static_cast<FlybyGrade>(std::clamp(parseInt(value, 0), 0, 3));
+        } else if (key == save_schema::field::pendingTransferAssistFuelSavings) {
+            save.pendingTransferAssist.fuelSavings = std::max(0.0, parseDouble(value, 0.0));
+        } else if (key == save_schema::field::pendingTransferAssistSpeedBoost) {
+            save.pendingTransferAssist.speedBoost = std::max(0.0, parseDouble(value, 0.0));
+        } else if (key == save_schema::field::pendingTransferAssistInstability) {
+            save.pendingTransferAssist.instabilityPenalty = std::clamp(parseDouble(value, 0.0), 0.0, 1.0);
         } else if (key == save_schema::field::screen) {
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::campaignMilestone) {

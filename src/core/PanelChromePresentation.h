@@ -88,11 +88,17 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
     metrics.push_back(panelMetric(text::labels::crewStress, crewStressSummary(astronaut)));
     const double pendingFuelSavings = state.screen == Screen::Launch ? activeLaunch.slingshotFuelSavings : state.run.nextLaunchFuelBoost;
     const double pendingSpeedBoost = state.screen == Screen::Launch ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;
-    if (pendingFuelSavings > 0.0 || pendingSpeedBoost > 0.0) {
+    const double pendingInstability = state.screen == Screen::Launch
+        ? activeLaunch.slingshotInstabilityPenalty
+        : state.run.nextLaunchInstabilityPenalty;
+    if (pendingFuelSavings > 0.0 || pendingSpeedBoost > 0.0 || pendingInstability > 0.0) {
         metrics.push_back(panelMetric(
             "Slingshot momentum",
             display::fixed(pendingFuelSavings, 1) + " fuel saved / +" +
-                display::percent(pendingSpeedBoost) + " velocity"));
+                display::percent(pendingSpeedBoost) + " velocity" +
+                (pendingInstability > 0.0
+                    ? " / +" + display::percent(pendingInstability) + " flight instability"
+                    : " / stable")));
     }
     return metrics;
 }

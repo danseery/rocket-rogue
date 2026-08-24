@@ -75,6 +75,8 @@ public:
     void claimSaturnCourse();
     void acknowledgeJupiterWindow();
     void openJupiterRefit();
+    void beginTransferAssist(std::string_view definitionId);
+    void continueTransferAssist();
     void beginJupiterSlingshot();
     void continueJupiterSlingshot();
     void runArrivalFlyby();
@@ -246,6 +248,9 @@ private:
     void applyDebugDroneLoadout();
     void applyDebugActOneCheckpoint();
     void save();
+    void beginTitleLaunch(bool newCampaign);
+    void completeTitleLaunch();
+    void startNewGame();
     PanelRenderContext panelRenderContext(const PreparedLaunch& flightModel) const;
     void refreshPanel();
     void refreshRealtimeHud();
@@ -321,6 +326,9 @@ private:
     double observedExpeditionExperience_ = 0.0;
     bool expeditionXpObservationInitialized_ = false;
     bool titleScreenActive_ = true;
+    bool titleLaunchActive_ = false;
+    bool titleLaunchStartsNewCampaign_ = false;
+    double titleLaunchElapsedSeconds_ = 0.0;
     bool hasSavedGame_ = false;
     std::string titleNotice_;
     bool panelDirty_ = true;

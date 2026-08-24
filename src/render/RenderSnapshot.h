@@ -145,6 +145,10 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
 struct RenderSnapshot {
     Screen screen = Screen::Hangar;
     bool titleScreen = false;
+    // A short, presentation-only departure after selecting New Game or
+    // Continue. It never affects campaign state or simulation time.
+    double titleLaunchProgress = 0.0;
+    double titleLaunchRumble = 0.0;
     LaunchResultType lastResult = LaunchResultType::None;
     LaunchFailureCause lastLaunchFailureCause = LaunchFailureCause::None;
     double currentMultiplier = 1.0;
@@ -248,7 +252,6 @@ struct RenderSnapshot {
     double miningOperatorFirePulse = 0.0;
     bool miningRigPresent = true;
     bool miningRigDisabled = false;
-    bool miningRigTethered = false;
     bool miningOperatorRigTethered = false;
     bool miningAnchorValid = false;
     double miningAnchorX = 0.0;

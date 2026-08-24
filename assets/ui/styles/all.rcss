@@ -1047,17 +1047,19 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .arrival-stamp-continue {
     width: 320px;
-    min-height: 28px;
-    height: 28px;
+    min-height: 36px;
+    height: 36px;
     margin-top: 3px;
     margin-right: 0px;
-    padding: 0px;
-    color: #9eafbc;
+    padding: 7px 12px;
+    color: #ffffff;
     font-size: 13px;
-    line-height: 28px;
-    text-align: left;
-    background-color: transparent;
-    border-width: 0px;
+    line-height: 1.15;
+    text-align: center;
+    background-color: #1d4a39;
+    border-width: 1px;
+    border-color: #ffffff;
+    border-radius: 6px;
 }
 #rr-panel.mining-fullscreen-panel {
     left: 0px;
@@ -5158,8 +5160,9 @@ button {
     text-align: center;
     background-color: #153244;
     border-width: 1px;
-    border-color: #4e6b80;
+    border-color: #ffffff;
     border-radius: 6px;
+    box-sizing: border-box;
 }
 .actions button {
     width: 184px;
@@ -5444,35 +5447,35 @@ button.disabled,
 button:disabled {
     color: #8a939c;
     background-color: #252b31;
-    border-color: #47515a;
+    border-color: rgba(255, 255, 255, 0.36);
 }
 button.disabled:hover,
 button:disabled:hover {
     color: #8a939c;
     background-color: #252b31;
-    border-color: #47515a;
+    border-color: rgba(255, 255, 255, 0.36);
 }
 button.ok {
     background-color: #1d4a39;
-    border-color: #5ba77f;
+    border-color: #ffffff;
 }
 button.warn {
     background-color: #4c3f1c;
-    border-color: #b99a3f;
+    border-color: #ffffff;
 }
 button.rare {
     color: #ffd166;
     background-color: #3c3014;
-    border-color: #d7aa3a;
+    border-color: #ffffff;
 }
 button.risk {
     color: #ffe1c2;
     background-color: #8a431b;
-    border-color: #ff9148;
+    border-color: #ffffff;
 }
 button.danger {
     background-color: #4a2421;
-    border-color: #b85b51;
+    border-color: #ffffff;
 }
 button.ghost {
     color: #99a9b8;
@@ -10579,4 +10582,105 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 @keyframes rr-level-up-refresh {
     from { transform: translateY(4px); opacity: 0.45; }
     to { transform: translateY(0px); opacity: 1.0; }
+}
+
+/* A control must look actionable before it is focused. Keep semantic fills,
+   but make hover, keyboard focus, and controller focus unmistakable without
+   unsupported shadow/filter effects or layout movement. */
+button,
+button.ok,
+button.warn,
+button.rare,
+button.risk,
+button.danger,
+button.ghost,
+.native-scene-launch-control {
+    border-width: 1px !important;
+    border-color: #ffffff !important;
+}
+button:hover,
+button:focus,
+body.controller-focus-visible button.rr-controller-focus,
+body.controller-focus-visible .native-scene-launch-control.rr-controller-focus {
+    color: #ffffff;
+    background-color: #24566d;
+    border-width: 2px;
+    border-color: #ffffff !important;
+}
+button.ok:hover,
+button.ok:focus,
+body.controller-focus-visible button.ok.rr-controller-focus,
+.arrival-stamp-continue:hover,
+.arrival-stamp-continue:focus,
+body.controller-focus-visible .arrival-stamp-continue.rr-controller-focus {
+    background-color: #277354;
+}
+button.warn:hover,
+button.warn:focus,
+body.controller-focus-visible button.warn.rr-controller-focus {
+    background-color: #6a5724;
+}
+button.danger:hover,
+button.danger:focus,
+body.controller-focus-visible button.danger.rr-controller-focus {
+    background-color: #67312d;
+}
+button.disabled,
+button:disabled,
+button.disabled:hover,
+button:disabled:hover {
+    border-width: 1px;
+    border-color: rgba(255, 255, 255, 0.36) !important;
+}
+/* The title uses a specialized selector, so restate the shared affordance at
+   matching specificity instead of letting it fall back to text-only links. */
+.title-menu .title-action {
+    border-width: 1px;
+    border-color: #ffffff;
+}
+.title-menu .title-action:hover,
+.title-menu .title-action:focus,
+body.controller-focus-visible .title-menu .title-action.rr-controller-focus {
+    color: #f4c95d;
+    font-effect: glow(2px #9b761e);
+    background-color: #155d78;
+    border-width: 2px;
+    border-color: #ffffff;
+    animation: title-action-engage 0.20s cubic-in-out 1;
+}
+.title-screen.is-launching .title-content {
+    animation: title-content-depart 0.87s cubic-in 0.50s 1 forwards;
+}
+.title-screen.is-launching {
+    animation: title-screen-launch-shake 1.37s linear 1;
+}
+.title-screen.is-launching .title-menu {
+    pointer-events: none;
+}
+.title-screen.is-launching .title-action {
+    color: #f4c95d;
+    background-color: #155d78;
+    border-width: 2px;
+    border-color: #ffffff;
+    font-effect: glow(2px #9b761e);
+}
+@keyframes title-action-engage {
+    from { transform: translateY(0px) scale(1.0); }
+    45% { transform: translateY(-2px) scale(1.025); }
+    to { transform: translateY(0px) scale(1.0); }
+}
+@keyframes title-content-depart {
+    from { transform: translateY(0px); opacity: 1.0; }
+    48% { transform: translateY(3px); opacity: 1.0; }
+    to { transform: translateY(28px); opacity: 0.0; }
+}
+@keyframes title-screen-launch-shake {
+    from { transform: translate(0px, 0px); }
+    6% { transform: translate(-3px, 2px); }
+    12% { transform: translate(3px, -2px); }
+    18% { transform: translate(-2px, 1px); }
+    24% { transform: translate(2px, -1px); }
+    30% { transform: translate(-1px, 1px); }
+    36% { transform: translate(0px, 0px); }
+    to { transform: translate(0px, 0px); }
 }

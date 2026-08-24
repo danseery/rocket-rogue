@@ -197,7 +197,7 @@ std::string expeditionControlsMarkup()
 <span class="opening-control-title">Keyboard + mouse</span>
 <div class="opening-control-row"><strong>Menus</strong><p>Mouse or WASD / Arrows navigate. Enter / Space selects. Esc goes back or pauses.</p></div>
 <div class="opening-control-row"><strong>Launch</strong><p>Space launches. WASD / Arrows steer and change throttle. R turns around. C turns engines off or on.</p></div>
-<div class="opening-control-row"><strong>Flight</strong><p>WASD / Arrows steer approaches. Esc aborts.</p></div>
+<div class="opening-control-row"><strong>Flight</strong><p>WASD / Arrows steer approaches. Esc aborts. During Scan or Push, Space acts and B or Esc safely banks progress.</p></div>
 <div class="opening-control-row"><strong>Mining rig</strong><p>WASD / Arrows move. Space or left click drills. E scans. T tethers. F exits the rig. R banks payload at the ship.</p></div>
 <div class="opening-control-row"><strong>Jetpack EVA</strong><p>WASD / Arrows thrust. Mouse aims. Left click fires. Right click drills. E scans. T tethers. F enters the rig.</p></div>
 </article>
@@ -267,7 +267,7 @@ std::string phaseTitle(Screen screen)
 std::string button(std::string_view label, std::string_view action, std::string cssClass = "", bool defaultFocus = false)
 {
     const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
-    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\" data-ui-focus-id=\"action:" +
         htmlEscape(action) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
@@ -286,7 +286,7 @@ std::string scenarioActionButton(
         objective.stepId,
         static_cast<int>(objective.action));
     const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
-    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
     return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) +
         "\" data-scenario-id=\"" + htmlEscape(objective.scenarioId) +
         "\" data-scenario-step-id=\"" + htmlEscape(objective.stepId) +
@@ -304,7 +304,7 @@ std::string missionStamp(
     std::string_view tagTwo,
     std::string_view tagThree,
     std::string_view continueAction,
-    std::string_view continueLabel = "Select to continue",
+    std::string_view continueLabel = "Continue",
     const ScenarioObjectivePresentation* scenarioObjective = nullptr)
 {
     std::ostringstream out;
@@ -329,10 +329,14 @@ std::string missionStamp(
     return out.str();
 }
 
-std::string modalButton(std::string_view label, std::string_view modalId, std::string cssClass = "")
+std::string modalButton(
+    std::string_view label,
+    std::string_view modalId,
+    std::string cssClass = "",
+    bool defaultFocus = false)
 {
     const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
-    const std::string defaultAttr = cssClass == "ok" ? " data-ui-default-focus=\"1\"" : "";
+    const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
     return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) +
         "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
@@ -413,7 +417,7 @@ void collectSharedUtilityModals()
         "<div><strong>Menus</strong><span>Left stick or D-pad navigates. South selects. East goes back. Right stick scrolls.</span></div>"
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
         "<div><strong>Launch</strong><span>Left stick steers and changes throttle. South turns around. West turns engines off or on.</span></div>"
-        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort Flyby or Orbit.</span></div>"
+        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort Flyby or Orbit. During Scan or Push, tap East to log or bank; hold East to abort.</span></div>"
         "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
@@ -538,22 +542,15 @@ std::string miningTetherBurdenLabel(const MiningRunState& mining, const MiningLo
         mining.artifact.tethered &&
         mining.artifact.state != MiningArtifactState::Delivered &&
         mining.artifact.state != MiningArtifactState::Destroyed;
-    const bool rigTethered = mining.rigTethered && !mining.rigDisabled;
     const bool operatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled;
-    if (!artifactTethered && !rigTethered && !operatorRigTethered) {
+    if (!artifactTethered && !operatorRigTethered) {
         return "CLEAR";
     }
     if (operatorRigTethered && !artifactTethered) {
-        return "EVA TO DRONE / TOW TO SHIP";
+        return "EVA TO MINING RIG / TOW TO SHIP";
     }
     if (operatorRigTethered && artifactTethered) {
         return "EVA + ARTIFACT / " + display::fixed(load.burden, 1) + " LOAD";
-    }
-    if (rigTethered && !artifactTethered) {
-        return "DRONE / TOW TO SHIP";
-    }
-    if (rigTethered && artifactTethered) {
-        return "DRONE + ARTIFACT / " + display::fixed(load.burden, 1) + " LOAD";
     }
     return display::fixed(load.burden, 1) + " / " + display::percent(load.speedMultiplier) + " SPD";
 }
@@ -924,7 +921,7 @@ std::string miningPanelButton(const PanelButtonPresentation& action, bool defaul
 {
     const std::string cssClass = action.enabled ? action.cssClass : "disabled";
     const std::string classAttr = " class=\"" + htmlEscape(cssClass) + " rr-mining-text-button\"";
-    const std::string defaultAttr = (defaultFocus || cssClass == "ok") ? " data-ui-default-focus=\"1\"" : "";
+    const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
     std::ostringstream out;
     out << "<button type=\"button\"" << classAttr;
     if (!action.actionId.empty()) {
@@ -950,12 +947,15 @@ std::string miningModalButton(
         "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\">" + htmlEscape(label) + "</button>";
 }
 
-std::string introductoryPanelButton(const PanelButtonPresentation& action, std::string_view modalId)
+std::string introductoryPanelButton(
+    const PanelButtonPresentation& action,
+    std::string_view modalId,
+    bool defaultFocus = false)
 {
     if (!action.enabled || modalId.empty()) {
-        return panelButton(action);
+        return panelButton(action, defaultFocus);
     }
-    return modalButton(action.label, modalId, action.cssClass);
+    return modalButton(action.label, modalId, action.cssClass, defaultFocus);
 }
 
 std::string activityIntroductionModal(
@@ -1171,10 +1171,16 @@ std::string saturnSlingshotFailureModal(const GameState& state)
 
 bool jupiterWindowAvailable(const GameState& state, const ContentCatalog& catalog)
 {
-    return currentDestination(state, catalog).id == content::destination::mars &&
-        hasUnlock(state.meta, content::unlock::routeJupiter) &&
-        (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
-         state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer);
+    const TransferAssistDefinition* definition = catalog.findTransferAssist(content::transferAssist::marsJupiter);
+    const Destination* next = nextDestination(state, catalog);
+    return definition != nullptr && next != nullptr &&
+        currentDestination(state, catalog).id == definition->sourceDestinationId &&
+        next->id == definition->targetDestinationId &&
+        (definition->allowedLaunchStages.empty() ||
+         std::find(
+             definition->allowedLaunchStages.begin(),
+             definition->allowedLaunchStages.end(),
+             state.meta.launchLessons.stage) != definition->allowedLaunchStages.end());
 }
 
 std::string jupiterWindowModal(const GameState& state, const ContentCatalog& catalog)
@@ -1187,10 +1193,12 @@ std::string jupiterWindowModal(const GameState& state, const ContentCatalog& cat
     const double tank = launchFuelCapacity(state);
     const double routeBurn = launchCruiseFuelCostForTier(3);
     const double tankMargin = tank - routeBurn;
-    const double slingshotBurn = std::max(
-        0.0,
-        routeBurn - tuning::flyby::jupiterSlingshotFuelSavings);
+    const TransferAssistDefinition* definition = catalog.findTransferAssist(content::transferAssist::marsJupiter);
+    const double assistSavings = definition == nullptr ? tuning::flyby::jupiterSlingshotFuelSavings : definition->fuelSavings;
+    const double slingshotBurn = std::max(0.0, routeBurn - assistSavings);
     const double combinedMargin = tank - slingshotBurn;
+    const PendingTransferAssist* activeAssist = pendingTransferAssistForDestination(state, content::destination::jupiter);
+    const double instabilityPenalty = activeAssist == nullptr ? 0.0 : activeAssist->instabilityPenalty;
     const bool tanksThreeInstalled =
         launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
     const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
@@ -1211,22 +1219,26 @@ std::string jupiterWindowModal(const GameState& state, const ContentCatalog& cat
             : std::to_string(tankCost) + " credits // +5 permanent capacity // No flight risk")
         << "</strong></article>"
         << "<article class=\"jupiter-option-card\"><span>PRESS YOUR LUCK</span><h3>MARS SLINGSHOT</h3>"
-        << "<p>Hold the gold corridor for a Perfect pass. Mars gravity replaces five fuel of powered travel for one attempt.</p>"
-        << "<strong>" << (state.run.jupiterSlingshotActive
+        << "<p>A Good pass supplies enough momentum. Perfect keeps the Jupiter transfer stable; Good adds +35% flight instability for that attempt.</p>"
+        << "<strong>" << (activeAssist != nullptr
             ? "ACTIVE // " + display::fixed(slingshotBurn, 0) + " powered burn // +" +
-                display::percent(state.run.nextLaunchSpeedBoost) + " velocity"
-            : "Perfect required // " + display::fixed(slingshotBurn, 0) +
-                " powered burn // +20–40% velocity // Impact damages hull")
+                display::percent(activeAssist->speedBoost) + " velocity // " +
+                (instabilityPenalty > 0.0
+                    ? "+" + display::percent(instabilityPenalty) + " instability"
+                    : "Perfect: stable")
+            : "Good required // " + display::fixed(slingshotBurn, 0) +
+                " powered burn // +20–40% velocity // Perfect: stable")
         << "</strong></article>"
         << "</div><div class=\"jupiter-combined-preview\"><span>STACK BOTH</span><strong>25 tank // 15 burn // 10 margin // +slingshot velocity</strong>"
+        << "<p>Good is enough to depart but adds +35% flight instability. Perfect preserves the same transfer benefit without the penalty.</p>"
         << "<p>Neither option closes the other. Current hardware margin: "
         << display::signedFixed(tankMargin, 0) << ". Current combined margin: "
         << display::signedFixed(combinedMargin, 0) << ".</p></div>"
         << "<div class=\"modal-actions action-row rr-action-footer jupiter-window-actions\">"
         << button("Open Refit", ui::actions::openJupiterRefit, "ok", true)
-        << (state.run.jupiterSlingshotActive
-            ? button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "warn")
-            : button("Begin Mars Slingshot", ui::actions::beginJupiterSlingshot, "warn"))
+        << (activeAssist != nullptr
+            ? button("Continue to Jupiter", ui::actions::continueTransferAssist, "warn")
+            : button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn"))
         << button("Return to Hangar", ui::actions::acknowledgeJupiterWindow, "ghost")
         << "</div></section>";
     return reviewed
@@ -1236,24 +1248,39 @@ std::string jupiterWindowModal(const GameState& state, const ContentCatalog& cat
 
 std::string jupiterSlingshotActiveModal(const GameState& state, const ContentCatalog& catalog)
 {
-    if (state.screen != Screen::Hangar || !state.run.jupiterSlingshotActive ||
-        currentDestination(state, catalog).id != content::destination::mars) {
+    const PendingTransferAssist& pending = state.run.pendingTransferAssist;
+    const TransferAssistDefinition* definition = catalog.findTransferAssist(pending.definitionId);
+    const Destination* source = definition == nullptr ? nullptr : catalog.findDestination(definition->sourceDestinationId);
+    const Destination* target = definition == nullptr ? nullptr : catalog.findDestination(definition->targetDestinationId);
+    if (state.screen != Screen::Hangar || definition == nullptr || !pending.active() || source == nullptr ||
+        target == nullptr || currentDestination(state, catalog).id != definition->sourceDestinationId) {
         return {};
     }
+    const PendingTransferAssist* activeAssist = &pending;
     const double tank = launchFuelCapacity(state);
-    const double routeBurn = launchCruiseFuelCostForTier(3);
-    const double poweredBurn = std::max(0.0, routeBurn - pendingLaunchFuelSavings(state));
+    const double routeBurn = launchCruiseFuelCostForTier(target->tier);
+    const double poweredBurn = std::max(0.0, routeBurn - activeAssist->fuelSavings);
     const double margin = tank - poweredBurn;
+    const double instabilityPenalty = activeAssist->instabilityPenalty;
     std::ostringstream body;
     body << "<section class=\"activity-introduction modal-body campaign-briefing jupiter-slingshot-active\">"
-        << "<span class=\"activity-introduction-kicker\">SLINGSHOT ACTIVE</span>"
-        << "<p class=\"activity-introduction-setup\">Mars's gravity has already sent the ship toward Jupiter.</p>"
+        << "<span class=\"activity-introduction-kicker\">SLINGSHOT ACTIVE"
+        << (instabilityPenalty > 0.0 ? " // WILD RIDE" : " // STABLE") << "</span>"
+        << "<p class=\"activity-introduction-setup\">"
+        << (instabilityPenalty > 0.0
+            ? "The Good pass supplied enough " + source->name + " momentum, but the shallow exit makes the " + target->name + " flight harder to control."
+            : "The Perfect pass supplied " + source->name + " momentum without disturbing the ship's normal flight stability.")
+        << "</p>"
         << "<div class=\"activity-introduction-payoff\"><span>Transfer underway</span><strong>"
         << display::fixed(tank, 0) << " tank // " << display::fixed(poweredBurn, 0)
         << " powered burn // " << display::fixed(margin, 0) << " margin // +"
-        << display::percent(state.run.nextLaunchSpeedBoost) << " velocity</strong></div>"
+        << display::percent(activeAssist->speedBoost) << " velocity // "
+        << (instabilityPenalty > 0.0
+            ? "+" + display::percent(instabilityPenalty) + " flight instability"
+            : "stable flight")
+        << "</strong></div>"
         << "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "ok", true)
+        << button("Continue to " + target->name, ui::actions::continueTransferAssist, "ok", true)
         << "</div></section>";
     return autoModalTemplate(
         ui::modals::jupiterSlingshotActive,
@@ -1736,13 +1763,13 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
             }
         }
         const MiningArtifactObject& artifact = state.run.mining.artifact;
-        const bool rigTethered = (state.run.mining.rigTethered || state.run.mining.operatorRigTethered) &&
+        const bool rigTethered = state.run.mining.operatorRigTethered &&
             !state.run.mining.rigDisabled;
         const std::string objectiveState = artifact.revealed
             ? (artifact.state == MiningArtifactState::Delivered
                    ? "EXTRACT SAFELY"
                    : (artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED"))
-            : (rigTethered ? "TOW DRONE TO SHUTTLE" : "CLEAR ACTIVE LAYER");
+            : (rigTethered ? "TOW MINING RIG TO SHUTTLE" : "CLEAR ACTIVE LAYER");
         out << " // " << objectiveState;
         return out.str();
     }
@@ -1761,7 +1788,7 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
 std::string miningCocoonObjectiveState(const MiningRunState& mining)
 {
     const MiningArtifactObject& artifact = mining.artifact;
-    const bool rigTethered = (mining.rigTethered || mining.operatorRigTethered) && !mining.rigDisabled;
+    const bool rigTethered = mining.operatorRigTethered && !mining.rigDisabled;
     if (artifact.revealed) {
         if (artifact.state == MiningArtifactState::Delivered) {
             return "EXTRACT SAFELY";
@@ -1769,7 +1796,7 @@ std::string miningCocoonObjectiveState(const MiningRunState& mining)
         return artifact.tethered ? "TOW TO SHUTTLE" : "OBJECTIVE EXPOSED";
     }
     if (rigTethered) {
-        return "TOW DRONE TO SHUTTLE";
+        return "TOW MINING RIG TO SHUTTLE";
     }
     return "CLEAR ACTIVE LAYER";
 }
@@ -2167,8 +2194,8 @@ std::string surfaceMiniGamePanel(
     out << "<article class=\"resource-bank minigame-callout\"><div><h2>" << htmlEscape(statusTitle)
         << "</h2><p>" << htmlEscape(statusDetail) << "</p></div></article>";
     out << "<div class=\"actions action-row minigame-actions\">";
-    for (std::size_t index = 0; index < actions.size(); ++index) {
-        out << panelButton(actions[index], index == 0);
+    for (const PanelButtonPresentation& action : actions) {
+        out << panelButton(action);
     }
     out << "</div></section>";
     return out.str();
@@ -2180,7 +2207,8 @@ std::string arrivalOperationCard(
     std::string_view risk,
     std::string_view reward,
     const PanelButtonPresentation& action,
-    std::string_view introductionModal = {})
+    std::string_view introductionModal = {},
+    bool defaultFocus = false)
 {
     std::ostringstream out;
     out << "<article class=\"ops-card arrival-card rr-fixed-lane-card ui-choice-row decision-choice-row\">";
@@ -2191,7 +2219,7 @@ std::string arrivalOperationCard(
             << (action.enabled ? "" : " compact-block-reason") << "\">" << htmlEscape(detail) << "</p>";
     }
     out << "<div class=\"card-footer action-row\"><span class=\"arrival-card-status\">" << htmlEscape(action.enabled ? std::string(text::panel::ready) : std::string(text::buttons::unavailable))
-        << "</span>" << introductoryPanelButton(action, introductionModal) << "</div></article>";
+        << "</span>" << introductoryPanelButton(action, introductionModal, defaultFocus) << "</div></article>";
     return out.str();
 }
 
@@ -2535,23 +2563,25 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
         if (!jupiterTransferMarginReady(state)) {
             return {
                 "Create 5 fuel of Jupiter transfer margin",
-                "Install Fuel Tanks III, fly a Perfect Mars slingshot, or stack both. Successful Mars operations reopen Refit."};
+                "Install Fuel Tanks III, fly a Good-or-better Mars slingshot, or stack both. Perfect avoids the slingshot's instability penalty."};
         }
         return {
             "Reach Jupiter",
-            state.run.jupiterSlingshotActive
+            pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr
                 ? "Mars gravity is carrying the ship outward. Continue through the asteroid gaps."
                 : "Fuel Tanks III supplies permanent margin. The optional Mars slingshot still stacks."};
     case LaunchTrainingStage::JupiterTransfer:
         return launchMissionReady(state)
             ? std::pair<std::string, std::string>{
                   "Reach Jupiter",
-                  state.run.jupiterSlingshotActive
-                      ? "Mars slingshot active. Fuel Tanks III remains optional and stacks."
-                      : "Fuel Tanks III is ready. A Perfect Mars slingshot remains optional and stacks."}
+                  pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr
+                      ? (pendingLaunchInstabilityPenalty(state) > 0.0
+                            ? "Good Mars slingshot active: +35% flight instability. Fuel Tanks III remains optional and stacks."
+                            : "Perfect Mars slingshot active: stable flight. Fuel Tanks III remains optional and stacks.")
+                      : "Fuel Tanks III is ready. A Good-or-better Mars slingshot remains optional and stacks."}
             : std::pair<std::string, std::string>{
                   "Create 5 fuel of Jupiter transfer margin",
-                  "Install Fuel Tanks III, fly a Perfect Mars slingshot, or stack both."};
+                  "Install Fuel Tanks III, fly a Good-or-better Mars slingshot, or stack both."};
     case LaunchTrainingStage::Complete:
         return {"Prepare the next flight", "Current destination: " + target.name};
     }
@@ -2590,7 +2620,7 @@ std::string compactHeaderObjective(
         return "Choose the next destination";
     case Screen::ArrivalOps:
         return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
-            ? "ORBIT CAPTURED // LAND WITH MAP OR DEPART"
+            ? "ORBIT CAPTURED // LAND OR DEPART"
             : "APPROACH UNCOMMITTED // CHOOSE ONE PATH";
     default:
         return state.statusLine;
@@ -2736,8 +2766,8 @@ std::string scenarioMapCocoonDetail(
                 break;
             }
         }
-        if ((mining.rigTethered || mining.operatorRigTethered) && !mining.rigDisabled) {
-            out << " / TOW DRONE TO SHUTTLE";
+        if (mining.operatorRigTethered && !mining.rigDisabled) {
+            out << " / TOW MINING RIG TO SHUTTLE";
         }
         if (mining.artifact.revealed) {
             out << (mining.artifact.tethered ? " / TOW TO SHUTTLE" : " / OBJECTIVE EXPOSED");
@@ -3106,7 +3136,9 @@ std::string buildGamePanelMarkup(
     settingsBody << "</div>";
 
     if (context.titleScreenActive) {
-        out << "<section class=\"title-screen\" data-panel-mode=\"title\">"
+        out << "<section class=\"title-screen"
+            << (context.titleLaunchActive ? " is-launching" : "")
+            << "\" data-panel-mode=\"title\">"
             << "<div class=\"title-scanline title-scanline-a\"></div>"
             << "<div class=\"title-scanline title-scanline-b\"></div>"
             << "<div class=\"title-content\">"
@@ -3278,7 +3310,8 @@ std::string buildGamePanelMarkup(
         const std::string destinationName = flybyDestination == nullptr ? currentFrontier.name : flybyDestination->name;
         const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
         const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
-        const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
+        const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
+        const bool transferAssistRun = transferAssist != nullptr;
         const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
             !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
         const ScenarioObjectivePresentation challengeObjective = scenarioChallenge
@@ -3289,40 +3322,56 @@ std::string buildGamePanelMarkup(
             : ScenarioObjectivePresentation {};
         const bool clearsGenericRoute = !scenarioChallenge && flybyClearsGenericNextRoute(state, catalog);
 
-        if (flyby.completed && jupiterSlingshot) {
+        if (flyby.completed && transferAssistRun) {
             const double speedScale = flyby.slingshotAwarded
                 ? flyby.slingshotSpeedScale
                 : flybySlingshotScale(flyby);
             const double speedBoost = flyby.slingshotAwarded
                 ? flyby.slingshotSpeedBoost
-                : tuning::flyby::slingshotSpeedBoost * speedScale;
+                : transferAssist->speedBoostBase * speedScale;
             const double tank = launchFuelCapacity(state);
-            const double poweredBurn = launchCruiseFuelCostForTier(3) -
-                tuning::flyby::jupiterSlingshotFuelSavings;
+            const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
+            const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
+            const std::string sourceName = source == nullptr ? destinationName : source->name;
+            const std::string targetName = target == nullptr ? "the target" : target->name;
+            const double poweredBurn = launchCruiseFuelCostForTier(target == nullptr ? 3 : target->tier) -
+                transferAssist->fuelSavings;
             const double margin = tank - poweredBurn;
             const bool perfect = grade == FlybyGrade::Perfect;
+            const bool good = grade == FlybyGrade::Good;
+            const bool departing = good || perfect;
+            const double instabilityPenalty = good
+                ? transferAssist->goodInstabilityPenalty
+                : 0.0;
             const std::string title = perfect
-                ? "SLINGSHOT ACTIVE"
-                : (flyby.collidedWithBody ? "MARS IMPACT" : "SLINGSHOT LOST");
+                ? "SLINGSHOT ACTIVE — STABLE"
+                : (good
+                      ? "SLINGSHOT ACTIVE — WILD RIDE"
+                      : (flyby.collidedWithBody ? sourceName + " IMPACT" : "SLINGSHOT LOST"));
             const std::string body = perfect
-                ? "Mars's gravity has already sent the ship toward Jupiter. Continue the transfer with propellant-free velocity already carrying the ship outward."
-                : (flyby.collidedWithBody
-                      ? "The ship clipped Mars. Hull damage applies, Jupiter departure did not occur, and both transfer options remain available."
-                      : "Only a Perfect pass supplies enough gravity momentum. Retry the Flyby, install Fuel Tanks III, or do both.");
-            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\"jupiter-slingshot\" hidden></div>";
+                ? sourceName + "'s gravity has already sent the ship toward " + targetName + ". The Perfect pass supplies propellant-free velocity without changing normal flight stability."
+                : (good
+                      ? sourceName + "'s gravity supplies the same " + display::fixed(transferAssist->fuelSavings, 0) + "-fuel saving and achieved velocity. The Good exit adds " + display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability to the " + targetName + " attempt: more drift, oversteer, and throttle kick."
+                      : (flyby.collidedWithBody
+                            ? "The ship clipped " + sourceName + ". Hull damage applies, " + targetName + " departure did not occur, and the assist remains retryable."
+                            : "The pass missed the departure corridor. Retry the Flyby or build more permanent margin."));
+            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\"transfer-assist\" hidden></div>";
             out << missionStamp(
-                "Mars departure",
+                sourceName + " departure",
                 title,
                 body,
-                perfect ? display::fixed(tank, 0) + " tank" : "NO DEPARTURE",
-                perfect ? display::fixed(poweredBurn, 0) + " powered burn" : "PERFECT REQUIRED",
-                perfect
-                    ? display::fixed(margin, 0) + " margin // +" + display::percent(speedBoost) + " velocity"
+                departing ? display::fixed(tank, 0) + " tank" : "NO DEPARTURE",
+                departing ? display::fixed(poweredBurn, 0) + " powered burn" : "GOOD REQUIRED",
+                departing
+                    ? "+" + display::percent(speedBoost) + " velocity // " +
+                        (instabilityPenalty > 0.0
+                            ? "+" + display::percent(instabilityPenalty) + " instability"
+                            : "stable")
                     : (flyby.collidedWithBody
                           ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
                           : "RETRY OR REFIT"),
-                perfect ? ui::actions::continueJupiterSlingshot : ui::actions::flybyContinue,
-                perfect ? std::string_view("Continue to Jupiter") : std::string_view("Return to Hangar"));
+                departing ? ui::actions::continueTransferAssist : ui::actions::flybyContinue,
+                departing ? std::string_view("Continue to " + targetName) : std::string_view("Return to Hangar"));
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             out << inventoryTemplate(state, catalog);
             return out.str();
@@ -3397,7 +3446,7 @@ std::string buildGamePanelMarkup(
                     ? std::string_view(challengeObjective.actionLabel)
                     : (scenarioChallenge
                           ? std::string_view("Return to Hangar")
-                          : std::string_view("Select to continue")),
+                          : std::string_view("Continue")),
                 scenarioChallenge && grade == FlybyGrade::Perfect ? &challengeObjective : nullptr);
             if (scenarioChallenge) {
                 out << scenarioObjectiveModal(challengeObjective);
@@ -3408,14 +3457,18 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<div data-flyby-run=\"1\" data-flyby-completed=\"0\" data-flyby-purpose=\""
-            << (jupiterSlingshot ? "jupiter-slingshot" : (scenarioChallenge ? "scenario-challenge" : "recon"))
+            << (transferAssistRun ? "transfer-assist" : (scenarioChallenge ? "scenario-challenge" : "recon"))
             << "\" hidden></div>";
         out << "<section class=\"live-hud-header\"><div><h2>"
-            << htmlEscape(jupiterSlingshot
-                ? "Mars Slingshot"
+            << htmlEscape(transferAssistRun
+                ? transferAssist->displayName
                 : (scenarioChallenge ? challengeObjective.title : "Manual Flyby")) << "</h2>"
-            << "<p class=\"phase-copy\">" << htmlEscape(jupiterSlingshot
-                ? "PERFECT REQUIRED — Hold the gold corridor. Mars gravity will carry this ship directly toward Jupiter."
+            << "<p class=\"phase-copy\">" << htmlEscape(transferAssistRun
+                ? "GOOD DEPARTS — Hold the gold corridor for Perfect stability. A Good pass reaches " +
+                    (catalog.findDestination(transferAssist->targetDestinationId) == nullptr
+                        ? std::string("the target")
+                        : catalog.findDestination(transferAssist->targetDestinationId)->name) + " with " +
+                    display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability."
                 : (scenarioChallenge
                       ? "PERFECT REQUIRED — " + challengeObjective.detail
                       : "Hold the approach corridor until the timer closes."))
@@ -3649,13 +3702,20 @@ std::string buildGamePanelMarkup(
             const bool usedSlingshot = state.lastOutcome.slingshotFuelSavings + 0.000001 >=
                 tuning::flyby::jupiterSlingshotFuelSavings;
             const bool usedTanks = state.lastOutcome.transferFuelCapacity + 0.000001 >= 25.0;
+            const bool wildRide = state.lastOutcome.slingshotInstabilityPenalty > 0.0;
             const std::string arrivalMethod = usedSlingshot && usedTanks
-                ? "MAXIMUM PREPARATION"
-                : (usedSlingshot ? "BORROWED MOMENTUM" : "PERMANENT ENGINEERING MARGIN");
-            const std::string arrivalCopy = usedSlingshot && usedTanks
-                ? "Fuel Tanks III supplied permanent reserve while a Perfect Mars pass cut the powered burn. Preparation and execution stacked."
+                ? (wildRide ? "MAXIMUM PREPARATION — WILD RIDE" : "MAXIMUM PREPARATION")
                 : (usedSlingshot
-                    ? "Mars's gravity supplied the missing transfer movement. The ship arrived after accepting the flyby risk."
+                      ? (wildRide ? "BORROWED MOMENTUM — WILD RIDE" : "BORROWED MOMENTUM")
+                      : "PERMANENT ENGINEERING MARGIN");
+            const std::string arrivalCopy = usedSlingshot && usedTanks
+                ? (wildRide
+                      ? "Fuel Tanks III supplied permanent reserve while a Good Mars pass cut the burn and made flight control wilder. Hardware and risk stacked."
+                      : "Fuel Tanks III supplied permanent reserve while a Perfect Mars pass cut the powered burn. Preparation and execution stacked.")
+                : (usedSlingshot
+                    ? (wildRide
+                          ? "Mars supplied the missing movement. The Good exit reached Jupiter after a visibly less stable flight."
+                          : "Mars supplied the missing movement. The Perfect exit preserved normal flight stability.")
                     : "Fuel Tanks III carried five permanent fuel beyond the calibrated burn. No flyby risk was required.");
             summaryBody << "<div class=\"jupiter-arrival-method\"><span>JUPITER ARRIVAL</span><strong>"
                 << htmlEscape(arrivalMethod) << "</strong><p>" << htmlEscape(arrivalCopy) << "</p></div>";
@@ -3777,14 +3837,15 @@ std::string buildGamePanelMarkup(
         out << "<div class=\"ops-grid\">";
         if (orbitCaptured) {
             out << arrivalOperationCard(
-                "LAND WITH ORBITAL MAP",
+                "LAND",
                 "Descend to " + landingTarget + ". Surface hazard +0 from approach mapping. Earns the normal one-step Flight Data contribution. Orbit remains this visit's committed path.",
                 "Mapped descent",
                 "",
                 landingAvailable
-                    ? panelActionButton("LAND WITH MAP", ui::actions::arrivalLanding, "ok")
+                    ? panelActionButton("LAND", ui::actions::arrivalLanding, "ok")
                     : disabledPanelButton(text::buttons::unavailable),
-                landingIntroduction);
+                landingIntroduction,
+                true);
             out << arrivalOperationCard(
                 "DEPART WITH SCIENCE",
                 "Keep the Orbit credits and Research Data, end the visit, and skip surface resources. Grants no route clearance and no Landing Flight Data.",
@@ -4277,8 +4338,8 @@ std::string buildGamePanelMarkup(
             });
         }
         out << "<div class=\"scan-actions ui-action-bar rr-action-footer\">";
-        for (std::size_t index = 0; index < scanPanel.actions.size(); ++index) {
-            out << panelButton(scanPanel.actions[index], index == 0);
+        for (const PanelButtonPresentation& action : scanPanel.actions) {
+            out << panelButton(action);
         }
         out << "</div>";
         out << "<div class=\"surface-scan-scene-marker\" data-scan-signal=\"" << htmlEscape(scanPanel.signal)
@@ -4627,10 +4688,14 @@ std::string buildGamePanelMarkup(
                 << modalButton("Compare", "refit_compare", "ghost") << "</div>";
         }
         out << "</div><div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
-        const auto defaultRefit = std::find_if(
-            refitWindow.offers.begin(),
-            refitWindow.offers.end(),
-            [](const RefitOfferPresentation& offer) { return offer.action.enabled; });
+        // Ordinary Refit purchases spend credits and need deliberate focus.
+        // A single curated tutorial offer is the sole safe default.
+        const auto defaultRefit = singleLaunchLessonOffer
+            ? std::find_if(
+                  refitWindow.offers.begin(),
+                  refitWindow.offers.end(),
+                  [](const RefitOfferPresentation& offer) { return offer.action.enabled; })
+            : refitWindow.offers.end();
         const std::size_t defaultRefitIndex = defaultRefit == refitWindow.offers.end()
             ? refitWindow.offers.size()
             : static_cast<std::size_t>(std::distance(refitWindow.offers.begin(), defaultRefit));
@@ -4737,8 +4802,12 @@ std::string buildGamePanelMarkup(
     if (showJupiterOptions) {
         const double tank = launchFuelCapacity(state);
         const double routeBurn = launchCruiseFuelCostForTier(3);
-        const double savings = state.run.jupiterSlingshotActive
-            ? pendingLaunchFuelSavings(state)
+        const PendingTransferAssist* activeAssist = pendingTransferAssistForDestination(state, content::destination::jupiter);
+        const double savings = activeAssist != nullptr
+            ? activeAssist->fuelSavings
+            : 0.0;
+        const double instabilityPenalty = activeAssist != nullptr
+            ? activeAssist->instabilityPenalty
             : 0.0;
         const double poweredBurn = std::max(0.0, routeBurn - savings);
         const double margin = tank - poweredBurn;
@@ -4757,11 +4826,14 @@ std::string buildGamePanelMarkup(
             << " tank</strong><small>" << (tanksThree ? "+5 permanent capacity // INSTALLED" : "+5 permanent capacity // 92 credits")
             << "</small></div>"
             << "<div><span>MARS SLINGSHOT</span><strong>";
-        if (state.run.jupiterSlingshotActive) {
+        if (activeAssist != nullptr) {
             out << display::fixed(poweredBurn, 0) << " powered burn</strong><small>ACTIVE // +"
-                << display::percent(state.run.nextLaunchSpeedBoost) << " velocity";
+                << display::percent(activeAssist->speedBoost) << " velocity // "
+                << (instabilityPenalty > 0.0
+                    ? "+" + display::percent(instabilityPenalty) + " instability"
+                    : "Perfect: stable");
         } else {
-            out << "Perfect Flyby</strong><small>-5 powered fuel // +20–40% velocity";
+            out << "Good-or-better Flyby</strong><small>-5 powered fuel // +20–40% velocity // Good: +35% instability";
         }
         out << "</small></div></div><div class=\"hangar-frontier-meter\" aria-hidden=\"true\">";
         for (int segment = 0; segment < 10; ++segment) {
@@ -4810,26 +4882,26 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
-    if (state.run.jupiterSlingshotActive) {
-        out << button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "ok", true);
+    if (pendingTransferAssistForDestination(state, launchTarget.id) != nullptr) {
+        out << button("Continue to Jupiter", ui::actions::continueTransferAssist, "ok", true);
     } else {
         out << (prepareLaunchBlocked
-            ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep")
+            ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep", true)
             : (showLaunchIntroduction
-                ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok hangar-launch-prep")
+                ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok hangar-launch-prep", true)
                 : (showFlightControlsIntroduction
-                    ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep")
+                    ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep", true)
                     : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok hangar-launch-prep", true))));
     }
-    if (showJupiterOptions && !state.run.jupiterSlingshotActive) {
+    if (showJupiterOptions && pendingTransferAssistForDestination(state, content::destination::jupiter) == nullptr) {
         out << (canStartJupiterSlingshot(state, catalog)
-            ? button("Begin Mars Slingshot", ui::actions::beginJupiterSlingshot, "warn")
+            ? button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn")
             : disabledButton("Mars Slingshot Unavailable"));
         if (jupiterTransferMarginReady(state)) {
             out << button("Transfer: Jupiter", ui::actions::attemptFrontier, "danger");
         }
     } else if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression &&
-               !state.run.jupiterSlingshotActive) {
+               pendingTransferAssistForDestination(state, next == nullptr ? std::string_view{} : next->id) == nullptr) {
         if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
             out << (launchHardwareBlocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")

@@ -39,6 +39,10 @@ constexpr double kLevelUpFanfareSeconds = 0.70;
 constexpr double kLevelUpActivationFenceSeconds = 0.35;
 constexpr double kLevelUpRefreshFenceSeconds = 0.22;
 constexpr double kLevelUpSelectionResolveSeconds = 0.10;
+constexpr double kTitleLaunchIgnitionDelaySeconds = 0.50;
+constexpr double kTitleLaunchDepartureSeconds = 0.65 / 0.75;
+constexpr double kTitleLaunchSequenceSeconds =
+    kTitleLaunchIgnitionDelaySeconds + kTitleLaunchDepartureSeconds;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
@@ -629,7 +633,11 @@ void RocketGameApp::consumeNextLaunchBoost()
 {
     state_.run.nextLaunchFuelBoost = 0.0;
     state_.run.nextLaunchSpeedBoost = 0.0;
-    state_.run.jupiterSlingshotActive = false;
+    state_.run.nextLaunchInstabilityPenalty = 0.0;
+    if (!session_.preparedLaunch.transferAssistId.empty() &&
+        state_.run.pendingTransferAssist.definitionId == session_.preparedLaunch.transferAssistId) {
+        state_.run.pendingTransferAssist = {};
+    }
 }
 
 double RocketGameApp::liveBurnMultiplier() const
@@ -1522,6 +1530,14 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 void RocketGameApp::tick(double deltaSeconds)
 {
     if (titleScreenActive_) {
+        if (titleLaunchActive_) {
+            titleLaunchElapsedSeconds_ = std::min(
+                titleLaunchElapsedSeconds_ + std::clamp(deltaSeconds, 0.0, 0.25),
+                kTitleLaunchSequenceSeconds);
+            if (titleLaunchElapsedSeconds_ >= kTitleLaunchSequenceSeconds) {
+                completeTitleLaunch();
+            }
+        }
         return;
     }
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
@@ -1690,10 +1706,20 @@ void RocketGameApp::tick(double deltaSeconds)
         const bool wasCompleted = state_.run.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
         if (!wasCompleted && state_.run.flyby.completed) {
-            const bool jupiterSlingshot =
-                state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot;
-            if (jupiterSlingshot && state_.run.flyby.result == FlybyGrade::Perfect) {
-                (void)armJupiterSlingshot(state_);
+            const TransferAssistDefinition* transferAssist = catalog_.findTransferAssist(
+                state_.run.flyby.transferAssistId);
+            const bool transferAssistRun = transferAssist != nullptr;
+            const Destination* assistSource = transferAssist == nullptr
+                ? nullptr
+                : catalog_.findDestination(transferAssist->sourceDestinationId);
+            const Destination* assistTarget = transferAssist == nullptr
+                ? nullptr
+                : catalog_.findDestination(transferAssist->targetDestinationId);
+            const std::string assistSourceName = assistSource == nullptr ? "the source body" : assistSource->name;
+            const std::string assistTargetName = assistTarget == nullptr ? "the target" : assistTarget->name;
+            if (transferAssist != nullptr &&
+                static_cast<int>(state_.run.flyby.result) >= static_cast<int>(transferAssist->minimumGrade)) {
+                (void)armTransferAssist(state_, catalog_);
             }
             const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
                 !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
@@ -1705,15 +1731,15 @@ void RocketGameApp::tick(double deltaSeconds)
                 : findScenarioStepDefinition(*scenario, state_.run.flyby.scenarioStepId);
             switch (state_.run.flyby.result) {
             case FlybyGrade::Perfect:
-                state_.statusLine = jupiterSlingshot
-                    ? "Mars slingshot active. The ship is already moving toward Jupiter."
+                state_.statusLine = transferAssistRun
+                    ? assistSourceName + " assist active. The ship is already moving toward " + assistTargetName + "."
                     : (scenarioChallenge
                           ? "Perfect corridor held. Claim the scenario reward."
                           : "Perfect slingshot. The next launch saves powered fuel and carries more velocity.");
                 break;
             case FlybyGrade::Good:
-                state_.statusLine = jupiterSlingshot
-                    ? "Clean pass, but not enough Mars gravity for Jupiter. Retry or build tank margin."
+                state_.statusLine = transferAssistRun
+                    ? assistSourceName + " assist active. The Good pass reaches " + assistTargetName + " with a wilder flight."
                     : (scenarioChallenge
                           ? (challenge != nullptr && !challenge->failureExplanation.empty()
                                 ? challenge->failureExplanation
@@ -1722,8 +1748,8 @@ void RocketGameApp::tick(double deltaSeconds)
                 break;
             case FlybyGrade::Miss:
             default:
-                state_.statusLine = jupiterSlingshot
-                    ? "Mars slingshot lost. Jupiter options remain open."
+                state_.statusLine = transferAssistRun
+                    ? assistSourceName + " assist lost. The " + assistTargetName + " option remains open."
                     : (scenarioChallenge
                           ? (challenge != nullptr && !challenge->failureExplanation.empty()
                                 ? challenge->failureExplanation
@@ -1809,9 +1835,10 @@ void RocketGameApp::prepareForLaunch()
         return;
     }
 
-    if (state_.run.jupiterSlingshotActive) {
-        state_.statusLine =
-            "Mars gravity is already carrying the ship outward. Continue to Jupiter instead of starting another sortie.";
+    if (transferAssistCanContinue(state_, catalog_)) {
+        const Destination* target = nextDestination(state_, catalog_);
+        state_.statusLine = "Transfer momentum is already active. Continue to " +
+            std::string(target == nullptr ? "the target" : target->name) + " instead of starting another sortie.";
         refreshPanel();
         return;
     }
@@ -2135,7 +2162,19 @@ void RocketGameApp::openJupiterRefit()
 void RocketGameApp::beginJupiterSlingshot()
 {
     acknowledgeJupiterWindow();
-    if (!startJupiterSlingshotRun(state_, catalog_)) {
+    beginTransferAssist(content::transferAssist::marsJupiter);
+}
+
+void RocketGameApp::beginTransferAssist(std::string_view definitionId)
+{
+    const TransferAssistDefinition* definition = catalog_.findTransferAssist(definitionId);
+    if (definition != nullptr &&
+        !scenarioStepBriefingAcknowledged(state_, definition->availabilityScenarioId, definition->availabilityStepId)) {
+        (void)performScenarioAction(
+            state_, catalog_, definition->availabilityScenarioId, definition->availabilityStepId,
+            ScenarioActionKind::AcknowledgeBriefing);
+    }
+    if (!startTransferAssistRun(state_, catalog_, definitionId)) {
         panelDirty_ = true;
         return;
     }
@@ -2145,20 +2184,26 @@ void RocketGameApp::beginJupiterSlingshot()
 
 void RocketGameApp::continueJupiterSlingshot()
 {
+    continueTransferAssist();
+}
+
+void RocketGameApp::continueTransferAssist()
+{
     if (state_.screen == Screen::Flyby && state_.run.flyby.active &&
         state_.run.flyby.completed &&
-        state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot) {
-        if (state_.run.flyby.result != FlybyGrade::Perfect) {
+        !state_.run.flyby.transferAssistId.empty()) {
+        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.flyby.transferAssistId);
+        if (definition == nullptr || static_cast<int>(state_.run.flyby.result) < static_cast<int>(definition->minimumGrade)) {
             completeFlybyRun(state_, catalog_);
             save();
             panelDirty_ = true;
             return;
         }
-        (void)armJupiterSlingshot(state_);
+        (void)armTransferAssist(state_, catalog_);
         completeFlybyRun(state_, catalog_);
     }
-    if (!state_.run.jupiterSlingshotActive) {
-        state_.statusLine = "Hold a Perfect Mars corridor before continuing to Jupiter.";
+    if (!transferAssistCanContinue(state_, catalog_)) {
+        state_.statusLine = "Reach the required transfer-assist grade before continuing.";
         save();
         panelDirty_ = true;
         return;
@@ -2182,7 +2227,7 @@ void RocketGameApp::flybyAbort()
     if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
         return;
     }
-    const bool jupiterSlingshot = state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot;
+    const bool jupiterSlingshot = !state_.run.flyby.transferAssistId.empty();
     const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
     abortFlybyRun(state_, catalog_);
@@ -2200,9 +2245,10 @@ void RocketGameApp::flybyContinue()
     }
 
     const FlybyGrade grade = state_.run.flyby.result;
-    if (state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot) {
-        if (grade == FlybyGrade::Perfect) {
-            continueJupiterSlingshot();
+    if (!state_.run.flyby.transferAssistId.empty()) {
+        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.flyby.transferAssistId);
+        if (definition != nullptr && static_cast<int>(grade) >= static_cast<int>(definition->minimumGrade)) {
+            continueTransferAssist();
         } else {
             completeFlybyRun(state_, catalog_);
             syncLaunchConfig(state_, catalog_);
@@ -2724,10 +2770,7 @@ void RocketGameApp::miningTether()
     }
 
     const MiningArtifactObject before = state_.run.mining.artifact;
-    const bool beforeRigTethered = state_.run.mining.rigTethered;
     const bool beforeOperatorRigTethered = state_.run.mining.operatorRigTethered;
-    const bool beforeRigAvailable = !state_.run.mining.rigDisabled &&
-        state_.run.mining.rigDepthZone == state_.run.mining.depthZone;
     toggleMiningTether(state_);
     const MiningRunState& mining = state_.run.mining;
     const MiningArtifactObject& artifact = state_.run.mining.artifact;
@@ -2739,22 +2782,6 @@ void RocketGameApp::miningTether()
         state_.statusLine = "Jetpack tether locked to the Mining Rig. Tow it back to the ship.";
     } else if (!mining.operatorRigTethered && beforeOperatorRigTethered) {
         state_.statusLine = "Jetpack tether released.";
-    } else if (mining.rigTethered && !beforeRigTethered) {
-        state_.statusLine = "Drone tether locked. Tow it back through the shaft to the ship.";
-    } else if (!mining.rigTethered && beforeRigTethered) {
-        state_.statusLine = "Drone tether released.";
-    } else if (!beforeRigAvailable && !artifact.tethered) {
-        state_.statusLine = mining.rigDisabled
-            ? "The disabled drone cannot be tethered."
-            : "The drone is on another depth; return to its layer before tethering.";
-    } else if (!artifact.present || artifact.state == MiningArtifactState::Delivered || artifact.state == MiningArtifactState::Destroyed) {
-        state_.statusLine = mining.rigDisabled || mining.operatorMode == MiningOperatorMode::Jetpack
-            ? "No recoverable tether target."
-            : "Drone tether unavailable.";
-    } else if (!artifact.revealed && artifact.state == MiningArtifactState::Embedded) {
-        state_.statusLine = "Drone tether unchanged. Expose the artifact to tether it.";
-    } else {
-        state_.statusLine = "Move closer to the exposed artifact to tether it, or tow the drone to the ship.";
     }
     panelDirty_ = true;
 }
@@ -3281,11 +3308,14 @@ void RocketGameApp::debugShowHangar()
 void RocketGameApp::debugShowJupiterOptions(int mode)
 {
     beginDebugSandbox("Debug Jupiter options. No save data will be written.");
-    const int combination = std::clamp(mode, 0, 3);
+    const int combination = std::clamp(mode, 0, 5);
+    const bool tanksInstalled = combination == 1 || combination == 3 || combination == 5;
+    const bool slingshotActive = combination >= 2;
+    const bool goodSlingshot = combination == 2 || combination == 3;
     state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
     state_.meta.furthestTier = 2;
     state_.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
-    state_.meta.launchUpgrades.fuelTanks = (combination == 1 || combination == 3) ? 3 : 2;
+    state_.meta.launchUpgrades.fuelTanks = tanksInstalled ? 3 : 2;
     addDebugUnlock(state_, content::unlock::routeMars);
     addDebugUnlock(state_, content::unlock::routeJupiter);
     if (ScenarioInstance* marsScenario = findScenarioInstance(
@@ -3299,27 +3329,35 @@ void RocketGameApp::debugShowJupiterOptions(int mode)
             }
         }
         if (ScenarioStepProgress* funding = findScenarioStepProgress(*marsScenario, "funding")) {
-            funding->briefingAcknowledged = combination >= 2;
-            funding->completed = combination >= 2;
+            funding->briefingAcknowledged = slingshotActive;
+            funding->completed = slingshotActive;
         }
     }
     state_.meta.marsMiningBriefingAcknowledged = true;
     state_.meta.marsBayExpansionClaimed = true;
-    state_.run.jupiterSlingshotActive = combination >= 2;
-    state_.run.nextLaunchFuelBoost = state_.run.jupiterSlingshotActive
-        ? tuning::flyby::jupiterSlingshotFuelSavings
-        : 0.0;
-    state_.run.nextLaunchSpeedBoost = state_.run.jupiterSlingshotActive
-        ? tuning::flyby::slingshotSpeedBoost
-        : 0.0;
+    state_.run.pendingTransferAssist = slingshotActive
+        ? PendingTransferAssist {
+            content::transferAssist::marsJupiter,
+            content::destination::mars,
+            content::destination::jupiter,
+            goodSlingshot ? FlybyGrade::Good : FlybyGrade::Perfect,
+            tuning::flyby::jupiterSlingshotFuelSavings,
+            tuning::flyby::slingshotSpeedBoost,
+            goodSlingshot ? tuning::flyby::jupiterSlingshotGoodInstabilityPenalty : 0.0 }
+        : PendingTransferAssist {};
+    state_.run.nextLaunchFuelBoost = 0.0;
+    state_.run.nextLaunchSpeedBoost = 0.0;
+    state_.run.nextLaunchInstabilityPenalty = 0.0;
     state_.run.refitEntitled = true;
     state_.run.credits = 92.0;
     state_.screen = Screen::Hangar;
-    static constexpr std::array<std::string_view, 4> labels {
+    static constexpr std::array<std::string_view, 6> labels {
         "Neither path",
         "Fuel Tanks III",
-        "Mars slingshot",
-        "Both stacked"
+        "Good Mars slingshot",
+        "Fuel Tanks III plus Good Mars slingshot",
+        "Perfect Mars slingshot",
+        "Fuel Tanks III plus Perfect Mars slingshot"
     };
     state_.statusLine = "Debug Jupiter readiness: " +
         std::string(labels[static_cast<std::size_t>(combination)]) +
@@ -3631,7 +3669,7 @@ void RocketGameApp::attemptFrontierTransfer()
     if (!launchMissionReady(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next != nullptr && next->id == content::destination::jupiter
-            ? "Create 5 fuel of Jupiter margin with Fuel Tanks III, a Perfect Mars slingshot, or both."
+            ? "Create 5 fuel of Jupiter margin with Fuel Tanks III, a Good-or-better Mars slingshot, or both."
             : "Install the required launch upgrade before this route attempt.";
         refreshPanel();
         return;
@@ -3820,9 +3858,15 @@ void RocketGameApp::resetSave()
 
 void RocketGameApp::newGame()
 {
-    if (!titleScreenActive_) {
+    if (!titleScreenActive_ || titleLaunchActive_) {
         return;
     }
+
+    beginTitleLaunch(true);
+}
+
+void RocketGameApp::startNewGame()
+{
 
     GameState freshState = createNewGame(catalog_, 0x524F434B45544ULL);
     ensureDroneBayState(freshState, catalog_);
@@ -3835,7 +3879,7 @@ void RocketGameApp::newGame()
         services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
         if (hasSavedGame_) {
             titleNotice_ = "New campaign could not replace the existing save. Your progress is still intact.";
-            panelDirty_ = true;
+            refreshPanel();
             return;
         }
         freshState.statusLine = "New campaign started, but local save initialization failed.";
@@ -3880,7 +3924,29 @@ void RocketGameApp::disableDebugToolsForFreshCampaign()
 
 void RocketGameApp::continueGame()
 {
-    if (!titleScreenActive_ || !hasSavedGame_) {
+    if (!titleScreenActive_ || !hasSavedGame_ || titleLaunchActive_) {
+        return;
+    }
+    beginTitleLaunch(false);
+}
+
+void RocketGameApp::beginTitleLaunch(bool newCampaign)
+{
+    titleLaunchActive_ = true;
+    titleLaunchStartsNewCampaign_ = newCampaign;
+    titleLaunchElapsedSeconds_ = 0.0;
+    releaseRealtimeInputs(true);
+    refreshPanel();
+}
+
+void RocketGameApp::completeTitleLaunch()
+{
+    const bool startsNewCampaign = titleLaunchStartsNewCampaign_;
+    titleLaunchActive_ = false;
+    titleLaunchStartsNewCampaign_ = false;
+    titleLaunchElapsedSeconds_ = 0.0;
+    if (startsNewCampaign) {
+        startNewGame();
         return;
     }
     titleScreenActive_ = false;
@@ -4046,6 +4112,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         services_.saves.description(),
         services_.renderer.description(),
         titleScreenActive_,
+        titleLaunchActive_,
         hasSavedGame_,
         titleNotice_,
         firstTimeIntroductionsEnabled_,
@@ -4344,6 +4411,10 @@ void RocketGameApp::runUiAction(const std::string& action)
         acknowledgeJupiterWindow();
     } else if (action == ui::actions::openJupiterRefit) {
         openJupiterRefit();
+    } else if (action.starts_with(ui::actions::beginTransferAssistPrefix)) {
+        beginTransferAssist(action.substr(ui::actions::beginTransferAssistPrefix.size()));
+    } else if (action == ui::actions::continueTransferAssist) {
+        continueTransferAssist();
     } else if (action == ui::actions::beginJupiterSlingshot) {
         beginJupiterSlingshot();
     } else if (action == ui::actions::continueJupiterSlingshot) {
@@ -4431,6 +4502,16 @@ RenderSnapshot RocketGameApp::snapshot() const
     if (titleScreenActive_) {
         result.screen = Screen::Hangar;
         result.titleScreen = true;
+        if (titleLaunchActive_) {
+            result.titleLaunchRumble = std::clamp(
+                1.0 - titleLaunchElapsedSeconds_ / kTitleLaunchIgnitionDelaySeconds,
+                0.0,
+                1.0);
+            result.titleLaunchProgress = std::clamp(
+                (titleLaunchElapsedSeconds_ - kTitleLaunchIgnitionDelaySeconds) / kTitleLaunchDepartureSeconds,
+                0.0,
+                1.0);
+        }
         result.animationTime = services_.host.monotonicSeconds();
         return result;
     }
@@ -4596,7 +4677,6 @@ RenderSnapshot RocketGameApp::snapshot() const
             std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
         result.miningRigPresent = mining.rigDepthZone == mining.depthZone;
         result.miningRigDisabled = mining.rigDisabled;
-        result.miningRigTethered = mining.rigTethered && !mining.rigDisabled;
         result.miningOperatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled &&
             mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
         const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining);

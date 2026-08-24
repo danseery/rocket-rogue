@@ -276,8 +276,6 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         mining.operatorPresent;
     const MiningDrillStats operatorStats =
         miningOperatorDrillStats();
-    const double activeActorX = evaActive ? mining.operatorX : mining.droneX;
-    const double activeActorY = evaActive ? mining.operatorY : mining.droneY;
     const double displayedDrillPower = evaActive
         ? operatorStats.power
         : stats.power;
@@ -326,20 +324,15 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     if (mining.artifact.present) {
         presentation.metrics.push_back(panelMetric("Artifact", miningArtifactStateLabel(mining.artifact.state)));
         const bool artifactTethered = mining.artifact.tethered;
-        const bool rigTethered = mining.rigTethered && !mining.rigDisabled;
         const bool operatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled;
         presentation.metrics.push_back(panelMetric(
             "Tether",
-            artifactTethered && (rigTethered || operatorRigTethered)
-                ? "Drone + artifact"
-                : (artifactTethered
-                    ? "Artifact locked"
-                    : (operatorRigTethered ? "EVA tow locked" : (rigTethered ? "Drone locked" : "Free")))));
+            artifactTethered
+                ? "Artifact locked"
+                : (operatorRigTethered ? "EVA tow locked" : "Free")));
         presentation.metrics.push_back(panelMetric("Artifact integrity", display::percent(mining.artifact.maxHealth <= 0.0 ? 0.0 : mining.artifact.health / mining.artifact.maxHealth)));
     } else if (mining.operatorRigTethered && !mining.rigDisabled) {
         presentation.metrics.push_back(panelMetric("Tether", "EVA tow locked"));
-    } else if (mining.rigTethered && !mining.rigDisabled) {
-        presentation.metrics.push_back(panelMetric("Tether", "Drone locked"));
     }
     presentation.payloadMetrics = {
         panelMetric("Rig cargo", std::to_string(carriedCargo)),
@@ -483,23 +476,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                 panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"));
         } else {
             const MiningArtifactObject& artifact = mining.artifact;
-            const bool artifactRecoverable = artifact.present
-                && artifact.state != MiningArtifactState::Delivered
-                && artifact.state != MiningArtifactState::Destroyed;
-            const bool artifactExposed = artifact.revealed || artifact.state == MiningArtifactState::Loose;
-            const double artifactDistance = artifactRecoverable
-                ? std::hypot(artifact.x - activeActorX, artifact.y - activeActorY)
-                : 0.0;
-            const bool rigAvailable = !mining.rigDisabled && mining.rigDepthZone == mining.depthZone;
-            const double rigDistance = rigAvailable
-                ? std::hypot(mining.droneX - activeActorX, mining.droneY - activeActorY)
-                : 0.0;
-            const bool artifactInRange = artifactRecoverable && artifactExposed &&
-                artifactDistance <= tuning::mining::artifactTetherRangeCells;
-            const bool operatorRigInRange = evaActive && rigAvailable &&
-                rigDistance <= tuning::mining::operatorRigTetherRangeCells;
-            const bool preferOperatorRig = operatorRigInRange &&
-                (!artifactInRange || rigDistance <= artifactDistance);
+            const MiningTetherTargetResolution tetherTarget = resolveMiningTetherTarget(mining);
             presentation.commandTitle = "Commands";
             if (arenaRules.mechanics.fogAndScanner) {
                 presentation.commandHints.push_back("Pulse Scanner (E) - Reveals nearby resources");
@@ -509,20 +486,23 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             PanelButtonPresentation tetherAction = disabledPanelButton("No tether target");
             if (artifact.tethered) {
                 tetherAction = panelActionButton("Release artifact tether", ui::actions::miningTether, "warn");
-            } else if (mining.rigTethered || mining.operatorRigTethered) {
-                tetherAction = panelActionButton("Release drone tether", ui::actions::miningTether, "warn");
-            } else if (preferOperatorRig) {
-                tetherAction = panelActionButton("Tether drone", ui::actions::miningTether, "warn");
-            } else if (artifactInRange) {
+            } else if (mining.operatorRigTethered) {
+                tetherAction = panelActionButton("Release Mining Rig tether", ui::actions::miningTether, "warn");
+            } else if (tetherTarget.target == MiningTetherTarget::Artifact &&
+                       tetherTarget.blocker == MiningTetherBlocker::None) {
                 tetherAction = panelActionButton("Tether artifact", ui::actions::miningTether, "warn");
-            } else if (rigAvailable) {
-                tetherAction = evaActive && rigDistance > tuning::mining::operatorRigTetherRangeCells
-                    ? disabledPanelButton("Move within drone tether range")
-                    : panelActionButton("Tether drone", ui::actions::miningTether, "warn");
-            } else if (artifactRecoverable && !artifactExposed) {
+            } else if (tetherTarget.target == MiningTetherTarget::MiningRig) {
+                tetherAction = panelActionButton("Tether Mining Rig", ui::actions::miningTether, "warn");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactGateLocked) {
+                tetherAction = disabledPanelButton("Complete gate to tether artifact");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactUnexposed) {
                 tetherAction = disabledPanelButton("Scan or expose artifact");
-            } else if (artifactRecoverable) {
-                tetherAction = disabledPanelButton("Move within tether range");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactOutOfRange) {
+                tetherAction = disabledPanelButton("Move within artifact tether range");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::RigDifferentDepth) {
+                tetherAction = disabledPanelButton("Mining Rig is on another depth");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::RigOutOfRange) {
+                tetherAction = disabledPanelButton("Move within Mining Rig tether range");
             }
             // Keep the command discoverable even when the current target is
             // out of range; the same T action can tether either object.
@@ -531,8 +511,8 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             }
             presentation.commandHints.push_back(
                 evaActive
-                    ? "Tether (T) - Attach your jetpack line to the Mining Rig and tow it to the ship"
-                    : "Tether (T) - Engage the ship winch for the drone or tow an exposed nearby artifact");
+                    ? "Tether (T) - Attach to the nearest exposed artifact or same-depth Mining Rig"
+                    : "Tether (T) - Attach to an exposed nearby artifact");
             presentation.actions.push_back(std::move(tetherAction));
             if (!mining.miniDrones.empty()) {
                 presentation.commandHints.push_back("Assigned Support Drones (Automatic) - Execute their roles automatically");

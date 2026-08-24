@@ -29,6 +29,8 @@ struct PreparedLaunch {
     double crashMultiplier = 0.0;
     double slingshotFuelSavings = 0.0;
     double slingshotSpeedBoost = 0.0;
+    double slingshotInstabilityPenalty = 0.0;
+    std::string transferAssistId;
     int overpreparedData = 0;
     double provingPayoutBonus = 0.0;
 

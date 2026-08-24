@@ -52,6 +52,37 @@ struct MiningSwarmPreview {
     std::uint64_t seed = 0;
 };
 
+// The physical object selected by the shared T/Y tether action. This is
+// intentionally independent of presentation so the command label, input, and
+// simulation cannot disagree about what is closest.
+enum class MiningTetherTarget {
+    None,
+    Artifact,
+    MiningRig
+};
+
+enum class MiningTetherBlocker {
+    None,
+    NoTarget,
+    ArtifactUnexposed,
+    ArtifactOutOfRange,
+    ArtifactGateLocked,
+    RigDifferentDepth,
+    RigOutOfRange
+};
+
+struct MiningTetherTargetResolution {
+    MiningTetherTarget target = MiningTetherTarget::None;
+    MiningTetherBlocker blocker = MiningTetherBlocker::NoTarget;
+    bool artifactRecoverable = false;
+    bool artifactExposed = false;
+    bool artifactInRange = false;
+    bool rigAvailable = false;
+    bool rigInRange = false;
+    double artifactDistance = 0.0;
+    double rigDistance = 0.0;
+};
+
 std::string_view miningMaterialName(MiningCellMaterial material);
 std::string_view miningCellFeatureName(MiningCellFeature feature);
 std::string_view miningEnemyTypeName(MiningEnemyType enemy);
@@ -106,6 +137,7 @@ void setMiningDrilling(GameState& state, bool drilling);
 void setMiningFire(GameState& state, bool firing);
 void setMiningOperatorToggleProgress(GameState& state, double progress);
 bool toggleMiningOperator(GameState& state);
+MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& mining);
 void toggleMiningTether(GameState& state);
 void pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
 bool repairMiningOperator(GameState& state);

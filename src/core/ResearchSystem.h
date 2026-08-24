@@ -177,6 +177,20 @@ bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, 
 bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
 bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
 bool jupiterWindowReviewed(const GameState& state, const ContentCatalog& catalog);
+const TransferAssistDefinition* availableTransferAssist(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId = {});
+bool canStartTransferAssist(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId);
+bool startTransferAssistRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId);
+bool armTransferAssist(GameState& state, const ContentCatalog& catalog);
+bool transferAssistCanContinue(const GameState& state, const ContentCatalog& catalog);
 bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog);
 bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog);
 bool armJupiterSlingshot(GameState& state);

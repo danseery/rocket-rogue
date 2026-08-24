@@ -664,9 +664,10 @@ enum class FlybyPurpose {
     ScenarioChallenge,
     // Serialized compatibility name. New mechanics use ScenarioChallenge.
     SaturnSlingshot = ScenarioChallenge,
-    // A literal Mars departure. Unlike reconnaissance or scenario data, a
-    // Perfect pass leaves the ship physically moving toward Jupiter.
-    JupiterSlingshot
+    // Compatibility ordinal for existing saves. New authored departures use
+    // TransferAssist and carry their content definition ID on the run.
+    JupiterSlingshot,
+    TransferAssist = JupiterSlingshot
 };
 
 enum class CampaignObjectiveId {
@@ -1129,6 +1130,25 @@ struct Destination {
     // Hidden origins remain addressable for save compatibility and route
     // calculations, but never appear as a player-facing destination.
     bool hiddenFromProgression = false;
+    // A nonzero value opts this route into a calibrated powered-fuel margin
+    // gate. The shared calculation can include a matching transfer assist.
+    double calibratedTransferMarginRequired = 0.0;
+    std::string transferMarginBlockerText;
+};
+
+struct TransferAssistDefinition {
+    std::string id;
+    std::string sourceDestinationId;
+    std::string targetDestinationId;
+    std::string availabilityScenarioId;
+    std::string availabilityStepId;
+    std::vector<LaunchTrainingStage> allowedLaunchStages;
+    FlybyGrade minimumGrade = FlybyGrade::Good;
+    double fuelSavings = 0.0;
+    double speedBoostBase = 0.0;
+    double goodInstabilityPenalty = 0.0;
+    int impactHullDamage = 0;
+    std::string displayName;
 };
 
 struct LaunchConfig {
@@ -1168,6 +1188,8 @@ struct LaunchOutcome {
     double transferFuelCapacity = 0.0;
     double slingshotFuelSavings = 0.0;
     double slingshotSpeedBoost = 0.0;
+    double slingshotInstabilityPenalty = 0.0;
+    std::string transferAssistId;
     double recoveryCost = 0.0;
     int shipDamage = 0;
     bool crewKilled = false;
@@ -1291,6 +1313,9 @@ struct FlybyRunState {
     // authored completion contract remains attached to this active run.
     std::string scenarioId;
     std::string scenarioStepId;
+    // Empty for reconnaissance and ordinary scenario challenges. A populated
+    // ID turns the finished pass into the authored physical transfer assist.
+    std::string transferAssistId;
     double elapsedSeconds = 0.0;
     double durationSeconds = 18.0;
     double shipX = -0.68;
@@ -1329,6 +1354,18 @@ struct FlybyRunState {
     double slingshotSpeedBoost = 0.0;
     double slingshotSpeedScale = 1.0;
     std::vector<FlybyTrailPoint> trailPoints;
+};
+
+struct PendingTransferAssist {
+    std::string definitionId;
+    std::string sourceDestinationId;
+    std::string targetDestinationId;
+    FlybyGrade grade = FlybyGrade::Active;
+    double fuelSavings = 0.0;
+    double speedBoost = 0.0;
+    double instabilityPenalty = 0.0;
+
+    bool active() const { return !definitionId.empty() && !targetDestinationId.empty(); }
 };
 
 struct OrbitRunState {
@@ -1705,9 +1742,11 @@ struct MiningRunState {
     double rigVelocityX = 0.0;
     double rigVelocityY = 0.0;
     bool rigDisabled = false;
-    // Rig mode engages the ship winch. EVA mode uses this separate line so
-    // the operator can physically tow the Mining Rig through a return shaft.
+    // Retained only to read older saves that recorded the removed ship-winch
+    // behavior. New runtime and save data always normalize this to false.
     bool rigTethered = false;
+    // EVA uses this line to physically tow the Mining Rig through a return
+    // shaft.
     bool operatorRigTethered = false;
     int rigDepthZone = 0;
     MiningOperatorMode operatorMode = MiningOperatorMode::Rig;
@@ -1829,7 +1868,8 @@ struct RunState {
     // never changes the physical Transfer Tank capacity.
     double nextLaunchFuelBoost = 0.0;
     double nextLaunchSpeedBoost = 0.0;
-    bool jupiterSlingshotActive = false;
+    double nextLaunchInstabilityPenalty = 0.0;
+    PendingTransferAssist pendingTransferAssist;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;

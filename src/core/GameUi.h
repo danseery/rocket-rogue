@@ -78,6 +78,8 @@ inline constexpr std::string_view acknowledgeJupiterWindow = "acknowledge_jupite
 inline constexpr std::string_view openJupiterRefit = "open_jupiter_refit";
 inline constexpr std::string_view beginJupiterSlingshot = "begin_jupiter_slingshot";
 inline constexpr std::string_view continueJupiterSlingshot = "continue_jupiter_slingshot";
+inline constexpr std::string_view beginTransferAssistPrefix = "begin_transfer_assist:";
+inline constexpr std::string_view continueTransferAssist = "continue_transfer_assist";
 inline constexpr std::string_view scenarioActionPrefix = "scenario_action:";
 
 inline std::string buyOffer(int index)
@@ -118,6 +120,11 @@ inline std::string equipDrone(int index)
 inline std::string unequipDroneSlot(int slotIndex)
 {
     return std::string(unequipDroneSlotPrefix) + std::to_string(slotIndex);
+}
+
+inline std::string beginTransferAssist(std::string_view definitionId)
+{
+    return std::string(beginTransferAssistPrefix) + std::string(definitionId);
 }
 
 // Scenario IDs and step IDs are stable content identifiers. Keep the action

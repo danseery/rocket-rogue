@@ -370,6 +370,7 @@ inline constexpr double slingshotFuelBoost = 1.5;
 inline constexpr double slingshotSpeedBoost = 0.20;
 inline constexpr double slingshotMaxSpeedScale = 2.0;
 inline constexpr double jupiterSlingshotFuelSavings = 5.0;
+inline constexpr double jupiterSlingshotGoodInstabilityPenalty = 0.35;
 inline constexpr int impactHullDamage = 18;
 } // namespace flyby
 

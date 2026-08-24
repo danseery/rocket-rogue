@@ -221,6 +221,15 @@ const Destination* ContentCatalog::findDestination(std::string_view id) const
     return found == destinations.end() ? nullptr : &*found;
 }
 
+const TransferAssistDefinition* ContentCatalog::findTransferAssist(std::string_view id) const
+{
+    const auto found = std::find_if(
+        transferAssists.begin(),
+        transferAssists.end(),
+        [&](const TransferAssistDefinition& definition) { return definition.id == id; });
+    return found == transferAssists.end() ? nullptr : &*found;
+}
+
 const ScenarioDefinition* ContentCatalog::findScenario(std::string_view id) const
 {
     const auto found = std::find_if(scenarios.begin(), scenarios.end(), [id](const ScenarioDefinition& scenario) {
@@ -458,6 +467,9 @@ ContentCatalog createDefaultContent()
             destination.approachBriefTitle = "IO APPROACH";
             destination.approachBriefDetail =
                 "Skipping Io leaves the active capture objective incomplete and the authored Saturn route blocked.";
+            destination.calibratedTransferMarginRequired = 5.0;
+            destination.transferMarginBlockerText =
+                "Create 5 fuel of Jupiter transfer margin with Fuel Tanks III, a Good-or-better Mars slingshot, or both.";
         }
         // The current catalog begins its outward-only expedition at Saturn.
         // This is content policy: recovery and transfer mechanics consume the
@@ -550,7 +562,7 @@ ContentCatalog createDefaultContent()
                       {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"funding", {"delivery"}, "JUPITER TRANSFER", "The Jupiter Window",
                     "Create five fuel of transfer margin. Build it into the ship, take it from Mars's gravity, or stack both.",
-                    "FUEL TANKS III OR PERFECT MARS SLINGSHOT — BENEFITS STACK", "Review Jupiter Options", {},
+                    "FUEL TANKS III OR GOOD-OR-BETTER MARS SLINGSHOT — BENEFITS STACK", "Review Jupiter Options", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}}
             }
@@ -609,6 +621,22 @@ ContentCatalog createDefaultContent()
                     ScenarioActionKind::ClaimReward, {}, {}}
             },
             false
+        }
+    };
+    catalog.transferAssists = {
+        {
+            content::transferAssist::marsJupiter,
+            content::destination::mars,
+            content::destination::jupiter,
+            content::scenario::marsBayExpansion,
+            "funding",
+            {LaunchTrainingStage::HullIntegrity, LaunchTrainingStage::JupiterTransfer},
+            FlybyGrade::Good,
+            tuning::flyby::jupiterSlingshotFuelSavings,
+            tuning::flyby::slingshotSpeedBoost,
+            tuning::flyby::jupiterSlingshotGoodInstabilityPenalty,
+            tuning::flyby::impactHullDamage,
+            "Mars Slingshot"
         }
     };
     catalog.scenarioFactories = {

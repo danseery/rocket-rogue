@@ -40,10 +40,27 @@ int crewUpgradeCost(const CrewUpgrade& upgrade);
 int launchUpgradeRank(const GameState& state, LaunchUpgradeKind kind);
 double launchFuelCapacity(const GameState& state);
 double pendingLaunchFuelSavings(const GameState& state);
+double pendingLaunchInstabilityPenalty(const GameState& state);
+const PendingTransferAssist* pendingTransferAssistForDestination(
+    const GameState& state,
+    std::string_view destinationId);
+double pendingLaunchFuelSavingsForDestination(
+    const GameState& state,
+    std::string_view destinationId);
+double pendingLaunchSpeedBoostForDestination(
+    const GameState& state,
+    std::string_view destinationId);
+double pendingLaunchInstabilityPenaltyForDestination(
+    const GameState& state,
+    std::string_view destinationId);
 double calibratedTransferFuelMargin(
     const GameState& state,
     const Destination& destination);
 bool jupiterTransferMarginReady(const GameState& state);
+bool destinationTransferMarginReady(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const Destination& destination);
 const ShipModule* nextLaunchUpgrade(const GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);
 bool launchUpgradeUnlocked(const GameState& state, LaunchUpgradeKind kind, int rank);
 bool canInstallLaunchUpgrade(const GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);

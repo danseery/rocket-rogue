@@ -1088,6 +1088,15 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 34.0F) * shimmer * 3.5F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 29.0F) * shimmer * 2.5F;
     }
+    if (cameraShakeEnabled && snapshot.titleScreen && snapshot.titleLaunchRumble > 0.0) {
+        // Ignition rumbles for half a second before the ship commits to its
+        // departure. Keep it small enough that the title remains readable at
+        // Deck scale.
+        const float rumble = static_cast<float>(std::clamp(snapshot.titleLaunchRumble, 0.0, 1.0));
+        const float shake = rumble * 3.0F;
+        scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 96.0F) * shake;
+        scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 79.0F) * shake * 0.72F;
+    }
     if (cameraShakeEnabled && snapshot.screen == Screen::SurfaceUpgrade && snapshot.levelUpFanfare > 0.0) {
         const float envelope = static_cast<float>(std::clamp(snapshot.levelUpFanfare, 0.0, 1.0));
         const float shake = envelope * envelope;
@@ -3087,16 +3096,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const float pulse = 0.78F + 0.14F * std::sin(static_cast<float>(snapshot.animationTime) * 6.0F);
         drawLine(operatorPosition.x, operatorPosition.y, drone.x, drone.y, {0.32F, 0.96F, 1.0F, pulse}, 2.6F);
         drawRadialGlow(drone.x, drone.y, cellSize * 1.35F, {0.32F, 0.96F, 1.0F, 0.05F}, 16);
-    }
-    if (snapshot.miningRigTethered && snapshot.miningRigPresent) {
-        const double anchorY = snapshot.miningShipPresent
-            ? snapshot.miningReturnZoneY
-            : 1.5;
-        const Vec2 shipAnchor = cellCenter(snapshot.miningReturnZoneX, anchorY);
-        const float distance = std::hypot(shipAnchor.x - drone.x, shipAnchor.y - drone.y);
-        const float pulse = 0.76F + 0.12F * std::sin(static_cast<float>(snapshot.animationTime) * 5.0F);
-        drawLine(drone.x, drone.y, shipAnchor.x, shipAnchor.y, {0.30F, 0.88F, 1.0F, pulse}, 2.2F);
-        drawRadialGlow(shipAnchor.x, shipAnchor.y, cellSize * (1.0F + std::clamp(distance / (cellSize * 18.0F), 0.0F, 1.0F)), {0.30F, 0.88F, 1.0F, 0.06F}, 18);
     }
     if (!miningOperatorModeInitialized_) {
         previousMiningOperatorActive_ = snapshot.miningOperatorActive;
@@ -5124,33 +5123,44 @@ void SceneComposer::drawTitleBackdrop(const RenderSnapshot& snapshot)
         drawMoon();
     }
 
-    const Vec2 rocket {
-        0.64F + std::sin(time * 0.19F) * 0.035F,
-        0.31F + std::cos(time * 0.16F) * 0.024F
-    };
+    const float launch = static_cast<float>(std::clamp(snapshot.titleLaunchProgress, 0.0, 1.0));
+    const float rumble = static_cast<float>(std::clamp(snapshot.titleLaunchRumble, 0.0, 1.0));
+    // Ease out then carry the title ship off the upper-right edge. The title
+    // UI owns its own fade; this stays in the scene so native and web share
+    // the same physical departure.
+    const float departure = launch * launch * (3.0F - 2.0F * launch);
     const Vec2 forward = normalize({
         -0.12F + std::sin(time * 0.13F) * 0.025F,
         1.0F
     });
+    const Vec2 rocket {
+        0.64F + std::sin(time * 0.19F) * 0.035F + forward.x * departure * 1.52F,
+        0.31F + std::cos(time * 0.16F) * 0.024F + forward.y * departure * 1.52F
+    };
     const Vec2 exhaust {
         rocket.x - forward.x * 0.205F,
         rocket.y - forward.y * 0.205F
     };
-    const float thrustPulse = 0.78F + std::sin(time * 5.8F) * 0.10F;
+    const float thrustPulse = 0.78F + std::sin(time * 5.8F) * 0.10F + departure * 0.20F;
     const int thrustFrame = static_cast<int>(std::floor(time * 12.0F)) % 6;
 
-    drawRadialGlow(exhaust.x, exhaust.y, 0.12F, {0.16F, 0.74F, 1.0F, 0.11F}, 36);
-    drawSpriteRotated(
-        exhaust.x,
-        exhaust.y,
-        0.10F,
-        0.18F,
-        forward.x,
-        forward.y,
-        {0.82F, 0.96F, 1.0F, thrustPulse},
-        ThrustAsset,
-        thrustFrame,
-        6);
+    // The title ship is cold until the player commits. Ignition starts the
+    // animated flame during the rumble and carries through liftoff.
+    if (rumble > 0.0F || launch > 0.0F) {
+        const float ignition = std::max(rumble, std::min(1.0F, launch * 2.0F));
+        drawRadialGlow(exhaust.x, exhaust.y, 0.12F, {0.16F, 0.74F, 1.0F, 0.11F * ignition}, 36);
+        drawSpriteRotated(
+            exhaust.x,
+            exhaust.y,
+            0.10F,
+            0.18F,
+            forward.x,
+            forward.y,
+            {0.82F, 0.96F, 1.0F, std::min(1.0F, thrustPulse) * ignition},
+            ThrustAsset,
+            thrustFrame,
+            6);
+    }
     drawSpriteRotated(
         rocket.x,
         rocket.y,

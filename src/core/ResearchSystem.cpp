@@ -1801,69 +1801,135 @@ bool jupiterWindowReviewed(const GameState& state, const ContentCatalog&)
             "funding");
 }
 
-bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog)
+const TransferAssistDefinition* availableTransferAssist(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId)
 {
-    return currentDestination(state, catalog).id == content::destination::mars &&
-        hasUnlock(state.meta, content::unlock::routeJupiter) &&
-        (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
-         state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
-        !state.run.jupiterSlingshotActive &&
+    const auto available = [&](const TransferAssistDefinition& definition) {
+        const Destination* next = nextDestination(state, catalog);
+        if (next == nullptr || currentDestination(state, catalog).id != definition.sourceDestinationId ||
+            next->id != definition.targetDestinationId) {
+            return false;
+        }
+        if (std::any_of(
+                next->routeRequirementKeys.begin(), next->routeRequirementKeys.end(),
+                [&](const std::string& routeKey) { return !hasUnlock(state.meta, routeKey); })) {
+            return false;
+        }
+        if (!definition.allowedLaunchStages.empty() &&
+            std::find(
+                definition.allowedLaunchStages.begin(),
+                definition.allowedLaunchStages.end(),
+                state.meta.launchLessons.stage) == definition.allowedLaunchStages.end()) {
+            return false;
+        }
+        return scenarioHasCompletedStep(state, definition.availabilityScenarioId, definition.availabilityStepId) ||
+            scenarioStepBriefingAcknowledged(state, definition.availabilityScenarioId, definition.availabilityStepId);
+    };
+    if (!definitionId.empty()) {
+        const TransferAssistDefinition* definition = catalog.findTransferAssist(definitionId);
+        return definition != nullptr && available(*definition) ? definition : nullptr;
+    }
+    const auto found = std::find_if(
+        catalog.transferAssists.begin(),
+        catalog.transferAssists.end(),
+        available);
+    return found == catalog.transferAssists.end() ? nullptr : &*found;
+}
+
+bool canStartTransferAssist(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId)
+{
+    return availableTransferAssist(state, catalog, definitionId) != nullptr &&
+        !state.run.pendingTransferAssist.active() &&
         !state.run.flyby.active &&
         !state.run.surfaceExpedition.active &&
         !state.run.mining.active;
 }
 
-bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog)
+bool startTransferAssistRun(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view definitionId)
 {
-    if (!canStartJupiterSlingshot(state, catalog)) {
-        state.statusLine = "Complete the Mars contract before attempting its Jupiter slingshot.";
+    const TransferAssistDefinition* definition = availableTransferAssist(state, catalog, definitionId);
+    if (definition == nullptr || !canStartTransferAssist(state, catalog, definitionId)) {
+        state.statusLine = "Complete the authored transfer objective before attempting its assist.";
         return false;
     }
-
-    const Destination* mars = catalog.findDestination(content::destination::mars);
-    if (mars == nullptr) {
+    const Destination* source = catalog.findDestination(definition->sourceDestinationId);
+    if (source == nullptr) {
         return false;
     }
-    state.run.flyby = createFlybyRun(
-        state,
-        catalog,
-        *mars,
-        FlybyPurpose::JupiterSlingshot);
-    // This authored departure risk is explicit in The Jupiter Window. Ship
-    // assists may improve control, but a planetary impact still costs the
-    // advertised 18 hull damage.
-    state.run.flyby.impactHullDamage = tuning::flyby::impactHullDamage;
+    state.run.flyby = createFlybyRun(state, catalog, *source, FlybyPurpose::TransferAssist);
+    state.run.flyby.transferAssistId = definition->id;
+    state.run.flyby.impactHullDamage = definition->impactHullDamage;
+    const Destination* target = catalog.findDestination(definition->targetDestinationId);
+    if (target == nullptr) {
+        state.run.flyby = {};
+        return false;
+    }
     state.run.arrivalOps = {};
     state.screen = Screen::Flyby;
-    state.statusLine = "Mars departure active. Hold the gold corridor for a Perfect slingshot.";
+    const std::string minimumGrade = definition->minimumGrade == FlybyGrade::Perfect ? "Perfect" : "Good";
+    state.statusLine = source->name + " departure active. Reach " + minimumGrade +
+        " for momentum; hold Perfect for a stable " + target->name + " transfer.";
     return true;
 }
 
-bool armJupiterSlingshot(GameState& state)
+bool armTransferAssist(GameState& state, const ContentCatalog& catalog)
 {
     FlybyRunState& flyby = state.run.flyby;
-    if (!flyby.active || !flyby.completed ||
-        flyby.purpose != FlybyPurpose::JupiterSlingshot ||
-        flyby.result != FlybyGrade::Perfect) {
+    const TransferAssistDefinition* definition = catalog.findTransferAssist(flyby.transferAssistId);
+    const FlybyGrade grade = flyby.result == FlybyGrade::Active ? flybyGrade(flyby) : flyby.result;
+    if (!flyby.active || !flyby.completed || definition == nullptr ||
+        static_cast<int>(grade) < static_cast<int>(definition->minimumGrade)) {
         return false;
     }
 
     populateFlybyRewardPreview(flyby, nullptr);
     flyby.slingshotAwarded = true;
     flyby.slingshotSpeedScale = flybySpeedScale(flyby);
-    flyby.slingshotFuelSavings = tuning::flyby::jupiterSlingshotFuelSavings;
-    flyby.slingshotSpeedBoost =
-        tuning::flyby::slingshotSpeedBoost * flyby.slingshotSpeedScale;
+    flyby.slingshotFuelSavings = definition->fuelSavings;
+    flyby.slingshotSpeedBoost = definition->speedBoostBase * flyby.slingshotSpeedScale;
     flyby.rewardCredits = 0.0;
     flyby.blueprintGain = 0;
-    state.run.nextLaunchFuelBoost = std::max(
-        state.run.nextLaunchFuelBoost,
-        flyby.slingshotFuelSavings);
-    state.run.nextLaunchSpeedBoost = std::max(
-        state.run.nextLaunchSpeedBoost,
-        flyby.slingshotSpeedBoost);
-    state.run.jupiterSlingshotActive = true;
+    state.run.pendingTransferAssist = {
+        definition->id,
+        definition->sourceDestinationId,
+        definition->targetDestinationId,
+        grade,
+        flyby.slingshotFuelSavings,
+        flyby.slingshotSpeedBoost,
+        grade == FlybyGrade::Good ? definition->goodInstabilityPenalty : 0.0
+    };
     return true;
+}
+
+bool transferAssistCanContinue(const GameState& state, const ContentCatalog& catalog)
+{
+    const PendingTransferAssist* assist = pendingTransferAssistForDestination(
+        state,
+        nextDestination(state, catalog) == nullptr ? std::string_view{} : nextDestination(state, catalog)->id);
+    return assist != nullptr && catalog.findTransferAssist(assist->definitionId) != nullptr;
+}
+
+bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog)
+{
+    return canStartTransferAssist(state, catalog, content::transferAssist::marsJupiter);
+}
+
+bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog)
+{
+    return startTransferAssistRun(state, catalog, content::transferAssist::marsJupiter);
+}
+
+bool armJupiterSlingshot(GameState& state)
+{
+    return armTransferAssist(state, legacyCampaignCatalog());
 }
 
 void setFlybyMove(GameState& state, double xAxis, double yAxis)
@@ -2084,8 +2150,13 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
         return;
     }
 
+    const FlybyGrade grade = state.run.flyby.result == FlybyGrade::Active
+        ? flybyGrade(state.run.flyby)
+        : state.run.flyby.result;
+    if (!state.run.flyby.transferAssistId.empty()) {
+        (void)armTransferAssist(state, catalog);
+    }
     FlybyRunState flyby = state.run.flyby;
-    const FlybyGrade grade = flyby.result == FlybyGrade::Active ? flybyGrade(flyby) : flyby.result;
     switch (grade) {
     case FlybyGrade::Miss:
         state.meta.totalFlybyMisses += 1;
@@ -2099,20 +2170,28 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
     case FlybyGrade::Active:
         break;
     }
-    const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
-    if (!jupiterSlingshot) {
+    const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
+    const bool isTransferAssist = transferAssist != nullptr;
+    if (!isTransferAssist) {
         applyFlybyReward(state, catalog, grade);
     }
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
     ScenarioStepDefinition challengeStep;
     bool hasChallengeStep = false;
-    if (jupiterSlingshot) {
+    if (isTransferAssist) {
+        const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
+        const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
+        const std::string sourceName = source == nullptr ? "Departure" : source->name;
+        const std::string targetName = target == nullptr ? "target" : target->name;
         state.run.arrivalOps = {};
         state.screen = Screen::Hangar;
         state.statusLine = grade == FlybyGrade::Perfect
-            ? "Mars slingshot active. Continue directly toward Jupiter."
-            : "Mars slingshot lost. Retry the pass or build permanent tank margin.";
+            ? sourceName + " slingshot active. Perfect execution keeps the " + targetName + " transfer stable."
+            : (grade == FlybyGrade::Good
+                  ? sourceName + " slingshot active. The Good pass reaches " + targetName + " with +" +
+                      std::to_string(static_cast<int>(transferAssist->goodInstabilityPenalty * 100.0)) + "% flight instability."
+                  : sourceName + " slingshot lost. Retry the pass or build permanent tank margin.");
     } else if (scenarioChallenge) {
         const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, flyby.scenarioId);
         const ScenarioInstance* instance = findScenarioInstance(state.meta, flyby.scenarioId);
@@ -2135,7 +2214,9 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
     }
     const Destination* destination = catalog.findDestination(flyby.destinationId);
     state.run.flyby = {};
-    if (scenarioChallenge) {
+    if (isTransferAssist) {
+        // The physical assist already returned to its Hangar continuation.
+    } else if (scenarioChallenge) {
         state.run.arrivalOps = {};
         state.screen = Screen::Hangar;
         const ScenarioStepState challengeState = scenarioStepState(
@@ -2171,13 +2252,18 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
 
     const FlybyRunState flyby = state.run.flyby;
     state.run.flyby = {};
-    const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
+    const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
+    const bool isTransferAssist = transferAssist != nullptr;
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
-    if (jupiterSlingshot) {
+    if (isTransferAssist) {
+        const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
+        const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
         state.run.arrivalOps = {};
         state.screen = Screen::Hangar;
-        state.statusLine = "Mars slingshot aborted. Jupiter options remain open.";
+        state.statusLine = (source == nullptr ? std::string("Departure") : source->name) +
+            " slingshot aborted. " + (target == nullptr ? std::string("Transfer") : target->name) +
+            " options remain open.";
     } else if (scenarioChallenge) {
         ScenarioEvent event;
         event.kind = ScenarioEventKind::ActivityAborted;

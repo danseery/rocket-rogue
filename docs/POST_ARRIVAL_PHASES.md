@@ -22,18 +22,26 @@ Arrival choices explain their exact progression value before commitment. Good or
 
 ## Jupiter Transfer Window
 
-The Mars Bay Expansion opens `THE JUPITER WINDOW`, an informational saved beat rather than a branch selection. Jupiter needs five fuel of calibrated transfer margin. The player may create it permanently with Fuel Tanks III, physically take it from Mars gravity with a Perfect departure Flyby, or stack both. Reviewing one option never locks, hides, or disables the other.
+The Mars Bay Expansion opens `THE JUPITER WINDOW`, an informational saved beat rather than a branch selection. Jupiter needs five fuel of calibrated transfer margin. The player may create it permanently with Fuel Tanks III, physically take it from Mars gravity with a Good-or-better departure Flyby, or stack both. Reviewing one option never locks, hides, or disables the other.
 
-At calibrated `0.60` throttle, Jupiter's route burn is `20`. Fuel Tanks III costs `92` credits and raises permanent capacity from `20` to `25`. The Mars slingshot requires Perfect, saves a fixed `5` powered fuel for one Jupiter attempt, and retains the achieved `+20-40%` travel rate. The dedicated departure pass pays no credits or Research Data; Good, Miss, and abort remain retryable, while impact still deals `18` hull damage.
+At calibrated `0.60` throttle, Jupiter's route burn is `20`. Fuel Tanks III costs `92` credits and raises permanent capacity from `20` to `25`. The Mars slingshot requires Good or Perfect, saves a fixed `5` powered fuel for one Jupiter attempt, and retains the achieved `+20-40%` travel rate. Good also adds `+0.35` flight instability for that attempt, capped at the existing `1.00` maximum; it affects the normal seeded startup drift, steering variance, oversteer, throttle kicks, damping, and auto-trim. Perfect grants the same momentum with no instability penalty. The dedicated departure pass pays no credits or Research Data; Miss and abort remain retryable, while impact still deals `18` hull damage.
 
 | Configuration | Tank | Powered burn | Arrival margin | Velocity |
 |---|---:|---:|---:|---:|
 | Neither | 20 | 20 | 0; Jupiter locked | Normal |
 | Fuel Tanks III | 25 | 20 | +5 | Normal |
-| Perfect Mars slingshot | 20 | 15 | +5 | +20-40% |
-| Both | 25 | 15 | +10 | +20-40% |
+| Good Mars slingshot | 20 | 15 | +5 | +20-40%; +35% flight instability |
+| Perfect Mars slingshot | 20 | 15 | +5 | +20-40%; normal stability |
+| Tanks + Good slingshot | 25 | 15 | +10 | +20-40%; +35% flight instability |
+| Tanks + Perfect slingshot | 25 | 15 | +10 | +20-40%; normal stability |
 
-The powered-fuel equation is `max(0, route burn * throttle multiplier - slingshot savings)`. Savings are subtracted after throttle scaling, so high throttle can still exceed the available fuel. Gravity-provided movement consumes no propellant and produces no engine heat. Beginning the Jupiter segment consumes the active slingshot; a failed Jupiter attempt returns without momentum and requires another Perfect Mars pass. Fuel Tanks III remains installed permanently.
+The powered-fuel equation is `max(0, route burn * throttle multiplier - slingshot savings)`. Savings are subtracted after throttle scaling, so high throttle can still exceed the available fuel. Good instability is `clamp(base Flight Controls instability + 0.35, 0, 1)`; Perfect adds zero. Gravity-provided movement consumes no propellant and produces no engine heat. Beginning the Jupiter segment consumes the active slingshot and its optional instability penalty; a failed Jupiter attempt returns without momentum and requires another Good-or-better Mars pass. Fuel Tanks III remains installed permanently.
+
+### Target-Bound Transfer Assists
+
+Physical gravity assists are content-defined `TransferAssistDefinition` records, rather than destination-specific runtime behavior. A definition names its source and target, the reviewed scenario step that makes it available, permitted curriculum stages, minimum Flyby grade, fuel saving, speed scaling, Good-grade instability, and impact damage. Completing one writes a saved `PendingTransferAssist` containing the earned values. It is applied only when the prepared launch targets that exact authored destination and is consumed when that launch begins; ordinary recon Perfect bonuses remain generic next-launch bonuses. Destination content can declare a calibrated-margin requirement, so a future assist and route can use the same margin evaluator without adding a new planet branch. The current Mars-to-Jupiter record remains the sole authored physical assist. Saturn's Perfect Jupiter Flyby stays a separate scenario route-unlock challenge.
+
+Version-13 saves serialize the canonical pending-assist record and also retain the legacy Jupiter-slingshot fields as a compatibility projection. Loading an older active Jupiter-slingshot save reconstructs the canonical Mars-to-Jupiter record; no save-version bump is required.
 
 The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The current authored site presents outer and inner four-segment lava layers, then requires protected-Artifact towing and safe Surface extraction. The Artifact grants the standard 75 Expedition XP on full return while the authored scenario preserves its story and route unlocks. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward. Future protected sites configure the same reusable cocoon, objective, event, and reward boundaries rather than adding destination-specific mining code.
 

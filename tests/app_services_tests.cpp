@@ -680,9 +680,14 @@ std::string activeJupiterSlingshotSave()
     state.meta.launchUpgrades.flightControls = 1;
     state.meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
     state.meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
-    state.run.jupiterSlingshotActive = true;
-    state.run.nextLaunchFuelBoost = rocket::tuning::flyby::jupiterSlingshotFuelSavings;
-    state.run.nextLaunchSpeedBoost = rocket::tuning::flyby::slingshotSpeedBoost;
+    state.run.pendingTransferAssist = rocket::PendingTransferAssist {
+        rocket::content::transferAssist::marsJupiter,
+        rocket::content::destination::mars,
+        rocket::content::destination::jupiter,
+        rocket::FlybyGrade::Good,
+        rocket::tuning::flyby::jupiterSlingshotFuelSavings,
+        rocket::tuning::flyby::slingshotSpeedBoost,
+        rocket::tuning::flyby::jupiterSlingshotGoodInstabilityPenalty};
     state.screen = rocket::Screen::Hangar;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -815,7 +820,7 @@ int main()
         assert(ui.activateFocused());
         assert(ui.modalOpen());
         const std::string activeModalFocus = ui.focusedId();
-        assert(!activeModalFocus.empty());
+        assert(activeModalFocus.empty());
         ui.render(); // Clear the modal host rebuild before measuring HUD-only work.
 
         rocket::RealtimeHudState hud;
@@ -1690,7 +1695,10 @@ int main()
 
         fixture.ui.dispatchAction("continue_game");
         fixture.runner.resetFrameClock();
-        fixture.runner.frame();
+        for (int frame = 0; frame < 6; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::Mining);
         assert(std::abs(fixture.renderer.shipDamage - 37.0) < 0.0001);
@@ -1897,8 +1905,10 @@ int main()
         fixture.preferences.value.debugToolsEnabled = true;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
+        for (int frame = 0; frame < 6; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::StoryBriefing);
         assert(!fixture.preferences.value.debugToolsEnabled);
@@ -2210,15 +2220,18 @@ int main()
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
         fixture.host.now += 1.0 / 120.0;
         fixture.runner.frame();
-        assert(fixture.ui.html.find("SLINGSHOT ACTIVE") != std::string::npos);
+        assert(fixture.ui.html.find("SLINGSHOT ACTIVE // WILD RIDE") != std::string::npos);
+        assert(fixture.ui.html.find("+35% flight instability") != std::string::npos);
 
         fixture.ui.dispatchAction(std::string(rocket::ui::actions::continueJupiterSlingshot));
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
         const std::optional<rocket::SaveData> spent = rocket::deserializeSaveData(fixture.saves.value);
         assert(spent.has_value());
         assert(!spent->jupiterSlingshotActive);
+        assert(!spent->pendingTransferAssist.active());
         assert(spent->nextLaunchFuelBoost == 0.0);
         assert(spent->nextLaunchSpeedBoost == 0.0);
+        assert(spent->nextLaunchInstabilityPenalty == 0.0);
         assert(spent->launchUpgrades.fuelTanks == 2);
         fixture.runner.shutdown();
     }
@@ -2231,8 +2244,10 @@ int main()
         fixture.saves.failStore = true;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("new_game");
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
+        for (int frame = 0; frame < 6; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
         assert(fixture.renderer.titleScreen);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         assert(fixture.ui.html.find("data-panel-mode=\"title\"") != std::string::npos);
