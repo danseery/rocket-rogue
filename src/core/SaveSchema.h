@@ -32,6 +32,7 @@ inline constexpr std::string_view shallowRecoveryStreak = "shallowRecoveryStreak
 inline constexpr std::string_view cleanShallowRecoveryStreak = "cleanShallowRecoveryStreak";
 inline constexpr std::string_view nextLaunchFuelBoost = "nextLaunchFuelBoost";
 inline constexpr std::string_view nextLaunchSpeedBoost = "nextLaunchSpeedBoost";
+inline constexpr std::string_view jupiterSlingshotActive = "jupiterSlingshotActive";
 inline constexpr std::string_view screen = "screen";
 inline constexpr std::string_view campaignMilestone = "campaignMilestone";
 inline constexpr std::string_view chapter = "chapter";

@@ -257,15 +257,14 @@ void populateAsteroidField(PreparedLaunch& launch, const Destination& destinatio
 
 } // namespace
 
-double launchFuelCapacityForRank(int rank, double oneLaunchBoost)
+double launchFuelCapacityForRank(int rank)
 {
     return tuning::launchProgression::baseFuelCapacity +
         static_cast<double>(std::clamp(
             rank,
             0,
             tuning::launchProgression::maximumUpgradeRank)) *
-            tuning::launchProgression::fuelPerTankRank +
-        std::max(0.0, oneLaunchBoost);
+            tuning::launchProgression::fuelPerTankRank;
 }
 
 double launchCruiseFuelCostForTier(int tier)
@@ -283,6 +282,17 @@ double launchFuelUseMultiplier(double throttle)
         std::max(0.01, tuning::launch::calibratedThrottle);
     return tuning::launch::fuelDistanceBaseMultiplier +
         tuning::launch::fuelDistanceThrottleMultiplier * normalized * normalized;
+}
+
+double launchPoweredFuelCost(
+    double cruiseFuelCost,
+    double throttle,
+    double slingshotFuelSavings)
+{
+    return std::max(
+        0.0,
+        std::max(0.0, cruiseFuelCost) * launchFuelUseMultiplier(throttle) -
+            std::max(0.0, slingshotFuelSavings));
 }
 
 double launchControlChaosForRank(int rank)
@@ -357,7 +367,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
 {
     PreparedLaunch launch;
     launch.config = state.launchConfig;
-    launch.slingshotFuelBoost = std::max(0.0, state.run.nextLaunchFuelBoost);
+    launch.slingshotFuelSavings = std::max(0.0, state.run.nextLaunchFuelBoost);
     launch.slingshotSpeedBoost = std::max(0.0, state.run.nextLaunchSpeedBoost);
 
     const Destination* configuredDestination = catalog.findDestination(launch.config.destinationId);
@@ -384,7 +394,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         state.meta.launchUpgrades.fuelTanks,
         0,
         tuning::launchProgression::maximumUpgradeRank);
-    launch.fuelCapacity = launchFuelCapacityForRank(fuelRank, launch.slingshotFuelBoost);
+    launch.fuelCapacity = launchFuelCapacityForRank(fuelRank);
     launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
     // Frontier transfers land as soon as the ship reaches the destination.
     // Fuel remains a range constraint, not a hidden landing-reserve check.
@@ -449,7 +459,10 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
         launch.config.missionKind == LaunchMissionKind::FuelCalibration &&
         !launch.config.frontierTransfer;
     flight.projectedFuelRequired = launch.config.frontierTransfer
-        ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle) +
+        ? launchPoweredFuelCost(
+              launch.cruiseFuelCost,
+              flight.selectedThrottle,
+              launch.slingshotFuelSavings) +
             launch.arrivalReserveFuel
         : 0.0;
     flight.projectedFuelReserve = flight.fuelRemaining - flight.projectedFuelRequired;
@@ -602,8 +615,12 @@ LaunchFlightStep updateLaunchFlight(
         const double fuelUsePerProgress = flight.returningHome &&
                 flight.fuelSurveyReturnUsePerProgress > 0.0
             ? flight.fuelSurveyReturnUsePerProgress
-            : launch.cruiseFuelCost *
-                launchFuelUseMultiplier(flight.selectedThrottle);
+            : (flight.returningHome
+                  ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle)
+                  : launchPoweredFuelCost(
+                        launch.cruiseFuelCost,
+                        flight.selectedThrottle,
+                        launch.slingshotFuelSavings));
         flight.fuelRemaining = std::max(
             0.0,
             flight.fuelRemaining - traveledDistance * fuelUsePerProgress);
@@ -613,8 +630,14 @@ LaunchFlightStep updateLaunchFlight(
     const double projectedDistance = flight.returningHome
         ? flight.travelProgress
         : (launch.config.frontierTransfer ? 1.0 - flight.travelProgress : flight.travelProgress);
+    const double projectedFuelPerProgress = flight.returningHome
+        ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle)
+        : launchPoweredFuelCost(
+              launch.cruiseFuelCost,
+              flight.selectedThrottle,
+              launch.slingshotFuelSavings);
     flight.projectedFuelRequired = std::max(0.0, projectedDistance) *
-        launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle) +
+        projectedFuelPerProgress +
         (!flight.returningHome && launch.config.frontierTransfer
                 ? launch.arrivalReserveFuel
                 : 0.0);
@@ -869,6 +892,8 @@ LaunchOutcome resolveLaunch(
     outcome.failureCause = resolution.failureCause;
     outcome.fuelSurveyReturnTiming = resolution.fuelSurveyReturnTiming;
     outcome.minimumSafetyMargin = resolution.minimumSafetyMargin;
+    outcome.slingshotFuelSavings = launch.slingshotFuelSavings;
+    outcome.slingshotSpeedBoost = launch.slingshotSpeedBoost;
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {

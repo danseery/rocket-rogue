@@ -663,7 +663,10 @@ enum class FlybyPurpose {
     Recon,
     ScenarioChallenge,
     // Serialized compatibility name. New mechanics use ScenarioChallenge.
-    SaturnSlingshot = ScenarioChallenge
+    SaturnSlingshot = ScenarioChallenge,
+    // A literal Mars departure. Unlike reconnaissance or scenario data, a
+    // Perfect pass leaves the ship physically moving toward Jupiter.
+    JupiterSlingshot
 };
 
 enum class CampaignObjectiveId {
@@ -1163,6 +1166,8 @@ struct LaunchOutcome {
     double payout = 0.0;
     double transferFuelRemaining = 0.0;
     double transferFuelCapacity = 0.0;
+    double slingshotFuelSavings = 0.0;
+    double slingshotSpeedBoost = 0.0;
     double recoveryCost = 0.0;
     int shipDamage = 0;
     bool crewKilled = false;
@@ -1320,7 +1325,7 @@ struct FlybyRunState {
     int blueprintGain = 0;
     double rewardBonusScale = 1.0;
     bool slingshotAwarded = false;
-    double slingshotFuelBoost = 0.0;
+    double slingshotFuelSavings = 0.0;
     double slingshotSpeedBoost = 0.0;
     double slingshotSpeedScale = 1.0;
     std::vector<FlybyTrailPoint> trailPoints;
@@ -1819,8 +1824,12 @@ struct RunState {
     SurfaceScanRunState surfaceScan;
     SurfacePushRunState surfacePush;
     MiningRunState mining;
+    // Serialized under the compatibility field name nextLaunchFuelBoost.
+    // The value is powered-route fuel saved by existing Flyby momentum; it
+    // never changes the physical Transfer Tank capacity.
     double nextLaunchFuelBoost = 0.0;
     double nextLaunchSpeedBoost = 0.0;
+    bool jupiterSlingshotActive = false;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;

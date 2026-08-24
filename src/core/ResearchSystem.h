@@ -176,6 +176,10 @@ bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact);
 bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, ArtifactRecord& artifact);
 bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
 bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
+bool jupiterWindowReviewed(const GameState& state, const ContentCatalog& catalog);
+bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog);
+bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog);
+bool armJupiterSlingshot(GameState& state);
 bool startScenarioFlybyRun(
     GameState& state,
     const ContentCatalog& catalog,

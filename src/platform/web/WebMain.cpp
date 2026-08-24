@@ -948,6 +948,16 @@ void rr_debug_hangar()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_jupiter_options(int mode)
+{
+    if (g_app) {
+        g_app->debugShowJupiterOptions(mode);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_results()
 {
     if (g_app) {

@@ -2623,8 +2623,14 @@ SaveData captureSaveData(const GameState& state)
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
     save.nextLaunchFuelBoost = state.run.nextLaunchFuelBoost;
     save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
+    save.jupiterSlingshotActive = state.run.jupiterSlingshotActive;
     if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
+    } else if (state.screen == Screen::Flyby) {
+        // Authored departure Flybys do not persist their realtime simulation.
+        // A completed Jupiter pass persists its physical momentum separately
+        // and safely resumes at the Hangar continuation beat.
+        save.screen = Screen::Hangar;
     } else if ((state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) && state.run.surfaceExpedition.active) {
         save.screen = Screen::SurfaceExpedition;
     } else {
@@ -2731,6 +2737,12 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.cleanShallowRecoveryStreak = std::max(0, save.cleanShallowRecoveryStreak);
     state.run.nextLaunchFuelBoost = std::max(0.0, save.nextLaunchFuelBoost);
     state.run.nextLaunchSpeedBoost = std::max(0.0, save.nextLaunchSpeedBoost);
+    state.run.jupiterSlingshotActive = save.jupiterSlingshotActive;
+    if (state.run.jupiterSlingshotActive) {
+        state.run.nextLaunchFuelBoost = std::max(
+            state.run.nextLaunchFuelBoost,
+            tuning::flyby::jupiterSlingshotFuelSavings);
+    }
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
@@ -3076,6 +3088,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::cleanShallowRecoveryStreak, save.cleanShallowRecoveryStreak);
     writeField(out, save_schema::field::nextLaunchFuelBoost, save.nextLaunchFuelBoost);
     writeField(out, save_schema::field::nextLaunchSpeedBoost, save.nextLaunchSpeedBoost);
+    writeField(out, save_schema::field::jupiterSlingshotActive, save.jupiterSlingshotActive ? 1 : 0);
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
@@ -3370,6 +3383,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.nextLaunchFuelBoost = parseDouble(value, save.nextLaunchFuelBoost);
         } else if (key == save_schema::field::nextLaunchSpeedBoost) {
             save.nextLaunchSpeedBoost = parseDouble(value, save.nextLaunchSpeedBoost);
+        } else if (key == save_schema::field::jupiterSlingshotActive) {
+            save.jupiterSlingshotActive = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::screen) {
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::campaignMilestone) {

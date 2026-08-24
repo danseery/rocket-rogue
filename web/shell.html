@@ -465,6 +465,10 @@
         </button>
         <div class="debug-accordion-panel" id="debug-menu-mission-prep" hidden>
           <button type="button" data-debug-action="hangar">Hangar board</button>
+          <button type="button" data-debug-action="jupiter-neither">Jupiter: neither</button>
+          <button type="button" data-debug-action="jupiter-tanks">Jupiter: tanks</button>
+          <button type="button" data-debug-action="jupiter-slingshot">Jupiter: slingshot</button>
+          <button type="button" data-debug-action="jupiter-both">Jupiter: both</button>
           <button type="button" data-debug-action="navigation">Navigation board</button>
         </div>
       </section>
@@ -875,6 +879,7 @@
       debugFlyby: () => rrCall("rr_debug_flyby"),
       debugOrbit: () => rrCall("rr_debug_orbit"),
       debugHangar: () => rrCall("rr_debug_hangar"),
+      debugJupiterOptions: (mode) => rrCall("rr_debug_jupiter_options", [mode], ["number"]),
       debugResults: () => rrCall("rr_debug_results"),
       debugArrivalOps: () => rrCall("rr_debug_arrival_ops"),
       debugResearch: () => rrCall("rr_debug_research"),
@@ -1003,6 +1008,10 @@
       flyby: () => rr.debugFlyby(),
       orbit: () => rr.debugOrbit(),
       hangar: () => rr.debugHangar(),
+      "jupiter-neither": () => rr.debugJupiterOptions(0),
+      "jupiter-tanks": () => rr.debugJupiterOptions(1),
+      "jupiter-slingshot": () => rr.debugJupiterOptions(2),
+      "jupiter-both": () => rr.debugJupiterOptions(3),
       results: () => rr.debugResults(),
       "arrival-ops": () => rr.debugArrivalOps(),
       research: () => rr.debugResearch(),

@@ -74,6 +74,10 @@ inline constexpr std::string_view beginSaturnSlingshot = "begin_saturn_slingshot
 inline constexpr std::string_view retrySaturnSlingshot = "retry_saturn_slingshot";
 inline constexpr std::string_view acknowledgeSaturnSlingshotFailure = "acknowledge_saturn_slingshot_failure";
 inline constexpr std::string_view claimSaturnCourse = "claim_saturn_course";
+inline constexpr std::string_view acknowledgeJupiterWindow = "acknowledge_jupiter_window";
+inline constexpr std::string_view openJupiterRefit = "open_jupiter_refit";
+inline constexpr std::string_view beginJupiterSlingshot = "begin_jupiter_slingshot";
+inline constexpr std::string_view continueJupiterSlingshot = "continue_jupiter_slingshot";
 inline constexpr std::string_view scenarioActionPrefix = "scenario_action:";
 
 inline std::string buyOffer(int index)
@@ -164,6 +168,8 @@ inline constexpr std::string_view marsBayCompletion = "mars_bay_completion";
 inline constexpr std::string_view ioVolcanicBriefing = "io_volcanic_briefing";
 inline constexpr std::string_view saturnSlingshotBriefing = "saturn_slingshot_briefing";
 inline constexpr std::string_view saturnSlingshotFailure = "saturn_slingshot_failure";
+inline constexpr std::string_view jupiterWindow = "jupiter_window";
+inline constexpr std::string_view jupiterSlingshotActive = "jupiter_slingshot_active";
 } // namespace modals
 
 namespace briefings {

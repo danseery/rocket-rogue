@@ -1169,6 +1169,99 @@ std::string saturnSlingshotFailureModal(const GameState& state)
 
 #endif
 
+bool jupiterWindowAvailable(const GameState& state, const ContentCatalog& catalog)
+{
+    return currentDestination(state, catalog).id == content::destination::mars &&
+        hasUnlock(state.meta, content::unlock::routeJupiter) &&
+        (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
+         state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer);
+}
+
+std::string jupiterWindowModal(const GameState& state, const ContentCatalog& catalog)
+{
+    if (!jupiterWindowAvailable(state, catalog)) {
+        return {};
+    }
+
+    const bool reviewed = jupiterWindowReviewed(state, catalog);
+    const double tank = launchFuelCapacity(state);
+    const double routeBurn = launchCruiseFuelCostForTier(3);
+    const double tankMargin = tank - routeBurn;
+    const double slingshotBurn = std::max(
+        0.0,
+        routeBurn - tuning::flyby::jupiterSlingshotFuelSavings);
+    const double combinedMargin = tank - slingshotBurn;
+    const bool tanksThreeInstalled =
+        launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+    const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
+    const int tankCost = fuelTanksThree == nullptr ? 92 : moduleOfferCost(*fuelTanksThree);
+
+    std::ostringstream body;
+    body << "<section class=\"jupiter-window modal-body campaign-briefing\">"
+        << "<span class=\"activity-introduction-kicker\">JUPITER TRANSFER // OPEN OPTIONS</span>"
+        << "<p class=\"activity-introduction-setup\">Create five fuel of transfer margin. Build it into the ship, take it from Mars's gravity, or stack both.</p>"
+        << "<div class=\"jupiter-option-grid controller-choice-row\">"
+        << "<article class=\"jupiter-option-card\"><span>PERMANENT ENGINEERING</span><h3>FUEL TANKS III</h3>"
+        << "<p>" << (tanksThreeInstalled
+            ? "Transfer Tank capacity is 25. The permanent engineering margin is installed; the Jupiter burn remains "
+            : "Increase the Transfer Tank from 20 to 25. The Jupiter burn remains ")
+        << display::fixed(routeBurn, 0) << ".</p>"
+        << "<strong>" << (tanksThreeInstalled
+            ? "INSTALLED // +5 permanent capacity // No flight risk"
+            : std::to_string(tankCost) + " credits // +5 permanent capacity // No flight risk")
+        << "</strong></article>"
+        << "<article class=\"jupiter-option-card\"><span>PRESS YOUR LUCK</span><h3>MARS SLINGSHOT</h3>"
+        << "<p>Hold the gold corridor for a Perfect pass. Mars gravity replaces five fuel of powered travel for one attempt.</p>"
+        << "<strong>" << (state.run.jupiterSlingshotActive
+            ? "ACTIVE // " + display::fixed(slingshotBurn, 0) + " powered burn // +" +
+                display::percent(state.run.nextLaunchSpeedBoost) + " velocity"
+            : "Perfect required // " + display::fixed(slingshotBurn, 0) +
+                " powered burn // +20–40% velocity // Impact damages hull")
+        << "</strong></article>"
+        << "</div><div class=\"jupiter-combined-preview\"><span>STACK BOTH</span><strong>25 tank // 15 burn // 10 margin // +slingshot velocity</strong>"
+        << "<p>Neither option closes the other. Current hardware margin: "
+        << display::signedFixed(tankMargin, 0) << ". Current combined margin: "
+        << display::signedFixed(combinedMargin, 0) << ".</p></div>"
+        << "<div class=\"modal-actions action-row rr-action-footer jupiter-window-actions\">"
+        << button("Open Refit", ui::actions::openJupiterRefit, "ok", true)
+        << (state.run.jupiterSlingshotActive
+            ? button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "warn")
+            : button("Begin Mars Slingshot", ui::actions::beginJupiterSlingshot, "warn"))
+        << button("Return to Hangar", ui::actions::acknowledgeJupiterWindow, "ghost")
+        << "</div></section>";
+    return reviewed
+        ? modalTemplate(ui::modals::jupiterWindow, "THE JUPITER WINDOW", body.str())
+        : autoModalTemplate(ui::modals::jupiterWindow, "THE JUPITER WINDOW", body.str(), false);
+}
+
+std::string jupiterSlingshotActiveModal(const GameState& state, const ContentCatalog& catalog)
+{
+    if (state.screen != Screen::Hangar || !state.run.jupiterSlingshotActive ||
+        currentDestination(state, catalog).id != content::destination::mars) {
+        return {};
+    }
+    const double tank = launchFuelCapacity(state);
+    const double routeBurn = launchCruiseFuelCostForTier(3);
+    const double poweredBurn = std::max(0.0, routeBurn - pendingLaunchFuelSavings(state));
+    const double margin = tank - poweredBurn;
+    std::ostringstream body;
+    body << "<section class=\"activity-introduction modal-body campaign-briefing jupiter-slingshot-active\">"
+        << "<span class=\"activity-introduction-kicker\">SLINGSHOT ACTIVE</span>"
+        << "<p class=\"activity-introduction-setup\">Mars's gravity has already sent the ship toward Jupiter.</p>"
+        << "<div class=\"activity-introduction-payoff\"><span>Transfer underway</span><strong>"
+        << display::fixed(tank, 0) << " tank // " << display::fixed(poweredBurn, 0)
+        << " powered burn // " << display::fixed(margin, 0) << " margin // +"
+        << display::percent(state.run.nextLaunchSpeedBoost) << " velocity</strong></div>"
+        << "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
+        << button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "ok", true)
+        << "</div></section>";
+    return autoModalTemplate(
+        ui::modals::jupiterSlingshotActive,
+        "SLINGSHOT ACTIVE",
+        body.str(),
+        false);
+}
+
 std::string scenarioObjectiveStateLabel(ScenarioStepState state)
 {
     switch (state) {
@@ -1337,7 +1430,16 @@ std::string scenarioObjectiveModalForDestination(
     const ContentCatalog& catalog,
     std::string_view destinationId)
 {
-    return scenarioObjectiveModal(scenarioObjectiveForDestination(state, catalog, destinationId));
+    const ScenarioObjectivePresentation objective =
+        scenarioObjectiveForDestination(state, catalog, destinationId);
+    if (objective.scenarioId == content::scenario::marsBayExpansion &&
+        objective.stepId == "funding") {
+        // The Jupiter Window owns a three-action, non-exclusive briefing.
+        // The generic one-action scenario modal would falsely imply a single
+        // prescribed path through Refit.
+        return {};
+    }
+    return scenarioObjectiveModal(objective);
 }
 
 int scenarioCommonAboard(const GameState& state, std::string_view destinationId)
@@ -2430,14 +2532,26 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
         if (!hasUnlock(state.meta, content::unlock::routeJupiter)) {
             return {"Complete Mars Bay Expansion", "Finish the Mars contract to reveal the Jupiter route."};
         }
-        if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 3) {
-            return {"Jupiter transfer requires 25 transfer fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
+        if (!jupiterTransferMarginReady(state)) {
+            return {
+                "Create 5 fuel of Jupiter transfer margin",
+                "Install Fuel Tanks III, fly a Perfect Mars slingshot, or stack both. Successful Mars operations reopen Refit."};
         }
-        return {"Reach Jupiter", "Steer through the asteroid gaps. Reaching Jupiter completes the flight."};
+        return {
+            "Reach Jupiter",
+            state.run.jupiterSlingshotActive
+                ? "Mars gravity is carrying the ship outward. Continue through the asteroid gaps."
+                : "Fuel Tanks III supplies permanent margin. The optional Mars slingshot still stacks."};
     case LaunchTrainingStage::JupiterTransfer:
         return launchMissionReady(state)
-            ? std::pair<std::string, std::string>{"Reach Jupiter", "Fuel Tanks III is ready. Hull Plating remains optional."}
-            : std::pair<std::string, std::string>{"Jupiter transfer requires 25 transfer fuel", "Current capacity is 20. Successful Mars operations earn credits and reopen Refit."};
+            ? std::pair<std::string, std::string>{
+                  "Reach Jupiter",
+                  state.run.jupiterSlingshotActive
+                      ? "Mars slingshot active. Fuel Tanks III remains optional and stacks."
+                      : "Fuel Tanks III is ready. A Perfect Mars slingshot remains optional and stacks."}
+            : std::pair<std::string, std::string>{
+                  "Create 5 fuel of Jupiter transfer margin",
+                  "Install Fuel Tanks III, fly a Perfect Mars slingshot, or stack both."};
     case LaunchTrainingStage::Complete:
         return {"Prepare the next flight", "Current destination: " + target.name};
     }
@@ -3164,6 +3278,7 @@ std::string buildGamePanelMarkup(
         const std::string destinationName = flybyDestination == nullptr ? currentFrontier.name : flybyDestination->name;
         const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
         const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
+        const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
         const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
             !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
         const ScenarioObjectivePresentation challengeObjective = scenarioChallenge
@@ -3173,6 +3288,45 @@ std::string buildGamePanelMarkup(
             ? scenarioObjectiveForDestination(state, catalog, flybyDestination->id)
             : ScenarioObjectivePresentation {};
         const bool clearsGenericRoute = !scenarioChallenge && flybyClearsGenericNextRoute(state, catalog);
+
+        if (flyby.completed && jupiterSlingshot) {
+            const double speedScale = flyby.slingshotAwarded
+                ? flyby.slingshotSpeedScale
+                : flybySlingshotScale(flyby);
+            const double speedBoost = flyby.slingshotAwarded
+                ? flyby.slingshotSpeedBoost
+                : tuning::flyby::slingshotSpeedBoost * speedScale;
+            const double tank = launchFuelCapacity(state);
+            const double poweredBurn = launchCruiseFuelCostForTier(3) -
+                tuning::flyby::jupiterSlingshotFuelSavings;
+            const double margin = tank - poweredBurn;
+            const bool perfect = grade == FlybyGrade::Perfect;
+            const std::string title = perfect
+                ? "SLINGSHOT ACTIVE"
+                : (flyby.collidedWithBody ? "MARS IMPACT" : "SLINGSHOT LOST");
+            const std::string body = perfect
+                ? "Mars's gravity has already sent the ship toward Jupiter. Continue the transfer with propellant-free velocity already carrying the ship outward."
+                : (flyby.collidedWithBody
+                      ? "The ship clipped Mars. Hull damage applies, Jupiter departure did not occur, and both transfer options remain available."
+                      : "Only a Perfect pass supplies enough gravity momentum. Retry the Flyby, install Fuel Tanks III, or do both.");
+            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\"jupiter-slingshot\" hidden></div>";
+            out << missionStamp(
+                "Mars departure",
+                title,
+                body,
+                perfect ? display::fixed(tank, 0) + " tank" : "NO DEPARTURE",
+                perfect ? display::fixed(poweredBurn, 0) + " powered burn" : "PERFECT REQUIRED",
+                perfect
+                    ? display::fixed(margin, 0) + " margin // +" + display::percent(speedBoost) + " velocity"
+                    : (flyby.collidedWithBody
+                          ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
+                          : "RETRY OR REFIT"),
+                perfect ? ui::actions::continueJupiterSlingshot : ui::actions::flybyContinue,
+                perfect ? std::string_view("Continue to Jupiter") : std::string_view("Return to Hangar"));
+            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+            out << inventoryTemplate(state, catalog);
+            return out.str();
+        }
 
         if (flyby.completed) {
             const std::string resultTitle = scenarioChallenge
@@ -3187,7 +3341,7 @@ std::string buildGamePanelMarkup(
                             ? "PLANET SKIPPED"
                             : flybyGradeLabel(grade)));
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
-            const double flybyFuelBoost = flyby.slingshotAwarded ? flyby.slingshotFuelBoost : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
+            const double flybyFuelSavings = flyby.slingshotAwarded ? flyby.slingshotFuelSavings : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
             const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
             const std::string resultBody = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect
@@ -3220,7 +3374,7 @@ std::string buildGamePanelMarkup(
                 : (flyby.collidedWithBody
                 ? "Hull damage logged"
                 : (grade == FlybyGrade::Perfect
-                    ? "+" + display::fixed(flybyFuelBoost, 1) + " fuel, +" + display::fixed(flybySpeedBoost, 2) + " speed"
+                    ? display::fixed(flybyFuelSavings, 1) + " fuel saved, +" + display::percent(flybySpeedBoost) + " velocity"
                     : (grade == FlybyGrade::Good
                           ? (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST"))
                           : "APPROACH UNCOMMITTED")));
@@ -3254,12 +3408,17 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<div data-flyby-run=\"1\" data-flyby-completed=\"0\" data-flyby-purpose=\""
-            << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
+            << (jupiterSlingshot ? "jupiter-slingshot" : (scenarioChallenge ? "scenario-challenge" : "recon"))
+            << "\" hidden></div>";
         out << "<section class=\"live-hud-header\"><div><h2>"
-            << htmlEscape(scenarioChallenge ? challengeObjective.title : "Manual Flyby") << "</h2>"
-            << "<p class=\"phase-copy\">" << htmlEscape(scenarioChallenge
-                ? "PERFECT REQUIRED — " + challengeObjective.detail
-                : "Hold the approach corridor until the timer closes.")
+            << htmlEscape(jupiterSlingshot
+                ? "Mars Slingshot"
+                : (scenarioChallenge ? challengeObjective.title : "Manual Flyby")) << "</h2>"
+            << "<p class=\"phase-copy\">" << htmlEscape(jupiterSlingshot
+                ? "PERFECT REQUIRED — Hold the gold corridor. Mars gravity will carry this ship directly toward Jupiter."
+                : (scenarioChallenge
+                      ? "PERFECT REQUIRED — " + challengeObjective.detail
+                      : "Hold the approach corridor until the timer closes."))
             << "</p></div>" << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
         if (scenarioChallenge) {
             out << scenarioObjectiveMarkup(challengeObjective, false, false);
@@ -3483,7 +3642,25 @@ std::string buildGamePanelMarkup(
 
         std::ostringstream summaryBody;
         summaryBody << "<section class=\"launch-outcome-summary\"><p class=\"launch-outcome-consequence\">"
-            << htmlEscape(summary.consequence) << "</p><div class=\"ui-outcome-rows\">"
+            << htmlEscape(summary.consequence) << "</p>";
+        if (successfulReturn &&
+            state.lastOutcome.destinationId == content::destination::jupiter &&
+            state.lastOutcome.recoveryMethod == RecoveryMethod::TransferArrival) {
+            const bool usedSlingshot = state.lastOutcome.slingshotFuelSavings + 0.000001 >=
+                tuning::flyby::jupiterSlingshotFuelSavings;
+            const bool usedTanks = state.lastOutcome.transferFuelCapacity + 0.000001 >= 25.0;
+            const std::string arrivalMethod = usedSlingshot && usedTanks
+                ? "MAXIMUM PREPARATION"
+                : (usedSlingshot ? "BORROWED MOMENTUM" : "PERMANENT ENGINEERING MARGIN");
+            const std::string arrivalCopy = usedSlingshot && usedTanks
+                ? "Fuel Tanks III supplied permanent reserve while a Perfect Mars pass cut the powered burn. Preparation and execution stacked."
+                : (usedSlingshot
+                    ? "Mars's gravity supplied the missing transfer movement. The ship arrived after accepting the flyby risk."
+                    : "Fuel Tanks III carried five permanent fuel beyond the calibrated burn. No flyby risk was required.");
+            summaryBody << "<div class=\"jupiter-arrival-method\"><span>JUPITER ARRIVAL</span><strong>"
+                << htmlEscape(arrivalMethod) << "</strong><p>" << htmlEscape(arrivalCopy) << "</p></div>";
+        }
+        summaryBody << "<div class=\"ui-outcome-rows\">"
             << "<div><span>OUTCOME</span><strong>" << htmlEscape(presentation.label) << "</strong></div>"
             << "<div><span>CREW</span><strong>" << htmlEscape(
                 presentation.crewFate.active ? presentation.crewFate.title : std::string_view("Recovered")) << "</strong></div>"
@@ -3630,7 +3807,7 @@ std::string buildGamePanelMarkup(
                 "Branching path",
                 "Map descent or depart",
                 orbitAvailable
-                    ? panelActionButton("CAPTURE ORBIT", ui::actions::arrivalOrbit, "warn")
+                    ? panelActionButton("ORBIT", ui::actions::arrivalOrbit, "warn")
                     : disabledPanelButton(text::buttons::unavailable),
                 orbitIntroduction);
             out << arrivalOperationCard(
@@ -3639,7 +3816,7 @@ std::string buildGamePanelMarkup(
                 "Terminal approach",
                 "",
                 landingAvailable
-                    ? panelActionButton("DESCEND DIRECT", ui::actions::arrivalLanding, "danger")
+                    ? panelActionButton("LAND", ui::actions::arrivalLanding, "danger")
                     : disabledPanelButton(text::buttons::unavailable),
                 landingIntroduction);
         }
@@ -3664,7 +3841,7 @@ std::string buildGamePanelMarkup(
                 ui::modals::flybyIntroduction,
                 "FLYBY — PASS THROUGH",
                 "A Good or Perfect pass banks Research Data and credits, closes Orbit and Landing, and ends this visit.",
-                "At authored objectives the route stays blocked. Later generic routes can be cleared quickly by sacrificing surface resources. Perfect also stores a next-launch solution.",
+                "At authored objectives the route stays blocked. Later generic routes can be cleared quickly by sacrificing surface resources. Perfect also stores powered-fuel savings and extra velocity for the next launch.",
                 "Begin flyby",
                 ui::actions::arrivalFlyby,
                 "ok");
@@ -4556,7 +4733,45 @@ std::string buildGamePanelMarkup(
         out << hangarFuelChip(metric);
     }
     out << "</div>";
-    if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+    const bool showJupiterOptions = jupiterWindowAvailable(state, catalog);
+    if (showJupiterOptions) {
+        const double tank = launchFuelCapacity(state);
+        const double routeBurn = launchCruiseFuelCostForTier(3);
+        const double savings = state.run.jupiterSlingshotActive
+            ? pendingLaunchFuelSavings(state)
+            : 0.0;
+        const double poweredBurn = std::max(0.0, routeBurn - savings);
+        const double margin = tank - poweredBurn;
+        const bool tanksThree = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+        const int filledSegments = std::clamp(
+            static_cast<int>(std::floor(std::max(0.0, margin) + 0.000001)),
+            0,
+            10);
+        out << "<section class=\"hangar-frontier-readiness phase-lane\" data-jupiter-options=\"1\" aria-label=\"Jupiter transfer margin "
+            << htmlEscape(display::fixed(margin, 0) + " fuel; 5 required") << "\">"
+            << "<div class=\"hangar-frontier-head\"><div><span>NEXT FRONTIER</span><strong>JUPITER OPTIONS</strong></div>"
+            << "<div><b>" << htmlEscape(display::signedFixed(margin, 0))
+            << " MARGIN</b><small>5 REQUIRED</small></div></div>"
+            << "<div class=\"hangar-frontier-contributors\">"
+            << "<div><span>FUEL TANKS III</span><strong>" << display::fixed(tank, 0)
+            << " tank</strong><small>" << (tanksThree ? "+5 permanent capacity // INSTALLED" : "+5 permanent capacity // 92 credits")
+            << "</small></div>"
+            << "<div><span>MARS SLINGSHOT</span><strong>";
+        if (state.run.jupiterSlingshotActive) {
+            out << display::fixed(poweredBurn, 0) << " powered burn</strong><small>ACTIVE // +"
+                << display::percent(state.run.nextLaunchSpeedBoost) << " velocity";
+        } else {
+            out << "Perfect Flyby</strong><small>-5 powered fuel // +20–40% velocity";
+        }
+        out << "</small></div></div><div class=\"hangar-frontier-meter\" aria-hidden=\"true\">";
+        for (int segment = 0; segment < 10; ++segment) {
+            out << "<i class=\"" << (segment < filledSegments ? "is-filled " : "")
+                << (segment == 4 ? "is-required-edge" : "") << "\"></i>";
+        }
+        out << "</div><div class=\"hangar-frontier-foot\"><p>Either option creates the required margin. Both stack to 10 margin and slingshot velocity.</p>"
+            << modalButton("Review options", ui::modals::jupiterWindow, "ghost")
+            << "</div></section>";
+    } else if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
         const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         out << "<section class=\"objective-strip rr-objective-strip phase-lane\"><span>Objective</span><strong>"
             << htmlEscape(title) << "</strong><p>" << htmlEscape(detail) << "</p></section>";
@@ -4588,21 +4803,6 @@ std::string buildGamePanelMarkup(
     const std::string prepareLaunchLabel = "Launch: " + launchTarget.name;
     const bool prepareLaunchBlocked =
         launchReadiness.blocked || !currentDestinationLaunchReady(state, catalog);
-    const FrontierGateStatus nextFrontierGate = next != nullptr
-        ? frontierGateStatusForDestination(state, catalog, next->id)
-        : FrontierGateStatus {};
-    const double nextFrontierRequiredFuel = next != nullptr
-        ? tuning::launchProgression::baseFuelCapacity + static_cast<double>(
-              std::clamp(next->tier, 0, tuning::launchProgression::maximumUpgradeRank)) *
-              tuning::launchProgression::fuelPerTankRank
-        : 0.0;
-    const double launchFuelAvailable = launchFuelCapacity(state);
-    const bool nextFrontierFuelShortfall = next != nullptr &&
-        !navigationAvailable(state) &&
-        !currentFrontier.hiddenFromProgression &&
-        state.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
-        nextFrontierGate.kind == FrontierGateKind::FlightData &&
-        launchFuelAvailable + 0.000001 < nextFrontierRequiredFuel;
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
     if (navigationAvailable(state)) {
         out << button("Open Navigation", ui::actions::openNavigation, "warn");
@@ -4610,40 +4810,30 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
-    out << "<div class=\"hangar-launch-stack\">";
-    if (nextFrontierFuelShortfall) {
-        const int filledSegments = std::clamp(
-            static_cast<int>(std::floor(launchFuelAvailable / std::max(1.0, nextFrontierRequiredFuel) * 10.0)),
-            0,
-            10);
-        const int shortfall = std::max(0, static_cast<int>(std::ceil(nextFrontierRequiredFuel - launchFuelAvailable)));
-        out << "<section class=\"hangar-fuel-requirement\" aria-label=\"Launch fuel requirement: "
-            << htmlEscape(display::fixed(launchFuelAvailable, 0) + " of " +
-                display::fixed(nextFrontierRequiredFuel, 0) + " fuel; " + std::to_string(shortfall) + " short")
-            << "\"><header><span>LAUNCH FUEL</span><strong>"
-            << htmlEscape(display::fixed(launchFuelAvailable, 0) + " / " +
-                display::fixed(nextFrontierRequiredFuel, 0))
-            << "</strong><small>" << shortfall << " SHORT</small></header><div class=\"hangar-fuel-meter\" aria-hidden=\"true\">";
-        for (int segment = 0; segment < 10; ++segment) {
-            out << "<span class=\"" << (segment < filledSegments ? "is-filled" : "") << "\"></span>";
-        }
-        out << "</div></section>";
+    if (state.run.jupiterSlingshotActive) {
+        out << button("Continue to Jupiter", ui::actions::continueJupiterSlingshot, "ok", true);
+    } else {
+        out << (prepareLaunchBlocked
+            ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep")
+            : (showLaunchIntroduction
+                ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok hangar-launch-prep")
+                : (showFlightControlsIntroduction
+                    ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep")
+                    : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok hangar-launch-prep", true))));
     }
-    out << (prepareLaunchBlocked
-        ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep")
-        : (showLaunchIntroduction
-            ? modalButton(prepareLaunchLabel, ui::modals::launchIntroduction, "ok hangar-launch-prep")
-            : (showFlightControlsIntroduction
-                ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep")
-                : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok hangar-launch-prep", true))));
-    out << "</div>";
-    if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression) {
+    if (showJupiterOptions && !state.run.jupiterSlingshotActive) {
+        out << (canStartJupiterSlingshot(state, catalog)
+            ? button("Begin Mars Slingshot", ui::actions::beginJupiterSlingshot, "warn")
+            : disabledButton("Mars Slingshot Unavailable"));
+        if (jupiterTransferMarginReady(state)) {
+            out << button("Transfer: Jupiter", ui::actions::attemptFrontier, "danger");
+        }
+    } else if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression &&
+               !state.run.jupiterSlingshotActive) {
         if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
-            out << (nextFrontierFuelShortfall
-                ? std::string()
-                : (launchHardwareBlocked
-                    ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
-                    : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
+            out << (launchHardwareBlocked
+                ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
+                : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger"));
         } else if (canCommitToNextFrontier(state, catalog)) {
             const bool oneWayCommit = next->oneWayExpedition;
             out << (launchReadiness.blocked
@@ -4711,6 +4901,8 @@ std::string buildGamePanelMarkup(
     if (!currentFrontier.hiddenFromProgression) {
         out << scenarioObjectiveModalForDestination(state, catalog, currentFrontier.id);
     }
+    out << jupiterWindowModal(state, catalog);
+    out << jupiterSlingshotActiveModal(state, catalog);
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
     out << inventoryTemplate(state, catalog);

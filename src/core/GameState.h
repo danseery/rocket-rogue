@@ -39,6 +39,11 @@ int moduleOfferCost(const ShipModule& module);
 int crewUpgradeCost(const CrewUpgrade& upgrade);
 int launchUpgradeRank(const GameState& state, LaunchUpgradeKind kind);
 double launchFuelCapacity(const GameState& state);
+double pendingLaunchFuelSavings(const GameState& state);
+double calibratedTransferFuelMargin(
+    const GameState& state,
+    const Destination& destination);
+bool jupiterTransferMarginReady(const GameState& state);
 const ShipModule* nextLaunchUpgrade(const GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);
 bool launchUpgradeUnlocked(const GameState& state, LaunchUpgradeKind kind, int rank);
 bool canInstallLaunchUpgrade(const GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);

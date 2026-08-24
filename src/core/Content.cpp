@@ -548,9 +548,9 @@ ContentCatalog createDefaultContent()
                      {{ScenarioRewardKind::DroneBaySlots, {}, 2, false},
                       {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
                       {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
-                {"funding", {"delivery"}, "JUPITER TRANSFER", "Jupiter Transfer Window",
-                    "The Jupiter transfer requires 25 transfer fuel. Current capacity is 20. Mission credits fund permanent refits, and successful Mars operations reopen the shipyard.",
-                    "MISSION CREDITS FUND PERMANENT REFITS", "Review Refit Options", {},
+                {"funding", {"delivery"}, "JUPITER TRANSFER", "The Jupiter Window",
+                    "Create five fuel of transfer margin. Build it into the ship, take it from Mars's gravity, or stack both.",
+                    "FUEL TANKS III OR PERFECT MARS SLINGSHOT — BENEFITS STACK", "Review Jupiter Options", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}}
             }

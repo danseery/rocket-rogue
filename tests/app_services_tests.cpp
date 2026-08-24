@@ -669,6 +669,25 @@ std::string readyMarsExpansionClaimSave()
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string activeJupiterSlingshotSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xF004ULL);
+    state.run.destinationIndex = 2;
+    state.meta.furthestTier = 2;
+    state.meta.launchLessons.stage = rocket::LaunchTrainingStage::HullIntegrity;
+    state.meta.launchUpgrades.fuelTanks = 2;
+    state.meta.launchUpgrades.flightControls = 1;
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
+    state.run.jupiterSlingshotActive = true;
+    state.run.nextLaunchFuelBoost = rocket::tuning::flyby::jupiterSlingshotFuelSavings;
+    state.run.nextLaunchSpeedBoost = rocket::tuning::flyby::slingshotSpeedBoost;
+    state.screen = rocket::Screen::Hangar;
+    rocket::syncLaunchConfig(state, catalog);
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 } // namespace
 
 int main()
@@ -2123,9 +2142,8 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Claiming the Mars contract refreshes the already-earned refit after the
-    // route unlock, pinning Fuel Tanks III while leaving the funding briefing
-    // saved and unacknowledged until its explicit action.
+    // Claiming the Mars contract opens the saved Jupiter options beat. The
+    // player may review either independent contributor before opening Refit.
     {
         AppFixture fixture;
         fixture.saves.value = readyMarsExpansionClaimSave();
@@ -2137,15 +2155,22 @@ int main()
             std::string(rocket::ui::actions::scenarioActionPrefix) +
             rocket::content::scenario::marsBayExpansion + "|delivery|" +
             std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
         const std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
         assert(saved.has_value());
+        for (int pendingChoice = 0;
+             pendingChoice < 4 && fixture.ui.html.find("surface_upgrade:0") != std::string::npos;
+             ++pendingChoice) {
+            fixture.ui.dispatchAction("surface_upgrade:0");
+            fixture.host.now += 1.0 / 120.0;
+            fixture.runner.frame();
+        }
         assert(std::find(
             saved->unlockKeys.begin(),
             saved->unlockKeys.end(),
             rocket::content::unlock::routeJupiter) != saved->unlockKeys.end());
-        assert(!saved->offerModuleIds.empty());
-        assert(saved->offerModuleIds.front() == rocket::content::module::fuelTanks3);
         const auto marsScenario = std::find_if(
             saved->scenarios.begin(),
             saved->scenarios.end(),
@@ -2157,10 +2182,8 @@ int main()
             : rocket::findScenarioStepProgress(*marsScenario, "funding");
         assert(funding != nullptr && !funding->briefingAcknowledged);
 
-        fixture.ui.dispatchAction(
-            std::string(rocket::ui::actions::scenarioActionPrefix) +
-            rocket::content::scenario::marsBayExpansion + "|funding|" +
-            std::to_string(static_cast<int>(rocket::ScenarioActionKind::AcknowledgeBriefing)));
+        fixture.ui.dispatchAction(std::string(rocket::ui::actions::openJupiterRefit));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
         const std::optional<rocket::SaveData> acknowledged = rocket::deserializeSaveData(fixture.saves.value);
         assert(acknowledged.has_value());
         const auto acknowledgedMars = std::find_if(
@@ -2174,6 +2197,29 @@ int main()
             ? nullptr
             : rocket::findScenarioStepProgress(*acknowledgedMars, "funding");
         assert(acknowledgedFunding != nullptr && acknowledgedFunding->briefingAcknowledged);
+        fixture.runner.shutdown();
+    }
+
+    // Beginning the Jupiter segment spends borrowed Mars momentum immediately
+    // and persists that consumption, while permanent tank ranks are untouched.
+    {
+        AppFixture fixture;
+        fixture.saves.value = activeJupiterSlingshotSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.ui.html.find("SLINGSHOT ACTIVE") != std::string::npos);
+
+        fixture.ui.dispatchAction(std::string(rocket::ui::actions::continueJupiterSlingshot));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        const std::optional<rocket::SaveData> spent = rocket::deserializeSaveData(fixture.saves.value);
+        assert(spent.has_value());
+        assert(!spent->jupiterSlingshotActive);
+        assert(spent->nextLaunchFuelBoost == 0.0);
+        assert(spent->nextLaunchSpeedBoost == 0.0);
+        assert(spent->launchUpgrades.fuelTanks == 2);
         fixture.runner.shutdown();
     }
 

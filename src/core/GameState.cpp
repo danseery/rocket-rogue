@@ -366,6 +366,32 @@ double launchFuelCapacity(const GameState& state)
             tuning::launchProgression::fuelPerTankRank;
 }
 
+double pendingLaunchFuelSavings(const GameState& state)
+{
+    return std::max(0.0, state.run.nextLaunchFuelBoost);
+}
+
+double calibratedTransferFuelMargin(
+    const GameState& state,
+    const Destination& destination)
+{
+    const double routeBurn = std::min(
+        tuning::launch::routeFuelMaximum,
+        tuning::launch::routeFuelBase +
+            static_cast<double>(std::max(1, destination.tier)) *
+                tuning::launch::routeFuelPerTier);
+    return launchFuelCapacity(state) -
+        std::max(0.0, routeBurn - pendingLaunchFuelSavings(state));
+}
+
+bool jupiterTransferMarginReady(const GameState& state)
+{
+    return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3 ||
+        (state.run.jupiterSlingshotActive &&
+         pendingLaunchFuelSavings(state) + 0.000001 >=
+             tuning::flyby::jupiterSlingshotFuelSavings);
+}
+
 const ShipModule* nextLaunchUpgrade(
     const GameState& state,
     const ContentCatalog& catalog,
@@ -497,10 +523,10 @@ bool launchMissionReady(const GameState& state)
             launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 2;
     case LaunchTrainingStage::HullIntegrity:
         return hasUnlock(state.meta, content::unlock::routeJupiter) &&
-            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+            jupiterTransferMarginReady(state);
     case LaunchTrainingStage::JupiterTransfer:
         return hasUnlock(state.meta, content::unlock::routeJupiter) &&
-            launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
+            jupiterTransferMarginReady(state);
     }
     return false;
 }
@@ -1704,14 +1730,14 @@ FrontierGateStatus frontierGateStatusForDestination(
     if (destination->tier == 3 &&
         !launchTrainingAtLeast(state, LaunchTrainingStage::Complete)) {
         status.kind = FrontierGateKind::FlightData;
-        status.current = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3 ? 1 : 0;
+        status.current = jupiterTransferMarginReady(state) ? 1 : 0;
         status.required = 1;
         status.satisfied =
             (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
                 state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
             status.current >= status.required;
-        status.blockerText = "Jupiter requires 25 fuel; current capacity is " +
-            std::to_string(static_cast<int>(launchFuelCapacity(state))) + ".";
+        status.blockerText =
+            "Create 5 fuel of Jupiter transfer margin with Fuel Tanks III, a Perfect Mars slingshot, or both.";
         if (!status.satisfied) {
             return status;
         }

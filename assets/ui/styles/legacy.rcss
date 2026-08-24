@@ -7823,77 +7823,215 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     font-size: 16px;
     line-height: 1.1;
 }
-#rr-panel.hangar-family-panel .hangar-actions .hangar-launch-stack {
+#rr-panel.hangar-family-panel .hangar-frontier-readiness {
     display: flex;
-    flex: 0 0 196px;
-    flex-direction: column;
-    align-items: center;
-    width: 196px;
-    margin: 0px 8px 5px 0px;
-}
-#rr-panel.hangar-family-panel .hangar-actions .hangar-launch-stack .hangar-launch-prep {
-    flex: 0 0 62px;
-    margin: 0px;
-}
-#rr-panel.hangar-family-panel .hangar-actions .hangar-fuel-requirement {
-    display: flex;
-    flex: 0 0 196px;
     flex-direction: column;
     box-sizing: border-box;
-    width: 196px;
-    min-width: 196px;
-    min-height: 48px;
-    height: 48px;
-    margin: 0px 0px 5px 0px;
-    padding: 5px 10px;
+    width: 704px;
+    min-height: 112px;
+    height: auto;
+    margin: 8px 0px 10px 0px;
+    padding: 10px 12px;
     color: #f3c766;
-    background-color: #2b240f;
+    background-color: #191a12;
     border-width: 1px;
     border-color: #9a7b25;
     border-radius: 5px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-requirement header {
+#rr-panel.hangar-family-panel .hangar-frontier-head,
+#rr-panel.hangar-family-panel .hangar-frontier-contributors,
+#rr-panel.hangar-family-panel .hangar-frontier-foot {
     display: flex;
-    align-items: baseline;
+    flex-direction: row;
+    align-items: center;
     width: 100%;
-    white-space: nowrap;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-requirement header span {
+#rr-panel.hangar-family-panel .hangar-frontier-head > div {
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-head > div:last-child {
+    align-items: flex-end;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-head span,
+#rr-panel.hangar-family-panel .hangar-frontier-contributors span,
+#rr-panel.hangar-family-panel .hangar-frontier-foot span {
     color: #d1b46b;
     font-size: 9px;
     line-height: 12px;
     letter-spacing: 1px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-requirement header strong {
-    margin-left: auto;
+#rr-panel.hangar-family-panel .hangar-frontier-head strong {
     color: #fff0bc;
-    font-size: 13px;
+    font-size: 18px;
     font-weight: normal;
-    line-height: 12px;
+    line-height: 22px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-requirement header small {
-    margin-left: 5px;
+#rr-panel.hangar-family-panel .hangar-frontier-head b {
+    color: #fff0bc;
+    font-size: 16px;
+    font-weight: normal;
+    line-height: 20px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-head small {
     color: #ff9551;
-    font-size: 8px;
+    font-size: 9px;
     line-height: 12px;
     letter-spacing: 1px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-meter {
+#rr-panel.hangar-family-panel .hangar-frontier-contributors {
+    margin-top: 8px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-contributors > div {
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+    min-height: 42px;
+    margin-right: 8px;
+    padding: 6px 8px;
+    background-color: #10202a;
+    border-width: 1px;
+    border-color: #355567;
+    border-radius: 4px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-contributors > div:last-child {
+    margin-right: 0px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-contributors strong {
+    color: #f2fcff;
+    font-size: 14px;
+    font-weight: normal;
+    line-height: 17px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-contributors small {
+    color: #a9ddeb;
+    font-size: 10px;
+    line-height: 13px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-meter {
     display: flex;
     flex-direction: row;
     width: 100%;
     height: 8px;
-    margin-top: 5px;
+    margin-top: 8px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-meter span {
+#rr-panel.hangar-family-panel .hangar-frontier-meter i {
     flex: 1 1 0px;
     height: 8px;
     margin-right: 3px;
     background-color: #533d14;
     border-radius: 1px;
 }
-#rr-panel.hangar-family-panel .hangar-fuel-meter span:last-child { margin-right: 0px; }
-#rr-panel.hangar-family-panel .hangar-fuel-meter span.is-filled { background-color: #f0b929; }
+#rr-panel.hangar-family-panel .hangar-frontier-meter i:last-child { margin-right: 0px; }
+#rr-panel.hangar-family-panel .hangar-frontier-meter i.is-filled { background-color: #f0b929; }
+#rr-panel.hangar-family-panel .hangar-frontier-meter i.is-required-edge {
+    border-right-width: 2px;
+    border-right-color: #fff0bc;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-foot {
+    margin-top: 7px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-foot p {
+    flex: 1 1 auto;
+    margin: 0px 10px 0px 0px;
+    color: #d7e7ec;
+    font-size: 10px;
+    line-height: 13px;
+}
+#rr-panel.hangar-family-panel .hangar-frontier-foot button {
+    flex: 0 0 132px;
+    width: 132px;
+    min-height: 30px;
+    height: 30px;
+    margin: 0px;
+    padding: 0px 8px;
+    font-size: 10px;
+    line-height: 30px;
+}
+.jupiter-option-grid {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    margin-top: 10px;
+}
+.jupiter-option-card {
+    display: flex;
+    flex: 1 1 0px;
+    flex-direction: column;
+    min-height: 142px;
+    margin-right: 8px;
+    padding: 10px;
+    background-color: #0e2029;
+    border-width: 1px;
+    border-color: #41677a;
+    border-radius: 5px;
+}
+.jupiter-option-card:last-child { margin-right: 0px; }
+.jupiter-option-card > span,
+.jupiter-combined-preview > span {
+    color: #79d9ef;
+    font-size: 9px;
+    line-height: 12px;
+    letter-spacing: 1px;
+}
+.jupiter-option-card h3 {
+    margin: 4px 0px 5px 0px;
+    color: #f2fcff;
+    font-size: 18px;
+    font-weight: normal;
+    line-height: 22px;
+}
+.jupiter-option-card p,
+.jupiter-combined-preview p {
+    color: #b8ccd4;
+    font-size: 11px;
+    line-height: 15px;
+}
+.jupiter-option-card strong,
+.jupiter-combined-preview strong {
+    margin-top: auto;
+    color: #f3c766;
+    font-size: 10px;
+    font-weight: normal;
+    line-height: 14px;
+}
+.jupiter-combined-preview {
+    display: flex;
+    flex-direction: column;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background-color: #211d0f;
+    border-width: 1px;
+    border-color: #9a7b25;
+    border-radius: 4px;
+}
+.jupiter-combined-preview p { margin: 4px 0px 0px 0px; }
+.jupiter-window-actions button { flex: 1 1 150px; }
+
+.jupiter-arrival-method {
+    margin: 10px 0px;
+    padding: 10px 12px;
+    border-width: 1px;
+    border-color: #b98b20;
+    background-color: #171a16;
+}
+.jupiter-arrival-method span {
+    display: block;
+    color: #d8b64e;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+.jupiter-arrival-method strong {
+    display: block;
+    margin-top: 3px;
+    color: #eef4f5;
+    font-size: 15px;
+}
+.jupiter-arrival-method p {
+    margin-top: 5px;
+    color: #a9bec8;
+}
 .hangar-details-menu {
     display: flex;
     flex-direction: row;

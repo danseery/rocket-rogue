@@ -1908,6 +1908,97 @@ void fuelRefitsTeachMarsAndFundJupiter()
             currentDestinationLaunchReady(jupiterRefit, catalog),
         "insufficient Jupiter fuel must block only the next route while leaving Mars replay available");
 
+    GameState slingshotOnly = jupiterRefit;
+    const double slingshotCreditsBefore = slingshotOnly.run.credits;
+    const int slingshotResearchBefore = slingshotOnly.meta.blueprintProgress;
+    require(startJupiterSlingshotRun(slingshotOnly, catalog) &&
+            slingshotOnly.screen == Screen::Flyby &&
+            slingshotOnly.run.flyby.purpose == FlybyPurpose::JupiterSlingshot,
+        "the Mars departure slingshot must remain available without Fuel Tanks III");
+    {
+        const std::optional<SaveData> inProgressSave = deserializeSaveData(
+            serializeSaveData(captureSaveData(slingshotOnly)));
+        require(inProgressSave.has_value(),
+            "an in-progress Mars departure Flyby must save safely");
+        GameState restoredInProgress = createNewGame(catalog, 0xF0041);
+        restoreSaveData(restoredInProgress, catalog, *inProgressSave);
+        require(restoredInProgress.screen == Screen::Hangar &&
+                !restoredInProgress.run.flyby.active &&
+                canStartJupiterSlingshot(restoredInProgress, catalog),
+            "loading during the realtime Flyby must return to a retryable Hangar without granting momentum");
+    }
+    slingshotOnly.run.flyby.completed = true;
+    slingshotOnly.run.flyby.result = FlybyGrade::Perfect;
+    slingshotOnly.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    slingshotOnly.run.flyby.velocityX = tuning::flyby::maxSpeed;
+    require(armJupiterSlingshot(slingshotOnly),
+        "a Perfect Mars pass must physically arm the one-attempt Jupiter slingshot");
+    const double achievedSpeedBoost = slingshotOnly.run.nextLaunchSpeedBoost;
+    completeFlybyRun(slingshotOnly, catalog);
+    require(slingshotOnly.run.jupiterSlingshotActive &&
+            nearlyEqual(launchFuelCapacity(slingshotOnly), 20.0) &&
+            nearlyEqual(pendingLaunchFuelSavings(slingshotOnly), 5.0) &&
+            nearlyEqual(calibratedTransferFuelMargin(
+                slingshotOnly,
+                *catalog.findDestination(content::destination::jupiter)), 5.0) &&
+            jupiterTransferMarginReady(slingshotOnly),
+        "a Perfect Mars slingshot alone must open Jupiter with 20 tank, 15 burn, and 5 margin");
+    require(nearlyEqual(slingshotOnly.run.credits, slingshotCreditsBefore) &&
+            slingshotOnly.meta.blueprintProgress == slingshotResearchBefore,
+        "the dedicated departure slingshot must award no credits or Research Data");
+    require(achievedSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001 &&
+            achievedSpeedBoost <= tuning::flyby::slingshotSpeedBoost *
+                    tuning::flyby::slingshotMaxSpeedScale + 0.001,
+        "the dedicated slingshot must retain the achieved 20-40 percent travel-rate range");
+
+    const double calibratedBurn = launchPoweredFuelCost(
+        20.0,
+        tuning::launch::calibratedThrottle,
+        tuning::flyby::jupiterSlingshotFuelSavings);
+    require(nearlyEqual(calibratedBurn, 15.0) &&
+            launchPoweredFuelCost(20.0, tuning::launch::pilotingMinimumPoweredThrottle, 5.0) < calibratedBurn &&
+            launchPoweredFuelCost(20.0, 1.0, 5.0) > 20.0,
+        "slingshot savings must apply after throttle scaling so cautious, calibrated, and reckless burns retain distinct risk");
+
+    GameState goodRetry = jupiterRefit;
+    require(startJupiterSlingshotRun(goodRetry, catalog),
+        "the dedicated Mars slingshot should start from the reviewed Jupiter window");
+    goodRetry.run.flyby.completed = true;
+    goodRetry.run.flyby.result = FlybyGrade::Good;
+    completeFlybyRun(goodRetry, catalog);
+    require(!goodRetry.run.jupiterSlingshotActive &&
+            canStartJupiterSlingshot(goodRetry, catalog) &&
+            nearlyEqual(goodRetry.run.credits, slingshotCreditsBefore) &&
+            goodRetry.meta.blueprintProgress == slingshotResearchBefore,
+        "a Good Mars pass must award nothing, leave Jupiter locked, and remain retryable");
+
+    GameState impactRetry = jupiterRefit;
+    require(startJupiterSlingshotRun(impactRetry, catalog),
+        "the dedicated impact fixture must start the Mars slingshot");
+    impactRetry.run.flyby.shipX = tuning::flyby::destinationX;
+    impactRetry.run.flyby.shipY = tuning::flyby::destinationY;
+    const int expectedImpactDamage = impactRetry.run.flyby.impactHullDamage;
+    updateFlybyRun(impactRetry, 0.001);
+    require(impactRetry.run.flyby.completed &&
+            impactRetry.run.flyby.collidedWithBody &&
+            impactRetry.run.shipDamage == expectedImpactDamage &&
+            expectedImpactDamage == tuning::flyby::impactHullDamage,
+        "a Mars slingshot impact must retain the existing 18 hull damage");
+    completeFlybyRun(impactRetry, catalog);
+    require(canStartJupiterSlingshot(impactRetry, catalog),
+        "an impact must spend hull integrity but leave the departure pass retryable");
+
+    SaveData slingshotSave = captureSaveData(slingshotOnly);
+    const std::optional<SaveData> restoredSlingshotSave =
+        deserializeSaveData(serializeSaveData(slingshotSave));
+    require(restoredSlingshotSave.has_value(),
+        "an active Mars slingshot must serialize");
+    GameState restoredSlingshot = createNewGame(catalog, 0xF005);
+    restoreSaveData(restoredSlingshot, catalog, *restoredSlingshotSave);
+    require(restoredSlingshot.run.jupiterSlingshotActive &&
+            nearlyEqual(restoredSlingshot.run.nextLaunchFuelBoost, 5.0),
+        "an active Mars slingshot must survive save/load until the Jupiter attempt begins");
+
     Random jupiterRng(0xF004);
     generateModuleOffers(jupiterRefit, catalog, jupiterRng);
     require(jupiterRefit.run.offerModuleIds[0] == content::module::fuelTanks3,
@@ -1939,6 +2030,99 @@ void fuelRefitsTeachMarsAndFundJupiter()
             nearlyEqual(launchFuelCapacity(jupiterRefit), 25.0) &&
             launchMissionReady(jupiterRefit, catalog),
         "buying the pinned Prototype must spend 92 credits and make the 25-fuel Jupiter transfer available");
+    require(canStartJupiterSlingshot(jupiterRefit, catalog),
+        "installing Fuel Tanks III must never hide or disable the Mars slingshot");
+
+    GameState both = jupiterRefit;
+    both.run.jupiterSlingshotActive = true;
+    both.run.nextLaunchFuelBoost = tuning::flyby::jupiterSlingshotFuelSavings;
+    both.run.nextLaunchSpeedBoost = achievedSpeedBoost;
+    const Destination* jupiter = catalog.findDestination(content::destination::jupiter);
+    require(jupiter != nullptr &&
+            nearlyEqual(launchFuelCapacity(both), 25.0) &&
+            nearlyEqual(launchPoweredFuelCost(
+                launchCruiseFuelCostForTier(jupiter->tier),
+                tuning::launch::calibratedThrottle,
+                pendingLaunchFuelSavings(both)), 15.0) &&
+            nearlyEqual(calibratedTransferFuelMargin(both, *jupiter), 10.0) &&
+            jupiterTransferMarginReady(both),
+        "Fuel Tanks III and the Mars slingshot must stack to 25 tank, 15 burn, and 10 margin");
+
+    PreparedLaunch heatBaseline;
+    heatBaseline.config.destinationId = jupiter->id;
+    heatBaseline.config.frontierTransfer = true;
+    heatBaseline.fuelCapacity = 25.0;
+    heatBaseline.cruiseFuelCost = 20.0;
+    heatBaseline.heatEnabled = true;
+    PreparedLaunch heatSlingshot = heatBaseline;
+    heatSlingshot.slingshotFuelSavings = 5.0;
+    heatSlingshot.slingshotSpeedBoost = achievedSpeedBoost;
+    LaunchFlightState baselineFlight = beginLaunchFlight(heatBaseline, *jupiter);
+    LaunchFlightState slingshotFlight = beginLaunchFlight(heatSlingshot, *jupiter);
+    baselineFlight.selectedThrottle = tuning::launch::calibratedThrottle;
+    slingshotFlight.selectedThrottle = tuning::launch::calibratedThrottle;
+    (void)updateLaunchFlight(baselineFlight, heatBaseline, *jupiter, {}, 0.04);
+    (void)updateLaunchFlight(slingshotFlight, heatSlingshot, *jupiter, {}, 0.04);
+    require(nearlyEqual(baselineFlight.heat, slingshotFlight.heat),
+        "gravity-provided slingshot velocity must add no powered heat input");
+
+    const auto hangarHtml = [&](GameState rendered, std::uint64_t seed) {
+        rendered.screen = Screen::Hangar;
+        syncLaunchConfig(rendered, catalog);
+        Random panelRng(seed);
+        const PreparedLaunch panelLaunch = prepareLaunch(rendered, catalog, panelRng);
+        return buildGamePanelHtml({rendered, catalog, panelLaunch, panelLaunch});
+    };
+    const std::string neitherHtml = hangarHtml(goodRetry, 0xF010);
+    const std::string tanksHtml = hangarHtml(jupiterRefit, 0xF011);
+    const std::string slingshotHtml = hangarHtml(slingshotOnly, 0xF012);
+    const std::string bothHtml = hangarHtml(both, 0xF013);
+    require(neitherHtml.find("THE JUPITER WINDOW") != std::string::npos &&
+            neitherHtml.find("Create five fuel of transfer margin") != std::string::npos &&
+            neitherHtml.find("25 tank // 15 burn // 10 margin // +slingshot velocity") != std::string::npos,
+        "the Jupiter story beat must expose both independent choices and the combined preview");
+    require(neitherHtml.find("20 tank") != std::string::npos &&
+            neitherHtml.find("Perfect Flyby") != std::string::npos &&
+            neitherHtml.find("0 MARGIN") != std::string::npos &&
+            neitherHtml.find("hangar-frontier-meter\" aria-hidden=\"true\"><i") != std::string::npos,
+        "the Hangar readiness strip must show the locked neither-path state without text inside its segmented bar");
+    require(tanksHtml.find("25 tank") != std::string::npos &&
+            tanksHtml.find("+5 MARGIN") != std::string::npos &&
+            tanksHtml.find("Transfer: Jupiter") != std::string::npos &&
+            tanksHtml.find("Begin Mars Slingshot") != std::string::npos,
+        "Fuel Tanks III must open Jupiter while preserving the independent slingshot action");
+    require(slingshotHtml.find("20 tank") != std::string::npos &&
+            slingshotHtml.find("15 powered burn") != std::string::npos &&
+            slingshotHtml.find("+5 MARGIN") != std::string::npos &&
+            slingshotHtml.find("SLINGSHOT ACTIVE") != std::string::npos,
+        "the slingshot-only Hangar must show its exact physical transfer math");
+    require(bothHtml.find("25 tank") != std::string::npos &&
+            bothHtml.find("15 powered burn") != std::string::npos &&
+            bothHtml.find("+10 MARGIN") != std::string::npos,
+        "the both-path Hangar must visibly stack permanent tank capacity and flyby savings");
+    require(tanksHtml.find("Launch: Mars") != std::string::npos &&
+            tanksHtml.find("Begin Mars Slingshot") != std::string::npos &&
+            tanksHtml.find("Transfer: Jupiter") != std::string::npos,
+        "Mars replay, slingshot, and Jupiter transfer must remain separate peer actions");
+
+    const auto jupiterArrivalHtml = [&](double tank, double savings, std::uint64_t seed) {
+        GameState result = both;
+        result.screen = Screen::Results;
+        result.lastOutcome = {};
+        result.lastOutcome.type = LaunchResultType::MissionComplete;
+        result.lastOutcome.failureCause = LaunchFailureCause::None;
+        result.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
+        result.lastOutcome.destinationId = content::destination::jupiter;
+        result.lastOutcome.transferFuelCapacity = tank;
+        result.lastOutcome.slingshotFuelSavings = savings;
+        Random panelRng(seed);
+        const PreparedLaunch panelLaunch = prepareLaunch(result, catalog, panelRng);
+        return buildGamePanelHtml({result, catalog, panelLaunch, panelLaunch});
+    };
+    require(jupiterArrivalHtml(25.0, 0.0, 0xF020).find("PERMANENT ENGINEERING MARGIN") != std::string::npos &&
+            jupiterArrivalHtml(20.0, 5.0, 0xF021).find("BORROWED MOMENTUM") != std::string::npos &&
+            jupiterArrivalHtml(25.0, 5.0, 0xF022).find("MAXIMUM PREPARATION") != std::string::npos,
+        "Jupiter arrival must acknowledge tanks-only, slingshot-only, and stacked methods distinctly");
 }
 
 void refitRerollsSpendAndEscalate()
@@ -2478,6 +2662,11 @@ void arrivalPresentationExplainsCommitmentAndResearchProgress()
         "Arrival board should expose exact unmapped hazard and current/next Research Data milestone meaning");
     require(uncommitted.find("Objective remains active; Mars route stays locked") != std::string::npos,
         "Moon Pass Through should name the authored route blocker before commitment");
+    require(uncommitted.find("rr-button-label\">ORBIT</span>") != std::string::npos
+            && uncommitted.find("rr-button-label\">LAND</span>") != std::string::npos
+            && uncommitted.find("rr-button-label\">CAPTURE ORBIT</span>") == std::string::npos
+            && uncommitted.find("rr-button-label\">DESCEND DIRECT</span>") == std::string::npos,
+        "Arrival approach buttons should use the concise Orbit and Land labels");
 
     require(captureArrivalOrbit(state), "presentation setup should capture Orbit");
     PanelRenderContext capturedContext {state, catalog, launch, launch};
@@ -2589,7 +2778,9 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     const double baselinePerfectReward = perfect.run.credits;
     Random rng(704);
     const PreparedLaunch launch = prepareLaunch(perfect, catalog, rng);
-    require(launch.slingshotFuelBoost >= tuning::flyby::slingshotFuelBoost - 0.001, "prepared launch should include pending slingshot fuel");
+    require(launch.slingshotFuelSavings >= tuning::flyby::slingshotFuelBoost - 0.001, "prepared launch should include pending slingshot fuel savings");
+    require(nearlyEqual(launch.fuelCapacity, launchFuelCapacity(perfect)),
+        "a flyby benefit must save powered fuel without changing tank capacity");
     require(launch.slingshotSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "prepared launch should include pending slingshot speed");
 
     GameState fastPerfect = createNewGame(catalog, 711);

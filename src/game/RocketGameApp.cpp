@@ -629,6 +629,7 @@ void RocketGameApp::consumeNextLaunchBoost()
 {
     state_.run.nextLaunchFuelBoost = 0.0;
     state_.run.nextLaunchSpeedBoost = 0.0;
+    state_.run.jupiterSlingshotActive = false;
 }
 
 double RocketGameApp::liveBurnMultiplier() const
@@ -1689,6 +1690,11 @@ void RocketGameApp::tick(double deltaSeconds)
         const bool wasCompleted = state_.run.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
         if (!wasCompleted && state_.run.flyby.completed) {
+            const bool jupiterSlingshot =
+                state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot;
+            if (jupiterSlingshot && state_.run.flyby.result == FlybyGrade::Perfect) {
+                (void)armJupiterSlingshot(state_);
+            }
             const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
                 !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
             const ScenarioDefinition* scenario = scenarioChallenge
@@ -1699,24 +1705,30 @@ void RocketGameApp::tick(double deltaSeconds)
                 : findScenarioStepDefinition(*scenario, state_.run.flyby.scenarioStepId);
             switch (state_.run.flyby.result) {
             case FlybyGrade::Perfect:
-                state_.statusLine = scenarioChallenge
-                    ? "Perfect corridor held. Claim the scenario reward."
-                    : "Perfect slingshot. Next launch gets fuel margin and speed.";
+                state_.statusLine = jupiterSlingshot
+                    ? "Mars slingshot active. The ship is already moving toward Jupiter."
+                    : (scenarioChallenge
+                          ? "Perfect corridor held. Claim the scenario reward."
+                          : "Perfect slingshot. The next launch saves powered fuel and carries more velocity.");
                 break;
             case FlybyGrade::Good:
-                state_.statusLine = scenarioChallenge
-                    ? (challenge != nullptr && !challenge->failureExplanation.empty()
-                        ? challenge->failureExplanation
-                        : "Clean flyby, but the scenario requirement was not met.")
-                    : "Clean flyby. Recon data secured.";
+                state_.statusLine = jupiterSlingshot
+                    ? "Clean pass, but not enough Mars gravity for Jupiter. Retry or build tank margin."
+                    : (scenarioChallenge
+                          ? (challenge != nullptr && !challenge->failureExplanation.empty()
+                                ? challenge->failureExplanation
+                                : "Clean flyby, but the scenario requirement was not met.")
+                          : "Clean flyby. Recon data secured.");
                 break;
             case FlybyGrade::Miss:
             default:
-                state_.statusLine = scenarioChallenge
-                    ? (challenge != nullptr && !challenge->failureExplanation.empty()
-                        ? challenge->failureExplanation
-                        : "Scenario corridor lost.")
-                    : "Missed flyby window. Approach options remain open.";
+                state_.statusLine = jupiterSlingshot
+                    ? "Mars slingshot lost. Jupiter options remain open."
+                    : (scenarioChallenge
+                          ? (challenge != nullptr && !challenge->failureExplanation.empty()
+                                ? challenge->failureExplanation
+                                : "Scenario corridor lost.")
+                          : "Missed flyby window. Approach options remain open.");
                 break;
             }
             save();
@@ -1797,6 +1809,13 @@ void RocketGameApp::prepareForLaunch()
         return;
     }
 
+    if (state_.run.jupiterSlingshotActive) {
+        state_.statusLine =
+            "Mars gravity is already carrying the ship outward. Continue to Jupiter instead of starting another sortie.";
+        refreshPanel();
+        return;
+    }
+
     if (state_.run.shipDamage >= tuning::damage::destroyedShipDamage) {
         state_.statusLine = std::string(text::status::launchHullBlocked);
         refreshPanel();
@@ -1849,6 +1868,10 @@ void RocketGameApp::prepareForLaunch()
     state_.statusLine = miningDroneTransferEnabled(state_)
         ? std::string(text::status::droneStowing)
         : std::string(text::status::preflightReadyWithoutDrone);
+    // Persist one-attempt momentum consumption immediately. Active flight
+    // saves normalize back to a safe board, but may never restore a spent
+    // Mars slingshot after the Jupiter segment has begun.
+    save();
     refreshPanel();
 }
 
@@ -2080,6 +2103,70 @@ void RocketGameApp::claimSaturnCourse()
     (void)runLegacyScenarioUiAction(ui::actions::claimSaturnCourse);
 }
 
+void RocketGameApp::acknowledgeJupiterWindow()
+{
+    if (!jupiterWindowReviewed(state_, catalog_)) {
+        (void)performScenarioAction(
+            state_,
+            catalog_,
+            content::scenario::marsBayExpansion,
+            "funding",
+            ScenarioActionKind::AcknowledgeBriefing);
+    }
+    state_.screen = Screen::Hangar;
+    state_.statusLine =
+        "Jupiter options reviewed. Build permanent margin, take the Mars slingshot, or stack both.";
+    syncLaunchConfig(state_, catalog_);
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::openJupiterRefit()
+{
+    acknowledgeJupiterWindow();
+    if (!openRefitIfAvailable(true)) {
+        state_.statusLine =
+            "Refit is closed. Successful Mars operations earn credits and reopen it; the slingshot remains available.";
+        save();
+        panelDirty_ = true;
+    }
+}
+
+void RocketGameApp::beginJupiterSlingshot()
+{
+    acknowledgeJupiterWindow();
+    if (!startJupiterSlingshotRun(state_, catalog_)) {
+        panelDirty_ = true;
+        return;
+    }
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::continueJupiterSlingshot()
+{
+    if (state_.screen == Screen::Flyby && state_.run.flyby.active &&
+        state_.run.flyby.completed &&
+        state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot) {
+        if (state_.run.flyby.result != FlybyGrade::Perfect) {
+            completeFlybyRun(state_, catalog_);
+            save();
+            panelDirty_ = true;
+            return;
+        }
+        (void)armJupiterSlingshot(state_);
+        completeFlybyRun(state_, catalog_);
+    }
+    if (!state_.run.jupiterSlingshotActive) {
+        state_.statusLine = "Hold a Perfect Mars corridor before continuing to Jupiter.";
+        save();
+        panelDirty_ = true;
+        return;
+    }
+    state_.screen = Screen::Hangar;
+    attemptFrontierTransfer();
+}
+
 void RocketGameApp::flybyMove(double xAxis, double yAxis)
 {
     if (state_.screen != Screen::Flyby) {
@@ -2095,10 +2182,11 @@ void RocketGameApp::flybyAbort()
     if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
         return;
     }
+    const bool jupiterSlingshot = state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot;
     const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
     abortFlybyRun(state_, catalog_);
-    if (!scenarioChallenge) {
+    if (!scenarioChallenge && !jupiterSlingshot) {
         state_.statusLine = "Flyby aborted. No recon reward earned.";
     }
     save();
@@ -2112,6 +2200,17 @@ void RocketGameApp::flybyContinue()
     }
 
     const FlybyGrade grade = state_.run.flyby.result;
+    if (state_.run.flyby.purpose == FlybyPurpose::JupiterSlingshot) {
+        if (grade == FlybyGrade::Perfect) {
+            continueJupiterSlingshot();
+        } else {
+            completeFlybyRun(state_, catalog_);
+            syncLaunchConfig(state_, catalog_);
+            save();
+            panelDirty_ = true;
+        }
+        return;
+    }
     const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
     if (scenarioChallenge) {
@@ -2128,7 +2227,7 @@ void RocketGameApp::flybyContinue()
     switch (grade) {
     case FlybyGrade::Perfect:
         (void)bankFlybyRouteClearance(state_, catalog_);
-        finishArrivalVisit("Planet skipped. Perfect launch solution stored for the next launch.");
+        finishArrivalVisit("Planet skipped. Powered-fuel savings and extra velocity stored for the next launch.");
         break;
     case FlybyGrade::Good:
         (void)bankFlybyRouteClearance(state_, catalog_);
@@ -3179,6 +3278,56 @@ void RocketGameApp::debugShowHangar()
     panelDirty_ = true;
 }
 
+void RocketGameApp::debugShowJupiterOptions(int mode)
+{
+    beginDebugSandbox("Debug Jupiter options. No save data will be written.");
+    const int combination = std::clamp(mode, 0, 3);
+    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
+    state_.meta.furthestTier = 2;
+    state_.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    state_.meta.launchUpgrades.fuelTanks = (combination == 1 || combination == 3) ? 3 : 2;
+    addDebugUnlock(state_, content::unlock::routeMars);
+    addDebugUnlock(state_, content::unlock::routeJupiter);
+    if (ScenarioInstance* marsScenario = findScenarioInstance(
+            state_.meta,
+            content::scenario::marsBayExpansion)) {
+        for (std::string_view completedStep : {std::string_view("briefing"), std::string_view("delivery")}) {
+            if (ScenarioStepProgress* progress = findScenarioStepProgress(*marsScenario, completedStep)) {
+                progress->briefingAcknowledged = true;
+                progress->completed = true;
+                progress->claimed = true;
+            }
+        }
+        if (ScenarioStepProgress* funding = findScenarioStepProgress(*marsScenario, "funding")) {
+            funding->briefingAcknowledged = combination >= 2;
+            funding->completed = combination >= 2;
+        }
+    }
+    state_.meta.marsMiningBriefingAcknowledged = true;
+    state_.meta.marsBayExpansionClaimed = true;
+    state_.run.jupiterSlingshotActive = combination >= 2;
+    state_.run.nextLaunchFuelBoost = state_.run.jupiterSlingshotActive
+        ? tuning::flyby::jupiterSlingshotFuelSavings
+        : 0.0;
+    state_.run.nextLaunchSpeedBoost = state_.run.jupiterSlingshotActive
+        ? tuning::flyby::slingshotSpeedBoost
+        : 0.0;
+    state_.run.refitEntitled = true;
+    state_.run.credits = 92.0;
+    state_.screen = Screen::Hangar;
+    static constexpr std::array<std::string_view, 4> labels {
+        "Neither path",
+        "Fuel Tanks III",
+        "Mars slingshot",
+        "Both stacked"
+    };
+    state_.statusLine = "Debug Jupiter readiness: " +
+        std::string(labels[static_cast<std::size_t>(combination)]) +
+        ". Real save remains untouched.";
+    syncLaunchConfig(state_, catalog_);
+    panelDirty_ = true;
+}
+
 void RocketGameApp::debugShowResults()
 {
     beginDebugSandbox("Debug Debrief board. No save data will be written.");
@@ -3480,7 +3629,10 @@ void RocketGameApp::attemptFrontierTransfer()
 
     syncLaunchConfig(state_, catalog_);
     if (!launchMissionReady(state_, catalog_)) {
-        state_.statusLine = "Install the required launch upgrade before this route attempt.";
+        const Destination* next = nextDestination(state_, catalog_);
+        state_.statusLine = next != nullptr && next->id == content::destination::jupiter
+            ? "Create 5 fuel of Jupiter margin with Fuel Tanks III, a Perfect Mars slingshot, or both."
+            : "Install the required launch upgrade before this route attempt.";
         refreshPanel();
         return;
     }
@@ -3513,6 +3665,7 @@ void RocketGameApp::attemptFrontierTransfer()
     state_.statusLine = miningDroneTransferEnabled(state_)
         ? std::string(text::status::droneStowing)
         : std::string(text::status::preflightReadyWithoutDrone);
+    save();
     refreshPanel();
 }
 
@@ -4038,9 +4191,10 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         // but deliberately leaves fabrication/assignment to the player.
         state_.screen = Screen::DroneOps;
         state_.statusLine = "Drone Ops unlocked. Fabricate and assign Prospector Mk I to learn the bay.";
-    } else if (marsExpansionClaimed && state_.run.refitEntitled) {
-        (void)openRefitIfAvailable(true);
-        state_.statusLine = "Jupiter transfer planning is ready. Review the shipyard options.";
+    } else if (marsExpansionClaimed) {
+        state_.screen = Screen::Hangar;
+        state_.statusLine =
+            "The Jupiter window is open. Review permanent tanks, the Mars slingshot, or both.";
     } else if (supportDroneNeedsAssignment) {
         // The reward is owned, but no capacity was available for its
         // content-authored automatic assignment. Drone Ops provides the
@@ -4186,6 +4340,14 @@ void RocketGameApp::runUiAction(const std::string& action)
         next();
     } else if (action == ui::actions::attemptFrontier) {
         attemptFrontierTransfer();
+    } else if (action == ui::actions::acknowledgeJupiterWindow) {
+        acknowledgeJupiterWindow();
+    } else if (action == ui::actions::openJupiterRefit) {
+        openJupiterRefit();
+    } else if (action == ui::actions::beginJupiterSlingshot) {
+        beginJupiterSlingshot();
+    } else if (action == ui::actions::continueJupiterSlingshot) {
+        continueJupiterSlingshot();
     } else if (action == ui::actions::openNavigation) {
         openNavigation();
     } else if (action == ui::actions::arkJump) {

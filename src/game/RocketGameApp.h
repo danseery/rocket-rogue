@@ -73,6 +73,10 @@ public:
     void retrySaturnSlingshot();
     void acknowledgeSaturnSlingshotFailure();
     void claimSaturnCourse();
+    void acknowledgeJupiterWindow();
+    void openJupiterRefit();
+    void beginJupiterSlingshot();
+    void continueJupiterSlingshot();
     void runArrivalFlyby();
     void flybyMove(double xAxis, double yAxis);
     void flybyAbort();
@@ -126,6 +130,7 @@ public:
     void debugStartOrbit();
     void debugShowTitle();
     void debugShowHangar();
+    void debugShowJupiterOptions(int mode);
     void debugShowResults();
     void debugShowArrivalOps();
     void debugShowResearch();

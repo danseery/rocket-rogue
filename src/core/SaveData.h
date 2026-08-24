@@ -24,6 +24,7 @@ struct SaveData {
     int cleanShallowRecoveryStreak = 0;
     double nextLaunchFuelBoost = 0.0;
     double nextLaunchSpeedBoost = 0.0;
+    bool jupiterSlingshotActive = false;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;

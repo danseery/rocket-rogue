@@ -27,7 +27,7 @@ struct PreparedLaunch {
     // Legacy outcome records still expose a failure point. Live piloted
     // survival never consults this value.
     double crashMultiplier = 0.0;
-    double slingshotFuelBoost = 0.0;
+    double slingshotFuelSavings = 0.0;
     double slingshotSpeedBoost = 0.0;
     int overpreparedData = 0;
     double provingPayoutBonus = 0.0;
@@ -136,7 +136,11 @@ struct LaunchResolutionContext {
 };
 
 PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catalog, Random& rng);
-double launchFuelCapacityForRank(int rank, double oneLaunchBoost = 0.0);
+double launchFuelCapacityForRank(int rank);
+double launchPoweredFuelCost(
+    double cruiseFuelCost,
+    double throttle,
+    double slingshotFuelSavings = 0.0);
 double launchCruiseFuelCostForTier(int tier);
 double launchFuelUseMultiplier(double throttle);
 double launchControlChaosForRank(int rank);

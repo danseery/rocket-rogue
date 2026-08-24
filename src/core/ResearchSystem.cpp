@@ -885,7 +885,7 @@ double flybyCompletionBonusScale(const FlybyRunState& flyby)
 void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destination)
 {
     const bool existingSlingshotAwarded = flyby.slingshotAwarded;
-    const double existingFuelBoost = flyby.slingshotFuelBoost;
+    const double existingFuelSavings = flyby.slingshotFuelSavings;
     const double existingSpeedBoost = flyby.slingshotSpeedBoost;
     const double existingSpeedScale = flyby.slingshotSpeedScale;
 
@@ -893,7 +893,7 @@ void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destina
     flyby.blueprintGain = 0;
     flyby.rewardBonusScale = 1.0;
     flyby.slingshotAwarded = false;
-    flyby.slingshotFuelBoost = 0.0;
+    flyby.slingshotFuelSavings = 0.0;
     flyby.slingshotSpeedBoost = 0.0;
     flyby.slingshotSpeedScale = 1.0;
 
@@ -901,11 +901,11 @@ void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destina
         flyby.slingshotAwarded = true;
         if (existingSlingshotAwarded) {
             flyby.slingshotSpeedScale = existingSpeedScale;
-            flyby.slingshotFuelBoost = existingFuelBoost;
+            flyby.slingshotFuelSavings = existingFuelSavings;
             flyby.slingshotSpeedBoost = existingSpeedBoost;
         } else {
             flyby.slingshotSpeedScale = flybySpeedScale(flyby);
-            flyby.slingshotFuelBoost = tuning::flyby::slingshotFuelBoost * flyby.slingshotSpeedScale;
+            flyby.slingshotFuelSavings = tuning::flyby::slingshotFuelBoost * flyby.slingshotSpeedScale;
             flyby.slingshotSpeedBoost = tuning::flyby::slingshotSpeedBoost * flyby.slingshotSpeedScale;
         }
     }
@@ -1526,6 +1526,44 @@ void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
     };
 }
 
+namespace {
+
+FlybyRunState createFlybyRun(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const Destination& destination,
+    FlybyPurpose purpose)
+{
+    FlybyRunState flyby;
+    flyby.active = true;
+    flyby.destinationId = destination.id;
+    flyby.purpose = purpose;
+    flyby.durationSeconds = tuning::flyby::durationSeconds;
+    flyby.shipX = tuning::flyby::startX;
+    flyby.shipY = tuning::flyby::startY;
+    flyby.velocityX = tuning::flyby::startVelocityX;
+    flyby.velocityY = tuning::flyby::startVelocityY;
+    flyby.gravityStrength = flybyGravityForDestination(destination);
+    flyby.planetColliderRadius = flybyPlanetColliderRadius(destination);
+    applyShipAssistToFlyby(flyby, aggregateShipStats(state, catalog));
+    const auto [scoreX, scoreY] = flybyShipNosePoint(
+        flyby.shipX,
+        flyby.shipY,
+        flyby.velocityX,
+        flyby.velocityY);
+    flyby.pathProgress = nearestFlybyPathSample(scoreX, scoreY).progress;
+    flyby.currentZone = flybyZoneAt(
+        scoreX,
+        scoreY,
+        flyby.perfectBand,
+        flyby.goodBand);
+    flyby.worstZone = flyby.currentZone;
+    pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
+    return flyby;
+}
+
+} // namespace
+
 void completeArrivalFlyby(GameState& state, const ContentCatalog& catalog)
 {
     applyFlybyReward(state, catalog, FlybyGrade::Good);
@@ -1541,24 +1579,11 @@ void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
         return;
     }
 
-    FlybyRunState flyby;
-    flyby.active = true;
-    flyby.destinationId = destination->id;
-    flyby.purpose = FlybyPurpose::Recon;
-    flyby.durationSeconds = tuning::flyby::durationSeconds;
-    flyby.shipX = tuning::flyby::startX;
-    flyby.shipY = tuning::flyby::startY;
-    flyby.velocityX = tuning::flyby::startVelocityX;
-    flyby.velocityY = tuning::flyby::startVelocityY;
-    flyby.gravityStrength = flybyGravityForDestination(*destination);
-    flyby.planetColliderRadius = flybyPlanetColliderRadius(*destination);
-    applyShipAssistToFlyby(flyby, aggregateShipStats(state, catalog));
-    const auto [scoreX, scoreY] = flybyShipNosePoint(flyby.shipX, flyby.shipY, flyby.velocityX, flyby.velocityY);
-    flyby.pathProgress = nearestFlybyPathSample(scoreX, scoreY).progress;
-    flyby.currentZone = flybyZoneAt(scoreX, scoreY, flyby.perfectBand, flyby.goodBand);
-    flyby.worstZone = flyby.currentZone;
-    pushFlybyTrailPoint(flyby, flyby.shipX, flyby.shipY);
-    state.run.flyby = flyby;
+    state.run.flyby = createFlybyRun(
+        state,
+        catalog,
+        *destination,
+        FlybyPurpose::Recon);
     preserveArrivalFuelAtDestination(state, destination->id);
     state.screen = Screen::Flyby;
 }
@@ -1764,6 +1789,80 @@ bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog)
         return false;
     }
     writeLegacyCampaignSaveProjection(state, catalog);
+    return true;
+}
+
+bool jupiterWindowReviewed(const GameState& state, const ContentCatalog&)
+{
+    return scenarioHasCompletedStep(state, content::scenario::marsBayExpansion, "funding") ||
+        scenarioStepBriefingAcknowledged(
+            state,
+            content::scenario::marsBayExpansion,
+            "funding");
+}
+
+bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog)
+{
+    return currentDestination(state, catalog).id == content::destination::mars &&
+        hasUnlock(state.meta, content::unlock::routeJupiter) &&
+        (state.meta.launchLessons.stage == LaunchTrainingStage::HullIntegrity ||
+         state.meta.launchLessons.stage == LaunchTrainingStage::JupiterTransfer) &&
+        !state.run.jupiterSlingshotActive &&
+        !state.run.flyby.active &&
+        !state.run.surfaceExpedition.active &&
+        !state.run.mining.active;
+}
+
+bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog)
+{
+    if (!canStartJupiterSlingshot(state, catalog)) {
+        state.statusLine = "Complete the Mars contract before attempting its Jupiter slingshot.";
+        return false;
+    }
+
+    const Destination* mars = catalog.findDestination(content::destination::mars);
+    if (mars == nullptr) {
+        return false;
+    }
+    state.run.flyby = createFlybyRun(
+        state,
+        catalog,
+        *mars,
+        FlybyPurpose::JupiterSlingshot);
+    // This authored departure risk is explicit in The Jupiter Window. Ship
+    // assists may improve control, but a planetary impact still costs the
+    // advertised 18 hull damage.
+    state.run.flyby.impactHullDamage = tuning::flyby::impactHullDamage;
+    state.run.arrivalOps = {};
+    state.screen = Screen::Flyby;
+    state.statusLine = "Mars departure active. Hold the gold corridor for a Perfect slingshot.";
+    return true;
+}
+
+bool armJupiterSlingshot(GameState& state)
+{
+    FlybyRunState& flyby = state.run.flyby;
+    if (!flyby.active || !flyby.completed ||
+        flyby.purpose != FlybyPurpose::JupiterSlingshot ||
+        flyby.result != FlybyGrade::Perfect) {
+        return false;
+    }
+
+    populateFlybyRewardPreview(flyby, nullptr);
+    flyby.slingshotAwarded = true;
+    flyby.slingshotSpeedScale = flybySpeedScale(flyby);
+    flyby.slingshotFuelSavings = tuning::flyby::jupiterSlingshotFuelSavings;
+    flyby.slingshotSpeedBoost =
+        tuning::flyby::slingshotSpeedBoost * flyby.slingshotSpeedScale;
+    flyby.rewardCredits = 0.0;
+    flyby.blueprintGain = 0;
+    state.run.nextLaunchFuelBoost = std::max(
+        state.run.nextLaunchFuelBoost,
+        flyby.slingshotFuelSavings);
+    state.run.nextLaunchSpeedBoost = std::max(
+        state.run.nextLaunchSpeedBoost,
+        flyby.slingshotSpeedBoost);
+    state.run.jupiterSlingshotActive = true;
     return true;
 }
 
@@ -1973,7 +2072,7 @@ void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrad
     state.meta.blueprintProgress += blueprintGain;
     state.run.credits += reward;
     if (grade == FlybyGrade::Perfect) {
-        state.run.nextLaunchFuelBoost = std::max(state.run.nextLaunchFuelBoost, state.run.flyby.slingshotFuelBoost);
+        state.run.nextLaunchFuelBoost = std::max(state.run.nextLaunchFuelBoost, state.run.flyby.slingshotFuelSavings);
         state.run.nextLaunchSpeedBoost = std::max(state.run.nextLaunchSpeedBoost, state.run.flyby.slingshotSpeedBoost);
     }
     unlockFromBlueprints(state);
@@ -2000,12 +2099,21 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
     case FlybyGrade::Active:
         break;
     }
-    applyFlybyReward(state, catalog, grade);
+    const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
+    if (!jupiterSlingshot) {
+        applyFlybyReward(state, catalog, grade);
+    }
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
     ScenarioStepDefinition challengeStep;
     bool hasChallengeStep = false;
-    if (scenarioChallenge) {
+    if (jupiterSlingshot) {
+        state.run.arrivalOps = {};
+        state.screen = Screen::Hangar;
+        state.statusLine = grade == FlybyGrade::Perfect
+            ? "Mars slingshot active. Continue directly toward Jupiter."
+            : "Mars slingshot lost. Retry the pass or build permanent tank margin.";
+    } else if (scenarioChallenge) {
         const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, flyby.scenarioId);
         const ScenarioInstance* instance = findScenarioInstance(state.meta, flyby.scenarioId);
         if (definition != nullptr && instance != nullptr) {
@@ -2063,9 +2171,14 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
 
     const FlybyRunState flyby = state.run.flyby;
     state.run.flyby = {};
+    const bool jupiterSlingshot = flyby.purpose == FlybyPurpose::JupiterSlingshot;
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
-    if (scenarioChallenge) {
+    if (jupiterSlingshot) {
+        state.run.arrivalOps = {};
+        state.screen = Screen::Hangar;
+        state.statusLine = "Mars slingshot aborted. Jupiter options remain open.";
+    } else if (scenarioChallenge) {
         ScenarioEvent event;
         event.kind = ScenarioEventKind::ActivityAborted;
         event.scenarioId = flyby.scenarioId;

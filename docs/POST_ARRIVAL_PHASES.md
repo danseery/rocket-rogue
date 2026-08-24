@@ -18,7 +18,22 @@ Every successful surface-destination arrival opens a committed approach decision
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Arrival choices explain their exact progression value before commitment. Good or Perfect Pass Through banks one Research Data plus credits and closes Orbit/Landing; Perfect also stores the next-launch solution. Orbit banks its tiered Research Data and credits, removes the unmapped descent penalty for that visit, and then offers Land or Depart. Misses and aborts do not commit. Campaign-critical mining beats use mandatory saved briefings and explicit claim actions. Moon, Mars, and Io may be skipped for a visit, but their objective remains incomplete and the authored onward route stays locked.
+Arrival choices explain their exact progression value before commitment. Good or Perfect Pass Through banks one Research Data plus credits and closes Orbit/Landing; Perfect also stores `1.5-3.0` powered-fuel savings and `+20-40%` velocity for the next launch. It does not enlarge the tank. Orbit banks its tiered Research Data and credits, removes the unmapped descent penalty for that visit, and then offers Land or Depart. Misses and aborts do not commit. Campaign-critical mining beats use mandatory saved briefings and explicit claim actions. Moon, Mars, and Io may be skipped for a visit, but their objective remains incomplete and the authored onward route stays locked.
+
+## Jupiter Transfer Window
+
+The Mars Bay Expansion opens `THE JUPITER WINDOW`, an informational saved beat rather than a branch selection. Jupiter needs five fuel of calibrated transfer margin. The player may create it permanently with Fuel Tanks III, physically take it from Mars gravity with a Perfect departure Flyby, or stack both. Reviewing one option never locks, hides, or disables the other.
+
+At calibrated `0.60` throttle, Jupiter's route burn is `20`. Fuel Tanks III costs `92` credits and raises permanent capacity from `20` to `25`. The Mars slingshot requires Perfect, saves a fixed `5` powered fuel for one Jupiter attempt, and retains the achieved `+20-40%` travel rate. The dedicated departure pass pays no credits or Research Data; Good, Miss, and abort remain retryable, while impact still deals `18` hull damage.
+
+| Configuration | Tank | Powered burn | Arrival margin | Velocity |
+|---|---:|---:|---:|---:|
+| Neither | 20 | 20 | 0; Jupiter locked | Normal |
+| Fuel Tanks III | 25 | 20 | +5 | Normal |
+| Perfect Mars slingshot | 20 | 15 | +5 | +20-40% |
+| Both | 25 | 15 | +10 | +20-40% |
+
+The powered-fuel equation is `max(0, route burn * throttle multiplier - slingshot savings)`. Savings are subtracted after throttle scaling, so high throttle can still exceed the available fuel. Gravity-provided movement consumes no propellant and produces no engine heat. Beginning the Jupiter segment consumes the active slingshot; a failed Jupiter attempt returns without momentum and requires another Perfect Mars pass. Fuel Tanks III remains installed permanently.
 
 The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lava seams contain ore; the Hazard Support Drone Mk I cools those seams into gray Common Ore. The current authored site presents outer and inner four-segment lava layers, then requires protected-Artifact towing and safe Surface extraction. The Artifact grants the standard 75 Expedition XP on full return while the authored scenario preserves its story and route unlocks. Afterward, a dedicated Jupiter Flyby requires a Perfect gold-corridor pass to open Saturn, and its preflight brief states that the Saturn launch commits the expedition outward. Future protected sites configure the same reusable cocoon, objective, event, and reward boundaries rather than adding destination-specific mining code.
 

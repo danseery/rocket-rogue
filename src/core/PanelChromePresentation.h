@@ -86,10 +86,13 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
         metrics.push_back(panelMetric("Launch lesson", std::string(toString(flightModel.config.missionKind))));
     }
     metrics.push_back(panelMetric(text::labels::crewStress, crewStressSummary(astronaut)));
-    const double pendingFuelBoost = state.screen == Screen::Launch ? activeLaunch.slingshotFuelBoost : state.run.nextLaunchFuelBoost;
+    const double pendingFuelSavings = state.screen == Screen::Launch ? activeLaunch.slingshotFuelSavings : state.run.nextLaunchFuelBoost;
     const double pendingSpeedBoost = state.screen == Screen::Launch ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;
-    if (pendingFuelBoost > 0.0 || pendingSpeedBoost > 0.0) {
-        metrics.push_back(panelMetric("Slingshot window", "+" + display::fixed(pendingFuelBoost, 1) + " fuel / +" + display::fixed(pendingSpeedBoost, 2) + " speed"));
+    if (pendingFuelSavings > 0.0 || pendingSpeedBoost > 0.0) {
+        metrics.push_back(panelMetric(
+            "Slingshot momentum",
+            display::fixed(pendingFuelSavings, 1) + " fuel saved / +" +
+                display::percent(pendingSpeedBoost) + " velocity"));
     }
     return metrics;
 }
