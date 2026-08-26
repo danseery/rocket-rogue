@@ -1032,13 +1032,12 @@ bool canOccupy(const MiningTerrain& terrain, double x, double y)
         !cell->suitOnlyPassage;
 }
 
-bool canOccupyActorAtTerrainOffset(
+bool canOccupyActor(
     const MiningTerrain& terrain,
     double x,
     double y,
     double colliderRadius,
-    bool allowSuitOnlyPassage,
-    double terrainCoordinateOffset)
+    bool allowSuitOnlyPassage)
 {
     constexpr std::array<std::pair<double, double>, 9> samples {{
         {0.0, 0.0},
@@ -1052,8 +1051,8 @@ bool canOccupyActorAtTerrainOffset(
         {-0.70710678118, -0.70710678118}
     }};
     for (const auto& [sampleX, sampleY] : samples) {
-        const int cellX = static_cast<int>(std::floor(x + terrainCoordinateOffset + sampleX * colliderRadius));
-        const int cellY = static_cast<int>(std::floor(y + terrainCoordinateOffset + sampleY * colliderRadius));
+        const int cellX = static_cast<int>(std::floor(x + sampleX * colliderRadius));
+        const int cellY = static_cast<int>(std::floor(y + sampleY * colliderRadius));
         const MiningCell* cell = miningCellAt(terrain, cellX, cellY);
         if (cell == nullptr || miningMaterialSolid(cell->material) ||
             (cell->suitOnlyPassage && !allowSuitOnlyPassage)) {
@@ -1061,44 +1060,6 @@ bool canOccupyActorAtTerrainOffset(
         }
     }
     return true;
-}
-
-// Autonomous helpers predate the rig and use terrain-edge coordinates. Keep
-// their query stable until their movement is migrated deliberately.
-bool canOccupyActor(
-    const MiningTerrain& terrain,
-    double x,
-    double y,
-    double colliderRadius,
-    bool allowSuitOnlyPassage)
-{
-    return canOccupyActorAtTerrainOffset(
-        terrain,
-        x,
-        y,
-        colliderRadius,
-        allowSuitOnlyPassage,
-        0.0);
-}
-
-// The controlled rig and EVA actor are rendered at cell centers. Convert the
-// sampled collider into terrain-edge coordinates before selecting its cell.
-// Without this half-cell offset, downward contact overlaps a wall visually
-// while upward contact stops a half-cell early.
-bool canOccupyControlledActor(
-    const MiningTerrain& terrain,
-    double x,
-    double y,
-    double colliderRadius,
-    bool allowSuitOnlyPassage)
-{
-    return canOccupyActorAtTerrainOffset(
-        terrain,
-        x,
-        y,
-        colliderRadius,
-        allowSuitOnlyPassage,
-        0.5);
 }
 
 bool drillableCell(const MiningCell* cell)
@@ -5575,7 +5536,7 @@ double advanceActorToCollisionBoundary(
     double colliderRadius,
     bool allowSuitOnlyPassage)
 {
-    if (!canOccupyControlledActor(
+    if (!canOccupyActor(
             terrain,
             startX,
             startY,
@@ -5594,7 +5555,7 @@ double advanceActorToCollisionBoundary(
         const double middle = (lower + upper) * 0.5;
         const double probeX = startX + (targetX - startX) * middle;
         const double probeY = startY + (targetY - startY) * middle;
-        if (canOccupyControlledActor(
+        if (canOccupyActor(
                 terrain,
                 probeX,
                 probeY,
@@ -5698,22 +5659,19 @@ void simulateMiningActorMotion(
     }
     clampActorSpeed(velocityX, velocityY, maximumSpeed);
 
-    // Terrain cells 0 and width - 1 / height - 1 are the outer wall. Actor
-    // positions are at cell centers, so retain the same half-cell conversion
-    // used by canOccupyControlledActor() when clamping against those walls.
-    const double minimumX = 0.5 + colliderRadius;
+    const double minimumX = 1.0 + colliderRadius;
     const double maximumX =
-        static_cast<double>(mining.terrain.width) - 1.5 - colliderRadius;
-    const double minimumY = 0.5 + colliderRadius;
+        static_cast<double>(mining.terrain.width - 1) - colliderRadius;
+    const double minimumY = 1.0 + colliderRadius;
     const double maximumY =
-        static_cast<double>(mining.terrain.height) - 1.5 - colliderRadius;
+        static_cast<double>(mining.terrain.height - 1) - colliderRadius;
     const double nextX = std::clamp(positionX + velocityX * dt, minimumX, maximumX);
     const double nextY = std::clamp(positionY + velocityY * dt, minimumY, maximumY);
 
     double collisionX = 0.0;
     double collisionY = 0.0;
 
-    if (canOccupyControlledActor(
+    if (canOccupyActor(
             mining.terrain,
             nextX,
             positionY,
@@ -5734,7 +5692,7 @@ void simulateMiningActorMotion(
         mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
         collisionX = nextX - positionX;
     }
-    if (canOccupyControlledActor(
+    if (canOccupyActor(
             mining.terrain,
             positionX,
             nextY,

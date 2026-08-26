@@ -3997,12 +3997,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         snapshot.miningContactIndicatorDirX,
         snapshot.miningContactIndicatorDirY));
     if (!snapshot.miningExtractionActive && collisionIndicator > 0.0F && collisionDirectionLength > 0.0001F) {
-        // Keep the contact mark attached to the simulated collider, not the
-        // rig's presentation-only rebound. The rig can recoil away from the
-        // wall, but the mark must remain on the terrain edge that stopped it.
-        const Vec2 collisionCenter = snapshot.miningOperatorActive
-            ? operatorPosition
-            : cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+        const Vec2 collisionCenter = snapshot.miningOperatorActive ? operatorPosition : drone;
         // Gameplay coordinates point down; scene coordinates point up.
         const Vec2 collisionDirection {
             static_cast<float>(snapshot.miningContactIndicatorDirX) / collisionDirectionLength,

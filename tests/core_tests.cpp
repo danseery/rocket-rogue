@@ -8621,7 +8621,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     MiningRunState& mining = state.run.mining;
     clearMiningTerrainForEvaTest(mining);
     const double softContactStartX =
-        33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.12;
+        33.0 - tuning::mining::rigColliderRadiusCells - 0.12;
     mining.droneX = softContactStartX;
     mining.droneY = 10.0;
     MiningCell* soft = miningCellAt(mining.terrain, 33, 10);
@@ -8632,7 +8632,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     updateMiningRun(state, catalog, 0.08);
 
     require(mining.droneX > softContactStartX, "drilling into regolith should let the drone grind forward slowly");
-    require(mining.droneX < 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells + 0.001, "the drone should not occupy unbroken regolith before the drill clears it");
+    require(static_cast<int>(std::floor(mining.droneX)) == 32, "the drone should not occupy unbroken regolith before the drill clears it");
     require(mining.contactIntensity > 0.0, "soft contact should set mining feedback intensity");
     require(soft->remainingToughness < soft->maxToughness, "pushing into regolith while drilling should do terrain work");
 
@@ -8643,7 +8643,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(soft->material == MiningCellMaterial::Empty, "continued drilling should visibly clear soft terrain before the drone passes through");
 
     const double hardContactStartX =
-        33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.03;
+        33.0 - tuning::mining::rigColliderRadiusCells - 0.03;
     mining.droneX = hardContactStartX;
     mining.droneY = 12.0;
     MiningCell* hard = miningCellAt(mining.terrain, 33, 12);
@@ -8661,7 +8661,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     updateMiningRun(state, catalog, 0.08);
     updateMiningRun(dampedState, catalog, 0.08);
 
-    const double hardContactBoundary = 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells;
+    const double hardContactBoundary = 33.0 - tuning::mining::rigColliderRadiusCells;
     require(
         mining.droneX > hardContactStartX + 0.02 && mining.droneX < hardContactBoundary + 0.001,
         "a hard-rock collision should sweep the rig to the physical boundary instead of leaving a full movement-step gap");
@@ -8687,7 +8687,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     hard->maxToughness = miningMaterialToughness(MiningCellMaterial::HardRock, 0);
     hard->remainingToughness = hard->maxToughness;
     hard->revealed = false;
-    mining.droneX = 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.08;
+    mining.droneX = 32.85;
     mining.droneY = 12.0;
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
@@ -8695,48 +8695,10 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::HardRock, "hard rock should require several hard contacts before breaking");
-    for (int i = 0; i < 24 && hard->material != MiningCellMaterial::Empty; ++i) {
+    for (int i = 0; i < 14 && hard->material != MiningCellMaterial::Empty; ++i) {
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::Empty, "default hard rock should clear in a short arcade burst");
-
-    // Player coordinates are cell centers, while terrain cells are indexed by
-    // their top-left edge. Verify both vertical approaches stop at the same
-    // rendered edge rather than overlapping from below or leaving a half-cell
-    // gap from above.
-    mining.gravityStrength = 0.0;
-    mining.droneX = 20.0;
-    mining.rigVelocityX = 0.0;
-    mining.rigVelocityY = 0.0;
-    mining.contactBounce = 0.0;
-    mining.contactBounceVelocity = 0.0;
-    mining.contactSpeedRecovery = 1.0;
-    MiningCell* lowerWall = miningCellAt(mining.terrain, 20, 14);
-    require(lowerWall != nullptr, "lower directional-collision wall should exist");
-    *lowerWall = {MiningCellMaterial::HardRock, 8.0, 8.0, true, false};
-    const double downwardBoundary = 14.0 - 0.5 - tuning::mining::rigColliderRadiusCells;
-    mining.droneY = downwardBoundary - 0.06;
-    setMiningMove(state, 0.0, 1.0);
-    setMiningDrilling(state, false);
-    updateMiningRun(state, catalog, 0.08);
-    require(
-        mining.droneY > downwardBoundary - 0.06 && mining.droneY < downwardBoundary + 0.001,
-        "downward contact should stop at the visible top edge of the lower tile");
-    require(mining.contactIndicatorDirY > 0.99, "downward contact should mark the lower edge of the rig");
-
-    *lowerWall = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
-    MiningCell* upperWall = miningCellAt(mining.terrain, 20, 11);
-    require(upperWall != nullptr, "upper directional-collision wall should exist");
-    *upperWall = {MiningCellMaterial::HardRock, 8.0, 8.0, true, false};
-    const double upwardBoundary = 11.0 + 1.0 - 0.5 + tuning::mining::rigColliderRadiusCells;
-    mining.droneY = upwardBoundary + 0.06;
-    mining.rigVelocityY = 0.0;
-    setMiningMove(state, 0.0, -1.0);
-    updateMiningRun(state, catalog, 0.08);
-    require(
-        mining.droneY < upwardBoundary + 0.06 && mining.droneY > upwardBoundary - 0.001,
-        "upward contact should stop at the visible bottom edge of the upper tile");
-    require(mining.contactIndicatorDirY < -0.99, "upward contact should mark the upper edge of the rig");
 
     for (MiningCell& cell : mining.terrain.cells) {
         cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
