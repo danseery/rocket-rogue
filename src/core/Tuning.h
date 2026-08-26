@@ -513,6 +513,21 @@ inline constexpr double scanSweepRadiansPerSecond = 2.70;
 inline constexpr double scanWindowCenterRadians = 1.57079632679489661923;
 inline constexpr double scanGoodWindowHalfAngleRadians = 0.42;
 inline constexpr double scanPerfectWindowHalfAngleRadians = 0.13;
+// Each newly mapped layer tightens the next pulse window. A miss retries the
+// same layer, so it does not make the timing window any smaller.
+inline constexpr double scanWindowDepthScale = 0.84;
+inline constexpr double scanGoodWindowMinimumHalfAngleRadians = 0.16;
+inline constexpr double scanPerfectWindowMinimumHalfAngleRadians = 0.05;
+inline double surfaceScanGoodWindowHalfAngleForDepth(int depthOffset) noexcept
+{
+    const double scale = std::pow(scanWindowDepthScale, std::max(0, depthOffset));
+    return std::max(scanGoodWindowMinimumHalfAngleRadians, scanGoodWindowHalfAngleRadians * scale);
+}
+inline double surfaceScanPerfectWindowHalfAngleForDepth(int depthOffset) noexcept
+{
+    const double scale = std::pow(scanWindowDepthScale, std::max(0, depthOffset));
+    return std::max(scanPerfectWindowMinimumHalfAngleRadians, scanPerfectWindowHalfAngleRadians * scale);
+}
 inline constexpr int scanGoodInformationPercent = 80;
 inline constexpr int scanPerfectInformationPercent = 100;
 inline constexpr double scanGoodSuccessFanfareSeconds = 0.70;
@@ -579,6 +594,7 @@ inline constexpr double hardTerrainBounceCooldownSeconds = 0.30;
 inline constexpr double contactBounceSpring = 58.0;
 inline constexpr double contactBounceDamping = 0.68;
 inline constexpr double contactBounceMaxCells = 2.24;
+inline constexpr double contactIndicatorSeconds = 0.42;
 inline constexpr double postContactMinSpeedScale = 0.55;
 inline constexpr double postContactSpeedRecoverySeconds = 0.55;
 inline constexpr int drillRepairCommonAtFullDamage = 4;

@@ -1442,9 +1442,31 @@ bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCata
         && (outcome.frontierTransfer || outcome.recoveryMethod == RecoveryMethod::TransferArrival);
 }
 
+namespace {
+
+bool arrivalFlybyIntroduced(const GameState& state, const ContentCatalog& catalog)
+{
+    return std::any_of(
+        catalog.transferAssists.begin(),
+        catalog.transferAssists.end(),
+        [&](const TransferAssistDefinition& definition) {
+            return scenarioHasCompletedStep(
+                       state,
+                       definition.availabilityScenarioId,
+                       definition.availabilityStepId)
+                || scenarioStepBriefingAcknowledged(
+                    state,
+                    definition.availabilityScenarioId,
+                    definition.availabilityStepId);
+        });
+}
+
+} // namespace
+
 bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog)
 {
     return currentResearchDestination(state, catalog) != nullptr
+        && arrivalFlybyIntroduced(state, catalog)
         && state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
 }
 
@@ -1457,14 +1479,32 @@ bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
     return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
 }
 
+bool requiresArrivalOrbitBeforeLanding(const GameState& state, const ContentCatalog& catalog)
+{
+    const Destination* destination = currentResearchDestination(state, catalog);
+    return destination != nullptr
+        && destination->requiresArrivalSurveySequence
+        && destinationHistoryValue(state.meta.destinationLandings, catalog, destination->id) == 0;
+}
+
 bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& catalog)
 {
     const Destination* destination = currentResearchDestination(state, catalog);
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
         return false;
     }
+    if (requiresArrivalOrbitBeforeLanding(state, catalog) &&
+        state.run.arrivalOps.commitment != ApproachCommitment::OrbitCaptured) {
+        return false;
+    }
     return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted
         || state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
+}
+
+bool canDepartCapturedArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
+{
+    return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
+        && !requiresArrivalOrbitBeforeLanding(state, catalog);
 }
 
 bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog)
@@ -1484,6 +1524,17 @@ std::string arrivalOperationBlockReason(const GameState& state, const ContentCat
     if (state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
         && (operation == "flyby" || operation == "orbit")) {
         return "Orbit captured. Pass Through and a second capture are closed for this visit.";
+    }
+    if (operation == "flyby" && !arrivalFlybyIntroduced(state, catalog)) {
+        return "Flyby is introduced with the Jupiter transfer window.";
+    }
+    if (requiresArrivalOrbitBeforeLanding(state, catalog)) {
+        if (operation == "landing") {
+            return "Capture Orbit before the first mapped lunar landing.";
+        }
+        if (operation == "depart") {
+            return "The first lunar arrival must land after Orbit capture.";
+        }
     }
     return {};
 }
@@ -1766,14 +1817,15 @@ bool startScenarioFlybyRun(
     if (!actionOutcome.applied || !actionOutcome.beginsActivity) {
         return false;
     }
-    startArrivalFlybyRun(state, catalog);
-    if (!state.run.flyby.active) {
+    const Destination* destination = currentResearchDestination(state, catalog);
+    if (destination == nullptr) {
         return false;
     }
-    state.run.flyby.purpose = FlybyPurpose::ScenarioChallenge;
+    state.run.flyby = createFlybyRun(state, catalog, *destination, FlybyPurpose::ScenarioChallenge);
     state.run.flyby.scenarioId = std::string(scenarioId);
     state.run.flyby.scenarioStepId = std::string(stepId);
     state.run.arrivalOps = {};
+    state.screen = Screen::Flyby;
     state.statusLine = actionOutcome.message;
     return true;
 }
@@ -4057,14 +4109,15 @@ void addSurfaceScanMarker(SurfaceDepthProspect& prospect, MiningCellMaterial mar
 SurfaceScanPulseGrade surfaceScanPulseGrade(const SurfaceScanRunState& scan)
 {
     constexpr double twoPi = 6.28318530717958647692;
+    const int depthOffset = static_cast<int>(scan.depthProspects.size());
     const double sweep = tuning::research::surfaceScanSweepAngleRadians(scan.elapsedSeconds);
     const double difference = std::abs(std::remainder(
         sweep - tuning::research::scanWindowCenterRadians,
         twoPi));
-    if (difference <= tuning::research::scanPerfectWindowHalfAngleRadians) {
+    if (difference <= tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(depthOffset)) {
         return SurfaceScanPulseGrade::Perfect;
     }
-    if (difference <= tuning::research::scanGoodWindowHalfAngleRadians) {
+    if (difference <= tuning::research::surfaceScanGoodWindowHalfAngleForDepth(depthOffset)) {
         return SurfaceScanPulseGrade::Good;
     }
     return SurfaceScanPulseGrade::Miss;

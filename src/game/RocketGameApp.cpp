@@ -2375,8 +2375,9 @@ void RocketGameApp::attemptArrivalLanding()
 
 void RocketGameApp::departCapturedOrbit()
 {
-    if (state_.screen != Screen::ArrivalOps
-        || state_.run.arrivalOps.commitment != ApproachCommitment::OrbitCaptured) {
+    if (state_.screen != Screen::ArrivalOps || !canDepartCapturedArrivalOrbit(state_, catalog_)) {
+        state_.statusLine = arrivalOperationBlockReason(state_, catalog_, "depart");
+        panelDirty_ = true;
         return;
     }
 
@@ -2992,6 +2993,11 @@ void RocketGameApp::debugStartFlyby()
     state_.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
     state_.lastOutcome.destinationId = content::destination::moon;
     state_.lastOutcome.frontierTransfer = true;
+    if (ScenarioInstance* scenario = findScenarioInstance(state_.meta, content::scenario::marsBayExpansion)) {
+        if (ScenarioStepProgress* funding = findScenarioStepProgress(*scenario, "funding")) {
+            funding->briefingAcknowledged = true;
+        }
+    }
     startArrivalFlybyRun(state_, catalog_);
     state_.statusLine = "Debug flyby sandbox. Fly this approach without touching your save.";
     syncLaunchConfig(state_, catalog_);
@@ -4586,6 +4592,10 @@ RenderSnapshot RocketGameApp::snapshot() const
             0.0,
             1.0);
         result.travelProgress = session_.flightArmed ? session_.flight.travelProgress : 0.0;
+        const double targetMultiplier = 1.0 +
+            (visualDestination->targetMultiplier - 1.0) * result.launchMissionTargetProgress;
+        result.launchMissionTargetReached = session_.flightArmed &&
+            session_.flight.peakMultiplier + 0.000001 >= targetMultiplier;
         result.returningHome = session_.flight.returningHome;
         result.returnTurnProgress = result.returningHome ? 1.0 : 0.0;
     } else if (state_.screen == Screen::ArrivalFanfare || state_.screen == Screen::Flyby || state_.screen == Screen::Orbit || state_.screen == Screen::SurfaceScan || state_.screen == Screen::SurfacePush) {
@@ -4636,6 +4646,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningLoad = loadStats.currentLoad;
         result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
         result.miningContactIntensity = mining.contactIntensity;
+        result.miningContactIndicatorSeconds = mining.contactIndicatorSeconds;
+        result.miningContactIndicatorDirX = mining.contactIndicatorDirX;
+        result.miningContactIndicatorDirY = mining.contactIndicatorDirY;
         result.miningScannerPulse = mining.scannerPulseSeconds;
         result.miningScannerRechargeProgress = tuning::mining::scannerRechargePresentationProgress(
             state_.run.surfaceExpedition.scannerCooldownSeconds);
@@ -4767,6 +4780,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfaceScanBusted = scan.busted;
         result.surfaceScanPulses = scan.pulses;
         result.surfaceScanMaxPulses = std::max(1, scan.maxPulses);
+        result.surfaceScanCurrentDepthOffset = static_cast<int>(scan.depthProspects.size());
         result.surfaceScanSignal = scan.signal;
         result.surfaceScanInterference = scan.interference;
         result.surfaceScanBustRisk = scan.bustRisk;

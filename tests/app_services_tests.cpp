@@ -812,6 +812,13 @@ int main()
         moonArrival.type = rocket::LaunchResultType::MissionComplete;
         moonArrival.frontierTransfer = true;
         moonArrival.destinationId = rocket::content::destination::moon;
+        rocket::ScenarioInstance* marsBay = rocket::findScenarioInstance(
+            flyby.meta, rocket::content::scenario::marsBayExpansion);
+        rocket::ScenarioStepProgress* funding = marsBay == nullptr
+            ? nullptr
+            : rocket::findScenarioStepProgress(*marsBay, "funding");
+        assert(funding != nullptr);
+        funding->briefingAcknowledged = true;
         rocket::startArrivalOps(flyby, moonArrival);
         rocket::startArrivalFlybyRun(flyby, catalog);
         assert(flyby.screen == rocket::Screen::Flyby && !flyby.run.flyby.completed);
@@ -1706,6 +1713,10 @@ int main()
         assert(fixture.runner.initialize());
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         assert(fixture.ui.html.find("data-rr-action=\"continue_game\"") != std::string::npos);
+        const std::size_t continuePosition = fixture.ui.html.find("data-rr-action=\"continue_game\"");
+        const std::size_t separatorPosition = fixture.ui.html.find("title-menu-separator");
+        const std::size_t newGamePosition = fixture.ui.html.find("data-modal-open=\"new_game_confirm\"");
+        assert(continuePosition < separatorPosition && separatorPosition < newGamePosition);
         fixture.host.now += 0.20;
         fixture.runner.frame();
         assert(fixture.renderer.titleScreen);

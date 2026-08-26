@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/GameUi.h"
 #include "core/PanelPresentation.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <array>
@@ -83,6 +84,19 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
 {
     const SurfaceScanRunState& scan = state.run.surfaceScan;
     SurfaceScanRailPresentation presentation;
+    const int currentDepthOffset = static_cast<int>(scan.depthProspects.size());
+    const auto fullWindowDegrees = [](double halfAngle) {
+        constexpr double degreesPerRadian = 57.2957795130823208768;
+        return static_cast<int>(std::round(halfAngle * 2.0 * degreesPerRadian));
+    };
+    presentation.objective = "LAYER +" + std::to_string(currentDepthOffset)
+        + " // GOLD "
+        + std::to_string(fullWindowDegrees(
+            tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(currentDepthOffset)))
+        + " DEG // GREEN "
+        + std::to_string(fullWindowDegrees(
+            tuning::research::surfaceScanGoodWindowHalfAngleForDepth(currentDepthOffset)))
+        + " DEG // TIGHTENS WITH DEPTH.";
     presentation.metrics = {{
         panelMetric("PULSES", std::to_string(scan.pulses) + "/" + std::to_string(std::max(1, scan.maxPulses))),
         panelMetric("FORECAST", scan.cargo > 0 ? "+" + std::to_string(scan.cargo) : "0"),

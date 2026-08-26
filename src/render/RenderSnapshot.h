@@ -167,6 +167,7 @@ struct RenderSnapshot {
     double launchCourseVelocity = 0.0;
     double launchCourseLimit = 1.0;
     double launchMissionTargetProgress = 1.0;
+    bool launchMissionTargetReached = false;
     double launchHullRemaining = 100.0;
     double launchHullMaximum = 100.0;
     double launchHeatFailureProgress = 0.0;
@@ -225,6 +226,9 @@ struct RenderSnapshot {
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;
     double miningContactIntensity = 0.0;
+    double miningContactIndicatorSeconds = 0.0;
+    double miningContactIndicatorDirX = 0.0;
+    double miningContactIndicatorDirY = 0.0;
     double miningScannerPulse = 0.0;
     // -1 means no active mining actor. Otherwise this rises from zero after a
     // manual Survey Pulse to one when the shared scanner is ready again.
@@ -321,6 +325,7 @@ struct RenderSnapshot {
     bool surfaceScanBusted = false;
     int surfaceScanPulses = 0;
     int surfaceScanMaxPulses = 1;
+    int surfaceScanCurrentDepthOffset = 0;
     double surfaceScanSignal = 0.0;
     double surfaceScanInterference = 0.0;
     double surfaceScanBustRisk = 0.0;

@@ -1859,6 +1859,30 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
     const float goodBand = static_cast<float>(snapshot.flybyGoodBand);
     const float perfectBand = static_cast<float>(snapshot.flybyPerfectBand);
     const float pulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.6F);
+    const int zone = snapshot.flybyCompleted ? snapshot.flybyResult : snapshot.flybyZone;
+    const bool perfectZone = snapshot.flybyCompleted ? zone >= 3 : zone >= 2;
+    const bool goodZone = snapshot.flybyCompleted ? zone >= 2 : zone >= 1;
+    const bool missedZone = !goodZone;
+    const auto bandColor = [](Color resting, Color active, bool selected) {
+        return selected ? active : resting;
+    };
+    const auto bandWidth = [](bool selected, float restingWidth) {
+        return selected ? 3.0F : restingWidth;
+    };
+    const Color goodBoundaryColor = missedZone
+        ? Color {1.0F, 0.25F, 0.20F, 0.92F}
+        : bandColor(
+            {0.35F, 0.92F, 0.62F, 0.30F},
+            {0.35F, 0.92F, 0.62F, 0.92F},
+            goodZone && !perfectZone);
+    const float goodBoundaryWidth = missedZone
+        ? 3.0F
+        : bandWidth(goodZone && !perfectZone, 2.0F);
+    const Color perfectBoundaryColor = bandColor(
+        {1.0F, 0.82F, 0.28F, 0.38F + pulse * 0.06F},
+        {1.0F, 0.82F, 0.28F, 0.92F},
+        perfectZone);
+    const float perfectBoundaryWidth = bandWidth(perfectZone, 2.4F);
 
     auto pathPoint = [](float t) {
         const float u = 1.0F - t;
@@ -1904,10 +1928,10 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
     };
 
     drawCurveOffset(0.0F, {0.74F, 0.86F, 0.92F, 0.18F}, 1.2F);
-    drawCurveOffset(-goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 2.0F);
-    drawCurveOffset(goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 2.0F);
-    drawCurveOffset(-perfectBand, {1.0F, 0.82F, 0.28F, 0.38F + pulse * 0.06F}, 2.4F);
-    drawCurveOffset(perfectBand, {1.0F, 0.82F, 0.28F, 0.38F + pulse * 0.06F}, 2.4F);
+    drawCurveOffset(-goodBand, goodBoundaryColor, goodBoundaryWidth);
+    drawCurveOffset(goodBand, goodBoundaryColor, goodBoundaryWidth);
+    drawCurveOffset(-perfectBand, perfectBoundaryColor, perfectBoundaryWidth);
+    drawCurveOffset(perfectBand, perfectBoundaryColor, perfectBoundaryWidth);
 
     const Vec2 startGate = pathPoint(0.0F);
     const Vec2 endGate = pathPoint(1.0F);
@@ -1972,18 +1996,6 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
         }
         submitLines(pathVertices, kFlightPathTrailWidth);
     }
-
-    const int zone = snapshot.flybyCompleted ? snapshot.flybyResult : snapshot.flybyZone;
-    const bool perfectZone = snapshot.flybyCompleted ? zone >= 3 : zone >= 2;
-    const bool goodZone = snapshot.flybyCompleted ? zone >= 2 : zone >= 1;
-    const Color zoneGlow = perfectZone
-        ? Color{0.92F, 0.42F, 0.04F, 0.18F}
-        : (goodZone ? Color{0.02F, 0.28F, 0.46F, 0.16F} : Color{0.32F, 0.0F, 0.035F, 0.24F});
-    const Color zoneRing = perfectZone
-        ? Color{1.0F, 0.76F, 0.22F, 0.54F}
-        : (goodZone ? Color{0.22F, 0.86F, 1.0F, 0.46F} : Color{0.78F, 0.04F, 0.04F, 0.52F});
-    drawRadialGlow(shipX, shipY, 0.078F + pulse * 0.008F, zoneGlow, 42);
-    drawEllipseLine(shipX, shipY, 0.052F + pulse * 0.005F, 0.052F + pulse * 0.005F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
     // Use the live key input as well as the retained setting. This keeps the
     // flame visible on the first Flyby frame that W is pressed.
@@ -2077,12 +2089,36 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
     const float targetRadius = static_cast<float>(snapshot.orbitTargetRadius);
     const float goodBand = static_cast<float>(snapshot.orbitGoodBand);
     const float perfectBand = static_cast<float>(snapshot.orbitPerfectBand);
+    const int zone = snapshot.orbitCompleted ? snapshot.orbitResult : snapshot.orbitZone;
+    const bool perfectZone = snapshot.orbitCompleted ? zone >= 3 : zone >= 2;
+    const bool goodZone = snapshot.orbitCompleted ? zone >= 2 : zone >= 1;
+    const bool missedZone = !goodZone;
+    const auto bandColor = [](Color resting, Color active, bool selected) {
+        return selected ? active : resting;
+    };
+    const auto bandWidth = [](bool selected, float restingWidth) {
+        return selected ? 3.0F : restingWidth;
+    };
+    const Color goodBoundaryColor = missedZone
+        ? Color {1.0F, 0.25F, 0.20F, 0.92F}
+        : bandColor(
+            {0.35F, 0.92F, 0.62F, 0.30F},
+            {0.35F, 0.92F, 0.62F, 0.92F},
+            goodZone && !perfectZone);
+    const float goodBoundaryWidth = missedZone
+        ? 3.0F
+        : bandWidth(goodZone && !perfectZone, 2.0F);
 
     drawEllipseLine(0.0F, 0.0F, targetRadius, targetRadius, {0.74F, 0.86F, 0.92F, 0.18F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius - goodBand, targetRadius - goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius + goodBand, targetRadius + goodBand, {0.18F, 0.78F, 1.0F, 0.30F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius - perfectBand, targetRadius - perfectBand, {1.0F, 0.80F, 0.24F, 0.38F + pulse * 0.08F}, 128, 0.0F, 2.0F * kPi);
-    drawEllipseLine(0.0F, 0.0F, targetRadius + perfectBand, targetRadius + perfectBand, {1.0F, 0.80F, 0.24F, 0.38F + pulse * 0.08F}, 128, 0.0F, 2.0F * kPi);
+    drawEllipseLine(0.0F, 0.0F, targetRadius - goodBand, targetRadius - goodBand, goodBoundaryColor, 128, 0.0F, 2.0F * kPi, goodBoundaryWidth);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + goodBand, targetRadius + goodBand, goodBoundaryColor, 128, 0.0F, 2.0F * kPi, goodBoundaryWidth);
+    const Color perfectBoundaryColor = bandColor(
+        {1.0F, 0.80F, 0.24F, 0.38F + pulse * 0.08F},
+        {1.0F, 0.80F, 0.24F, 0.92F},
+        perfectZone);
+    const float perfectBoundaryWidth = bandWidth(perfectZone, 2.4F);
+    drawEllipseLine(0.0F, 0.0F, targetRadius - perfectBand, targetRadius - perfectBand, perfectBoundaryColor, 128, 0.0F, 2.0F * kPi, perfectBoundaryWidth);
+    drawEllipseLine(0.0F, 0.0F, targetRadius + perfectBand, targetRadius + perfectBand, perfectBoundaryColor, 128, 0.0F, 2.0F * kPi, perfectBoundaryWidth);
 
     const float progress = static_cast<float>(std::clamp(snapshot.orbitProgress, 0.0, 1.0));
     if (progress > 0.0F) {
@@ -2142,18 +2178,6 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
             -static_cast<float>(tuning::orbit::direction) * shipY,
             static_cast<float>(tuning::orbit::direction) * shipX});
     }
-
-    const int zone = snapshot.orbitCompleted ? snapshot.orbitResult : snapshot.orbitZone;
-    const bool perfectZone = snapshot.orbitCompleted ? zone >= 3 : zone >= 2;
-    const bool goodZone = snapshot.orbitCompleted ? zone >= 2 : zone >= 1;
-    const Color zoneGlow = perfectZone
-        ? Color{0.92F, 0.42F, 0.04F, 0.17F}
-        : (goodZone ? Color{0.02F, 0.26F, 0.44F, 0.14F} : Color{0.32F, 0.0F, 0.035F, 0.22F});
-    const Color zoneRing = perfectZone
-        ? Color{1.0F, 0.76F, 0.22F, 0.50F}
-        : (goodZone ? Color{0.22F, 0.84F, 1.0F, 0.42F} : Color{0.78F, 0.04F, 0.04F, 0.50F});
-    drawRadialGlow(shipX, shipY, 0.074F + pulse * 0.008F, zoneGlow, 42);
-    drawEllipseLine(shipX, shipY, 0.050F + pulse * 0.004F, 0.050F + pulse * 0.004F, zoneRing, 42, 0.0F, 2.0F * kPi);
 
     const float throttle = static_cast<float>(std::clamp(snapshot.instrumentThrottle, 0.0, 1.0));
     const float radialInput = static_cast<float>(snapshot.orbitInputX);
@@ -3965,6 +3989,71 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 10);
         }
     }
+    const float collisionIndicator = static_cast<float>(std::clamp(
+        snapshot.miningContactIndicatorSeconds / tuning::mining::contactIndicatorSeconds,
+        0.0,
+        1.0));
+    const float collisionDirectionLength = static_cast<float>(std::hypot(
+        snapshot.miningContactIndicatorDirX,
+        snapshot.miningContactIndicatorDirY));
+    if (!snapshot.miningExtractionActive && collisionIndicator > 0.0F && collisionDirectionLength > 0.0001F) {
+        // Keep the contact mark attached to the simulated collider, not the
+        // rig's presentation-only rebound. The rig can recoil away from the
+        // wall, but the mark must remain on the terrain edge that stopped it.
+        const Vec2 collisionCenter = snapshot.miningOperatorActive
+            ? operatorPosition
+            : cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+        // Gameplay coordinates point down; scene coordinates point up.
+        const Vec2 collisionDirection {
+            static_cast<float>(snapshot.miningContactIndicatorDirX) / collisionDirectionLength,
+            -static_cast<float>(snapshot.miningContactIndicatorDirY) / collisionDirectionLength
+        };
+        const Vec2 perpendicular {-collisionDirection.y, collisionDirection.x};
+        const float colliderRadius = static_cast<float>(
+            snapshot.miningOperatorActive
+                ? tuning::mining::operatorColliderRadiusCells
+                : tuning::mining::rigColliderRadiusCells);
+        const Vec2 contactPoint {
+            collisionCenter.x + collisionDirection.x * colliderRadius * cellW,
+            collisionCenter.y + collisionDirection.y * colliderRadius * cellH
+        };
+        const float pulse = 0.78F + 0.22F * std::sin(static_cast<float>(snapshot.animationTime) * 48.0F);
+        const float alpha = collisionIndicator * (0.62F + 0.30F * pulse);
+        const float halfBarrier = cellSize * (0.32F + 0.12F * (1.0F - collisionIndicator));
+        const float chevronDepth = cellSize * 0.18F;
+        const Color bumpColor {1.0F, 0.22F, 0.14F, alpha};
+        drawRadialGlow(
+            contactPoint.x,
+            contactPoint.y,
+            cellSize * (0.72F + (1.0F - collisionIndicator) * 0.28F),
+            {1.0F, 0.12F, 0.06F, alpha * 0.16F},
+            18);
+        drawLine(
+            contactPoint.x - perpendicular.x * halfBarrier,
+            contactPoint.y - perpendicular.y * halfBarrier,
+            contactPoint.x + perpendicular.x * halfBarrier,
+            contactPoint.y + perpendicular.y * halfBarrier,
+            bumpColor,
+            3.0F);
+        const Vec2 chevronBase {
+            contactPoint.x - collisionDirection.x * chevronDepth,
+            contactPoint.y - collisionDirection.y * chevronDepth
+        };
+        drawLine(
+            chevronBase.x - perpendicular.x * halfBarrier * 0.72F,
+            chevronBase.y - perpendicular.y * halfBarrier * 0.72F,
+            contactPoint.x,
+            contactPoint.y,
+            bumpColor,
+            2.0F);
+        drawLine(
+            chevronBase.x + perpendicular.x * halfBarrier * 0.72F,
+            chevronBase.y + perpendicular.y * halfBarrier * 0.72F,
+            contactPoint.x,
+            contactPoint.y,
+            bumpColor,
+            2.0F);
+    }
     if (snapshot.miningExtractionActive) {
         const float miniWindow = 0.34F;
         for (std::size_t i = 0; i < snapshot.miningMiniDrones.size(); ++i) {
@@ -4345,6 +4434,14 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     const float surfaceRadius = 0.105F;
     const float sweep = static_cast<float>(tuning::research::surfaceScanSweepAngleRadians(time));
     const int maxScanLayers = std::max(1, snapshot.surfaceScanMaxPulses);
+    const int currentDepthOffset = std::clamp(
+        snapshot.surfaceScanCurrentDepthOffset,
+        0,
+        std::max(0, maxScanLayers - 1));
+    const float goodWindowHalfAngle = static_cast<float>(
+        tuning::research::surfaceScanGoodWindowHalfAngleForDepth(currentDepthOffset));
+    const float perfectWindowHalfAngle = static_cast<float>(
+        tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(currentDepthOffset));
 
     // The home body is deliberately cropped by the protected scene clip. It
     // supplies the same scale cue as the mockup without moving or replacing
@@ -4404,13 +4501,14 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
                 1.2F);
         }
     };
-    // The green good window surrounds the narrower gold perfect window.
+    // Each mapped layer makes the next pass narrower. The green good window
+    // still surrounds the narrower gold perfect window at every depth.
     drawScanWindow(
-        static_cast<float>(tuning::research::scanGoodWindowHalfAngleRadians),
+        goodWindowHalfAngle,
         {0.18F, 0.92F, 0.40F, 0.13F},
         {0.28F, 1.0F, 0.48F, 0.62F});
     drawScanWindow(
-        static_cast<float>(tuning::research::scanPerfectWindowHalfAngleRadians),
+        perfectWindowHalfAngle,
         {1.0F, 0.74F, 0.16F, 0.24F},
         {1.0F, 0.82F, 0.24F, 0.86F});
 
@@ -5192,9 +5290,28 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
             }
             submitLines(vertices, width);
         };
-        drawCorridorBoundary(tuning::launch::pilotingCourseSafe, {0.35F, 0.92F, 0.62F, 0.34F}, 1.0F);
-        drawCorridorBoundary(tuning::launch::pilotingCourseCaution, {1.0F, 0.78F, 0.24F, 0.28F}, 1.0F);
-        drawCorridorBoundary(snapshot.launchCourseLimit, {1.0F, 0.25F, 0.20F, 0.32F}, 1.5F);
+        const double absoluteOffset = std::abs(snapshot.launchCourseOffset);
+        const bool inGoldBand = absoluteOffset < tuning::launch::pilotingCourseSafe;
+        const bool inGreenBand = !inGoldBand && absoluteOffset < snapshot.launchCourseLimit;
+        const bool inRedBand = !inGoldBand && !inGreenBand;
+        const auto bandColor = [](Color resting, Color active, bool selected) {
+            return selected ? active : resting;
+        };
+        const auto bandWidth = [](bool selected, float restingWidth) {
+            return selected ? 3.0F : restingWidth;
+        };
+        drawCorridorBoundary(
+            tuning::launch::pilotingCourseSafe,
+            bandColor({1.0F, 0.78F, 0.24F, 0.34F}, {1.0F, 0.78F, 0.24F, 0.92F}, inGoldBand),
+            bandWidth(inGoldBand, 1.0F));
+        drawCorridorBoundary(
+            tuning::launch::pilotingCourseCaution,
+            bandColor({0.35F, 0.92F, 0.62F, 0.28F}, {0.35F, 0.92F, 0.62F, 0.92F}, inGreenBand),
+            bandWidth(inGreenBand, 1.0F));
+        drawCorridorBoundary(
+            snapshot.launchCourseLimit,
+            bandColor({1.0F, 0.25F, 0.20F, 0.32F}, {1.0F, 0.25F, 0.20F, 0.92F}, inRedBand),
+            bandWidth(inRedBand, 1.5F));
 
     }
 
@@ -5301,16 +5418,6 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
-    if (snapshot.screen == Screen::Launch && snapshot.launchManualControlsEnabled &&
-        std::abs(snapshot.launchCourseOffset) >= tuning::launch::pilotingCourseSafe) {
-        const Color correctionColor = std::abs(snapshot.launchCourseOffset) >= snapshot.launchCourseLimit
-            ? Color {1.0F, 0.24F, 0.18F, 0.92F}
-            : Color {1.0F, 0.78F, 0.24F, 0.82F};
-        std::vector<SceneVertex>& correction = scratchVertices(16);
-        appendLine(correction, cx, cy, centerRoute.x, centerRoute.y, correctionColor);
-        submitLines(correction, 2.0F);
-        drawCircle(centerRoute.x, centerRoute.y, 0.005F, correctionColor, 14);
-    }
     const float scale = std::clamp(0.26F - static_cast<float>(snapshot.travelProgress) * 0.06F, 0.16F, 0.26F);
     auto world = [&](float localX, float localY) {
         return Vec2 {
@@ -5717,12 +5824,17 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             snapshot,
             targetProgress,
             snapshot.launchCourseLimit);
+        const bool crossedTarget = snapshot.launchMissionTargetReached ||
+            snapshot.travelProgress >= targetProgress;
+        const Color targetColor = crossedTarget
+            ? Color {0.35F, 0.92F, 0.62F, 0.82F}
+            : Color {1.0F, 0.25F, 0.20F, 0.82F};
         drawLine(
             targetLeft.x,
             targetLeft.y,
             targetRight.x,
             targetRight.y,
-            {0.98F, 0.82F, 0.36F, 0.70F},
+            targetColor,
             2.0F);
     } else if ((snapshot.destinationTier == 0 && !snapshot.frontierTransfer) || snapshot.destinationTier > 2) {
         const Vec2 targetMarker = routePoint(snapshot, 1.0F);
@@ -5813,7 +5925,16 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
     }
 }
 
-void SceneComposer::drawEllipseLine(float cx, float cy, float rx, float ry, Color color, int segments, float start, float end)
+void SceneComposer::drawEllipseLine(
+    float cx,
+    float cy,
+    float rx,
+    float ry,
+    Color color,
+    int segments,
+    float start,
+    float end,
+    float width)
 {
     auto& vertices = scratchVertices(static_cast<std::size_t>(segments) * 16U);
     Vec2 previous {cx + std::cos(start) * rx, cy + std::sin(start) * ry};
@@ -5824,7 +5945,7 @@ void SceneComposer::drawEllipseLine(float cx, float cy, float rx, float ry, Colo
         appendLine(vertices, previous.x, previous.y, next.x, next.y, color);
         previous = next;
     }
-    submitLines(vertices, 1.0F);
+    submitLines(vertices, width);
 }
 
 void SceneComposer::submit(

@@ -3155,13 +3155,19 @@ std::string buildGamePanelMarkup(
             << "<div class=\"title-divider\"><span></span><strong>ORE // ORBIT // RETURN</strong><span></span></div>"
             << "<div class=\"title-menu\">";
         if (context.hasSavedGame) {
-            out << modalButton("New Game", "new_game_confirm", "title-action title-new-game")
-                << button("Continue", ui::actions::continueGame, "title-action title-continue", true);
+            out << "<div class=\"title-menu-primary\">"
+                << button("Continue", ui::actions::continueGame, "title-action title-continue", true)
+                << "</div>"
+                << "<div class=\"title-menu-separator\" aria-hidden=\"true\"></div>"
+                << "<div class=\"title-menu-secondary\">"
+                << modalButton("New Game", "new_game_confirm", "title-action title-new-game")
+                << modalButton("Settings", ui::modals::settings, "title-action title-settings")
+                << "</div>";
         } else {
             out << button("New Game", ui::actions::newGame, "title-action title-new-game", true);
+            out << modalButton("Settings", ui::modals::settings, "title-action title-settings");
         }
-        out << modalButton("Settings", ui::modals::settings, "title-action title-settings")
-            << "</div>"
+        out << "</div>"
             << "<span class=\"title-save-state ";
         out << (context.hasSavedGame ? "save-found\">SAVE SIGNAL ACQUIRED" : "save-empty\">NO LOCAL SAVE DETECTED");
         out << "</span>";
@@ -3755,8 +3761,11 @@ std::string buildGamePanelMarkup(
         const bool orbitCaptured = state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
         const bool flybyAvailable = canRunArrivalFlyby(state, catalog);
         const bool orbitAvailable = canEnterArrivalOrbit(state, catalog);
+        const bool firstLandingSequence = requiresArrivalOrbitBeforeLanding(state, catalog);
         const bool landingAvailable = canAttemptArrivalLanding(state, catalog);
+        const bool canDepartOrbit = canDepartCapturedArrivalOrbit(state, catalog);
         const std::string_view flybyIntroduction = !context.firstTimeIntroductionsEnabled
+                || !flybyAvailable
                 || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
             ? std::string_view {}
             : ui::modals::flybyIntroduction;
@@ -3765,6 +3774,7 @@ std::string buildGamePanelMarkup(
             ? std::string_view {}
             : ui::modals::orbitIntroduction;
         const std::string_view landingIntroduction = !context.firstTimeIntroductionsEnabled
+                || !landingAvailable
                 || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::landing)
             ? std::string_view {}
             : ui::modals::landingIntroduction;
@@ -3803,6 +3813,9 @@ std::string buildGamePanelMarkup(
                 + " credits; Perfect +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Perfect))
                 + " and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Perfect))
                 + ". Removes +20 descent hazard for this visit. Closes Pass Through; then Land or Depart.";
+            if (firstLandingSequence) {
+                orbitRewardDetail += " The first landing must use this orbital map.";
+            }
         }
 
         out << phaseBoardOpen("phase-board-arrival", "");
@@ -3833,7 +3846,8 @@ std::string buildGamePanelMarkup(
             }
         }
         out << "<p class=\"phase-copy\">Research families are added to future Refit offers when milestones are reached; they are not immediately owned.</p>";
-        out << "<h2>" << htmlEscape(orbitCaptured ? "Resolve captured orbit" : "Commit approach") << "</h2>";
+        out << "<h2>" << htmlEscape(
+            orbitCaptured ? "Resolve captured orbit" : (firstLandingSequence ? "Map first landing" : "Commit approach")) << "</h2>";
         out << "<div class=\"ops-grid\">";
         if (orbitCaptured) {
             out << arrivalOperationCard(
@@ -3846,22 +3860,24 @@ std::string buildGamePanelMarkup(
                     : disabledPanelButton(text::buttons::unavailable),
                 landingIntroduction,
                 true);
-            out << arrivalOperationCard(
-                "DEPART WITH SCIENCE",
-                "Keep the Orbit credits and Research Data, end the visit, and skip surface resources. Grants no route clearance and no Landing Flight Data.",
-                "End visit",
-                "Research Data banked",
-                panelActionButton("DEPART", ui::actions::arrivalOrbitDepart, "warn"));
+            if (canDepartOrbit) {
+                out << arrivalOperationCard(
+                    "DEPART WITH SCIENCE",
+                    "Keep the Orbit credits and Research Data, end the visit, and skip surface resources. Grants no route clearance and no Landing Flight Data.",
+                    "End visit",
+                    "Research Data banked",
+                    panelActionButton("DEPART", ui::actions::arrivalOrbitDepart, "warn"));
+            }
         } else {
-            out << arrivalOperationCard(
-                "FLYBY — PASS THROUGH",
-                flybyRewardDetail,
-                "Terminal path",
-                "Research Data + credits",
-                flybyAvailable
-                    ? panelActionButton("PASS THROUGH", ui::actions::arrivalFlyby, "ok")
-                    : disabledPanelButton(text::buttons::unavailable),
-                flybyIntroduction);
+            if (flybyAvailable) {
+                out << arrivalOperationCard(
+                    "FLYBY — PASS THROUGH",
+                    flybyRewardDetail,
+                    "Terminal path",
+                    "Research Data + credits",
+                    panelActionButton("PASS THROUGH", ui::actions::arrivalFlyby, "ok"),
+                    flybyIntroduction);
+            }
             out << arrivalOperationCard(
                 "ORBIT — CAPTURE",
                 orbitRewardDetail,
@@ -3871,15 +3887,17 @@ std::string buildGamePanelMarkup(
                     ? panelActionButton("ORBIT", ui::actions::arrivalOrbit, "warn")
                     : disabledPanelButton(text::buttons::unavailable),
                 orbitIntroduction);
-            out << arrivalOperationCard(
-                "DIRECT DESCENT",
-                "Immediately descend to " + landingTarget + ". SURFACE HAZARD +20. Closes Pass Through and Orbit. Earns the normal one-step Flight Data contribution after landing.",
-                "Terminal approach",
-                "",
-                landingAvailable
-                    ? panelActionButton("LAND", ui::actions::arrivalLanding, "danger")
-                    : disabledPanelButton(text::buttons::unavailable),
-                landingIntroduction);
+            if (!firstLandingSequence) {
+                out << arrivalOperationCard(
+                    "DIRECT DESCENT",
+                    "Immediately descend to " + landingTarget + ". SURFACE HAZARD +20. Closes Pass Through and Orbit. Earns the normal one-step Flight Data contribution after landing.",
+                    "Terminal approach",
+                    "",
+                    landingAvailable
+                        ? panelActionButton("LAND", ui::actions::arrivalLanding, "danger")
+                        : disabledPanelButton(text::buttons::unavailable),
+                    landingIntroduction);
+            }
         }
         out << "</div>";
         out << phaseBoardClose();
@@ -3890,8 +3908,12 @@ std::string buildGamePanelMarkup(
             out << activityIntroductionModal(
                 ui::modals::approachIntroduction,
                 approachLocation + " APPROACH",
-                "Choose one committed path: Pass Through ends the visit, Capture Orbit opens mapped landing or science departure, and Direct Descent accepts +20 surface hazard.",
-                "At the Moon, skipping the planet does not complete the active capture objective or open the Mars route.",
+                firstLandingSequence
+                    ? "First landing protocol requires Capture Orbit, then Land with the orbital map."
+                    : "Choose one committed path: Pass Through ends the visit, Capture Orbit opens mapped landing or science departure, and Direct Descent accepts +20 surface hazard.",
+                firstLandingSequence
+                    ? "Flyby is introduced later at the Jupiter transfer window. The Lunar contract and Mars route still require surface recovery."
+                    : "At the Moon, skipping the planet does not complete the active capture objective or open the Mars route.",
                 "Review",
                 ui::actions::acknowledgeApproachIntroduction,
                 "ok",

@@ -2717,6 +2717,14 @@ void researchPhasesUnlockOnlyAfterMarsArrival()
         "arrival phase track should mark the current phase and pending follow-up");
 }
 
+void introduceArrivalFlybyForTest(GameState& state)
+{
+    ScenarioInstance* scenario = findScenarioInstance(state.meta, content::scenario::marsBayExpansion);
+    ScenarioStepProgress* funding = scenario == nullptr ? nullptr : findScenarioStepProgress(*scenario, "funding");
+    require(funding != nullptr, "the Mars transfer-assist briefing should exist in test state");
+    funding->briefingAcknowledged = true;
+}
+
 void arrivalOperationsUseMutuallyExclusiveCommitments()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2735,21 +2743,30 @@ void arrivalOperationsUseMutuallyExclusiveCommitments()
     require(shouldOpenArrivalOps(jupiterArrival, catalog), "Jupiter transfer arrival should open arrival operations");
 
     startArrivalOps(state, moonArrival);
-    require(canRunArrivalFlyby(state, catalog), "Moon flyby should always be available after arrival");
+    require(!canRunArrivalFlyby(state, catalog), "Moon Flyby should stay hidden until the Jupiter transfer window introduces it");
     require(canEnterArrivalOrbit(state, catalog), "Moon orbit should be available as an initial approach path");
-    require(canAttemptArrivalLanding(state, catalog), "Moon direct descent should be available immediately");
+    require(!canAttemptArrivalLanding(state, catalog), "the first Moon landing should require an orbit capture");
     require(captureArrivalOrbit(state), "a successful orbit should capture the approach");
     require(!canRunArrivalFlyby(state, catalog), "captured orbit should close Pass Through");
     require(!canEnterArrivalOrbit(state, catalog), "captured orbit should close repeat capture");
     require(canAttemptArrivalLanding(state, catalog), "captured orbit should expose mapped landing");
+    require(!canDepartCapturedArrivalOrbit(state, catalog), "the first Moon orbit must continue to landing instead of departing with science");
     require(!hasUnlock(state.meta, content::unlock::routeMars),
         "Moon landing alone must not silently chart Mars; the explicit Prospector contract owns that route unlock");
     state.run.destinationIndex = 1;
     require(!flybyClearsGenericNextRoute(state, catalog), "Moon Pass Through must not bypass the authored Mars route");
     require(!bankFlybyRouteClearance(state, catalog), "authored story routes must reject generic Flyby clearance");
 
+    GameState returnMoon = createNewGame(catalog, 6071);
+    returnMoon.meta.destinationLandings[1] = 1;
+    startArrivalOps(returnMoon, moonArrival);
+    require(canAttemptArrivalLanding(returnMoon, catalog), "later Moon visits should restore direct descent");
+    require(captureArrivalOrbit(returnMoon) && canDepartCapturedArrivalOrbit(returnMoon, catalog),
+        "later Moon visits should restore departure after a captured orbit");
+
     GameState generic = createNewGame(catalog, 611);
     generic.run.destinationIndex = 4;
+    introduceArrivalFlybyForTest(generic);
     LaunchOutcome saturnArrival = moonArrival;
     saturnArrival.destinationId = content::destination::saturn;
     startArrivalOps(generic, saturnArrival);
@@ -2805,22 +2822,22 @@ void arrivalPresentationExplainsCommitmentAndResearchProgress()
 
     const std::string uncommitted = buildGamePanelHtml(context);
     require(uncommitted.find("APPROACH UNCOMMITTED") != std::string::npos
-            && uncommitted.find("FLYBY — PASS THROUGH") != std::string::npos
             && uncommitted.find("ORBIT — CAPTURE") != std::string::npos
-            && uncommitted.find("DIRECT DESCENT") != std::string::npos,
-        "Arrival board should present the three mutually exclusive uncommitted paths");
+            && uncommitted.find("FLYBY — PASS THROUGH") == std::string::npos
+            && uncommitted.find("DIRECT DESCENT") == std::string::npos,
+        "the first Moon arrival should present only its required Orbit capture path");
     require(uncommitted.find("UNMAPPED +20") != std::string::npos
             && uncommitted.find("7/8 • RECOVERY") != std::string::npos
             && uncommitted.find("future Refit offers") != std::string::npos,
         "Arrival board should expose exact unmapped hazard and current/next Research Data milestone meaning");
-    require(uncommitted.find("Objective remains active; Mars route stays locked") != std::string::npos,
-        "Moon Pass Through should name the authored route blocker before commitment");
+    require(uncommitted.find("First landing protocol: Capture Orbit, then Land") != std::string::npos,
+        "Moon approach copy should explain the required Orbit-to-Land sequence");
     require(uncommitted.find("data-rr-action=\"arrival_flyby\" data-ui-focus-id=\"action:arrival_flyby\" data-ui-default-focus=\"1\"") == std::string::npos
             && uncommitted.find("data-rr-action=\"arrival_orbit\" data-ui-focus-id=\"action:arrival_orbit\" data-ui-default-focus=\"1\"") == std::string::npos
             && uncommitted.find("data-rr-action=\"arrival_landing\" data-ui-focus-id=\"action:arrival_landing\" data-ui-default-focus=\"1\"") == std::string::npos,
         "uncommitted arrival choices must not let confirm make an irreversible approach decision");
     require(uncommitted.find("rr-button-label\">ORBIT</span>") != std::string::npos
-            && uncommitted.find("rr-button-label\">LAND</span>") != std::string::npos
+            && uncommitted.find("rr-button-label\">LAND</span>") == std::string::npos
             && uncommitted.find("rr-button-label\">CAPTURE ORBIT</span>") == std::string::npos
             && uncommitted.find("rr-button-label\">DESCEND DIRECT</span>") == std::string::npos,
         "Arrival approach buttons should use the concise Orbit and Land labels");
@@ -2831,9 +2848,9 @@ void arrivalPresentationExplainsCommitmentAndResearchProgress()
     const std::string captured = buildGamePanelHtml(capturedContext);
     require(captured.find("ORBIT CAPTURED") != std::string::npos
             && captured.find("LAND") != std::string::npos
-            && captured.find("DEPART WITH SCIENCE") != std::string::npos
-            && captured.find("data-rr-action=\"arrival_orbit_depart\"") != std::string::npos,
-        "captured Orbit board should expose only mapped landing and science departure resolution");
+            && captured.find("DEPART WITH SCIENCE") == std::string::npos
+            && captured.find("data-rr-action=\"arrival_orbit_depart\"") == std::string::npos,
+        "the first captured Moon orbit should expose only its required mapped landing");
     require(captured.find("data-rr-action=\"arrival_flyby\"") == std::string::npos
             && captured.find("data-rr-action=\"arrival_orbit\"") == std::string::npos,
         "captured Orbit presentation should close Pass Through and repeat capture actions");
@@ -2870,9 +2887,14 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     moonArrival.frontierTransfer = true;
     moonArrival.destinationId = content::destination::moon;
 
+    const auto startArrivalFlybyForTest = [&](GameState& flybyState, const LaunchOutcome& arrival) {
+        introduceArrivalFlybyForTest(flybyState);
+        startArrivalOps(flybyState, arrival);
+        startArrivalFlybyRun(flybyState, catalog);
+    };
+
     GameState miss = createNewGame(catalog, 701);
-    startArrivalOps(miss, moonArrival);
-    startArrivalFlybyRun(miss, catalog);
+    startArrivalFlybyForTest(miss, moonArrival);
     require(miss.screen == Screen::Flyby && miss.run.flyby.active, "starting arrival flyby should open the flyby minigame");
     require(miss.run.flyby.currentZone >= 1, "flyby should begin inside the single-pass corridor");
     require(miss.run.flyby.gravityStrength <= tuning::flyby::gravityEasy + 0.001, "Moon flyby should use easy gravity");
@@ -2896,8 +2918,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(miss.meta.totalFlybyMisses == 1, "missed flyby should be counted for future achievement stats");
 
     GameState good = createNewGame(catalog, 702);
-    startArrivalOps(good, moonArrival);
-    startArrivalFlybyRun(good, catalog);
+    startArrivalFlybyForTest(good, moonArrival);
     const int goodFlybysBefore = destinationHistoryValue(good.meta.destinationFlybys, catalog, content::destination::moon);
     const int goodBlueprintsBefore = good.meta.blueprintProgress;
     const double goodCreditsBefore = good.run.credits;
@@ -2912,8 +2933,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(good.meta.totalFlybyGoods == 1, "good flyby should be counted for future achievement stats");
 
     GameState perfect = createNewGame(catalog, 703);
-    startArrivalOps(perfect, moonArrival);
-    startArrivalFlybyRun(perfect, catalog);
+    startArrivalFlybyForTest(perfect, moonArrival);
     perfect.run.flyby.completed = true;
     perfect.run.flyby.result = FlybyGrade::Perfect;
     perfect.run.flyby.elapsedSeconds = tuning::flyby::durationSeconds - 1.0;
@@ -2943,8 +2963,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(launch.slingshotSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "prepared launch should include pending slingshot speed");
 
     GameState fastPerfect = createNewGame(catalog, 711);
-    startArrivalOps(fastPerfect, moonArrival);
-    startArrivalFlybyRun(fastPerfect, catalog);
+    startArrivalFlybyForTest(fastPerfect, moonArrival);
     fastPerfect.run.flyby.completed = true;
     fastPerfect.run.flyby.result = FlybyGrade::Perfect;
     fastPerfect.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
@@ -2963,8 +2982,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(restored.meta.totalFlybyPerfects == fastPerfect.meta.totalFlybyPerfects, "perfect flyby totals should survive save roundtrip");
 
     GameState fastGate = createNewGame(catalog, 712);
-    startArrivalOps(fastGate, moonArrival);
-    startArrivalFlybyRun(fastGate, catalog);
+    startArrivalFlybyForTest(fastGate, moonArrival);
     const auto cubicPoint = [](double a, double b, double c, double d, double t) {
         const double u = 1.0 - t;
         return u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * d;
@@ -2984,8 +3002,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(std::hypot(fastGate.run.flyby.velocityX, fastGate.run.flyby.velocityY) < 0.001, "flyby should physically stop the shuttle when the exit gate is reached");
 
     GameState fastOvershoot = createNewGame(catalog, 713);
-    startArrivalOps(fastOvershoot, moonArrival);
-    startArrivalFlybyRun(fastOvershoot, catalog);
+    startArrivalFlybyForTest(fastOvershoot, moonArrival);
     fastOvershoot.run.flyby.gravityStrength = 0.0;
     fastOvershoot.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
     fastOvershoot.run.flyby.shipX = cubicPoint(tuning::flyby::startX, tuning::flyby::control1X, tuning::flyby::control2X, tuning::flyby::endX, 0.98);
@@ -3001,8 +3018,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(fastOvershoot.run.flyby.worstZone >= 2, "post-finish overshoot should not degrade a perfect gate crossing");
 
     GameState visibleGate = createNewGame(catalog, 715);
-    startArrivalOps(visibleGate, moonArrival);
-    startArrivalFlybyRun(visibleGate, catalog);
+    startArrivalFlybyForTest(visibleGate, moonArrival);
     visibleGate.run.flyby.gravityStrength = 0.0;
     visibleGate.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
     const double finishDx = 3.0 * (tuning::flyby::endX - tuning::flyby::control2X);
@@ -3027,8 +3043,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(flybyGrade(strictMiss) == FlybyGrade::Miss, "touching the miss zone should make the whole flyby a miss");
 
     GameState instantMiss = createNewGame(catalog, 716);
-    startArrivalOps(instantMiss, moonArrival);
-    startArrivalFlybyRun(instantMiss, catalog);
+    startArrivalFlybyForTest(instantMiss, moonArrival);
     instantMiss.run.flyby.gravityStrength = 0.0;
     instantMiss.run.flyby.shipX = tuning::flyby::startX - tuning::flyby::goodBand * 2.8;
     instantMiss.run.flyby.shipY = tuning::flyby::startY + tuning::flyby::goodBand * 3.0;
@@ -3054,16 +3069,14 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     outerArrival.frontierTransfer = true;
     outerArrival.destinationId = content::destination::jupiter;
     GameState outer = createNewGame(catalog, 707);
-    startArrivalOps(outer, outerArrival);
-    startArrivalFlybyRun(outer, catalog);
+    startArrivalFlybyForTest(outer, outerArrival);
     require(outer.run.flyby.gravityStrength > miss.run.flyby.gravityStrength, "large-planet flyby should apply stronger gravity than Moon/Mars");
     const double initialProgress = outer.run.flyby.pathProgress;
     updateFlybyRun(outer, 0.5);
     require(outer.run.flyby.pathProgress >= initialProgress, "single-pass flyby should advance along the corridor over time");
 
     GameState longTrail = createNewGame(catalog, 718);
-    startArrivalOps(longTrail, moonArrival);
-    startArrivalFlybyRun(longTrail, catalog);
+    startArrivalFlybyForTest(longTrail, moonArrival);
     longTrail.run.flyby.gravityStrength = 0.0;
     longTrail.run.flyby.trailPoints.clear();
     for (int i = 0; i < 120; ++i) {
@@ -3077,8 +3090,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
         "flyby trail should preserve the oldest path point through a long run");
 
     GameState impact = createNewGame(catalog, 708);
-    startArrivalOps(impact, moonArrival);
-    startArrivalFlybyRun(impact, catalog);
+    startArrivalFlybyForTest(impact, moonArrival);
     impact.run.shipDamage = 7;
     impact.run.flyby.shipX = tuning::flyby::destinationX;
     impact.run.flyby.shipY = tuning::flyby::destinationY;
@@ -3088,8 +3100,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(impact.run.shipDamage == 7 + impact.run.flyby.impactHullDamage, "planet impact should add assisted hull damage to the ship");
 
     GameState outOfBounds = createNewGame(catalog, 714);
-    startArrivalOps(outOfBounds, moonArrival);
-    startArrivalFlybyRun(outOfBounds, catalog);
+    startArrivalFlybyForTest(outOfBounds, moonArrival);
     outOfBounds.run.flyby.shipX = 1.05;
     outOfBounds.run.flyby.velocityX = tuning::flyby::maxSpeed;
     updateFlybyRun(outOfBounds, 0.2);
@@ -3097,8 +3108,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(outOfBounds.run.flyby.result == FlybyGrade::Miss, "leaving the flyby playfield should be a missed flyby");
 
     GameState controls = createNewGame(catalog, 709);
-    startArrivalOps(controls, moonArrival);
-    startArrivalFlybyRun(controls, catalog);
+    startArrivalFlybyForTest(controls, moonArrival);
     Random controlsPanelRng(709);
     const PreparedLaunch controlsPanelLaunch = prepareLaunch(controls, catalog, controlsPanelRng);
     const std::string controlsPanelHtml = buildGamePanelHtml({controls, catalog, controlsPanelLaunch, controlsPanelLaunch});
@@ -3123,8 +3133,7 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
         "holding Flyby decrease throttle should progressively lower the retained burn level");
 
     GameState turn = createNewGame(catalog, 710);
-    startArrivalOps(turn, moonArrival);
-    startArrivalFlybyRun(turn, catalog);
+    startArrivalFlybyForTest(turn, moonArrival);
     turn.run.flyby.gravityStrength = 0.0;
     const double headingBefore = std::atan2(turn.run.flyby.velocityY, turn.run.flyby.velocityX);
     setFlybyMove(turn, 1.0, 0.0);
@@ -3150,6 +3159,7 @@ void shipUpgradesAssistFlybyAndOrbitMinigames()
         content::module::analogTelemetry,
         content::module::springCapsule
     };
+    introduceArrivalFlybyForTest(baseline);
     startArrivalOps(baseline, marsArrival);
     startArrivalFlybyRun(baseline, catalog);
     startArrivalOrbitRun(baseline, catalog);
@@ -3171,6 +3181,7 @@ void shipUpgradesAssistFlybyAndOrbitMinigames()
         content::module::predictiveGuidance,
         content::module::abortTower
     };
+    introduceArrivalFlybyForTest(assisted);
     startArrivalOps(assisted, marsArrival);
     startArrivalFlybyRun(assisted, catalog);
     startArrivalOrbitRun(assisted, catalog);
@@ -3312,6 +3323,7 @@ void activeFlybySaveResumesAtApproach()
     moonArrival.type = LaunchResultType::MissionComplete;
     moonArrival.frontierTransfer = true;
     moonArrival.destinationId = content::destination::moon;
+    introduceArrivalFlybyForTest(state);
     startArrivalOps(state, moonArrival);
     startArrivalFlybyRun(state, catalog);
 
@@ -4110,6 +4122,46 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     const auto structureLimits = scanPushLimitPair(structureUpgraded, 1940);
     require(structureLimits.first == structureLimits.second + 1, "structural support should keep scan and push depth limits in parity");
     require(structureLimits.first > baselineLimits.first, "structural support should also expand scan depth");
+}
+
+void surfaceScanTimingWindowsTightenByMappedDepth()
+{
+    using namespace tuning::research;
+    require(
+        std::abs(surfaceScanGoodWindowHalfAngleForDepth(0) - scanGoodWindowHalfAngleRadians) < 0.000001,
+        "the first surface scan layer should keep the authored good window");
+    require(
+        std::abs(surfaceScanPerfectWindowHalfAngleForDepth(0) - scanPerfectWindowHalfAngleRadians) < 0.000001,
+        "the first surface scan layer should keep the authored perfect window");
+    require(
+        surfaceScanGoodWindowHalfAngleForDepth(1) < surfaceScanGoodWindowHalfAngleForDepth(0)
+            && surfaceScanPerfectWindowHalfAngleForDepth(1) < surfaceScanPerfectWindowHalfAngleForDepth(0),
+        "each newly mapped scan layer should tighten both timing windows");
+    require(
+        surfaceScanGoodWindowHalfAngleForDepth(20) >= scanGoodWindowMinimumHalfAngleRadians
+            && surfaceScanPerfectWindowHalfAngleForDepth(20) >= scanPerfectWindowMinimumHalfAngleRadians,
+        "deep scan windows should respect their playable minimums");
+
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1941);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.supply = 10;
+    Random rng(1942);
+    require(startSurfaceScanRun(state, rng).applied, "surface scan should start for depth-timing coverage");
+
+    // A mapped layer advances the next timing test to depth +1. Its midpoint
+    // between Perfect and Good should remain a Good result at that new depth.
+    state.run.surfaceScan.depthProspects.push_back({});
+    const double depthOneGood = surfaceScanGoodWindowHalfAngleForDepth(1);
+    const double depthOnePerfect = surfaceScanPerfectWindowHalfAngleForDepth(1);
+    state.run.surfaceScan.elapsedSeconds =
+        (scanWindowCenterRadians + (depthOneGood + depthOnePerfect) * 0.5) /
+        scanSweepRadiansPerSecond;
+    pulseSurfaceScan(state, rng);
+    require(
+        state.run.surfaceScan.lastPulseGrade == SurfaceScanPulseGrade::Good,
+        "surface scan grading should use the tighter current-depth window");
 }
 
 
@@ -8569,7 +8621,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     MiningRunState& mining = state.run.mining;
     clearMiningTerrainForEvaTest(mining);
     const double softContactStartX =
-        33.0 - tuning::mining::rigColliderRadiusCells - 0.12;
+        33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.12;
     mining.droneX = softContactStartX;
     mining.droneY = 10.0;
     MiningCell* soft = miningCellAt(mining.terrain, 33, 10);
@@ -8580,7 +8632,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     updateMiningRun(state, catalog, 0.08);
 
     require(mining.droneX > softContactStartX, "drilling into regolith should let the drone grind forward slowly");
-    require(static_cast<int>(std::floor(mining.droneX)) == 32, "the drone should not occupy unbroken regolith before the drill clears it");
+    require(mining.droneX < 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells + 0.001, "the drone should not occupy unbroken regolith before the drill clears it");
     require(mining.contactIntensity > 0.0, "soft contact should set mining feedback intensity");
     require(soft->remainingToughness < soft->maxToughness, "pushing into regolith while drilling should do terrain work");
 
@@ -8591,7 +8643,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(soft->material == MiningCellMaterial::Empty, "continued drilling should visibly clear soft terrain before the drone passes through");
 
     const double hardContactStartX =
-        33.0 - tuning::mining::rigColliderRadiusCells - 0.03;
+        33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.03;
     mining.droneX = hardContactStartX;
     mining.droneY = 12.0;
     MiningCell* hard = miningCellAt(mining.terrain, 33, 12);
@@ -8609,9 +8661,16 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     updateMiningRun(state, catalog, 0.08);
     updateMiningRun(dampedState, catalog, 0.08);
 
-    require(mining.droneX <= hardContactStartX + 0.01, "hard rock should resist forward movement before it breaks");
+    const double hardContactBoundary = 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells;
+    require(
+        mining.droneX > hardContactStartX + 0.02 && mining.droneX < hardContactBoundary + 0.001,
+        "a hard-rock collision should sweep the rig to the physical boundary instead of leaving a full movement-step gap");
     require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
+    require(
+        mining.contactIndicatorSeconds > 0.0 && mining.contactIndicatorDirX > 0.99 &&
+            std::abs(mining.contactIndicatorDirY) < 0.01,
+        "a player-driven rig collision should retain a short-lived indicator on the contacted edge");
     require(
         mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0 || mining.contactBounceCooldown > 0.0,
         "hard contact should trigger a damped bounce impulse");
@@ -8628,7 +8687,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     hard->maxToughness = miningMaterialToughness(MiningCellMaterial::HardRock, 0);
     hard->remainingToughness = hard->maxToughness;
     hard->revealed = false;
-    mining.droneX = 32.85;
+    mining.droneX = 33.0 - 0.5 - tuning::mining::rigColliderRadiusCells - 0.08;
     mining.droneY = 12.0;
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
@@ -8636,10 +8695,48 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::HardRock, "hard rock should require several hard contacts before breaking");
-    for (int i = 0; i < 14 && hard->material != MiningCellMaterial::Empty; ++i) {
+    for (int i = 0; i < 24 && hard->material != MiningCellMaterial::Empty; ++i) {
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::Empty, "default hard rock should clear in a short arcade burst");
+
+    // Player coordinates are cell centers, while terrain cells are indexed by
+    // their top-left edge. Verify both vertical approaches stop at the same
+    // rendered edge rather than overlapping from below or leaving a half-cell
+    // gap from above.
+    mining.gravityStrength = 0.0;
+    mining.droneX = 20.0;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    mining.contactBounce = 0.0;
+    mining.contactBounceVelocity = 0.0;
+    mining.contactSpeedRecovery = 1.0;
+    MiningCell* lowerWall = miningCellAt(mining.terrain, 20, 14);
+    require(lowerWall != nullptr, "lower directional-collision wall should exist");
+    *lowerWall = {MiningCellMaterial::HardRock, 8.0, 8.0, true, false};
+    const double downwardBoundary = 14.0 - 0.5 - tuning::mining::rigColliderRadiusCells;
+    mining.droneY = downwardBoundary - 0.06;
+    setMiningMove(state, 0.0, 1.0);
+    setMiningDrilling(state, false);
+    updateMiningRun(state, catalog, 0.08);
+    require(
+        mining.droneY > downwardBoundary - 0.06 && mining.droneY < downwardBoundary + 0.001,
+        "downward contact should stop at the visible top edge of the lower tile");
+    require(mining.contactIndicatorDirY > 0.99, "downward contact should mark the lower edge of the rig");
+
+    *lowerWall = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+    MiningCell* upperWall = miningCellAt(mining.terrain, 20, 11);
+    require(upperWall != nullptr, "upper directional-collision wall should exist");
+    *upperWall = {MiningCellMaterial::HardRock, 8.0, 8.0, true, false};
+    const double upwardBoundary = 11.0 + 1.0 - 0.5 + tuning::mining::rigColliderRadiusCells;
+    mining.droneY = upwardBoundary + 0.06;
+    mining.rigVelocityY = 0.0;
+    setMiningMove(state, 0.0, -1.0);
+    updateMiningRun(state, catalog, 0.08);
+    require(
+        mining.droneY < upwardBoundary + 0.06 && mining.droneY > upwardBoundary - 0.001,
+        "upward contact should stop at the visible bottom edge of the upper tile");
+    require(mining.contactIndicatorDirY < -0.99, "upward contact should mark the upper edge of the rig");
 
     for (MiningCell& cell : mining.terrain.cells) {
         cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
@@ -8830,6 +8927,7 @@ void transferFuelPersistsAndBecomesRigFuel()
             nearlyEqual(restoredArrival.run.arrivalOps.transferFuelCapacity, 15.0),
         "Arrival Ops must preserve transfer fuel remaining and capacity across save/load");
 
+    introduceArrivalFlybyForTest(restoredArrival);
     startArrivalFlybyRun(restoredArrival, catalog);
     require(restoredArrival.run.flyby.active, "arrival flyby should start for fuel preservation coverage");
     abortFlybyRun(restoredArrival, catalog);
@@ -8837,6 +8935,7 @@ void transferFuelPersistsAndBecomesRigFuel()
             nearlyEqual(restoredArrival.run.arrivalOps.transferFuelCapacity, 15.0),
         "entering and leaving a flyby must not erase arrival transfer fuel");
 
+    introduceArrivalFlybyForTest(restoredArrival);
     startArrivalFlybyRun(restoredArrival, catalog);
     restoredArrival.run.flyby.completed = true;
     restoredArrival.run.flyby.result = FlybyGrade::Good;
@@ -11352,6 +11451,7 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
     moonArrival.type = LaunchResultType::MissionComplete;
     moonArrival.frontierTransfer = true;
     moonArrival.destinationId = content::destination::moon;
+    introduceArrivalFlybyForTest(flyby);
     startArrivalOps(flyby, moonArrival);
     startArrivalFlybyRun(flyby, catalog);
     require(flyby.screen == Screen::Flyby && !flyby.run.flyby.completed,
@@ -12087,6 +12187,7 @@ int main()
     surfaceUpgradesAndDronesModifyScanMiniGame();
     surfaceUpgradesAndDronesModifyPushDeeperMiniGame();
     surfaceScanAndPushDepthLimitsStayInParity();
+    surfaceScanTimingWindowsTightenByMappedDepth();
     runUpgradesSurviveEmergencyRecall();
     runUpgradeLifetimeFollowsTheTransport();
     miningDepletionAtShipGracefullyEndsRun();

@@ -219,7 +219,9 @@ bool shouldOpenArrivalOps(const LaunchOutcome& outcome, const ContentCatalog& ca
 bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCatalog& catalog);
 bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog);
 bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog);
+bool requiresArrivalOrbitBeforeLanding(const GameState& state, const ContentCatalog& catalog);
 bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& catalog);
+bool canDepartCapturedArrivalOrbit(const GameState& state, const ContentCatalog& catalog);
 bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog);
 int destinationHistoryValue(const std::vector<int>& values, const ContentCatalog& catalog, std::string_view destinationId);
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation);

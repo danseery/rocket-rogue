@@ -458,7 +458,7 @@ ContentCatalog createDefaultContent()
         if (destination.id == content::destination::moon) {
             destination.approachBriefTitle = "MOON APPROACH";
             destination.approachBriefDetail =
-                "Pass Through, Capture Orbit, and Direct Descent are mutually exclusive paths for this visit.";
+                "First landing protocol: Capture Orbit, then Land with the orbital map. Flyby is introduced later at the Jupiter transfer window.";
         } else if (destination.id == content::destination::mars) {
             destination.approachBriefTitle = "MARS APPROACH";
             destination.approachBriefDetail =

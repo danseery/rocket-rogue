@@ -731,7 +731,7 @@ void testLaunchDestinationGateUsesCorridorEndpoints()
 
         const ScenePacket& packet = composer.compose(snapshot);
         const std::vector<LineSegment> destinationGate =
-            lineSegmentsWithColor(packet, 0.98F, 0.82F, 0.36F, 0.70F);
+            lineSegmentsWithColor(packet, 1.0F, 0.25F, 0.20F, 0.82F);
         const std::vector<LineSegment> lostCourseBoundary =
             lineSegmentsWithColor(packet, 1.0F, 0.25F, 0.20F, 0.32F);
         assert(destinationGate.size() == 1U);
@@ -752,7 +752,136 @@ void testLaunchDestinationGateUsesCorridorEndpoints()
                 });
             assert(touchesBoundary);
         }
+
+        snapshot.travelProgress = snapshot.launchMissionTargetProgress;
+        const ScenePacket& crossedPacket = composer.compose(snapshot);
+        const std::vector<LineSegment> crossedGate =
+            lineSegmentsWithColor(crossedPacket, 0.35F, 0.92F, 0.62F, 0.82F);
+        assert(crossedGate.size() == 1U);
+        assert(std::abs(crossedGate.front().start.x - destinationGate.front().start.x) < 0.001F);
+        assert(std::abs(crossedGate.front().start.y - destinationGate.front().start.y) < 0.001F);
+        assert(std::abs(crossedGate.front().end.x - destinationGate.front().end.x) < 0.001F);
+        assert(std::abs(crossedGate.front().end.y - destinationGate.front().end.y) < 0.001F);
+
+        snapshot.travelProgress = 0.25;
+        snapshot.returningHome = true;
+        snapshot.launchMissionTargetReached = true;
+        const ScenePacket& returnPacket = composer.compose(snapshot);
+        const std::vector<LineSegment> returnGate =
+            lineSegmentsWithColor(returnPacket, 0.35F, 0.92F, 0.62F, 0.82F);
+        assert(returnGate.size() == 1U);
+
+        snapshot.launchMissionTargetReached = false;
+        const ScenePacket& earlyReturnPacket = composer.compose(snapshot);
+        const std::vector<LineSegment> earlyReturnGate =
+            lineSegmentsWithColor(earlyReturnPacket, 1.0F, 0.25F, 0.20F, 0.82F);
+        assert(earlyReturnGate.size() == 1U);
+
+        snapshot.returningHome = false;
+        snapshot.launchMissionTargetReached = false;
+        snapshot.launchCourseOffset = 0.0;
+        const ScenePacket& goldBandPacket = composer.compose(snapshot);
+        assert(!lineSegmentsWithColor(goldBandPacket, 1.0F, 0.78F, 0.24F, 0.92F).empty());
+
+        snapshot.launchCourseOffset =
+            (rocket::tuning::launch::pilotingCourseSafe + snapshot.launchCourseLimit) * 0.5;
+        const ScenePacket& greenBandPacket = composer.compose(snapshot);
+        assert(!lineSegmentsWithColor(greenBandPacket, 0.35F, 0.92F, 0.62F, 0.92F).empty());
+
+        snapshot.launchCourseOffset = snapshot.launchCourseLimit + 0.01;
+        const ScenePacket& redBandPacket = composer.compose(snapshot);
+        assert(!lineSegmentsWithColor(redBandPacket, 1.0F, 0.25F, 0.20F, 0.92F).empty());
     }
+}
+
+void testOrbitGuideBandsHighlightActiveZone()
+{
+    const auto hasLineColor = [](
+        const ScenePacket& packet,
+        float red,
+        float green,
+        float blue,
+        float alpha) {
+        return std::any_of(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.shape == SceneInstanceShape::Rectangle
+                    && std::abs(instance.color.r - red) < 0.01F
+                    && std::abs(instance.color.g - green) < 0.01F
+                    && std::abs(instance.color.b - blue) < 0.01F
+                    && std::abs(instance.color.a - alpha) < 0.01F;
+            });
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Orbit;
+    snapshot.orbitPlanetRadius = 0.20;
+    snapshot.orbitTargetRadius = 0.62;
+    snapshot.orbitGoodBand = 0.08;
+    snapshot.orbitPerfectBand = 0.04;
+    snapshot.orbitShipX = snapshot.orbitTargetRadius;
+    snapshot.orbitVelocityY = 1.0;
+
+    snapshot.orbitZone = 2;
+    const ScenePacket& perfectPacket = composer.compose(snapshot);
+    assert(hasLineColor(perfectPacket, 1.0F, 0.80F, 0.24F, 0.92F));
+
+    snapshot.orbitZone = 1;
+    const ScenePacket& goodPacket = composer.compose(snapshot);
+    assert(hasLineColor(goodPacket, 0.35F, 0.92F, 0.62F, 0.92F));
+
+    snapshot.orbitZone = 0;
+    const ScenePacket& missedPacket = composer.compose(snapshot);
+    assert(hasLineColor(missedPacket, 1.0F, 0.25F, 0.20F, 0.92F));
+}
+
+void testFlybyGuideBandsHighlightActiveZone()
+{
+    const auto hasLineColor = [](
+        const ScenePacket& packet,
+        float red,
+        float green,
+        float blue,
+        float alpha) {
+        return std::any_of(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.shape == SceneInstanceShape::Rectangle
+                    && std::abs(instance.color.r - red) < 0.01F
+                    && std::abs(instance.color.g - green) < 0.01F
+                    && std::abs(instance.color.b - blue) < 0.01F
+                    && std::abs(instance.color.a - alpha) < 0.01F;
+            });
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flyby;
+    snapshot.destinationTier = 1;
+    snapshot.flybyDestinationX = rocket::tuning::flyby::destinationX;
+    snapshot.flybyDestinationY = rocket::tuning::flyby::destinationY;
+    snapshot.flybyGoodBand = rocket::tuning::flyby::goodBand;
+    snapshot.flybyPerfectBand = rocket::tuning::flyby::perfectBand;
+    snapshot.flybyVelocityX = 1.0;
+
+    snapshot.flybyZone = 2;
+    const ScenePacket& perfectPacket = composer.compose(snapshot);
+    assert(hasLineColor(perfectPacket, 1.0F, 0.82F, 0.28F, 0.92F));
+
+    snapshot.flybyZone = 1;
+    const ScenePacket& goodPacket = composer.compose(snapshot);
+    assert(hasLineColor(goodPacket, 0.35F, 0.92F, 0.62F, 0.92F));
+
+    snapshot.flybyZone = 0;
+    const ScenePacket& missedPacket = composer.compose(snapshot);
+    assert(hasLineColor(missedPacket, 1.0F, 0.25F, 0.20F, 0.92F));
 }
 
 void testManifestAndLogicalTextureMapping()
@@ -2118,6 +2247,34 @@ void testMiningRigStaysVisibleAndTracksHeading()
     assertMiningDrillMounted(diagonal, diagonalDrill);
 }
 
+void testMiningCollisionIndicatorMarksTheContactedEdge()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningContactIndicatorSeconds = rocket::tuning::mining::contactIndicatorSeconds;
+    snapshot.miningContactIndicatorDirX = 0.0;
+    snapshot.miningContactIndicatorDirY = 1.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::MiningDrone, true);
+    const ScenePacket& packet = composer.compose(snapshot);
+    assertValidDrawRanges(packet);
+
+    const bool foundBumpBarrier = std::any_of(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured && instance.shape == SceneInstanceShape::Rectangle &&
+                std::abs(instance.color.r - 1.0F) < 0.01F &&
+                std::abs(instance.color.g - 0.22F) < 0.01F &&
+                std::abs(instance.color.b - 0.14F) < 0.01F &&
+                instance.color.a > 0.55F;
+        });
+    assert(foundBumpBarrier);
+}
+
 void testMiningSurveyPulseRechargeRingPersistsWhenReady()
 {
     const auto cyanArcLength = [](const ScenePacket& packet) {
@@ -2979,6 +3136,8 @@ int main()
     testLogicalSceneClipScalesToFramebuffer();
     testPackedVertexConversion();
     testLaunchDestinationGateUsesCorridorEndpoints();
+    testOrbitGuideBandsHighlightActiveZone();
+    testFlybyGuideBandsHighlightActiveZone();
     testManifestAndLogicalTextureMapping();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testFlybySteeringTriangleAndThrustFlameRemainDistinct();
@@ -3000,6 +3159,7 @@ int main()
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningRigSlerpsVerticalDuringExtraction();
     testMiningRigStaysVisibleAndTracksHeading();
+    testMiningCollisionIndicatorMarksTheContactedEdge();
     testMiningSurveyPulseRechargeRingPersistsWhenReady();
     testMiningSurveyPulseWaveReachesItsRealRadiusThenFades();
     testMiningSurveyPulseProgressivelyRevealsNewTerrain();

@@ -876,6 +876,19 @@ body.controller-connected .opening-controls { width: var(--rr-legacy-layout-025,
     flex-direction: column;
     width: var(--rr-legacy-layout-044, 0px);
 }
+.title-menu-primary,
+.title-menu-secondary {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+.title-menu-separator {
+    width: 100%;
+    height: 1px;
+    margin-top: 15px;
+    margin-bottom: 5px;
+    background-color: rgba(99, 229, 255, 0.34);
+}
 .title-menu .title-action {
     width: var(--rr-legacy-layout-044, 0px);
     min-height: var(--rr-legacy-layout-045, 0px);
@@ -891,6 +904,9 @@ body.controller-connected .opening-controls { width: var(--rr-legacy-layout-025,
     border-width: 1px;
     border-color: rgba(99, 229, 255, 0.42);
     border-radius: 6px;
+}
+.title-menu-primary .title-action {
+    margin-top: 0px;
 }
 .title-menu .title-action:hover,
 body.controller-focus-visible .title-menu .title-action.rr-controller-focus {

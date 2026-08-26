@@ -1784,6 +1784,12 @@ struct MiningRunState {
     double returnZoneX = 0.0;
     double returnZoneY = 0.0;
     double contactIntensity = 0.0;
+    // Transient presentation state for a player-driven collision. Unlike
+    // contactIntensity, this remembers which edge of the active vehicle hit
+    // terrain so the scene can make tight clearances legible.
+    double contactIndicatorSeconds = 0.0;
+    double contactIndicatorDirX = 0.0;
+    double contactIndicatorDirY = 0.0;
     double recoilX = 0.0;
     double recoilY = 0.0;
     double contactBounce = 0.0;
